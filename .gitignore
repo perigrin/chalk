@@ -53,3 +53,4 @@ cover_db/
 *.gcda
 *.gcno
 CLAUDE.md
+prompt_plan.md

@@ -7,7 +7,8 @@
 > walked in those deep prehistoric seas when the Chalk had been formed, in a
 > million-year rain made of the shells of tiny creatures. She trod a land made of
 > life, and breathed it in, and listened to it, and thought its thoughts for it.
--- Terry Pratchett, _A Hat Full of Sky_
+
+&mdash; Terry Pratchett, _A Hat Full of Sky_
 
 Chalk is a project to build a self-hosting compiler using a strict subset of Perl.
 
