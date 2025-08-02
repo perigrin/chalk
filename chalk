@@ -704,7 +704,7 @@ class GrammarRule {
     field $lhs :param :reader;          # Left-hand side nonterminal
     field $rhs :param :reader;          # Right-hand side symbols
     field $semantic_action :param;  # Code reference for building IR
-    field $id :param :reader;
+    field $cached_id;
 
     method matches($symbols) {
         for my $s (@$symbols) {
@@ -715,6 +715,21 @@ class GrammarRule {
 
     method rhs_length() { scalar @$rhs }
     method rhs_at($pos) { $rhs->[$pos] }
+
+    method id() {
+        return $cached_id if defined $cached_id;
+        
+        use Digest::SHA qw(sha1_hex);
+        
+        my @hash_components = ($lhs);
+        push @hash_components, @$rhs;
+        # Note: We don't include semantic_action in the hash since 
+        # code refs are not easily hashable and rules with same 
+        # grammar but different actions should be considered different
+        
+        $cached_id = sha1_hex(join('|', @hash_components));
+        return $cached_id;
+    }
 
     method execute_action($matches, $ir_graph) {
         return $semantic_action->($matches, $ir_graph);
@@ -785,7 +800,6 @@ class ScanlessEarleyParser {
         @grammar_rules = (
             # Program → Statement+
             GrammarRule->new(
-                id => 1,
                 lhs => 'Program',
                 rhs => ['Statement'],
                 semantic_action => sub ($matches, $ir) {
@@ -794,8 +808,7 @@ class ScanlessEarleyParser {
             ),
 
             GrammarRule->new(
-                id => 2,
-                lhs => 'Program',
+                                lhs => 'Program',
                 rhs => ['Program', 'WS', 'Statement'],
                 semantic_action => sub ($matches, $ir) {
                     # Sequential composition - just return the last statement
@@ -805,8 +818,7 @@ class ScanlessEarleyParser {
 
             # Statement → PrintStmt | Assignment
             GrammarRule->new(
-                id => 3,
-                lhs => 'Statement',
+                                lhs => 'Statement',
                 rhs => ['PrintStmt'],
                 semantic_action => sub ($matches, $ir) {
                     return $matches->[0];
@@ -814,8 +826,7 @@ class ScanlessEarleyParser {
             ),
 
             GrammarRule->new(
-                id => 4,
-                lhs => 'Statement',
+                                lhs => 'Statement',
                 rhs => ['Assignment'],
                 semantic_action => sub ($matches, $ir) {
                     return $matches->[0];
@@ -824,8 +835,7 @@ class ScanlessEarleyParser {
 
             # Expression → StringLiteral
             GrammarRule->new(
-                id => 4.1,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['StringLiteral'],
                 semantic_action => sub ($matches, $ir) {
                     return $matches->[0];
@@ -834,8 +844,7 @@ class ScanlessEarleyParser {
 
             # Expression → Variable
             GrammarRule->new(
-                id => 4.2,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['Variable'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
@@ -846,8 +855,7 @@ class ScanlessEarleyParser {
 
             # Expression → StringLiteral ComparisonOp StringLiteral
             GrammarRule->new(
-                id => 4.3,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
                 semantic_action => sub ($matches, $ir) {
                     my $op = $matches->[2]{op};
@@ -857,8 +865,7 @@ class ScanlessEarleyParser {
 
             # Expression → Variable ComparisonOp StringLiteral
             GrammarRule->new(
-                id => 4.4,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
@@ -870,8 +877,7 @@ class ScanlessEarleyParser {
 
             # Expression → StringLiteral ComparisonOp Variable
             GrammarRule->new(
-                id => 4.5,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'Variable'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[4]{var_name};
@@ -883,8 +889,7 @@ class ScanlessEarleyParser {
 
             # Expression → Variable ComparisonOp Variable
             GrammarRule->new(
-                id => 4.6,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'Variable'],
                 semantic_action => sub ($matches, $ir) {
                     my $left_var = $matches->[0]{var_name};
@@ -898,8 +903,7 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → 'eq'
             GrammarRule->new(
-                id => 5.1,
-                lhs => 'ComparisonOp',
+                                lhs => 'ComparisonOp',
                 rhs => ['eq'],
                 semantic_action => sub ($matches, $ir) {
                     return { op => 'eq' };
@@ -908,8 +912,7 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → 'ne'
             GrammarRule->new(
-                id => 5.2,
-                lhs => 'ComparisonOp',
+                                lhs => 'ComparisonOp',
                 rhs => ['ne'],
                 semantic_action => sub ($matches, $ir) {
                     return { op => 'ne' };
@@ -918,8 +921,7 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → '=='
             GrammarRule->new(
-                id => 5.3,
-                lhs => 'ComparisonOp',
+                                lhs => 'ComparisonOp',
                 rhs => ['=='],
                 semantic_action => sub ($matches, $ir) {
                     return { op => '==' };
@@ -928,8 +930,7 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → '!='
             GrammarRule->new(
-                id => 5.4,
-                lhs => 'ComparisonOp',
+                                lhs => 'ComparisonOp',
                 rhs => ['!='],
                 semantic_action => sub ($matches, $ir) {
                     return { op => '!=' };
@@ -938,8 +939,7 @@ class ScanlessEarleyParser {
 
             # Expression → Expression '&&' Expression  
             GrammarRule->new(
-                id => 4.7,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['Expression', 'WS', '&&', 'WS', 'Expression'],
                 semantic_action => sub ($matches, $ir) {
                     return $ir->create_logical_and($matches->[0], $matches->[4]);
@@ -948,8 +948,7 @@ class ScanlessEarleyParser {
 
             # Expression → Expression '||' Expression
             GrammarRule->new(
-                id => 4.8,
-                lhs => 'Expression',
+                                lhs => 'Expression',
                 rhs => ['Expression', 'WS', '||', 'WS', 'Expression'],
                 semantic_action => sub ($matches, $ir) {
                     return $ir->create_logical_or($matches->[0], $matches->[4]);
@@ -958,8 +957,7 @@ class ScanlessEarleyParser {
 
             # PrintStmt → 'print' WS Expression ';'
             GrammarRule->new(
-                id => 5,
-                lhs => 'PrintStmt',
+                                lhs => 'PrintStmt',
                 rhs => ['print', 'WS', 'Expression', 'WS', ';'],
                 semantic_action => sub ($matches, $ir) {
                     my $expr_node = $matches->[2];
@@ -970,8 +968,7 @@ class ScanlessEarleyParser {
 
             # Assignment → Variable WS '=' WS Expression WS ';'
             GrammarRule->new(
-                id => 6,
-                lhs => 'Assignment',
+                                lhs => 'Assignment',
                 rhs => ['Variable', 'WS', '=', 'WS', 'Expression', 'WS', ';'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
@@ -983,8 +980,7 @@ class ScanlessEarleyParser {
 
             # StringLiteral → '"' InterpolatedContent '"' (interpolated)
             GrammarRule->new(
-                id => 7,
-                lhs => 'StringLiteral',
+                                lhs => 'StringLiteral',
                 rhs => ['"', 'InterpolatedContent', '"'],
                 semantic_action => sub ($matches, $ir) {
                     my $node = $matches->[1];
@@ -1008,8 +1004,7 @@ class ScanlessEarleyParser {
 
             # StringLiteral → "'" StringContent "'"
             GrammarRule->new(
-                id => 8,
-                lhs => 'StringLiteral',
+                                lhs => 'StringLiteral',
                 rhs => ["'", 'StringContent', "'"],
                 semantic_action => sub ($matches, $ir) {
                     my $content = $matches->[1]{text};
@@ -1020,8 +1015,7 @@ class ScanlessEarleyParser {
 
             # StringContent → CharSeq (for single-quoted strings)
             GrammarRule->new(
-                id => 9,
-                lhs => 'StringContent',
+                                lhs => 'StringContent',
                 rhs => ['CharSeq'],
                 semantic_action => sub ($matches, $ir) {
                     DEBUG "StringContent CharSeq: " . $matches->[0]{text};
@@ -1031,8 +1025,7 @@ class ScanlessEarleyParser {
 
             # InterpolatedContent → CharSeq (same as StringContent but will be marked for interpolation)
             GrammarRule->new(
-                id => 9.1,
-                lhs => 'InterpolatedContent',
+                                lhs => 'InterpolatedContent',
                 rhs => ['CharSeq'],
                 semantic_action => sub ($matches, $ir) {
                     my $content = $matches->[0]{text};
@@ -1046,8 +1039,7 @@ class ScanlessEarleyParser {
 
             # CharSeq → Char CharSeq
             GrammarRule->new(
-                id => 10,
-                lhs => 'CharSeq',
+                                lhs => 'CharSeq',
                 rhs => ['Char', 'CharSeq'],
                 semantic_action => sub ($matches, $ir) {
                     DEBUG "CharSeq (recursive) semantic action: building '" . $matches->[0]{char} . "' + '" . ($matches->[1]{text} // '') . "'";
@@ -1057,8 +1049,7 @@ class ScanlessEarleyParser {
 
             # CharSeq → Char
             GrammarRule->new(
-                id => 11,
-                lhs => 'CharSeq',
+                                lhs => 'CharSeq',
                 rhs => ['Char'],
                 semantic_action => sub ($matches, $ir) {
                     return { text => $matches->[0]{char} };
@@ -1067,8 +1058,7 @@ class ScanlessEarleyParser {
 
             # Variable → '$' Identifier
             GrammarRule->new(
-                id => 12,
-                lhs => 'Variable',
+                                lhs => 'Variable',
                 rhs => ['$', 'Identifier'],
                 semantic_action => sub ($matches, $ir) {
                     return { var_name => $matches->[1]{name} };
@@ -1077,8 +1067,7 @@ class ScanlessEarleyParser {
 
             # Identifier → Letter LetterDigitSeq
             GrammarRule->new(
-                id => 13,
-                lhs => 'Identifier',
+                                lhs => 'Identifier',
                 rhs => ['Letter', 'LetterDigitSeq'],
                 semantic_action => sub ($matches, $ir) {
                     return { name => $matches->[0]{char} . $matches->[1]{text} };
@@ -1087,8 +1076,7 @@ class ScanlessEarleyParser {
 
             # Identifier → Letter
             GrammarRule->new(
-                id => 14,
-                lhs => 'Identifier',
+                                lhs => 'Identifier',
                 rhs => ['Letter'],
                 semantic_action => sub ($matches, $ir) {
                     return { name => $matches->[0]{char} };
@@ -1097,8 +1085,7 @@ class ScanlessEarleyParser {
 
             # LetterDigitSeq → LetterDigit LetterDigitSeq
             GrammarRule->new(
-                id => 15,
-                lhs => 'LetterDigitSeq',
+                                lhs => 'LetterDigitSeq',
                 rhs => ['LetterDigit', 'LetterDigitSeq'],
                 semantic_action => sub ($matches, $ir) {
                     return { text => $matches->[0]{char} . $matches->[1]{text} };
@@ -1107,8 +1094,7 @@ class ScanlessEarleyParser {
 
             # LetterDigitSeq → LetterDigit
             GrammarRule->new(
-                id => 16,
-                lhs => 'LetterDigitSeq',
+                                lhs => 'LetterDigitSeq',
                 rhs => ['LetterDigit'],
                 semantic_action => sub ($matches, $ir) {
                     return { text => $matches->[0]{char} };
@@ -1117,8 +1103,7 @@ class ScanlessEarleyParser {
 
             # WS → Whitespace WS
             GrammarRule->new(
-                id => 17,
-                lhs => 'WS',
+                                lhs => 'WS',
                 rhs => ['Whitespace', 'WS'],
                 semantic_action => sub ($matches, $ir) {
                     return undef;  # Whitespace has no semantic value
@@ -1127,8 +1112,7 @@ class ScanlessEarleyParser {
 
             # WS → Whitespace
             GrammarRule->new(
-                id => 18,
-                lhs => 'WS',
+                                lhs => 'WS',
                 rhs => ['Whitespace'],
                 semantic_action => sub ($matches, $ir) {
                     return undef;
@@ -1137,8 +1121,7 @@ class ScanlessEarleyParser {
 
             # WS → ε (empty)
             GrammarRule->new(
-                id => 19,
-                lhs => 'WS',
+                                lhs => 'WS',
                 rhs => [],
                 semantic_action => sub ($matches, $ir) {
                     return undef;
