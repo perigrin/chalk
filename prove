@@ -1,0 +1,130 @@
+#!/usr/bin/env perl
+# ABOUTME: Test harness for Chalk compiler - runs .t files through chalk and collects TAP output
+# ABOUTME: Executes test files using chalk compiler and interprets the TAP results
+
+use strict;
+use warnings;
+use v5.42;
+use File::Find;
+use Getopt::Long;
+use Cwd qw(abs_path);
+
+my $verbose = 0;
+my $help = 0;
+
+GetOptions(
+    'v|verbose+'  => \$verbose,
+    'h|help'      => \$help,
+) or die "Error in command line arguments\n";
+
+if ($help) {
+    print <<'USAGE';
+Usage: prove [options] [test_files...]
+  -v, --verbose         Verbose output
+  -h, --help            Show this help message
+
+If no test files are specified, all .t files in t/ will be run.
+Each test file is executed through the chalk compiler.
+USAGE
+    exit 0;
+}
+
+# Find the chalk executable
+my $chalk_path = abs_path('./chalk');
+die "Cannot find chalk executable at $chalk_path\n" unless -x $chalk_path;
+
+# Determine which tests to run
+my @test_files;
+
+if (@ARGV) {
+    # Use specified test files
+    @test_files = @ARGV;
+} else {
+    # Find all test files in t/ directory
+    find(
+        sub {
+            return unless -f $_;
+            return unless /\.t$/;
+            push @test_files, $File::Find::name;
+        },
+        't'
+    );
+}
+
+unless (@test_files) {
+    die "No test files found\n";
+}
+
+# Sort for consistent ordering
+@test_files = sort @test_files;
+
+my $total_tests = 0;
+my $failed_tests = 0;
+my $failed_files = 0;
+
+for my $test_file (@test_files) {
+    print "$test_file .. ";
+    
+    # Execute the test file through chalk
+    my $output = `'$chalk_path' '$test_file' 2>&1`;
+    my $exit_code = $? >> 8;
+    
+    if ($exit_code != 0) {
+        print "FAILED (exit code $exit_code)\n";
+        $failed_files++;
+        if ($verbose) {
+            print "Output:\n$output\n";
+        }
+        next;
+    }
+    
+    # Parse TAP output
+    my @lines = split /\n/, $output;
+    my $plan_line;
+    my $test_count = 0;
+    my $failed_count = 0;
+    my $passed = 1;
+    
+    for my $line (@lines) {
+        if ($line =~ /^1\.\.(\d+)/) {
+            $plan_line = $1;
+        } elsif ($line =~ /^(not )?ok\s*(\d+)?/) {
+            $test_count++;
+            if ($1) {  # "not ok"
+                $failed_count++;
+                $passed = 0;
+            }
+        }
+    }
+    
+    $total_tests += $test_count;
+    $failed_tests += $failed_count;
+    
+    if ($passed && defined $plan_line && $test_count == $plan_line) {
+        print "ok\n";
+        if ($verbose) {
+            # Show the TAP output in verbose mode
+            print $output;
+            print "\n" unless $output =~ /\n$/;
+        }
+    } else {
+        print "FAILED\n";
+        $failed_files++;
+        if ($verbose) {
+            print "Expected $plan_line tests, ran $test_count, failed $failed_count\n";
+            print "Output:\n$output\n";
+        }
+    }
+}
+
+# Summary
+print "\nTest Summary:\n";
+print "Files: " . scalar(@test_files) . ", Tests: $total_tests, Failed: $failed_tests\n";
+
+if ($failed_files > 0) {
+    print "Failed $failed_files/" . scalar(@test_files) . " test files.\n";
+    exit 1;
+} else {
+    print "All tests successful.\n";
+    exit 0;
+}
