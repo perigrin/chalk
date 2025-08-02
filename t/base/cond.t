@@ -1,14 +1,20 @@
 #!./chalk
 
-# ABOUTME: Perl compatibility test for conditional operators
-# ABOUTME: Based on Perl's t/base/cond.t to ensure 100% compatibility
+# ABOUTME: Perl compatibility test for conditional operators - exact copy of Perl's t/base/cond.t
+# ABOUTME: Tests that conditional operators (&&, ||) work correctly with comparisons
+
+# make sure conditional operators work
 
 print "1..4\n";
 
 $x = '0';
 
-# Test cases adapted from Perl's t/base/cond.t
-print $x eq $x; print "\n";  # Should print 1 (ok 1)
-print $x ne $x; print "\n";  # Should print 0 (ok 2 if 0)  
-print $x == $x; print "\n";  # Should print 1 (ok 3)
-print $x != $x; print "\n";  # Should print 0 (ok 4 if 0)
+$x eq $x && print "ok 1 - operator eq\n";
+$x ne $x && print "not ok 1 - operator ne\n";
+$x eq $x || print "not ok 2 - operator eq\n";
+$x ne $x || print "ok 2 - operator ne\n";
+
+$x == $x && print "ok 3 - operator ==\n";
+$x != $x && print "not ok 3 - operator !=\n";
+$x == $x || print "not ok 4 - operator ==\n";
+$x != $x || print "ok 4 - operator !=\n";
