@@ -1,0 +1,11 @@
+[project]
+name = "chalk"
+version = "0.01"
+perl_version = "5.42.0"
+
+[dependencies]
+cpanfile = "cpanfile"
+local_lib = ".local"
+
+[build]
+output_dir = "build"

@@ -1,0 +1,55 @@
+# Perl
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Perl build artifacts
+blib/
+pm_to_blib
+Build
+_build/
+cover_db/
+inc/
+Build.PL
+!Build/
+MANIFEST*
+!MANIFEST.SKIP
+Makefile.old
+nytprof.out
+nytprof/
+
+# PVM/Perl version management
+.local/
+local/
+build/
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
+*~
+.#*
+\#*#
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+
+# Perl test coverage
+cover_db/
+*.gcov
+*.gcda
+*.gcno
+CLAUDE.md
