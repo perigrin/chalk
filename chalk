@@ -157,6 +157,143 @@ class ConcatNode :isa(IRNode) {
     }
 }
 
+class ComparisonNode :isa(IRNode) {
+    method operation() { "Comparison" }
+
+    method execute() {
+        my $left = $self->input_at(0)->value();
+        my $right = $self->input_at(1)->value();
+        my $op = $self->attr('op');
+        
+        DEBUG "ComparisonNode executing: '$left' $op '$right'";
+        
+        my $result;
+        if ($op eq 'eq') {
+            $result = ($left // '') eq ($right // '') ? 1 : 0;
+        } elsif ($op eq 'ne') {
+            $result = ($left // '') ne ($right // '') ? 1 : 0;
+        } elsif ($op eq '==') {
+            $result = $self->to_number($left) == $self->to_number($right) ? 1 : 0;
+        } elsif ($op eq '!=') {
+            $result = $self->to_number($left) != $self->to_number($right) ? 1 : 0;
+        } elsif ($op eq '<') {
+            $result = $self->to_number($left) < $self->to_number($right) ? 1 : 0;
+        } elsif ($op eq '>') {
+            $result = $self->to_number($left) > $self->to_number($right) ? 1 : 0;
+        } elsif ($op eq '<=') {
+            $result = $self->to_number($left) <= $self->to_number($right) ? 1 : 0;
+        } elsif ($op eq '>=') {
+            $result = $self->to_number($left) >= $self->to_number($right) ? 1 : 0;
+        } else {
+            die "Unknown comparison operator: $op";
+        }
+        
+        DEBUG "ComparisonNode result: $result";
+        $self->set_value($result);
+    }
+    
+    method to_number($val) {
+        # Perl-style numeric conversion
+        return 0 unless defined $val;
+        return 0 if $val eq '';
+        return 0 if $val eq '0';
+        
+        # Try to extract leading number
+        if ($val =~ /^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/) {
+            return $1 + 0;  # Force numeric context
+        }
+        return 0;  # Non-numeric strings become 0
+    }
+}
+
+class LogicalAndNode :isa(IRNode) {
+    method operation() { "LogicalAnd" }
+
+    method execute() {
+        my $left = $self->input_at(0)->value();
+        
+        DEBUG "LogicalAndNode executing with left: '$left'";
+        
+        # Short-circuit evaluation: if left is false, don't evaluate right
+        unless ($self->is_true($left)) {
+            DEBUG "LogicalAndNode short-circuit: left is false, returning 0";
+            $self->set_value(0);
+            return;
+        }
+        
+        # Left is true, evaluate right
+        my $right = $self->input_at(1)->value();
+        DEBUG "LogicalAndNode right value: '$right'";
+        
+        my $result = $self->is_true($right) ? 1 : 0;
+        DEBUG "LogicalAndNode result: $result";
+        $self->set_value($result);
+    }
+    
+    method is_true($val) {
+        # Perl truthiness: empty string, "0", and undef are false
+        return 0 unless defined $val;
+        return 0 if $val eq '';
+        return 0 if $val eq '0';
+        return 1;
+    }
+}
+
+class LogicalOrNode :isa(IRNode) {
+    method operation() { "LogicalOr" }
+
+    method execute() {
+        my $left = $self->input_at(0)->value();
+        
+        DEBUG "LogicalOrNode executing with left: '$left'";
+        
+        # Short-circuit evaluation: if left is true, don't evaluate right
+        if ($self->is_true($left)) {
+            DEBUG "LogicalOrNode short-circuit: left is true, returning 1";
+            $self->set_value(1);
+            return;
+        }
+        
+        # Left is false, evaluate right
+        my $right = $self->input_at(1)->value();
+        DEBUG "LogicalOrNode right value: '$right'";
+        
+        my $result = $self->is_true($right) ? 1 : 0;
+        DEBUG "LogicalOrNode result: $result";
+        $self->set_value($result);
+    }
+    
+    method is_true($val) {
+        # Perl truthiness: empty string, "0", and undef are false
+        return 0 unless defined $val;
+        return 0 if $val eq '';
+        return 0 if $val eq '0';
+        return 1;
+    }
+}
+
+class NotNode :isa(IRNode) {
+    method operation() { "Not" }
+
+    method execute() {
+        my $input = $self->input_at(0)->value();
+        
+        DEBUG "NotNode executing with input: '$input'";
+        
+        my $result = $self->is_true($input) ? 0 : 1;
+        DEBUG "NotNode result: $result";
+        $self->set_value($result);
+    }
+    
+    method is_true($val) {
+        # Perl truthiness: empty string, "0", and undef are false
+        return 0 unless defined $val;
+        return 0 if $val eq '';
+        return 0 if $val eq '0';
+        return 1;
+    }
+}
+
 class ThreadedSeaOfNodes {
     field %nodes;           # Hash of nodes by their content hash
     field $entry_node;
@@ -269,6 +406,54 @@ class ThreadedSeaOfNodes {
 
         $nodes{$hash_key} = $node;
         DEBUG "create_concat: stored new ConcatNode in nodes hash";
+        return $node;
+    }
+
+    method create_comparison($op, $left_node, $right_node) {
+        my $node = ComparisonNode->new();
+        $node->add_input($left_node);
+        $node->add_input($right_node);
+        $node->set_attr('op', $op);
+
+        my $hash_key = $node->compute_hash();
+        return $nodes{$hash_key} if exists $nodes{$hash_key};
+
+        $nodes{$hash_key} = $node;
+        return $node;
+    }
+
+    method create_logical_and($left_node, $right_node) {
+        my $node = LogicalAndNode->new();
+        $node->add_input($left_node);
+        $node->add_input($right_node);
+
+        my $hash_key = $node->compute_hash();
+        return $nodes{$hash_key} if exists $nodes{$hash_key};
+
+        $nodes{$hash_key} = $node;
+        return $node;
+    }
+
+    method create_logical_or($left_node, $right_node) {
+        my $node = LogicalOrNode->new();
+        $node->add_input($left_node);
+        $node->add_input($right_node);
+
+        my $hash_key = $node->compute_hash();
+        return $nodes{$hash_key} if exists $nodes{$hash_key};
+
+        $nodes{$hash_key} = $node;
+        return $node;
+    }
+
+    method create_not($input_node) {
+        my $node = NotNode->new();
+        $node->add_input($input_node);
+
+        my $hash_key = $node->compute_hash();
+        return $nodes{$hash_key} if exists $nodes{$hash_key};
+
+        $nodes{$hash_key} = $node;
         return $node;
     }
 
@@ -467,6 +652,15 @@ class ThreadedSeaOfNodes {
        } elsif ($class eq 'StoreNode') {
            my $var = $original_node->attr('var');
            return $self->create_store($var, $new_inputs[0]);
+       } elsif ($class eq 'ComparisonNode') {
+           my $op = $original_node->attr('op');
+           return $self->create_comparison($op, $new_inputs[0], $new_inputs[1]);
+       } elsif ($class eq 'LogicalAndNode') {
+           return $self->create_logical_and($new_inputs[0], $new_inputs[1]);
+       } elsif ($class eq 'LogicalOrNode') {
+           return $self->create_logical_or($new_inputs[0], $new_inputs[1]);
+       } elsif ($class eq 'NotNode') {
+           return $self->create_not($new_inputs[0]);
        } elsif ($class eq 'LoadNode' || $class eq 'ConstantNode') {
            # These don't have inputs, so no replacement needed
            return undef;
@@ -671,11 +865,103 @@ class ScanlessEarleyParser {
                 }
             ),
 
-            # PrintStmt → 'print' WS StringLiteral ';'
+            # Expression → StringLiteral ComparisonOp StringLiteral
+            GrammarRule->new(
+                id => 4.3,
+                lhs => 'Expression',
+                rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
+                semantic_action => sub ($matches, $ir) {
+                    my $op = $matches->[2]{op};
+                    return $ir->create_comparison($op, $matches->[0], $matches->[4]);
+                }
+            ),
+
+            # Expression → Variable ComparisonOp StringLiteral
+            GrammarRule->new(
+                id => 4.4,
+                lhs => 'Expression',
+                rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
+                semantic_action => sub ($matches, $ir) {
+                    my $var_name = $matches->[0]{var_name};
+                    my $left_node = $ir->create_load($var_name);
+                    my $op = $matches->[2]{op};
+                    return $ir->create_comparison($op, $left_node, $matches->[4]);
+                }
+            ),
+
+            # Expression → StringLiteral ComparisonOp Variable
+            GrammarRule->new(
+                id => 4.5,
+                lhs => 'Expression',
+                rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'Variable'],
+                semantic_action => sub ($matches, $ir) {
+                    my $var_name = $matches->[4]{var_name};
+                    my $right_node = $ir->create_load($var_name);
+                    my $op = $matches->[2]{op};
+                    return $ir->create_comparison($op, $matches->[0], $right_node);
+                }
+            ),
+
+            # Expression → Variable ComparisonOp Variable
+            GrammarRule->new(
+                id => 4.6,
+                lhs => 'Expression',
+                rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'Variable'],
+                semantic_action => sub ($matches, $ir) {
+                    my $left_var = $matches->[0]{var_name};
+                    my $right_var = $matches->[4]{var_name};
+                    my $left_node = $ir->create_load($left_var);
+                    my $right_node = $ir->create_load($right_var);
+                    my $op = $matches->[2]{op};
+                    return $ir->create_comparison($op, $left_node, $right_node);
+                }
+            ),
+
+            # ComparisonOp → 'eq'
+            GrammarRule->new(
+                id => 5.1,
+                lhs => 'ComparisonOp',
+                rhs => ['eq'],
+                semantic_action => sub ($matches, $ir) {
+                    return { op => 'eq' };
+                }
+            ),
+
+            # ComparisonOp → 'ne'
+            GrammarRule->new(
+                id => 5.2,
+                lhs => 'ComparisonOp',
+                rhs => ['ne'],
+                semantic_action => sub ($matches, $ir) {
+                    return { op => 'ne' };
+                }
+            ),
+
+            # ComparisonOp → '=='
+            GrammarRule->new(
+                id => 5.3,
+                lhs => 'ComparisonOp',
+                rhs => ['=='],
+                semantic_action => sub ($matches, $ir) {
+                    return { op => '==' };
+                }
+            ),
+
+            # ComparisonOp → '!='
+            GrammarRule->new(
+                id => 5.4,
+                lhs => 'ComparisonOp',
+                rhs => ['!='],
+                semantic_action => sub ($matches, $ir) {
+                    return { op => '!=' };
+                }
+            ),
+
+            # PrintStmt → 'print' WS Expression ';'
             GrammarRule->new(
                 id => 5,
                 lhs => 'PrintStmt',
-                rhs => ['print', 'WS', 'StringLiteral', 'WS', ';'],
+                rhs => ['print', 'WS', 'Expression', 'WS', ';'],
                 semantic_action => sub ($matches, $ir) {
                     my $expr_node = $matches->[2];
                     my $print_node = $ir->create_print($expr_node);
@@ -683,11 +969,11 @@ class ScanlessEarleyParser {
                 }
             ),
 
-            # Assignment → Variable WS '=' WS StringLiteral WS ';'
+            # Assignment → Variable WS '=' WS Expression WS ';'
             GrammarRule->new(
                 id => 6,
                 lhs => 'Assignment',
-                rhs => ['Variable', 'WS', '=', 'WS', 'StringLiteral', 'WS', ';'],
+                rhs => ['Variable', 'WS', '=', 'WS', 'Expression', 'WS', ';'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
                     my $expr_node = $matches->[4];
@@ -1189,7 +1475,7 @@ class ScanlessEarleyParser {
         return $symbol =~ /^(Letter|LetterDigit|Char|Whitespace)$/;
     }
 
-    method is_literal($symbol) { $symbol =~ /^(print|\$|=|;|"|')$/ }
+    method is_literal($symbol) { $symbol =~ /^(print|\$|=|;|"|'|&&|\|\||and|or|!|==|!=|<=|>=|<|>|eq|ne|\(|\))$/ }
 
     method matches_character_class($char, $class) {
         for ($class) {
