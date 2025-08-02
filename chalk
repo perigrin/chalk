@@ -936,6 +936,26 @@ class ScanlessEarleyParser {
                 }
             ),
 
+            # Expression → Expression '&&' Expression  
+            GrammarRule->new(
+                id => 4.7,
+                lhs => 'Expression',
+                rhs => ['Expression', 'WS', '&&', 'WS', 'Expression'],
+                semantic_action => sub ($matches, $ir) {
+                    return $ir->create_logical_and($matches->[0], $matches->[4]);
+                }
+            ),
+
+            # Expression → Expression '||' Expression
+            GrammarRule->new(
+                id => 4.8,
+                lhs => 'Expression',
+                rhs => ['Expression', 'WS', '||', 'WS', 'Expression'],
+                semantic_action => sub ($matches, $ir) {
+                    return $ir->create_logical_or($matches->[0], $matches->[4]);
+                }
+            ),
+
             # PrintStmt → 'print' WS Expression ';'
             GrammarRule->new(
                 id => 5,
