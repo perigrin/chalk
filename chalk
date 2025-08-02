@@ -31,8 +31,16 @@ class IRNode {
 
     method input_at($index) { $inputs[$index] }
     method update_input($index, $node) {
-        DEBUG "Updating input $index from " . ($inputs[$index] ? $inputs[$index]->to_string : 'undef') . " to " . $node->to_string;
+        my $old_node = $inputs[$index];
+        my $old_hash = $self->compute_hash();
+        DEBUG "Updating input $index from " . ($old_node ? $old_node->to_string : 'undef') . " to " . $node->to_string;
+        DEBUG "  Node hash before update: $old_hash";
         $inputs[$index] = $node;
+        # Clear cached hash since inputs changed
+        $cached_hash = undef;
+        my $new_hash = $self->compute_hash();
+        DEBUG "  Node hash after update: $new_hash";
+        DEBUG "  Hash changed: " . ($old_hash ne $new_hash ? "YES" : "NO");
     }
 
     method add_dependent($node) {
@@ -72,6 +80,10 @@ class IRNode {
     }
 
     method to_string() { ref($self) . "(".$self->short_id().")" }
+
+    method DESTROY() {
+        DEBUG "DESTROYING " . ref($self) . "(" . substr($self->compute_hash(), 0, 8) . ")";
+    }
 }
 
 # Specific operation node types
@@ -111,6 +123,7 @@ class StoreNode :isa(IRNode) {
     method execute() {
         my $var_name = $self->attr('var');
         my $stored_value = $self->input_at(0)->value();
+        DEBUG "StoreNode($var_name) storing value: '$stored_value'";
         $SYMBOL_TABLE{$var_name} = $stored_value;
         $self->set_value($stored_value);
     }
@@ -121,7 +134,9 @@ class LoadNode :isa(IRNode) {
 
     method execute() {
         my $var_name = $self->attr('var');
-        $self->set_value($SYMBOL_TABLE{$var_name});
+        my $value = $SYMBOL_TABLE{$var_name};
+        DEBUG "LoadNode($var_name) executing: symbol_table has " . (defined $value ? "'$value'" : 'undef');
+        $self->set_value($value);
     }
 }
 
@@ -160,28 +175,57 @@ class ThreadedSeaOfNodes {
 
     method create_load($var_name) {
         my $version = $symbol_versions{$var_name} // 0;
+        DEBUG "create_load($var_name) called, version=$version";
+
+        if ($version == 0) {
+            die qq[Global symbol "$var_name" requires explicit package name (did you forget to declare "my $var_name"?)];
+        }
+
         my $node = LoadNode->new();
         $node->set_attr('var', $var_name);
         $node->set_attr('version', $version);
+
+        if (my $store_node = $self->find_store_node($var_name, $version)) {
+            DEBUG "LoadNode($var_name) linking to StoreNode version $version";
+            $node->add_input($store_node);
+        } else {
+            DEBUG "LoadNode($var_name) could not find StoreNode version $version";
+        }
 
         my $hash_key = $node->compute_hash();
         return $nodes{$hash_key} if exists $nodes{$hash_key};
 
         $nodes{$hash_key} = $node;
+        DEBUG "create_load($var_name) created new LoadNode with hash " . substr($hash_key, 0, 8);
         return $node;
     }
 
+    method find_store_node($var_name, $version) {
+        for my $node ($self->nodes) {
+            next unless $node->isa('StoreNode');
+            next unless $node->attr('var') eq $var_name;
+            next unless $node->attr('version') == $version;
+            return $node;
+        }
+        return;
+    }
     method create_store($var_name, $value_node) {
-        my $version = ++$symbol_versions{$var_name};
+        my $version = ($symbol_versions{$var_name} // 0) + 1;
+        DEBUG "create_store($var_name) called, version=$version";
         my $node = StoreNode->new();
         $node->add_input($value_node);
         $node->set_attr('var', $var_name);
         $node->set_attr('version', $version);
 
         my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
+        if (exists $nodes{$hash_key}) {
+            DEBUG "create_store($var_name) returning existing StoreNode with hash " . substr($hash_key, 0, 8);
+            return $nodes{$hash_key};
+        }
 
+        $symbol_versions{$var_name} = $version;
         $nodes{$hash_key} = $node;
+        DEBUG "create_store($var_name) created new StoreNode with hash " . substr($hash_key, 0, 8);
         return $node;
     }
 
@@ -236,9 +280,14 @@ class ThreadedSeaOfNodes {
       my $node = $nodes{$node_hash};
       unless ($node) {
           DEBUG "  Node not found in nodes hash!";
+          DEBUG "  Available hashes: " . join(", ", map { substr($_, 0, 8) } sort keys %nodes);
           return;
       }
       DEBUG "  Found node: " . ref($node) . ", ready: " . $node->ready_count . "/" . ($node->total_deps || 0);
+
+      # Test field access
+      my @inputs = $node->inputs;
+      DEBUG "  Node has " . scalar(@inputs) . " inputs via field reader";
 
       $node->inc_ready_count;
       return unless $node->ready_count >= ($node->total_deps || 0);
@@ -266,9 +315,13 @@ class ThreadedSeaOfNodes {
        my @leaf_nodes = grep { scalar($_->inputs) == 0 } $self->nodes;
        DEBUG "Found " . scalar(@leaf_nodes) . " leaf nodes";
 
-
        for my $leaf (@leaf_nodes) {
-           DEBUG "Trying to execute leaf node: " . ref($leaf) . " (" . $leaf->compute_hash(). ")";
+           my $type = ref($leaf);
+           my $extra = "";
+           if ($leaf->isa('StoreNode') || $leaf->isa('LoadNode')) {
+               $extra = " var=" . ($leaf->attr('var') // 'unknown');
+           }
+           DEBUG "Trying to execute leaf node: $type$extra (" . $leaf->compute_hash(). ")";
            $self->try_execute_node($leaf->compute_hash());
        }
    }
@@ -364,25 +417,63 @@ class ThreadedSeaOfNodes {
        my $old_hash = $old_node->compute_hash();
        my $new_hash = $new_node->compute_hash();
 
-       DEBUG "Replacing references from $old_hash to $new_hash";
+       DEBUG "Replacing references from $old_hash to $new_hash (simpler approach)";
 
-       # Update all nodes that have the old node as input
+       # For now, let's just fix the immediate problem by updating %nodes
+       # when a node's hash changes after update_input
+
+       # Find all nodes that reference the old node and update them
        for my $node ($self->nodes) {
            my @inputs = $node->inputs;
            for (my $i = 0; $i < @inputs; $i++) {
                if ($inputs[$i] == $old_node) {
-                   # This is a bit tricky - we need to update the input
-                   # For now, let's just log it
-                   DEBUG "Would need to update input $i of " . ref($node);
+                   DEBUG "  Updating input $i of " . ref($node);
+
+                   # Get the old hash before update
+                   my $node_old_hash = $node->compute_hash();
+
+                   # Update the input (this changes the node's hash)
                    $node->update_input($i, $new_node);
-                   # Also need to update dependency tracking
+
+                   # Get the new hash after update
+                   my $node_new_hash = $node->compute_hash();
+
+                   # Update %nodes to reflect the hash change
+                   if ($node_old_hash ne $node_new_hash) {
+                       DEBUG "    Updating %nodes: $node_old_hash -> $node_new_hash";
+                       delete $nodes{$node_old_hash};
+                       $nodes{$node_new_hash} = $node;
+                   }
+
+                   # Update dependency tracking
                    $new_node->add_dependent($node);
                }
            }
        }
 
-       # We don't need to delete the old node - if it's no longer referenced,
-       # it won't be in the execution chain anyway
+       DEBUG "Node reference replacement complete";
+   }
+
+   method create_node_with_inputs($original_node, @new_inputs) {
+       # Create a new node of the same type but with different inputs
+       my $class = ref($original_node);
+
+       if ($class eq 'PrintNode') {
+           return $self->create_print($new_inputs[0]);
+       } elsif ($class eq 'AddNode') {
+           return $self->create_add($new_inputs[0], $new_inputs[1]);
+       } elsif ($class eq 'ConcatNode') {
+           return $self->create_concat(@new_inputs);
+       } elsif ($class eq 'StoreNode') {
+           my $var = $original_node->attr('var');
+           return $self->create_store($var, $new_inputs[0]);
+       } elsif ($class eq 'LoadNode' || $class eq 'ConstantNode') {
+           # These don't have inputs, so no replacement needed
+           return undef;
+       }
+
+       DEBUG "Warning: Unknown node type for replacement: $class";
+       return undef;
    }
 
    method cleanup_orphaned_nodes() {
@@ -1149,9 +1240,9 @@ die "No code to execute\n" unless defined $perl_code && length $perl_code;
 my $parser = ScanlessEarleyParser->new();
 my $ir_graph = $parser->parse($perl_code);
 
-# Run optimizations and cleanup
-$ir_graph->run_peephole_optimizations();
+# Run optimizations and cleanup (peephole optimizations run in execute_threaded)
 $ir_graph->cleanup_orphaned_nodes();
+# $ir_graph->dump_graph();  # Temporarily disabled to test theories
 
 # Execute the code
 $ir_graph->execute_threaded();

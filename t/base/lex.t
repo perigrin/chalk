@@ -1,3 +1,5 @@
 print "1..1\n";
+
 $x = 'x';
-print "ok 1 - basic variable assignment and interpolation\n";
+
+print "ok	parsed: :$x: eq :x:\n";
