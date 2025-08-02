@@ -193,16 +193,7 @@ class ComparisonNode :isa(IRNode) {
     }
     
     method to_number($val) {
-        # Perl-style numeric conversion
-        return 0 unless defined $val;
-        return 0 if $val eq '';
-        return 0 if $val eq '0';
-        
-        # Try to extract leading number
-        if ($val =~ /^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/) {
-            return $1 + 0;  # Force numeric context
-        }
-        return 0;  # Non-numeric strings become 0
+        return 0 + $val;
     }
 }
 
