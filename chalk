@@ -720,12 +720,13 @@ class GrammarRule {
         return $cached_id if defined $cached_id;
         
         use Digest::SHA qw(sha1_hex);
+        use Scalar::Util qw(refaddr);
         
         my @hash_components = ($lhs);
         push @hash_components, @$rhs;
-        # Note: We don't include semantic_action in the hash since 
-        # code refs are not easily hashable and rules with same 
-        # grammar but different actions should be considered different
+        # Include semantic action address so rules with same grammar
+        # but different actions are considered different
+        push @hash_components, refaddr($semantic_action);
         
         $cached_id = sha1_hex(join('|', @hash_components));
         return $cached_id;
