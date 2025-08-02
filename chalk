@@ -222,11 +222,7 @@ class LogicalAndNode :isa(IRNode) {
     }
     
     method is_true($val) {
-        # Perl truthiness: empty string, "0", and undef are false
-        return 0 unless defined $val;
-        return 0 if $val eq '';
-        return 0 if $val eq '0';
-        return 1;
+        return !!$val;
     }
 }
 
@@ -255,11 +251,7 @@ class LogicalOrNode :isa(IRNode) {
     }
     
     method is_true($val) {
-        # Perl truthiness: empty string, "0", and undef are false
-        return 0 unless defined $val;
-        return 0 if $val eq '';
-        return 0 if $val eq '0';
-        return 1;
+        return !!$val;
     }
 }
 
@@ -277,11 +269,7 @@ class NotNode :isa(IRNode) {
     }
     
     method is_true($val) {
-        # Perl truthiness: empty string, "0", and undef are false
-        return 0 unless defined $val;
-        return 0 if $val eq '';
-        return 0 if $val eq '0';
-        return 1;
+        return !!$val;
     }
 }
 
