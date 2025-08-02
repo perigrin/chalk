@@ -1111,24 +1111,47 @@ class ScanlessEarleyParser {
     }
 }
 
-# Usage example
+# Command-line argument processing
+use Getopt::Long;
+
+my $help;
+
+GetOptions(
+    'h|help' => \$help,
+) or die "Error in command line arguments\n";
+
+if ($help) {
+    print <<'USAGE';
+Usage: chalk [filename]
+  -h, --help    Show this help message
+
+If no filename is given, code is read from STDIN.
+USAGE
+    exit 0;
+}
+
+my $perl_code;
+
+if (@ARGV) {
+    # Read from file
+    my $filename = $ARGV[0];
+    open my $fh, '<', $filename or die "Cannot open file '$filename': $!\n";
+    $perl_code = do { local $/; <$fh> };
+    close $fh;
+} else {
+    # Read from STDIN
+    $perl_code = do { local $/; <STDIN> };
+}
+
+die "No code to execute\n" unless defined $perl_code && length $perl_code;
+
+# Parse and execute the code
 my $parser = ScanlessEarleyParser->new();
-
-my $perl_code = q{print "1..129\n";
-$x = 'x';
-print "#1	:$x: eq :x:\n";};
-
 my $ir_graph = $parser->parse($perl_code);
 
-# Run optimizations and cleanup, then show the optimized graph
+# Run optimizations and cleanup
 $ir_graph->run_peephole_optimizations();
 $ir_graph->cleanup_orphaned_nodes();
-$ir_graph->dump_graph();
 
-say "\n=== Threaded Execution ===";
+# Execute the code
 $ir_graph->execute_threaded();
-
-say "\nSymbol table contents:";
-for my $var (sort keys %SYMBOL_TABLE) {
-    say "  $var = " . ($SYMBOL_TABLE{$var} // 'undef');
-}
