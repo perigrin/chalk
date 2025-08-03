@@ -21,7 +21,10 @@ class IRNode {
     field $ready_count :reader = 0; # How many dependencies have completed
     field $total_deps :reader;      # Total number of dependencies needed
 
-    method inc_ready_count() { $ready_count++ }
+    method inc_ready_count() { 
+        $ready_count++;
+        DEBUG ref($self) . "(" . $self->short_id . ") inc_ready_count: now " . $ready_count . "/" . ($total_deps || 0);
+    }
 
     method add_input($node) {
         push @inputs, $node;
@@ -47,6 +50,7 @@ class IRNode {
         DEBUG ref($self) . "(" . $self->short_id . ") adding dependent: " . $node->to_string;
         # we could also use uniq when we notify_dependents which means fewer calls but more memory
         @dependent_hashes = uniq @dependent_hashes, $node->compute_hash;
+        DEBUG ref($self) . "(" . $self->short_id . ") now has " . scalar(@dependent_hashes) . " dependents";
     }
 
     method set_attr($key, $value) { $attributes{$key} = $value }
@@ -309,7 +313,13 @@ class ThreadedSeaOfNodes {
         }
 
         my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
+        DEBUG "create_load($var_name) computed hash: " . substr($hash_key, 0, 8);
+        DEBUG "create_load($var_name) nodes hash has: " . scalar(keys %nodes) . " entries";
+        
+        if (exists $nodes{$hash_key}) {
+            DEBUG "create_load($var_name) returning existing LoadNode with hash " . substr($hash_key, 0, 8);
+            return $nodes{$hash_key};
+        }
 
         $nodes{$hash_key} = $node;
         DEBUG "create_load($var_name) created new LoadNode with hash " . substr($hash_key, 0, 8);
@@ -390,14 +400,22 @@ class ThreadedSeaOfNodes {
 
     method create_comparison($op, $left_node, $right_node) {
         my $node = ComparisonNode->new();
+        DEBUG "create_comparison: adding left input: " . $left_node->to_string;
         $node->add_input($left_node);
+        DEBUG "create_comparison: adding right input: " . $right_node->to_string;
         $node->add_input($right_node);
         $node->set_attr('op', $op);
 
         my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
+        DEBUG "create_comparison: computed hash: " . substr($hash_key, 0, 8);
+        
+        if (exists $nodes{$hash_key}) {
+            DEBUG "create_comparison: returning existing ComparisonNode";
+            return $nodes{$hash_key};
+        }
 
         $nodes{$hash_key} = $node;
+        DEBUG "create_comparison: created new ComparisonNode with " . scalar($node->inputs) . " inputs";
         return $node;
     }
 
@@ -447,24 +465,34 @@ class ThreadedSeaOfNodes {
           DEBUG "  Available hashes: " . join(", ", map { substr($_, 0, 8) } sort keys %nodes);
           return;
       }
-      DEBUG "  Found node: " . ref($node) . ", ready: " . $node->ready_count . "/" . ($node->total_deps || 0);
 
-      # Test field access
       my @inputs = $node->inputs;
-      DEBUG "  Node has " . scalar(@inputs) . " inputs via field reader";
+      DEBUG "  Found node: " . ref($node) . " with " . scalar(@inputs) . " inputs";
 
-      $node->inc_ready_count;
-      return unless $node->ready_count >= ($node->total_deps || 0);
+      # Check if all inputs have computed values (are ready)
+      for my $i (0 .. $#inputs) {
+          my $input = $inputs[$i];
+          unless (defined $input->value) {
+              DEBUG "  Input $i (" . ref($input) . ") not ready yet";
+              return;
+          }
+          DEBUG "  Input $i (" . ref($input) . ") has value: '" . ($input->value // 'undef') . "'";
+      }
 
-      DEBUG "  Executing node!";
+      DEBUG "  All inputs ready - executing node!";
       $node->execute();
       $self->notify_dependents($node_hash);
    }
 
    method notify_dependents($node_hash) {
        my $node = $nodes{$node_hash} or return;
+       DEBUG "notify_dependents called for " . ref($node) . "(" . $node->short_id . ")";
+       DEBUG "  has " . scalar($node->dependent_hashes) . " dependent entries";
 
+       # Notify each dependent once per dependency relationship
+       # This allows nodes with same input multiple times to get multiple notifications
        for my $dependent_hash ($node->dependent_hashes) {
+           DEBUG "  notifying dependent: $dependent_hash";
            $self->try_execute_node($dependent_hash);
        }
    }
