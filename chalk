@@ -21,7 +21,7 @@ class IRNode {
     field $ready_count :reader = 0; # How many dependencies have completed
     field $total_deps :reader;      # Total number of dependencies needed
 
-    method inc_ready_count() { 
+    method inc_ready_count() {
         $ready_count++;
         DEBUG ref($self) . "(" . $self->short_id . ") inc_ready_count: now " . $ready_count . "/" . ($total_deps || 0);
     }
@@ -138,6 +138,13 @@ class LoadNode :isa(IRNode) {
 
     method execute() {
         my $var_name = $self->attr('var');
+        my $version = $self->attr('version');
+        
+        # Check if this is an orphaned LoadNode (version 0 with no inputs)
+        if ($version == 0 && !$self->inputs) {
+            die qq[Global symbol "\$$var_name" requires explicit package name (did you forget to declare "my \$$var_name"?)];
+        }
+        
         my $value = $SYMBOL_TABLE{$var_name};
         DEBUG "LoadNode($var_name) executing: symbol_table has " . (defined $value ? "'$value'" : 'undef');
         $self->set_value($value);
@@ -168,9 +175,9 @@ class ComparisonNode :isa(IRNode) {
         my $left = $self->input_at(0)->value();
         my $right = $self->input_at(1)->value();
         my $op = $self->attr('op');
-        
+
         DEBUG "ComparisonNode executing: '$left' $op '$right'";
-        
+
         my $result;
         if ($op eq 'eq') {
             $result = ($left // '') eq ($right // '') ? 1 : 0;
@@ -191,11 +198,11 @@ class ComparisonNode :isa(IRNode) {
         } else {
             die "Unknown comparison operator: $op";
         }
-        
+
         DEBUG "ComparisonNode result: $result";
         $self->set_value($result);
     }
-    
+
     method to_number($val) {
         return 0 + $val;
     }
@@ -206,25 +213,25 @@ class LogicalAndNode :isa(IRNode) {
 
     method execute() {
         my $left = $self->input_at(0)->value();
-        
+
         DEBUG "LogicalAndNode executing with left: '$left'";
-        
+
         # Short-circuit evaluation: if left is false, don't evaluate right
         unless ($self->is_true($left)) {
             DEBUG "LogicalAndNode short-circuit: left is false, returning 0";
             $self->set_value(0);
             return;
         }
-        
+
         # Left is true, evaluate right
         my $right = $self->input_at(1)->value();
         DEBUG "LogicalAndNode right value: '$right'";
-        
+
         my $result = $self->is_true($right) ? 1 : 0;
         DEBUG "LogicalAndNode result: $result";
         $self->set_value($result);
     }
-    
+
     method is_true($val) {
         return !!$val;
     }
@@ -235,25 +242,25 @@ class LogicalOrNode :isa(IRNode) {
 
     method execute() {
         my $left = $self->input_at(0)->value();
-        
+
         DEBUG "LogicalOrNode executing with left: '$left'";
-        
+
         # Short-circuit evaluation: if left is true, don't evaluate right
         if ($self->is_true($left)) {
             DEBUG "LogicalOrNode short-circuit: left is true, returning 1";
             $self->set_value(1);
             return;
         }
-        
+
         # Left is false, evaluate right
         my $right = $self->input_at(1)->value();
         DEBUG "LogicalOrNode right value: '$right'";
-        
+
         my $result = $self->is_true($right) ? 1 : 0;
         DEBUG "LogicalOrNode result: $result";
         $self->set_value($result);
     }
-    
+
     method is_true($val) {
         return !!$val;
     }
@@ -264,14 +271,14 @@ class NotNode :isa(IRNode) {
 
     method execute() {
         my $input = $self->input_at(0)->value();
-        
+
         DEBUG "NotNode executing with input: '$input'";
-        
+
         my $result = $self->is_true($input) ? 0 : 1;
         DEBUG "NotNode result: $result";
         $self->set_value($result);
     }
-    
+
     method is_true($val) {
         return !!$val;
     }
@@ -297,10 +304,8 @@ class ThreadedSeaOfNodes {
         my $version = $symbol_versions{$var_name} // 0;
         DEBUG "create_load($var_name) called, version=$version";
 
-        if ($version == 0) {
-            die qq[Global symbol "$var_name" requires explicit package name (did you forget to declare "my $var_name"?)];
-        }
-
+        # Create LoadNode even if variable doesn't exist yet (version == 0)
+        # This allows SPPF construction during parsing - orphaned nodes will be cleaned up later
         my $node = LoadNode->new();
         $node->set_attr('var', $var_name);
         $node->set_attr('version', $version);
@@ -315,7 +320,7 @@ class ThreadedSeaOfNodes {
         my $hash_key = $node->compute_hash();
         DEBUG "create_load($var_name) computed hash: " . substr($hash_key, 0, 8);
         DEBUG "create_load($var_name) nodes hash has: " . scalar(keys %nodes) . " entries";
-        
+
         if (exists $nodes{$hash_key}) {
             DEBUG "create_load($var_name) returning existing LoadNode with hash " . substr($hash_key, 0, 8);
             return $nodes{$hash_key};
@@ -408,7 +413,7 @@ class ThreadedSeaOfNodes {
 
         my $hash_key = $node->compute_hash();
         DEBUG "create_comparison: computed hash: " . substr($hash_key, 0, 8);
-        
+
         if (exists $nodes{$hash_key}) {
             DEBUG "create_comparison: returning existing ComparisonNode";
             return $nodes{$hash_key};
@@ -633,7 +638,8 @@ class ThreadedSeaOfNodes {
                    # Update %nodes to reflect the hash change
                    if ($node_old_hash ne $node_new_hash) {
                        DEBUG "    Updating %nodes: $node_old_hash -> $node_new_hash";
-                       delete $nodes{$node_old_hash};
+                       # commented out deleting nodes during replacement for now
+                       # delete $nodes{$node_old_hash};
                        $nodes{$node_new_hash} = $node;
                    }
 
@@ -746,16 +752,16 @@ class GrammarRule {
 
     method id() {
         return $cached_id if defined $cached_id;
-        
+
         use Digest::SHA qw(sha1_hex);
         use Scalar::Util qw(refaddr);
-        
+
         my @hash_components = ($lhs);
         push @hash_components, @$rhs;
         # Include semantic action address so rules with same grammar
         # but different actions are considered different
         push @hash_components, refaddr($semantic_action);
-        
+
         $cached_id = sha1_hex(join('|', @hash_components));
         return $cached_id;
     }
@@ -771,15 +777,33 @@ class GrammarRule {
 
 # Earley item
 class EarleyItem {
+    use Digest::SHA qw(sha1_hex);
+    
     field $rule :param :reader;
     field $dot_pos :param :reader = 0;
     field $start_pos :param :reader = 0;
     field $current_pos :param :reader :writer = 0;
     field $matched_text :param :reader :writer = "";
     field $semantic_value :param :reader = undef;
+    field $hash = undef;
 
     method set_semantic_value($value) {
         $semantic_value = $value;
+    }
+    
+    method compute_hash() {
+        return $hash if defined $hash;
+        
+        # Hash based on rule ID, dot position, and start position
+        # These three values uniquely identify an Earley item's parse state
+        my $content = join(':', 
+            $rule->id,
+            $dot_pos,
+            $start_pos
+        );
+        
+        $hash = sha1_hex($content);
+        return $hash;
     }
 
     method is_complete() { $dot_pos >= $rule->rhs_length }
@@ -827,36 +851,39 @@ class ScanlessEarleyParser {
 
     method define_grammar() {
         @grammar_rules = (
-            # Program → Statement+
+            # Program → StatementSeq
             GrammarRule->new(
                 lhs => 'Program',
+                rhs => ['StatementSeq'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+
+
+            # StatementSeq → Statement
+            GrammarRule->new(
+                lhs => 'StatementSeq',
                 rhs => ['Statement'],
                 semantic_action => sub ($matches, $ir) {
                     return $matches->[0];
                 }
             ),
 
+            # StatementSeq → Statement ';' WS StatementSeq
             GrammarRule->new(
-                                lhs => 'Program',
-                rhs => ['Program', 'WS', 'Statement'],
+                lhs => 'StatementSeq',
+                rhs => ['Statement', ';', 'WS', 'StatementSeq'],
                 semantic_action => sub ($matches, $ir) {
-                    # Sequential composition - just return the last statement
-                    return $matches->[2];
+                    # Sequential composition - return the last statement
+                    return $matches->[3];
                 }
             ),
 
-            # Statement → PrintStmt | Assignment
+            # Statement → Expression
             GrammarRule->new(
-                                lhs => 'Statement',
-                rhs => ['PrintStmt'],
-                semantic_action => sub ($matches, $ir) {
-                    return $matches->[0];
-                }
-            ),
-
-            GrammarRule->new(
-                                lhs => 'Statement',
-                rhs => ['Assignment'],
+                lhs => 'Statement',
+                rhs => ['Expression'],
                 semantic_action => sub ($matches, $ir) {
                     return $matches->[0];
                 }
@@ -864,8 +891,17 @@ class ScanlessEarleyParser {
 
             # Expression → StringLiteral
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['StringLiteral'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+            
+            # Expression → PrintExpr
+            GrammarRule->new(
+                lhs => 'Expression',
+                rhs => ['PrintExpr'],
                 semantic_action => sub ($matches, $ir) {
                     return $matches->[0];
                 }
@@ -873,7 +909,7 @@ class ScanlessEarleyParser {
 
             # Expression → Variable
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['Variable'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
@@ -882,9 +918,19 @@ class ScanlessEarleyParser {
                 }
             ),
 
+            # Expression → Assignment (assignments are expressions)
+            GrammarRule->new(
+                lhs => 'Expression',
+                rhs => ['Assignment'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+
+
             # Expression → StringLiteral ComparisonOp StringLiteral
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
                 semantic_action => sub ($matches, $ir) {
                     my $op = $matches->[2]{op};
@@ -894,7 +940,7 @@ class ScanlessEarleyParser {
 
             # Expression → Variable ComparisonOp StringLiteral
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
@@ -906,7 +952,7 @@ class ScanlessEarleyParser {
 
             # Expression → StringLiteral ComparisonOp Variable
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'Variable'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[4]{var_name};
@@ -918,7 +964,7 @@ class ScanlessEarleyParser {
 
             # Expression → Variable ComparisonOp Variable
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'Variable'],
                 semantic_action => sub ($matches, $ir) {
                     my $left_var = $matches->[0]{var_name};
@@ -932,7 +978,7 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → 'eq'
             GrammarRule->new(
-                                lhs => 'ComparisonOp',
+                lhs => 'ComparisonOp',
                 rhs => ['eq'],
                 semantic_action => sub ($matches, $ir) {
                     return { op => 'eq' };
@@ -941,7 +987,7 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → 'ne'
             GrammarRule->new(
-                                lhs => 'ComparisonOp',
+                lhs => 'ComparisonOp',
                 rhs => ['ne'],
                 semantic_action => sub ($matches, $ir) {
                     return { op => 'ne' };
@@ -950,7 +996,7 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → '=='
             GrammarRule->new(
-                                lhs => 'ComparisonOp',
+                lhs => 'ComparisonOp',
                 rhs => ['=='],
                 semantic_action => sub ($matches, $ir) {
                     return { op => '==' };
@@ -959,16 +1005,16 @@ class ScanlessEarleyParser {
 
             # ComparisonOp → '!='
             GrammarRule->new(
-                                lhs => 'ComparisonOp',
+                lhs => 'ComparisonOp',
                 rhs => ['!='],
                 semantic_action => sub ($matches, $ir) {
                     return { op => '!=' };
                 }
             ),
 
-            # Expression → Expression '&&' Expression  
+            # Expression → Expression '&&' Expression
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['Expression', 'WS', '&&', 'WS', 'Expression'],
                 semantic_action => sub ($matches, $ir) {
                     return $ir->create_logical_and($matches->[0], $matches->[4]);
@@ -977,17 +1023,17 @@ class ScanlessEarleyParser {
 
             # Expression → Expression '||' Expression
             GrammarRule->new(
-                                lhs => 'Expression',
+                lhs => 'Expression',
                 rhs => ['Expression', 'WS', '||', 'WS', 'Expression'],
                 semantic_action => sub ($matches, $ir) {
                     return $ir->create_logical_or($matches->[0], $matches->[4]);
                 }
             ),
 
-            # PrintStmt → 'print' WS Expression ';'
+            # PrintExpr → 'print' WS Expression
             GrammarRule->new(
-                                lhs => 'PrintStmt',
-                rhs => ['print', 'WS', 'Expression', 'WS', ';'],
+                lhs => 'PrintExpr',
+                rhs => ['print', 'WS', 'Expression'],
                 semantic_action => sub ($matches, $ir) {
                     my $expr_node = $matches->[2];
                     my $print_node = $ir->create_print($expr_node);
@@ -995,10 +1041,10 @@ class ScanlessEarleyParser {
                 }
             ),
 
-            # Assignment → Variable WS '=' WS Expression WS ';'
+            # Assignment → Variable WS '=' WS Expression
             GrammarRule->new(
-                                lhs => 'Assignment',
-                rhs => ['Variable', 'WS', '=', 'WS', 'Expression', 'WS', ';'],
+                lhs => 'Assignment',
+                rhs => ['Variable', 'WS', '=', 'WS', 'Expression'],
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
                     my $expr_node = $matches->[4];
@@ -1009,7 +1055,7 @@ class ScanlessEarleyParser {
 
             # StringLiteral → '"' InterpolatedContent '"' (interpolated)
             GrammarRule->new(
-                                lhs => 'StringLiteral',
+                lhs => 'StringLiteral',
                 rhs => ['"', 'InterpolatedContent', '"'],
                 semantic_action => sub ($matches, $ir) {
                     my $node = $matches->[1];
@@ -1033,7 +1079,7 @@ class ScanlessEarleyParser {
 
             # StringLiteral → "'" StringContent "'"
             GrammarRule->new(
-                                lhs => 'StringLiteral',
+                lhs => 'StringLiteral',
                 rhs => ["'", 'StringContent', "'"],
                 semantic_action => sub ($matches, $ir) {
                     my $content = $matches->[1]{text};
@@ -1044,7 +1090,7 @@ class ScanlessEarleyParser {
 
             # StringContent → CharSeq (for single-quoted strings)
             GrammarRule->new(
-                                lhs => 'StringContent',
+                lhs => 'StringContent',
                 rhs => ['CharSeq'],
                 semantic_action => sub ($matches, $ir) {
                     DEBUG "StringContent CharSeq: " . $matches->[0]{text};
@@ -1054,7 +1100,7 @@ class ScanlessEarleyParser {
 
             # InterpolatedContent → CharSeq (same as StringContent but will be marked for interpolation)
             GrammarRule->new(
-                                lhs => 'InterpolatedContent',
+                lhs => 'InterpolatedContent',
                 rhs => ['CharSeq'],
                 semantic_action => sub ($matches, $ir) {
                     my $content = $matches->[0]{text};
@@ -1068,7 +1114,7 @@ class ScanlessEarleyParser {
 
             # CharSeq → Char CharSeq
             GrammarRule->new(
-                                lhs => 'CharSeq',
+                lhs => 'CharSeq',
                 rhs => ['Char', 'CharSeq'],
                 semantic_action => sub ($matches, $ir) {
                     DEBUG "CharSeq (recursive) semantic action: building '" . $matches->[0]{char} . "' + '" . ($matches->[1]{text} // '') . "'";
@@ -1078,7 +1124,7 @@ class ScanlessEarleyParser {
 
             # CharSeq → Char
             GrammarRule->new(
-                                lhs => 'CharSeq',
+                lhs => 'CharSeq',
                 rhs => ['Char'],
                 semantic_action => sub ($matches, $ir) {
                     return { text => $matches->[0]{char} };
@@ -1087,7 +1133,7 @@ class ScanlessEarleyParser {
 
             # Variable → '$' Identifier
             GrammarRule->new(
-                                lhs => 'Variable',
+                lhs => 'Variable',
                 rhs => ['$', 'Identifier'],
                 semantic_action => sub ($matches, $ir) {
                     return { var_name => $matches->[1]{name} };
@@ -1096,7 +1142,7 @@ class ScanlessEarleyParser {
 
             # Identifier → Letter LetterDigitSeq
             GrammarRule->new(
-                                lhs => 'Identifier',
+                lhs => 'Identifier',
                 rhs => ['Letter', 'LetterDigitSeq'],
                 semantic_action => sub ($matches, $ir) {
                     return { name => $matches->[0]{char} . $matches->[1]{text} };
@@ -1105,7 +1151,7 @@ class ScanlessEarleyParser {
 
             # Identifier → Letter
             GrammarRule->new(
-                                lhs => 'Identifier',
+                lhs => 'Identifier',
                 rhs => ['Letter'],
                 semantic_action => sub ($matches, $ir) {
                     return { name => $matches->[0]{char} };
@@ -1114,7 +1160,7 @@ class ScanlessEarleyParser {
 
             # LetterDigitSeq → LetterDigit LetterDigitSeq
             GrammarRule->new(
-                                lhs => 'LetterDigitSeq',
+                lhs => 'LetterDigitSeq',
                 rhs => ['LetterDigit', 'LetterDigitSeq'],
                 semantic_action => sub ($matches, $ir) {
                     return { text => $matches->[0]{char} . $matches->[1]{text} };
@@ -1123,7 +1169,7 @@ class ScanlessEarleyParser {
 
             # LetterDigitSeq → LetterDigit
             GrammarRule->new(
-                                lhs => 'LetterDigitSeq',
+                lhs => 'LetterDigitSeq',
                 rhs => ['LetterDigit'],
                 semantic_action => sub ($matches, $ir) {
                     return { text => $matches->[0]{char} };
@@ -1132,7 +1178,7 @@ class ScanlessEarleyParser {
 
             # WS → Whitespace WS
             GrammarRule->new(
-                                lhs => 'WS',
+                lhs => 'WS',
                 rhs => ['Whitespace', 'WS'],
                 semantic_action => sub ($matches, $ir) {
                     return undef;  # Whitespace has no semantic value
@@ -1141,7 +1187,7 @@ class ScanlessEarleyParser {
 
             # WS → Whitespace
             GrammarRule->new(
-                                lhs => 'WS',
+                lhs => 'WS',
                 rhs => ['Whitespace'],
                 semantic_action => sub ($matches, $ir) {
                     return undef;
@@ -1150,12 +1196,48 @@ class ScanlessEarleyParser {
 
             # WS → ε (empty)
             GrammarRule->new(
-                                lhs => 'WS',
+                lhs => 'WS',
                 rhs => [],
                 semantic_action => sub ($matches, $ir) {
                     return undef;
                 }
             ),
+
+            # Handle comments as statements
+            GrammarRule->new(
+                lhs => 'Statement',
+                rhs => ['Comment'],
+                semantic_action => sub ($matches, $ir) {
+                    return undef;  # Comments produce no semantic value
+                }
+            ),
+
+            # Comment → '#' CommentText '\n'
+            GrammarRule->new(
+                lhs => 'Comment',
+                rhs => ['#', 'CommentText', '\n'],
+                semantic_action => sub ($matches, $ir) {
+                    return undef;
+                }
+            ),
+
+            # CommentText → CommentLineChar CommentText | ε
+            GrammarRule->new(
+                lhs => 'CommentText',
+                rhs => ['CommentLineChar', 'CommentText'],
+                semantic_action => sub ($matches, $ir) {
+                    return undef;
+                }
+            ),
+
+            GrammarRule->new(
+                lhs => 'CommentText',
+                rhs => [],
+                semantic_action => sub ($matches, $ir) {
+                    return undef;
+                }
+            ),
+
         );
 
         %nonterminals = map { $_->lhs => $_ } @grammar_rules;
@@ -1165,6 +1247,7 @@ class ScanlessEarleyParser {
     method parse($text) {
         $input_text = $text;
         @chart = ();
+        my %seen_items;  # Track items by hash to prevent duplicates
 
         DEBUG "Parsing text: $text";
         # Initialize chart with start state - predict all Program rules
@@ -1172,6 +1255,25 @@ class ScanlessEarleyParser {
             map { EarleyItem->new( rule => $_ ) }
             grep { $_->lhs eq 'Program' } @grammar_rules
         ];
+        
+        # Mark initial items as seen
+        for my $item (@{$chart[0]}) {
+            $seen_items{$item->compute_hash()} = 1;
+        }
+        
+        # Helper to add item only if not seen
+        my $add_item = sub ($item, $chart_pos, $to_agenda) {
+            my $item_hash = $item->compute_hash();
+            if (!$seen_items{$item_hash}) {
+                $seen_items{$item_hash} = 1;
+                push @{$chart[$chart_pos]}, $item;
+                push @$to_agenda, $item if $to_agenda;
+                DEBUG "Added new item: " . $item->to_string;
+                return 1;
+            }
+            DEBUG "Skipping duplicate item: " . $item->to_string;
+            return 0;
+        };
 
         # Main parsing loop - process each character position
         for my $pos (0 .. length($text)) {
@@ -1209,6 +1311,23 @@ class ScanlessEarleyParser {
     method find_actual_completion($symbol, $start_pos, $parent_item, $parent_end_pos) {
         DEBUG "Finding actual completion for $symbol starting at $start_pos";
 
+      # Handle end-of-input case: if we're past the input length, check for empty rules
+      if ($start_pos >= length($input_text)) {
+          # Look for empty rules for this symbol in the grammar
+          for my $rule (@grammar_rules) {
+              if ($rule->lhs eq $symbol && @{$rule->rhs} == 0) {
+                  DEBUG "Found empty rule for $symbol at end of input: " . $rule->lhs . " → ε";
+                  # Execute semantic action for empty rule
+                  my $semantic_value = $rule->execute_action([], $ir_graph);
+                  return {
+                      semantic_value => $semantic_value,
+                      end_pos => $start_pos
+                  };
+              }
+          }
+          DEBUG "No empty rule found for $symbol at end of input";
+      }
+
       # Strategy 1: Look for completed items across all chart positions
       my @all_candidates = map {
           $chart[$_] ? grep {
@@ -1220,11 +1339,14 @@ class ScanlessEarleyParser {
               $_->is_complete &&
               $_->rule->lhs eq $symbol &&
               $_->start_pos == $start_pos &&
-              $_->current_pos > $_->start_pos &&
               $self->could_be_child_of($_, $parent_item)
           } @{$chart[$_]} : ()
       } ($start_pos .. $parent_end_pos);
 
+      DEBUG "All candidates for $symbol at $start_pos:";
+      for my $cand (@all_candidates) {
+          DEBUG "  " . $cand->to_string . " span=" . ($cand->current_pos - $cand->start_pos);
+      }
       my ($best_item) = sort {
           # we want the item with the longest span
           ($b->current_pos - $b->start_pos) <=> ($a->current_pos - $a->start_pos)
@@ -1238,9 +1360,17 @@ class ScanlessEarleyParser {
           };
       }
 
-      DEBUG "No perfect completion found, trying to reconstruct.";
-      # Strategy 2: Reconstruct from partial completions
-      return $self->reconstruct_from_partials($symbol, $start_pos, $parent_end_pos);
+      DEBUG "No perfect completion found for symbol '$symbol' at position $start_pos";
+      DEBUG "Available candidates were:";
+      for my $pos ($start_pos .. $parent_end_pos) {
+          next unless $chart[$pos];
+          for my $item (@{$chart[$pos]}) {
+              if ($item->rule->lhs eq $symbol && $item->start_pos == $start_pos) {
+                  DEBUG "  " . $item->to_string . " (complete=" . $item->is_complete . ", consumed=" . ($item->current_pos - $item->start_pos) . ")";
+              }
+          }
+      }
+      die "Parse failed: Could not find complete parse for '$symbol' starting at position $start_pos";
     }
 
     method reconstruct_from_partials($symbol, $start_pos, $parent_end_pos) {
@@ -1409,8 +1539,23 @@ class ScanlessEarleyParser {
             DEBUG "Set current_pos to $pos for item: " . $new_item->to_string;
             $new_item->set_current_pos($pos);
             DEBUG "\tNew item: " . $new_item->to_string;
-            push @$agenda, $new_item;
-            push @{$chart[$pos]}, $new_item;
+            
+            # Check if this item already exists before adding
+            my $already_exists = 0;
+            for my $existing_item (@{$chart[$pos]}) {
+                if ($existing_item->rule == $new_item->rule && 
+                    $existing_item->start_pos == $new_item->start_pos && 
+                    $existing_item->dot_pos == $new_item->dot_pos) {
+                    DEBUG "Item already exists in chart, skipping";
+                    $already_exists = 1;
+                    last;
+                }
+            }
+            
+            if (!$already_exists) {
+                push @$agenda, $new_item;
+                push @{$chart[$pos]}, $new_item;
+            }
         }
         DEBUG "Item completed with semantic value: " . (defined $semantic_value ? $semantic_value :
   'undef');
@@ -1469,24 +1614,31 @@ class ScanlessEarleyParser {
                     current_pos => $pos
                 );
 
-                for my $item (@{$chart[$pos]}) {
-                    if ($item->rule == $rule && $item->start_pos == $pos && $item->dot_pos == 0) {
+                # Check if this exact item already exists using content-based comparison
+                my $already_exists = 0;
+                for my $existing_item (@{$chart[$pos]}) {
+                    if ($existing_item->rule == $rule && 
+                        $existing_item->start_pos == $pos && 
+                        $existing_item->dot_pos == 0) {
                         DEBUG "Rule already predicted, skipping";
-                        return;
+                        $already_exists = 1;
+                        last;
                     }
                 }
-                DEBUG "Adding predicted item: " . $predicted_item->to_string;
-                push @$agenda, $predicted_item;
-                push @{$chart[$pos]}, $predicted_item;
+                
+                if (!$already_exists) {
+                    DEBUG "Adding predicted item: " . $predicted_item->to_string;
+                    push @$agenda, $predicted_item;
+                    push @{$chart[$pos]}, $predicted_item;
+                }
             }
         }
     }
 
     method is_character_class($symbol) {
-        return $symbol =~ /^(Letter|LetterDigit|Char|Whitespace)$/;
+        return $symbol =~ /^(Letter|LetterDigit|Char|Whitespace|CommentLineChar)$/;
     }
 
-    method is_literal($symbol) { $symbol =~ /^(print|\$|=|;|"|'|&&|\|\||and|or|!|==|!=|<=|>=|<|>|eq|ne|\(|\))$/ }
 
     method matches_character_class($char, $class) {
         for ($class) {
@@ -1494,6 +1646,7 @@ class ScanlessEarleyParser {
             if ($_ eq 'LetterDigit') { return $char =~ /[a-zA-Z0-9]/ }
             if ($_ eq 'Char') { return $char =~ /[^"']/ }  # Any char except quotes
             if ($_ eq 'Whitespace') { return $char =~ /\s/ }
+            if ($_ eq 'CommentLineChar') { return $char =~ /[^\n]/ }  # Any char except newline
             return 0;
         }
     }
