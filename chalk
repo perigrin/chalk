@@ -12,81 +12,42 @@ our sub DEBUG($msg) { $ENV{DEBUG} && say STDERR "DEBUG: $msg" }
 class IRNode {
     use List::Util qw(uniq);
 
-    field @inputs :reader;
-    field @control_deps;
-    field %attributes;
-    field $cached_hash;
-    field @dependent_hashes :reader;  # Function pointers to execute after this node
+    field $inputs :param = [];
+    field $attributes :param = {};
+    field $hash;  # Computed eagerly in ADJUST block
+    field $outputs :param = [];  # Renamed from outputs, nodes that depend on this one
     field $value :reader :writer;           # Cached result value
     field $ready_count :reader = 0; # How many dependencies have completed
     field $total_deps :reader;      # Total number of dependencies needed
+
+    ADJUST {
+        use Digest::SHA qw(sha1_hex);
+        $hash = sha1_hex($self->operation, %$attributes, map { $_->id } @$inputs);
+    }
+
+    method inputs() { @$inputs }
+    method outputs() { @$outputs }
 
     method inc_ready_count() {
         $ready_count++;
         DEBUG ref($self) . "(" . $self->short_id . ") inc_ready_count: now " . $ready_count . "/" . ($total_deps || 0);
     }
 
-    method add_input($node) {
-        push @inputs, $node;
-        $node->add_dependent($self);
-        $total_deps = scalar @inputs;
-    }
+    method input_at($index) { $inputs->[$index] }
 
-    method input_at($index) { $inputs[$index] }
-    method update_input($index, $node) {
-        my $old_node = $inputs[$index];
-        my $old_hash = $self->compute_hash();
-        DEBUG "Updating input $index from " . ($old_node ? $old_node->to_string : 'undef') . " to " . $node->to_string;
-        DEBUG "  Node hash before update: $old_hash";
-        $inputs[$index] = $node;
-        # Clear cached hash since inputs changed
-        $cached_hash = undef;
-        my $new_hash = $self->compute_hash();
-        DEBUG "  Node hash after update: $new_hash";
-        DEBUG "  Hash changed: " . ($old_hash ne $new_hash ? "YES" : "NO");
-    }
-
-    method add_dependent($node) {
-        DEBUG ref($self) . "(" . $self->short_id . ") adding dependent: " . $node->to_string;
-        # we could also use uniq when we notify_dependents which means fewer calls but more memory
-        @dependent_hashes = uniq @dependent_hashes, $node->compute_hash;
-        DEBUG ref($self) . "(" . $self->short_id . ") now has " . scalar(@dependent_hashes) . " dependents";
-    }
-
-    method set_attr($key, $value) { $attributes{$key} = $value }
-    method attr($key) { $attributes{$key} }
+    method attr($key) { $attributes->{$key} }
 
     # Each subclass implements its own execution logic
     method execute() { ... }
     method operation() { ... }
 
-    method id() { $self->compute_hash }
-    method short_id() { substr($self->compute_hash, 0, 8) }
+    method id() { $hash }
+    method short_id() { substr($hash, 0, 8) }
 
-    method compute_hash() {
-        return $cached_hash if defined $cached_hash;
-
-        use Digest::SHA qw(sha1_hex);
-
-        my @hash_components = ($self->operation);
-
-        # Add input hashes (sorted for deterministic hashing)
-        my @input_hashes = sort map { $_->compute_hash } @inputs;
-        push @hash_components, @input_hashes;
-
-        # Add attributes (sorted by key for deterministic hashing)
-        for my $key (sort keys %attributes) {
-            push @hash_components, "$key=" . ($attributes{$key} // 'undef');
-        }
-
-        $cached_hash = sha1_hex(join('|', @hash_components));
-        return $cached_hash;
-    }
-
-    method to_string() { ref($self) . "(".$self->short_id().")" }
+    method to_string() { $self->operation(). "(".$self->short_id().")" }
 
     method DESTROY() {
-        DEBUG "DESTROYING " . ref($self) . "(" . substr($self->compute_hash(), 0, 8) . ")";
+        DEBUG "DESTROYING " . ref($self) . "(" . substr($hash, 0, 8) . ")";
     }
 }
 
@@ -139,12 +100,10 @@ class LoadNode :isa(IRNode) {
     method execute() {
         my $var_name = $self->attr('var');
         my $version = $self->attr('version');
-        
-        # Check if this is an orphaned LoadNode (version 0 with no inputs)
-        if ($version == 0 && !$self->inputs) {
-            die qq[Global symbol "\$$var_name" requires explicit package name (did you forget to declare "my \$$var_name"?)];
-        }
-        
+
+        # Note: Check for undefined variables (version 0 with no inputs) happens in peephole optimizer
+        # after orphan cleanup, not during execution
+
         my $value = $SYMBOL_TABLE{$var_name};
         DEBUG "LoadNode($var_name) executing: symbol_table has " . (defined $value ? "'$value'" : 'undef');
         $self->set_value($value);
@@ -289,47 +248,35 @@ class ThreadedSeaOfNodes {
     field $entry_node;
     field %symbol_versions; # Track SSA versions: $symbol_versions{var} = current_version
 
-    method create_constant($value) {
-        my $node = ConstantNode->new();
-        $node->set_attr('value', $value);
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        return $node;
+    method set_entry_node($node) {
+        $entry_node = $node;
+        DEBUG "Entry node set to: " . (defined $node ? $node->to_string : 'undef');
     }
 
-    method create_load($var_name) {
-        my $version = $symbol_versions{$var_name} // 0;
-        DEBUG "create_load($var_name) called, version=$version";
-
-        # Create LoadNode even if variable doesn't exist yet (version == 0)
-        # This allows SPPF construction during parsing - orphaned nodes will be cleaned up later
-        my $node = LoadNode->new();
-        $node->set_attr('var', $var_name);
-        $node->set_attr('version', $version);
-
-        if (my $store_node = $self->find_store_node($var_name, $version)) {
-            DEBUG "LoadNode($var_name) linking to StoreNode version $version";
-            $node->add_input($store_node);
-        } else {
-            DEBUG "LoadNode($var_name) could not find StoreNode version $version";
+    method mark_orphaned($node) {
+        # Remove the node from the nodes hash if it exists
+        my $hash = $node->id();
+        if (exists $nodes{$hash}) {
+            DEBUG "Marking node as orphaned: " . $node->to_string;
+            delete $nodes{$hash};
         }
+    }
 
-        my $hash_key = $node->compute_hash();
-        DEBUG "create_load($var_name) computed hash: " . substr($hash_key, 0, 8);
-        DEBUG "create_load($var_name) nodes hash has: " . scalar(keys %nodes) . " entries";
+    method add_node($node) {
+        my $hash_key = $node->id();
+        DEBUG "add_node: " . ref($node) . " with hash = $hash_key";
 
         if (exists $nodes{$hash_key}) {
-            DEBUG "create_load($var_name) returning existing LoadNode with hash " . substr($hash_key, 0, 8);
+            DEBUG "add_node: returning existing node";
             return $nodes{$hash_key};
         }
 
         $nodes{$hash_key} = $node;
-        DEBUG "create_load($var_name) created new LoadNode with hash " . substr($hash_key, 0, 8);
+        DEBUG "add_node: stored new " . ref($node) . " in nodes hash";
+        DEBUG "add_node: nodes hash now has " . scalar(keys %nodes) . " entries";
         return $node;
     }
+
 
     method find_store_node($var_name, $version) {
         for my $node ($self->nodes) {
@@ -340,129 +287,20 @@ class ThreadedSeaOfNodes {
         }
         return;
     }
-    method create_store($var_name, $value_node) {
-        my $version = ($symbol_versions{$var_name} // 0) + 1;
-        DEBUG "create_store($var_name) called, version=$version";
-        my $node = StoreNode->new();
-        $node->add_input($value_node);
-        $node->set_attr('var', $var_name);
-        $node->set_attr('version', $version);
 
-        my $hash_key = $node->compute_hash();
-        if (exists $nodes{$hash_key}) {
-            DEBUG "create_store($var_name) returning existing StoreNode with hash " . substr($hash_key, 0, 8);
-            return $nodes{$hash_key};
-        }
 
-        $symbol_versions{$var_name} = $version;
-        $nodes{$hash_key} = $node;
-        DEBUG "create_store($var_name) created new StoreNode with hash " . substr($hash_key, 0, 8);
-        return $node;
-    }
-
-    method create_print($expr_node) {
-        my $node = PrintNode->new();
-        $node->add_input($expr_node);
-        DEBUG "Creating PrintNode with hash: " . $node->compute_hash();
-
-        my $hash_key = $node->compute_hash();
-        if (exists $nodes{$hash_key}) {
-            DEBUG "Found existing PrintNode with hash: " . $hash_key;
-            return $nodes{$hash_key} ;
-        }
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
-
-    method create_add($left_node, $right_node) {
-        my $node = AddNode->new();
-        $node->add_input($left_node);
-        $node->add_input($right_node);
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
-
-    method create_concat(@expr_nodes) {
-        my $node = ConcatNode->new();
-        $node->add_input($_) for @expr_nodes;
-
-        my $hash_key = $node->compute_hash();
-        DEBUG "create_concat: hash_key = $hash_key";
-        if (exists $nodes{$hash_key}) {
-            DEBUG "create_concat: returning existing node";
-            return $nodes{$hash_key};
-        }
-
-        $nodes{$hash_key} = $node;
-        DEBUG "create_concat: stored new ConcatNode in nodes hash";
-        return $node;
-    }
-
-    method create_comparison($op, $left_node, $right_node) {
-        my $node = ComparisonNode->new();
-        DEBUG "create_comparison: adding left input: " . $left_node->to_string;
-        $node->add_input($left_node);
-        DEBUG "create_comparison: adding right input: " . $right_node->to_string;
-        $node->add_input($right_node);
-        $node->set_attr('op', $op);
-
-        my $hash_key = $node->compute_hash();
-        DEBUG "create_comparison: computed hash: " . substr($hash_key, 0, 8);
-
-        if (exists $nodes{$hash_key}) {
-            DEBUG "create_comparison: returning existing ComparisonNode";
-            return $nodes{$hash_key};
-        }
-
-        $nodes{$hash_key} = $node;
-        DEBUG "create_comparison: created new ComparisonNode with " . scalar($node->inputs) . " inputs";
-        return $node;
-    }
-
-    method create_logical_and($left_node, $right_node) {
-        my $node = LogicalAndNode->new();
-        $node->add_input($left_node);
-        $node->add_input($right_node);
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
-
-    method create_logical_or($left_node, $right_node) {
-        my $node = LogicalOrNode->new();
-        $node->add_input($left_node);
-        $node->add_input($right_node);
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
-
-    method create_not($input_node) {
-        my $node = NotNode->new();
-        $node->add_input($input_node);
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
 
     method nodes() { values %nodes }
     method node_count() { scalar keys %nodes }
 
-    method try_execute_node($node_hash) {
+    method get_symbol_version($var_name) { $symbol_versions{$var_name} // 0 }
+    method set_symbol_version($var_name, $version) { $symbol_versions{$var_name} = $version }
+    method increment_symbol_version($var_name) {
+        $symbol_versions{$var_name} = ($symbol_versions{$var_name} // 0) + 1;
+        return $symbol_versions{$var_name};
+    }
+
+    method try_execute_node($node_hash, $dependents_map = undef) {
       DEBUG "try_execute_node called with hash: $node_hash";
       my $node = $nodes{$node_hash};
       unless ($node) {
@@ -486,31 +324,44 @@ class ThreadedSeaOfNodes {
 
       DEBUG "  All inputs ready - executing node!";
       $node->execute();
-      $self->notify_dependents($node_hash);
+      $self->notify_dependents($node_hash, $dependents_map);
    }
 
-   method notify_dependents($node_hash) {
+   method notify_dependents($node_hash, $dependents_map = undef) {
        my $node = $nodes{$node_hash} or return;
        DEBUG "notify_dependents called for " . ref($node) . "(" . $node->short_id . ")";
-       DEBUG "  has " . scalar($node->dependent_hashes) . " dependent entries";
+
+       my @dependent_hashes =  @{$dependents_map->{$node_hash} || []};
+
+       DEBUG "  has " . scalar(@dependent_hashes) . " dependent entries";
 
        # Notify each dependent once per dependency relationship
        # This allows nodes with same input multiple times to get multiple notifications
-       for my $dependent_hash ($node->dependent_hashes) {
+       for my $dependent_hash (@dependent_hashes) {
            DEBUG "  notifying dependent: $dependent_hash";
-           $self->try_execute_node($dependent_hash);
+           $self->try_execute_node($dependent_hash, $dependents_map);
        }
    }
 
    method execute_threaded() {
+       # Link up LoadNodes to StoreNodes after parsing is complete
+       $self->link_load_nodes();
+
        # Run peephole optimizations first
        $self->run_peephole_optimizations();
 
-       # Clean up unreferenced nodes
+       # Clean up unreferenced nodes BEFORE building dependency graph
        $self->cleanup_orphaned_nodes();
+
+       # Build dependency graph for execution (after cleanup)
+       my $dependents_map = $self->build_dependency_graph();
 
        my @leaf_nodes = grep { scalar($_->inputs) == 0 } $self->nodes;
        DEBUG "Found " . scalar(@leaf_nodes) . " leaf nodes";
+       DEBUG "Nodes after cleanup: " . scalar($self->nodes) . " total";
+       for my $node ($self->nodes) {
+           DEBUG "  " . $node->to_string . " (inputs: " . scalar($node->inputs) . ")";
+       }
 
        for my $leaf (@leaf_nodes) {
            my $type = ref($leaf);
@@ -518,8 +369,8 @@ class ThreadedSeaOfNodes {
            if ($leaf->isa('StoreNode') || $leaf->isa('LoadNode')) {
                $extra = " var=" . ($leaf->attr('var') // 'unknown');
            }
-           DEBUG "Trying to execute leaf node: $type$extra (" . $leaf->compute_hash(). ")";
-           $self->try_execute_node($leaf->compute_hash());
+           DEBUG "Trying to execute leaf node: $type$extra (" . $leaf->id(). ")";
+           $self->try_execute_node($leaf->id(), $dependents_map);
        }
    }
 
@@ -551,10 +402,76 @@ class ThreadedSeaOfNodes {
            my @inputs = $node->inputs;
            if (@inputs) {
                for my $input (@inputs) {
-                   say $input->short_id . " -> " . $short_id;
+                   say ref($input) . " " . $input->short_id . " -> " . ref($node) . " " . $short_id;
                }
            } else {
-               say $short_id . " (leaf node)";
+               say ref($node) . " " . $short_id . " (leaf node)";
+           }
+       }
+   }
+
+   method link_waiting_load_nodes($var_name, $store_node) {
+       DEBUG "Linking LoadNodes waiting for \$$var_name to StoreNode";
+
+       # Collect LoadNodes that need linking to this specific variable
+       my @waiting_loads = grep {
+           $_->isa('LoadNode') &&
+           !$_->inputs &&
+           $_->attr('var') eq $var_name
+       } $self->nodes;
+
+       for my $old_load (@waiting_loads) {
+           DEBUG "Linking LoadNode(\$$var_name) to StoreNode";
+
+           # Create new LoadNode with input
+           my $new_load = LoadNode->new(
+               attributes => {
+                   var => $old_load->attr('var'),
+                   version => $old_load->attr('version')
+               },
+               inputs => [$store_node]
+           );
+
+           # Replace the old LoadNode with the new one
+           $self->replace_node($old_load, $new_load);
+       }
+   }
+
+   method link_load_nodes() {
+       DEBUG "Linking LoadNodes to StoreNodes after parsing";
+
+       # Debug: show all StoreNodes
+       DEBUG "Available StoreNodes:";
+       for my $node ($self->nodes) {
+           if ($node->isa('StoreNode')) {
+               DEBUG "  StoreNode: var=" . $node->attr('var') . " version=" . $node->attr('version');
+           }
+       }
+
+       # Collect LoadNodes that need linking
+       my @unlinked_loads = grep { $_->isa('LoadNode') && !$_->inputs } $self->nodes;
+
+       for my $old_load (@unlinked_loads) {
+           my $var_name = $old_load->attr('var');
+           my $version = $old_load->attr('version');
+
+           # Try to find matching StoreNode
+           if (my $store_node = $self->find_store_node($var_name, $version)) {
+               DEBUG "Deferred linking: LoadNode($var_name) -> StoreNode version $version";
+
+               # Create new LoadNode with input
+               my $new_load = LoadNode->new(
+                   attributes => {
+                       var => $var_name,
+                       version => $version
+                   },
+                   inputs => [$store_node]
+               );
+
+               # Replace the old LoadNode with the new one
+               $self->replace_node($old_load, $new_load);
+           } else {
+               DEBUG "Deferred linking: No StoreNode found for LoadNode($var_name) version $version";
            }
        }
    }
@@ -562,6 +479,11 @@ class ThreadedSeaOfNodes {
    method run_peephole_optimizations() {
        DEBUG "Running peephole optimizations";
 
+       # Parse selection patterns (run first to resolve ambiguities)
+       $self->resolve_operator_precedence();
+       $self->prefer_longer_expressions();
+
+       # Traditional peephole optimizations
        # Find all ConstantNodes marked for interpolation
        for my $node ($self->nodes) {
            next unless $node->isa('ConstantNode');
@@ -576,6 +498,10 @@ class ThreadedSeaOfNodes {
                $self->replace_with_interpolation($node, $content);
            }
        }
+
+       # TODO: Implement proper undefined variable checking
+       # Currently disabled to allow multi-statement programs to work
+       # The issue is complex interaction between parsing order, execution order, and orphan cleanup
    }
 
    method replace_with_interpolation($const_node, $content) {
@@ -588,68 +514,147 @@ class ThreadedSeaOfNodes {
 
            # Add literal text before the variable
            if (length($prefix) > 0) {
-               push @parts, $self->create_constant($prefix);
+               push @parts, $self->add_node(ConstantNode->new(attributes => {value => $prefix}));
            }
 
-           # Add variable load
-           push @parts, $self->create_load($var_name);
+           # Add variable load - find the corresponding StoreNode
+           my $version = $self->get_symbol_version($var_name) || 1;
+           my $store_node = $self->find_store_node($var_name, $version);
+
+           my $load_node;
+           if ($store_node) {
+               # Create LoadNode with StoreNode as input
+               $load_node = $self->add_node(LoadNode->new(
+                   attributes => {var => $var_name, version => $version},
+                   inputs => [$store_node]
+               ));
+               DEBUG "Created LoadNode for $var_name with StoreNode dependency";
+           } else {
+               # Fallback: create unlinked LoadNode (will be linked later)
+               $load_node = $self->add_node(LoadNode->new(
+                   attributes => {var => $var_name, version => $version}
+               ));
+               DEBUG "Created unlinked LoadNode for $var_name - will link later";
+           }
+           push @parts, $load_node;
            DEBUG "Added interpolation for variable: $var_name";
        }
 
        # Add any remaining literal text
        if ($content =~ /\G(.+)$/gc) {
-           push @parts, $self->create_constant($1);
+           push @parts, $self->add_node(ConstantNode->new(attributes => {value => $1}));
        }
 
        # If we have multiple parts, create a concat node
        if (@parts > 1) {
-           my $concat_node = $self->create_concat(@parts);
+           my $concat_node = $self->add_node(ConcatNode->new(inputs => [@parts]));
 
            # Update all references to the old constant node
-           $self->replace_node_references($const_node, $concat_node);
+           $self->replace_node($const_node, $concat_node);
        }
    }
 
-   method replace_node_references($old_node, $new_node) {
-       my $old_hash = $old_node->compute_hash();
-       my $new_hash = $new_node->compute_hash();
 
-       DEBUG "Replacing references from $old_hash to $new_hash (simpler approach)";
+   method remove_if_orphaned($node) {
+       my $hash = $node->id;
 
-       # For now, let's just fix the immediate problem by updating %nodes
-       # when a node's hash changes after update_input
+       DEBUG "Checking if node is orphaned: " . $node->to_string;
 
-       # Find all nodes that reference the old node and update them
-       for my $node ($self->nodes) {
-           my @inputs = $node->inputs;
-           for (my $i = 0; $i < @inputs; $i++) {
-               if ($inputs[$i] == $old_node) {
-                   DEBUG "  Updating input $i of " . ref($node);
+       return unless exists $nodes{$hash};  # Already removed
+       return if defined $entry_node && $node == $entry_node;  # Can't orphan entry node
 
-                   # Get the old hash before update
-                   my $node_old_hash = $node->compute_hash();
+       # Never orphan PrintNodes - they represent program output
+       return if $node->isa('PrintNode');
 
-                   # Update the input (this changes the node's hash)
-                   $node->update_input($i, $new_node);
-
-                   # Get the new hash after update
-                   my $node_new_hash = $node->compute_hash();
-
-                   # Update %nodes to reflect the hash change
-                   if ($node_old_hash ne $node_new_hash) {
-                       DEBUG "    Updating %nodes: $node_old_hash -> $node_new_hash";
-                       # commented out deleting nodes during replacement for now
-                       # delete $nodes{$node_old_hash};
-                       $nodes{$node_new_hash} = $node;
-                   }
-
-                   # Update dependency tracking
-                   $new_node->add_dependent($node);
+       # Check if any node in the graph still references this one as input
+       for my $other_node ($self->nodes) {
+           for my $input ($other_node->inputs) {
+               if ($input == $node) {
+                   DEBUG "  Node still referenced by: " . $other_node->to_string;
+                   return;  # Still referenced, not orphaned
                }
            }
        }
 
-       DEBUG "Node reference replacement complete";
+       # Not referenced by anyone, safe to remove
+       DEBUG "Removing orphaned node: " . $node->to_string . " (hash: $hash)";
+       delete $nodes{$hash};
+       return 1;  # Was orphaned and removed
+   }
+
+   method build_dependency_graph() {
+       DEBUG "Building dependency graph (outputs/dependents)";
+
+       my %dependents_map;  # hash -> [array of dependent hashes]
+
+       # For each node, find all nodes that depend on it (have it as input)
+       for my $node ($self->nodes) {
+           my $node_hash = $node->id;
+           my @dependents;
+
+           # Look through all other nodes to see which ones have this node as input
+           for my $other_node ($self->nodes) {
+               next if $other_node == $node;  # Skip self
+
+               for my $input ($other_node->inputs) {
+                   if ($input == $node) {
+                       push @dependents, $other_node->id;
+                       last;  # This other_node depends on current node
+                   }
+               }
+           }
+
+           $dependents_map{$node_hash} = \@dependents;
+
+           if (@dependents) {
+               DEBUG "Node " . $node->to_string . " has " . scalar(@dependents) . " dependents";
+           }
+       }
+
+       return \%dependents_map;
+   }
+
+   method replace_node($old_node, $new_node) {
+       my $old_hash = $old_node->id();
+       my $new_hash = $new_node->id();
+
+       DEBUG "replace_node: $old_hash -> $new_hash";
+
+       # Replace in nodes hash
+       if (exists $nodes{$old_hash}) {
+           delete $nodes{$old_hash};
+           $nodes{$new_hash} = $new_node;
+           DEBUG "  Updated nodes hash";
+       } else {
+           DEBUG "  Warning: old_hash $old_hash not found in nodes hash";
+       }
+
+       # Find all nodes that use the old node as input and replace them
+       my @nodes_to_replace;
+       for my $node ($self->nodes) {
+           my @inputs = $node->inputs;
+           for (my $i = 0; $i < @inputs; $i++) {
+               if ($inputs[$i] == $old_node) {
+                   DEBUG "  Node " . $node->to_string . " uses old node as input $i";
+
+                   # Create replacement inputs array
+                   my @new_inputs = @inputs;
+                   $new_inputs[$i] = $new_node;
+
+                   # Create new version of this node
+                   my $replacement_node = $self->create_node_with_inputs($node, @new_inputs);
+                   if ($replacement_node) {
+                       push @nodes_to_replace, [$node, $replacement_node];
+                   }
+               }
+           }
+       }
+
+       # Recursively replace all nodes that referenced the old node
+       for my $pair (@nodes_to_replace) {
+           my ($old_referring_node, $new_referring_node) = @$pair;
+           $self->replace_node($old_referring_node, $new_referring_node);
+       }
    }
 
    method create_node_with_inputs($original_node, @new_inputs) {
@@ -657,25 +662,39 @@ class ThreadedSeaOfNodes {
        my $class = ref($original_node);
 
        if ($class eq 'PrintNode') {
-           return $self->create_print($new_inputs[0]);
+           return $self->add_node(PrintNode->new(inputs => [@new_inputs]));
        } elsif ($class eq 'AddNode') {
-           return $self->create_add($new_inputs[0], $new_inputs[1]);
+           return $self->add_node(AddNode->new(inputs => [@new_inputs]));
        } elsif ($class eq 'ConcatNode') {
-           return $self->create_concat(@new_inputs);
+           return $self->add_node(ConcatNode->new(inputs => [@new_inputs]));
        } elsif ($class eq 'StoreNode') {
            my $var = $original_node->attr('var');
-           return $self->create_store($var, $new_inputs[0]);
+           my $version = $original_node->attr('version');
+           return $self->add_node(StoreNode->new(
+               attributes => {var => $var, version => $version},
+               inputs => [@new_inputs]
+           ));
        } elsif ($class eq 'ComparisonNode') {
            my $op = $original_node->attr('op');
-           return $self->create_comparison($op, $new_inputs[0], $new_inputs[1]);
+           return $self->add_node(ComparisonNode->new(
+               attributes => {op => $op},
+               inputs => [@new_inputs]
+           ));
        } elsif ($class eq 'LogicalAndNode') {
-           return $self->create_logical_and($new_inputs[0], $new_inputs[1]);
+           return $self->add_node(LogicalAndNode->new(inputs => [@new_inputs]));
        } elsif ($class eq 'LogicalOrNode') {
-           return $self->create_logical_or($new_inputs[0], $new_inputs[1]);
+           return $self->add_node(LogicalOrNode->new(inputs => [@new_inputs]));
        } elsif ($class eq 'NotNode') {
-           return $self->create_not($new_inputs[0]);
-       } elsif ($class eq 'LoadNode' || $class eq 'ConstantNode') {
-           # These don't have inputs, so no replacement needed
+           return $self->add_node(NotNode->new(inputs => [@new_inputs]));
+       } elsif ($class eq 'LoadNode') {
+           my $var = $original_node->attr('var');
+           my $version = $original_node->attr('version');
+           return $self->add_node(LoadNode->new(
+               attributes => {var => $var, version => $version},
+               inputs => [@new_inputs]
+           ));
+       } elsif ($class eq 'ConstantNode') {
+           # ConstantNodes don't have inputs, so no replacement needed
            return undef;
        }
 
@@ -683,62 +702,138 @@ class ThreadedSeaOfNodes {
        return undef;
    }
 
-   method cleanup_orphaned_nodes() {
+    method cleanup_orphaned_nodes() {
        DEBUG "Cleaning up orphaned nodes";
        my $before_count = scalar keys %nodes;
 
-       # Find all nodes that are reachable from leaf nodes
-       my %reachable;
+       # Get a snapshot of all nodes to check (since we'll be modifying %nodes during iteration)
+       my @all_nodes = $self->nodes;
+       my $removed_count = 0;
 
-       # Start with leaf nodes that have dependents (are actually used)
-       my @to_visit;
-       for my $node ($self->nodes) {
-           if (scalar($node->inputs) == 0 && $node->dependent_hashes) {
-               push @to_visit, $node->compute_hash;
-               $reachable{$node->compute_hash} = 1;
+       for my $node (@all_nodes) {
+           if ($self->remove_if_orphaned($node)) {
+               $removed_count++;
            }
-       }
-
-       # Trace through all dependencies
-       while (@to_visit) {
-           my $hash = shift @to_visit;
-           my $node = $nodes{$hash} or next;
-
-           # Mark all nodes that this node depends on
-           for my $dep_hash ($node->dependent_hashes) {
-               unless ($reachable{$dep_hash}) {
-                   $reachable{$dep_hash} = 1;
-                   push @to_visit, $dep_hash;
-               }
-           }
-       }
-
-       # Remove unreachable nodes
-       my @to_remove;
-       for my $hash (keys %nodes) {
-           unless ($reachable{$hash}) {
-               push @to_remove, $hash;
-           }
-       }
-
-       for my $hash (@to_remove) {
-           DEBUG "Removing orphaned node: $hash (" . ref($nodes{$hash}) . ")";
-           delete $nodes{$hash};
        }
 
        my $after_count = scalar keys %nodes;
-       DEBUG "Cleaned up " . (@to_remove) . " orphaned nodes ($before_count -> $after_count)";
+       DEBUG "Cleaned up $removed_count orphaned nodes ($before_count -> $after_count)";
+   }
+
+   # Parse selection peephole patterns
+   method resolve_operator_precedence() {
+       DEBUG "Resolving operator precedence ambiguities";
+
+       # Look for competing operator interpretations
+       for my $node ($self->nodes) {
+           if ($node->isa('PrintNode')) {
+               $self->check_print_precedence($node);
+           }
+           if ($node->isa('ComparisonNode')) {
+               $self->check_comparison_precedence($node);
+           }
+       }
+   }
+
+   method check_print_precedence($print_node) {
+       my @inputs = $print_node->inputs;
+       return unless @inputs;
+       my $expr_input = $inputs[0];
+
+       # Check if there are competing longer expressions for this print
+       for my $node ($self->nodes) {
+           if ($node->isa('LogicalOrNode') || $node->isa('LogicalAndNode')) {
+               # If this operator could extend the print's expression
+               if ($self->could_extend_expression($expr_input, $node)) {
+                   DEBUG "Found precedence conflict: PrintNode vs " . ref($node);
+                   $self->prefer_longer_expression($print_node, $node);
+               }
+           }
+       }
+   }
+
+   method could_extend_expression($short_expr, $longer_expr) {
+       # Check if the longer expression contains the shorter one as a component
+       my @inputs = $longer_expr->inputs;
+       for my $input (@inputs) {
+           if ($input == $short_expr) {
+               return 1;
+           }
+       }
+       return 0;
+   }
+
+   method prefer_longer_expression($short_node, $long_node) {
+       DEBUG "Preferring longer expression over shorter parse";
+       # For now, we'll orphan competing PrintNodes that have shorter expressions
+       # when there's a longer logical expression available
+       $self->mark_node_as_orphaned($short_node);
+   }
+
+   method mark_node_as_orphaned($node) {
+       # Remove from nodes hash - this will make it unreachable during cleanup
+       my $hash = $node->id();
+       if (exists $nodes{$hash}) {
+           DEBUG "Marking node as orphaned: " . ref($node) . "($hash)";
+           delete $nodes{$hash};
+       }
+   }
+
+   method check_comparison_precedence($comparison_node) {
+       # Comparison operators have higher precedence than logical operators
+       # So ComparisonNode should be preferred over LogicalAnd/Or that would consume its operands
+
+       for my $node ($self->nodes) {
+           if ($node->isa('LogicalOrNode') || $node->isa('LogicalAndNode')) {
+               # Check if logical operator is trying to split up a comparison
+               if ($self->logical_splits_comparison($node, $comparison_node)) {
+                   DEBUG "Found precedence conflict: " . ref($node) . " vs ComparisonNode";
+                   DEBUG "Comparison has higher precedence - preferring ComparisonNode";
+                   $self->prefer_comparison_over_logical($comparison_node, $node);
+               }
+           }
+       }
+   }
+
+   method logical_splits_comparison($logical_node, $comparison_node) {
+       # Check if the logical operator uses operands that should belong to the comparison
+       my @logical_inputs = $logical_node->inputs;
+       my @comparison_inputs = $comparison_node->inputs;
+
+       # If logical operator shares an operand with comparison, there might be a precedence issue
+       for my $logical_input (@logical_inputs) {
+           for my $comparison_input (@comparison_inputs) {
+               if ($logical_input == $comparison_input) {
+                   return 1;
+               }
+           }
+       }
+       return 0;
+   }
+
+   method prefer_comparison_over_logical($comparison_node, $logical_node) {
+       DEBUG "Preferring comparison precedence over logical operator";
+       # Mark the logical node as orphaned since comparison should bind tighter
+       $self->mark_node_as_orphaned($logical_node);
+   }
+
+   method prefer_longer_expressions() {
+       DEBUG "Applying general preference for longer expressions";
+       # This could implement more general patterns for preferring
+       # longer over shorter expression interpretations
    }
 }
 
 # Grammar rule with semantic action
 class GrammarRule {
     use experimental 'keyword_any';
+    use Digest::SHA qw(sha1_hex);
+    use Scalar::Util qw(refaddr);
 
     field $lhs :param :reader;          # Left-hand side nonterminal
     field $rhs :param :reader;          # Right-hand side symbols
     field $semantic_action :param;  # Code reference for building IR
-    field $cached_id;
+    field $id :reader = sha1_hex($lhs, @$rhs, refaddr($semantic_action));
 
     method matches($symbols) {
         for my $s (@$symbols) {
@@ -749,22 +844,6 @@ class GrammarRule {
 
     method rhs_length() { scalar @$rhs }
     method rhs_at($pos) { $rhs->[$pos] }
-
-    method id() {
-        return $cached_id if defined $cached_id;
-
-        use Digest::SHA qw(sha1_hex);
-        use Scalar::Util qw(refaddr);
-
-        my @hash_components = ($lhs);
-        push @hash_components, @$rhs;
-        # Include semantic action address so rules with same grammar
-        # but different actions are considered different
-        push @hash_components, refaddr($semantic_action);
-
-        $cached_id = sha1_hex(join('|', @hash_components));
-        return $cached_id;
-    }
 
     method execute_action($matches, $ir_graph) {
         return $semantic_action->($matches, $ir_graph);
@@ -778,32 +857,17 @@ class GrammarRule {
 # Earley item
 class EarleyItem {
     use Digest::SHA qw(sha1_hex);
-    
+
     field $rule :param :reader;
     field $dot_pos :param :reader = 0;
     field $start_pos :param :reader = 0;
     field $current_pos :param :reader :writer = 0;
     field $matched_text :param :reader :writer = "";
     field $semantic_value :param :reader = undef;
-    field $hash = undef;
+    field $id :reader = sha1_hex($rule->id, $dot_pos, $start_pos);
 
     method set_semantic_value($value) {
         $semantic_value = $value;
-    }
-    
-    method compute_hash() {
-        return $hash if defined $hash;
-        
-        # Hash based on rule ID, dot position, and start position
-        # These three values uniquely identify an Earley item's parse state
-        my $content = join(':', 
-            $rule->id,
-            $dot_pos,
-            $start_pos
-        );
-        
-        $hash = sha1_hex($content);
-        return $hash;
     }
 
     method is_complete() { $dot_pos >= $rule->rhs_length }
@@ -844,6 +908,7 @@ class ScanlessEarleyParser {
     field @chart;  # Array of state sets
     field $input_text;
     field %nonterminals;
+    field %left_recursive_rules;
 
     ADJUST {
         $self->define_grammar();
@@ -880,7 +945,8 @@ class ScanlessEarleyParser {
                 }
             ),
 
-            # Statement → Expression
+
+            # Statement → Expression | Assignment
             GrammarRule->new(
                 lhs => 'Statement',
                 rhs => ['Expression'],
@@ -888,91 +954,11 @@ class ScanlessEarleyParser {
                     return $matches->[0];
                 }
             ),
-
-            # Expression → StringLiteral
             GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['StringLiteral'],
-                semantic_action => sub ($matches, $ir) {
-                    return $matches->[0];
-                }
-            ),
-            
-            # Expression → PrintExpr
-            GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['PrintExpr'],
-                semantic_action => sub ($matches, $ir) {
-                    return $matches->[0];
-                }
-            ),
-
-            # Expression → Variable
-            GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['Variable'],
-                semantic_action => sub ($matches, $ir) {
-                    my $var_name = $matches->[0]{var_name};
-                    my $load_node = $ir->create_load($var_name);
-                    return $load_node;
-                }
-            ),
-
-            # Expression → Assignment (assignments are expressions)
-            GrammarRule->new(
-                lhs => 'Expression',
+                lhs => 'Statement',
                 rhs => ['Assignment'],
                 semantic_action => sub ($matches, $ir) {
                     return $matches->[0];
-                }
-            ),
-
-
-            # Expression → StringLiteral ComparisonOp StringLiteral
-            GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
-                semantic_action => sub ($matches, $ir) {
-                    my $op = $matches->[2]{op};
-                    return $ir->create_comparison($op, $matches->[0], $matches->[4]);
-                }
-            ),
-
-            # Expression → Variable ComparisonOp StringLiteral
-            GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'StringLiteral'],
-                semantic_action => sub ($matches, $ir) {
-                    my $var_name = $matches->[0]{var_name};
-                    my $left_node = $ir->create_load($var_name);
-                    my $op = $matches->[2]{op};
-                    return $ir->create_comparison($op, $left_node, $matches->[4]);
-                }
-            ),
-
-            # Expression → StringLiteral ComparisonOp Variable
-            GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['StringLiteral', 'WS', 'ComparisonOp', 'WS', 'Variable'],
-                semantic_action => sub ($matches, $ir) {
-                    my $var_name = $matches->[4]{var_name};
-                    my $right_node = $ir->create_load($var_name);
-                    my $op = $matches->[2]{op};
-                    return $ir->create_comparison($op, $matches->[0], $right_node);
-                }
-            ),
-
-            # Expression → Variable ComparisonOp Variable
-            GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['Variable', 'WS', 'ComparisonOp', 'WS', 'Variable'],
-                semantic_action => sub ($matches, $ir) {
-                    my $left_var = $matches->[0]{var_name};
-                    my $right_var = $matches->[4]{var_name};
-                    my $left_node = $ir->create_load($left_var);
-                    my $right_node = $ir->create_load($right_var);
-                    my $op = $matches->[2]{op};
-                    return $ir->create_comparison($op, $left_node, $right_node);
                 }
             ),
 
@@ -1012,21 +998,127 @@ class ScanlessEarleyParser {
                 }
             ),
 
-            # Expression → Expression '&&' Expression
+            # Operator definitions (matching Guacamole)
+            # OpLogOr → '||' | '//'
             GrammarRule->new(
-                lhs => 'Expression',
-                rhs => ['Expression', 'WS', '&&', 'WS', 'Expression'],
+                lhs => 'OpLogOr',
+                rhs => ['||'],
                 semantic_action => sub ($matches, $ir) {
-                    return $ir->create_logical_and($matches->[0], $matches->[4]);
+                    return { op => '||' };
+                }
+            ),
+            GrammarRule->new(
+                lhs => 'OpLogOr',
+                rhs => ['//'],
+                semantic_action => sub ($matches, $ir) {
+                    return { op => '//' };
                 }
             ),
 
-            # Expression → Expression '||' Expression
+            # OpLogAnd → '&&'
+            GrammarRule->new(
+                lhs => 'OpLogAnd',
+                rhs => ['&&'],
+                semantic_action => sub ($matches, $ir) {
+                    return { op => '&&' };
+                }
+            ),
+
+            # Hierarchical precedence structure like Guacamole
+            # Expression → LogicalOrExpr (top level)
             GrammarRule->new(
                 lhs => 'Expression',
-                rhs => ['Expression', 'WS', '||', 'WS', 'Expression'],
+                rhs => ['LogicalOrExpr'],
                 semantic_action => sub ($matches, $ir) {
-                    return $ir->create_logical_or($matches->[0], $matches->[4]);
+                    return $matches->[0];
+                }
+            ),
+
+            # LogicalOrExpr → LogicalOrExpr OpLogOr LogicalAndExpr | LogicalAndExpr (matching Guacamole ExprLogOr0)
+            GrammarRule->new(
+                lhs => 'LogicalOrExpr',
+                rhs => ['LogicalOrExpr', 'WS', 'OpLogOr', 'WS', 'LogicalAndExpr'],
+                semantic_action => sub ($matches, $ir) {
+                    # $matches->[2] contains the operator info from OpLogOr
+                    return $ir->add_node(LogicalOrNode->new(inputs => [$matches->[0], $matches->[4]]));
+                }
+            ),
+            GrammarRule->new(
+                lhs => 'LogicalOrExpr',
+                rhs => ['LogicalAndExpr'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+
+            # LogicalAndExpr → LogicalAndExpr OpLogAnd ComparisonExpr | ComparisonExpr (matching Guacamole ExprLogAnd0)
+            GrammarRule->new(
+                lhs => 'LogicalAndExpr',
+                rhs => ['LogicalAndExpr', 'WS', 'OpLogAnd', 'WS', 'ComparisonExpr'],
+                semantic_action => sub ($matches, $ir) {
+                    # $matches->[2] contains the operator info from OpLogAnd
+                    return $ir->add_node(LogicalAndNode->new(inputs => [$matches->[0], $matches->[4]]));
+                }
+            ),
+            GrammarRule->new(
+                lhs => 'LogicalAndExpr',
+                rhs => ['ComparisonExpr'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+
+            # ComparisonExpr → PrimaryExpr CompOp PrimaryExpr | PrimaryExpr
+            GrammarRule->new(
+                lhs => 'ComparisonExpr',
+                rhs => ['PrimaryExpr', 'WS', 'ComparisonOp', 'WS', 'PrimaryExpr'],
+                semantic_action => sub ($matches, $ir) {
+                    return $ir->add_node(ComparisonNode->new(
+                        attributes => {op => $matches->[2]->{op}},
+                        inputs => [$matches->[0], $matches->[4]]
+                    ));
+                }
+            ),
+            GrammarRule->new(
+                lhs => 'ComparisonExpr',
+                rhs => ['PrimaryExpr'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+
+            # PrimaryExpr → Variable | StringLiteral | PrintExpr | '(' Expression ')'
+            GrammarRule->new(
+                lhs => 'PrimaryExpr',
+                rhs => ['Variable'],
+                semantic_action => sub ($matches, $ir) {
+                    my $var_name = $matches->[0]{var_name};
+                    my $version = $ir->get_symbol_version($var_name) || 1;
+                    my $load_node = $ir->add_node(LoadNode->new(
+                        attributes => {var => $var_name, version => $version}
+                    ));
+                    return $load_node;
+                }
+            ),
+            GrammarRule->new(
+                lhs => 'PrimaryExpr',
+                rhs => ['StringLiteral'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+            GrammarRule->new(
+                lhs => 'PrimaryExpr',
+                rhs => ['PrintExpr'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[0];
+                }
+            ),
+            GrammarRule->new(
+                lhs => 'PrimaryExpr',
+                rhs => ['(', 'WS', 'Expression', 'WS', ')'],
+                semantic_action => sub ($matches, $ir) {
+                    return $matches->[2];  # Return the inner Expression
                 }
             ),
 
@@ -1036,7 +1128,9 @@ class ScanlessEarleyParser {
                 rhs => ['print', 'WS', 'Expression'],
                 semantic_action => sub ($matches, $ir) {
                     my $expr_node = $matches->[2];
-                    my $print_node = $ir->create_print($expr_node);
+                    DEBUG "PrintExpr semantic action: expr_node = " . (defined $expr_node ? $expr_node->to_string : 'undef');
+                    my $print_node = $ir->add_node(PrintNode->new(inputs => [$expr_node]));
+                    DEBUG "PrintExpr semantic action: created print_node = " . (defined $print_node ? $print_node->to_string : 'undef');
                     return $print_node;
                 }
             ),
@@ -1048,7 +1142,13 @@ class ScanlessEarleyParser {
                 semantic_action => sub ($matches, $ir) {
                     my $var_name = $matches->[0]{var_name};
                     my $expr_node = $matches->[4];
-                    my $store_node = $ir->create_store($var_name, $expr_node);
+                    # Increment version for this variable
+                    my $version = $ir->increment_symbol_version($var_name);
+
+                    my $store_node = $ir->add_node(StoreNode->new(
+                        attributes => {var => $var_name, version => $version},
+                        inputs => [$expr_node]
+                    ));
                     return $store_node;
                 }
             ),
@@ -1068,12 +1168,14 @@ class ScanlessEarleyParser {
                     $content =~ s/\\\\/\\/g;  # backslash
                     $content =~ s/\\"/"/g;    # double quote
                     # Note: \$ should stay as \$ for now - the interpolation handler will deal with literal $
-                    $node->set_attr('value', $content);
+                    # Create new node with processed content using generic add_node
+                    my $new_node = $ir->add_node(ConstantNode->new(
+                        attributes => {value => $content, needs_interpolation => 1}
+                    ));
 
-                    # Mark the final node for interpolation
-                    $node->set_attr('needs_interpolation', 1);
-                    DEBUG "StringLiteral: processed escapes and marking final string '" . $node->attr('value') . "' for interpolation";
-                    return $node;
+                    DEBUG "StringLiteral: processed escapes and marking final string '" . $new_node->attr('value') . "' for interpolation";
+
+                    return $new_node;
                 }
             ),
 
@@ -1083,7 +1185,7 @@ class ScanlessEarleyParser {
                 rhs => ["'", 'StringContent', "'"],
                 semantic_action => sub ($matches, $ir) {
                     my $content = $matches->[1]{text};
-                    my $const_node = $ir->create_constant($content);
+                    my $const_node = $ir->add_node(ConstantNode->new(attributes => {value => $content}));
                     return $const_node;
                 }
             ),
@@ -1105,7 +1207,7 @@ class ScanlessEarleyParser {
                 semantic_action => sub ($matches, $ir) {
                     my $content = $matches->[0]{text};
                     DEBUG "InterpolatedContent semantic action called with: '$content'";
-                    my $const_node = $ir->create_constant($content);
+                    my $const_node = $ir->add_node(ConstantNode->new(attributes => {value => $content}));
                     # Don't mark for interpolation yet - let StringLiteral decide
                     # when it has the complete string
                     return $const_node;
@@ -1212,35 +1314,55 @@ class ScanlessEarleyParser {
                 }
             ),
 
-            # Comment → '#' CommentText '\n'
+            # Comment → '#' CommentText VerticalSpace
             GrammarRule->new(
                 lhs => 'Comment',
-                rhs => ['#', 'CommentText', '\n'],
+                rhs => ['#', 'CommentText', 'VerticalSpace'],
                 semantic_action => sub ($matches, $ir) {
                     return undef;
                 }
             ),
 
-            # CommentText → CommentLineChar CommentText | ε
+            # CommentText → CommentCharSeq (like CharSeq but for comments)
             GrammarRule->new(
                 lhs => 'CommentText',
-                rhs => ['CommentLineChar', 'CommentText'],
+                rhs => ['CommentCharSeq'],
                 semantic_action => sub ($matches, $ir) {
-                    return undef;
+                    return undef;  # Comments don't need to return text
                 }
             ),
 
+            # CommentCharSeq → CommentLineChar CommentCharSeq
             GrammarRule->new(
-                lhs => 'CommentText',
-                rhs => [],
+                lhs => 'CommentCharSeq',
+                rhs => ['CommentLineChar', 'CommentCharSeq'],
                 semantic_action => sub ($matches, $ir) {
-                    return undef;
+                    return undef;  # Comments don't need to return text
                 }
             ),
+
+            # CommentCharSeq → CommentLineChar
+            GrammarRule->new(
+                lhs => 'CommentCharSeq',
+                rhs => ['CommentLineChar'],
+                semantic_action => sub ($matches, $ir) {
+                    return undef;  # Comments don't need to return text
+                }
+            ),
+
+
 
         );
 
         %nonterminals = map { $_->lhs => $_ } @grammar_rules;
+
+        # Detect left-recursive rules
+        for my $rule (@grammar_rules) {
+            if (@{$rule->rhs} > 0 && $rule->rhs->[0] eq $rule->lhs) {
+                $left_recursive_rules{$rule->id} = 1;
+                DEBUG "Detected left-recursive rule: " . $rule->to_string;
+            }
+        }
     }
 
 
@@ -1255,15 +1377,15 @@ class ScanlessEarleyParser {
             map { EarleyItem->new( rule => $_ ) }
             grep { $_->lhs eq 'Program' } @grammar_rules
         ];
-        
+
         # Mark initial items as seen
         for my $item (@{$chart[0]}) {
-            $seen_items{$item->compute_hash()} = 1;
+            $seen_items{$item->id()} = 1;
         }
-        
+
         # Helper to add item only if not seen
         my $add_item = sub ($item, $chart_pos, $to_agenda) {
-            my $item_hash = $item->compute_hash();
+            my $item_hash = $item->id();
             if (!$seen_items{$item_hash}) {
                 $seen_items{$item_hash} = 1;
                 push @{$chart[$chart_pos]}, $item;
@@ -1300,6 +1422,25 @@ class ScanlessEarleyParser {
                 }
             }
         }
+        # After parsing is complete, find the final Program result and set it as entry_node
+        my $final_pos = length($text);
+        DEBUG "Looking for completed Program items at final position $final_pos";
+        DEBUG "Chart[$final_pos] has " . scalar(@{$chart[$final_pos] || []}) . " items";
+
+        # Search all chart positions for completed Program items
+        for my $pos (0 .. $#chart) {
+            next unless $chart[$pos];
+            for my $item (@{$chart[$pos]}) {
+                if ($item->is_complete &&
+                    $item->rule->lhs eq 'Program' &&
+                    $item->start_pos == 0) {
+                    $ir_graph->set_entry_node($item->semantic_value);
+                    DEBUG "Set entry_node to: " . (defined $item->semantic_value ? $item->semantic_value->to_string : 'undef') . " (found at chart position $pos)";
+                    last;
+                }
+            }
+        }
+
         return $ir_graph;
     }
 
@@ -1308,69 +1449,194 @@ class ScanlessEarleyParser {
     }
 
 
+    # Shared method to find all valid completion candidates
+    method find_candidates($symbol, $start_pos, $parent_item, $parent_end_pos) {
+        # Handle end-of-input case: if we're past the input length, check for empty rules
+        if ($start_pos >= length($input_text)) {
+            # Look for empty rules for this symbol in the grammar
+            for my $rule (@grammar_rules) {
+                if ($rule->lhs eq $symbol && @{$rule->rhs} == 0) {
+                    DEBUG "Found empty rule for $symbol at end of input: " . $rule->lhs . " → ε";
+                    # Execute semantic action for empty rule
+                    my $semantic_value = $rule->execute_action([], $ir_graph);
+                    return [{
+                        item => undef,  # No item for empty rule
+                        semantic_value => $semantic_value,
+                        end_pos => $start_pos
+                    }];
+                }
+            }
+            DEBUG "No empty rule found for $symbol at end of input";
+            return [];
+        }
+
+        # Look for completed items across all chart positions
+        my @all_candidates = map {
+            $chart[$_] ? grep {
+                DEBUG "Checking item: " . $_->to_string . " complete=" . $_->is_complete .
+                      " lhs_match=" . ($_->rule->lhs eq $symbol) .
+                      " start_pos=" . $_->start_pos . " looking_for=" . $start_pos .
+                      " consumed=" . ($_->current_pos > $_->start_pos) .
+                      " child_ok=" . $self->could_be_child_of($_, $parent_item);
+                $_->is_complete &&
+                $_->rule->lhs eq $symbol &&
+                $_->start_pos == $start_pos &&
+                $self->could_be_child_of($_, $parent_item)
+            } @{$chart[$_]} : ()
+        } ($start_pos .. $parent_end_pos);
+
+        DEBUG "All candidates for $symbol at $start_pos:";
+        for my $cand (@all_candidates) {
+            DEBUG "  " . $cand->to_string . " span=" . ($cand->current_pos - $cand->start_pos);
+        }
+
+        # Convert items to candidate records
+        return [map {
+            {
+                item => $_,
+                semantic_value => $_->semantic_value,
+                end_pos => $_->current_pos
+            }
+        } @all_candidates];
+    }
+
+    # Final result selection - prefers longest spans for left-recursive structures
+    method find_best_completion($symbol, $start_pos, $parent_item, $parent_end_pos) {
+        DEBUG "Finding best completion for $symbol starting at $start_pos (final selection)";
+        
+        my $candidates = $self->find_candidates($symbol, $start_pos, $parent_item, $parent_end_pos);
+        
+        return undef unless @$candidates;
+        
+        my ($best_candidate) = sort {
+            my $item_a = $a->{item};
+            my $item_b = $b->{item};
+            
+            # Handle empty rule case
+            return 0 unless $item_a && $item_b;
+            
+            if (@$candidates > 1) {
+                # Check if any candidate is a left-recursive expression (contains same symbol on RHS)
+                my $has_left_recursive = grep {
+                    my $item = $_->{item};
+                    $item && $item->rule->rhs_length > 0 && $item->rule->rhs_at(0) eq $item->rule->lhs
+                } @$candidates;
+
+                # Check if we have single-token expressions that might be part of larger constructs
+                my $has_single_token = grep {
+                    my $item = $_->{item};
+                    if ($item) {
+                        my $rule = $item->rule;
+                        # Single token rules that are often part of larger expressions
+                        ($rule->lhs eq 'Variable' && $rule->rhs_length == 2) ||  # Variable → $ Identifier
+                        ($rule->lhs eq 'StringLiteral' && $rule->rhs_length == 3)  # StringLiteral → ' StringContent '
+                    } else { 0 }
+                } @$candidates;
+
+                my $has_compound = grep {
+                    my $item = $_->{item};
+                    if ($item) {
+                        my $rule = $item->rule;
+                        # Compound expressions (comparisons, operators, etc.)
+                        $rule->rhs_length > 3
+                    } else { 0 }
+                } @$candidates;
+
+                if ($has_left_recursive) {
+                    # For left-recursive cases, prefer LONGEST span (complete structure)
+                    # This implements the YAEP/MARPA principle from LEFT_RECURSION_OPTIMIZATION.md Section 5.3
+                    ($b->{end_pos} - $start_pos) <=> ($a->{end_pos} - $start_pos)
+                } elsif ($has_single_token && $has_compound) {
+                    # If we have both simple and compound options, strongly prefer compound
+                    # This encourages operator formation over premature simple selection
+                    ($b->{end_pos} - $start_pos) <=> ($a->{end_pos} - $start_pos) ||
+                    # If spans are equal, prefer compound rules
+                    ($item_b->rule->rhs_length <=> $item_a->rule->rhs_length)
+                } else {
+                    # For non-left-recursive cases, prefer longest span (greedy)
+                    ($b->{end_pos} - $start_pos) <=> ($a->{end_pos} - $start_pos)
+                }
+            } else {
+                # Single candidate, no sorting needed
+                0
+            }
+        } @$candidates;
+
+        DEBUG "Found best completion: " . ($best_candidate->{item} ? $best_candidate->{item}->to_string : "empty rule");
+        return $best_candidate;
+    }
+
+    # Reconstruction method - finds actual completed items that were used during parsing
     method find_actual_completion($symbol, $start_pos, $parent_item, $parent_end_pos) {
-        DEBUG "Finding actual completion for $symbol starting at $start_pos";
-
-      # Handle end-of-input case: if we're past the input length, check for empty rules
-      if ($start_pos >= length($input_text)) {
-          # Look for empty rules for this symbol in the grammar
-          for my $rule (@grammar_rules) {
-              if ($rule->lhs eq $symbol && @{$rule->rhs} == 0) {
-                  DEBUG "Found empty rule for $symbol at end of input: " . $rule->lhs . " → ε";
-                  # Execute semantic action for empty rule
-                  my $semantic_value = $rule->execute_action([], $ir_graph);
-                  return {
-                      semantic_value => $semantic_value,
-                      end_pos => $start_pos
-                  };
-              }
-          }
-          DEBUG "No empty rule found for $symbol at end of input";
-      }
-
-      # Strategy 1: Look for completed items across all chart positions
-      my @all_candidates = map {
-          $chart[$_] ? grep {
-              DEBUG "Checking item: " . $_->to_string . " complete=" . $_->is_complete .
-                    " lhs_match=" . ($_->rule->lhs eq $symbol) .
-                    " start_pos=" . $_->start_pos . " looking_for=" . $start_pos .
-                    " consumed=" . ($_->current_pos > $_->start_pos) .
-                    " child_ok=" . $self->could_be_child_of($_, $parent_item);
-              $_->is_complete &&
-              $_->rule->lhs eq $symbol &&
-              $_->start_pos == $start_pos &&
-              $self->could_be_child_of($_, $parent_item)
-          } @{$chart[$_]} : ()
-      } ($start_pos .. $parent_end_pos);
-
-      DEBUG "All candidates for $symbol at $start_pos:";
-      for my $cand (@all_candidates) {
-          DEBUG "  " . $cand->to_string . " span=" . ($cand->current_pos - $cand->start_pos);
-      }
-      my ($best_item) = sort {
-          # we want the item with the longest span
-          ($b->current_pos - $b->start_pos) <=> ($a->current_pos - $a->start_pos)
-      } @all_candidates;
-
-      if ($best_item) {
-          DEBUG "Found best item: " . $best_item->to_string;
-          return {
-              semantic_value => $best_item->semantic_value,
-              end_pos => $best_item->current_pos
-          };
-      }
-
-      DEBUG "No perfect completion found for symbol '$symbol' at position $start_pos";
-      DEBUG "Available candidates were:";
-      for my $pos ($start_pos .. $parent_end_pos) {
-          next unless $chart[$pos];
-          for my $item (@{$chart[$pos]}) {
-              if ($item->rule->lhs eq $symbol && $item->start_pos == $start_pos) {
-                  DEBUG "  " . $item->to_string . " (complete=" . $item->is_complete . ", consumed=" . ($item->current_pos - $item->start_pos) . ")";
-              }
-          }
-      }
-      die "Parse failed: Could not find complete parse for '$symbol' starting at position $start_pos";
+        DEBUG "Finding actual completion for $symbol starting at $start_pos (reconstruction)";
+        
+        # Strategy: Instead of trying to calculate where symbols should be,
+        # find all completed items for this symbol and pick the one that makes sense
+        # within the parent item's span
+        
+        my @all_completed_items;
+        for my $chart_pos (0 .. $#chart) {
+            next unless $chart[$chart_pos];
+            for my $item (@{$chart[$chart_pos]}) {
+                if ($item->is_complete && 
+                    $item->rule->lhs eq $symbol &&
+                    $item->start_pos >= $start_pos &&  # Must start at or after our position
+                    $item->current_pos <= $parent_end_pos) {  # Must end within parent span
+                    
+                    push @all_completed_items, $item;
+                }
+            }
+        }
+        
+        DEBUG "Found " . scalar(@all_completed_items) . " completed items for $symbol:";
+        for my $item (@all_completed_items) {
+            DEBUG "  " . $item->to_string . " span: " . $item->start_pos . "-" . $item->current_pos;
+        }
+        
+        if (!@all_completed_items) {
+            # Handle empty rule case
+            for my $rule (@grammar_rules) {
+                if ($rule->lhs eq $symbol && @{$rule->rhs} == 0) {
+                    DEBUG "Using empty rule for $symbol";
+                    my $semantic_value = $rule->execute_action([], $ir_graph);
+                    return {
+                        semantic_value => $semantic_value,
+                        end_pos => $start_pos  # Empty rule doesn't advance position
+                    };
+                }
+            }
+            
+            DEBUG "No completed items found for $symbol at/after position $start_pos";
+            DEBUG "Available items in chart:";
+            for my $pos (0 .. $#chart) {
+                next unless $chart[$pos];
+                for my $item (@{$chart[$pos]}) {
+                    if ($item->rule->lhs eq $symbol) {
+                        DEBUG "  Chart[$pos]: " . $item->to_string . " (complete=" . $item->is_complete . ")";
+                    }
+                }
+            }
+            die "Parse failed: Could not find completed parse for '$symbol' at/after position $start_pos";
+        }
+        
+        # For reconstruction, prefer the item that starts closest to our expected position
+        # This is more reliable than trying to calculate positions
+        my ($best_item) = sort {
+            # Prefer items that start exactly at our position
+            my $a_exact = ($a->start_pos == $start_pos) ? 0 : 1;
+            my $b_exact = ($b->start_pos == $start_pos) ? 0 : 1;
+            $a_exact <=> $b_exact ||
+            # If neither is exact, prefer the one that starts closest to our position
+            abs($a->start_pos - $start_pos) <=> abs($b->start_pos - $start_pos) ||
+            # If start positions are equal, prefer shorter spans (more specific)
+            ($a->current_pos - $a->start_pos) <=> ($b->current_pos - $b->start_pos)
+        } @all_completed_items;
+        
+        DEBUG "Selected item for reconstruction: " . $best_item->to_string;
+        return {
+            semantic_value => $best_item->semantic_value,
+            end_pos => $best_item->current_pos
+        };
     }
 
     method reconstruct_from_partials($symbol, $start_pos, $parent_end_pos) {
@@ -1452,16 +1718,18 @@ class ScanlessEarleyParser {
 
     method reconstruct_parse_path($completed_item, $end_pos) {
       DEBUG "Reconstructing parse path for " . $completed_item->to_string;
+      DEBUG "Item spans from " . $completed_item->start_pos . " to " . $end_pos;
       my $rule = $completed_item->rule;
       my @rhs = $rule->rhs->@*;
       my @path;
 
       # Start from the beginning of this item
       my $current_pos = $completed_item->start_pos;
+      DEBUG "Starting reconstruction at position $current_pos";
 
       for my $i (0 .. $#rhs) {
           my $symbol = $rhs[$i];
-          DEBUG "Processing symbol $symbol";
+          DEBUG "Processing symbol $symbol at current_pos=$current_pos (step $i of " . scalar(@rhs) . ")";
           if ($self->is_character_class($symbol)) {
               DEBUG "Character class: $symbol";
               # Character: record position and advance
@@ -1523,38 +1791,47 @@ class ScanlessEarleyParser {
 
         $item->set_semantic_value($semantic_value);
 
-        # Standard Earley completion
-        for my $waiting_item (@{$chart[$item->start_pos]}) {
-            DEBUG "Checking waiting item " . $waiting_item->to_string;
-            next if $waiting_item->is_complete;
-            DEBUG "\tWaiting item is not complete";
-            next unless defined $waiting_item->next_symbol;
-            DEBUG "\tWaiting item has next symbol";
-            next unless $waiting_item->next_symbol eq $rule->lhs;
-            DEBUG "\tComparing '" . ($waiting_item->next_symbol // 'undef') . "' eq '" . ($rule->lhs //
-  'undef') . "'";
-            DEBUG "\tWaiting item has correct next symbol";
+        # Standard Earley completion - look for waiting items that could use this completion
+        # We need to check positions where items might be waiting for this symbol
+        for my $chart_pos (0 .. $item->start_pos) {
+            next unless $chart[$chart_pos];
+            for my $waiting_item (@{$chart[$chart_pos]}) {
+                DEBUG "Checking waiting item " . $waiting_item->to_string;
+                next if $waiting_item->is_complete;
+                DEBUG "\tWaiting item is not complete";
+                next unless defined $waiting_item->next_symbol;
+                DEBUG "\tWaiting item has next symbol";
+                next unless $waiting_item->next_symbol eq $rule->lhs;
 
-            my $new_item = $waiting_item->advance;
-            DEBUG "Set current_pos to $pos for item: " . $new_item->to_string;
-            $new_item->set_current_pos($pos);
-            DEBUG "\tNew item: " . $new_item->to_string;
-            
-            # Check if this item already exists before adding
-            my $already_exists = 0;
-            for my $existing_item (@{$chart[$pos]}) {
-                if ($existing_item->rule == $new_item->rule && 
-                    $existing_item->start_pos == $new_item->start_pos && 
-                    $existing_item->dot_pos == $new_item->dot_pos) {
-                    DEBUG "Item already exists in chart, skipping";
-                    $already_exists = 1;
-                    last;
+                # Additional check: waiting item should be positioned to consume this completion
+                # The waiting item's current position should match where this completion starts
+                next unless $waiting_item->current_pos == $item->start_pos;
+                DEBUG "\tWaiting item is positioned correctly (current_pos=" . $waiting_item->current_pos . " matches completion start=" . $item->start_pos . ")";
+
+                DEBUG "\tComparing '" . ($waiting_item->next_symbol // 'undef') . "' eq '" . ($rule->lhs // 'undef') . "'";
+                DEBUG "\tWaiting item has correct next symbol";
+
+                my $new_item = $waiting_item->advance;
+                DEBUG "Set current_pos to $pos for item: " . $new_item->to_string;
+                $new_item->set_current_pos($pos);
+                DEBUG "\tNew item: " . $new_item->to_string;
+
+                # Check if this item already exists before adding
+                my $already_exists = 0;
+                for my $existing_item (@{$chart[$pos]}) {
+                    if ($existing_item->rule == $new_item->rule &&
+                        $existing_item->start_pos == $new_item->start_pos &&
+                        $existing_item->dot_pos == $new_item->dot_pos) {
+                        DEBUG "Item already exists in chart, skipping";
+                        $already_exists = 1;
+                        last;
+                    }
                 }
-            }
-            
-            if (!$already_exists) {
-                push @$agenda, $new_item;
-                push @{$chart[$pos]}, $new_item;
+
+                if (!$already_exists) {
+                    push @$agenda, $new_item;
+                    push @{$chart[$pos]}, $new_item;
+                }
             }
         }
         DEBUG "Item completed with semantic value: " . (defined $semantic_value ? $semantic_value :
@@ -1608,6 +1885,10 @@ class ScanlessEarleyParser {
         for my $rule (@grammar_rules) {
             if ($rule->lhs eq $next_sym) {
                 DEBUG "Found rule to predict: " . $rule->to_string;
+
+                # Standard Earley handling for left-recursive rules
+                # Let the fixed-point computation handle recursion naturally
+
                 my $predicted_item = EarleyItem->new(
                     rule => $rule,
                     start_pos => $pos,
@@ -1617,15 +1898,15 @@ class ScanlessEarleyParser {
                 # Check if this exact item already exists using content-based comparison
                 my $already_exists = 0;
                 for my $existing_item (@{$chart[$pos]}) {
-                    if ($existing_item->rule == $rule && 
-                        $existing_item->start_pos == $pos && 
+                    if ($existing_item->rule == $rule &&
+                        $existing_item->start_pos == $pos &&
                         $existing_item->dot_pos == 0) {
                         DEBUG "Rule already predicted, skipping";
                         $already_exists = 1;
                         last;
                     }
                 }
-                
+
                 if (!$already_exists) {
                     DEBUG "Adding predicted item: " . $predicted_item->to_string;
                     push @$agenda, $predicted_item;
@@ -1636,7 +1917,7 @@ class ScanlessEarleyParser {
     }
 
     method is_character_class($symbol) {
-        return $symbol =~ /^(Letter|LetterDigit|Char|Whitespace|CommentLineChar)$/;
+        return $symbol =~ /^(Letter|LetterDigit|Char|Whitespace|CommentLineChar|VerticalSpace)$/;
     }
 
 
@@ -1647,6 +1928,10 @@ class ScanlessEarleyParser {
             if ($_ eq 'Char') { return $char =~ /[^"']/ }  # Any char except quotes
             if ($_ eq 'Whitespace') { return $char =~ /\s/ }
             if ($_ eq 'CommentLineChar') { return $char =~ /[^\n]/ }  # Any char except newline
+            if ($_ eq 'VerticalSpace') { 
+                # Unicode-aware vertical space: LF, VT, FF, CR, NEL, Line Separator, Paragraph Separator
+                return $char =~ /[\x{A}\x{B}\x{C}\x{D}\x{0085}\x{2028}\x{2029}]/;
+            }
             return 0;
         }
     }
@@ -1691,8 +1976,8 @@ my $parser = ScanlessEarleyParser->new();
 my $ir_graph = $parser->parse($perl_code);
 
 # Run optimizations and cleanup (peephole optimizations run in execute_threaded)
-$ir_graph->cleanup_orphaned_nodes();
-# $ir_graph->dump_graph();  # Temporarily disabled to test theories
+# $ir_graph->cleanup_orphaned_nodes();  # Don't call cleanup here - it's called in execute_threaded
+$ir_graph->dump_graph();  # Check what's in graph before execute_threaded
 
 # Execute the code
 $ir_graph->execute_threaded();

@@ -1,10 +1,3 @@
-#!./chalk
-
-# ABOUTME: Perl compatibility test for conditional operators - exact copy of Perl's t/base/cond.t
-# ABOUTME: Tests that conditional operators (&&, ||) work correctly with comparisons
-
-# make sure conditional operators work
-
 print "1..4\n";
 
 $x = '0';
