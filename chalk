@@ -1,1248 +1,179 @@
-#!/usr/bin/env perl
+use 5.42.0;
+use experimental qw(class builtin);
 use utf8;
-binmode STDERR, ':utf8';
+use open qw/:std :utf8/;
 
-use v5.42;
-use experimental 'class';
+our sub DEBUG { $ENV{DEBUG} && say STDERR "DEBUG: ", &np(@_) }
 
-our %SYMBOL_TABLE;  # Global symbol table for variables
+class Grammar {
+    use experimental qw(keyword_any);
 
-our sub DEBUG($msg) { $ENV{DEBUG} && say STDERR "DEBUG: $msg" }
-# Base IRNode class
-class IRNode {
-    use List::Util qw(uniq);
+    field $rules :param :reader;
+    field $start :param :reader = $rules->[0]->lhs;
 
-    field @inputs :reader;
-    field @control_deps;
-    field %attributes;
-    field $cached_hash;
-    field @dependent_hashes :reader;  # Function pointers to execute after this node
-    field $value :reader :writer;           # Cached result value
-    field $ready_count :reader = 0; # How many dependencies have completed
-    field $total_deps :reader;      # Total number of dependencies needed
-
-    method inc_ready_count() { $ready_count++ }
-
-    method add_input($node) {
-        push @inputs, $node;
-        $node->add_dependent($self);
-        $total_deps = scalar @inputs;
+    sub build_grammar(@rules) {
+        my $rules = map { Rule->new( lhs => $_->[0], rhs => $_->[1] ) } @rules;
+        Grammar->new( rules => $rules );
     }
 
-    method input_at($index) { $inputs[$index] }
-    method update_input($index, $node) {
-        my $old_node = $inputs[$index];
-        my $old_hash = $self->compute_hash();
-        DEBUG "Updating input $index from " . ($old_node ? $old_node->to_string : 'undef') . " to " . $node->to_string;
-        DEBUG "  Node hash before update: $old_hash";
-        $inputs[$index] = $node;
-        # Clear cached hash since inputs changed
-        $cached_hash = undef;
-        my $new_hash = $self->compute_hash();
-        DEBUG "  Node hash after update: $new_hash";
-        DEBUG "  Hash changed: " . ($old_hash ne $new_hash ? "YES" : "NO");
+    method is_terminal($token) {
+        not any { $_->lhs eq $token } $rules->@*;
     }
 
-    method add_dependent($node) {
-        DEBUG ref($self) . "(" . $self->short_id . ") adding dependent: " . $node->to_string;
-        # we could also use uniq when we notify_dependents which means fewer calls but more memory
-        @dependent_hashes = uniq @dependent_hashes, $node->compute_hash;
-    }
-
-    method set_attr($key, $value) { $attributes{$key} = $value }
-    method attr($key) { $attributes{$key} }
-
-    # Each subclass implements its own execution logic
-    method execute() { ... }
-    method operation() { ... }
-
-    method id() { $self->compute_hash }
-    method short_id() { substr($self->compute_hash, 0, 8) }
-
-    method compute_hash() {
-        return $cached_hash if defined $cached_hash;
-
-        use Digest::SHA qw(sha1_hex);
-
-        my @hash_components = ($self->operation);
-
-        # Add input hashes (sorted for deterministic hashing)
-        my @input_hashes = sort map { $_->compute_hash } @inputs;
-        push @hash_components, @input_hashes;
-
-        # Add attributes (sorted by key for deterministic hashing)
-        for my $key (sort keys %attributes) {
-            push @hash_components, "$key=" . ($attributes{$key} // 'undef');
-        }
-
-        $cached_hash = sha1_hex(join('|', @hash_components));
-        return $cached_hash;
-    }
-
-    method to_string() { ref($self) . "(".$self->short_id().")" }
-
-    method DESTROY() {
-        DEBUG "DESTROYING " . ref($self) . "(" . substr($self->compute_hash(), 0, 8) . ")";
+    method find_rules($lhs) {
+        grep { $_->lhs eq $lhs } $rules->@*;
     }
 }
 
-# Specific operation node types
-class ConstantNode :isa(IRNode) {
-    method operation() { "Constant" }
+class Rule {
+    use Digest::SHA qw(sha1_hex);
 
-    method execute() {
-        $self->set_value($self->attr('value'));
-    }
-}
+    field $lhs    :param :reader;
+    field $rhs    :param :reader;
+    field $origin :param :reader = 0;
 
-class AddNode :isa(IRNode) {
-    method operation() { "Add" }
-
-    method execute() {
-        my $left = $self->input_at(0)->value();
-        my $right = $self->input_at(1)->value();
-        $self->set_value($left + $right);
-    }
-}
-
-class PrintNode :isa(IRNode) {
-
-    method operation() { "Print" }
-
-    method execute() {
-        my $input_val = $self->input_at(0)->value();
-        DEBUG "PrintNode executing with value: " . ($input_val // 'undef');
-        print $input_val // '';
-        $self->set_value($input_val);  # Print passes through its input
-    }
-}
-
-class StoreNode :isa(IRNode) {
-    method operation() { "Store" }
-
-    method execute() {
-        my $var_name = $self->attr('var');
-        my $stored_value = $self->input_at(0)->value();
-        DEBUG "StoreNode($var_name) storing value: '$stored_value'";
-        $SYMBOL_TABLE{$var_name} = $stored_value;
-        $self->set_value($stored_value);
-    }
-}
-
-class LoadNode :isa(IRNode) {
-    method operation() { "Load" }
-
-    method execute() {
-        my $var_name = $self->attr('var');
-        my $value = $SYMBOL_TABLE{$var_name};
-        DEBUG "LoadNode($var_name) executing: symbol_table has " . (defined $value ? "'$value'" : 'undef');
-        $self->set_value($value);
-    }
-}
-
-class ConcatNode :isa(IRNode) {
-    method operation() { "Concat" }
-
-    method execute() {
-        my $result = "";
-        my @inputs = $self->inputs;
-        DEBUG "ConcatNode executing with " . scalar(@inputs) . " inputs";
-        for my $input (@inputs) {
-            my $val = $input->value() // '';
-            DEBUG "  Input: " . ref($input) . " value: '$val'";
-            $result .= $val;
-        }
-        DEBUG "ConcatNode result: '$result'";
-        $self->set_value($result);
-    }
-}
-
-class ThreadedSeaOfNodes {
-    field %nodes;           # Hash of nodes by their content hash
-    field $entry_node;
-    field %symbol_versions; # Track SSA versions: $symbol_versions{var} = current_version
-
-    method create_constant($value) {
-        my $node = ConstantNode->new();
-        $node->set_attr('value', $value);
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
-
-    method create_load($var_name) {
-        my $version = $symbol_versions{$var_name} // 0;
-        DEBUG "create_load($var_name) called, version=$version";
-
-        if ($version == 0) {
-            die qq[Global symbol "$var_name" requires explicit package name (did you forget to declare "my $var_name"?)];
-        }
-
-        my $node = LoadNode->new();
-        $node->set_attr('var', $var_name);
-        $node->set_attr('version', $version);
-
-        if (my $store_node = $self->find_store_node($var_name, $version)) {
-            DEBUG "LoadNode($var_name) linking to StoreNode version $version";
-            $node->add_input($store_node);
-        } else {
-            DEBUG "LoadNode($var_name) could not find StoreNode version $version";
-        }
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        DEBUG "create_load($var_name) created new LoadNode with hash " . substr($hash_key, 0, 8);
-        return $node;
-    }
-
-    method find_store_node($var_name, $version) {
-        for my $node ($self->nodes) {
-            next unless $node->isa('StoreNode');
-            next unless $node->attr('var') eq $var_name;
-            next unless $node->attr('version') == $version;
-            return $node;
-        }
-        return;
-    }
-    method create_store($var_name, $value_node) {
-        my $version = ($symbol_versions{$var_name} // 0) + 1;
-        DEBUG "create_store($var_name) called, version=$version";
-        my $node = StoreNode->new();
-        $node->add_input($value_node);
-        $node->set_attr('var', $var_name);
-        $node->set_attr('version', $version);
-
-        my $hash_key = $node->compute_hash();
-        if (exists $nodes{$hash_key}) {
-            DEBUG "create_store($var_name) returning existing StoreNode with hash " . substr($hash_key, 0, 8);
-            return $nodes{$hash_key};
-        }
-
-        $symbol_versions{$var_name} = $version;
-        $nodes{$hash_key} = $node;
-        DEBUG "create_store($var_name) created new StoreNode with hash " . substr($hash_key, 0, 8);
-        return $node;
-    }
-
-    method create_print($expr_node) {
-        my $node = PrintNode->new();
-        $node->add_input($expr_node);
-        DEBUG "Creating PrintNode with hash: " . $node->compute_hash();
-
-        my $hash_key = $node->compute_hash();
-        if (exists $nodes{$hash_key}) {
-            DEBUG "Found existing PrintNode with hash: " . $hash_key;
-            return $nodes{$hash_key} ;
-        }
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
-
-    method create_add($left_node, $right_node) {
-        my $node = AddNode->new();
-        $node->add_input($left_node);
-        $node->add_input($right_node);
-
-        my $hash_key = $node->compute_hash();
-        return $nodes{$hash_key} if exists $nodes{$hash_key};
-
-        $nodes{$hash_key} = $node;
-        return $node;
-    }
-
-    method create_concat(@expr_nodes) {
-        my $node = ConcatNode->new();
-        $node->add_input($_) for @expr_nodes;
-
-        my $hash_key = $node->compute_hash();
-        DEBUG "create_concat: hash_key = $hash_key";
-        if (exists $nodes{$hash_key}) {
-            DEBUG "create_concat: returning existing node";
-            return $nodes{$hash_key};
-        }
-
-        $nodes{$hash_key} = $node;
-        DEBUG "create_concat: stored new ConcatNode in nodes hash";
-        return $node;
-    }
-
-    method nodes() { values %nodes }
-    method node_count() { scalar keys %nodes }
-
-    method try_execute_node($node_hash) {
-      DEBUG "try_execute_node called with hash: $node_hash";
-      my $node = $nodes{$node_hash};
-      unless ($node) {
-          DEBUG "  Node not found in nodes hash!";
-          DEBUG "  Available hashes: " . join(", ", map { substr($_, 0, 8) } sort keys %nodes);
-          return;
-      }
-      DEBUG "  Found node: " . ref($node) . ", ready: " . $node->ready_count . "/" . ($node->total_deps || 0);
-
-      # Test field access
-      my @inputs = $node->inputs;
-      DEBUG "  Node has " . scalar(@inputs) . " inputs via field reader";
-
-      $node->inc_ready_count;
-      return unless $node->ready_count >= ($node->total_deps || 0);
-
-      DEBUG "  Executing node!";
-      $node->execute();
-      $self->notify_dependents($node_hash);
-   }
-
-   method notify_dependents($node_hash) {
-       my $node = $nodes{$node_hash} or return;
-
-       for my $dependent_hash ($node->dependent_hashes) {
-           $self->try_execute_node($dependent_hash);
-       }
-   }
-
-   method execute_threaded() {
-       # Run peephole optimizations first
-       $self->run_peephole_optimizations();
-
-       # Clean up unreferenced nodes
-       $self->cleanup_orphaned_nodes();
-
-       my @leaf_nodes = grep { scalar($_->inputs) == 0 } $self->nodes;
-       DEBUG "Found " . scalar(@leaf_nodes) . " leaf nodes";
-
-       for my $leaf (@leaf_nodes) {
-           my $type = ref($leaf);
-           my $extra = "";
-           if ($leaf->isa('StoreNode') || $leaf->isa('LoadNode')) {
-               $extra = " var=" . ($leaf->attr('var') // 'unknown');
-           }
-           DEBUG "Trying to execute leaf node: $type$extra (" . $leaf->compute_hash(). ")";
-           $self->try_execute_node($leaf->compute_hash());
-       }
-   }
-
-   method dump_graph() {
-       say "Generated Sea of Nodes with " . $self->node_count . " nodes";
-
-       # Debug: show the generated nodes
-       my @nodes = $self->nodes;
-       for my $node (@nodes) {
-           my $class_name = ref($node);
-           $class_name =~ s/.*:://;  # Remove package prefix
-           say $node->to_string;
-
-           if ($node->operation eq 'Constant') {
-               say "  Value: '" . ($node->attr('value') // 'undef') . "'";
-           } elsif ($node->operation eq 'Store' || $node->operation eq 'Load') {
-               say "  Variable: " . ($node->attr('var') // 'undef') .
-                   " v" . ($node->attr('version') // 'undef');
-           }
-
-           if ($node->inputs) {
-               say "  Inputs: " . join(', ', map { $_->to_string } $node->inputs);
-           }
-       }
-
-       say "\n=== Dependency Graph ===";
-       for my $node (@nodes) {
-           my $short_id = $node->short_id;
-           my @inputs = $node->inputs;
-           if (@inputs) {
-               for my $input (@inputs) {
-                   say $input->short_id . " -> " . $short_id;
-               }
-           } else {
-               say $short_id . " (leaf node)";
-           }
-       }
-   }
-
-   method run_peephole_optimizations() {
-       DEBUG "Running peephole optimizations";
-
-       # Find all ConstantNodes marked for interpolation
-       for my $node ($self->nodes) {
-           next unless $node->isa('ConstantNode');
-           next unless $node->attr('needs_interpolation');
-
-           my $content = $node->attr('value');
-           DEBUG "Checking for interpolation in: $content";
-
-           # Look for $identifier patterns
-           if ($content =~ /\$(\w+)/) {
-               DEBUG "Found variable interpolation: \$$1";
-               $self->replace_with_interpolation($node, $content);
-           }
-       }
-   }
-
-   method replace_with_interpolation($const_node, $content) {
-       my @parts;
-       my $pos = 0;
-
-       # Parse the string looking for $identifier patterns
-       while ($content =~ /\G(.*?)\$(\w+)/gc) {
-           my ($prefix, $var_name) = ($1, $2);
-
-           # Add literal text before the variable
-           if (length($prefix) > 0) {
-               push @parts, $self->create_constant($prefix);
-           }
-
-           # Add variable load
-           push @parts, $self->create_load($var_name);
-           DEBUG "Added interpolation for variable: $var_name";
-       }
-
-       # Add any remaining literal text
-       if ($content =~ /\G(.+)$/gc) {
-           push @parts, $self->create_constant($1);
-       }
-
-       # If we have multiple parts, create a concat node
-       if (@parts > 1) {
-           my $concat_node = $self->create_concat(@parts);
-
-           # Update all references to the old constant node
-           $self->replace_node_references($const_node, $concat_node);
-       }
-   }
-
-   method replace_node_references($old_node, $new_node) {
-       my $old_hash = $old_node->compute_hash();
-       my $new_hash = $new_node->compute_hash();
-
-       DEBUG "Replacing references from $old_hash to $new_hash (simpler approach)";
-
-       # For now, let's just fix the immediate problem by updating %nodes
-       # when a node's hash changes after update_input
-
-       # Find all nodes that reference the old node and update them
-       for my $node ($self->nodes) {
-           my @inputs = $node->inputs;
-           for (my $i = 0; $i < @inputs; $i++) {
-               if ($inputs[$i] == $old_node) {
-                   DEBUG "  Updating input $i of " . ref($node);
-
-                   # Get the old hash before update
-                   my $node_old_hash = $node->compute_hash();
-
-                   # Update the input (this changes the node's hash)
-                   $node->update_input($i, $new_node);
-
-                   # Get the new hash after update
-                   my $node_new_hash = $node->compute_hash();
-
-                   # Update %nodes to reflect the hash change
-                   if ($node_old_hash ne $node_new_hash) {
-                       DEBUG "    Updating %nodes: $node_old_hash -> $node_new_hash";
-                       delete $nodes{$node_old_hash};
-                       $nodes{$node_new_hash} = $node;
-                   }
-
-                   # Update dependency tracking
-                   $new_node->add_dependent($node);
-               }
-           }
-       }
-
-       DEBUG "Node reference replacement complete";
-   }
-
-   method create_node_with_inputs($original_node, @new_inputs) {
-       # Create a new node of the same type but with different inputs
-       my $class = ref($original_node);
-
-       if ($class eq 'PrintNode') {
-           return $self->create_print($new_inputs[0]);
-       } elsif ($class eq 'AddNode') {
-           return $self->create_add($new_inputs[0], $new_inputs[1]);
-       } elsif ($class eq 'ConcatNode') {
-           return $self->create_concat(@new_inputs);
-       } elsif ($class eq 'StoreNode') {
-           my $var = $original_node->attr('var');
-           return $self->create_store($var, $new_inputs[0]);
-       } elsif ($class eq 'LoadNode' || $class eq 'ConstantNode') {
-           # These don't have inputs, so no replacement needed
-           return undef;
-       }
-
-       DEBUG "Warning: Unknown node type for replacement: $class";
-       return undef;
-   }
-
-   method cleanup_orphaned_nodes() {
-       DEBUG "Cleaning up orphaned nodes";
-       my $before_count = scalar keys %nodes;
-
-       # Find all nodes that are reachable from leaf nodes
-       my %reachable;
-
-       # Start with leaf nodes that have dependents (are actually used)
-       my @to_visit;
-       for my $node ($self->nodes) {
-           if (scalar($node->inputs) == 0 && $node->dependent_hashes) {
-               push @to_visit, $node->compute_hash;
-               $reachable{$node->compute_hash} = 1;
-           }
-       }
-
-       # Trace through all dependencies
-       while (@to_visit) {
-           my $hash = shift @to_visit;
-           my $node = $nodes{$hash} or next;
-
-           # Mark all nodes that this node depends on
-           for my $dep_hash ($node->dependent_hashes) {
-               unless ($reachable{$dep_hash}) {
-                   $reachable{$dep_hash} = 1;
-                   push @to_visit, $dep_hash;
-               }
-           }
-       }
-
-       # Remove unreachable nodes
-       my @to_remove;
-       for my $hash (keys %nodes) {
-           unless ($reachable{$hash}) {
-               push @to_remove, $hash;
-           }
-       }
-
-       for my $hash (@to_remove) {
-           DEBUG "Removing orphaned node: $hash (" . ref($nodes{$hash}) . ")";
-           delete $nodes{$hash};
-       }
-
-       my $after_count = scalar keys %nodes;
-       DEBUG "Cleaned up " . (@to_remove) . " orphaned nodes ($before_count -> $after_count)";
-   }
-}
-
-# Grammar rule with semantic action
-class GrammarRule {
-    use experimental 'keyword_any';
-
-    field $lhs :param :reader;          # Left-hand side nonterminal
-    field $rhs :param :reader;          # Right-hand side symbols
-    field $semantic_action :param;  # Code reference for building IR
-    field $id :param :reader;
-
-    method matches($symbols) {
-        for my $s (@$symbols) {
-            return 0 unless any { $s eq $_ } @$rhs;
-        }
-        return 1;
-    }
-
-    method rhs_length() { scalar @$rhs }
-    method rhs_at($pos) { $rhs->[$pos] }
-
-    method execute_action($matches, $ir_graph) {
-        return $semantic_action->($matches, $ir_graph);
-    }
+    field $id :param :reader = sha1_hex( $lhs, $rhs->@* );
 
     method to_string() {
-        return $lhs . " → " . join(' ', @$rhs);
+        return "Rule ($id) $lhs -> $rhs";
     }
 }
 
-# Earley item
-class EarleyItem {
-    field $rule :param :reader;
+class Item {
+    use overload '""' => 'to_string';
+
+    field $rule    :param :reader;
     field $dot_pos :param :reader = 0;
-    field $start_pos :param :reader = 0;
-    field $current_pos :param :reader :writer = 0;
-    field $matched_text :param :reader :writer = "";
-    field $semantic_value :param :reader = undef;
+    field $origin  :param :reader;
 
-    method set_semantic_value($value) {
-        $semantic_value = $value;
-    }
+    method is_complete() { $dot_pos >= $rule->rhs->@* }
+    method next_token()  { $rule->rhs->[$dot_pos] }
 
-    method is_complete() { $dot_pos >= $rule->rhs_length }
-    method next_symbol() {
-        return undef if $self->is_complete;
-        return $rule->rhs_at($dot_pos);
-    }
-
-    method advance($matched_char = "") {
-        DEBUG "Advancing item: " . $self->to_string;
-        EarleyItem->new(
-            rule => $rule,
+    method advance() {
+        Item->new(
+            rule    => $rule,
             dot_pos => $dot_pos + 1,
-            start_pos => $start_pos,
-            current_pos => $current_pos,
-            matched_text => $matched_text . $matched_char,
+            origin  => $origin,
         );
     }
 
     method to_string() {
-      my @rhs = $rule->rhs->@*;
-      my @parts;
-      for my $i (0 .. @rhs) {
-          if ($i == $dot_pos) {
-              push @parts, "•";
-          }
-          if ($i < @rhs) {
-              push @parts, $rhs[$i];
-          }
-      }
-      return $rule->lhs . " → " . join(' ', @parts);
+        return "Item ($rule, $dot_pos)";
     }
 }
 
-class ScanlessEarleyParser {
-    field @grammar_rules;
-    field $ir_graph = ThreadedSeaOfNodes->new();
-    field @chart;  # Array of state sets
-    field $input_text;
-    field %nonterminals;
+class State {
+    use builtin qw(true);
+    use overload '""' => 'to_string';
 
-    ADJUST {
-        $self->define_grammar();
+    field $grammar :param;
+    field $id      :param :reader = 0;
+    field $items   :param :reader = [];
+    field %seen        = map { $_->id => true } $items->@*;
+    field %transitions = ();
+
+    method seen($item)        { $seen{ $item->rule->id } }
+    method transition($token) { $transitions{$token} }
+
+    method add_item($item) {
+        DEBUG "SEEN $item" and return if $seen{ $item->rule->id };
+
+        DEBUG "ADD $item";
+        push @$items, $item;
+        $seen{ $item->rule->id } = true;
     }
 
-    method define_grammar() {
-        @grammar_rules = (
-            # Program → Statement+
-            GrammarRule->new(
-                id => 1,
-                lhs => 'Program',
-                rhs => ['Statement'],
-                semantic_action => sub ($matches, $ir) {
-                    return $matches->[0];
-                }
-            ),
+    method predict($token) {
+        DEBUG "PREDICT $token";
+        my @rules = $grammar->find_rules($token);
+        for my $rule (@rules) {
+            next if $seen{ $rule->id };
+            $self->add_item( Item->new( rule => $rule, origin => $self ) );
+            $self->predict( $rule->rhs->[0] );
+        }
+    }
 
-            GrammarRule->new(
-                id => 2,
-                lhs => 'Program',
-                rhs => ['Program', 'WS', 'Statement'],
-                semantic_action => sub ($matches, $ir) {
-                    # Sequential composition - just return the last statement
-                    return $matches->[2];
-                }
-            ),
+    method find_waiting($token) {
+        grep { $_->lhs eq $token } $items->@*;
+    }
 
-            # Statement → PrintStmt | Assignment
-            GrammarRule->new(
-                id => 3,
-                lhs => 'Statement',
-                rhs => ['PrintStmt'],
-                semantic_action => sub ($matches, $ir) {
-                    return $matches->[0];
-                }
-            ),
+    method complete($item) {
+        DEBUG "COMPLETE $item";
+        my $origin = $item->origin;
+        for my $i ( $origin->find_waiting( $item->lhs ) ) {
+            $self->add_item( $i->advance );
+        }
 
-            GrammarRule->new(
-                id => 4,
-                lhs => 'Statement',
-                rhs => ['Assignment'],
-                semantic_action => sub ($matches, $ir) {
-                    return $matches->[0];
-                }
-            ),
+ #  TODO Add confluence: {REDUCE, mainstem=Assignment@0, tributary=Declarator@0}
+    }
 
-            # Expression → StringLiteral
-            GrammarRule->new(
-                id => 4.1,
-                lhs => 'Expression',
-                rhs => ['StringLiteral'],
-                semantic_action => sub ($matches, $ir) {
-                    return $matches->[0];
-                }
-            ),
+    method reduce() {
+        DEBUG "REDUCE State $id";
+        for my $item ( $self->items->@* ) {
+            if ( $item->is_complete ) {
+                $self->complete($item);
+                next;
+            }
+            my $next = $item->next_token;
+            if ( $grammar->is_terminal($next) ) {
+                $transitions{$next} = $item->rule;
+                last;
+            }
+            $self->predict($next);
+        }
+    }
 
-            # Expression → Variable
-            GrammarRule->new(
-                id => 4.2,
-                lhs => 'Expression',
-                rhs => ['Variable'],
-                semantic_action => sub ($matches, $ir) {
-                    my $var_name = $matches->[0]{var_name};
-                    my $load_node = $ir->create_load($var_name);
-                    return $load_node;
-                }
-            ),
+    method to_string() {
+        local $" = "\n\t";
+        return "State($id) [\n\t@$items\n]";
+    }
+}
 
-            # PrintStmt → 'print' WS StringLiteral ';'
-            GrammarRule->new(
-                id => 5,
-                lhs => 'PrintStmt',
-                rhs => ['print', 'WS', 'StringLiteral', 'WS', ';'],
-                semantic_action => sub ($matches, $ir) {
-                    my $expr_node = $matches->[2];
-                    my $print_node = $ir->create_print($expr_node);
-                    return $print_node;
-                }
-            ),
+class Parser {
+    use builtin qw(indexed);
 
-            # Assignment → Variable WS '=' WS StringLiteral WS ';'
-            GrammarRule->new(
-                id => 6,
-                lhs => 'Assignment',
-                rhs => ['Variable', 'WS', '=', 'WS', 'StringLiteral', 'WS', ';'],
-                semantic_action => sub ($matches, $ir) {
-                    my $var_name = $matches->[0]{var_name};
-                    my $expr_node = $matches->[4];
-                    my $store_node = $ir->create_store($var_name, $expr_node);
-                    return $store_node;
-                }
-            ),
+    field @states;
+    field $grammar :param :reader;
+    field @confluence = ();
 
-            # StringLiteral → '"' InterpolatedContent '"' (interpolated)
-            GrammarRule->new(
-                id => 7,
-                lhs => 'StringLiteral',
-                rhs => ['"', 'InterpolatedContent', '"'],
-                semantic_action => sub ($matches, $ir) {
-                    my $node = $matches->[1];
+    method tokenize($input) { indexed split /\s+/, $input }
 
-                    # Process escape sequences for double-quoted strings
-                    my $content = $node->attr('value');
-                    $content =~ s/\\n/\n/g;   # newline
-                    $content =~ s/\\t/\t/g;   # tab
-                    $content =~ s/\\r/\r/g;   # carriage return
-                    $content =~ s/\\\\/\\/g;  # backslash
-                    $content =~ s/\\"/"/g;    # double quote
-                    # Note: \$ should stay as \$ for now - the interpolation handler will deal with literal $
-                    $node->set_attr('value', $content);
-
-                    # Mark the final node for interpolation
-                    $node->set_attr('needs_interpolation', 1);
-                    DEBUG "StringLiteral: processed escapes and marking final string '" . $node->attr('value') . "' for interpolation";
-                    return $node;
-                }
-            ),
-
-            # StringLiteral → "'" StringContent "'"
-            GrammarRule->new(
-                id => 8,
-                lhs => 'StringLiteral',
-                rhs => ["'", 'StringContent', "'"],
-                semantic_action => sub ($matches, $ir) {
-                    my $content = $matches->[1]{text};
-                    my $const_node = $ir->create_constant($content);
-                    return $const_node;
-                }
-            ),
-
-            # StringContent → CharSeq (for single-quoted strings)
-            GrammarRule->new(
-                id => 9,
-                lhs => 'StringContent',
-                rhs => ['CharSeq'],
-                semantic_action => sub ($matches, $ir) {
-                    DEBUG "StringContent CharSeq: " . $matches->[0]{text};
-                    return { text => $matches->[0]{text} };
-                }
-            ),
-
-            # InterpolatedContent → CharSeq (same as StringContent but will be marked for interpolation)
-            GrammarRule->new(
-                id => 9.1,
-                lhs => 'InterpolatedContent',
-                rhs => ['CharSeq'],
-                semantic_action => sub ($matches, $ir) {
-                    my $content = $matches->[0]{text};
-                    DEBUG "InterpolatedContent semantic action called with: '$content'";
-                    my $const_node = $ir->create_constant($content);
-                    # Don't mark for interpolation yet - let StringLiteral decide
-                    # when it has the complete string
-                    return $const_node;
-                }
-            ),
-
-            # CharSeq → Char CharSeq
-            GrammarRule->new(
-                id => 10,
-                lhs => 'CharSeq',
-                rhs => ['Char', 'CharSeq'],
-                semantic_action => sub ($matches, $ir) {
-                    DEBUG "CharSeq (recursive) semantic action: building '" . $matches->[0]{char} . "' + '" . ($matches->[1]{text} // '') . "'";
-                    return { text => $matches->[0]{char} . $matches->[1]{text} // '' };
-                }
-            ),
-
-            # CharSeq → Char
-            GrammarRule->new(
-                id => 11,
-                lhs => 'CharSeq',
-                rhs => ['Char'],
-                semantic_action => sub ($matches, $ir) {
-                    return { text => $matches->[0]{char} };
-                }
-            ),
-
-            # Variable → '$' Identifier
-            GrammarRule->new(
-                id => 12,
-                lhs => 'Variable',
-                rhs => ['$', 'Identifier'],
-                semantic_action => sub ($matches, $ir) {
-                    return { var_name => $matches->[1]{name} };
-                }
-            ),
-
-            # Identifier → Letter LetterDigitSeq
-            GrammarRule->new(
-                id => 13,
-                lhs => 'Identifier',
-                rhs => ['Letter', 'LetterDigitSeq'],
-                semantic_action => sub ($matches, $ir) {
-                    return { name => $matches->[0]{char} . $matches->[1]{text} };
-                }
-            ),
-
-            # Identifier → Letter
-            GrammarRule->new(
-                id => 14,
-                lhs => 'Identifier',
-                rhs => ['Letter'],
-                semantic_action => sub ($matches, $ir) {
-                    return { name => $matches->[0]{char} };
-                }
-            ),
-
-            # LetterDigitSeq → LetterDigit LetterDigitSeq
-            GrammarRule->new(
-                id => 15,
-                lhs => 'LetterDigitSeq',
-                rhs => ['LetterDigit', 'LetterDigitSeq'],
-                semantic_action => sub ($matches, $ir) {
-                    return { text => $matches->[0]{char} . $matches->[1]{text} };
-                }
-            ),
-
-            # LetterDigitSeq → LetterDigit
-            GrammarRule->new(
-                id => 16,
-                lhs => 'LetterDigitSeq',
-                rhs => ['LetterDigit'],
-                semantic_action => sub ($matches, $ir) {
-                    return { text => $matches->[0]{char} };
-                }
-            ),
-
-            # WS → Whitespace WS
-            GrammarRule->new(
-                id => 17,
-                lhs => 'WS',
-                rhs => ['Whitespace', 'WS'],
-                semantic_action => sub ($matches, $ir) {
-                    return undef;  # Whitespace has no semantic value
-                }
-            ),
-
-            # WS → Whitespace
-            GrammarRule->new(
-                id => 18,
-                lhs => 'WS',
-                rhs => ['Whitespace'],
-                semantic_action => sub ($matches, $ir) {
-                    return undef;
-                }
-            ),
-
-            # WS → ε (empty)
-            GrammarRule->new(
-                id => 19,
-                lhs => 'WS',
-                rhs => [],
-                semantic_action => sub ($matches, $ir) {
-                    return undef;
-                }
-            ),
+    method initial() {
+        $states[0] = State->new( grammar => $grammar );
+        $states[0]->add_item(
+            Item->new(
+                rule   => $grammar->start,
+                origin => $states[0]
+            )
         );
-
-        %nonterminals = map { $_->lhs => $_ } @grammar_rules;
+        $states[0]->reduce();
+        DEBUG "Initial State: $states[0]";
     }
 
-
-    method parse($text) {
-        $input_text = $text;
-        @chart = ();
-
-        DEBUG "Parsing text: $text";
-        # Initialize chart with start state - predict all Program rules
-        $chart[0] = [
-            map { EarleyItem->new( rule => $_ ) }
-            grep { $_->lhs eq 'Program' } @grammar_rules
-        ];
-
-        # Main parsing loop - process each character position
-        for my $pos (0 .. length($text)) {
-            DEBUG "Processing position $pos";
-            $chart[$pos] //= [];
-
-            my $agenda = [@{$chart[$pos]}];
-            DEBUG "Agenda: " . join(', ', map { $_->to_string } @$agenda);
-            while (@$agenda) {
-                my $item = shift @$agenda;
-
-                if ($item->is_complete) {
-                    DEBUG "Completed item: " . $item->to_string;
-                    $self->complete($item, $pos, $agenda);
-                } else {
-                    my $next_sym = $item->next_symbol;
-                    if ($self->is_character_class($next_sym)) {
-                        $self->scan_character($item, $pos, $text);
-                    } elsif ($self->is_nonterminal($next_sym)) {
-                       $self->predict($item, $pos, $agenda);
-                    } else {
-                        $self->scan_literal($item, $pos, $text);
-                    }
-                }
-            }
+    method scan( $index, $token ) {
+        DEBUG "SCAN Set $index for $token";
+        my $transition = $states[ $index - 1 ]->transition($token);
+        my $item       = Item->new( rule => $transition, origin => $index - 1 );
+        my $state      = $states[$index] //= State->new(
+            id      => $index,
+            grammar => $grammar,
+            items   => [$item]
+        );
+        unless ( $state->seen($item) ) {
+            $state->add_item($item);
         }
-        return $ir_graph;
+        push @confluence, [ 'SCAN', $item, $token ];
     }
 
-    method is_nonterminal($symbol) {
-        return exists $nonterminals{$symbol};
-    }
+    method parse($input) {
 
+        $self->initial();
+        DEBUG "Initial State: $states[0]";
 
-    method find_actual_completion($symbol, $start_pos, $parent_item, $parent_end_pos) {
-        DEBUG "Finding actual completion for $symbol starting at $start_pos";
-
-      # Strategy 1: Look for completed items across all chart positions
-      my @all_candidates = map {
-          $chart[$_] ? grep {
-              DEBUG "Checking item: " . $_->to_string . " complete=" . $_->is_complete .
-                    " lhs_match=" . ($_->rule->lhs eq $symbol) .
-                    " start_pos=" . $_->start_pos . " looking_for=" . $start_pos .
-                    " consumed=" . ($_->current_pos > $_->start_pos) .
-                    " child_ok=" . $self->could_be_child_of($_, $parent_item);
-              $_->is_complete &&
-              $_->rule->lhs eq $symbol &&
-              $_->start_pos == $start_pos &&
-              $_->current_pos > $_->start_pos &&
-              $self->could_be_child_of($_, $parent_item)
-          } @{$chart[$_]} : ()
-      } ($start_pos .. $parent_end_pos);
-
-      my ($best_item) = sort {
-          # we want the item with the longest span
-          ($b->current_pos - $b->start_pos) <=> ($a->current_pos - $a->start_pos)
-      } @all_candidates;
-
-      if ($best_item) {
-          DEBUG "Found best item: " . $best_item->to_string;
-          return {
-              semantic_value => $best_item->semantic_value,
-              end_pos => $best_item->current_pos
-          };
-      }
-
-      DEBUG "No perfect completion found, trying to reconstruct.";
-      # Strategy 2: Reconstruct from partial completions
-      return $self->reconstruct_from_partials($symbol, $start_pos, $parent_end_pos);
-    }
-
-    method reconstruct_from_partials($symbol, $start_pos, $parent_end_pos) {
-      # Strategy 2: When we can't find a perfect completion,
-      # try to reconstruct from available partial information
-
-      # Look for any item that started at the right position for this symbol
-      for my $chart_pos ($start_pos .. $parent_end_pos) {
-          next unless $chart[$chart_pos];
-
-          for my $item (@{$chart[$chart_pos]}) {
-              if ($item->rule->lhs eq $symbol &&
-                  $item->start_pos == $start_pos) {
-
-                  # Found an item for this symbol, even if not complete
-                  # Return what we can determine
-                  return {
-                      semantic_value => $item->semantic_value,
-                      end_pos => $item->current_pos || $chart_pos
-                  };
-              }
-          }
-      }
-
-      # If we still can't find anything, return a placeholder
-      return {
-          semantic_value => undef,
-          end_pos => $start_pos  # No progress made
-      };
-   }
-
-    method could_be_child_of($child_item, $parent_item) {
-      # Check if this child could logically be part of the parent's parse
-      return $child_item->current_pos <= $parent_item->current_pos &&
-             $child_item->start_pos >= $parent_item->start_pos;
-    }
-
-    method find_completed_item($symbol, $start_pos) {
-        DEBUG "Finding completed item for $symbol starting at $start_pos";
-      # Search through all chart positions from start_pos forward
-      for my $chart_pos ($start_pos .. $#chart) {
-          DEBUG "Checking chart position $chart_pos";
-          next unless $chart[$chart_pos];
-          DEBUG "Chart position $chart_pos has items";
-          for my $item (@{$chart[$chart_pos]}) {
-              DEBUG "Checking item " . $item->to_string;
-              if ($item->is_complete &&
-                  $item->rule->lhs eq $symbol &&
-                  $item->start_pos == $start_pos) {
-                  DEBUG "Found completed item: " . $item->to_string;
-                  return $item;
-              }
-          }
-      }
-      return;
-    }
-
-    method collect_child_values($item, $end_pos) {
-        my $rule = $item->rule;
-        my @rhs = $rule->rhs->@*;
-        my @values;
-
-        my @parse_path = $self->reconstruct_parse_path($item, $end_pos);
-
-        for my $i (0..$#rhs) {
-            my $s = $rhs[$i];
-            if ($self->is_character_class($s)) {
-                my $char = substr($input_text, $parse_path[$i]->{pos}, 1);
-                push @values, { char => $char };
-            }
-            elsif ($self->is_nonterminal($s)) {
-                    push @values, $parse_path[$i]->{semantic_value};
-            } else { # literal no semantic value, just advance position
-                push @values, undef;
-            }
-        }
-        return @values;
-    }
-
-    method reconstruct_parse_path($completed_item, $end_pos) {
-      DEBUG "Reconstructing parse path for " . $completed_item->to_string;
-      my $rule = $completed_item->rule;
-      my @rhs = $rule->rhs->@*;
-      my @path;
-
-      # Start from the beginning of this item
-      my $current_pos = $completed_item->start_pos;
-
-      for my $i (0 .. $#rhs) {
-          my $symbol = $rhs[$i];
-          DEBUG "Processing symbol $symbol";
-          if ($self->is_character_class($symbol)) {
-              DEBUG "Character class: $symbol";
-              # Character: record position and advance
-              push @path, {
-                  symbol => $symbol,
-                  pos => $current_pos,
-                  type => 'character'
-              };
-              $current_pos += 1;
-          }
-          elsif ($self->is_nonterminal($symbol)) {
-              DEBUG "Nonterminal: $symbol";
-              DEBUG "Looking for $symbol completion starting at $current_pos (after processing previous symbols)";
-              # Nonterminal: find what actually completed here
-              my $child_completion = $self->find_actual_completion(
-                  $symbol, $current_pos, $completed_item, $end_pos
-              );
-
-              if ($child_completion) {
-                  push @path, {
-                      symbol => $symbol,
-                      pos => $current_pos,
-                      type => 'nonterminal',
-                      semantic_value => $child_completion->{semantic_value},
-                      end_pos => $child_completion->{end_pos}
-                  };
-                  $current_pos = $child_completion->{end_pos};
-              }
-          }
-          else {
-              DEBUG "Literal: $symbol";
-              # Literal: record position and advance
-              push @path, {
-                  symbol => $symbol,
-                  pos => $current_pos,
-                  type => 'literal'
-              };
-              $current_pos += length($symbol);
-          }
-      }
-
-      return @path;
-    }
-
-    method complete($item, $pos, $agenda) {
-        DEBUG "Completing item " . $item->to_string;
-        my $rule = $item->rule; # Get the rule that just completed
-        my @child_values = $self->collect_child_values($item, $pos);
-
-        # Execute semantic action when rule completes
-        my $semantic_value = undef;
-        try {
-            DEBUG "Executing semantic action for rule: " . $rule->to_string . " (id: " . $rule->id . ")";
-            $semantic_value = $rule->execute_action(\@child_values, $ir_graph);
-        }
-        catch($e) {
-            warn "Error executing semantic action for rule " . $rule->id . ": $e";
-        }
-
-        $item->set_semantic_value($semantic_value);
-
-        # Standard Earley completion
-        for my $waiting_item (@{$chart[$item->start_pos]}) {
-            DEBUG "Checking waiting item " . $waiting_item->to_string;
-            next if $waiting_item->is_complete;
-            DEBUG "\tWaiting item is not complete";
-            next unless defined $waiting_item->next_symbol;
-            DEBUG "\tWaiting item has next symbol";
-            next unless $waiting_item->next_symbol eq $rule->lhs;
-            DEBUG "\tComparing '" . ($waiting_item->next_symbol // 'undef') . "' eq '" . ($rule->lhs //
-  'undef') . "'";
-            DEBUG "\tWaiting item has correct next symbol";
-
-            my $new_item = $waiting_item->advance;
-            DEBUG "Set current_pos to $pos for item: " . $new_item->to_string;
-            $new_item->set_current_pos($pos);
-            DEBUG "\tNew item: " . $new_item->to_string;
-            push @$agenda, $new_item;
-            push @{$chart[$pos]}, $new_item;
-        }
-        DEBUG "Item completed with semantic value: " . (defined $semantic_value ? $semantic_value :
-  'undef');
-    }
-
-    method scan_character($item, $pos, $text) {
-        return if $pos >= length($text);
-
-        my $char = substr($text, $pos, 1);
-        my $expected = $item->next_symbol;
-
-        if ($self->matches_character_class($char, $expected)) {
-            my $new_item = $item->advance($char);
-            $new_item->set_current_pos( $pos + 1 );
-
-            # Store the matched character for semantic actions
-            if ($expected eq 'Char') {
-                $new_item->set_semantic_value({ char => $char });
-            }
-
-            push @{$chart[$pos + 1]}, $new_item;
-        }
-    }
-
-    method scan_literal($item, $pos, $text) {
-        DEBUG "Scanning literal at position $pos";
-        my $literal = $item->next_symbol;
-        DEBUG "Literal: $literal";
-        my $lit_length = length($literal);
-
-        DEBUG "comparing $pos + $lit_length to " . length($text);
-        return if $pos + $lit_length > length($text);
-        DEBUG "Literal length: $lit_length";
-
-        my $text_part = substr($text, $pos, $lit_length);
-        DEBUG "Text part: $text_part";
-        if ($text_part eq $literal) {
-            DEBUG "Matched literal: $literal";
-            my $new_item = $item->advance($literal);
-            $new_item->set_current_pos($pos + $lit_length);
-
-            push @{$chart[$pos + $lit_length]}, $new_item;
-        }
-    }
-
-    method predict($item, $pos, $agenda) {
-        my $next_sym = $item->next_symbol;
-        DEBUG "Predicting for symbol: $next_sym at position $pos";
-
-        for my $rule (@grammar_rules) {
-            if ($rule->lhs eq $next_sym) {
-                DEBUG "Found rule to predict: " . $rule->to_string;
-                my $predicted_item = EarleyItem->new(
-                    rule => $rule,
-                    start_pos => $pos,
-                    current_pos => $pos
-                );
-
-                for my $item (@{$chart[$pos]}) {
-                    if ($item->rule == $rule && $item->start_pos == $pos && $item->dot_pos == 0) {
-                        DEBUG "Rule already predicted, skipping";
-                        return;
-                    }
-                }
-                DEBUG "Adding predicted item: " . $predicted_item->to_string;
-                push @$agenda, $predicted_item;
-                push @{$chart[$pos]}, $predicted_item;
-            }
-        }
-    }
-
-    method is_character_class($symbol) {
-        return $symbol =~ /^(Letter|LetterDigit|Char|Whitespace)$/;
-    }
-
-    method is_literal($symbol) { $symbol =~ /^(print|\$|=|;|"|')$/ }
-
-    method matches_character_class($char, $class) {
-        for ($class) {
-            if ($_ eq 'Letter') { return $char =~ /[a-zA-Z]/ }
-            if ($_ eq 'LetterDigit') { return $char =~ /[a-zA-Z0-9]/ }
-            if ($_ eq 'Char') { return $char =~ /[^"']/ }  # Any char except quotes
-            if ($_ eq 'Whitespace') { return $char =~ /\s/ }
-            return 0;
+        for my ( $i, $token ) ( $self->tokenize($input) ) {
+            $self->scan( $i + 1, $token );
+            $state[ $i + 1 ]->reduce();
         }
     }
 }
 
-# Command-line argument processing
-use Getopt::Long;
-
-my $help;
-
-GetOptions(
-    'h|help' => \$help,
-) or die "Error in command line arguments\n";
-
-if ($help) {
-    print <<'USAGE';
-Usage: chalk [filename]
-  -h, --help    Show this help message
-
-If no filename is given, code is read from STDIN.
-USAGE
-    exit 0;
-}
-
-my $perl_code;
-
-if (@ARGV) {
-    # Read from file
-    my $filename = $ARGV[0];
-    open my $fh, '<', $filename or die "Cannot open file '$filename': $!\n";
-    $perl_code = do { local $/; <$fh> };
-    close $fh;
-} else {
-    # Read from STDIN
-    $perl_code = do { local $/; <STDIN> };
-}
-
-die "No code to execute\n" unless defined $perl_code && length $perl_code;
-
-# Parse and execute the code
-my $parser = ScanlessEarleyParser->new();
-my $ir_graph = $parser->parse($perl_code);
-
-# Run optimizations and cleanup (peephole optimizations run in execute_threaded)
-$ir_graph->cleanup_orphaned_nodes();
-# $ir_graph->dump_graph();  # Temporarily disabled to test theories
-
-# Execute the code
-$ir_graph->execute_threaded();
