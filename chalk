@@ -3,192 +3,322 @@ use experimental qw(class builtin);
 use utf8;
 use open qw/:std :utf8/;
 
-our sub DEBUG { $ENV{DEBUG} && say STDERR "DEBUG: @_" }
+class Element {
+    use overload
+      '+'      => 'add',
+      '*'      => 'multiply',
+      '""'     => 'to_string',
+      fallback => 1;
 
-class Grammar {
-    use overload '""' => 'to_string';
-    use experimental qw(keyword_any);
+    method add($other)                       { ... }
+    method multiply( $other, $swap = undef ) { ... }
 
-    field $rules :param :reader;
-    field $start :param :reader = $rules->[0];
+    method score()     { ... }
+    method to_string() { ... }
+}
 
-    my sub new_rule( $lhs, $rhs ) { Rule->new( lhs => $lhs, rhs => $rhs ) }
+class Semiring {
+    method init_element_from_rule($rule) { ... }
+}
 
-    # alternate constructor
-    sub build_grammar( $class, @rules ) {
-        return $class->new( rules =>
-              [ map { my $r = new_rule(@$_); DEBUG "Added $r"; $r } @rules ] );
+class BooleanElement :isa(Element) {
+    field $value :param;
+
+    method multiply($other) {
+        BooleanElement->new( value => $value && $other->value );
     }
 
-    method is_terminal($token) {
-        not any { $_->lhs eq $token } $rules->@*;
+    method add($other) {
+        BooleanElement->new( value => $value || $other->value );
     }
+    method to_string() { $value ? 'true' : 'false' }
+}
 
-    method find_rules($lhs) {
-        grep { $_->lhs eq $lhs } $rules->@*;
-    }
+class BooleanSemiring :isa(Semiring) {
+    field $mul_id :reader = BooleanElement->new( value => 1 );
+    field $add_id :reader = BooleanElement->new( value => 0 );
+    field $root_element = BooleanElement->new( value => 1 );
 
-    method to_string(@) {
-        local $" = "\n\t";
-        return "Grammar [\n\t@$rules\n]";
+    method init_element_from_rule($rule) {
+        BooleanElement->new( value => $rule->probability > 0 ? 1 : 0 );
     }
 }
 
-class Rule {
-    use overload '""' => 'to_string';
-    use Digest::SHA qw(sha1_hex);
+class ViterbiElement :isa(Element) {
 
-    field $lhs    :param :reader;
-    field $rhs    :param :reader;
-    field $origin :param :reader = 0;
+    field $score :param :reader;
+    field $path  :param :reader;
 
-    field $id :param :reader = sha1_hex( $lhs, $rhs->@* );
+    method multiply( $other, $swap = undef ) {
 
-    method to_string(@) {
-        my $short_id = substr( $id, 0, 8 );
-        return "Rule ($short_id) $lhs -> [$rhs->@*]";
-    }
-}
-
-class Item {
-    use Carp qw(carp);
-    use overload '""' => 'to_string';
-
-    field $rule    :param :reader //= carp "rule cannot be undefined";
-    field $dot_pos :param :reader = 0;
-    field $origin  :param :reader;
-
-    method is_complete() { $dot_pos >= $rule->rhs->@* }
-    method next_token()  { $rule->rhs->[$dot_pos] }
-
-    method id() { sha1_hex( $rule->id, $dot_pos, $origin ) }
-
-    method advance() {
-        Item->new(
-            rule    => $rule,
-            dot_pos => $dot_pos + 1,
-            origin  => $origin,
+        return ViterbiElement->new(
+            score => $score + $other->score,
+            path  => [ $path->@*, $other->path->@* ],
         );
     }
 
-    method to_string(@) {
-        return "Item ($rule, $dot_pos)";
+    method add( $other, $swap = undef ) {
+        return $self if $score > $other->score;
+        return $other;
+    }
+
+    method to_string() {
+        return sprintf '%.4f[%s]', exp($score), join ',', $path->@*;
+    }
+
+    method probability() { exp($score) }
+    method best_path()   { $path->[0] }
+}
+
+class ViterbiSemiring :isa(Semiring) {
+    field $root_element :param :reader = ViterbiElement->new(
+        score => 0,
+        path  => [],
+    );
+    field $mul_id :reader = ViterbiElement->new(
+        score => 0,
+        path  => ['ε'],
+    );
+    field $add_id :reader = ViterbiElement->new(
+        score => -1e10,
+        path  => [],
+    );
+
+    method init_element_from_rule($rule) {
+        ViterbiElement->new(
+            score => log( $rule->probability ),
+            path  => ["$rule"]
+        );
     }
 }
 
-class State {
-    use overload '""' => 'to_string';
-    use builtin qw(true);
+class EarleyItem {
+    field $start_pos :param :reader;
+    field $rule      :param :reader;
+    field $dot_pos   :param :reader;
+    field $end_pos   :param :reader;
 
-    field $grammar :param;
-    field $id      :param :reader = 0;
-    field $items   :param :reader = [];
-    field %seen        = map { $_->id => true } $items->@*;
-    field %transitions = ();
+    method is_complete() { $dot_pos >= scalar( $rule->rhs->@* ) }
 
-    method seen($item)        { $seen{ $item->rule->id } }
-    method transition($token) { $transitions{$token} }
-
-    method add_item($item) {
-        DEBUG "SEEN $item" and return if $seen{ $item->rule->id };
-
-        DEBUG "ADD $item";
-        push @$items, $item;
-        $seen{ $item->rule->id } = true;
+    method next_symbol() {
+        return if $self->is_complete;
+        return $rule->rhs->[$dot_pos];
     }
 
-    method predict($token) {
-        DEBUG "PREDICT $token";
-        my @rules = $grammar->find_rules($token);
-        for my $rule (@rules) {
-            next if $seen{ $rule->id };
-            $self->add_item( Item->new( rule => $rule, origin => $self ) );
-            $self->predict( $rule->rhs->[0] );
-        }
+    method advance_dot() {
+        EarleyItem->new(
+            start_pos => $start_pos,
+            rule      => $rule,
+            dot_pos   => $dot_pos + 1,
+            end_pos   => $end_pos,
+        );
     }
 
-    method find_waiting($token) {
-        grep { $_->rule->lhs eq $token } $items->@*;
+    method to_string() {
+        my $dotted_rule = join ' ', $rule->rhs->@[ 0 .. $dot_pos - 1 ], '•',
+          $rule->rhs->@[ $dot_pos .. $rule->rhs->$#* ];
+        return "[$start_pos, $dotted_rule, $end_pos]";
     }
 
-    method complete($item) {
-        DEBUG "COMPLETE $item";
-        my $origin = $item->origin;
-        for my $i ( $origin->find_waiting( $item->rule->lhs ) ) {
-            $self->add_item( $i->advance );
-        }
+    method key() {
+        return "$start_pos|" . $rule->id . "|$dot_pos|$end_pos";
+    }
+}
+
+class EarleyChart {
+    field $semiring  :param;
+    field $goal_item :param;
+    field %chart;
+    field %by_end_pos;
+    field %by_start_pos;
+
+    method add_item($earley_item) {
+        $chart{ $earley_item->key } = $earley_item;
     }
 
-    method reduce() {
-        DEBUG "REDUCE State $id";
-        for my $item ( $self->items->@* ) {
-            if ( $item->is_complete ) {
-                $self->complete($item);
-                next;
-            }
-            my $next = $item->next_token;
-            if ( $grammar->is_terminal($next) ) {
-                $transitions{$next} = $item->rule;
-                last;
-            }
-            $self->predict($next);
-        }
+    method get_element($key) { $chart{$key} }
+
+    method add_element( $item, $element ) {
+        my $key     = $item->key;
+        my $current = $self->get_element($key);
+        $chart{$key} = $current + $element;
+
+        push $by_end_pos{ $item->end_pos }->@*,     $item;
+        push $by_start_pos{ $item->start_pos }->@*, $item;
+
+        return $chart{$key};
     }
 
-    method to_string(@) {
-        local $" = "\n\t";
-        return "State($id) [\n\t@$items\n]";
+    method items_ending_at($end_pos) {
+        return $by_end_pos{$end_pos}->@* if exists $by_end_pos{$end_pos};
+        return;
     }
+
+    method goal_value() { $self->get_element($goal_item) }
 }
 
 class Parser {
+    field $semiring :param = ViterbiSemiring->new();
+    field $grammar :param;
+
+    method parse(@input) {
+        my $n         = scalar @input;
+        my $goal_item = EarleyItem->new(
+            start_pos => 0,
+            rule      => $grammar->start_rule,
+            dot_pos   => 0,
+            end_pos   => $n,
+        );
+
+        my $chart = EarleyChart->new(
+            semiring  => $semiring,
+            goal_item => $goal_item,
+        );
+
+        my $start_item = EarleyItem->new(
+            start_pos => 0,
+            rule      => $grammar->start_rule,
+            dot_pos   => 0,
+            end_pos   => 0,
+        );
+
+        $chart->add_item($start_item);
+        for my $pos ( 0 .. $n ) {
+            $self->process_position( $pos, $chart, \@input );
+        }
+
+        return $chart->goal_value();
+    }
+
+    method process_position( $pos, $chart, $input ) {
+        my @agenda = $chart->items_ending_at($pos);
+
+        while ( my $item = shift @agenda ) {
+            my $element = $chart->get_element($item);
+
+            if ( $item->is_complete ) {
+                $self->complete( $item, $element, $chart, \@agenda );
+            }
+            elsif ( my $next_sym = $item->next_symbol ) {
+                if ( $grammar->is_nonterminal($next_sym) ) {
+                    $self->predict( $item, $next_sym, $chart, \@agenda );
+                }
+                elsif ( $pos < @$input && $next_sym eq $input->[$pos] ) {
+                    $self->scan( $item, $element, $chart, $pos );
+                }
+            }
+        }
+    }
+
+    method complete( $completed_item, $completed_element, $chart, $agenda ) {
+        my $lhs     = $completed_item->rule->lhs;
+        my @waiting = $chart->items_ending_at( $completed_item->start_pos );
+
+    # Find items waiting for this nonterminal at the completion's start position
+        for my $waiting_item (@waiting) {
+            next if $waiting_item->is_complete;
+            next unless ( $waiting_item->next_symbol // '' ) eq $lhs;
+
+            my $waiting_element = $chart->get_element($waiting_item);
+
+            # Semiring multiplication ⊗ combines sequential components
+            my $combined_element = $waiting_element * $completed_element;
+
+            my $new_item = EarleyItem->new(
+                start_pos => $waiting_item->start_pos,
+                rule      => $waiting_item->rule,
+                dot_pos   => $waiting_item->dot_pos + 1,
+                end_pos   => $completed_item->end_pos
+            );
+
+            $chart->add_element( $new_item, $combined_element );
+            push @$agenda, $new_item;
+        }
+    }
+
+    method predict( $item, $nonterminal, $chart, $agenda ) {
+        for my $rule ( $grammar->rules_for($nonterminal) ) {
+            my $predicted_item = EarleyItem->new(
+                start_pos => $item->end_pos,
+                rule      => $rule,
+                dot_pos   => 0,
+                end_pos   => $item->end_pos
+            );
+
+            next if $chart->get_element($predicted_item) eq $semiring->add_id;
+
+            my $rule_element = $semiring->init_element_from_rule($rule);
+            $chart->add_element( $predicted_item, $rule_element );
+            push @$agenda, $predicted_item;
+        }
+    }
+
+    method scan( $item, $element, $chart, $pos ) {
+        my $scanned_item = EarleyItem->new(
+            start_pos => $item->start_pos,
+            rule      => $item->rule,
+            dot_pos   => $item->dot_pos + 1,
+            end_pos   => $pos + 1
+        );
+
+        $chart->add_element( $scanned_item, $element );
+    }
+}
+
+class GrammarRule {
     use overload '""' => 'to_string';
-    use builtin qw(indexed);
+    use Digest::SHA qw(sha1_hex);
 
-    field @states;
-    field $grammar :param :reader;
+    field $lhs :param :reader;
+    field $rhs :param :reader;
+    field $probability :param :reader = 1.0;
 
-    method tokenize($input) { indexed split /\s+/, $input }
+    field $id :reader = sha1_hex( $lhs, $rhs->@* );
 
-    method initial() {
-        $states[0] = State->new( grammar => $grammar );
-        $states[0]->add_item(
-            Item->new(
-                rule   => $grammar->start,
-                origin => $states[0]
-            )
-        );
-        $states[0]->reduce();
-        DEBUG "Initial State: $states[0]";
+    method to_string() {
+        my $short_id = substr( $id, 0, 8 );
+        return "($short_id) $lhs -> " . join ' ', $rhs->@*;
+    }
+}
+
+class Grammar {
+    field $rules        :param :reader;
+    field $start_symbol :param :reader;
+
+    my sub new_rule( $lhs, $rhs ) {
+        return GrammarRule->new( lhs => $lhs, rhs => $rhs );
     }
 
-    method scan( $index, $token ) {
-        DEBUG "SCAN $token";
-        my $transition = $states[ $index - 1 ]->transition($token);
-        my $item       = Item->new( rule => $transition, origin => $index - 1 );
-        my $state      = $states[$index] //= State->new(
-            id      => $index,
-            grammar => $grammar,
-            items   => [$item]
-        );
-        unless ( $state->seen($item) ) {
-            $state->add_item($item);
+    sub build_grammar( $class, @rules ) {
+        my %rules = ();
+        for (@rules) {
+            my $lhs = $_->[0];
+            push @{ $rules{$lhs} //= [] }, new_rule(@$_);
         }
+        return Grammar->new( rules => \%rules, start_symbol => $rules[0]->[0] );
     }
 
-    method parse($input) {
-        $self->initial();
-        DEBUG "Initial State: $states[0]";
+    method start_rule() { return $rules->{$start_symbol}->[0] }
 
-        for my ( $i, $token ) ( $self->tokenize($input) ) {
-            $self->scan( $i + 1, $token );
-            $states[ $i + 1 ]->reduce();
+    method rules_for($symbol) {
+        return $rules->{$symbol}->@* if exists $rules->{$symbol};
+        return;
+    }
+
+    method is_nonterminal($symbol) {
+        return exists $rules->{$symbol};
+    }
+
+    method to_string() {
+        my $grammar = '';
+        $grammar .= "Grammar:\n";
+        for my $nt ( sort keys $rules->%* ) {
+            for my $rule ( $rules->{$nt}->@* ) {
+                $grammar .= "  $rule\n";
+            }
         }
-    }
-
-    method to_string(@) {
-        local $" = "\n\t";
-        return "Parser [\n\t@states\n]";
+        $grammar .= "\n";
+        return $grammar;
     }
 }
 
