@@ -630,6 +630,11 @@ class GrammarRule {
     # TODO: Enhance to handle lexemes/regex patterns for terminals
     # Currently only supports exact token matching, but we need
     # pattern-based terminals like [a-zA-Z_][a-zA-Z0-9_]* for identifiers
+    #
+    # TODO: Consider matrix-based Earley parsing optimization
+    # See: https://medium.com/@celine.y.lee/fast-earley-parsing-2216fb0909a3
+    # Matrix operations could optimize prediction/completion phases while
+    # lexemes handle terminal matching independently
     use overload '""' => 'to_string';
     use Digest::SHA qw(sha1_hex);
     use Encode qw(encode_utf8);
