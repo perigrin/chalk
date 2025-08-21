@@ -22,10 +22,10 @@ subtest 'Multiple items predicting same nonterminal' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Should handle redundant A predictions efficiently
-    my $result = $parser->parse(qw(a b));
+    my $result = $parser->parse_tokens(qw(a b));
     ok $result, 'Parse with redundant A predictions';
     
-    $result = $parser->parse(qw(a c));
+    $result = $parser->parse_tokens(qw(a c));
     ok $result, 'Parse alternative with same A prediction';
 };
 
@@ -40,7 +40,7 @@ subtest 'Deep nesting causing repeated predictions' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Should efficiently handle nested predictions
-    my $result = $parser->parse(qw(x x x x));
+    my $result = $parser->parse_tokens(qw(x x x x));
     ok $result, 'Parse with nested repeated predictions';
 };
 
@@ -56,11 +56,11 @@ subtest 'Ambiguous grammar prediction patterns' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Multiple operators will cause lots of E predictions
-    my $result = $parser->parse(qw(n + n * n - n));
+    my $result = $parser->parse_tokens(qw(n + n * n - n));
     ok $result, 'Parse highly ambiguous with many E predictions';
     
     # Test with longer input
-    $result = $parser->parse(qw(n + n + n + n + n));
+    $result = $parser->parse_tokens(qw(n + n + n + n + n));
     ok $result, 'Parse longer ambiguous input efficiently';
 };
 
@@ -74,7 +74,7 @@ subtest 'Compare with and without existing optimizations' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Should work efficiently with combined optimizations
-    my $result = $parser->parse(('a') x 30);
+    my $result = $parser->parse_tokens(('a') x 30);
     ok $result, 'Parse long input with all optimizations';
     
     # Test with Boolean semiring
@@ -83,6 +83,6 @@ subtest 'Compare with and without existing optimizations' => sub {
         semiring => BooleanSemiring->new()
     );
     
-    $result = $bool_parser->parse(('a') x 30);
+    $result = $bool_parser->parse_tokens(('a') x 30);
     ok $result, 'Boolean parse long input efficiently';
 };

@@ -20,7 +20,7 @@ subtest 'Basic memoization functionality' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # This should parse correctly with memoization
-    my $result = $parser->parse(qw(num + num + num));
+    my $result = $parser->parse_tokens(qw(num + num + num));
     ok $result, 'Parse with memoized predictions';
     
     # Test with Boolean semiring too
@@ -29,7 +29,7 @@ subtest 'Basic memoization functionality' => sub {
         semiring => BooleanSemiring->new()
     );
     
-    $result = $bool_parser->parse(qw(num + num + num));
+    $result = $bool_parser->parse_tokens(qw(num + num + num));
     ok $result, 'Boolean parse with memoized predictions';
 };
 
@@ -49,10 +49,10 @@ subtest 'Complex nested grammar' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Should work efficiently with memoization
-    my $result = $parser->parse(qw(the cat chased the dog));
+    my $result = $parser->parse_tokens(qw(the cat chased the dog));
     ok $result, 'Parse complex nested grammar';
     
-    $result = $parser->parse(qw(cat chased dog));
+    $result = $parser->parse_tokens(qw(cat chased dog));
     ok $result, 'Parse without determiners';
 };
 
@@ -67,11 +67,11 @@ subtest 'Ambiguous grammar with memoization' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Should handle ambiguity efficiently with memoization
-    my $result = $parser->parse(qw(n + n * n + n));
+    my $result = $parser->parse_tokens(qw(n + n * n + n));
     ok $result, 'Parse ambiguous grammar with memoization';
     
     # Longer input that would be expensive without memoization
-    $result = $parser->parse(('n', '+') x 5, 'n');
+    $result = $parser->parse_tokens(('n', '+') x 5, 'n');
     ok $result, 'Parse longer ambiguous input with memoization';
 };
 
@@ -85,7 +85,7 @@ subtest 'Recursive grammar benefits' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Should be efficient with combined optimizations
-    my $result = $parser->parse(('a') x 20);
+    my $result = $parser->parse_tokens(('a') x 20);
     ok $result, 'Parse recursive grammar with memoization and Leo items';
     
     # Test with Boolean semiring for completeness
@@ -94,6 +94,6 @@ subtest 'Recursive grammar benefits' => sub {
         semiring => BooleanSemiring->new()
     );
     
-    $result = $bool_parser->parse(('a') x 20);
+    $result = $bool_parser->parse_tokens(('a') x 20);
     ok $result, 'Boolean parse recursive with optimizations';
 };

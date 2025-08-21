@@ -208,15 +208,18 @@ class SPPFForest {
     }
 
     method create_sequence_node( $left_node, $right_node ) {
-        # TODO: Implement proper SPPF sequence node construction
-        # For now, just return the left node (placeholder for proper SPPF construction)
+
+ # TODO: Implement proper SPPF sequence node construction
+ # For now, just return the left node (placeholder for proper SPPF construction)
         return $left_node;
     }
 
     method add_alternative( $node1, $node2 ) {
+
         # TODO: Implement proper SPPF alternative merging
         # For now, just add the alternative as a packed node (placeholder)
         if ( $node1 isa SPPFSymbolNode && $node2 isa SPPFSymbolNode ) {
+
             # Add packed node representing the alternative
             my $packed = SPPFPackedNode->new( rule => undef );
             $packed->add_child($node2);
@@ -394,7 +397,7 @@ class EarleyChart {
 
         my @items = $self->items_ending_at($n);
 
-        for my $item ( @items ) {
+        for my $item (@items) {
             next unless $item->is_complete;
             next unless $item->start_pos == 0;
             next unless $item->rule->lhs eq $start_symbol;
@@ -405,7 +408,6 @@ class EarleyChart {
             }
         }
 
-
         # Check if we found any valid parses
         return $result == $semiring->add_id ? undef : $result;
     }
@@ -415,14 +417,18 @@ class Parser {
     field $semiring :param = ViterbiSemiring->new();
     field $grammar :param;
 
-    method parse(@input) {
-        my $n = scalar @input;
+    method parse_tokens(@input) {
 
-        my $chart = EarleyChart->new( semiring => $semiring, );
+  # backward compatibility for some of our tests that predate the lexeme support
+        return $self->parse_string( join '', @input );
+    }
+
+    method parse_string($input_string) {
+        my $chart = EarleyChart->new( semiring => $semiring );
 
        # Initialize chart by predicting all rules for start symbol at position 0
         my $start_symbol = $grammar->start_symbol;
-        for my $rule ( $grammar->rules_for( $start_symbol ) ) {
+        for my $rule ( $grammar->rules_for($start_symbol) ) {
             my $start_item = EarleyItem->new(
                 start_pos => 0,
                 rule      => $rule,
@@ -434,14 +440,19 @@ class Parser {
             $chart->add_element( $start_item, $start_element );
         }
 
-        for my $p ( 0 .. $n ) {
-            $self->process_position( $p, $chart, \@input );
+        # Process positions from 0 to end of string
+        my $pos          = 0;
+        my $input_length = length($input_string);
+
+        while ( $pos <= $input_length ) {
+            $self->process_position_string( $pos, $chart, $input_string );
+            $pos++;
         }
 
-        return $chart->goal_value( $grammar->start_symbol, $n );
+        return $chart->goal_value( $grammar->start_symbol, $input_length );
     }
 
-    method process_position( $pos, $chart, $input ) {
+    method process_position_string( $pos, $chart, $input_string ) {
         my @agenda = $chart->items_ending_at($pos);
 
         while ( my $item = shift @agenda ) {
@@ -455,10 +466,15 @@ class Parser {
                 if ( $grammar->is_nonterminal($next_sym) ) {
                     $self->predict( $item, $next_sym, $chart, \@agenda );
                 }
-                elsif ( $pos < @$input && $next_sym eq $input->[$pos] ) {
-                    $self->scan( $item, $element, $chart, $pos );
-                }
                 else {
+                    # Try to match terminal with lexeme support
+                    my $pattern = $item->rule->terminal_to_regex($next_sym);
+                    pos($input_string) = $pos;
+                    if ( my $matched = $input_string =~ /\G($pattern)/gc ) {
+                        my $match_length = length($1);
+                        $self->scan( $item, $element, $chart, $pos,
+                            $match_length );
+                    }
                 }
             }
         }
@@ -482,15 +498,15 @@ class Parser {
         my @waiting_for_lhs =
           grep { !$_->is_complete && $_->next_symbol eq $lhs } @regular_waiting;
 
-        # Check for deterministic reduction (only if no Leo items waiting)
-        # Leo items are only for deterministic right-recursive chains where:
-        # 1. Only one item is waiting for this LHS
-        # 2. The waiting item will be complete after this reduction
-        # 3. The rule is right-recursive
-        # 
-        # NOTE: Joop Leo's second optimization for left-recursion could be implemented
-        # here, but performance testing shows left-recursion is already faster than
-        # right-recursion in our Earley implementation, so it's not needed.
+  # Check for deterministic reduction (only if no Leo items waiting)
+  # Leo items are only for deterministic right-recursive chains where:
+  # 1. Only one item is waiting for this LHS
+  # 2. The waiting item will be complete after this reduction
+  # 3. The rule is right-recursive
+  #
+  # NOTE: Joop Leo's second optimization for left-recursion could be implemented
+  # here, but performance testing shows left-recursion is already faster than
+  # right-recursion in our Earley implementation, so it's not needed.
         if (   @waiting_for_lhs == 1
             && @leo_waiting == 0
             && $waiting_for_lhs[0]->rule->is_right_recursive
@@ -614,12 +630,12 @@ class Parser {
         }
     }
 
-    method scan( $item, $element, $chart, $pos ) {
+    method scan( $item, $element, $chart, $pos, $match_length ) {
         my $scanned_item = EarleyItem->new(
             start_pos => $item->start_pos,
             rule      => $item->rule,
             dot_pos   => $item->dot_pos + 1,
-            end_pos   => $pos + 1
+            end_pos   => $pos + $match_length
         );
 
         $chart->add_element( $scanned_item, $element );
@@ -627,9 +643,9 @@ class Parser {
 }
 
 class GrammarRule {
-    # TODO: Enhance to handle lexemes/regex patterns for terminals
-    # Currently only supports exact token matching, but we need
-    # pattern-based terminals like [a-zA-Z_][a-zA-Z0-9_]* for identifiers
+
+    # Supports both exact token matching and lexeme/regex patterns for terminals
+    # Use parse() for pre-tokenized input, parse_string() for lexeme matching
     #
     # TODO: Consider matrix-based Earley parsing optimization
     # See: https://medium.com/@celine.y.lee/fast-earley-parsing-2216fb0909a3
@@ -637,13 +653,13 @@ class GrammarRule {
     # lexemes handle terminal matching independently
     use overload '""' => 'to_string';
     use Digest::SHA qw(sha1_hex);
-    use Encode qw(encode_utf8);
+    use Encode      qw(encode_utf8);
 
     field $lhs :param :reader;
     field $rhs :param :reader;
     field $probability :param :reader = 1.0;
 
-    field $id :reader = sha1_hex( map { encode_utf8($_) } ($lhs, $rhs->@*) );
+    field $id :reader = sha1_hex( map { encode_utf8($_) } ( $lhs, $rhs->@* ) );
 
     method is_right_recursive() { $lhs eq $rhs->[-1] }
     method is_left_recursive()  { $lhs eq $rhs->[0] }
@@ -675,6 +691,14 @@ class GrammarRule {
     method to_string(@) {
         my $short_id = substr( $id, 0, 8 );
         return "($short_id) $lhs -> " . join ' ', $rhs->@*;
+    }
+
+    method terminal_to_regex($terminal) {
+
+        # Convert terminal to regex pattern
+        # If already a regex, return as-is
+        # If string literal, escape and convert to regex
+        return ref($terminal) eq 'Regexp' ? $terminal : qr/\Q$terminal\E/;
     }
 }
 

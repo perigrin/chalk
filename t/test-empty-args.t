@@ -19,10 +19,10 @@ subtest 'Empty argument lists' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('name', '(', 'arg', ')');
+    my $result = $parser->parse_tokens('name', '(', 'arg', ')');
     ok $result, 'Parse call with args';
     
-    $result = $parser->parse('name', '(', ')');
+    $result = $parser->parse_tokens('name', '(', ')');
     ok $result, 'Parse call with empty args';
 };
 
@@ -37,10 +37,10 @@ subtest 'Optional argument lists' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('name', '(', 'arg', ')');
+    my $result = $parser->parse_tokens('name', '(', 'arg', ')');
     ok $result, 'Parse call with args using optional';
     
-    $result = $parser->parse('name', '(', ')');
+    $result = $parser->parse_tokens('name', '(', ')');
     ok $result, 'Parse call with empty args using optional';
 };
 
@@ -55,9 +55,9 @@ subtest 'Method chain debugging' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('Class', '->', 'new', '(', 'arg', ')');
+    my $result = $parser->parse_tokens('Class', '->', 'new', '(', 'arg', ')');
     ok $result, 'Parse method with args';
     
-    $result = $parser->parse('Class', '->', 'new', '(', ')');
+    $result = $parser->parse_tokens('Class', '->', 'new', '(', ')');
     ok $result, 'Parse method with empty args';
 };

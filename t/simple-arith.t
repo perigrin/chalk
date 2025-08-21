@@ -16,7 +16,7 @@ my $grammar = Grammar->build_grammar(
 
 my $parser = Parser->new(grammar => $grammar);
 
-my $result = $parser->parse(qw(num));
+my $result = $parser->parse_tokens(qw(num));
 say "Single num result: " . (defined $result ? ref($result) . " - $result" : "undef");
 
 ok $result, "Parse single num";
@@ -28,7 +28,7 @@ $grammar = Grammar->build_grammar(
 );
 
 $parser = Parser->new(grammar => $grammar);
-$result = $parser->parse(qw(num + num));
+$result = $parser->parse_tokens(qw(num + num));
 say "Addition result: " . (defined $result ? ref($result) . " - $result" : "undef");
 
 ok $result, "Parse num + num";

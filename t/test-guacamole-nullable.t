@@ -23,15 +23,15 @@ subtest 'Optional semicolon patterns' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Statements without semicolons
-    my $result = $parser->parse('cmd', 'cmd', 'cmd');
+    my $result = $parser->parse_tokens('cmd', 'cmd', 'cmd');
     ok $result, 'Parse statements without semicolons';
     
     # Statements with some semicolons
-    $result = $parser->parse('cmd', ';', 'cmd', 'cmd');
+    $result = $parser->parse_tokens('cmd', ';', 'cmd', 'cmd');
     ok $result, 'Parse statements with some semicolons';
     
     # All statements with semicolons
-    $result = $parser->parse('cmd', ';', 'cmd', ';', 'cmd');
+    $result = $parser->parse_tokens('cmd', ';', 'cmd', ';', 'cmd');
     ok $result, 'Parse all statements with semicolons';
 };
 
@@ -48,15 +48,15 @@ subtest 'Optional parameter lists' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Function with no parameters
-    my $result = $parser->parse('name', '(', ')');
+    my $result = $parser->parse_tokens('name', '(', ')');
     ok $result, 'Parse function with no parameters';
     
     # Function with one parameter
-    $result = $parser->parse('name', '(', 'arg', ')');
+    $result = $parser->parse_tokens('name', '(', 'arg', ')');
     ok $result, 'Parse function with one parameter';
     
     # Function with multiple parameters
-    $result = $parser->parse('name', '(', 'arg', ',', 'arg', ',', 'arg', ')');
+    $result = $parser->parse_tokens('name', '(', 'arg', ',', 'arg', ',', 'arg', ')');
     ok $result, 'Parse function with multiple parameters';
 };
 
@@ -77,19 +77,19 @@ subtest 'Nested optional structures' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Simple if without else
-    my $result = $parser->parse('if', '(', 'test', ')', '{', 'stmt', '}');
+    my $result = $parser->parse_tokens('if', '(', 'test', ')', '{', 'stmt', '}');
     ok $result, 'Parse simple if without else';
     
     # If with else
-    $result = $parser->parse('if', '(', 'test', ')', '{', 'stmt', '}', 'else', '{', 'stmt', '}');
+    $result = $parser->parse_tokens('if', '(', 'test', ')', '{', 'stmt', '}', 'else', '{', 'stmt', '}');
     ok $result, 'Parse if with else';
     
     # If with elsif chain
-    $result = $parser->parse('if', '(', 'test', ')', '{', '}', 'else', 'if', '(', 'test', ')', '{', 'stmt', '}');
+    $result = $parser->parse_tokens('if', '(', 'test', ')', '{', '}', 'else', 'if', '(', 'test', ')', '{', 'stmt', '}');
     ok $result, 'Parse if with elsif chain';
     
     # Empty blocks
-    $result = $parser->parse('if', '(', 'test', ')', '{', '}', 'else', '{', '}');
+    $result = $parser->parse_tokens('if', '(', 'test', ')', '{', '}', 'else', '{', '}');
     ok $result, 'Parse if/else with empty blocks';
 };
 
@@ -112,27 +112,27 @@ subtest 'Highly nullable expression chains' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Minimal expression
-    my $result = $parser->parse('var');
+    my $result = $parser->parse_tokens('var');
     ok $result, 'Parse minimal expression';
     
     # Expression with prefix
-    $result = $parser->parse('!', 'var');
+    $result = $parser->parse_tokens('!', 'var');
     ok $result, 'Parse expression with prefix';
     
     # Expression with suffix
-    $result = $parser->parse('var', '[', 'idx', ']');
+    $result = $parser->parse_tokens('var', '[', 'idx', ']');
     ok $result, 'Parse expression with suffix';
     
     # Full expression
-    $result = $parser->parse('-', 'var', '.', 'method');
+    $result = $parser->parse_tokens('-', 'var', '.', 'method');
     ok $result, 'Parse full expression';
     
     # Parenthesized with nullable elements
-    $result = $parser->parse('(', 'var', ')');
+    $result = $parser->parse_tokens('(', 'var', ')');
     ok $result, 'Parse parenthesized expression';
     
     # Complex nested case
-    $result = $parser->parse('!', '(', '-', 'var', '[', 'idx', ']', ')', '.', 'method');
+    $result = $parser->parse_tokens('!', '(', '-', 'var', '[', 'idx', ']', ')', '.', 'method');
     ok $result, 'Parse complex nested expression';
 };
 
@@ -154,15 +154,15 @@ subtest 'Performance with nullable chains' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # All elements present
-    my $result = $parser->parse('a', 'b', 'c', 'd', 'e');
+    my $result = $parser->parse_tokens('a', 'b', 'c', 'd', 'e');
     ok $result, 'Parse with all elements present';
     
     # Some elements missing (testing nullable handling)
-    $result = $parser->parse('a', 'c', 'e');  # B and D are nullable
+    $result = $parser->parse_tokens('a', 'c', 'e');  # B and D are nullable
     ok $result, 'Parse with some nullable elements missing';
     
     # Minimal case
-    $result = $parser->parse('e');  # A, B, C, D all nullable
+    $result = $parser->parse_tokens('e');  # A, B, C, D all nullable
     ok $result, 'Parse with maximum nullable elements';
     
     # Test with Boolean semiring for performance
@@ -171,7 +171,7 @@ subtest 'Performance with nullable chains' => sub {
         semiring => BooleanSemiring->new()
     );
     
-    $result = $bool_parser->parse('e');
+    $result = $bool_parser->parse_tokens('e');
     ok $result, 'Boolean parse with maximum nullable elements';
     isa_ok $result, 'BooleanElement';
 };

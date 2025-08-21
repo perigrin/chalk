@@ -16,7 +16,7 @@ subtest 'Zero token regression test' => sub {
     my $grammar = Grammar->build_grammar([ 'Rule' => ['0'] ]);
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('0');
+    my $result = $parser->parse_tokens('0');
     ok $result, "Parse '0' token succeeds";
     isa_ok $result, ['ViterbiElement'], "Result is ViterbiElement";
     
@@ -29,7 +29,7 @@ subtest 'Other falsy values still work' => sub {
     my $grammar = Grammar->build_grammar([ 'Rule' => [''] ]);
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('');
+    my $result = $parser->parse_tokens('');
     ok $result, "Parse empty string succeeds";
 };
 
@@ -38,7 +38,7 @@ subtest 'Compare with truthy values' => sub {
     my $grammar = Grammar->build_grammar([ 'Rule' => ['1'] ]);
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('1');
+    my $result = $parser->parse_tokens('1');
     ok $result, "Parse '1' token succeeds";
     like $result->to_string, qr/Rule -> 1/, "Parse contains expected rule";
 };

@@ -170,7 +170,7 @@ subtest 'Basic class structure' => sub {
     my $parser = Parser->new(grammar => $chalk_grammar);
     
     # Simple class
-    my $result = $parser->parse(
+    my $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'field', '$var', ';',
         '}'
@@ -178,7 +178,7 @@ subtest 'Basic class structure' => sub {
     ok $result, 'Parse simple class';
     
     # Class with inheritance
-    $result = $parser->parse(
+    $result = $parser->parse_tokens(
         'class', 'ViterbiElement', ':isa(', 'Element', ')', '{',
         'field', '$var', ':param', ';',
         '}'
@@ -189,7 +189,7 @@ subtest 'Basic class structure' => sub {
 subtest 'Overload declarations' => sub {
     my $parser = Parser->new(grammar => $chalk_grammar);
     
-    my $result = $parser->parse(
+    my $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'use', 'overload', "'+'", '=>', "'add'", ';',
         '}'
@@ -197,7 +197,7 @@ subtest 'Overload declarations' => sub {
     ok $result, 'Parse class with simple overload';
     
     todo "multiple overload specs need lexeme support" => sub {
-        $result = $parser->parse(
+        $result = $parser->parse_tokens(
             'class', 'Element', '{',
             'use', 'overload', "'+'", '=>', "'add'", ',', 'Identifier', '=>', '1', ';',
             '}'
@@ -210,7 +210,7 @@ subtest 'Method declarations' => sub {
     my $parser = Parser->new(grammar => $chalk_grammar);
     
     # Method with empty parameter list
-    my $result = $parser->parse(
+    my $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'method', 'method', '(', ')', '{', '...', '}',
         '}'
@@ -218,7 +218,7 @@ subtest 'Method declarations' => sub {
     ok $result, 'Parse method with empty parameters';
     
     # Method with parameters
-    $result = $parser->parse(
+    $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'method', 'method', '(', '$var', ')', '{', 'return', '$var', ';', '}',
         '}'
@@ -226,7 +226,7 @@ subtest 'Method declarations' => sub {
     ok $result, 'Parse method with parameter';
     
     # Method with default parameter
-    $result = $parser->parse(
+    $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'method', 'method', '(', '$var', '=', 'undef', ')', '{', 'return', '$var', ';', '}',
         '}'
@@ -238,7 +238,7 @@ subtest 'Complex expressions' => sub {
     my $parser = Parser->new(grammar => $chalk_grammar);
     
     # Constructor call
-    my $result = $parser->parse(
+    my $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'method', 'method', '(', ')', '{', 'return', 'ViterbiElement', '->', 'new', '(', ')', ';', '}',
         '}'
@@ -247,7 +247,7 @@ subtest 'Complex expressions' => sub {
     
     # Constructor with arguments
     todo "constructor with named argument needs lexeme support" => sub {
-        $result = $parser->parse(
+        $result = $parser->parse_tokens(
             'class', 'Element', '{',
             'method', 'method', '(', ')', '{', 'return', 'ViterbiElement', '->', 'new', '(', 'Identifier', '=>', '$var', ')', ';', '}',
             '}'
@@ -260,7 +260,7 @@ subtest 'Field initialization' => sub {
     my $parser = Parser->new(grammar => $chalk_grammar);
     
     # Field with array reference initialization
-    my $result = $parser->parse(
+    my $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'field', '$var', '=', '[', ']', ';',
         '}'
@@ -269,7 +269,7 @@ subtest 'Field initialization' => sub {
     
     # Field with constructor initialization
     todo "field with constructor initialization needs lexeme support" => sub {
-        $result = $parser->parse(
+        $result = $parser->parse_tokens(
             'class', 'Element', '{',
             'field', '$var', '=', 'ViterbiElement', '->', 'new', '(', 'Identifier', '=>', '0', ')', ';',
             '}'
@@ -283,7 +283,7 @@ subtest 'Complete chalk class pattern' => sub {
     
     # Parse a complete class like ViterbiSemiring
     todo "complete ViterbiElement-style class needs lexeme support" => sub {
-        my $result = $parser->parse(
+        my $result = $parser->parse_tokens(
             'class', 'ViterbiElement', ':isa(', 'Element', ')', '{',
             'use', 'overload', "'+'", '=>', "'add'", ';',
             'field', '$var', ':param', ':reader', ';',

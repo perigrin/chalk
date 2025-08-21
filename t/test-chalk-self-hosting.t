@@ -117,7 +117,7 @@ subtest 'Parse chalk class declarations' => sub {
     my $parser = Parser->new(grammar => $chalk_grammar);
     
     # Test Element base class
-    my $result = $parser->parse(
+    my $result = $parser->parse_tokens(
         'class', 'Element', '{',
         'use', 'overload', "'+'", '=>', "'add'", ';',
         'method', 'add', '(@)', '{', '...', '}',
@@ -126,7 +126,7 @@ subtest 'Parse chalk class declarations' => sub {
     ok $result, 'Parse Element base class declaration';
     
     # Test class with inheritance
-    $result = $parser->parse(
+    $result = $parser->parse_tokens(
         'class', 'BooleanElement', ':isa(', 'Element', ')', '{',
         'field', '$value', ':param', ':reader', ';',
         '}'
@@ -137,10 +137,10 @@ subtest 'Parse chalk class declarations' => sub {
 subtest 'Parse chalk use declarations' => sub {
     my $parser = Parser->new(grammar => $chalk_grammar);
     
-    my $result = $parser->parse('use', '5.42.0', ';');
+    my $result = $parser->parse_tokens('use', '5.42.0', ';');
     ok $result, 'Parse version use declaration';
     
-    $result = $parser->parse('use', 'experimental', '(', "'add'", ')', ';');
+    $result = $parser->parse_tokens('use', 'experimental', '(', "'add'", ')', ';');
     ok $result, 'Parse experimental use declaration';
 };
 
@@ -162,7 +162,7 @@ subtest 'Parse entire chalk file' => sub {
     
     # This is the ultimate test - try to parse the entire tokenized chalk file:
     my $parser = Parser->new(grammar => $chalk_grammar);  
-    my $result = $parser->parse(@tokens);
+    my $result = $parser->parse_tokens(@tokens);
     
     if ($result) {
         ok $result, "Chalk successfully parses itself!";

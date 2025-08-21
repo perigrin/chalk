@@ -19,13 +19,13 @@ subtest 'Variable types' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('field', '$scalar', ';');
+    my $result = $parser->parse_tokens('field', '$scalar', ';');
     ok $result, 'Parse scalar variable';
     
-    $result = $parser->parse('field', '@array', ';');
+    $result = $parser->parse_tokens('field', '@array', ';');
     ok $result, 'Parse array variable';
     
-    $result = $parser->parse('field', '%hash', ';');
+    $result = $parser->parse_tokens('field', '%hash', ';');
     ok $result, 'Parse hash variable';
 };
 
@@ -40,13 +40,13 @@ subtest 'Postfix dereference syntax' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('$var');
+    my $result = $parser->parse_tokens('$var');
     ok $result, 'Parse simple variable';
     
-    $result = $parser->parse('$var', '->', '@*');
+    $result = $parser->parse_tokens('$var', '->', '@*');
     ok $result, 'Parse postfix array dereference';
     
-    $result = $parser->parse('$var', '->', '%*');
+    $result = $parser->parse_tokens('$var', '->', '%*');
     ok $result, 'Parse postfix hash dereference';
 };
 
@@ -62,13 +62,13 @@ subtest 'String concatenation' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('"literal"');
+    my $result = $parser->parse_tokens('"literal"');
     ok $result, 'Parse string literal';
     
-    $result = $parser->parse('$var', '.', '"literal"');
+    $result = $parser->parse_tokens('$var', '.', '"literal"');
     ok $result, 'Parse string concatenation';
     
-    $result = $parser->parse('"literal"', '.', '$var', '.', '|');
+    $result = $parser->parse_tokens('"literal"', '.', '$var', '.', '|');
     ok $result, 'Parse complex string concatenation';
 };
 
@@ -90,16 +90,16 @@ subtest 'Method calls and constructors' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('Constructor', '->', 'new', '(', ')');
+    my $result = $parser->parse_tokens('Constructor', '->', 'new', '(', ')');
     ok $result, 'Parse constructor with no args';
     
-    $result = $parser->parse('Constructor', '->', 'new', '(', 'value', ')');
+    $result = $parser->parse_tokens('Constructor', '->', 'new', '(', 'value', ')');
     ok $result, 'Parse constructor with simple arg';
     
-    $result = $parser->parse('Constructor', '->', 'new', '(', 'key', '=>', 'value', ')');
+    $result = $parser->parse_tokens('Constructor', '->', 'new', '(', 'key', '=>', 'value', ')');
     ok $result, 'Parse constructor with key-value arg';
     
-    $result = $parser->parse('$obj', '->', 'method', '(', 'key', '=>', 'value', ',', 'value', ')');
+    $result = $parser->parse_tokens('$obj', '->', 'method', '(', 'key', '=>', 'value', ',', 'value', ')');
     ok $result, 'Parse method call with mixed args';
 };
 
@@ -115,9 +115,9 @@ subtest 'Hash subscript and assignment' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse('%hash', '{', '$key', '}');
+    my $result = $parser->parse_tokens('%hash', '{', '$key', '}');
     ok $result, 'Parse hash subscript';
     
-    $result = $parser->parse('$hash', '{', '$key', '}', '//=', 'value');
+    $result = $parser->parse_tokens('$hash', '{', '$key', '}', '//=', 'value');
     ok $result, 'Parse hash assignment with //= operator';
 };

@@ -35,12 +35,12 @@ subtest 'Performance comparison: left vs right recursion' => sub {
         
         # Time left-recursive parsing
         my $left_start = time();
-        my $left_result = $left_parser->parse(@input);
+        my $left_result = $left_parser->parse_tokens(@input);
         my $left_time = time() - $left_start;
         
         # Time right-recursive parsing
         my $right_start = time();
-        my $right_result = $right_parser->parse(@input);
+        my $right_result = $right_parser->parse_tokens(@input);
         my $right_time = time() - $right_start;
         
         ok $left_result, "Left recursion handles length $length";
@@ -66,7 +66,7 @@ subtest 'Stress test left-recursion' => sub {
     push @input, '+', 'a' for (2..50);
     
     my $start = time();
-    my $result = $parser->parse(@input);
+    my $result = $parser->parse_tokens(@input);
     my $elapsed = time() - $start;
     
     ok $result, 'Left recursion handles 50-element chain';

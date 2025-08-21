@@ -20,7 +20,7 @@ subtest 'Simple left-recursive grammar' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Should handle left-recursion efficiently
-    my $result = $parser->parse(qw(num + num + num));
+    my $result = $parser->parse_tokens(qw(num + num + num));
     ok $result, 'Parse left-recursive expression';
     
     # Test with Boolean semiring
@@ -29,7 +29,7 @@ subtest 'Simple left-recursive grammar' => sub {
         semiring => BooleanSemiring->new()
     );
     
-    $result = $bool_parser->parse(qw(num + num + num));
+    $result = $bool_parser->parse_tokens(qw(num + num + num));
     ok $result, 'Boolean parse left-recursive expression';
 };
 
@@ -49,7 +49,7 @@ subtest 'Deep left-recursive chain' => sub {
         push @input, '+', 'num';
     }
     
-    my $result = $parser->parse(@input);
+    my $result = $parser->parse_tokens(@input);
     ok $result, 'Parse deep left-recursive chain';
 };
 
@@ -63,7 +63,7 @@ subtest 'Mixed left and right recursion' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse(qw(num + num * num));
+    my $result = $parser->parse_tokens(qw(num + num * num));
     ok $result, 'Parse mixed left/right recursive grammar';
 };
 
@@ -87,8 +87,8 @@ subtest 'Compare with pure right-recursive equivalent' => sub {
     
     my $input = [qw(num + num + num)];
     
-    my $left_result = $left_parser->parse(@$input);
-    my $right_result = $right_parser->parse(@$input);
+    my $left_result = $left_parser->parse_tokens(@$input);
+    my $right_result = $right_parser->parse_tokens(@$input);
     
     ok $left_result, 'Left-recursive parse succeeds';
     ok $right_result, 'Right-recursive parse succeeds';

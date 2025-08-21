@@ -18,17 +18,17 @@ subtest 'Right-recursive grammar with Leo items' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Test basic parsing still works
-    my $result = $parser->parse(qw(a));
+    my $result = $parser->parse_tokens(qw(a));
     ok $result, 'Parse single a';
     
-    $result = $parser->parse(qw(a a a));
+    $result = $parser->parse_tokens(qw(a a a));
     ok $result, 'Parse a a a with right recursion';
     
     # Test longer inputs that benefit from Leo optimization
-    $result = $parser->parse(('a') x 10);
+    $result = $parser->parse_tokens(('a') x 10);
     ok $result, 'Parse 10 a\'s with Leo optimization';
     
-    $result = $parser->parse(('a') x 20);
+    $result = $parser->parse_tokens(('a') x 20);
     ok $result, 'Parse 20 a\'s with Leo optimization';
 };
 
@@ -44,13 +44,13 @@ subtest 'Complex right-recursive grammar' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse(qw(num + num + num + num));
+    my $result = $parser->parse_tokens(qw(num + num + num + num));
     ok $result, 'Parse right-recursive addition chain';
     
-    $result = $parser->parse(qw(num * num * num * num));
+    $result = $parser->parse_tokens(qw(num * num * num * num));
     ok $result, 'Parse right-recursive multiplication chain';
     
-    $result = $parser->parse(qw(num + num * num + num));
+    $result = $parser->parse_tokens(qw(num + num * num + num));
     ok $result, 'Parse mixed right-recursive expression';
 };
 
@@ -67,7 +67,7 @@ subtest 'Verify Leo item creation' => sub {
     
     # Create a long chain that should definitely trigger Leo optimization
     my @input = ('a') x 50;
-    my $result = $parser->parse(@input);
+    my $result = $parser->parse_tokens(@input);
     ok $result, 'Parse 50 a\'s - should use Leo items for efficiency';
     
     # With Boolean semiring to test recognition
@@ -76,6 +76,6 @@ subtest 'Verify Leo item creation' => sub {
         semiring => BooleanSemiring->new()
     );
     
-    $result = $bool_parser->parse(@input);
+    $result = $bool_parser->parse_tokens(@input);
     ok $result, 'Boolean parse of 50 a\'s with Leo optimization';
 };

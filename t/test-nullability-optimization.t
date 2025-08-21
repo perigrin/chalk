@@ -21,16 +21,16 @@ subtest 'Parse with nullable productions' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # These should all parse successfully due to nullable optimizations
-    my $result = $parser->parse(qw(a b));
+    my $result = $parser->parse_tokens(qw(a b));
     ok $result, 'Parse a b';
     
-    $result = $parser->parse(qw(a));
+    $result = $parser->parse_tokens(qw(a));
     ok $result, 'Parse a (B nullable)';
     
-    $result = $parser->parse(qw(b));
+    $result = $parser->parse_tokens(qw(b));
     ok $result, 'Parse b (A nullable)';
     
-    $result = $parser->parse();
+    $result = $parser->parse_tokens();
     ok $result, 'Parse empty (both nullable)';
 };
 
@@ -45,10 +45,10 @@ subtest 'Nullable chains' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse(qw(c));
+    my $result = $parser->parse_tokens(qw(c));
     ok $result, 'Parse c with nullable prefix';
     
-    $result = $parser->parse();
+    $result = $parser->parse_tokens();
     ok $result, 'Parse empty with all nullable';
 };
 
@@ -63,16 +63,16 @@ subtest 'Mixed nullable and terminal' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse(qw(a b c));
+    my $result = $parser->parse_tokens(qw(a b c));
     ok $result, 'Parse a b c (full)';
     
-    $result = $parser->parse(qw(b c));
+    $result = $parser->parse_tokens(qw(b c));
     ok $result, 'Parse b c (no a)';
     
-    $result = $parser->parse(qw(a b));
+    $result = $parser->parse_tokens(qw(a b));
     ok $result, 'Parse a b (no c)';
     
-    $result = $parser->parse(qw(b));
+    $result = $parser->parse_tokens(qw(b));
     ok $result, 'Parse b (minimal)';
 };
 
@@ -91,12 +91,12 @@ subtest 'Verify optimization with complex grammar' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse(qw(num));
+    my $result = $parser->parse_tokens(qw(num));
     ok $result, 'Parse single num with nullable tails';
     
-    $result = $parser->parse(qw(num + num));
+    $result = $parser->parse_tokens(qw(num + num));
     ok $result, 'Parse addition with nullable tails';
     
-    $result = $parser->parse(qw(num * num + num));
+    $result = $parser->parse_tokens(qw(num * num + num));
     ok $result, 'Parse complex expression with nullable tails';
 };
