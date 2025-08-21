@@ -208,16 +208,15 @@ class SPPFForest {
     }
 
     method create_sequence_node( $left_node, $right_node ) {
-
- # For now, just return the left node (placeholder for proper SPPF construction)
+        # TODO: Implement proper SPPF sequence node construction
+        # For now, just return the left node (placeholder for proper SPPF construction)
         return $left_node;
     }
 
     method add_alternative( $node1, $node2 ) {
-
+        # TODO: Implement proper SPPF alternative merging
         # For now, just add the alternative as a packed node (placeholder)
         if ( $node1 isa SPPFSymbolNode && $node2 isa SPPFSymbolNode ) {
-
             # Add packed node representing the alternative
             my $packed = SPPFPackedNode->new( rule => undef );
             $packed->add_child($node2);
@@ -393,14 +392,19 @@ class EarleyChart {
         # Find all complete items that span [0,n] with LHS = start_symbol
         my $result = $semiring->add_id;
 
-        for my $item ( $self->items_ending_at($n) ) {
+        my @items = $self->items_ending_at($n);
+
+        for my $item ( @items ) {
             next unless $item->is_complete;
             next unless $item->start_pos == 0;
             next unless $item->rule->lhs eq $start_symbol;
 
             my $element = $self->get_element($item);
-            $result = $result + $element if $element;
+            if ($element) {
+                $result = $result + $element;
+            }
         }
+
 
         # Check if we found any valid parses
         return $result == $semiring->add_id ? undef : $result;
@@ -417,7 +421,8 @@ class Parser {
         my $chart = EarleyChart->new( semiring => $semiring, );
 
        # Initialize chart by predicting all rules for start symbol at position 0
-        for my $rule ( $grammar->rules_for( $grammar->start_symbol ) ) {
+        my $start_symbol = $grammar->start_symbol;
+        for my $rule ( $grammar->rules_for( $start_symbol ) ) {
             my $start_item = EarleyItem->new(
                 start_pos => 0,
                 rule      => $rule,
@@ -441,17 +446,19 @@ class Parser {
 
         while ( my $item = shift @agenda ) {
             my $element = $chart->get_element($item);
-            next unless $element;
+            next unless defined $element;
 
             if ( $item->is_complete ) {
                 $self->complete( $item, $element, $chart, \@agenda );
             }
-            elsif ( my $next_sym = $item->next_symbol ) {
+            elsif ( defined( my $next_sym = $item->next_symbol ) ) {
                 if ( $grammar->is_nonterminal($next_sym) ) {
                     $self->predict( $item, $next_sym, $chart, \@agenda );
                 }
                 elsif ( $pos < @$input && $next_sym eq $input->[$pos] ) {
                     $self->scan( $item, $element, $chart, $pos );
+                }
+                else {
                 }
             }
         }
@@ -480,6 +487,10 @@ class Parser {
         # 1. Only one item is waiting for this LHS
         # 2. The waiting item will be complete after this reduction
         # 3. The rule is right-recursive
+        # 
+        # NOTE: Joop Leo's second optimization for left-recursion could be implemented
+        # here, but performance testing shows left-recursion is already faster than
+        # right-recursion in our Earley implementation, so it's not needed.
         if (   @waiting_for_lhs == 1
             && @leo_waiting == 0
             && $waiting_for_lhs[0]->rule->is_right_recursive
@@ -616,14 +627,18 @@ class Parser {
 }
 
 class GrammarRule {
+    # TODO: Enhance to handle lexemes/regex patterns for terminals
+    # Currently only supports exact token matching, but we need
+    # pattern-based terminals like [a-zA-Z_][a-zA-Z0-9_]* for identifiers
     use overload '""' => 'to_string';
     use Digest::SHA qw(sha1_hex);
+    use Encode qw(encode_utf8);
 
     field $lhs :param :reader;
     field $rhs :param :reader;
     field $probability :param :reader = 1.0;
 
-    field $id :reader = sha1_hex( $lhs, $rhs->@* );
+    field $id :reader = sha1_hex( map { encode_utf8($_) } ($lhs, $rhs->@*) );
 
     method is_right_recursive() { $lhs eq $rhs->[-1] }
     method is_left_recursive()  { $lhs eq $rhs->[0] }
