@@ -160,6 +160,7 @@ class EarleyChart {
     field %by_end_pos;
     field %by_start_pos;
     field %predicted;    # Track what we've predicted at each position
+    field %completed;    # Track what we've completed
 
     method add_item($earley_item) {
         $chart{ $earley_item->key } = $earley_item;
@@ -193,6 +194,14 @@ class EarleyChart {
 
     method has_item($item) {
         return exists $chart{$item};
+    }
+
+    method has_completed($item) {
+        return exists $completed{$item};
+    }
+
+    method mark_completed($item) {
+        $completed{$item} = 1;
     }
 
     method goal_value( $start_symbol, $n ) {
@@ -265,6 +274,10 @@ class Parser {
     }
 
     method complete( $completed_item, $completed_element, $chart, $agenda ) {
+        # Check if we've already completed this item
+        return if $chart->has_completed($completed_item);
+        $chart->mark_completed($completed_item);
+        
         my $lhs = $completed_item->rule->lhs;
 
         my @waiting = $chart->items_ending_at( $completed_item->start_pos );
@@ -362,6 +375,11 @@ class Parser {
 
     method predict( $item, $nonterminal, $chart, $agenda ) {
         my $pos = $item->end_pos;
+
+        # Check if we've already predicted this nonterminal at this position
+        # This saves the work of creating items we know will be duplicates
+        return if $chart->has_predicted($nonterminal, $pos);
+        $chart->mark_predicted($nonterminal, $pos);
 
         for my $rule ( $grammar->rules_for($nonterminal) ) {
             my $predicted_item = EarleyItem->new(
