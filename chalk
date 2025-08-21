@@ -1,3 +1,5 @@
+#!/usr/bin/env perl
+# vim: ft=perl
 use 5.42.0;
 use experimental qw(class builtin);
 use utf8;
@@ -8,10 +10,12 @@ class Element {
       '+'      => 'add',
       '*'      => 'multiply',
       '""'     => 'to_string',
+      '=='     => 'equals',
       fallback => 1;
 
-    method add($other)                       { ... }
+    method add( $other, $swap      = undef ) { ... }
     method multiply( $other, $swap = undef ) { ... }
+    method equals( $other, $swap   = undef ) { ... }
 
     method score()     { ... }
     method to_string() { ... }
@@ -28,9 +32,15 @@ class BooleanElement :isa(Element) {
         BooleanElement->new( value => $value && $other->value );
     }
 
-    method add($other) {
+    method add( $other, $swap = undef ) {
         BooleanElement->new( value => $value || $other->value );
     }
+
+    method equals( $other, $swap = undef ) {
+        return 0 unless ref($other) eq ref($self);
+        return $value == $other->value;
+    }
+
     method to_string(@) { $value ? 'true' : 'false' }
 }
 
@@ -45,7 +55,6 @@ class BooleanSemiring :isa(Semiring) {
 }
 
 class ViterbiElement :isa(Element) {
-
     field $score :param :reader;
     field $path  :param :reader;
 
@@ -60,6 +69,12 @@ class ViterbiElement :isa(Element) {
     method add( $other, $swap = undef ) {
         return $self if $score > $other->score;
         return $other;
+    }
+
+    method equals( $other, $swap = undef ) {
+        return 0 unless ref($other) eq ref($self);
+        return $score == $other->score
+          && join( ',', $path->@* ) eq join( ',', $other->path->@* );
     }
 
     method to_string(@) {
@@ -122,8 +137,7 @@ class EarleyItem {
 }
 
 class EarleyChart {
-    field $semiring  :param;
-    field $goal_item :param;
+    field $semiring :param;
     field %chart;
     field %by_end_pos;
     field %by_start_pos;
@@ -150,7 +164,22 @@ class EarleyChart {
         return;
     }
 
-    method goal_value() { $self->get_element($goal_item) }
+    method goal_value( $start_symbol, $n ) {
+        # Find all complete items that span [0,n] with LHS = start_symbol
+        my $result = $semiring->add_id;
+
+        for my $item ($self->items_ending_at($n)) {
+            next unless $item->is_complete;
+            next unless $item->start_pos == 0;
+            next unless $item->rule->lhs eq $start_symbol;
+
+            my $element = $self->get_element($item);
+            $result = $result + $element if $element;
+        }
+
+        # Check if we found any valid parses
+        return $result == $semiring->add_id ? undef : $result;
+    }
 }
 
 class Parser {
@@ -160,33 +189,26 @@ class Parser {
     method parse(@input) {
         my $n = scalar @input;
 
-        my $chart = EarleyChart->new(
-            semiring  => $semiring,
-            goal_item => EarleyItem->new(
+        my $chart = EarleyChart->new( semiring => $semiring, );
+
+        # Initialize chart by predicting all rules for start symbol at position 0
+        for my $rule ($grammar->rules_for($grammar->start_symbol)) {
+            my $start_item = EarleyItem->new(
                 start_pos => 0,
-                rule      => $grammar->start_rule,
-                dot_pos   => scalar( $grammar->start_rule->rhs->@* ),
-                end_pos   => $n,
-            ),
-        );
+                rule      => $rule,
+                dot_pos   => 0,
+                end_pos   => 0,
+            );
 
-        my $start_item = EarleyItem->new(
-            start_pos => 0,
-            rule      => $grammar->start_rule,
-            dot_pos   => 0,
-            end_pos   => 0,
-        );
-
-        # Add initial element for start item
-        my $start_element =
-          $semiring->init_element_from_rule( $grammar->start_rule );
-        $chart->add_element( $start_item, $start_element );
+            my $start_element = $semiring->init_element_from_rule($rule);
+            $chart->add_element($start_item, $start_element);
+        }
 
         for my $p ( 0 .. $n ) {
             $self->process_position( $p, $chart, \@input );
         }
 
-        return $chart->goal_value();
+        return $chart->goal_value( $grammar->start_symbol, $n );
     }
 
     method process_position( $pos, $chart, $input ) {

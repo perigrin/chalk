@@ -11,7 +11,6 @@ require "$RealBin/../chalk";
 
 subtest 'Basic arithmetic grammar' => sub {
     my $grammar = Grammar->build_grammar(
-        [ 'S' => ['E'] ],
         [ 'E' => [qw(E + T)] ],
         [ 'E' => ['T'] ],
         [ 'T' => [qw(T * F)] ],
@@ -57,7 +56,6 @@ subtest 'Ambiguous grammar' => sub {
 
 subtest 'Left-recursive grammar' => sub {
     my $grammar = Grammar->build_grammar(
-        [ 'Start' => ['S'] ],
         [ 'S' => [qw(S a)] ],
         [ 'S' => ['a'] ],
     );
@@ -73,7 +71,6 @@ subtest 'Left-recursive grammar' => sub {
 
 subtest 'Right-recursive grammar' => sub {
     my $grammar = Grammar->build_grammar(
-        [ 'Start' => ['S'] ],
         [ 'S' => [qw(a S)] ],
         [ 'S' => ['a'] ],
     );
@@ -142,7 +139,6 @@ subtest 'Boolean vs Viterbi semiring' => sub {
 
 subtest 'Complex nested grammar' => sub {
     my $grammar = Grammar->build_grammar(
-        [ 'Start' => ['S'] ],
         [ 'S' => [qw(NP VP)] ],
         [ 'NP' => [qw(Det N)] ],
         [ 'NP' => ['N'] ],
