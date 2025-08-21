@@ -470,7 +470,7 @@ class Parser {
                     # Try to match terminal with lexeme support
                     my $pattern = $item->rule->terminal_to_regex($next_sym);
                     pos($input_string) = $pos;
-                    if ( my $matched = $input_string =~ /\G($pattern)/gc ) {
+                    if ( $input_string =~ /\G($pattern)/gc ) {
                         my $match_length = length($1);
                         $self->scan( $item, $element, $chart, $pos,
                             $match_length );
