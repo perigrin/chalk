@@ -136,6 +136,24 @@ class EarleyItem {
     }
 }
 
+class LeoItem {
+    use overload '""' => 'key';
+
+    field $symbol    :param :reader;
+    field $start_pos :param :reader;
+    field $end_pos   :param :reader;
+    field $top_item  :param :reader;
+    field $rule      :reader = $top_item->rule;
+
+    method is_complete() { 1 }
+    method next_symbol() { }
+
+    method key(@) {
+        return "LEO:$symbol|$start_pos|$end_pos";
+    }
+
+}
+
 class EarleyChart {
     field $semiring :param;
     field %chart;
@@ -165,10 +183,11 @@ class EarleyChart {
     }
 
     method goal_value( $start_symbol, $n ) {
+
         # Find all complete items that span [0,n] with LHS = start_symbol
         my $result = $semiring->add_id;
 
-        for my $item ($self->items_ending_at($n)) {
+        for my $item ( $self->items_ending_at($n) ) {
             next unless $item->is_complete;
             next unless $item->start_pos == 0;
             next unless $item->rule->lhs eq $start_symbol;
@@ -191,8 +210,8 @@ class Parser {
 
         my $chart = EarleyChart->new( semiring => $semiring, );
 
-        # Initialize chart by predicting all rules for start symbol at position 0
-        for my $rule ($grammar->rules_for($grammar->start_symbol)) {
+       # Initialize chart by predicting all rules for start symbol at position 0
+        for my $rule ( $grammar->rules_for( $grammar->start_symbol ) ) {
             my $start_item = EarleyItem->new(
                 start_pos => 0,
                 rule      => $rule,
@@ -201,7 +220,7 @@ class Parser {
             );
 
             my $start_element = $semiring->init_element_from_rule($rule);
-            $chart->add_element($start_item, $start_element);
+            $chart->add_element( $start_item, $start_element );
         }
 
         for my $p ( 0 .. $n ) {
@@ -216,6 +235,7 @@ class Parser {
 
         while ( my $item = shift @agenda ) {
             my $element = $chart->get_element($item);
+            next unless $element;
 
             if ( $item->is_complete ) {
                 $self->complete( $item, $element, $chart, \@agenda );
@@ -232,15 +252,51 @@ class Parser {
     }
 
     method complete( $completed_item, $completed_element, $chart, $agenda ) {
-        my $lhs     = $completed_item->rule->lhs;
-        my @waiting = $chart->items_ending_at( $completed_item->start_pos );
+        my $lhs = $completed_item->rule->lhs;
 
-    # Find items waiting for this nonterminal at the completion's start position
-        for my $waiting_item (@waiting) {
+
+        my @waiting = $chart->items_ending_at( $completed_item->start_pos );
+        
+        # Separate Leo items from regular items
+        my @leo_waiting = grep { $_ isa LeoItem && $_->symbol eq $lhs } @waiting;
+        my @regular_waiting = grep { !($_ isa LeoItem) } @waiting;
+        
+        my @waiting_for_lhs =
+          grep { !$_->is_complete && $_->next_symbol eq $lhs } @regular_waiting;
+
+        # Check for deterministic reduction (only if no Leo items waiting)
+        # Leo items are only for deterministic right-recursive chains where:
+        # 1. Only one item is waiting for this LHS
+        # 2. The waiting item will be complete after this reduction
+        # 3. The rule is right-recursive
+        if ( @waiting_for_lhs == 1 && @leo_waiting == 0 &&
+             $waiting_for_lhs[0]->rule->is_right_recursive &&
+             $waiting_for_lhs[0]->dot_pos == scalar($waiting_for_lhs[0]->rule->rhs->@*) - 1 )
+        {
+            my $waiting_item = $waiting_for_lhs[0];
+
+            my $leo = LeoItem->new(
+                symbol    => $lhs,
+                start_pos => $waiting_item->start_pos,
+                end_pos   => $completed_item->end_pos,  # Use completed item's end
+                top_item  => $waiting_item,
+            );
+
+            my $waiting_element  = $chart->get_element($waiting_item);
+            next unless $waiting_element;
+            my $combined_element = $waiting_element * $completed_element;
+            $chart->add_element( $leo, $combined_element );
+            push @$agenda, $leo;
+            return;  # Skip normal completion
+        }
+
+        # Normal completion for regular items
+        for my $waiting_item (@regular_waiting) {
             next if $waiting_item->is_complete;
             next unless ( $waiting_item->next_symbol // '' ) eq $lhs;
 
             my $waiting_element = $chart->get_element($waiting_item);
+            next unless $waiting_element;
 
             # Semiring multiplication ⊗ combines sequential components
             my $combined_element = $waiting_element * $completed_element;
@@ -252,6 +308,31 @@ class Parser {
                 end_pos   => $completed_item->end_pos
             );
 
+            $chart->add_element( $new_item, $combined_element );
+            push @$agenda, $new_item;
+        }
+        
+        # Handle Leo items waiting for this completion
+        for my $leo_item (@leo_waiting) {
+            # Unpack the Leo chain to get the original waiting item
+            my $current = $leo_item->top_item;
+            while ($current isa LeoItem) {
+                $current = $current->top_item;
+            }
+            
+            # Now $current is the original EarleyItem at the bottom of the chain
+            # Complete it with the current completed item
+            my $waiting_element = $chart->get_element($leo_item);
+            next unless $waiting_element;
+            my $combined_element = $waiting_element * $completed_element;
+            
+            my $new_item = EarleyItem->new(
+                start_pos => $current->start_pos,
+                rule      => $current->rule,
+                dot_pos   => $current->dot_pos + 1,
+                end_pos   => $completed_item->end_pos
+            );
+            
             $chart->add_element( $new_item, $combined_element );
             push @$agenda, $new_item;
         }
@@ -295,6 +376,9 @@ class GrammarRule {
     field $probability :param :reader = 1.0;
 
     field $id :reader = sha1_hex( $lhs, $rhs->@* );
+
+    method is_right_recursive() { $lhs eq $rhs->[-1] }
+    method is_left_recursive()  { $lhs eq $rhs->[0] }
 
     method to_string(@) {
         my $short_id = substr( $id, 0, 8 );
