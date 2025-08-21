@@ -22,16 +22,16 @@ class Semiring {
 }
 
 class BooleanElement :isa(Element) {
-    field $value :param;
+    field $value :param :reader;
 
-    method multiply($other) {
+    method multiply( $other, $swap = undef ) {
         BooleanElement->new( value => $value && $other->value );
     }
 
     method add($other) {
         BooleanElement->new( value => $value || $other->value );
     }
-    method to_string() { $value ? 'true' : 'false' }
+    method to_string(@) { $value ? 'true' : 'false' }
 }
 
 class BooleanSemiring :isa(Semiring) {
@@ -62,7 +62,7 @@ class ViterbiElement :isa(Element) {
         return $other;
     }
 
-    method to_string() {
+    method to_string(@) {
         return sprintf '%.4f[%s]', exp($score), join ',', $path->@*;
     }
 
@@ -87,12 +87,14 @@ class ViterbiSemiring :isa(Semiring) {
     method init_element_from_rule($rule) {
         ViterbiElement->new(
             score => log( $rule->probability ),
-            path  => ["$rule"]
+            path  => [$rule]
         );
     }
 }
 
 class EarleyItem {
+    use overload '""' => 'key';
+
     field $start_pos :param :reader;
     field $rule      :param :reader;
     field $dot_pos   :param :reader;
@@ -114,13 +116,7 @@ class EarleyItem {
         );
     }
 
-    method to_string() {
-        my $dotted_rule = join ' ', $rule->rhs->@[ 0 .. $dot_pos - 1 ], '•',
-          $rule->rhs->@[ $dot_pos .. $rule->rhs->$#* ];
-        return "[$start_pos, $dotted_rule, $end_pos]";
-    }
-
-    method key() {
+    method key(@) {
         return "$start_pos|" . $rule->id . "|$dot_pos|$end_pos";
     }
 }
@@ -141,7 +137,7 @@ class EarleyChart {
     method add_element( $item, $element ) {
         my $key     = $item->key;
         my $current = $self->get_element($key);
-        $chart{$key} = $current + $element;
+        $chart{$key} = $current ? $current + $element : $element;
 
         push $by_end_pos{ $item->end_pos }->@*,     $item;
         push $by_start_pos{ $item->start_pos }->@*, $item;
@@ -162,17 +158,16 @@ class Parser {
     field $grammar :param;
 
     method parse(@input) {
-        my $n         = scalar @input;
-        my $goal_item = EarleyItem->new(
-            start_pos => 0,
-            rule      => $grammar->start_rule,
-            dot_pos   => 0,
-            end_pos   => $n,
-        );
+        my $n = scalar @input;
 
         my $chart = EarleyChart->new(
             semiring  => $semiring,
-            goal_item => $goal_item,
+            goal_item => EarleyItem->new(
+                start_pos => 0,
+                rule      => $grammar->start_rule,
+                dot_pos   => scalar( $grammar->start_rule->rhs->@* ),
+                end_pos   => $n,
+            ),
         );
 
         my $start_item = EarleyItem->new(
@@ -182,9 +177,13 @@ class Parser {
             end_pos   => 0,
         );
 
-        $chart->add_item($start_item);
-        for my $pos ( 0 .. $n ) {
-            $self->process_position( $pos, $chart, \@input );
+        # Add initial element for start item
+        my $start_element =
+          $semiring->init_element_from_rule( $grammar->start_rule );
+        $chart->add_element( $start_item, $start_element );
+
+        for my $p ( 0 .. $n ) {
+            $self->process_position( $p, $chart, \@input );
         }
 
         return $chart->goal_value();
@@ -245,7 +244,7 @@ class Parser {
                 end_pos   => $item->end_pos
             );
 
-            next if $chart->get_element($predicted_item) eq $semiring->add_id;
+            next if $chart->get_element($predicted_item);
 
             my $rule_element = $semiring->init_element_from_rule($rule);
             $chart->add_element( $predicted_item, $rule_element );
@@ -275,7 +274,7 @@ class GrammarRule {
 
     field $id :reader = sha1_hex( $lhs, $rhs->@* );
 
-    method to_string() {
+    method to_string(@) {
         my $short_id = substr( $id, 0, 8 );
         return "($short_id) $lhs -> " . join ' ', $rhs->@*;
     }
@@ -309,7 +308,7 @@ class Grammar {
         return exists $rules->{$symbol};
     }
 
-    method to_string() {
+    method to_string(@) {
         my $grammar = '';
         $grammar .= "Grammar:\n";
         for my $nt ( sort keys $rules->%* ) {
