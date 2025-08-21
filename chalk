@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # vim: ft=perl
 use 5.42.0;
-use experimental qw(class builtin);
+use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use open qw/:std :utf8/;
 
@@ -254,13 +254,13 @@ class Parser {
     method complete( $completed_item, $completed_element, $chart, $agenda ) {
         my $lhs = $completed_item->rule->lhs;
 
-
         my @waiting = $chart->items_ending_at( $completed_item->start_pos );
-        
+
         # Separate Leo items from regular items
-        my @leo_waiting = grep { $_ isa LeoItem && $_->symbol eq $lhs } @waiting;
-        my @regular_waiting = grep { !($_ isa LeoItem) } @waiting;
-        
+        my @leo_waiting =
+          grep { $_ isa LeoItem && $_->symbol eq $lhs } @waiting;
+        my @regular_waiting = grep { !( $_ isa LeoItem ) } @waiting;
+
         my @waiting_for_lhs =
           grep { !$_->is_complete && $_->next_symbol eq $lhs } @regular_waiting;
 
@@ -269,25 +269,27 @@ class Parser {
         # 1. Only one item is waiting for this LHS
         # 2. The waiting item will be complete after this reduction
         # 3. The rule is right-recursive
-        if ( @waiting_for_lhs == 1 && @leo_waiting == 0 &&
-             $waiting_for_lhs[0]->rule->is_right_recursive &&
-             $waiting_for_lhs[0]->dot_pos == scalar($waiting_for_lhs[0]->rule->rhs->@*) - 1 )
+        if (   @waiting_for_lhs == 1
+            && @leo_waiting == 0
+            && $waiting_for_lhs[0]->rule->is_right_recursive
+            && $waiting_for_lhs[0]->dot_pos ==
+            scalar( $waiting_for_lhs[0]->rule->rhs->@* ) - 1 )
         {
             my $waiting_item = $waiting_for_lhs[0];
 
             my $leo = LeoItem->new(
                 symbol    => $lhs,
                 start_pos => $waiting_item->start_pos,
-                end_pos   => $completed_item->end_pos,  # Use completed item's end
-                top_item  => $waiting_item,
+                end_pos  => $completed_item->end_pos, # Use completed item's end
+                top_item => $waiting_item,
             );
 
-            my $waiting_element  = $chart->get_element($waiting_item);
+            my $waiting_element = $chart->get_element($waiting_item);
             next unless $waiting_element;
             my $combined_element = $waiting_element * $completed_element;
             $chart->add_element( $leo, $combined_element );
             push @$agenda, $leo;
-            return;  # Skip normal completion
+            return;    # Skip normal completion
         }
 
         # Normal completion for regular items
@@ -311,28 +313,29 @@ class Parser {
             $chart->add_element( $new_item, $combined_element );
             push @$agenda, $new_item;
         }
-        
+
         # Handle Leo items waiting for this completion
         for my $leo_item (@leo_waiting) {
+
             # Unpack the Leo chain to get the original waiting item
             my $current = $leo_item->top_item;
-            while ($current isa LeoItem) {
+            while ( $current isa LeoItem ) {
                 $current = $current->top_item;
             }
-            
+
             # Now $current is the original EarleyItem at the bottom of the chain
             # Complete it with the current completed item
             my $waiting_element = $chart->get_element($leo_item);
             next unless $waiting_element;
             my $combined_element = $waiting_element * $completed_element;
-            
+
             my $new_item = EarleyItem->new(
                 start_pos => $current->start_pos,
                 rule      => $current->rule,
                 dot_pos   => $current->dot_pos + 1,
                 end_pos   => $completed_item->end_pos
             );
-            
+
             $chart->add_element( $new_item, $combined_element );
             push @$agenda, $new_item;
         }
@@ -352,6 +355,26 @@ class Parser {
             my $rule_element = $semiring->init_element_from_rule($rule);
             $chart->add_element( $predicted_item, $rule_element );
             push @$agenda, $predicted_item;
+        }
+
+        # Aycock-Horspool optimization: if the nonterminal is nullable,
+        # we can also advance the dot past it immediately
+        if ( $grammar->is_nullable($nonterminal) ) {
+            my $advanced_item = EarleyItem->new(
+                start_pos => $item->start_pos,
+                rule      => $item->rule,
+                dot_pos   => $item->dot_pos + 1,
+                end_pos   => $item->end_pos
+            );
+
+            # Only add if not already present
+            unless ( $chart->get_element($advanced_item) ) {
+                my $current_element = $chart->get_element($item);
+                if ($current_element) {
+                    $chart->add_element( $advanced_item, $current_element );
+                    push @$agenda, $advanced_item;
+                }
+            }
         }
     }
 
@@ -380,6 +403,30 @@ class GrammarRule {
     method is_right_recursive() { $lhs eq $rhs->[-1] }
     method is_left_recursive()  { $lhs eq $rhs->[0] }
 
+    method is_nullable($grammar) {
+        state $seen = {};
+
+        # Empty production is nullable
+        return 1 if @$rhs == 0;
+
+        # All symbols in RHS must be nullable
+        return 1 if all {
+            my @rules = $grammar->rules_for($_);
+
+            # Terminals (no rules) are not nullable
+            return 0 unless @rules;
+
+            # In cycle, assume not nullable
+            return 0 if $seen->{$_};
+
+            # Check if this symbol is nullable via any of its rules
+            local $seen->{$_} = 1;
+            return 0 unless any { $_->is_nullable($grammar) } @rules;
+        } @$rhs;
+
+        return 0;
+    }
+
     method to_string(@) {
         my $short_id = substr( $id, 0, 8 );
         return "($short_id) $lhs -> " . join ' ', $rhs->@*;
@@ -389,6 +436,7 @@ class GrammarRule {
 class Grammar {
     field $rules        :param :reader;
     field $start_symbol :param :reader;
+    field %nullable_cache;
 
     my sub new_rule( $lhs, $rhs ) {
         return GrammarRule->new( lhs => $lhs, rhs => $rhs );
@@ -412,6 +460,25 @@ class Grammar {
 
     method is_nonterminal($symbol) {
         return exists $rules->{$symbol};
+    }
+
+    method is_nullable($symbol) {
+
+        # Check cache first
+        return $nullable_cache{$symbol} if exists $nullable_cache{$symbol};
+
+       # Compute nullability by checking if any rule for this symbol is nullable
+        my $result = 0;
+        for my $rule ( $self->rules_for($symbol) ) {
+            if ( $rule->is_nullable($self) ) {
+                $result = 1;
+                last;
+            }
+        }
+
+        # Cache the result
+        $nullable_cache{$symbol} = $result;
+        return $result;
     }
 
     method to_string(@) {
