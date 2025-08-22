@@ -3,7 +3,7 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
-use open qw/:std :utf8/;
+use open qw(:std :utf8);
 
 class Element {
     use overload
@@ -77,7 +77,7 @@ class ViterbiElement :isa(Element) {
     }
 
     method to_string(@) {
-        return sprintf '%.4f[%s]', exp($score), join ',', $path->@*;
+        return sprintf( '%.4f[%s]', exp($score), join( ',', $path->@* ) );
     }
 
     method probability() { exp($score) }
@@ -95,7 +95,7 @@ class SPPFSymbolNode {
     field @packed_nodes;
 
     method add_packed_node($packed_node) {
-        push @packed_nodes, $packed_node;
+        push( @packed_nodes, $packed_node );
     }
 
     method packed_nodes() { @packed_nodes }
@@ -114,7 +114,7 @@ class SPPFPackedNode {
     field @children;
 
     method add_child($child) {
-        push @children, $child;
+        push( @children, $child );
     }
 
     method children() { @children }
@@ -177,8 +177,8 @@ class SPPFViterbiElement :isa(Element) {
     }
 
     method to_string(@) {
-        return sprintf '%.4f[%s] SPPF:%s', exp($score), join( ',', $path->@* ),
-          $sppf_node;
+        return sprintf( '%.4f[%s] SPPF:%s',
+            exp($score), join( ',', $path->@* ), $sppf_node );
     }
 
     method probability() { exp($score) }
@@ -254,9 +254,10 @@ class SPPFViterbiSemiring :isa(Semiring) {
     );
 
     method init_element_from_rule($rule) {
-        my $symbol_node = $forest->get_or_create_symbol_node(
-            $rule->lhs, 0, 0    # Position will be updated during parsing
-        );
+
+        # Position will be updated during parsing
+        my $symbol_node =
+          $forest->get_or_create_symbol_node( $rule->lhs, 0, 0 );
 
         return SPPFViterbiElement->new(
             score     => log( $rule->probability ),
@@ -301,7 +302,7 @@ class EarleyItem {
     field $dot_pos   :param :reader;
     field $end_pos   :param :reader;
 
-    method is_complete() { $dot_pos >= scalar( $rule->rhs->@* ) }
+    method is_complete() { return $dot_pos >= scalar( $rule->rhs->@* ); }
 
     method next_symbol() {
         return if $self->is_complete;
@@ -359,31 +360,31 @@ class EarleyChart {
         my $current = $self->get_element($key);
         $chart{$key} = $current ? $current + $element : $element;
 
-        push $by_end_pos{ $item->end_pos }->@*,     $item;
-        push $by_start_pos{ $item->start_pos }->@*, $item;
+        push( $by_end_pos{ $item->end_pos }->@*,     $item );
+        push( $by_start_pos{ $item->start_pos }->@*, $item );
 
         return $chart{$key};
     }
 
     method items_ending_at($end_pos) {
-        return $by_end_pos{$end_pos}->@* if exists $by_end_pos{$end_pos};
+        return $by_end_pos{$end_pos}->@* if exists( $by_end_pos{$end_pos} );
         return;
     }
 
-    method has_predicted( $nonterminal, $pos ) {
-        return exists $predicted{"$nonterminal|$pos"};
+    method has_predicted( $nonterminal, $pos, $rule_id ) {
+        return exists( $predicted{"$nonterminal|$pos|$rule_id"} );
     }
 
-    method mark_predicted( $nonterminal, $pos ) {
-        $predicted{"$nonterminal|$pos"} = 1;
+    method mark_predicted( $nonterminal, $pos, $rule_id ) {
+        $predicted{"$nonterminal|$pos|$rule_id"} = 1;
     }
 
     method has_item($item) {
-        return exists $chart{$item};
+        return exists( $chart{$item} );
     }
 
     method has_completed($item) {
-        return exists $completed{$item};
+        return exists( $completed{$item} );
     }
 
     method mark_completed($item) {
@@ -420,7 +421,7 @@ class Parser {
     method parse_tokens(@input) {
 
   # backward compatibility for some of our tests that predate the lexeme support
-        return $self->parse_string( join '', @input );
+        return $self->parse_string( join( '', @input ) );
     }
 
     method parse_string($input_string) {
@@ -441,23 +442,42 @@ class Parser {
         }
 
         # Process positions from 0 to end of string
-        my $pos          = 0;
-        my $input_length = length($input_string);
+        my $pos             = 0;
+        my $input_length    = length($input_string);
+        my $last_active_pos = 0;
 
         while ( $pos <= $input_length ) {
+            my @agenda_before = $chart->items_ending_at($pos);
             $self->process_position_string( $pos, $chart, $input_string );
-            $pos++;
+
+            # Track the last position where we had active items
+            if ( @agenda_before > 0 ) {
+                $last_active_pos = $pos;
+            }
+
+            ++$pos;
         }
 
-        return $chart->goal_value( $grammar->start_symbol, $input_length );
+        my $result =
+          $chart->goal_value( $grammar->start_symbol, $input_length );
+
+        # Show where parsing actually stopped if it failed
+        if ( !$result && $last_active_pos < $input_length ) {
+            warn(
+"🔍 PARSING STOPPED: Reached position $last_active_pos of $input_length ("
+                  . sprintf( "%.1f", 100 * $last_active_pos / $input_length )
+                  . "%)\n" );
+        }
+
+        return $result;
     }
 
     method process_position_string( $pos, $chart, $input_string ) {
         my @agenda = $chart->items_ending_at($pos);
 
-        while ( my $item = shift @agenda ) {
+        while ( my $item = shift(@agenda) ) {
             my $element = $chart->get_element($item);
-            next unless defined $element;
+            next unless defined($element);
 
             if ( $item->is_complete ) {
                 $self->complete( $item, $element, $chart, \@agenda );
@@ -515,18 +535,19 @@ class Parser {
         {
             my $waiting_item = $waiting_for_lhs[0];
 
+            # Use completed item's end position
             my $leo = LeoItem->new(
                 symbol    => $lhs,
                 start_pos => $waiting_item->start_pos,
-                end_pos  => $completed_item->end_pos, # Use completed item's end
-                top_item => $waiting_item,
+                end_pos   => $completed_item->end_pos,
+                top_item  => $waiting_item,
             );
 
             my $waiting_element = $chart->get_element($waiting_item);
             next unless $waiting_element;
             my $combined_element = $waiting_element * $completed_element;
             $chart->add_element( $leo, $combined_element );
-            push @$agenda, $leo;
+            push( @$agenda, $leo );
             return;    # Skip normal completion
         }
 
@@ -551,7 +572,7 @@ class Parser {
             # Only add if not already in chart
             unless ( $chart->has_item($new_item) ) {
                 $chart->add_element( $new_item, $combined_element );
-                push @$agenda, $new_item;
+                push( @$agenda, $new_item );
             }
         }
 
@@ -580,18 +601,20 @@ class Parser {
             # Only add if not already in chart
             unless ( $chart->has_item($new_item) ) {
                 $chart->add_element( $new_item, $combined_element );
-                push @$agenda, $new_item;
+                push( @$agenda, $new_item );
             }
         }
     }
 
     method predict( $item, $nonterminal, $chart, $agenda ) {
-        my $pos = $item->end_pos;
+        my $pos                = $item->end_pos;
+        my $predicting_rule_id = $item->rule->id;
 
-        # Check if we've already predicted this nonterminal at this position
-        # This saves the work of creating items we know will be duplicates
-        return if $chart->has_predicted( $nonterminal, $pos );
-        $chart->mark_predicted( $nonterminal, $pos );
+# Check if we've already predicted this nonterminal from this rule at this position
+# Multiple rules can predict the same nonterminal, so we track by rule origin
+        return
+          if $chart->has_predicted( $nonterminal, $pos, $predicting_rule_id );
+        $chart->mark_predicted( $nonterminal, $pos, $predicting_rule_id );
 
         for my $rule ( $grammar->rules_for($nonterminal) ) {
             my $predicted_item = EarleyItem->new(
@@ -605,7 +628,7 @@ class Parser {
             unless ( $chart->has_item($predicted_item) ) {
                 my $rule_element = $semiring->init_element_from_rule($rule);
                 $chart->add_element( $predicted_item, $rule_element );
-                push @$agenda, $predicted_item;
+                push( @$agenda, $predicted_item );
             }
         }
 
@@ -624,7 +647,7 @@ class Parser {
                 my $current_element = $chart->get_element($item);
                 if ($current_element) {
                     $chart->add_element( $advanced_item, $current_element );
-                    push @$agenda, $advanced_item;
+                    push( @$agenda, $advanced_item );
                 }
             }
         }
@@ -690,7 +713,7 @@ class GrammarRule {
 
     method to_string(@) {
         my $short_id = substr( $id, 0, 8 );
-        return "($short_id) $lhs -> " . join ' ', $rhs->@*;
+        return "($short_id) $lhs -> " . join( ' ', $rhs->@* );
     }
 
     method terminal_to_regex($terminal) {
@@ -707,15 +730,27 @@ class Grammar {
     field $start_symbol :param :reader;
     field %nullable_cache;
 
-    my sub new_rule( $lhs, $rhs ) {
-        return GrammarRule->new( lhs => $lhs, rhs => $rhs );
+    my sub new_rule( $lhs, $rhs, $probability = 1.0 ) {
+        $probability ||= 0.1;
+        return GrammarRule->new(
+            lhs         => $lhs,
+            rhs         => $rhs,
+            probability => $probability
+        );
     }
 
-    sub build_grammar( $class, @rules ) {
+    my sub insert ( $items, @list ) {
+        return [ ( map { $_, @$items } @list[ 0 .. $#list - 1 ] ), $list[-1] ];
+    }
+
+    sub build_grammar( $class, $auto_insert, @rules ) {
         my %rules = ();
-        for (@rules) {
-            my $lhs = $_->[0];
-            push @{ $rules{$lhs} //= [] }, new_rule(@$_);
+        for my $r (@rules) {
+            my ( $lhs, $rhs ) = @$r;
+            if ( @$auto_insert && @$rhs > 1 ) {
+                $r->[1] = insert( $auto_insert, @$rhs );
+            }
+            push( @{ $rules{$lhs} //= [] }, new_rule(@$r) );
         }
         return Grammar->new( rules => \%rules, start_symbol => $rules[0]->[0] );
     }
@@ -723,18 +758,18 @@ class Grammar {
     method start_rule() { return $rules->{$start_symbol}->[0] }
 
     method rules_for($symbol) {
-        return $rules->{$symbol}->@* if exists $rules->{$symbol};
+        return $rules->{$symbol}->@* if exists($rules->{$symbol});
         return;
     }
 
     method is_nonterminal($symbol) {
-        return exists $rules->{$symbol};
+        return exists($rules->{$symbol});
     }
 
     method is_nullable($symbol) {
 
         # Check cache first
-        return $nullable_cache{$symbol} if exists $nullable_cache{$symbol};
+        return $nullable_cache{$symbol} if exists($nullable_cache{$symbol});
 
        # Compute nullability by checking if any rule for this symbol is nullable
         my $result = 0;
@@ -753,7 +788,7 @@ class Grammar {
     method to_string(@) {
         my $grammar = '';
         $grammar .= "Grammar:\n";
-        for my $nt ( sort keys $rules->%* ) {
+        for my $nt ( sort(keys($rules->%*)) ) {
             for my $rule ( $rules->{$nt}->@* ) {
                 $grammar .= "  $rule\n";
             }
