@@ -24,68 +24,7 @@ class Semiring {
     method init_element_from_rule($rule) { ... }
 }
 
-class BooleanElement :isa(Element) {
-    field $value :param :reader;
-
-    method multiply( $other, $swap = undef ) {
-        BooleanElement->new( value => $value && $other->value );
-    }
-
-    method add( $other, $swap = undef ) {
-        BooleanElement->new( value => $value || $other->value );
-    }
-
-    method equals( $other, $swap = undef ) {
-        return 0 unless ref($other) eq ref($self);
-        return $value == $other->value;
-    }
-
-    method to_string(@) { $value ? 'true' : 'false' }
-}
-
-class BooleanSemiring :isa(Semiring) {
-    field $mul_id :reader = BooleanElement->new( value => 1 );
-    field $add_id :reader = BooleanElement->new( value => 0 );
-    field $root_element = BooleanElement->new( value => 1 );
-
-    method init_element_from_rule($rule) {
-        BooleanElement->new( value => $rule->probability > 0 ? 1 : 0 );
-    }
-}
-
-class ViterbiElement :isa(Element) {
-    field $score :param :reader;
-    field $path  :param :reader;
-
-    method multiply( $other, $swap = undef ) {
-
-        return ViterbiElement->new(
-            score => $score + $other->score,
-            path  => [ $path->@*, $other->path->@* ],
-        );
-    }
-
-    method add( $other, $swap = undef ) {
-        return $self if $score > $other->score;
-        return $other;
-    }
-
-    method equals( $other, $swap = undef ) {
-        return 0 unless ref($other) eq ref($self);
-        return $score == $other->score
-          && join( ',', $path->@* ) eq join( ',', $other->path->@* );
-    }
-
-    method to_string(@) {
-        return sprintf( '%.4f[%s]', exp($score), join( ',', $path->@* ) );
-    }
-
-    method probability() { exp($score) }
-    method best_path()   { $path->[0] }
-}
-
 # SPPF (Shared Packed Parse Forest) Node Classes
-
 class SPPFSymbolNode {
     use overload '""' => 'to_string';
 
@@ -233,19 +172,22 @@ class SPPFForest {
 }
 
 class SPPFViterbiSemiring :isa(Semiring) {
-    field $forest = SPPFForest->new();
+    field $forest :reader = SPPFForest->new();
+
     field $root_element :reader = SPPFViterbiElement->new(
         score     => 0,
         path      => [],
         sppf_node => $forest->get_or_create_symbol_node( "ROOT", 0, 0 ),
         forest    => $forest
     );
+
     field $mul_id :reader = SPPFViterbiElement->new(
         score     => 0,
         path      => ['ε'],
         sppf_node => $forest->get_or_create_symbol_node( "ε", 0, 0 ),
         forest    => $forest
     );
+
     field $add_id :reader = SPPFViterbiElement->new(
         score     => -1e10,
         path      => [],
@@ -254,8 +196,6 @@ class SPPFViterbiSemiring :isa(Semiring) {
     );
 
     method init_element_from_rule($rule) {
-
-        # Position will be updated during parsing
         my $symbol_node =
           $forest->get_or_create_symbol_node( $rule->lhs, 0, 0 );
 
@@ -264,32 +204,6 @@ class SPPFViterbiSemiring :isa(Semiring) {
             path      => [$rule],
             sppf_node => $symbol_node,
             forest    => $forest
-        );
-    }
-
-    method forest() {
-        return $forest;
-    }
-}
-
-class ViterbiSemiring :isa(Semiring) {
-    field $root_element :param :reader = ViterbiElement->new(
-        score => 0,
-        path  => [],
-    );
-    field $mul_id :reader = ViterbiElement->new(
-        score => 0,
-        path  => ['ε'],
-    );
-    field $add_id :reader = ViterbiElement->new(
-        score => -1e10,
-        path  => [],
-    );
-
-    method init_element_from_rule($rule) {
-        ViterbiElement->new(
-            score => log( $rule->probability ),
-            path  => [$rule]
         );
     }
 }
@@ -344,8 +258,7 @@ class LeoItem {
 class EarleyChart {
     field $semiring :param;
     field %chart;
-    field %by_end_pos;
-    field %by_start_pos;
+    field @by_end_pos;
     field %predicted;    # Track what we've predicted at each position
     field %completed;    # Track what we've completed
 
@@ -360,15 +273,18 @@ class EarleyChart {
         my $current = $self->get_element($key);
         $chart{$key} = $current ? $current + $element : $element;
 
-        push( $by_end_pos{ $item->end_pos }->@*,     $item );
-        push( $by_start_pos{ $item->start_pos }->@*, $item );
+        push( $by_end_pos[ $item->end_pos ]->@*, $item );
 
         return $chart{$key};
     }
 
     method items_ending_at($end_pos) {
-        return $by_end_pos{$end_pos}->@* if exists( $by_end_pos{$end_pos} );
+        return $by_end_pos[$end_pos]->@* if $by_end_pos[$end_pos];
         return;
+    }
+
+    method has_item($item) {
+        return exists( $chart{$item} );
     }
 
     method has_predicted( $nonterminal, $pos, $rule_id ) {
@@ -377,10 +293,6 @@ class EarleyChart {
 
     method mark_predicted( $nonterminal, $pos, $rule_id ) {
         $predicted{"$nonterminal|$pos|$rule_id"} = 1;
-    }
-
-    method has_item($item) {
-        return exists( $chart{$item} );
     }
 
     method has_completed($item) {
@@ -415,7 +327,7 @@ class EarleyChart {
 }
 
 class Parser {
-    field $semiring :param = ViterbiSemiring->new();
+    field $semiring :param = SPPFViterbiSemiring->new();
     field $grammar :param;
 
     method parse_tokens(@input) {
@@ -607,14 +519,12 @@ class Parser {
     }
 
     method predict( $item, $nonterminal, $chart, $agenda ) {
-        my $pos                = $item->end_pos;
-        my $predicting_rule_id = $item->rule->id;
+        my $pos = $item->end_pos;
 
 # Check if we've already predicted this nonterminal from this rule at this position
 # Multiple rules can predict the same nonterminal, so we track by rule origin
-        return
-          if $chart->has_predicted( $nonterminal, $pos, $predicting_rule_id );
-        $chart->mark_predicted( $nonterminal, $pos, $predicting_rule_id );
+        return if $chart->has_predicted( $nonterminal, $pos, $item->rule->id );
+        $chart->mark_predicted( $nonterminal, $pos, $item->rule->id );
 
         for my $rule ( $grammar->rules_for($nonterminal) ) {
             my $predicted_item = EarleyItem->new(
@@ -675,14 +585,12 @@ class GrammarRule {
     # Matrix operations could optimize prediction/completion phases while
     # lexemes handle terminal matching independently
     use overload '""' => 'to_string';
-    use Digest::SHA qw(sha1_hex);
-    use Encode      qw(encode_utf8);
 
+    state $next_id = 0;    # auto-incrementing rule ID
+    field $id  :reader = $next_id++;
     field $lhs :param :reader;
     field $rhs :param :reader;
     field $probability :param :reader = 1.0;
-
-    field $id :reader = sha1_hex( map { encode_utf8($_) } ( $lhs, $rhs->@* ) );
 
     method is_right_recursive() { $lhs eq $rhs->[-1] }
     method is_left_recursive()  { $lhs eq $rhs->[0] }
@@ -712,8 +620,7 @@ class GrammarRule {
     }
 
     method to_string(@) {
-        my $short_id = substr( $id, 0, 8 );
-        return "($short_id) $lhs -> " . join( ' ', $rhs->@* );
+        return "($id) $lhs -> " . join( ' ', $rhs->@* );
     }
 
     method terminal_to_regex($terminal) {
@@ -758,18 +665,18 @@ class Grammar {
     method start_rule() { return $rules->{$start_symbol}->[0] }
 
     method rules_for($symbol) {
-        return $rules->{$symbol}->@* if exists($rules->{$symbol});
+        return $rules->{$symbol}->@* if exists( $rules->{$symbol} );
         return;
     }
 
     method is_nonterminal($symbol) {
-        return exists($rules->{$symbol});
+        return exists( $rules->{$symbol} );
     }
 
     method is_nullable($symbol) {
 
         # Check cache first
-        return $nullable_cache{$symbol} if exists($nullable_cache{$symbol});
+        return $nullable_cache{$symbol} if exists( $nullable_cache{$symbol} );
 
        # Compute nullability by checking if any rule for this symbol is nullable
         my $result = 0;
@@ -788,7 +695,7 @@ class Grammar {
     method to_string(@) {
         my $grammar = '';
         $grammar .= "Grammar:\n";
-        for my $nt ( sort(keys($rules->%*)) ) {
+        for my $nt ( sort( keys( $rules->%* ) ) ) {
             for my $rule ( $rules->{$nt}->@* ) {
                 $grammar .= "  $rule\n";
             }
