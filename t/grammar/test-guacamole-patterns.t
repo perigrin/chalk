@@ -1,0 +1,184 @@
+#!/usr/bin/env perl
+# ABOUTME: Test complex grammar patterns found in Guacamole Perl parser
+# ABOUTME: Verify chalk parser handles real-world grammar complexity
+use 5.42.0;
+use Test2::V0;
+use FindBin      qw($RealBin);
+use experimental qw(defer);
+defer { done_testing() }
+
+require "$RealBin/../chalk";
+
+subtest 'Statement sequence patterns' => sub {
+    # Based on Guacamole: StatementSeq ::= Statement | Statement Semicolon | Statement Semicolon StatementSeq
+    my $grammar = Grammar->build_grammar(
+        [ 'StatementSeq' => ['Statement'] ],
+        [ 'StatementSeq' => [qw(Statement Semicolon)] ],
+        [ 'StatementSeq' => [qw(Statement Semicolon StatementSeq)] ],  # Right-recursive
+        [ 'Statement' => ['print'] ],
+        [ 'Semicolon' => [';'] ],
+    );
+    
+    my $parser = Parser->new(grammar => $grammar);
+    
+    # Single statement
+    my $result = $parser->parse_tokens('print');
+    ok $result, 'Parse single statement';
+    
+    # Statement with semicolon
+    $result = $parser->parse_tokens('print', ';');
+    ok $result, 'Parse statement with semicolon';
+    
+    # Multiple statements
+    $result = $parser->parse_tokens('print', ';', 'print');
+    ok $result, 'Parse statement sequence';
+    
+    # Long sequence
+    $result = $parser->parse_tokens('print', ';', 'print', ';', 'print');
+    ok $result, 'Parse long statement sequence';
+};
+
+subtest 'Complex for statement patterns' => sub {
+    # Simplified version of Guacamole ForStatement with multiple alternatives
+    my $grammar = Grammar->build_grammar(
+        [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon Statement RParen Block)] ],
+        [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon RParen Block)] ],
+        [ 'ForStatement' => [qw(for LParen Semicolon Statement Semicolon Statement RParen Block)] ],
+        [ 'ForStatement' => [qw(for LParen Semicolon Semicolon Statement RParen Block)] ],
+        [ 'ForStatement' => [qw(for LParen Expression RParen Block)] ],
+        [ 'Statement' => ['var'] ],
+        [ 'Expression' => ['expr'] ],
+        [ 'Block' => ['{}'] ],
+        [ 'LParen' => ['('] ],
+        [ 'RParen' => [')'] ],
+        [ 'Semicolon' => [';'] ],
+    );
+    
+    my $parser = Parser->new(grammar => $grammar);
+    
+    # C-style for loop
+    my $result = $parser->parse_tokens('for', '(', 'var', ';', 'var', ';', 'var', ')', '{}');
+    ok $result, 'Parse C-style for loop';
+    
+    # For loop with missing init
+    $result = $parser->parse_tokens('for', '(', ';', 'var', ';', 'var', ')', '{}');
+    ok $result, 'Parse for loop with missing init';
+    
+    # For loop with missing condition and increment
+    $result = $parser->parse_tokens('for', '(', ';', ';', 'var', ')', '{}');
+    ok $result, 'Parse for loop with missing condition and increment';
+    
+    # Foreach-style loop
+    $result = $parser->parse_tokens('for', '(', 'expr', ')', '{}');
+    ok $result, 'Parse foreach-style loop';
+};
+
+subtest 'Deeply nested optional elements' => sub {
+    # Pattern with many optional elements like Guacamole UseStatement
+    my $grammar = Grammar->build_grammar(
+        [ 'UseStatement' => [qw(use Class Version Expression)] ],
+        [ 'UseStatement' => [qw(use Class Version)] ],
+        [ 'UseStatement' => [qw(use Class Expression)] ],
+        [ 'UseStatement' => [qw(use Version)] ],
+        [ 'UseStatement' => [qw(use Class)] ],
+        [ 'Class' => ['Module'] ],
+        [ 'Version' => ['v1.0'] ],
+        [ 'Expression' => ['args'] ],
+    );
+    
+    my $parser = Parser->new(grammar => $grammar);
+    
+    # Full use statement
+    my $result = $parser->parse_tokens('use', 'Module', 'v1.0', 'args');
+    ok $result, 'Parse full use statement';
+    
+    # Use with version only
+    $result = $parser->parse_tokens('use', 'v1.0');
+    ok $result, 'Parse use with version only';
+    
+    # Use with module only
+    $result = $parser->parse_tokens('use', 'Module');
+    ok $result, 'Parse use with module only';
+    
+    # Use with module and args
+    $result = $parser->parse_tokens('use', 'Module', 'args');
+    ok $result, 'Parse use with module and args';
+};
+
+subtest 'Highly ambiguous expression hierarchy' => sub {
+    # Simplified version of Guacamole's expression precedence
+    my $grammar = Grammar->build_grammar(
+        [ 'Expression' => [qw(Expression + Expression)] ],
+        [ 'Expression' => [qw(Expression * Expression)] ],
+        [ 'Expression' => [qw(Expression - Expression)] ],
+        [ 'Expression' => [qw(Expression / Expression)] ],
+        [ 'Expression' => [qw(Expression % Expression)] ],
+        [ 'Expression' => [qw(Expression ** Expression)] ],
+        [ 'Expression' => [qw(Expression && Expression)] ],
+        [ 'Expression' => [qw(Expression || Expression)] ],
+        [ 'Expression' => [qw(( Expression ))] ],
+        [ 'Expression' => ['term'] ],
+    );
+    
+    my $parser = Parser->new(grammar => $grammar);
+    
+    # Simple expression
+    my $result = $parser->parse_tokens('term');
+    ok $result, 'Parse simple term';
+    
+    # Binary operation
+    $result = $parser->parse_tokens('term', '+', 'term');
+    ok $result, 'Parse binary addition';
+    
+    # Highly ambiguous expression
+    $result = $parser->parse_tokens('term', '+', 'term', '*', 'term', '-', 'term');
+    ok $result, 'Parse highly ambiguous expression';
+    
+    # Expression with parentheses
+    $result = $parser->parse_tokens('(', 'term', '+', 'term', ')', '*', 'term');
+    ok $result, 'Parse parenthesized expression';
+    
+    # Complex mixed operators
+    $result = $parser->parse_tokens('term', '**', 'term', '&&', 'term', '||', 'term');
+    ok $result, 'Parse complex mixed operators';
+    
+    # Test with SPPF semiring for ambiguous handling
+    my $sppf_parser = Parser->new(
+        grammar => $grammar,
+        semiring => SPPFViterbiSemiring->new()
+    );
+    
+    $result = $sppf_parser->parse_tokens('term', '+', 'term', '*', 'term');
+    ok $result, 'SPPF parse ambiguous expression';
+    isa_ok $result, 'SPPFViterbiElement';
+};
+
+subtest 'Recursive block structures' => sub {
+    # Pattern like Guacamole BlockStatement with nested blocks
+    my $grammar = Grammar->build_grammar(
+        [ 'Block' => [qw({ StatementList })] ],
+        [ 'Block' => [qw({ })] ],  # Empty block
+        [ 'StatementList' => ['Statement'] ],
+        [ 'StatementList' => [qw(Statement StatementList)] ],
+        [ 'Statement' => ['simple'] ],
+        [ 'Statement' => ['Block'] ],  # Recursive: statements can contain blocks
+    );
+    
+    my $parser = Parser->new(grammar => $grammar);
+    
+    # Empty block
+    my $result = $parser->parse_tokens('{', '}');
+    ok $result, 'Parse empty block';
+    
+    # Simple block
+    $result = $parser->parse_tokens('{', 'simple', '}');
+    ok $result, 'Parse simple block';
+    
+    # Nested blocks
+    $result = $parser->parse_tokens('{', 'simple', '{', 'simple', '}', 'simple', '}');
+    ok $result, 'Parse nested blocks';
+    
+    # Deeply nested blocks
+    $result = $parser->parse_tokens('{', '{', '{', 'simple', '}', '}', '}');
+    ok $result, 'Parse deeply nested blocks';
+};

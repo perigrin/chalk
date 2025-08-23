@@ -1,0 +1,31 @@
+# ABOUTME: GitHub Actions workflow to run self-hosting test on PRs and pu merges
+# ABOUTME: Validates that Chalk can successfully parse its own source code
+name: Self-Hosting Test
+
+on:
+  pull_request:
+    branches: [ pu ]
+  push:
+    branches: [ pu ]
+
+jobs:
+  self-hosting:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Perl
+      uses: shogo82148/actions-setup-perl@v1
+      with:
+        perl-version: '5.42'
+
+    - name: Install Perl dependencies
+      run: |
+        cpanm --notest Test2::V0
+
+    - name: Run self-hosting test
+      run: |
+        prove -v t/self-hosting.t
+
