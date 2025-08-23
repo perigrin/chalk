@@ -452,9 +452,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ArrowRHS' => ['PostfixDeref'], 0.3 ], # ->@*, ->%*, ->$* (postfix derefs)
 
     # Postfix dereferencing operators - atomic tokens
-    [ 'PostfixDeref' => ['@*'] ],
-    [ 'PostfixDeref' => ['%*'] ],
-    [ 'PostfixDeref' => ['$*'] ],
+    [ 'PostfixDeref' => [qr/[@%\$]\*/] ],
 
     # Value rules - basic terminals needed for chalk
     [ 'Value' => ['Variable'],                         0.4 ],    # Now includes $hash{key}, @array[index]
@@ -493,21 +491,13 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'UnaryKeywordExpression' => [ 'sort', 'ExpressionBlock', 'Expression' ], 1.0 ], # sort { ... } @list
 
     # Operators - basic ones needed for chalk
-    [ 'OpComma'   => [','] ],
-    [ 'OpComma'   => ['=>'] ],
-    [ 'OpAssign'  => ['='] ],
-    [ 'OpAssign'  => ['//='] ],    # Defined-or assignment
-    [ 'OpAssign'  => ['||='] ],    # Logical-or assignment
-    [ 'OpAssign'  => ['&&='] ],    # Logical-and assignment
-    [ 'OpAssign'  => ['.='] ],     # String concatenation assignment
+    [ 'OpComma'   => [qr/,|=>/] ],
+    [ 'OpAssign'  => [qr/\/\/=|\|\|=|&&=|\.=|=/] ],    # Assignment operators
     [ 'OpArrow'   => ['->'] ],
-    [ 'OpAdd'     => ['+'] ],
-    [ 'OpAdd'     => ['-'] ],
+    [ 'OpAdd'     => [qr/[+\-]/] ],
     [ 'OpConcat'  => ['.'] ],
-    [ 'OpMulti'   => ['*'] ],
-    [ 'OpMulti'   => ['/'] ],
-    [ 'OpLogOr'   => ['||'] ],
-    [ 'OpLogOr'   => ['//'] ],    # Defined-or operator
+    [ 'OpMulti'   => [qr/[*\/]/] ],
+    [ 'OpLogOr'   => [qr/\|\||\/\//] ],    # Logical or and defined-or
     [ 'OpLogAnd'  => ['&&'] ],
     [ 'OpNameOr'  => ['or'] ],
     [ 'OpNameAnd' => ['and'] ],
@@ -515,36 +505,15 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'OpTriThen' => ['?'] ],
     [ 'OpTriElse' => [':'] ],
     [ 'OpRange'   => ['..'] ],
-    [ 'OpBinOr'   => ['|'] ],
-    [ 'OpBinOr'   => ['^'] ],
+    [ 'OpBinOr'   => [qr/[|^]/] ],
     [ 'OpBinAnd'  => ['&'] ],
-    [ 'OpEqual'   => ['=='] ],
-    [ 'OpEqual'   => ['!='] ],
-    [ 'OpEqual'   => ['<=>'] ],
-    [ 'OpEqual'   => ['eq'] ],
-    [ 'OpEqual'   => ['ne'] ],
-    [ 'OpEqual'   => ['cmp'] ],
-    [ 'OpEqual'   => ['isa'] ],
-    [ 'OpInequal' => ['<'] ],
-    [ 'OpInequal' => ['>'] ],
-    [ 'OpInequal' => ['<='] ],
-    [ 'OpInequal' => ['>='] ],
-    [ 'OpInequal' => ['lt'] ],
-    [ 'OpInequal' => ['gt'] ],
-    [ 'OpInequal' => ['le'] ],
-    [ 'OpInequal' => ['ge'] ],
-    [ 'OpShift'   => ['<<'] ],
-    [ 'OpShift'   => ['>>'] ],
-    [ 'OpRegex'   => ['=~'] ],
-    [ 'OpRegex'   => ['!~'] ],
-    [ 'OpUnary'   => ['!'] ],
-    [ 'OpUnary'   => ['~'] ],
-    [ 'OpUnary'   => ['\\'] ],
-    [ 'OpUnary'   => ['+'] ],
-    [ 'OpUnary'   => ['-'] ],
+    [ 'OpEqual'   => [qr/==|!=|<=>|eq|ne|cmp|isa/] ],
+    [ 'OpInequal' => [qr/<=|>=|<|>|lt|gt|le|ge/] ],
+    [ 'OpShift'   => [qr/<<|>>/] ],
+    [ 'OpRegex'   => [qr/=~|!~/] ],
+    [ 'OpUnary'   => [qr/[!~\\+\-]/] ],
     [ 'OpPower'   => ['**'] ],
-    [ 'OpInc'     => ['++'] ],
-    [ 'OpInc'     => ['--'] ],
+    [ 'OpInc'     => [qr/\+\+|--/] ],
 
     # Terminal definitions for chalk - following guacamole.pm pattern
     # Variables with optional element sequences (subscripts)
@@ -576,8 +545,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'HashElem' => [ 'LBrace', 'Expression', 'RBrace' ], 1.0 ],
     [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*/] ],
     [ 'Number'       => [qr/\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/] ],
-    [ 'QuotedString' => [qr/"[^"]*"/] ],
-    [ 'QuotedString' => [qr/'[^']*'/] ],
+    [ 'QuotedString' => [qr/"[^"]*"|'[^']*'/] ],
     [ 'AtSymbol'     => ['@'] ],
 
     # Punctuation
@@ -617,17 +585,11 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Keyword expressions - termination points for Expression chain
     # For chalk, we only need basic ones that could appear
-    [ 'OpUnaryKeywordExpr' => ['return'] ],
-    [ 'OpUnaryKeywordExpr' => ['last'] ],
-    [ 'OpUnaryKeywordExpr' => ['next'] ],
-    [ 'OpUnaryKeywordExpr' => ['redo'] ],
+    [ 'OpUnaryKeywordExpr' => [qr/return|last|next|redo/] ],
     
-    [ 'OpAssignKeywordExpr' => ['goto'] ],
-    [ 'OpAssignKeywordExpr' => ['last'] ],
+    [ 'OpAssignKeywordExpr' => [qr/goto|last/] ],
     
-    [ 'OpListKeywordExpr' => ['print'] ],
-    [ 'OpListKeywordExpr' => ['warn'] ],
-    [ 'OpListKeywordExpr' => ['die'] ],
+    [ 'OpListKeywordExpr' => [qr/print|warn|die/] ],
 
     # Whitespace rules (needed for auto_insert)
     [ 'WS_OPT' => [],         0.1 ],
