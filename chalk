@@ -215,12 +215,13 @@ class EarleyItem {
     field $rule      :param :reader;
     field $dot_pos   :param :reader;
     field $end_pos   :param :reader;
-
-    method is_complete() { return $dot_pos >= scalar( $rule->rhs->@* ); }
+    field $rule_id          = $rule->id;
+    field @rhs              = $rule->rhs->@*;
+    field $complete :reader = $dot_pos >= scalar(@rhs);
 
     method next_symbol() {
-        return if $self->is_complete;
-        return $rule->rhs->[$dot_pos];
+        return if $complete;
+        return $rhs[$dot_pos];
     }
 
     method advance_dot() {
@@ -233,7 +234,7 @@ class EarleyItem {
     }
 
     method key(@) {
-        return "$start_pos|" . $rule->id . "|$dot_pos|$end_pos";
+        return "$start_pos|$rule_id|$dot_pos|$end_pos";
     }
 }
 
@@ -246,7 +247,7 @@ class LeoItem {
     field $top_item  :param :reader;
     field $rule      :reader = $top_item->rule;
 
-    method is_complete() { 1 }
+    method complete()    { 1 }
     method next_symbol() { }
 
     method key(@) {
@@ -311,7 +312,7 @@ class EarleyChart {
         my @items = $self->items_ending_at($n);
 
         for my $item (@items) {
-            next unless $item->is_complete;
+            next unless $item->complete;
             next unless $item->start_pos == 0;
             next unless $item->rule->lhs eq $start_symbol;
 
@@ -391,7 +392,7 @@ class Parser {
             my $element = $chart->get_element($item);
             next unless defined($element);
 
-            if ( $item->is_complete ) {
+            if ( $item->complete ) {
                 $self->complete( $item, $element, $chart, \@agenda );
             }
             elsif ( defined( my $next_sym = $item->next_symbol ) ) {
@@ -428,7 +429,7 @@ class Parser {
         my @regular_waiting = grep { !( $_ isa LeoItem ) } @waiting;
 
         my @waiting_for_lhs =
-          grep { !$_->is_complete && $_->next_symbol eq $lhs } @regular_waiting;
+          grep { !$_->complete && $_->next_symbol eq $lhs } @regular_waiting;
 
   # Check for deterministic reduction (only if no Leo items waiting)
   # Leo items are only for deterministic right-recursive chains where:
@@ -465,7 +466,7 @@ class Parser {
 
         # Normal completion for regular items
         for my $waiting_item (@regular_waiting) {
-            next if $waiting_item->is_complete;
+            next if $waiting_item->complete;
             next unless ( $waiting_item->next_symbol // '' ) eq $lhs;
 
             my $waiting_element = $chart->get_element($waiting_item);
@@ -591,18 +592,21 @@ class GrammarRule {
     field $lhs :param :reader;
     field $rhs :param :reader;
     field $probability :param :reader = 1.0;
+    field $nullable;
 
     method is_right_recursive() { $lhs eq $rhs->[-1] }
     method is_left_recursive()  { $lhs eq $rhs->[0] }
 
     method is_nullable($grammar) {
-        state $seen = {};
+        return $nullable if defined($nullable);    # memoize nullable
 
         # Empty production is nullable
-        return 1 if @$rhs == 0;
+        return $nullable = 1 if @$rhs == 0;
+
+        state $seen = {};
 
         # All symbols in RHS must be nullable
-        return 1 if all {
+        return $nullable = 1 if all {
             my @rules = $grammar->rules_for($_);
 
             # Terminals (no rules) are not nullable
@@ -616,7 +620,7 @@ class GrammarRule {
             return 0 unless any { $_->is_nullable($grammar) } @rules;
         } @$rhs;
 
-        return 0;
+        return $nullable = 0;
     }
 
     method to_string(@) {
