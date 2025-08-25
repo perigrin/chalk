@@ -215,14 +215,11 @@ class EarleyItem {
     field $rule      :param :reader;
     field $dot_pos   :param :reader;
     field $end_pos   :param :reader;
-    field $rule_id          = $rule->id;
-    field @rhs              = $rule->rhs->@*;
-    field $complete :reader = $dot_pos >= scalar(@rhs);
-
-    method next_symbol() {
-        return if $complete;
-        return $rhs[$dot_pos];
-    }
+    field $rule_id = $rule->id;
+    field @rhs     = $rule->rhs->@*;
+    field $complete    :reader = $dot_pos >= scalar(@rhs);
+    field $next_symbol :reader = $complete ? '' : $rhs[$dot_pos];
+    field $key = "Earley|$start_pos|$rule_id|$dot_pos|$end_pos";
 
     method advance_dot() {
         EarleyItem->new(
@@ -233,9 +230,7 @@ class EarleyItem {
         );
     }
 
-    method key(@) {
-        return "$start_pos|$rule_id|$dot_pos|$end_pos";
-    }
+    method key(@) { $key }
 }
 
 class LeoItem {
@@ -426,10 +421,10 @@ class Parser {
         # Separate Leo items from regular items
         my @leo_waiting =
           grep { $_ isa LeoItem && $_->symbol eq $lhs } @waiting;
-        my @regular_waiting = grep { !( $_ isa LeoItem ) } @waiting;
+        my @regular_waiting =
+          grep { !( $_ isa LeoItem ) && !$_->complete } @waiting;
 
-        my @waiting_for_lhs =
-          grep { !$_->complete && $_->next_symbol eq $lhs } @regular_waiting;
+        my @waiting_for_lhs = grep { $_->next_symbol eq $lhs } @regular_waiting;
 
   # Check for deterministic reduction (only if no Leo items waiting)
   # Leo items are only for deterministic right-recursive chains where:
@@ -465,9 +460,7 @@ class Parser {
         }
 
         # Normal completion for regular items
-        for my $waiting_item (@regular_waiting) {
-            next if $waiting_item->complete;
-            next unless ( $waiting_item->next_symbol // '' ) eq $lhs;
+        for my $waiting_item (@waiting_for_lhs) {
 
             my $waiting_element = $chart->get_element($waiting_item);
             next unless $waiting_element;
@@ -597,13 +590,11 @@ class GrammarRule {
     method is_right_recursive() { $lhs eq $rhs->[-1] }
     method is_left_recursive()  { $lhs eq $rhs->[0] }
 
-    method is_nullable($grammar) {
+    method is_nullable( $grammar, $seen = {} ) {
         return $nullable if defined($nullable);    # memoize nullable
 
         # Empty production is nullable
         return $nullable = 1 if @$rhs == 0;
-
-        state $seen = {};
 
         # All symbols in RHS must be nullable
         return $nullable = 1 if all {
@@ -616,8 +607,8 @@ class GrammarRule {
             return 0 if $seen->{$_};
 
             # Check if this symbol is nullable via any of its rules
-            local $seen->{$_} = 1;
-            return 0 unless any { $_->is_nullable($grammar) } @rules;
+            $seen->{$_} = 1;
+            return 0 unless any { $_->is_nullable( $grammar, $seen ) } @rules;
         } @$rhs;
 
         return $nullable = 0;
@@ -628,11 +619,13 @@ class GrammarRule {
     }
 
     method terminal_to_regex($terminal) {
+        state %seen;
 
         # Convert terminal to regex pattern
         # If already a regex, return as-is
         # If string literal, escape and convert to regex
-        return ref($terminal) eq 'Regexp' ? $terminal : qr/\Q$terminal\E/;
+        return $seen{$terminal} //=
+          ref($terminal) eq 'Regexp' ? $terminal : qr/\Q$terminal\E/;
     }
 }
 
@@ -640,6 +633,12 @@ class Grammar {
     field $rules        :param :reader;
     field $start_symbol :param :reader;
     field %nullable_cache;
+
+    ADJUST {
+        for my $s ( keys(%$rules) ) {
+            $self->is_nullable($s);
+        }
+    }
 
     my sub new_rule( $lhs, $rhs, $probability = 1.0 ) {
         $probability ||= 0.1;
