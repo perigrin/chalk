@@ -29,6 +29,8 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'BlockStatement' => ['ClassDecl'],  1.0 ],
     [ 'BlockStatement' => ['MethodDecl'], 1.0 ]
     ,    # Full method definitions with blocks
+    [ 'BlockStatement' => ['AdjustBlock'], 1.0 ]
+    ,    # ADJUST blocks for class initialization
     [ 'BlockStatement' => ['SubroutineDecl'], 1.0 ]
     ,    # Subroutine declarations with blocks
     [ 'BlockStatement' => ['LoopStatement'],      1.0 ],  # Loop statements
@@ -58,6 +60,9 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Block structure for conditional statements
     [ 'Block' => [ '{', 'StatementList', '}' ], 1.0 ],
+
+    # ADJUST block for class initialization
+    [ 'AdjustBlock' => [ 'ADJUST', 'Block' ], 1.0 ],
 
     # Loop statements (following guacamole pattern)
     [ 'LoopStatement' => ['ForStatement'],   1.0 ],
