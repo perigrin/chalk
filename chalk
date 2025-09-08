@@ -356,6 +356,8 @@ class Parser {
 
         while ( $pos <= $input_length ) {
             my @agenda_before = $chart->items_ending_at($pos);
+            
+            
             $self->process_position_string( $pos, $chart, $input_string );
 
             # Track the last position where we had active items
@@ -567,6 +569,7 @@ class Parser {
 
         $chart->add_element( $scanned_item, $element );
     }
+
 }
 
 class GrammarRule {
@@ -705,6 +708,56 @@ class Grammar {
         }
         $grammar .= "\n";
         return $grammar;
+    }
+}
+
+# Main execution when run as script
+if ( !caller ) {
+    require "./chalk-grammar.pl";
+    our $chalk_grammar;
+
+    # Debug: check if grammar loaded
+    if ( !defined($chalk_grammar) ) {
+        die("Error: Grammar not loaded!\n");
+    }
+
+    # Read input from STDIN or command line file
+    my $input;
+    if (@ARGV) {
+
+        # Read from file
+        my $filename = $ARGV[0];
+        open( my $fh, '<', $filename ) or die("Cannot open $filename: $!\n");
+        local $/;    # slurp mode
+        $input = <$fh>;
+        close($fh);
+    }
+    else {
+        # Read from STDIN
+        local $/;    # slurp mode
+        $input = <STDIN>;
+    }
+
+    chomp($input) if defined($input);
+
+    if ( defined($input) && length($input) > 0 ) {
+
+        # Create parser with grammar
+        my $parser = Parser->new( grammar => $chalk_grammar );
+
+        # Parse the input
+        my $result = $parser->parse_string($input);
+
+        # Print the result
+        if ($result) {
+            print("Parse successful: $result\n");
+        }
+        else {
+            print("Parse failed\n");
+        }
+    }
+    else {
+        print("No input provided\n");
     }
 }
 

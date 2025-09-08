@@ -8,7 +8,10 @@ our $chalk_grammar = Grammar->build_grammar(
     ['WS_OPT'],    # Auto-insert WS_OPT between all symbols
 
     # Program structure - adapted from original chalk grammar
-    [ 'Program' => ['StatementList'], 1.0 ],
+    [ 'Program' => ['StatementList'],              1.0 ],
+    [ 'Program' => [ 'StatementList', 'WS_OPT' ],  1.0 ],  # With trailing whitespace
+    [ 'Program' => [ 'Shebang', 'StatementList' ], 2.0 ],
+    [ 'Program' => [ 'Shebang', 'StatementList', 'WS_OPT' ], 2.0 ],  # Shebang with trailing whitespace
 
   # Statement lists - adapted for chalk with reduced ambiguity
   # Prioritize simpler patterns to prevent parsing explosion
@@ -35,7 +38,10 @@ our $chalk_grammar = Grammar->build_grammar(
     ,    # Subroutine declarations with blocks
     [ 'BlockStatement' => ['LoopStatement'],      1.0 ],  # Loop statements
     [ 'BlockStatement' => ['ConditionStatement'], 1.0 ],  # If/unless statements
-    [ 'BlockStatement' => ['Comment'],            1.0 ]
+    [ 'BlockStatement' => ['Comment'],            1.0 ],
+    [ 'BlockStatement' => ['BeginBlock'],         1.0 ],  # BEGIN blocks
+    [ 'BlockStatement' => ['EndBlock'],           1.0 ],   # END blocks
+    [ 'BlockStatement' => ['Block'],              1.0 ],   # Bare blocks
     ,    # Comments can appear in block contexts
 
   # Conditional statements (if/unless/while/until) - following guacamole pattern
@@ -43,15 +49,17 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ConditionStatement' => ['UnlessStatement'], 1.0 ],
     [ 'ConditionStatement' => ['ElsifStatement'],  1.0 ],
 
-    # If statement rules following guacamole ConditionIfExpr pattern
+    # If statement rules with proper elsif chaining
     [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [
-        'IfStatement' =>
-          [ 'if', '(', 'Expression', ')', 'Block', 'else', 'Block' ],
-        1.0
-    ],
+    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'ElsifChain' ], 1.0 ],
+    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'else', 'Block' ], 1.0 ],
+    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'ElsifChain', 'else', 'Block' ], 1.0 ],
+    
+    # Elsif chain can be one or more elsif blocks
+    [ 'ElsifChain' => [ 'elsif', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'ElsifChain' => [ 'elsif', '(', 'Expression', ')', 'Block', 'ElsifChain' ], 1.0 ],
 
-    # Elsif statement
+    # Standalone elsif statement (for backwards compatibility)
     [ 'ElsifStatement' => [ 'elsif', '(', 'Expression', ')', 'Block' ], 1.0 ],
 
     # Unless statement rules following guacamole ConditionUnlessExpr pattern
@@ -60,26 +68,40 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Block structure for conditional statements
     [ 'Block' => [ '{', 'StatementList', '}' ], 1.0 ],
+    [ 'Block' => [ '{', '}' ], 1.0 ],
 
     # ADJUST block for class initialization
     [ 'AdjustBlock' => [ 'ADJUST', 'Block' ], 1.0 ],
+    [ 'BeginBlock'  => [ 'BEGIN', 'Block' ],  1.0 ],
+    [ 'EndBlock'    => [ 'END', 'Block' ],    1.0 ],
 
     # Loop statements (following guacamole pattern)
     [ 'LoopStatement' => ['ForStatement'],   1.0 ],
     [ 'LoopStatement' => ['WhileStatement'], 1.0 ],
 
-    # For statement - foreach style (for my $var (@list) { ... })
+    # For statement - foreach style variations
     [
         'ForStatement' =>
           [ 'for', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ],
         1.0
     ],
+    [ 'ForStatement' => [ 'foreach', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'ForStatement' => [ 'for', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'ForStatement' => [ 'foreach', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
 
     # While statement - while ( condition ) { ... }
     [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ], 1.0 ],
 
     # Statements - chalk specific with expression support
-    [ 'Statement' => ['UseStatement'],         1.0 ],
+    [ 'Statement' => ['UseStatement'],     1.0 ],
+    [ 'Statement' => ['RequireStatement'], 1.0 ],    # Require statements
+    [ 'Statement' => ['FunctionCall'],     1.0 ],    # Function calls like print
+    [ 'Statement' => ['PrintExpr'],        1.0 ],
+    [ 'Statement' => ['DieExpr'],          1.0 ],
+    [ 'Statement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
+    [ 'Statement' => ['BuiltinFunctionCall'], 1.0 ],
+    [ 'Statement' => [ 'BuiltinFunctionCall', 'StatementModifier' ], 1.0 ]
+    ,    # Print statements without parentheses
     [ 'Statement' => ['BlockLevelExpression'], 1.0 ],   # Block-level expression
     [ 'Statement' => ['EllipsisStatement'],    1.0 ],   # Ellipsis (...)
     [ 'Statement' => ['FieldDecl'],            1.0 ],   # Field declarations
@@ -159,7 +181,7 @@ our $chalk_grammar = Grammar->build_grammar(
 
 # Basic terminals - include newlines since comments/shebangs are line-oriented
 # TODO: Allow inline comments within parameter lists and expressions, not just after complete statements
-    [ 'Shebang' => [qr/#!.*\n/] ],
+    [ 'Shebang' => [qr/#!.*$/m] ],
     [ 'Comment' => [qr/#.*$/m] ],    # Whitespace already consumed by WS/WS_OPT
 
     # Ellipsis statement
@@ -169,6 +191,9 @@ our $chalk_grammar = Grammar->build_grammar(
     # Return statements - following Guacamole OpKeywordReturnExpr pattern
     [ 'ReturnStatement' => [ 'return', 'Expression' ], 1.0 ],
     [ 'ReturnStatement' => ['return'],                 0.1 ],
+
+    # Require statements - similar to UseStatement but simpler
+    [ 'RequireStatement' => [ 'require', 'Expression' ], 1.0 ],
 
     # Statement modifiers - following Guacamole postfix patterns
     [ 'StatementModifier' => [ 'unless', 'Expression' ], 1.0 ],
@@ -184,10 +209,16 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'VersionExpr' => [qr/v?(?:\d+\.?){1,3}/] ],
 
    # QLikeValue - qw() expressions and regex patterns matching Guacamole pattern
-    [ 'QLikeValue' => [qr/qw\([^)]*\)/] ],
-    [ 'QLikeValue' => [qr{/[^/]*/[a-z]*}] ],      # /pattern/flags
-    [ 'QLikeValue' => [qr{qr/[^/]*/[a-z]*}] ],    # qr/pattern/flags
-     # TODO: Handle escaped forward slashes \/ in regex patterns, but not needed for chalk
+    [ 'QLikeValue' => [qr/qw\([^)]*\)/] ],                        # qw(...)
+    [ 'QLikeValue' => [qr/qr\{[^}]*\}[a-z]*/] ],                  # qr{...}flags
+    [ 'QLikeValue' => [qr/qr\/((?:[^\/]|(?<=\\)\/)*)\/[a-z]*/] ]
+    ,                                              # qr/.../flags with escapes
+    [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ],    # /.../flags with escapes
+    [ 'QLikeValue' => [qr/m![^!]*![a-z]*/] ],     # m!...!flags
+    [ 'QLikeValue' => [qr/m#[^#]*#[a-z]*/] ],     # m#...#flags  
+    [ 'QLikeValue' => [qr/m\|[^|]*\|[a-z]*/] ],   # m|...|flags
+    [ 'QLikeValue' => [qr/`[^`]*`/] ],            # `backticks`
+
     [ 'FieldAttributeList' => ['FieldAttribute'] ],
     [ 'FieldAttributeList' => [ 'FieldAttribute', 'FieldAttributeList' ] ],
     [ 'FieldAttribute'     => [':param'] ],
@@ -196,8 +227,8 @@ our $chalk_grammar = Grammar->build_grammar(
 # Expression hierarchy - Full Guacamole hierarchy with probabilities emulating action => ::first
     [ 'Expression' => ['ExprNameOr'],                              0.8 ],
     [ 'ExprNameOr' => [ 'ExprNameOr', 'OpNameOr', 'ExprNameAnd' ], 0.8 ]
-    ,                                            # First rule - higher prob
-    [ 'ExprNameOr' => ['ExprNameAnd'], 0.3 ],    # Fallback - lower prob
+    ,                                              # First rule - higher prob
+    [ 'ExprNameOr' => ['ExprNameAnd'], 0.3 ],      # Fallback - lower prob
 
 # BlockLevelExpression - uses NonBraceExprAssignR to avoid brace ambiguity
 # TODO: Allow bare Expressions without an explicit return as the last statement in a block
@@ -215,7 +246,7 @@ our $chalk_grammar = Grammar->build_grammar(
     ],
     [ 'BlockLevelExprNameAnd' => ['BlockLevelExprNameNot'],      0.3 ],
     [ 'BlockLevelExprNameNot' => [ 'OpNameNot', 'ExprNameNot' ], 0.8 ],
-    [ 'BlockLevelExprNameNot' => ['NonBraceExprAssignR'],        0.3 ],
+    [ 'BlockLevelExprNameNot' => ['NonBraceExprComma'],          0.3 ],
 
     # NonBraceExprAssignR - avoids consuming braces as hash refs
     [
@@ -260,11 +291,15 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'NonBraceExprRange0' => ['NonBraceExprLogOr0'], 0.3 ],
 
 # Continue through precedence chain: LogOr -> LogAnd -> BinOr -> BinAnd -> Eq -> Neq -> Shift -> Add -> Mul -> Regex -> Power -> Inc -> Arrow -> Value
+    [ 'NonBraceExprLogOrR' => [ 'NonBraceExprLogOr0', 'OpLogOr', 'NonBraceExprLogAndR' ], 0.8 ],
     [ 'NonBraceExprLogOrR' => ['NonBraceExprLogAndR'], 0.3 ],
+    [ 'NonBraceExprLogOr0' => [ 'NonBraceExprLogOr0', 'OpLogOr', 'NonBraceExprLogAnd0' ], 0.8 ],
     [ 'NonBraceExprLogOr0' => ['NonBraceExprLogAnd0'], 0.3 ],
 
     # NonBrace logical AND expressions
+    [ 'NonBraceExprLogAndR' => [ 'NonBraceExprLogAnd0', 'OpLogAnd', 'NonBraceExprBinOrR' ], 0.8 ],
     [ 'NonBraceExprLogAndR' => ['NonBraceExprBinOrR'], 0.3 ],
+    [ 'NonBraceExprLogAnd0' => [ 'NonBraceExprLogAnd0', 'OpLogAnd', 'NonBraceExprBinOr0' ], 0.8 ],
     [ 'NonBraceExprLogAnd0' => ['NonBraceExprBinOr0'], 0.3 ],
 
     # NonBrace binary OR expressions
@@ -289,9 +324,70 @@ our $chalk_grammar = Grammar->build_grammar(
     ],
     [ 'NonBraceExprEq0' => ['NonBraceExprNeq0'], 0.3 ],
 
-    # NonBrace inequality expressions
-    [ 'NonBraceExprNeqR' => ['NonBraceExprArrowR'], 0.3 ],
-    [ 'NonBraceExprNeq0' => ['NonBraceExprArrow0'], 0.3 ],
+    # NonBrace inequality expressions  
+    [ 'NonBraceExprNeqR' => [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShiftR' ], 0.8 ],
+    [ 'NonBraceExprNeqR' => ['NonBraceExprShiftR'], 0.3 ],
+    [ 'NonBraceExprNeq0' => [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShift0' ], 0.8 ],
+    [ 'NonBraceExprNeq0' => ['NonBraceExprShift0'], 0.3 ],
+
+    # NonBrace shift expressions
+    [ 'NonBraceExprShiftR' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddR' ], 0.8 ],
+    [ 'NonBraceExprShiftR' => ['NonBraceExprAddR'], 0.3 ],
+    [ 'NonBraceExprShift0' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAdd0' ], 0.8 ],
+    [ 'NonBraceExprShift0' => ['NonBraceExprAdd0'], 0.3 ],
+    [ 'NonBraceExprShiftU' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddU' ], 0.8 ],
+    [ 'NonBraceExprShiftU' => ['NonBraceExprAddU'], 0.3 ],
+
+    # NonBrace addition expressions  
+    [ 'NonBraceExprAddR' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulR' ], 0.8 ],
+    [ 'NonBraceExprAddR' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulR' ], 0.8 ], 
+    [ 'NonBraceExprAddR' => ['NonBraceExprMulR'], 0.3 ],
+    [ 'NonBraceExprAdd0' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMul0' ], 0.8 ],
+    [ 'NonBraceExprAdd0' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMul0' ], 0.8 ],
+    [ 'NonBraceExprAdd0' => ['NonBraceExprMul0'], 0.3 ],
+    [ 'NonBraceExprAddU' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulU' ], 0.8 ],
+    [ 'NonBraceExprAddU' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulU' ], 0.8 ],
+    [ 'NonBraceExprAddU' => ['NonBraceExprMulU'], 0.3 ],
+
+    # NonBrace multiplication expressions
+    [ 'NonBraceExprMulR' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexR' ], 0.8 ],
+    [ 'NonBraceExprMulR' => ['NonBraceExprRegexR'], 0.3 ],
+    [ 'NonBraceExprMul0' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegex0' ], 0.8 ],
+    [ 'NonBraceExprMul0' => ['NonBraceExprRegex0'], 0.3 ],
+    [ 'NonBraceExprMulU' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexU' ], 0.8 ],
+    [ 'NonBraceExprMulU' => ['NonBraceExprRegexU'], 0.3 ],
+
+    # NonBrace regex expressions
+    [ 'NonBraceExprRegexR' => ['NonBraceExprUnaryR'], 0.3 ],
+    [ 'NonBraceExprRegex0' => ['NonBraceExprUnary0'], 0.3 ],
+    [ 'NonBraceExprRegexU' => ['NonBraceExprUnaryU'], 0.3 ],
+
+    # NonBrace unary expressions
+    [ 'NonBraceExprUnaryR' => [ 'OpUnary', 'NonBraceExprUnaryR' ], 0.8 ],
+    [ 'NonBraceExprUnaryR' => ['NonBraceExprPowerR'], 0.3 ],
+    [ 'NonBraceExprUnary0' => [ 'OpUnary', 'NonBraceExprUnary0' ], 0.8 ],
+    [ 'NonBraceExprUnary0' => ['NonBraceExprPower0'], 0.3 ],
+    [ 'NonBraceExprUnaryU' => [ 'OpUnary', 'NonBraceExprUnaryU' ], 0.8 ],
+    [ 'NonBraceExprUnaryU' => ['NonBraceExprPowerU'], 0.3 ],
+
+    # NonBrace power expressions
+    [ 'NonBraceExprPowerR' => [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnaryR' ], 0.8 ],
+    [ 'NonBraceExprPowerR' => ['NonBraceExprIncR'], 0.3 ],
+    [ 'NonBraceExprPower0' => [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnary0' ], 0.8 ],
+    [ 'NonBraceExprPower0' => ['NonBraceExprInc0'], 0.3 ],
+    [ 'NonBraceExprPowerU' => [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnaryU' ], 0.8 ],
+    [ 'NonBraceExprPowerU' => ['NonBraceExprIncU'], 0.3 ],
+
+    # NonBrace increment expressions
+    [ 'NonBraceExprIncR' => [ 'OpInc', 'NonBraceExprIncR' ], 0.8 ],
+    [ 'NonBraceExprIncR' => [ 'NonBraceExprIncR', 'OpInc' ], 0.8 ],
+    [ 'NonBraceExprIncR' => ['NonBraceExprArrowR'], 0.3 ],
+    [ 'NonBraceExprInc0' => [ 'OpInc', 'NonBraceExprInc0' ], 0.8 ],
+    [ 'NonBraceExprInc0' => [ 'NonBraceExprInc0', 'OpInc' ], 0.8 ],
+    [ 'NonBraceExprInc0' => ['NonBraceExprArrow0'], 0.3 ],
+    [ 'NonBraceExprIncU' => [ 'OpInc', 'NonBraceExprIncU' ], 0.8 ],
+    [ 'NonBraceExprIncU' => [ 'NonBraceExprIncU', 'OpInc' ], 0.8 ],
+    [ 'NonBraceExprIncU' => ['NonBraceExprArrowU'], 0.3 ],
 
     # NonBrace arrow expressions
     [
@@ -376,6 +472,7 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Continue the chain down to Value
     [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ], 0.8 ],
+    [ 'ExprLogAndR' => [ 'ExprBinOrR', 'Comment' ],                0.7 ], # Expression with trailing comment
     [ 'ExprLogAndR' => ['ExprBinOrR'],                              0.3 ],
     [ 'ExprLogAndL' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrL' ], 0.8 ],
     [ 'ExprLogAndL' => ['ExprBinOrL'],                              0.3 ],
@@ -532,16 +629,125 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc.
     [ 'Value' => ['ExpressionBlock'],        0.3 ],    # { expr } blocks
     [ 'Value' => ['QLikeValue'],             0.8 ],
+    [ 'Value' => ['DiamondExpr'],            0.3 ],    # <$fh> constructs
     [ 'Value' => ['@'],                      0.3 ],
     [ 'Value' => ['FieldDecl'],              0.3 ],
-    [ 'Value' => ['VariableDecl'], 0.3 ],    # my $var = expr as expression
+    [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
+    [ 'Value' => ['PrintExpr'],    0.3 ], # print statements without parentheses
+
+    # Print expressions following guacamole OpKeywordPrintExpr pattern
+    [ 'PrintExpr' => [ 'print', 'NonBraceExprComma' ], 1.0 ],   # print "string"
+    [ 'PrintExpr' => ['print'],                        1.0 ],   # bare print
+    
+    # Print with filehandle: print FILEHANDLE "string"
+    [ 'PrintExpr' => [ 'print', 'Identifier', 'NonBraceExprComma' ], 1.0 ],         # print FH "string"
+    [ 'PrintExpr' => [ 'print', 'Identifier' ], 1.0 ],                              # print FH
+    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'NonBraceExprComma' ], 1.0 ],  # print STDOUT "string"  
+    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ], 1.0 ],                       # print STDOUT
+    
+    # Die expressions following same pattern as PrintExpr
+    [ 'DieExpr' => [ 'die', 'NonBraceExprComma' ], 1.0 ],    # die "string"
+    [ 'DieExpr' => ['die'],                        1.0 ],    # bare die
+    
+    # Built-in function calls (chdir, mkdir, etc.)
+    [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'NonBraceExprComma' ], 1.0 ],
+    [ 'BuiltinFunctionCall' => [ 'BuiltinFunction' ], 1.0 ],
+    [ 'BuiltinFunction' => [qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|open|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/] ],
+
+# NonBraceExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
+    [
+        'NonBraceExprComma' =>
+          [ 'NonBraceExprAssignL', 'OpComma', 'NonBraceExprComma' ],
+        0.8
+    ],
+    [ 'NonBraceExprComma' => [ 'NonBraceExprAssignL', 'OpComma' ], 0.7 ]
+    ,                                                           # Trailing comma
+    [ 'NonBraceExprComma' => ['NonBraceExprAssignR'], 0.3 ],    # Single item
+
+    # NonBraceExprAssignL for left-associative assignments in print context
+    [
+        'NonBraceExprAssignL' =>
+          [ 'NonBraceExprCond0', 'OpAssign', 'NonBraceExprAssignL' ],
+        0.8
+    ],
+    [ 'NonBraceExprAssignL' => ['NonBraceExprCondL'], 0.3 ],
+
+    # NonBraceExprCondL for conditional expressions in print context
+    [
+        'NonBraceExprCondL' => [
+            'NonBraceExprRange0', 'OpTriThen',
+            'NonBraceExprRangeL', 'OpTriElse',
+            'NonBraceExprCondL'
+        ],
+        0.8
+    ],
+    [ 'NonBraceExprCondL' => ['NonBraceExprRangeL'], 0.3 ],
+
+    # NonBraceExprRangeL for range expressions in print context
+    [
+        'NonBraceExprRangeL' =>
+          [ 'NonBraceExprLogOr0', 'OpRange', 'NonBraceExprLogOrL' ],
+        0.8
+    ],
+    [ 'NonBraceExprRangeL' => ['NonBraceExprLogOrL'], 0.3 ],
+
+    # Continue chain for NonBrace left-associative expressions  
+    [ 'NonBraceExprLogOrL'  => ['NonBraceExprLogAndL'], 0.3 ],
+    [ 'NonBraceExprLogAndL' => ['NonBraceExprBinOrL'],  0.3 ],
+    [ 'NonBraceExprBinOrL'  => ['NonBraceExprBinAndL'], 0.3 ],
+    [ 'NonBraceExprBinAndL' => ['NonBraceExprEqL'],     0.3 ],
+    [ 'NonBraceExprEqL'     => ['NonBraceExprNeqL'],    0.3 ],
+    [ 'NonBraceExprNeqL' => [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShiftL' ], 0.8 ],
+    [ 'NonBraceExprNeqL'    => ['NonBraceExprShiftL'],  0.3 ],
+    
+    # NonBrace shift expressions (left-associative)
+    [ 'NonBraceExprShiftL' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddL' ], 0.8 ],
+    [ 'NonBraceExprShiftL' => ['NonBraceExprAddL'], 0.3 ],
+    
+    # NonBrace addition expressions (left-associative)
+    [ 'NonBraceExprAddL' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulL' ], 0.8 ],
+    [ 'NonBraceExprAddL' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulL' ], 0.8 ],
+    [ 'NonBraceExprAddL' => ['NonBraceExprMulL'], 0.3 ],
+    
+    # NonBrace multiplication expressions (left-associative)
+    [ 'NonBraceExprMulL' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexL' ], 0.8 ],
+    [ 'NonBraceExprMulL' => ['NonBraceExprRegexL'], 0.3 ],
+    
+    [ 'NonBraceExprRegexL'  => ['NonBraceExprUnaryL'],  0.3 ],
+    [ 'NonBraceExprUnaryL'  => ['NonBraceExprPowerL'],  0.3 ],
+    [ 'NonBraceExprPowerL'  => ['NonBraceExprIncL'],    0.3 ],
+    [ 'NonBraceExprIncL' => [ 'OpInc', 'NonBraceExprIncL' ], 0.8 ],      # Pre-increment
+    [ 'NonBraceExprIncL' => [ 'NonBraceExprIncL', 'OpInc' ], 0.8 ],      # Post-increment  
+    [ 'NonBraceExprIncL'    => ['NonBraceExprArrowL'],  0.3 ],
+    [ 'NonBraceExprArrowL'  => ['NonBraceExprValueL'],  0.3 ],
+    [ 'NonBraceExprValueL'  => ['NonBraceValue'],       0.8 ],
+
+    # Add missing operators for ternary expressions
+    [ 'OpTriThen' => ['?'] ],
+    [ 'OpTriElse' => [':'] ],
+
+    # Diamond expressions following guacamole pattern
+    [ 'DiamondExpr' => ['Diamond'], 1.0 ],
+
+    # Diamond operator: <$fh>, <STDIN>, <>, <try>
+    [ 'Diamond' => [ '<', 'Variable',          '>' ], 1.0 ],
+    [ 'Diamond' => [ '<', 'BuiltinFilehandle', '>' ], 1.0 ],
+    [ 'Diamond' => [ '<', 'Identifier',        '>' ], 1.0 ],  # Bareword filehandles
+    [ 'Diamond' => [ '<', '>' ], 1.0 ],    # Empty diamond <>
+
+    # Built-in filehandles
+    [ 'BuiltinFilehandle' => [qr/STDIN|STDOUT|STDERR|ARGV|ARGVOUT|DATA/] ],
 
     # Function calls following Guacamole SubCall pattern
     [
         'FunctionCall' => [ 'Identifier', '(', 'ParameterList', ')' ],
         1.0
-    ],                                       # func(args)
+    ],                                     # func(args)
     [ 'FunctionCall' => [ 'Identifier', '(', ')' ], 1.0 ],    # func()
+    
+    # Qualified function calls for package methods
+    [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', 'ParameterList', ')' ], 1.0 ], # pkg::func(args)  
+    [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', ')' ], 1.0 ],                 # pkg::func()
 
 # Expression block for grep/map/sort - supports both single expressions and statement lists
     [ 'ExpressionBlock' => [ '{', 'Expression',    '}' ], 1.0 ],
@@ -578,7 +784,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'OpAdd'     => [qr/[+\-]/] ],
     [ 'OpMulti'   => [qr/[*\/]/] ],
     [ 'OpLogOr'   => [qr/\|\||\/\//] ],              # Logical or and defined-or
-    [ 'OpLogAnd'  => ['&&'] ],
+    [ 'OpLogAnd'  => [qr/&&/] ],
     [ 'OpNameOr'  => ['or'] ],
     [ 'OpNameAnd' => ['and'] ],
     [ 'OpNameNot' => ['not'] ],
@@ -600,6 +806,11 @@ our $chalk_grammar = Grammar->build_grammar(
     # Base variable patterns (without subscripts) - all sigils in one rule
     [ 'VariableBase' => [qr/[\$@%&*]\w+/] ],  # All variable types with sigils
     [ 'VariableBase' => [qr/\$#\w+/] ],       # Array length variables ($#array)
+
+    # Global variables following guacamole GlobalVariables pattern
+    [ 'VariableBase' => [qr/\$[!"#%&'()*+,\-.\/:;<=>?\@\[\\\]^_`|~]/] ],
+    [ 'VariableBase' => [qr/\$\^\w+/] ]  # Special caret variables like $^X
+    ,                                         # Global special vars
 
     # Scalar dereference patterns: @$var, %$var, *$var, &$var
     [ 'VariableBase' => [qr/[@%&*]\$\w+/] ],    # All dereference types
@@ -625,18 +836,21 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ArrayElem'    => [ '[', 'Expression', ']' ], 1.0 ],
     [ 'HashElem'     => [ '{', 'Expression', '}' ], 1.0 ],
     [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*/] ],
-    [ 'Number'       => [qr/\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/] ],
-    [ 'QuotedString' => [qr/"[^"]*"|'[^']*'/] ],
+    [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
+    [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
 
     # Punctuation
     [ 'PackageSeparator' => ['::'] ],
+    
+    # Qualified identifiers for package method calls like utf8::native_to_unicode
+    [ 'QualifiedIdentifier' => [ 'Identifier', 'PackageSeparator', 'Identifier' ], 1.0 ],
 
-    # ParameterList for method calls - simplified approach
-    [ 'ParameterList' => ['HashElement'],                               1.0 ],
-    [ 'ParameterList' => [ 'HashElement', 'OpComma', 'ParameterList' ], 1.0 ],
-    [ 'ParameterList' => ['Expression'],                                1.0 ],
-    [ 'ParameterList' => [ 'Expression', 'OpComma', 'ParameterList' ],  1.0 ],
-    [ 'ParameterList' => [], 1.0 ],    # Empty parameter list
+    # ParameterList for method calls - simplified using ExpressionList
+    [ 'ParameterList' => ['ExpressionList'],       1.0 ],
+    [ 'ParameterList' => [ 'OpComma', 'Comment' ], 1.0 ]
+    ,                                           # Just comma with comment
+    [ 'ParameterList' => ['Comment'], 1.0 ],    # Just a comment
+    [ 'ParameterList' => [],          1.0 ],    # Empty parameter list
 
     # ArrayRef and HashRef
     [ 'ArrayRef' => [ '[', 'ExpressionList', ']' ],  1.0 ],
@@ -644,28 +858,36 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'HashRef'  => [ '{', 'HashElementList', '}' ], 1.0 ],
     [ 'HashRef'  => [ '{', '}' ],                    1.0 ],    # Empty hash
 
-    [ 'ExpressionList' => ['Expression'],                                1.0 ],
-    [ 'ExpressionList' => [ 'Expression', 'OpComma', 'ExpressionList' ], 1.0 ],
+    # Optimal 3-rule ExpressionList - balances functionality with performance
+    [ 'ExpressionList' => ['Expression'], 1.0 ],                # Single expression 
+    [ 'ExpressionList' => [ 'Expression', 'OpComma', 'ExpressionList' ], 1.0 ], # Standard recursion
+    [ 'ExpressionList' => [ 'Comment', 'ExpressionList' ], 1.0 ], # Comment-prefixed lists
 
     [ 'HashElementList' => ['HashElement'], 1.0 ],
     [
         'HashElementList' => [ 'HashElement', 'OpComma', 'HashElementList' ],
         1.0
     ],
+    [ 'HashElementList' => [ 'HashElement', 'OpComma' ], 1.0 ], # Trailing comma
 
     [ 'HashElement' => [ 'Expression', 'OpComma', 'Expression' ], 1.0 ]
-    ,                                                          # key => value
+    ,                                                           # key => value
 
+    # File test operators - unary operators that test file properties
+    [ 'OpUnaryKeywordExpr' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],  # File test operators
+    
     # Keyword expressions - termination points for Expression chain
     # For chalk, we only need basic ones that could appear
-    [ 'OpUnaryKeywordExpr' => [qr/return|last|next|redo/] ],
+    [ 'OpUnaryKeywordExpr' => [qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/] ],
 
     [ 'OpAssignKeywordExpr' => [qr/goto|last/] ],
 
-    [ 'OpListKeywordExpr' => [qr/print|warn|die/] ],
+    [ 'OpListKeywordExpr' => [qr/warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|open|read|write|sysread|syswrite|recv|send|select/] ],
 
     # Whitespace rules (needed for auto_insert)
     [ 'WS_OPT' => [],         0.1 ],
     [ 'WS_OPT' => ['WS'],     1.0 ],
     [ 'WS'     => [qr/\s+/m], 1.0 ],
+    [ 'WS'     => [qr/#.*$/m], 1.0 ],    # Comments count as whitespace
+    [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ], # Comment followed by whitespace
 );
