@@ -27,5 +27,4 @@ jobs:
 
     - name: Run self-hosting test
       run: |
-        prove -v t/self-hosting.t
-
+        prove -v t/self-hosting.t t/precedence.t

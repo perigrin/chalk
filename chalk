@@ -147,10 +147,30 @@ class SPPFForest {
     }
 
     method create_sequence_node( $left_node, $right_node ) {
-
- # TODO: Implement proper SPPF sequence node construction
- # For now, just return the left node (placeholder for proper SPPF construction)
-        return $left_node;
+        
+        # Create a sequence node that properly represents the combination
+        # The sequence spans from left_node start to right_node end
+        my $start_pos = $left_node->start_pos;
+        my $end_pos = $right_node->end_pos;
+        
+        # Create a unique symbol name for this sequence
+        my $sequence_symbol = "SEQ(" . $left_node->symbol . "," . $right_node->symbol . ")";
+        
+        # Create new SPPF node for the sequence
+        my $sequence_node = SPPFSymbolNode->new(
+            symbol    => $sequence_symbol,
+            start_pos => $start_pos,
+            end_pos   => $end_pos
+        );
+        
+        # Add a packed node that represents this specific derivation
+        # In SPPF, packed nodes represent alternative ways to derive the same symbol
+        $sequence_node->add_packed_node({
+            left  => $left_node,
+            right => $right_node
+        });
+        
+        return $sequence_node;
     }
 
     method add_alternative( $node1, $node2 ) {
@@ -169,6 +189,286 @@ class SPPFForest {
     method nodes() {
         return \%symbol_nodes;
     }
+}
+
+# TypedInterpretation represents one possible computation with type constraints and score
+class TypedInterpretation {
+    use overload '""' => 'to_string';
+
+    field $operation :param :
+      reader;    # The computation node (e.g., AddNode, ConcatNode)
+    field $type :param :
+      reader;    # Type constraint (e.g., 'numeric', 'string', 'object')
+    field $score :param :reader;          # Viterbi log probability
+    field $inputs :param :reader = [];    # Input dependencies
+
+    method to_string(@) {
+        return sprintf( '[%s:%s:%.3f]', $operation, $type, exp($score) );
+    }
+
+    method probability() { exp($score) }
+}
+
+# AmbiguousOperationNode represents multiple ways to compute the same value
+class AmbiguousOperationNode {
+    use overload '""' => 'to_string';
+
+    state $next_id = 0;
+    field $id :reader = $next_id++;
+    field @interpretations;
+    field $best_interpretation;
+    field %type_scores;    # Cache scores by type for propagation
+
+    method add_interpretation($interpretation) {
+        push( @interpretations, $interpretation );
+
+        # Update best interpretation
+        if (  !$best_interpretation
+            || $interpretation->score > $best_interpretation->score )
+        {
+            $best_interpretation = $interpretation;
+        }
+
+        # Update type scores cache
+        my $type  = $interpretation->type;
+        my $score = $interpretation->score;
+        if ( !exists( $type_scores{$type} ) || $score > $type_scores{$type} ) {
+            $type_scores{$type} = $score;
+        }
+    }
+
+    method interpretations() { @interpretations }
+
+    method best_interpretation() { $best_interpretation }
+
+    method get_type_score($type) {
+        return $type_scores{$type} // -1e10;
+    }
+
+    method to_string(@) {
+        my $best =
+          $best_interpretation ? $best_interpretation->to_string : 'none';
+        return sprintf( 'Node%d[%d interpretations, best=%s]',
+            $id, scalar(@interpretations), $best );
+    }
+
+    # Duck typing compatibility with SPPFSymbolNode
+    method add_packed_node($packed_node) {
+
+        # For Sea of Nodes, "packed nodes" are just alternative interpretations
+        # This is a no-op since we handle alternatives differently
+    }
+
+    method packed_nodes() {
+
+     # Return empty list - Sea of Nodes handles alternatives via interpretations
+        return ();
+    }
+
+    method key() {
+        return "SeaNode:$id";
+    }
+}
+
+# SeaOfNodesForest maintains the computational graph with shared subexpressions
+class SeaOfNodesForest {
+    field %nodes_by_key;    # Deduplication map
+    field %nodes_by_id;     # All nodes by ID
+    field @root_nodes;      # Top-level computation nodes
+
+    method get_or_create_node( $key, $creator ) {
+        return $nodes_by_key{$key} if exists( $nodes_by_key{$key} );
+
+        my $node = $creator->();
+        $nodes_by_key{$key} = $node;
+        $nodes_by_id{ $node->id } = $node;
+        return $node;
+    }
+
+    method create_literal_node( $value, $start_pos, $end_pos ) {
+        my $key = "literal:$value:$start_pos:$end_pos";
+        return $self->get_or_create_node(
+            $key,
+            sub {
+                my $node = AmbiguousOperationNode->new();
+
+       # For now, treat all literals as generic symbols
+       # Type analysis should happen at a higher level, not during node creation
+                $node->add_interpretation(
+                    TypedInterpretation->new(
+                        operation => "Literal('$value')",
+                        type      => 'symbol',
+                        score     => log(1.0),
+                        inputs    => []
+                    )
+                );
+
+                return $node;
+            }
+        );
+    }
+
+    method create_variable_node( $name, $start_pos, $end_pos ) {
+        my $key = "var:$name:$start_pos:$end_pos";
+        return $self->get_or_create_node(
+            $key,
+            sub {
+                my $node = AmbiguousOperationNode->new();
+
+                # Variables can be any type - start with equal probabilities
+                for my $type (qw(numeric string object)) {
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "Var($name)",
+                            type      => $type,
+                            score     => log(0.33),
+                            inputs    => []
+                        )
+                    );
+                }
+
+                return $node;
+            }
+        );
+    }
+
+    method create_binary_operation( $op, $left_node, $right_node ) {
+        my $key = "binop:$op:" . $left_node->id . ":" . $right_node->id;
+        return $self->get_or_create_node(
+            $key,
+            sub {
+                my $node = AmbiguousOperationNode->new();
+
+                if ( $op eq '+' ) {
+
+                    # Numeric addition
+                    my $num_score =
+                      $left_node->get_type_score('numeric') +
+                      $right_node->get_type_score('numeric') +
+                      log(0.7);
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "Add",
+                            type      => 'numeric',
+                            score     => $num_score,
+                            inputs    => [ $left_node, $right_node ]
+                        )
+                    );
+
+                    # String concatenation
+                    my $str_score =
+                      $left_node->get_type_score('string') +
+                      $right_node->get_type_score('string') +
+                      log(0.2);
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "Concat",
+                            type      => 'string',
+                            score     => $str_score,
+                            inputs    => [ $left_node, $right_node ]
+                        )
+                    );
+
+                    # Object method call
+                    my $obj_score =
+                      $left_node->get_type_score('object') + log(0.1);
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "MethodCall('+', 1)",
+                            type      => 'object',
+                            score     => $obj_score,
+                            inputs    => [ $left_node, $right_node ]
+                        )
+                    );
+                }
+                elsif ( $op eq '*' ) {
+
+                    # Numeric multiplication
+                    my $num_score =
+                      $left_node->get_type_score('numeric') +
+                      $right_node->get_type_score('numeric') +
+                      log(0.9);
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "Multiply",
+                            type      => 'numeric',
+                            score     => $num_score,
+                            inputs    => [ $left_node, $right_node ]
+                        )
+                    );
+
+                    # String repetition
+                    my $str_score =
+                      $left_node->get_type_score('string') +
+                      $right_node->get_type_score('numeric') +
+                      log(0.05);
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "Repeat",
+                            type      => 'string',
+                            score     => $str_score,
+                            inputs    => [ $left_node, $right_node ]
+                        )
+                    );
+
+                    # Object method call
+                    my $obj_score =
+                      $left_node->get_type_score('object') + log(0.05);
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "MethodCall('*', 1)",
+                            type      => 'object',
+                            score     => $obj_score,
+                            inputs    => [ $left_node, $right_node ]
+                        )
+                    );
+                }
+
+                return $node;
+            }
+        );
+    }
+
+    method create_sequence_node( $left_node, $right_node ) {
+
+        # Sequential composition in dataflow
+        my $key = "seq:" . $left_node->id . ":" . $right_node->id;
+        return $self->get_or_create_node(
+            $key,
+            sub {
+                my $node = AmbiguousOperationNode->new();
+
+                # Sequence propagates the type of the last expression
+                for my $interp ( $right_node->interpretations ) {
+                    $node->add_interpretation(
+                        TypedInterpretation->new(
+                            operation => "Seq",
+                            type      => $interp->type,
+                            score     => $interp->score,
+                            inputs    => [ $left_node, $right_node ]
+                        )
+                    );
+                }
+
+                return $node;
+            }
+        );
+    }
+
+    method add_alternative( $node1, $node2 ) {
+
+        # Merge interpretations from both nodes
+        for my $interp ( $node2->interpretations ) {
+            $node1->add_interpretation($interp);
+        }
+    }
+
+    method add_root_node($node) {
+        push( @root_nodes, $node );
+    }
+
+    method nodes()      { \%nodes_by_id }
+    method root_nodes() { @root_nodes }
 }
 
 class SPPFViterbiSemiring :isa(Semiring) {
@@ -203,6 +503,45 @@ class SPPFViterbiSemiring :isa(Semiring) {
             score     => log( $rule->probability ),
             path      => [$rule],
             sppf_node => $symbol_node,
+            forest    => $forest
+        );
+    }
+}
+
+# Minimal Sea of Nodes Viterbi Semiring
+class SPPFSeaOfNodesViterbiSemiring :isa(Semiring) {
+    field $forest :reader = SeaOfNodesForest->new();
+
+    field $root_element :reader = SPPFViterbiElement->new(
+        score     => 0,
+        path      => [],
+        sppf_node => $forest->create_literal_node( "ROOT", 0, 0 ),
+        forest    => $forest
+    );
+
+    field $mul_id :reader = SPPFViterbiElement->new(
+        score     => 0,
+        path      => ['ε'],
+        sppf_node => $forest->create_literal_node( "ε", 0, 0 ),
+        forest    => $forest
+    );
+
+    field $add_id :reader = SPPFViterbiElement->new(
+        score     => -1e10,
+        path      => [],
+        sppf_node => $forest->create_literal_node( "⊥", 0, 0 ),
+        forest    => $forest
+    );
+
+    method init_element_from_rule($rule) {
+
+        # Create element with dataflow semantics using SeaOfNodesForest
+        my $node = $forest->create_literal_node( $rule->lhs, 0, 0 );
+
+        return SPPFViterbiElement->new(
+            score     => log( $rule->probability ),
+            path      => [$rule],
+            sppf_node => $node,
             forest    => $forest
         );
     }
@@ -356,8 +695,7 @@ class Parser {
 
         while ( $pos <= $input_length ) {
             my @agenda_before = $chart->items_ending_at($pos);
-            
-            
+
             $self->process_position_string( $pos, $chart, $input_string );
 
             # Track the last position where we had active items
@@ -713,12 +1051,33 @@ class Grammar {
 
 # Main execution when run as script
 if ( !caller ) {
-    require "./chalk-grammar.pl";
+    # Parse command line options
+    my $grammar_file = "./chalk-grammar.pl";  # default
+    my @remaining_args;
+    
+    my $i = 0;
+    while ($i <= $#ARGV) {
+        if ($ARGV[$i] eq '-g' && $i < $#ARGV) {
+            $grammar_file = $ARGV[$i + 1];
+            $i += 2; # skip both -g and the grammar file
+        } else {
+            push @remaining_args, $ARGV[$i];
+            $i++;
+        }
+    }
+    @ARGV = @remaining_args;
+    
+    # Load the specified grammar
+    if (-f $grammar_file) {
+        require $grammar_file;
+    } else {
+        die("Error: Grammar file '$grammar_file' not found!\n");
+    }
     our $chalk_grammar;
 
     # Debug: check if grammar loaded
     if ( !defined($chalk_grammar) ) {
-        die("Error: Grammar not loaded!\n");
+        die("Error: Grammar not loaded from $grammar_file!\n");
     }
 
     # Read input from STDIN or command line file
