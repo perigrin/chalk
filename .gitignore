@@ -55,3 +55,33 @@ cover_db/
 CLAUDE.md
 prompt_plan.md
 guacamole.pm
+
+# Backup files and directories
+backups/
+*-backup*
+*-original*
+*-with-*
+chalk-grammar-simple.pl
+
+# Example and demo scripts
+examples/
+demo-*.pl
+test-*.pl
+simplified-*.pl
+debug-*.pl
+
+# Documentation drafts
+docs/
+SEA_OF_NODES_NOTES.md
+notes-on-*.md
+guacamole.txt
+
+# Experimental modules
+SPPF*.pm
+SPPF*.pl
+
+# Dependency files
+cpanfile.snapshot
+
+# Test data directory
+perl-tests/
