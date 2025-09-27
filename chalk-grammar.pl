@@ -5,14 +5,14 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all defer);
 
 our $chalk_grammar = Grammar->build_grammar(
-    ['WS_OPT'],    # Auto-insert WS_OPT between all symbols
+    [],    # No auto-insertion - explicit WS_OPT placement
 
     # Program structure - adapted from original chalk grammar
-    [ 'Program' => ['StatementList'],             1.0 ],
-    [ 'Program' => [ 'StatementList', 'WS_OPT' ], 1.0 ]
-    ,              # With trailing whitespace
-    [ 'Program' => [ 'Shebang', 'StatementList' ], 2.0 ],
-    [ 'Program' => [ 'Shebang', 'StatementList', 'WS_OPT' ], 2.0 ]
+    [ 'Program' => ['StatementList'],             0.5 ],
+    [ 'Program' => [ 'StatementList', 'WS_OPT' ], 0.5 ]
+    ,              # With trailing whitespace (lower priority than shebang rules)
+    [ 'Program' => [ 'Shebang', 'StatementList', 'WS_OPT' ], 2.0 ],         # Shebang + statements + optional trailing whitespace
+    [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList', 'WS_OPT' ], 2.1 ] # Shebang + optional whitespace + statements + optional trailing whitespace
     ,              # Shebang with trailing whitespace
 
   # Statement lists - adapted for chalk with reduced ambiguity
@@ -20,15 +20,15 @@ our $chalk_grammar = Grammar->build_grammar(
   # StatementList following Perl semicolon rules
   # Semicolons required between statements, optional for last statement in block
     [ 'StatementList' => [], 0.1 ],    # Empty statement list (for empty blocks)
-    [ 'StatementList' => ['Statement'], 1.0 ]
+    [ 'StatementList' => [ 'Statement', ';', 'WS_OPT', 'StatementList' ], 1.0 ]
+    ,    # Statement + semicolon + more statements (explicit WS_OPT - auto-insertion insufficient)
+    [ 'StatementList' => ['Statement'], 0.9 ]
     ,    # Single statement (last in block, no semicolon needed)
     [ 'StatementList' => ['BlockStatement'], 0.95 ],    # Single block statement
-    [ 'StatementList' => [ 'Statement', ';', 'StatementList' ], 0.9 ]
-    ,    # Statement + semicolon + more statements
     [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ]
     ,    # Block + more statements
-    [ 'StatementList' => [ 'LineStatement', 'StatementList' ], 0.7 ]
-    ,    # Line + more
+    [ 'StatementList' => [ 'LineStatement', 'WS_OPT', 'StatementList' ], 1.1 ]
+    ,    # Line + more (higher priority than semicolon statements)
 
 # BlockStatement - statements that contain blocks and don't need semicolons (following guacamole)
     [ 'BlockStatement' => ['ClassDecl'],  1.0 ],
@@ -52,21 +52,21 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ConditionStatement' => ['ElsifStatement'],  1.0 ],
 
     # If statement rules with proper elsif chaining
-    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'IfStatement' => [ 'if', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ], 1.0 ],
     [
         'IfStatement' =>
-          [ 'if', '(', 'Expression', ')', 'Block', 'ElsifChain' ],
+          [ 'if', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block', 'ElsifChain' ],
         1.0
     ],
     [
         'IfStatement' =>
-          [ 'if', '(', 'Expression', ')', 'Block', 'else', 'Block' ],
+          [ 'if', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block', 'WS_OPT', 'else', 'WS_OPT', 'Block' ],
         1.0
     ],
     [
         'IfStatement' => [
-            'if',    '(',          'Expression', ')',
-            'Block', 'ElsifChain', 'else',       'Block'
+            'if', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT',
+            'Block', 'ElsifChain', 'WS_OPT', 'else', 'WS_OPT', 'Block'
         ],
         1.0
     ],
@@ -87,8 +87,8 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'UnlessStatement' => [ 'unless', 'Expression' ], 1.0 ],    # Postfix form
 
     # Block structure for conditional statements
-    [ 'Block' => [ '{', 'StatementList', '}' ], 1.0 ],
-    [ 'Block' => [ '{', '}' ], 1.0 ],
+    [ 'Block' => [ '{', 'WS_OPT', 'StatementList', 'WS_OPT', '}' ], 1.0 ],
+    [ 'Block' => [ '{', 'WS_OPT', '}' ], 1.0 ],
 
     # ADJUST block for class initialization
     [ 'AdjustBlock' => [ 'ADJUST', 'Block' ], 1.0 ],
@@ -139,7 +139,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'Statement' => ['VariableDecl'],       1.0 ], # my/our/local declarations
     [ 'Statement' => ['ReturnStatement'],    1.0 ], # Return statements
     [ 'Statement' => ['SubroutineDecl'],     1.0 ], # Subroutine declarations
-    [ 'Statement' => ['ConditionStatement'], 1.0 ], # If/unless/while statements
+    [ 'Statement' => ['ConditionStatement'], 2.0 ], # If/unless/while statements
     [ 'Statement' => [ 'ReturnStatement', 'StatementModifier' ], 1.0 ]
     ,                                               # Return with modifier
     [ 'Statement' => [ 'BlockLevelExpression', 'StatementModifier' ], 1.0 ]
@@ -284,7 +284,7 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBraceExprAssignR - avoids consuming braces as hash refs
     [
         'NonBraceExprAssignR' =>
-          [ 'NonBraceExprCond0', 'OpAssign', 'ExprAssignR' ],
+          [ 'NonBraceExprCond0', 'WS_OPT', 'OpAssign', 'WS_OPT', 'ExprAssignR' ],
         0.8
     ],
     [ 'NonBraceExprAssignR' => ['NonBraceExprCondR'], 0.3 ],
@@ -410,31 +410,31 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace addition expressions
     [
         'NonBraceExprAddR' =>
-          [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulR' ],
+          [ 'NonBraceExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'NonBraceExprMulR' ],
         0.8
     ],
     [
-        'NonBraceExprAddR' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulR' ],
+        'NonBraceExprAddR' => [ 'NonBraceExprAddU', 'WS_OPT', '.', 'WS_OPT', 'NonBraceExprMulR' ],
         0.8
     ],
     [ 'NonBraceExprAddR' => ['NonBraceExprMulR'], 0.3 ],
     [
         'NonBraceExprAdd0' =>
-          [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMul0' ],
+          [ 'NonBraceExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'NonBraceExprMul0' ],
         0.8
     ],
     [
-        'NonBraceExprAdd0' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMul0' ],
+        'NonBraceExprAdd0' => [ 'NonBraceExprAddU', 'WS_OPT', '.', 'WS_OPT', 'NonBraceExprMul0' ],
         0.8
     ],
     [ 'NonBraceExprAdd0' => ['NonBraceExprMul0'], 0.3 ],
     [
         'NonBraceExprAddU' =>
-          [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulU' ],
+          [ 'NonBraceExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'NonBraceExprMulU' ],
         0.8
     ],
     [
-        'NonBraceExprAddU' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulU' ],
+        'NonBraceExprAddU' => [ 'NonBraceExprAddU', 'WS_OPT', '.', 'WS_OPT', 'NonBraceExprMulU' ],
         0.8
     ],
     [ 'NonBraceExprAddU' => ['NonBraceExprMulU'], 0.3 ],
@@ -442,19 +442,19 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace multiplication expressions
     [
         'NonBraceExprMulR' =>
-          [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexR' ],
+          [ 'NonBraceExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'NonBraceExprRegexR' ],
         0.8
     ],
     [ 'NonBraceExprMulR' => ['NonBraceExprRegexR'], 0.3 ],
     [
         'NonBraceExprMul0' =>
-          [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegex0' ],
+          [ 'NonBraceExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'NonBraceExprRegex0' ],
         0.8
     ],
     [ 'NonBraceExprMul0' => ['NonBraceExprRegex0'], 0.3 ],
     [
         'NonBraceExprMulU' =>
-          [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexU' ],
+          [ 'NonBraceExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'NonBraceExprRegexU' ],
         0.8
     ],
     [ 'NonBraceExprMulU' => ['NonBraceExprRegexU'], 0.3 ],
@@ -475,19 +475,19 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace power expressions
     [
         'NonBraceExprPowerR' =>
-          [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnaryR' ],
+          [ 'NonBraceExprIncU', 'WS_OPT', 'OpPower', 'WS_OPT', 'NonBraceExprUnaryR' ],
         0.8
     ],
     [ 'NonBraceExprPowerR' => ['NonBraceExprIncR'], 0.3 ],
     [
         'NonBraceExprPower0' =>
-          [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnary0' ],
+          [ 'NonBraceExprIncU', 'WS_OPT', 'OpPower', 'WS_OPT', 'NonBraceExprUnary0' ],
         0.8
     ],
     [ 'NonBraceExprPower0' => ['NonBraceExprInc0'], 0.3 ],
     [
         'NonBraceExprPowerU' =>
-          [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnaryU' ],
+          [ 'NonBraceExprIncU', 'WS_OPT', 'OpPower', 'WS_OPT', 'NonBraceExprUnaryU' ],
         0.8
     ],
     [ 'NonBraceExprPowerU' => ['NonBraceExprIncU'], 0.3 ],
@@ -551,9 +551,9 @@ our $chalk_grammar = Grammar->build_grammar(
     ,    # Comma list - higher prob
     [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ], 0.7 ], # Trailing comma
     [ 'ExprComma' => ['ExprAssignR'],              0.3 ], # Single item fallback
-    [ 'ExprAssignR' => [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ], 0.8 ],
+    [ 'ExprAssignR' => [ 'ExprCond0', 'WS_OPT', 'OpAssign', 'WS_OPT', 'ExprAssignR' ], 0.8 ],
     [ 'ExprAssignR' => ['ExprCondR'],                              0.3 ],
-    [ 'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ], 0.8 ],
+    [ 'ExprAssignL' => [ 'ExprCond0', 'WS_OPT', 'OpAssign', 'WS_OPT', 'ExprAssignL' ], 0.8 ],
     [ 'ExprAssignL' => ['OpAssignKeywordExpr'],                    0.5 ],
     [ 'ExprAssignL' => ['ExprCondL'],                              0.3 ],
     [
@@ -632,26 +632,26 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ], 0.8 ],
     [ 'ExprShiftU' => ['ExprAddU'],                            0.3 ],
 
-    [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ], 0.8 ],
-    [ 'ExprAddR' => [ 'ExprAddU', '.', 'ExprMulR' ],     0.8 ],
+    [ 'ExprAddR' => [ 'ExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'ExprMulR' ], 0.8 ],
+    [ 'ExprAddR' => [ 'ExprAddU', 'WS_OPT', '.', 'WS_OPT', 'ExprMulR' ], 0.8 ],
     [ 'ExprAddR' => ['ExprMulR'],                        0.3 ],
-    [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ], 0.8 ],
-    [ 'ExprAddL' => [ 'ExprAddU', '.', 'ExprMulL' ],     0.8 ],
+    [ 'ExprAddL' => [ 'ExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'ExprMulL' ], 0.8 ],
+    [ 'ExprAddL' => [ 'ExprAddU', 'WS_OPT', '.', 'WS_OPT', 'ExprMulL' ], 0.8 ],
     [ 'ExprAddL' => ['ExprMulL'],                        0.3 ],
-    [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ], 0.8 ],
-    [ 'ExprAdd0' => [ 'ExprAddU', '.', 'ExprMul0' ],     0.8 ],
+    [ 'ExprAdd0' => [ 'ExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'ExprMul0' ], 0.8 ],
+    [ 'ExprAdd0' => [ 'ExprAddU', 'WS_OPT', '.', 'WS_OPT', 'ExprMul0' ], 0.8 ],
     [ 'ExprAdd0' => ['ExprMul0'],                        0.3 ],
-    [ 'ExprAddU' => [ 'ExprAddU', 'OpAdd', 'ExprMulU' ], 0.8 ],
-    [ 'ExprAddU' => [ 'ExprAddU', '.', 'ExprMulU' ],     0.8 ],
+    [ 'ExprAddU' => [ 'ExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'ExprMulU' ], 0.8 ],
+    [ 'ExprAddU' => [ 'ExprAddU', 'WS_OPT', '.', 'WS_OPT', 'ExprMulU' ], 0.8 ],
     [ 'ExprAddU' => ['ExprMulU'],                        0.3 ],
 
-    [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ], 0.8 ],
+    [ 'ExprMulR' => [ 'ExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'ExprRegexR' ], 0.8 ],
     [ 'ExprMulR' => ['ExprRegexR'],                          0.3 ],
-    [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ], 0.8 ],
+    [ 'ExprMulL' => [ 'ExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'ExprRegexL' ], 0.8 ],
     [ 'ExprMulL' => ['ExprRegexL'],                          0.3 ],
-    [ 'ExprMul0' => [ 'ExprMulU', 'OpMulti', 'ExprRegex0' ], 0.8 ],
+    [ 'ExprMul0' => [ 'ExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'ExprRegex0' ], 0.8 ],
     [ 'ExprMul0' => ['ExprRegex0'],                          0.3 ],
-    [ 'ExprMulU' => [ 'ExprMulU', 'OpMulti', 'ExprRegexU' ], 0.8 ],
+    [ 'ExprMulU' => [ 'ExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'ExprRegexU' ], 0.8 ],
     [ 'ExprMulU' => ['ExprRegexU'],                          0.3 ],
 
     [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ], 0.8 ],
@@ -672,13 +672,13 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprUnaryU' => [ 'OpUnary', 'ExprUnaryU' ], 0.8 ],
     [ 'ExprUnaryU' => ['ExprPowerU'],              0.3 ],
 
-    [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ], 0.8 ],
+    [ 'ExprPowerR' => [ 'ExprIncU', 'WS_OPT', 'OpPower', 'WS_OPT', 'ExprUnaryR' ], 0.8 ],
     [ 'ExprPowerR' => ['ExprIncR'],                            0.3 ],
-    [ 'ExprPowerL' => [ 'ExprIncU', 'OpPower', 'ExprUnaryL' ], 0.8 ],
+    [ 'ExprPowerL' => [ 'ExprIncU', 'WS_OPT', 'OpPower', 'WS_OPT', 'ExprUnaryL' ], 0.8 ],
     [ 'ExprPowerL' => ['ExprIncL'],                            0.3 ],
-    [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary0' ], 0.8 ],
+    [ 'ExprPower0' => [ 'ExprIncU', 'WS_OPT', 'OpPower', 'WS_OPT', 'ExprUnary0' ], 0.8 ],
     [ 'ExprPower0' => ['ExprInc0'],                            0.3 ],
-    [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnaryU' ], 0.8 ],
+    [ 'ExprPowerU' => [ 'ExprIncU', 'WS_OPT', 'OpPower', 'WS_OPT', 'ExprUnaryU' ], 0.8 ],
     [ 'ExprPowerU' => ['ExprIncU'],                            0.3 ],
 
     [ 'ExprIncR' => [ 'OpInc', 'ExprArrowR' ], 0.8 ],
@@ -786,7 +786,7 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBraceExprAssignL for left-associative assignments in print context
     [
         'NonBraceExprAssignL' =>
-          [ 'NonBraceExprCond0', 'OpAssign', 'NonBraceExprAssignL' ],
+          [ 'NonBraceExprCond0', 'WS_OPT', 'OpAssign', 'WS_OPT', 'NonBraceExprAssignL' ],
         0.8
     ],
     [ 'NonBraceExprAssignL' => ['NonBraceExprCondL'], 0.3 ],
@@ -846,7 +846,7 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace multiplication expressions (left-associative)
     [
         'NonBraceExprMulL' =>
-          [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexL' ],
+          [ 'NonBraceExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'NonBraceExprRegexL' ],
         0.8
     ],
     [ 'NonBraceExprMulL' => ['NonBraceExprRegexL'], 0.3 ],
@@ -886,7 +886,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'FunctionCall' => [ 'Identifier', '(', ')' ], 1.0 ],    # func()
 
     # Function calls without parentheses (common in Perl)
-    [ 'FunctionCall' => [ 'Identifier', 'NonBraceExprComma' ], 1.0 ]
+    [ 'FunctionCall' => [ 'Identifier', 'WS_OPT', 'NonBraceExprComma' ], 1.0 ]
     ,                                                         # func args
 
     # Qualified function calls for package methods
@@ -896,7 +896,7 @@ our $chalk_grammar = Grammar->build_grammar(
     ],                                                        # pkg::func(args)
     [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', ')' ], 1.0 ]
     ,                                                         # pkg::func()
-    [ 'FunctionCall' => [ 'QualifiedIdentifier', 'NonBraceExprComma' ], 1.0 ]
+    [ 'FunctionCall' => [ 'QualifiedIdentifier', 'WS_OPT', 'NonBraceExprComma' ], 1.0 ]
     ,                                                         # pkg::func args
 
 # Expression block for grep/map/sort - supports both single expressions and statement lists
@@ -986,11 +986,12 @@ our $chalk_grammar = Grammar->build_grammar(
 
     [ 'ArrayElem'  => [ '[', 'Expression', ']' ], 1.0 ],
     [ 'HashElem'   => [ '{', 'Expression', '}' ], 1.0 ],
-    [ 'Identifier' => [qr/[a-zA-Z_][a-zA-Z0-9_]*/] ],
+    [ 'Identifier' => [qr/[a-zA-Z_][a-zA-Z0-9_]*/], 1.0 ],
     [
         'Number' => [
 qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/
-        ]
+        ],
+        1.0
     ],
     [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
 
@@ -1050,14 +1051,15 @@ qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|
 
     [
         'OpListKeywordExpr' => [
-qr/warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|open|read|write|sysread|syswrite|recv|send|select/
-        ]
+qr/warn|print|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|open|read|write|sysread|syswrite|recv|send|select/
+        ],
+        1.0
     ],
 
     # Whitespace rules (needed for auto_insert)
-    [ 'WS_OPT' => [],              0.1 ],
-    [ 'WS_OPT' => ['WS'],          1.0 ],
-    [ 'WS'     => [qr/\s+/m],      1.0 ],
-    [ 'WS'     => [qr/#.*$/m],     1.0 ],    # Comments count as whitespace
-    [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ],    # Comment followed by whitespace
+    [ 'WS_OPT' => [],         0.1 ],    # WS_OPT can be empty
+    [ 'WS_OPT' => ['WS'],     1.0 ],    # WS_OPT can be whitespace
+    [ 'WS'     => [qr/\s+/m], 1.0 ]     # Only actual whitespace characters
 );
+
+# Note: Semantic Action Classes are now defined in the main chalk file
