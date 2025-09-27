@@ -362,13 +362,13 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace equality expressions (this is what we were missing!)
     [
         'NonBraceExprEqR' =>
-          [ 'NonBraceExprNeq0', 'OpEqual', 'NonBraceExprNeqR' ],
+          [ 'NonBraceExprNeq0', 'WS_OPT', 'OpEqual', 'WS_OPT', 'NonBraceExprNeqR' ],
         0.8
     ],
     [ 'NonBraceExprEqR' => ['NonBraceExprNeqR'], 0.3 ],
     [
         'NonBraceExprEq0' =>
-          [ 'NonBraceExprNeq0', 'OpEqual', 'NonBraceExprNeq0' ],
+          [ 'NonBraceExprNeq0', 'WS_OPT', 'OpEqual', 'WS_OPT', 'NonBraceExprNeq0' ],
         0.8
     ],
     [ 'NonBraceExprEq0' => ['NonBraceExprNeq0'], 0.3 ],
@@ -376,13 +376,13 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace inequality expressions
     [
         'NonBraceExprNeqR' =>
-          [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShiftR' ],
+          [ 'NonBraceExprShift0', 'WS_OPT', 'OpInequal', 'WS_OPT', 'NonBraceExprShiftR' ],
         0.8
     ],
     [ 'NonBraceExprNeqR' => ['NonBraceExprShiftR'], 0.3 ],
     [
         'NonBraceExprNeq0' =>
-          [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShift0' ],
+          [ 'NonBraceExprShift0', 'WS_OPT', 'OpInequal', 'WS_OPT', 'NonBraceExprShift0' ],
         0.8
     ],
     [ 'NonBraceExprNeq0' => ['NonBraceExprShift0'], 0.3 ],
@@ -609,18 +609,18 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprBinAnd0' => ['ExprEq0'],                       0.3 ],
 
     # Complete the missing expression hierarchy levels
-    [ 'ExprEqR' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ], 0.8 ],
+    [ 'ExprEqR' => [ 'ExprNeq0', 'WS_OPT', 'OpEqual', 'WS_OPT', 'ExprNeqR' ], 0.8 ],
     [ 'ExprEqR' => ['ExprNeqR'],                          0.3 ],
-    [ 'ExprEqL' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqL' ], 0.8 ],
+    [ 'ExprEqL' => [ 'ExprNeq0', 'WS_OPT', 'OpEqual', 'WS_OPT', 'ExprNeqL' ], 0.8 ],
     [ 'ExprEqL' => ['ExprNeqL'],                          0.3 ],
-    [ 'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ], 0.8 ],
+    [ 'ExprEq0' => [ 'ExprNeq0', 'WS_OPT', 'OpEqual', 'WS_OPT', 'ExprNeq0' ], 0.8 ],
     [ 'ExprEq0' => ['ExprNeq0'],                          0.3 ],
 
-    [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ], 0.8 ],
+    [ 'ExprNeqR' => [ 'ExprShift0', 'WS_OPT', 'OpInequal', 'WS_OPT', 'ExprShiftR' ], 0.8 ],
     [ 'ExprNeqR' => ['ExprShiftR'],                              0.3 ],
-    [ 'ExprNeqL' => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ], 0.8 ],
+    [ 'ExprNeqL' => [ 'ExprShift0', 'WS_OPT', 'OpInequal', 'WS_OPT', 'ExprShiftL' ], 0.8 ],
     [ 'ExprNeqL' => ['ExprShiftL'],                              0.3 ],
-    [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ], 0.8 ],
+    [ 'ExprNeq0' => [ 'ExprShift0', 'WS_OPT', 'OpInequal', 'WS_OPT', 'ExprShift0' ], 0.8 ],
     [ 'ExprNeq0' => ['ExprShift0'],                              0.3 ],
 
     [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ], 0.8 ],
@@ -815,10 +815,15 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'NonBraceExprLogAndL' => ['NonBraceExprBinOrL'],  0.3 ],
     [ 'NonBraceExprBinOrL'  => ['NonBraceExprBinAndL'], 0.3 ],
     [ 'NonBraceExprBinAndL' => ['NonBraceExprEqL'],     0.3 ],
+    [
+        'NonBraceExprEqL' =>
+          [ 'NonBraceExprNeq0', 'WS_OPT', 'OpEqual', 'WS_OPT', 'NonBraceExprNeqL' ],
+        0.8
+    ],
     [ 'NonBraceExprEqL'     => ['NonBraceExprNeqL'],    0.3 ],
     [
         'NonBraceExprNeqL' =>
-          [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShiftL' ],
+          [ 'NonBraceExprShift0', 'WS_OPT', 'OpInequal', 'WS_OPT', 'NonBraceExprShiftL' ],
         0.8
     ],
     [ 'NonBraceExprNeqL' => ['NonBraceExprShiftL'], 0.3 ],
