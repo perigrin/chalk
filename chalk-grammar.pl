@@ -125,8 +125,8 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ], 1.0 ],
 
     # Statements - chalk specific with expression support
-    [ 'Statement' => ['UseStatement'],     1.0 ],
-    [ 'Statement' => ['RequireStatement'], 1.0 ],    # Require statements
+    [ 'Statement' => ['UseStatement'],     2.0 ],    # Higher priority than FunctionCall for 'use'
+    [ 'Statement' => ['RequireStatement'], 2.0 ],    # Higher priority than FunctionCall for 'require'
     [ 'Statement' => ['FunctionCall'],     1.0 ],    # Function calls like print
     [ 'Statement' => ['PrintExpr'],        1.0 ],
     [ 'Statement' => ['DieExpr'],          1.0 ],
@@ -154,24 +154,24 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Class structure following guacamole PackageStatement pattern
     [
-        'ClassDecl' => [ 'class', 'Identifier', 'Inheritance', 'Block' ],
+        'ClassDecl' => [ 'class', 'WS_OPT', 'Identifier', 'WS_OPT', 'Inheritance', 'WS_OPT', 'Block' ],
         1.0
     ],
-    [ 'ClassDecl' => [ 'class', 'Identifier', 'Block' ], 1.0 ],
+    [ 'ClassDecl' => [ 'class', 'WS_OPT', 'Identifier', 'WS_OPT', 'Block' ], 1.0 ],
 
 # Method declarations are identical to subroutine declarations (following guacamole)
-    [ 'MethodDecl' => [ 'method', 'Identifier', 'SubDefinition' ], 1.0 ],
-    [ 'MethodDecl' => [ 'method', 'Identifier' ], 1.0 ],   # Forward declaration
-    [ 'MethodDecl' => [ 'method', 'SubDefinition' ], 1.0 ],   # anonymous method
+    [ 'MethodDecl' => [ 'method', 'WS_OPT', 'Identifier', 'WS_OPT', 'SubDefinition' ], 1.0 ],
+    [ 'MethodDecl' => [ 'method', 'WS_OPT', 'Identifier' ], 1.0 ],   # Forward declaration
+    [ 'MethodDecl' => [ 'method', 'WS_OPT', 'SubDefinition' ], 1.0 ],   # anonymous method
 
     # Subroutine declarations
-    [ 'SubroutineDecl' => [ 'sub', 'Identifier', 'SubDefinition' ], 1.0 ],
-    [ 'SubroutineDecl' => [ 'sub', 'Identifier' ], 1.0 ],  # Forward declaration
-    [ 'SubroutineDecl' => [ 'my', 'sub', 'Identifier', 'SubDefinition' ], 1.0 ]
+    [ 'SubroutineDecl' => [ 'sub', 'WS_OPT', 'Identifier', 'WS_OPT', 'SubDefinition' ], 1.0 ],
+    [ 'SubroutineDecl' => [ 'sub', 'WS_OPT', 'Identifier' ], 1.0 ],  # Forward declaration
+    [ 'SubroutineDecl' => [ 'my', 'WS_OPT', 'sub', 'WS_OPT', 'Identifier', 'WS_OPT', 'SubDefinition' ], 1.0 ]
     ,                                                      # my sub
-    [ 'SubroutineDecl' => [ 'my', 'sub', 'Identifier' ], 1.0 ]
+    [ 'SubroutineDecl' => [ 'my', 'WS_OPT', 'sub', 'WS_OPT', 'Identifier' ], 1.0 ]
     ,                                                      # my sub forward decl
-    [ 'SubrouteneDecl' => [ 'sub', 'SubDefinition' ], 1.0 ],    # anonymous sub
+    [ 'SubrouteneDecl' => [ 'sub', 'WS_OPT', 'SubDefinition' ], 1.0 ],    # anonymous sub
 
     # SubDefinition from guacamole grammar
     [ 'SubDefinition' => [ 'SubSigsDefinition', 'Block' ], 1.0 ],
@@ -185,13 +185,13 @@ our $chalk_grammar = Grammar->build_grammar(
  # to reduce parsing ambiguity and prevent exponential explosion
     [
         'UseStatement' =>
-          [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr', 'Expression' ],
+          [ 'use', 'WS_OPT', 'ClassIdent', 'WS_OPT', 'VersionExpr', 'WS_OPT', 'Expression' ],
         0.9
     ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent', 'Expression' ],  0.8 ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'VersionExpr' ],               0.7 ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr' ], 0.6 ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent' ],                0.5 ],
+    [ 'UseStatement' => [ 'use', 'WS_OPT', 'ClassIdent', 'WS_OPT', 'Expression' ],  0.8 ],
+    [ 'UseStatement' => [ 'use', 'WS_OPT', 'VersionExpr' ],               0.7 ],
+    [ 'UseStatement' => [ 'use', 'WS_OPT', 'ClassIdent', 'WS_OPT', 'VersionExpr' ], 0.6 ],
+    [ 'UseStatement' => [ 'use', 'WS_OPT', 'ClassIdent' ],                0.5 ],
 
     [ 'Inheritance' => [ ':isa(', 'ClassIdent', ')' ], 1.0 ],
 
@@ -232,7 +232,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'StatementModifier' => [ qr/unless|if|while|for/, 'Expression' ], 2.0 ],
 
     # Guacamole UseStatement components
-    [ 'OpKeywordUse' => ['use'] ],
+    # Removed OpKeywordUse - using 'use' directly in rules
     [ 'ClassIdent'   => ['SubNameExpr'] ],
 
     # SubNameExpr and VersionExpr definitions (simplified for chalk)
@@ -929,7 +929,7 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Operators - basic ones needed for chalk
     [ 'OpComma'   => [qr/,|=>/] ],
-    [ 'OpAssign'  => [qr/\/\/=|\|\|=|&&=|\.=|=/] ],  # Assignment operators
+    [ 'OpAssign'  => [qr/\/\/=|\|\|=|&&=|\.=|=(?!>)/] ],  # Assignment operators, = not followed by >
     [ 'OpArrow'   => ['->'] ],
     [ 'OpAdd'     => [qr/[+\-]/] ],
     [ 'OpMulti'   => [qr/[*\/]/] ],
@@ -986,7 +986,8 @@ our $chalk_grammar = Grammar->build_grammar(
 
     [ 'ArrayElem'  => [ '[', 'Expression', ']' ], 1.0 ],
     [ 'HashElem'   => [ '{', 'Expression', '}' ], 1.0 ],
-    [ 'Identifier' => [qr/[a-zA-Z_][a-zA-Z0-9_]*/], 1.0 ],
+    # Identifier pattern excludes reserved keywords
+    [ 'Identifier' => [qr/(?!(?:use|require|class|method|sub|if|while|for|foreach|unless|elsif|else|BEGIN|END|ADJUST|field|my|our|local|state|return|last|next|redo|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/], 1.0 ],
     [
         'Number' => [
 qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/
