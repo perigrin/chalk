@@ -292,8 +292,8 @@ our $chalk_grammar = Grammar->build_grammar(
  # NonBrace conditional expressions need to go through the full precedence chain
     [
         'NonBraceExprCondR' => [
-            'NonBraceExprRange0', 'OpTriThen',
-            'ExprRangeR',         'OpTriElse',
+            'NonBraceExprRange0', 'WS_OPT', 'OpTriThen', 'WS_OPT',
+            'ExprRangeR',         'WS_OPT', 'OpTriElse', 'WS_OPT',
             'ExprCondR'
         ],
         0.8
@@ -301,8 +301,8 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'NonBraceExprCondR' => ['NonBraceExprRangeR'], 0.3 ],
     [
         'NonBraceExprCond0' => [
-            'NonBraceExprRange0', 'OpTriThen',
-            'ExprRange0',         'OpTriElse',
+            'NonBraceExprRange0', 'WS_OPT', 'OpTriThen', 'WS_OPT',
+            'ExprRange0',         'WS_OPT', 'OpTriElse', 'WS_OPT',
             'ExprCond0'
         ],
         0.8
@@ -326,13 +326,13 @@ our $chalk_grammar = Grammar->build_grammar(
 # Continue through precedence chain: LogOr -> LogAnd -> BinOr -> BinAnd -> Eq -> Neq -> Shift -> Add -> Mul -> Regex -> Power -> Inc -> Arrow -> Value
     [
         'NonBraceExprLogOrR' =>
-          [ 'NonBraceExprLogOr0', 'OpLogOr', 'NonBraceExprLogAndR' ],
+          [ 'NonBraceExprLogOr0', 'WS_OPT', 'OpLogOr', 'WS_OPT', 'NonBraceExprLogAndR' ],
         0.8
     ],
     [ 'NonBraceExprLogOrR' => ['NonBraceExprLogAndR'], 0.3 ],
     [
         'NonBraceExprLogOr0' =>
-          [ 'NonBraceExprLogOr0', 'OpLogOr', 'NonBraceExprLogAnd0' ],
+          [ 'NonBraceExprLogOr0', 'WS_OPT', 'OpLogOr', 'WS_OPT', 'NonBraceExprLogAnd0' ],
         0.8
     ],
     [ 'NonBraceExprLogOr0' => ['NonBraceExprLogAnd0'], 0.3 ],
@@ -340,13 +340,13 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace logical AND expressions
     [
         'NonBraceExprLogAndR' =>
-          [ 'NonBraceExprLogAnd0', 'OpLogAnd', 'NonBraceExprBinOrR' ],
+          [ 'NonBraceExprLogAnd0', 'WS_OPT', 'OpLogAnd', 'WS_OPT', 'NonBraceExprBinOrR' ],
         0.8
     ],
     [ 'NonBraceExprLogAndR' => ['NonBraceExprBinOrR'], 0.3 ],
     [
         'NonBraceExprLogAnd0' =>
-          [ 'NonBraceExprLogAnd0', 'OpLogAnd', 'NonBraceExprBinOr0' ],
+          [ 'NonBraceExprLogAnd0', 'WS_OPT', 'OpLogAnd', 'WS_OPT', 'NonBraceExprBinOr0' ],
         0.8
     ],
     [ 'NonBraceExprLogAnd0' => ['NonBraceExprBinOr0'], 0.3 ],
@@ -557,17 +557,17 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprAssignL' => ['OpAssignKeywordExpr'],                    0.5 ],
     [ 'ExprAssignL' => ['ExprCondL'],                              0.3 ],
     [
-        'ExprCondR' => [ 'ExprRange0', '?', 'ExprRangeR', ':', 'ExprCondR' ],
+        'ExprCondR' => [ 'ExprRange0', 'WS_OPT', '?', 'WS_OPT', 'ExprRangeR', 'WS_OPT', ':', 'WS_OPT', 'ExprCondR' ],
         0.8
     ],
     [ 'ExprCondR' => ['ExprRangeR'], 0.3 ],
     [
-        'ExprCondL' => [ 'ExprRange0', '?', 'ExprRangeL', ':', 'ExprCondL' ],
+        'ExprCondL' => [ 'ExprRange0', 'WS_OPT', '?', 'WS_OPT', 'ExprRangeL', 'WS_OPT', ':', 'WS_OPT', 'ExprCondL' ],
         0.8
     ],
     [ 'ExprCondL' => ['ExprRangeL'], 0.3 ],
     [
-        'ExprCond0' => [ 'ExprRange0', '?', 'ExprRange0', ':', 'ExprCond0' ],
+        'ExprCond0' => [ 'ExprRange0', 'WS_OPT', '?', 'WS_OPT', 'ExprRange0', 'WS_OPT', ':', 'WS_OPT', 'ExprCond0' ],
         0.8
     ],
     [ 'ExprCond0'  => ['ExprRange0'],                             0.3 ],
@@ -577,21 +577,21 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprRangeL' => ['ExprLogOrL'],                             0.3 ],
     [ 'ExprRange0' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ],  0.8 ],
     [ 'ExprRange0' => ['ExprLogOr0'],                             0.3 ],
-    [ 'ExprLogOrR' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndR' ], 0.8 ],
+    [ 'ExprLogOrR' => [ 'ExprLogOr0', 'WS_OPT', 'OpLogOr', 'WS_OPT', 'ExprLogAndR' ], 0.8 ],
     [ 'ExprLogOrR' => ['ExprLogAndR'],                            0.3 ],
-    [ 'ExprLogOrL' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndL' ], 0.8 ],
+    [ 'ExprLogOrL' => [ 'ExprLogOr0', 'WS_OPT', 'OpLogOr', 'WS_OPT', 'ExprLogAndL' ], 0.8 ],
     [ 'ExprLogOrL' => ['ExprLogAndL'],                            0.3 ],
-    [ 'ExprLogOr0' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAnd0' ], 0.8 ],
+    [ 'ExprLogOr0' => [ 'ExprLogOr0', 'WS_OPT', 'OpLogOr', 'WS_OPT', 'ExprLogAnd0' ], 0.8 ],
     [ 'ExprLogOr0' => ['ExprLogAnd0'],                            0.3 ],
 
     # Continue the chain down to Value
-    [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ], 0.8 ],
+    [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'WS_OPT', 'OpLogAnd', 'WS_OPT', 'ExprBinOrR' ], 0.8 ],
     [ 'ExprLogAndR' => [ 'ExprBinOrR',  'Comment' ], 0.7 ]
     ,    # Expression with trailing comment
     [ 'ExprLogAndR' => ['ExprBinOrR'],                              0.3 ],
-    [ 'ExprLogAndL' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrL' ], 0.8 ],
+    [ 'ExprLogAndL' => [ 'ExprLogAnd0', 'WS_OPT', 'OpLogAnd', 'WS_OPT', 'ExprBinOrL' ], 0.8 ],
     [ 'ExprLogAndL' => ['ExprBinOrL'],                              0.3 ],
-    [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOr0' ], 0.8 ],
+    [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'WS_OPT', 'OpLogAnd', 'WS_OPT', 'ExprBinOr0' ], 0.8 ],
     [ 'ExprLogAnd0' => ['ExprBinOr0'],                              0.3 ],
 
     [ 'ExprBinOrR' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndR' ], 0.8 ],
@@ -794,8 +794,8 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBraceExprCondL for conditional expressions in print context
     [
         'NonBraceExprCondL' => [
-            'NonBraceExprRange0', 'OpTriThen',
-            'NonBraceExprRangeL', 'OpTriElse',
+            'NonBraceExprRange0', 'WS_OPT', 'OpTriThen', 'WS_OPT',
+            'NonBraceExprRangeL', 'WS_OPT', 'OpTriElse', 'WS_OPT',
             'NonBraceExprCondL'
         ],
         0.8
