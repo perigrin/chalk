@@ -25,7 +25,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'StatementList' => ['Statement'], 0.9 ]
     ,    # Single statement (last in block, no semicolon needed)
     [ 'StatementList' => ['BlockStatement'], 0.95 ],    # Single block statement
-    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ]
+    [ 'StatementList' => [ 'BlockStatement', 'WS_OPT', 'StatementList' ], 0.8 ]
     ,    # Block + more statements
     [ 'StatementList' => [ 'LineStatement', 'WS_OPT', 'StatementList' ], 1.1 ]
     ,    # Line + more (higher priority than semicolon statements)
