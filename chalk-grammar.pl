@@ -547,9 +547,9 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprNameAnd' => ['ExprNameNot'],                               0.3 ],
     [ 'ExprNameNot' => [ 'OpNameNot', 'ExprNameNot' ],                0.8 ],
     [ 'ExprNameNot' => ['ExprComma'],                                 0.3 ],
-    [ 'ExprComma'   => [ 'ExprAssignL', 'OpComma', 'ExprComma' ],     0.8 ]
+    [ 'ExprComma'   => [ 'ExprAssignL', 'WS_OPT', 'OpComma', 'WS_OPT', 'ExprComma' ],     0.8 ]
     ,    # Comma list - higher prob
-    [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ], 0.7 ], # Trailing comma
+    [ 'ExprComma' => [ 'ExprAssignL', 'WS_OPT', 'OpComma' ], 0.7 ], # Trailing comma
     [ 'ExprComma' => ['ExprAssignR'],              0.3 ], # Single item fallback
     [ 'ExprAssignR' => [ 'ExprCond0', 'WS_OPT', 'OpAssign', 'WS_OPT', 'ExprAssignR' ], 0.8 ],
     [ 'ExprAssignR' => ['ExprCondR'],                              0.3 ],
@@ -776,10 +776,10 @@ our $chalk_grammar = Grammar->build_grammar(
 # NonBraceExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
     [
         'NonBraceExprComma' =>
-          [ 'NonBraceExprAssignL', 'OpComma', 'NonBraceExprComma' ],
+          [ 'NonBraceExprAssignL', 'WS_OPT', 'OpComma', 'WS_OPT', 'NonBraceExprComma' ],
         0.8
     ],
-    [ 'NonBraceExprComma' => [ 'NonBraceExprAssignL', 'OpComma' ], 0.7 ]
+    [ 'NonBraceExprComma' => [ 'NonBraceExprAssignL', 'WS_OPT', 'OpComma' ], 0.7 ]
     ,                                                           # Trailing comma
     [ 'NonBraceExprComma' => ['NonBraceExprAssignR'], 0.3 ],    # Single item
 
@@ -1026,19 +1026,19 @@ qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[e
 
     # Optimal 3-rule ExpressionList - balances functionality with performance
     [ 'ExpressionList' => ['Expression'], 1.0 ],    # Single expression
-    [ 'ExpressionList' => [ 'Expression', 'OpComma', 'ExpressionList' ], 1.0 ]
+    [ 'ExpressionList' => [ 'Expression', 'WS_OPT', 'OpComma', 'WS_OPT', 'ExpressionList' ], 1.0 ]
     ,                                               # Standard recursion
     [ 'ExpressionList' => [ 'Comment', 'ExpressionList' ], 1.0 ]
     ,                                               # Comment-prefixed lists
 
     [ 'HashElementList' => ['HashElement'], 1.0 ],
     [
-        'HashElementList' => [ 'HashElement', 'OpComma', 'HashElementList' ],
+        'HashElementList' => [ 'HashElement', 'WS_OPT', 'OpComma', 'WS_OPT', 'HashElementList' ],
         1.0
     ],
-    [ 'HashElementList' => [ 'HashElement', 'OpComma' ], 1.0 ], # Trailing comma
+    [ 'HashElementList' => [ 'HashElement', 'WS_OPT', 'OpComma' ], 1.0 ], # Trailing comma
 
-    [ 'HashElement' => [ 'Expression', 'OpComma', 'Expression' ], 1.0 ]
+    [ 'HashElement' => [ 'Expression', 'WS_OPT', 'OpComma', 'WS_OPT', 'Expression' ], 1.0 ]
     ,                                                           # key => value
 
     # File test operators - unary operators that test file properties
