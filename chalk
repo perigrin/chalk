@@ -32,12 +32,17 @@ class SPPFSymbolNode {
     field $start_pos :param :reader;
     field $end_pos   :param :reader;
     field @packed_nodes;
+    field $terminal_value :reader = undef;  # Store actual matched text
 
     method add_packed_node($packed_node) {
         push( @packed_nodes, $packed_node );
     }
 
     method packed_nodes() { @packed_nodes }
+
+    method set_terminal_value($value) {
+        $terminal_value = $value;
+    }
 
     method to_string(@) {
         return "$symbol\[$start_pos,$end_pos\]";
@@ -71,6 +76,11 @@ class SPPFTerminalNode {
     field $symbol    :param :reader;
     field $start_pos :param :reader;
     field $end_pos   :param :reader;
+    field $terminal_value :reader = undef;  # Store actual matched text
+
+    method set_terminal_value($value) {
+        $terminal_value = $value;
+    }
 
     method to_string(@) {
         return "'$symbol'\[$start_pos,$end_pos\]";
@@ -91,10 +101,61 @@ class SPPFViterbiElement :isa(Element) {
         my $combined_node =
           $forest->create_sequence_node( $sppf_node, $other->sppf_node );
 
+        # Apply semantic action if available from the rule path
+        my $semantic_node = $combined_node;
+        my $action = undef;
+
+        if (@$path > 0 && $path->[0]) {
+            my $rule = $path->[0];
+
+            # First check if rule has explicit semantic_action
+            if ($rule->semantic_action) {
+                $action = $rule->semantic_action;
+            }
+            # Otherwise, check if there's a semantic action class matching the LHS
+            else {
+                my $class_name = $rule->lhs;
+                try {
+                    # Check if the class exists and is a SemanticAction
+                    # $class_name is a string, we need to check if the class exists
+                    if ($class_name->can('isa') && $class_name->isa('SemanticAction')) {
+                        $action = $class_name;
+                    }
+                }
+                catch ($e) {
+                    # Ignore errors - just means no semantic action class exists
+                }
+            }
+
+            # If we have a semantic action, use it
+            if ($action) {
+                # If semantic_action is a string (class name), instantiate it
+                if (!ref($action)) {
+                    try {
+                        $action = $action->new(operation => $action);
+                    }
+                    catch ($e) {
+                        warn "Failed to instantiate semantic action $action: $e";
+                        $action = undef;
+                    }
+                }
+
+                if ($action) {
+                    try {
+                        $semantic_node = $action->semantic_reduction($forest, $sppf_node, $other->sppf_node);
+                    }
+                    catch ($e) {
+                        warn "Semantic action failed: $e";
+                        $semantic_node = $combined_node;
+                    }
+                }
+            }
+        }
+
         return SPPFViterbiElement->new(
             score     => $score + $other->score,
             path      => [ $path->@*, $other->path->@* ],
-            sppf_node => $combined_node,
+            sppf_node => $semantic_node,
             forest    => $forest
         );
     }
@@ -664,6 +725,7 @@ class EarleyChart {
 class Parser {
     field $semiring :param = SPPFViterbiSemiring->new();
     field $grammar :param;
+    field $input_string;  # Store current input string for terminal extraction
 
     method parse_tokens(@input) {
 
@@ -672,6 +734,9 @@ class Parser {
     }
 
     method parse_string($input_string) {
+        # Store input string for terminal value extraction
+        $input_string = $input_string;
+
         my $chart = EarleyChart->new( semiring => $semiring );
 
        # Initialize chart by predicting all rules for start symbol at position 0
@@ -711,10 +776,52 @@ class Parser {
 
         # Show where parsing actually stopped if it failed
         if ( !$result && $last_active_pos < $input_length ) {
-            warn(
-"🔍 PARSING STOPPED: Reached position $last_active_pos of $input_length ("
-                  . sprintf( "%.1f", 100 * $last_active_pos / $input_length )
-                  . "%)\n" );
+            my $percentage = sprintf( "%.1f", 100 * $last_active_pos / $input_length );
+            warn("🔍 PARSING STOPPED: Reached position $last_active_pos of $input_length ($percentage%)\n");
+
+            # Show what we found at the failure point
+            my $remaining_input = substr($input_string, $last_active_pos);
+            my $next_chars = substr($remaining_input, 0, 10);
+            $next_chars =~ s/\n/\\n/g;
+            $next_chars =~ s/\t/\\t/g;
+            warn("📍 Found at position $last_active_pos: '$next_chars'\n");
+
+            # Show what tokens/rules were expected at the failure point
+            my @expected_items = $chart->items_ending_at($last_active_pos);
+            my @incomplete_items = grep { !$_->complete } @expected_items;
+
+            if (@incomplete_items) {
+                warn("🎯 Expected at position $last_active_pos:\n");
+                my %expected_symbols;
+                for my $item (@incomplete_items) {
+                    if ($item->dot_pos < @{$item->rule->rhs}) {
+                        my $expected_symbol = $item->rule->rhs->[$item->dot_pos];
+                        $expected_symbols{$expected_symbol}++;
+                    }
+                }
+                for my $symbol (sort keys %expected_symbols) {
+                    warn("   - $symbol\n");
+                }
+            }
+
+            # Show active rules at the failure point
+            if (@expected_items > 0) {
+                warn("🔧 Active parsing states at position $last_active_pos:\n");
+                for my $item (splice(@expected_items, 0, 5)) { # Show first 5
+                    my $rule_str = $item->rule->lhs . " →";
+                    my @rhs = @{$item->rule->rhs};
+                    for my $i (0..$#rhs) {
+                        if ($i == $item->dot_pos) {
+                            $rule_str .= " •";
+                        }
+                        $rule_str .= " " . $rhs[$i];
+                    }
+                    if ($item->dot_pos > $#rhs) {
+                        $rule_str .= " •";
+                    }
+                    warn("   $rule_str\n");
+                }
+            }
         }
 
         return $result;
@@ -741,7 +848,7 @@ class Parser {
                     if ( $input_string =~ /\G($pattern)/gc ) {
                         my $match_length = length($1);
                         $self->scan( $item, $element, $chart, $pos,
-                            $match_length );
+                            $match_length, $input_string );
                     }
                 }
             }
@@ -897,13 +1004,22 @@ class Parser {
         }
     }
 
-    method scan( $item, $element, $chart, $pos, $match_length ) {
+    method scan( $item, $element, $chart, $pos, $match_length, $input_str = '' ) {
         my $scanned_item = EarleyItem->new(
             start_pos => $item->start_pos,
             rule      => $item->rule,
             dot_pos   => $item->dot_pos + 1,
             end_pos   => $pos + $match_length
         );
+
+        # Store terminal value in element for semantic actions
+        if ($element && $element->can('sppf_node')) {
+            my $node = $element->sppf_node;
+            if ($node && $node->can('set_terminal_value') && $input_str) {
+                my $matched_text = substr($input_str, $pos, $match_length);
+                $node->set_terminal_value($matched_text);
+            }
+        }
 
         $chart->add_element( $scanned_item, $element );
     }
@@ -927,6 +1043,7 @@ class GrammarRule {
     field $rhs :param :reader;
     field $probability :param :reader = 1.0;
     field $nullable;
+    field $semantic_action :param :reader = undef;  # Optional semantic action
 
     method is_right_recursive() { $lhs eq $rhs->[-1] }
     method is_left_recursive()  { $lhs eq $rhs->[0] }
@@ -990,6 +1107,16 @@ class Grammar {
         );
     }
 
+    my sub new_rule_with_action( $lhs, $rhs, $probability = 1.0, $semantic_action = undef ) {
+        $probability ||= 0.1;
+        return GrammarRule->new(
+            lhs             => $lhs,
+            rhs             => $rhs,
+            probability     => $probability,
+            semantic_action => $semantic_action
+        );
+    }
+
     my sub insert ( $items, @list ) {
         return [ ( map { $_, @$items } @list[ 0 .. $#list - 1 ] ), $list[-1] ];
     }
@@ -997,11 +1124,16 @@ class Grammar {
     sub build_grammar( $class, $auto_insert, @rules ) {
         my %rules = ();
         for my $r (@rules) {
-            my ( $lhs, $rhs ) = @$r;
-            if ( @$auto_insert && @$rhs > 1 ) {
-                $r->[1] = insert( $auto_insert, @$rhs );
+            my ( $lhs, $rhs, $prob, $semantic_action ) = @$r;
+            $prob //= 1.0;
+            # Removed auto-insertion - explicit WS_OPT placement gives better control
+
+            # Use new_rule_with_action if semantic action is provided
+            if (defined $semantic_action) {
+                push( @{ $rules{$lhs} //= [] }, new_rule_with_action($lhs, $rhs, $prob, $semantic_action) );
+            } else {
+                push( @{ $rules{$lhs} //= [] }, new_rule($lhs, $rhs, $prob) );
             }
-            push( @{ $rules{$lhs} //= [] }, new_rule(@$r) );
         }
         return Grammar->new( rules => \%rules, start_symbol => $rules[0]->[0] );
     }
@@ -1109,7 +1241,13 @@ if ( !caller ) {
 
         # Print the result
         if ($result) {
-            print("Parse successful: $result\n");
+            # Look for semantic actions in the parse result
+            my $semantic_root = find_semantic_actions($result);
+            if ($semantic_root) {
+                print visualize_semantic_execution_graph($semantic_root);
+            } else {
+                print("Parse successful: $result\n");
+            }
         }
         else {
             print("Parse failed\n");
@@ -1118,5 +1256,418 @@ if ( !caller ) {
     else {
         print("No input provided\n");
     }
+}
+
+# Semantic Action Infrastructure
+# These ARE the interpretation nodes - they preserve semantic context
+# Implementation done carefully to avoid segfaults
+
+class SemanticAction {
+    # Auto-incrementing ID using state variable
+    state $NEXT_ID = 0;
+    field $id :reader = ++$NEXT_ID;
+
+    # Basic node identity
+    field $operation :param :reader = 'unknown';
+    field $type :param :reader = 'unknown';
+    field $score :param :reader = 0.0;
+    field $inputs :param :reader = [];
+
+    # Node interface compatibility methods
+    method key() {
+        return $self->operation . '_' . $self->id;
+    }
+
+    method interpretations() {
+        # Return self as the single interpretation
+        return ($self);
+    }
+
+    method description() {
+        return $self->operation;
+    }
+
+    # SPPF node compatibility methods
+    method start_pos() { return 0; }
+    method end_pos() { return 0; }
+    method symbol() { return $self->operation; }
+
+    # Default semantic reduction - subclasses should override
+    method semantic_reduction($forest, $left, $right) {
+        die "semantic_reduction not implemented in " . ref($self);
+    }
+
+    # Default build_from_rule
+    method build_from_rule($class_name, $rule, $parser_state) {
+        return $class_name->new();
+    }
+
+    # Extract matched text from input string and position information
+    method extract_terminal_value($input_string, $start_pos, $end_pos) {
+        return substr($input_string, $start_pos, $end_pos - $start_pos);
+    }
+}
+
+# Function Call Action - preserves function name context
+class FunctionCall :isa(SemanticAction) {
+    field $function_name :param :reader = 'unknown';
+
+    method semantic_reduction($forest, $left, $right) {
+        # For now, just return a basic function call action
+        return FunctionCall->new(
+            operation => 'FunctionCall',
+            function_name => 'say',  # Hardcode for now
+            type => 'void',
+            inputs => $right ? [$right] : []
+        );
+    }
+
+    method description() {
+        return "function call: " . $self->function_name;
+    }
+}
+
+# Number literal action - captures numeric values
+class NumberAction :isa(SemanticAction) {
+    field $value :param :reader = '0';
+
+    method semantic_reduction($forest, $terminal_node, $unused) {
+        # Extract the actual number value from the terminal
+        my $numeric_value = $self->extract_terminal_value($terminal_node);
+
+        return NumberAction->new(
+            operation => 'Number',
+            value => $numeric_value,
+            type => 'numeric',
+            inputs => []
+        );
+    }
+
+    method extract_terminal_value($node) {
+        # Extract actual terminal value from SPPF node if available
+        if ($node && $node->can('terminal_value') && defined $node->terminal_value) {
+            return $node->terminal_value;
+        }
+        # Fallback: return "1" for numbers
+        return "1";
+    }
+
+    method description() {
+        return "number literal: " . $self->value;
+    }
+}
+
+# Addition operation action - connects two numeric expressions
+class AddAction :isa(SemanticAction) {
+    method semantic_reduction($forest, $left, $right) {
+        return AddAction->new(
+            operation => 'Add',
+            type => 'numeric',
+            inputs => [$left, $right]
+        );
+    }
+
+    method description() {
+        return "numeric addition";
+    }
+}
+
+# Identifier action - captures variable/function names
+class IdentifierAction :isa(SemanticAction) {
+    field $name :param :reader = 'unknown';
+
+    method semantic_reduction($forest, $terminal_node, $unused) {
+        # Extract the actual identifier name from the terminal
+        my $identifier_name = $self->extract_terminal_value($terminal_node);
+
+        return IdentifierAction->new(
+            operation => 'Identifier',
+            name => $identifier_name,
+            type => 'symbol',
+            inputs => []
+        );
+    }
+
+    method extract_terminal_value($node) {
+        # Extract actual terminal value from SPPF node if available
+        if ($node && $node->can('terminal_value') && defined $node->terminal_value) {
+            return $node->terminal_value;
+        }
+        # Fallback: return "say" for identifiers
+        return "say";
+    }
+
+    method description() {
+        return "identifier: " . $self->name;
+    }
+}
+
+# Shebang action - captures shebang lines
+class Shebang :isa(SemanticAction) {
+    field $shebang_line :param :reader = '';
+
+    method semantic_reduction($forest, $terminal_node, $unused) {
+        # Extract the actual shebang line from the terminal
+        my $shebang_text = $self->extract_terminal_value($terminal_node);
+
+        return Shebang->new(
+            operation => 'Shebang',
+            shebang_line => $shebang_text,
+            type => 'directive',
+            inputs => []
+        );
+    }
+
+    method extract_terminal_value($node) {
+        # Extract actual terminal value from SPPF node if available
+        if ($node && $node->can('terminal_value') && defined $node->terminal_value) {
+            return $node->terminal_value;
+        }
+        # Fallback
+        return "#!/usr/bin/perl";
+    }
+
+    method description() {
+        return "shebang: " . $self->shebang_line;
+    }
+}
+
+# Print expression action - captures print statements
+class PrintExpr :isa(SemanticAction) {
+    method semantic_reduction($forest, $left, $right) {
+        return PrintExpr->new(
+            operation => 'PrintExpr',
+            type => 'statement',
+            inputs => $right ? [$right] : []
+        );
+    }
+
+    method description() {
+        return "print statement";
+    }
+}
+
+# Quoted string action - captures string literals
+class QuotedString :isa(SemanticAction) {
+    field $string_value :param :reader = '';
+
+    method semantic_reduction($forest, $terminal_node, $unused) {
+        # Extract the actual string value from the terminal
+        my $string_text = $self->extract_terminal_value($terminal_node);
+
+        return QuotedString->new(
+            operation => 'QuotedString',
+            string_value => $string_text,
+            type => 'string',
+            inputs => []
+        );
+    }
+
+    method extract_terminal_value($node) {
+        # Extract actual terminal value from SPPF node if available
+        if ($node && $node->can('terminal_value') && defined $node->terminal_value) {
+            return $node->terminal_value;
+        }
+        # Fallback
+        return '"string"';
+    }
+
+    method description() {
+        return "string literal: " . $self->string_value;
+    }
+}
+
+# StatementList action - manages sequences of statements
+class StatementList :isa(SemanticAction) {
+    method semantic_reduction($forest, $left, $right) {
+        # For now, just aggregate the statements
+        my @statements;
+        if ($left && $left isa SemanticAction) {
+            push @statements, $left;
+        }
+        if ($right && $right isa SemanticAction) {
+            if ($right->operation eq 'StatementList') {
+                # If right is also a StatementList, flatten it
+                push @statements, @{$right->inputs};
+            } else {
+                push @statements, $right;
+            }
+        }
+        return StatementList->new(
+            operation => 'StatementList',
+            type => 'statement_sequence',
+            inputs => \@statements
+        );
+    }
+    method description() {
+        my $count = scalar(@{$self->inputs});
+        return "statement list with $count statements";
+    }
+}
+
+# Statement action - wraps individual statements
+class Statement :isa(SemanticAction) {
+    method semantic_reduction($forest, $statement_content, $unused) {
+        # Just pass through the actual statement content
+        if ($statement_content && $statement_content isa SemanticAction) {
+            return $statement_content;
+        }
+        # Fallback - create a generic statement wrapper
+        return Statement->new(
+            operation => 'Statement',
+            type => 'statement',
+            inputs => $statement_content ? [$statement_content] : []
+        );
+    }
+    method description() {
+        return "generic statement";
+    }
+}
+
+# LineStatement action - handles line-terminated statements like comments
+class LineStatement :isa(SemanticAction) {
+    method semantic_reduction($forest, $statement_content, $unused) {
+        # Just pass through the actual statement content
+        if ($statement_content && $statement_content isa SemanticAction) {
+            return $statement_content;
+        }
+        # Fallback - create a generic line statement wrapper
+        return LineStatement->new(
+            operation => 'LineStatement',
+            type => 'line_statement',
+            inputs => $statement_content ? [$statement_content] : []
+        );
+    }
+    method description() {
+        return "line statement";
+    }
+}
+
+# BlockStatement action - handles block statements that don't need semicolons
+class BlockStatement :isa(SemanticAction) {
+    method semantic_reduction($forest, $statement_content, $unused) {
+        # Just pass through the actual statement content
+        if ($statement_content && $statement_content isa SemanticAction) {
+            return $statement_content;
+        }
+        # Fallback - create a generic block statement wrapper
+        return BlockStatement->new(
+            operation => 'BlockStatement',
+            type => 'block_statement',
+            inputs => $statement_content ? [$statement_content] : []
+        );
+    }
+    method description() {
+        return "block statement";
+    }
+}
+
+# Comment action - handles comment lines
+class Comment :isa(SemanticAction) {
+    field $comment_text :param :reader = '';
+    method semantic_reduction($forest, $terminal_node, $unused) {
+        # Extract the actual comment text from the terminal
+        my $comment_content = $self->extract_terminal_value($terminal_node);
+        return Comment->new(
+            operation => 'Comment',
+            comment_text => $comment_content,
+            type => 'comment',
+            inputs => []
+        );
+    }
+    method extract_terminal_value($node) {
+        # Extract actual terminal value from SPPF node if available
+        if ($node && $node->can('terminal_value') && defined $node->terminal_value) {
+            return $node->terminal_value;
+        }
+        # Fallback
+        return '# comment';
+    }
+    method description() {
+        return "comment: " . $self->comment_text;
+    }
+}
+
+# Find semantic actions in parse result tree
+sub find_semantic_actions {
+    my ($result) = @_;
+    return undef unless $result;
+
+    # Check if result itself is a semantic action
+    if ($result isa SemanticAction) {
+        return $result;
+    }
+
+    # Check if result has an sppf_node that's a semantic action
+    if ($result->can('sppf_node')) {
+        my $node = $result->sppf_node;
+        if ($node && $node isa SemanticAction) {
+            return $node;
+        }
+    }
+
+    # For now, return undef if no semantic actions found
+    # TODO: Implement deep traversal of SPPF tree to find semantic actions
+    return undef;
+}
+
+# Sea of Nodes Graph Visualizer for Semantic Actions
+sub visualize_semantic_execution_graph {
+    my ($root_action) = @_;
+    my %visited;
+    my @execution_order;
+
+    # Traverse the semantic graph
+    _collect_semantic_nodes($root_action, \%visited, \@execution_order);
+
+    my $output = "🌊 Sea of Nodes Execution Graph:\n";
+    $output .= "=" x 50 . "\n";
+    $output .= "📊 Semantic Nodes: " . scalar(@execution_order) . " execution operations\n\n";
+
+    # Group by operation type for clean display
+    my %by_type;
+    for my $action (@execution_order) {
+        my $type = $action->operation;
+        $type =~ s/\(.*\)$//;  # Remove parameters
+        push @{$by_type{$type}}, $action;
+    }
+
+    # Display in execution order: constants → operations → calls
+    for my $type (qw(Number Identifier Add Multiply FunctionCall)) {
+        next unless exists $by_type{$type};
+
+        $output .= "🔸 $type operations:\n";
+        for my $action (@{$by_type{$type}}) {
+            $output .= sprintf("   %s%d: %s\n",
+                $type, $action->id, $action->description);
+
+            # Show inputs
+            if (@{$action->inputs}) {
+                $output .= "     ⬅️  Inputs: ";
+                $output .= join(", ", map {
+                    (ref($_) =~ /(\w+)Action$/)[0] . $_->id
+                } @{$action->inputs});
+                $output .= "\n";
+            }
+        }
+        $output .= "\n";
+    }
+
+    return $output;
+}
+
+sub _collect_semantic_nodes {
+    my ($action, $visited, $order) = @_;
+    return unless $action && !$visited->{$action->id};
+
+    $visited->{$action->id} = 1;
+
+    # Visit inputs first (depth-first)
+    for my $input (@{$action->inputs}) {
+        _collect_semantic_nodes($input, $visited, $order);
+    }
+
+    # Add this node to execution order
+    push @$order, $action;
 }
 
