@@ -72,28 +72,28 @@ our $chalk_grammar = Grammar->build_grammar(
     ],
 
     # Elsif chain can be one or more elsif blocks
-    [ 'ElsifChain' => [ 'elsif', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'ElsifChain' => [ 'elsif', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ], 1.0 ],
     [
         'ElsifChain' =>
-          [ 'elsif', '(', 'Expression', ')', 'Block', 'ElsifChain' ],
+          [ 'elsif', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block', 'WS_OPT', 'ElsifChain' ],
         1.0
     ],
 
     # Standalone elsif statement (for backwards compatibility)
-    [ 'ElsifStatement' => [ 'elsif', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'ElsifStatement' => [ 'elsif', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ], 1.0 ],
 
     # Unless statement rules following guacamole ConditionUnlessExpr pattern
-    [ 'UnlessStatement' => [ 'unless', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'UnlessStatement' => [ 'unless', 'Expression' ], 1.0 ],    # Postfix form
+    [ 'UnlessStatement' => [ 'unless', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ], 1.0 ],
+    [ 'UnlessStatement' => [ 'unless', 'WS_OPT', 'Expression' ], 1.0 ],    # Postfix form
 
     # Block structure for conditional statements
     [ 'Block' => [ '{', 'WS_OPT', 'StatementList', 'WS_OPT', '}' ], 1.0 ],
     [ 'Block' => [ '{', 'WS_OPT', '}' ], 1.0 ],
 
     # ADJUST block for class initialization
-    [ 'AdjustBlock' => [ 'ADJUST', 'Block' ], 1.0 ],
-    [ 'BeginBlock'  => [ 'BEGIN',  'Block' ], 1.0 ],
-    [ 'EndBlock'    => [ 'END',    'Block' ], 1.0 ],
+    [ 'AdjustBlock' => [ 'ADJUST', 'WS_OPT', 'Block' ], 1.0 ],
+    [ 'BeginBlock'  => [ 'BEGIN', 'WS_OPT', 'Block' ], 1.0 ],
+    [ 'EndBlock'    => [ 'END', 'WS_OPT', 'Block' ], 1.0 ],
 
     # Loop statements (following guacamole pattern)
     [ 'LoopStatement' => ['ForStatement'],   1.0 ],
@@ -102,27 +102,27 @@ our $chalk_grammar = Grammar->build_grammar(
     # For statement - foreach style variations
     [
         'ForStatement' =>
-          [ 'for', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ],
+          [ 'for', 'WS_OPT', 'my', 'WS_OPT', 'VariableBase', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ],
         1.0
     ],
     [
         'ForStatement' =>
-          [ 'foreach', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ],
+          [ 'foreach', 'WS_OPT', 'my', 'WS_OPT', 'VariableBase', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ],
         1.0
     ],
     [
         'ForStatement' =>
-          [ 'for', 'VariableBase', '(', 'Expression', ')', 'Block' ],
+          [ 'for', 'WS_OPT', 'VariableBase', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ],
         1.0
     ],
     [
         'ForStatement' =>
-          [ 'foreach', 'VariableBase', '(', 'Expression', ')', 'Block' ],
+          [ 'foreach', 'WS_OPT', 'VariableBase', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ],
         1.0
     ],
 
     # While statement - while ( condition ) { ... }
-    [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'WhileStatement' => [ 'while', 'WS_OPT', '(', 'Expression', ')', 'WS_OPT', 'Block' ], 1.0 ],
 
     # Statements - chalk specific with expression support
     [ 'Statement' => ['UseStatement'],     2.0 ],    # Higher priority than FunctionCall for 'use'
@@ -171,15 +171,15 @@ our $chalk_grammar = Grammar->build_grammar(
     ,                                                      # my sub
     [ 'SubroutineDecl' => [ 'my', 'WS_OPT', 'sub', 'WS_OPT', 'Identifier' ], 1.0 ]
     ,                                                      # my sub forward decl
-    [ 'SubrouteneDecl' => [ 'sub', 'WS_OPT', 'SubDefinition' ], 1.0 ],    # anonymous sub
+    [ 'SubroutineDecl' => [ 'sub', 'WS_OPT', 'SubDefinition' ], 1.0 ],    # anonymous sub
 
     # SubDefinition from guacamole grammar
     [ 'SubDefinition' => [ 'SubSigsDefinition', 'Block' ], 1.0 ],
     [ 'SubDefinition' => ['Block'],                        1.0 ],
 
     # SubSigsDefinition is just a parenthetical expression
-    [ 'SubSigsDefinition' => [ '(', 'Expression', ')' ], 1.0 ],
-    [ 'SubSigsDefinition' => [ '(', ')' ], 1.0 ],
+    [ 'SubSigsDefinition' => [ '(', 'WS_OPT', 'Expression', 'WS_OPT', ')' ], 1.0 ],
+    [ 'SubSigsDefinition' => [ '(', 'WS_OPT', ')' ], 1.0 ],
 
  # UseStatement - reordered with higher probabilities for more specific patterns
  # to reduce parsing ambiguity and prevent exponential explosion
@@ -196,21 +196,21 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'Inheritance' => [ ':isa(', 'ClassIdent', ')' ], 1.0 ],
 
     # Field declarations - simplified like Guacamole Modifier Variable pattern
-    [ 'FieldDecl' => [ 'field', 'Variable', 'FieldAttributeList' ], 1.0 ],
-    [ 'FieldDecl' => [ 'field', 'Variable' ], 1.0 ],
+    [ 'FieldDecl' => [ 'field', 'WS_OPT', 'Variable', 'WS_OPT', 'FieldAttributeList' ], 1.0 ],
+    [ 'FieldDecl' => [ 'field', 'WS_OPT', 'Variable' ], 1.0 ],
 
     # Variable declarations - my/our/local/state
-    [ 'VariableDecl' => [ 'my', 'Variable', '=', 'Expression' ],    1.0 ],
-    [ 'VariableDecl' => [ 'my', 'Variable' ],                       1.0 ],
-    [ 'VariableDecl' => [ 'our', 'Variable', '=', 'Expression' ],   1.0 ],
-    [ 'VariableDecl' => [ 'our', 'Variable' ],                      1.0 ],
-    [ 'VariableDecl' => [ 'local', 'Variable', '=', 'Expression' ], 1.0 ],
-    [ 'VariableDecl' => [ 'local', 'Variable' ],                    1.0 ],
+    [ 'VariableDecl' => [ 'my', 'WS_OPT', 'Variable', 'WS_OPT', '=', 'WS_OPT', 'Expression' ],    1.0 ],
+    [ 'VariableDecl' => [ 'my', 'WS_OPT', 'Variable' ],                       1.0 ],
+    [ 'VariableDecl' => [ 'our', 'WS_OPT', 'Variable', 'WS_OPT', '=', 'WS_OPT', 'Expression' ],   1.0 ],
+    [ 'VariableDecl' => [ 'our', 'WS_OPT', 'Variable' ],                      1.0 ],
+    [ 'VariableDecl' => [ 'local', 'WS_OPT', 'Variable', 'WS_OPT', '=', 'WS_OPT', 'Expression' ], 1.0 ],
+    [ 'VariableDecl' => [ 'local', 'WS_OPT', 'Variable' ],                    1.0 ],
 
 # Local can also be used with any lvalue expression (hash elements, array elements, etc.)
-    [ 'VariableDecl' => [ 'local', 'Expression', '=', 'Expression' ], 1.0 ],
-    [ 'VariableDecl' => [ 'state', 'Variable',   '=', 'Expression' ], 1.0 ],
-    [ 'VariableDecl' => [ 'state', 'Variable' ], 1.0 ],
+    [ 'VariableDecl' => [ 'local', 'WS_OPT', 'Expression', 'WS_OPT', '=', 'WS_OPT', 'Expression' ], 1.0 ],
+    [ 'VariableDecl' => [ 'state', 'WS_OPT', 'Variable', 'WS_OPT', '=', 'WS_OPT', 'Expression' ], 1.0 ],
+    [ 'VariableDecl' => [ 'state', 'WS_OPT', 'Variable' ], 1.0 ],
 
 # Basic terminals - include newlines since comments/shebangs are line-oriented
 # TODO: Allow inline comments within parameter lists and expressions, not just after complete statements
@@ -222,14 +222,14 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'Ellipsis'          => ['...'] ],
 
     # Return statements - following Guacamole OpKeywordReturnExpr pattern
-    [ 'ReturnStatement' => [ 'return', 'Expression' ], 1.0 ],
+    [ 'ReturnStatement' => [ 'return', 'WS_OPT', 'Expression' ], 1.0 ],
     [ 'ReturnStatement' => ['return'],                 0.1 ],
 
     # Require statements - similar to UseStatement but simpler
-    [ 'RequireStatement' => [ 'require', 'Expression' ], 1.0 ],
+    [ 'RequireStatement' => [ 'require', 'WS_OPT', 'Expression' ], 1.0 ],
 
     # Statement modifiers - following Guacamole postfix patterns
-    [ 'StatementModifier' => [ qr/unless|if|while|for/, 'Expression' ], 2.0 ],
+    [ 'StatementModifier' => [ qr/unless|if|while|for/, 'WS_OPT', 'Expression' ], 2.0 ],
 
     # Guacamole UseStatement components
     # Removed OpKeywordUse - using 'use' directly in rules
@@ -352,11 +352,15 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'NonBraceExprLogAnd0' => ['NonBraceExprBinOr0'], 0.3 ],
 
     # NonBrace binary OR expressions
+    [ 'NonBraceExprBinOrR' => [ 'NonBraceExprBinOr0', 'WS_OPT', 'OpBinOr', 'WS_OPT', 'NonBraceExprBinAndR' ], 0.8 ],
     [ 'NonBraceExprBinOrR' => ['NonBraceExprBinAndR'], 0.3 ],
+    [ 'NonBraceExprBinOr0' => [ 'NonBraceExprBinOr0', 'WS_OPT', 'OpBinOr', 'WS_OPT', 'NonBraceExprBinAnd0' ], 0.8 ],
     [ 'NonBraceExprBinOr0' => ['NonBraceExprBinAnd0'], 0.3 ],
 
     # NonBrace binary AND expressions
+    [ 'NonBraceExprBinAndR' => [ 'NonBraceExprBinAnd0', 'WS_OPT', 'OpBinAnd', 'WS_OPT', 'NonBraceExprEqR' ], 0.8 ],
     [ 'NonBraceExprBinAndR' => ['NonBraceExprEqR'], 0.3 ],
+    [ 'NonBraceExprBinAnd0' => [ 'NonBraceExprBinAnd0', 'WS_OPT', 'OpBinAnd', 'WS_OPT', 'NonBraceExprEq0' ], 0.8 ],
     [ 'NonBraceExprBinAnd0' => ['NonBraceExprEq0'], 0.3 ],
 
     # NonBrace equality expressions (this is what we were missing!)
@@ -594,18 +598,18 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'WS_OPT', 'OpLogAnd', 'WS_OPT', 'ExprBinOr0' ], 0.8 ],
     [ 'ExprLogAnd0' => ['ExprBinOr0'],                              0.3 ],
 
-    [ 'ExprBinOrR' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndR' ], 0.8 ],
+    [ 'ExprBinOrR' => [ 'ExprBinOr0', 'WS_OPT', 'OpBinOr', 'WS_OPT', 'ExprBinAndR' ], 0.8 ],
     [ 'ExprBinOrR' => ['ExprBinAndR'],                            0.3 ],
-    [ 'ExprBinOrL' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndL' ], 0.8 ],
+    [ 'ExprBinOrL' => [ 'ExprBinOr0', 'WS_OPT', 'OpBinOr', 'WS_OPT', 'ExprBinAndL' ], 0.8 ],
     [ 'ExprBinOrL' => ['ExprBinAndL'],                            0.3 ],
-    [ 'ExprBinOr0' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAnd0' ], 0.8 ],
+    [ 'ExprBinOr0' => [ 'ExprBinOr0', 'WS_OPT', 'OpBinOr', 'WS_OPT', 'ExprBinAnd0' ], 0.8 ],
     [ 'ExprBinOr0' => ['ExprBinAnd0'],                            0.3 ],
 
-    [ 'ExprBinAndR' => [ 'ExprBinAnd0', '&', 'ExprEqR' ], 0.8 ],
+    [ 'ExprBinAndR' => [ 'ExprBinAnd0', 'WS_OPT', '&', 'WS_OPT', 'ExprEqR' ], 0.8 ],
     [ 'ExprBinAndR' => ['ExprEqR'],                       0.3 ],
-    [ 'ExprBinAndL' => [ 'ExprBinAnd0', '&', 'ExprEqL' ], 0.8 ],
+    [ 'ExprBinAndL' => [ 'ExprBinAnd0', 'WS_OPT', '&', 'WS_OPT', 'ExprEqL' ], 0.8 ],
     [ 'ExprBinAndL' => ['ExprEqL'],                       0.3 ],
-    [ 'ExprBinAnd0' => [ 'ExprBinAnd0', '&', 'ExprEq0' ], 0.8 ],
+    [ 'ExprBinAnd0' => [ 'ExprBinAnd0', 'WS_OPT', '&', 'WS_OPT', 'ExprEq0' ], 0.8 ],
     [ 'ExprBinAnd0' => ['ExprEq0'],                       0.3 ],
 
     # Complete the missing expression hierarchy levels
@@ -722,11 +726,11 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # ArrowRHS - method calls, array/hash indexing, postfix dereferencing
     [ 'ArrowRHS' => ['Identifier'],                              0.5 ],
-    [ 'ArrowRHS' => [ 'Identifier', '(', 'ParameterList', ')' ], 0.4 ],
-    [ 'ArrowRHS' => [ 'Identifier', '(', ')' ],    0.4 ],    # ->method($args)
-    [ 'ArrowRHS' => [ '(', 'ParameterList', ')' ], 0.4 ]
+    [ 'ArrowRHS' => [ 'Identifier', 'WS_OPT', '(', 'WS_OPT', 'ParameterList', 'WS_OPT', ')' ], 0.4 ],
+    [ 'ArrowRHS' => [ 'Identifier', 'WS_OPT', '(', 'WS_OPT', ')' ],    0.4 ],    # ->method($args)
+    [ 'ArrowRHS' => [ '(', 'WS_OPT', 'ParameterList', 'WS_OPT', ')' ], 0.4 ]
     ,    # ->($args) code ref call
-    [ 'ArrowRHS' => [ '(', ')' ],               0.4 ],    # ->() code ref call
+    [ 'ArrowRHS' => [ '(', 'WS_OPT', ')' ],               0.4 ],    # ->() code ref call
     [ 'ArrowRHS' => [ '[', 'Expression', ']' ], 0.3 ],
     [ 'ArrowRHS' => [ '{', 'Expression', '}' ], 0.3 ],
     [ 'ArrowRHS' => ['PostfixDeref'], 0.3 ], # ->@*, ->%*, ->$* (postfix derefs)
@@ -752,25 +756,25 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'Value' => ['FieldDecl'],              0.3 ],
     [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
     [ 'Value' => ['PrintExpr'],    0.3 ], # print statements without parentheses
-    [ 'Value' => [ 'sub', 'SubDefinition' ], 0.3 ],    # Anonymous subroutines
-    [ 'Value' => [ 'method', 'SubDefinition' ], 0.3 ], # Anonymous methods
+    [ 'Value' => [ 'sub', 'WS_OPT', 'SubDefinition' ], 0.3 ],    # Anonymous subroutines
+    [ 'Value' => [ 'method', 'WS_OPT', 'SubDefinition' ], 0.3 ], # Anonymous methods
 
     # Print expressions following guacamole OpKeywordPrintExpr pattern
-    [ 'PrintExpr' => [ 'print', 'NonBraceExprComma' ], 1.0 ],   # print "string"
+    [ 'PrintExpr' => [ 'print', 'WS_OPT', 'NonBraceExprComma' ], 1.0 ],   # print "string"
     [ 'PrintExpr' => ['print'],                        1.0 ],   # bare print
 
     # Print with filehandle: print FILEHANDLE "string"
-    [ 'PrintExpr' => [ 'print', 'Identifier', 'NonBraceExprComma' ], 1.0 ]
+    [ 'PrintExpr' => [ 'print', 'WS_OPT', 'Identifier', 'WS_OPT', 'NonBraceExprComma' ], 1.0 ]
     ,                                                     # print FH "string"
-    [ 'PrintExpr' => [ 'print', 'Identifier' ], 1.0 ],    # print FH
+    [ 'PrintExpr' => [ 'print', 'WS_OPT', 'Identifier' ], 1.0 ],    # print FH
     [
-        'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'NonBraceExprComma' ],
+        'PrintExpr' => [ 'print', 'WS_OPT', 'BuiltinFilehandle', 'WS_OPT', 'NonBraceExprComma' ],
         1.0
     ],    # print STDOUT "string"
-    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ], 1.0 ],    # print STDOUT
+    [ 'PrintExpr' => [ 'print', 'WS_OPT', 'BuiltinFilehandle' ], 1.0 ],    # print STDOUT
 
     # Die expressions following same pattern as PrintExpr
-    [ 'DieExpr' => [ 'die', 'NonBraceExprComma' ], 1.0 ],        # die "string"
+    [ 'DieExpr' => [ 'die', 'WS_OPT', 'NonBraceExprComma' ], 1.0 ],        # die "string"
     [ 'DieExpr' => ['die'],                        1.0 ],        # bare die
 
 # NonBraceExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
@@ -885,10 +889,10 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Function calls following Guacamole SubCall pattern
     [
-        'FunctionCall' => [ 'Identifier', '(', 'ParameterList', ')' ],
+        'FunctionCall' => [ 'Identifier', 'WS_OPT', '(', 'WS_OPT', 'ParameterList', 'WS_OPT', ')' ],
         1.0
     ],                                                   # func(args)
-    [ 'FunctionCall' => [ 'Identifier', '(', ')' ], 1.0 ],    # func()
+    [ 'FunctionCall' => [ 'Identifier', 'WS_OPT', '(', 'WS_OPT', ')' ], 1.0 ],    # func()
 
     # Function calls without parentheses (common in Perl)
     [ 'FunctionCall' => [ 'Identifier', 'WS_OPT', 'NonBraceExprComma' ], 1.0 ]
@@ -896,39 +900,39 @@ our $chalk_grammar = Grammar->build_grammar(
 
     # Qualified function calls for package methods
     [
-        'FunctionCall' => [ 'QualifiedIdentifier', '(', 'ParameterList', ')' ],
+        'FunctionCall' => [ 'QualifiedIdentifier', 'WS_OPT', '(', 'WS_OPT', 'ParameterList', 'WS_OPT', ')' ],
         1.0
     ],                                                        # pkg::func(args)
-    [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', ')' ], 1.0 ]
+    [ 'FunctionCall' => [ 'QualifiedIdentifier', 'WS_OPT', '(', 'WS_OPT', ')' ], 1.0 ]
     ,                                                         # pkg::func()
     [ 'FunctionCall' => [ 'QualifiedIdentifier', 'WS_OPT', 'NonBraceExprComma' ], 1.0 ]
     ,                                                         # pkg::func args
 
 # Expression block for grep/map/sort - supports both single expressions and statement lists
-    [ 'ExpressionBlock' => [ '{', 'Expression',    '}' ], 1.0 ],
-    [ 'ExpressionBlock' => [ '{', 'StatementList', '}' ], 1.0 ],
+    [ 'ExpressionBlock' => [ '{', 'WS_OPT', 'Expression', 'WS_OPT', '}' ], 1.0 ],
+    [ 'ExpressionBlock' => [ '{', 'WS_OPT', 'StatementList', 'WS_OPT', '}' ], 1.0 ],
 
     # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
     [
-        'UnaryKeywordExpression' => [ 'grep', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'grep', 'WS_OPT', 'ExpressionBlock', 'WS_OPT', 'Expression' ],
         1.0
     ],    # grep { ... } @list
-    [ 'UnaryKeywordExpression' => [ 'grep', 'Expression' ], 1.0 ]
+    [ 'UnaryKeywordExpression' => [ 'grep', 'WS_OPT', 'Expression' ], 1.0 ]
     ,     # grep EXPR, @list
     [
-        'UnaryKeywordExpression' => [ 'all', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'all', 'WS_OPT', 'ExpressionBlock', 'WS_OPT', 'Expression' ],
         1.0
     ],    # all { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'any', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'any', 'WS_OPT', 'ExpressionBlock', 'WS_OPT', 'Expression' ],
         1.0
     ],    # any { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'map', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'map', 'WS_OPT', 'ExpressionBlock', 'WS_OPT', 'Expression' ],
         1.0
     ],    # map { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'sort', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'sort', 'WS_OPT', 'ExpressionBlock', 'WS_OPT', 'Expression' ],
         1.0
     ],    # sort { ... } @list
 
@@ -945,6 +949,7 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'OpNameNot' => ['not'] ],
     [ 'OpRange'   => ['..'] ],
     [ 'OpBinOr'   => [qr/[|^]/] ],
+    [ 'OpBinAnd'  => [qr/&/] ],
     [ 'OpEqual'   => [qr/==|!=|<=>|eq|ne|cmp|isa/] ],
     [ 'OpInequal' => [qr/<=|>=|<|>|lt|gt|le|ge/] ],
     [ 'OpShift'   => [qr/<<|>>/] ],
@@ -1012,17 +1017,17 @@ qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[e
     ],
 
     # ParameterList for method calls - simplified using ExpressionList
-    [ 'ParameterList' => ['ExpressionList'],       1.0 ],
-    [ 'ParameterList' => [ 'OpComma', 'Comment' ], 1.0 ]
+    [ 'ParameterList' => ['ExpressionList'],       1.0 ],    # Prioritize actual expressions
+    [ 'ParameterList' => [ 'WS_OPT', 'OpComma', 'WS_OPT', 'Comment' ], 1.0 ]
     ,                                           # Just comma with comment
     [ 'ParameterList' => ['Comment'], 1.0 ],    # Just a comment
     [ 'ParameterList' => [],          1.0 ],    # Empty parameter list
 
     # ArrayRef and HashRef
-    [ 'ArrayRef' => [ '[', 'ExpressionList', ']' ],  1.0 ],
-    [ 'ArrayRef' => [ '[', ']' ],                    1.0 ],    # Empty array
-    [ 'HashRef'  => [ '{', 'HashElementList', '}' ], 1.0 ],
-    [ 'HashRef'  => [ '{', '}' ],                    1.0 ],    # Empty hash
+    [ 'ArrayRef' => [ '[', 'WS_OPT', 'ExpressionList', 'WS_OPT', ']' ],  1.0 ],
+    [ 'ArrayRef' => [ '[', 'WS_OPT', ']' ],                    1.0 ],    # Empty array
+    [ 'HashRef'  => [ '{', 'WS_OPT', 'HashElementList', 'WS_OPT', '}' ], 1.0 ],
+    [ 'HashRef'  => [ '{', 'WS_OPT', '}' ],                    1.0 ],    # Empty hash
 
     # Optimal 3-rule ExpressionList - balances functionality with performance
     [ 'ExpressionList' => ['Expression'], 1.0 ],    # Single expression
