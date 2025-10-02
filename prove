@@ -111,7 +111,8 @@ for my $test_file (@test_files) {
         print "FAILED\n";
         $failed_files++;
         if ($verbose) {
-            print "Expected $plan_line tests, ran $test_count, failed $failed_count\n";
+            my $expected = defined($plan_line) ? $plan_line : "unknown";
+            print "Expected $expected tests, ran $test_count, failed $failed_count\n";
             print "Output:\n$output\n";
         }
     }

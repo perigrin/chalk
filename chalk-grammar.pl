@@ -250,6 +250,12 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'QLikeValue' => [qr/m![^!]*![a-z]*/] ],      # m!...!flags
     [ 'QLikeValue' => [qr/m#[^#]*#[a-z]*/] ],      # m#...#flags
     [ 'QLikeValue' => [qr/m\|[^|]*\|[a-z]*/] ],    # m|...|flags
+    [ 'QLikeValue' => [qr/m\{[^}]*\}[a-z]*/] ],    # m{...}flags
+    [ 'QLikeValue' => [qr/s\{[^}]*\}\{[^}]*\}[a-z]*/] ],  # s{...}{...}flags
+    [ 'QLikeValue' => [qr/s\/((?:[^\/\\]|\\.)*)\/((?:[^\/\\]|\\.)*)\/[a-z]*/] ],  # s/.../.../ flags
+    [ 'QLikeValue' => [qr/s![^!]*![^!]*![a-z]*/] ],  # s!...!...!flags
+    [ 'QLikeValue' => [qr/s#[^#]*#[^#]*#[a-z]*/] ],  # s#...#...#flags
+    [ 'QLikeValue' => [qr/s\|[^|]*\|[^|]*\|[a-z]*/] ],  # s|...|...|flags
     [ 'QLikeValue' => [qr/`[^`]*`/] ],             # `backticks`
 
     [ 'FieldAttributeList' => ['FieldAttribute'] ],
@@ -394,19 +400,19 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace shift expressions
     [
         'NonBraceExprShiftR' =>
-          [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddR' ],
+          [ 'NonBraceExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'NonBraceExprAddR' ],
         0.8
     ],
     [ 'NonBraceExprShiftR' => ['NonBraceExprAddR'], 0.3 ],
     [
         'NonBraceExprShift0' =>
-          [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAdd0' ],
+          [ 'NonBraceExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'NonBraceExprAdd0' ],
         0.8
     ],
     [ 'NonBraceExprShift0' => ['NonBraceExprAdd0'], 0.3 ],
     [
         'NonBraceExprShiftU' =>
-          [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddU' ],
+          [ 'NonBraceExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'NonBraceExprAddU' ],
         0.8
     ],
     [ 'NonBraceExprShiftU' => ['NonBraceExprAddU'], 0.3 ],
@@ -464,8 +470,11 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'NonBraceExprMulU' => ['NonBraceExprRegexU'], 0.3 ],
 
     # NonBrace regex expressions
+    [ 'NonBraceExprRegexR' => [ 'NonBraceExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'NonBraceExprUnaryR' ], 0.8 ],
     [ 'NonBraceExprRegexR' => ['NonBraceExprUnaryR'], 0.3 ],
+    [ 'NonBraceExprRegex0' => [ 'NonBraceExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'NonBraceExprUnary0' ], 0.8 ],
     [ 'NonBraceExprRegex0' => ['NonBraceExprUnary0'], 0.3 ],
+    [ 'NonBraceExprRegexU' => [ 'NonBraceExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'NonBraceExprUnaryU' ], 0.8 ],
     [ 'NonBraceExprRegexU' => ['NonBraceExprUnaryU'], 0.3 ],
 
     # NonBrace unary expressions
@@ -627,13 +636,13 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprNeq0' => [ 'ExprShift0', 'WS_OPT', 'OpInequal', 'WS_OPT', 'ExprShift0' ], 0.8 ],
     [ 'ExprNeq0' => ['ExprShift0'],                              0.3 ],
 
-    [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ], 0.8 ],
+    [ 'ExprShiftR' => [ 'ExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'ExprAddR' ], 0.8 ],
     [ 'ExprShiftR' => ['ExprAddR'],                            0.3 ],
-    [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ], 0.8 ],
+    [ 'ExprShiftL' => [ 'ExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'ExprAddL' ], 0.8 ],
     [ 'ExprShiftL' => ['ExprAddL'],                            0.3 ],
-    [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd0' ], 0.8 ],
+    [ 'ExprShift0' => [ 'ExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'ExprAdd0' ], 0.8 ],
     [ 'ExprShift0' => ['ExprAdd0'],                            0.3 ],
-    [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ], 0.8 ],
+    [ 'ExprShiftU' => [ 'ExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'ExprAddU' ], 0.8 ],
     [ 'ExprShiftU' => ['ExprAddU'],                            0.3 ],
 
     [ 'ExprAddR' => [ 'ExprAddU', 'WS_OPT', 'OpAdd', 'WS_OPT', 'ExprMulR' ], 0.8 ],
@@ -658,13 +667,13 @@ our $chalk_grammar = Grammar->build_grammar(
     [ 'ExprMulU' => [ 'ExprMulU', 'WS_OPT', 'OpMulti', 'WS_OPT', 'ExprRegexU' ], 0.8 ],
     [ 'ExprMulU' => ['ExprRegexU'],                          0.3 ],
 
-    [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ], 0.8 ],
+    [ 'ExprRegexR' => [ 'ExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'ExprUnaryR' ], 0.8 ],
     [ 'ExprRegexR' => ['ExprUnaryR'],                            0.3 ],
-    [ 'ExprRegexL' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ], 0.8 ],
+    [ 'ExprRegexL' => [ 'ExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'ExprUnaryL' ], 0.8 ],
     [ 'ExprRegexL' => ['ExprUnaryL'],                            0.3 ],
-    [ 'ExprRegex0' => [ 'ExprRegexU', 'OpRegex', 'ExprUnary0' ], 0.8 ],
+    [ 'ExprRegex0' => [ 'ExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'ExprUnary0' ], 0.8 ],
     [ 'ExprRegex0' => ['ExprUnary0'],                            0.3 ],
-    [ 'ExprRegexU' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryU' ], 0.8 ],
+    [ 'ExprRegexU' => [ 'ExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'ExprUnaryU' ], 0.8 ],
     [ 'ExprRegexU' => ['ExprUnaryU'],                            0.3 ],
 
     [ 'ExprUnaryR' => [ 'OpUnary', 'ExprUnaryR' ], 0.8 ],
@@ -835,7 +844,7 @@ our $chalk_grammar = Grammar->build_grammar(
     # NonBrace shift expressions (left-associative)
     [
         'NonBraceExprShiftL' =>
-          [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddL' ],
+          [ 'NonBraceExprShiftU', 'WS_OPT', 'OpShift', 'WS_OPT', 'NonBraceExprAddL' ],
         0.8
     ],
     [ 'NonBraceExprShiftL' => ['NonBraceExprAddL'], 0.3 ],
@@ -860,6 +869,7 @@ our $chalk_grammar = Grammar->build_grammar(
     ],
     [ 'NonBraceExprMulL' => ['NonBraceExprRegexL'], 0.3 ],
 
+    [ 'NonBraceExprRegexL' => [ 'NonBraceExprRegexU', 'WS_OPT', 'OpRegex', 'WS_OPT', 'NonBraceExprUnaryL' ], 0.8 ],
     [ 'NonBraceExprRegexL' => ['NonBraceExprUnaryL'],          0.3 ],
     [ 'NonBraceExprUnaryL' => ['NonBraceExprPowerL'],          0.3 ],
     [ 'NonBraceExprPowerL' => ['NonBraceExprIncL'],            0.3 ],
