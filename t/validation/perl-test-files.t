@@ -37,16 +37,17 @@ for my $file (sort @test_files) {
     my $exit_code;
     my $timed_out = 0;
 
-    eval {
+    try {
         local $SIG{ALRM} = sub { die "timeout\n" };
         alarm 30;
         $output = `$RealBin/../../app.pl --semiring Boolean '$file' 2>&1`;
         $exit_code = $? >> 8;
         alarm 0;
-    };
-
-    if ($@ eq "timeout\n") {
-        $timed_out = 1;
+    }
+    catch ($e) {
+        if ($e eq "timeout\n") {
+            $timed_out = 1;
+        }
     }
 
     # Check if validation was successful
