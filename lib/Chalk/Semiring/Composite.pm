@@ -47,18 +47,13 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     method score() {
         # Sum scores from all elements that have them
         # In log-probability space, sum = product of probabilities
-        my $total = 0;
-        my $has_score = 0;
+        my $total;  # Starts undef
 
         for my $elem ($elements->@*) {
-            if ($elem->can('score')) {
-                $total += $elem->score;
-                $has_score = 1;
-            }
+            $total += $elem->score if $elem->can('score');
         }
 
-        return $total if $has_score;
-        return;
+        return $total;  # undef if no scores, number otherwise
     }
 
     method to_string(@) {
