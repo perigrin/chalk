@@ -4,6 +4,8 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
+use Chalk::Semiring::Viterbi;
+use Chalk::Semiring::Composite;
 
 # SPPF (Shared Packed Parse Forest) Node Classes
 class Chalk::Semiring::SPPFSymbolNode {
@@ -164,56 +166,60 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
     }
 }
 
+# SPPFViterbi Element - now a wrapper around Composite(SPPF, Viterbi)
+# Provides backward compatibility with previous SPPFViterbiElement API
 class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
-    field $score     :param :reader;
-    field $path      :param :reader;
-    field $sppf_node :param :reader;
-    field $forest    :param :reader;
+    field $composite :param :reader;
 
+    # Convenience accessors for backward compatibility
+    method score() {
+        return $composite->element_at(1)->score;
+    }
+
+    method path() {
+        return $composite->element_at(1)->path;
+    }
+
+    method sppf_node() {
+        return $composite->element_at(0)->sppf_node;
+    }
+
+    method forest() {
+        return $composite->element_at(0)->forest;
+    }
+
+    # Delegate core operations to composite
     method multiply( $other, $swap = undef ) {
-
-        # Create new combined SPPF node representing sequence
-        my $combined_node =
-          $forest->create_sequence_node( $sppf_node, $other->sppf_node );
-
+        my $result = $composite->multiply($other->composite);
         return Chalk::Semiring::SPPFViterbiElement->new(
-            score     => $score + $other->score,
-            path      => [ $path->@*, $other->path->@* ],
-            sppf_node => $combined_node,
-            forest    => $forest
+            composite => $result
         );
     }
 
     method add( $other, $swap = undef ) {
-        my $self_start = $sppf_node->start_pos;
-        my $self_end = $sppf_node->end_pos;
-        my $other_start = $other->sppf_node->start_pos;
-        my $other_end = $other->sppf_node->end_pos;
-
-        if ($self_start == $other_start && $self_end == $other_end) {
-            $forest->add_alternative( $sppf_node, $other->sppf_node );
-        }
-
-        return $self if $score > $other->score;
-        return $other;
+        my $result = $composite->add($other->composite);
+        return Chalk::Semiring::SPPFViterbiElement->new(
+            composite => $result
+        );
     }
 
     method equals( $other, $swap = undef ) {
         return 0 unless ref($other) eq ref($self);
-        return $score == $other->score
-          && join( ',', $path->@* ) eq join( ',', $other->path->@* );
+        return $composite->equals($other->composite);
     }
 
     method to_string(@) {
         return sprintf( '%.4f[%s] SPPF:%s',
-            exp($score), join( ',', $path->@* ), $sppf_node );
+            exp($self->score), join( ',', $self->path->@* ), $self->sppf_node );
     }
 
-    method probability() { exp($score) }
-    method best_path()   { $path->[0] }
+    # Backward compatibility helpers
+    method probability() { exp($self->score) }
+    method best_path()   { $self->path->[0] }
 
     method validate_complete_parse($input_length) {
-        return $sppf_node->start_pos == 0 && $sppf_node->end_pos == $input_length;
+        my $node = $self->sppf_node;
+        return $node->start_pos == 0 && $node->end_pos == $input_length;
     }
 }
 
@@ -268,46 +274,47 @@ class Chalk::Semiring::SPPFForest {
     }
 }
 
+# SPPFViterbi Semiring - now implemented as Composite(SPPF, Viterbi)
+# Provides backward compatibility while using clean separation of concerns
 class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
+    field $composite :reader;
+    field $sppf_semiring :reader;
+    field $viterbi_semiring :reader;
     field $forest :reader;
     field $root_element :reader;
     field $mul_id :reader;
     field $add_id :reader;
 
     ADJUST {
-        $forest = Chalk::Semiring::SPPFForest->new();
+        # Create child semirings
+        $sppf_semiring = Chalk::Semiring::SPPF->new();
+        $viterbi_semiring = Chalk::Semiring::Viterbi->new();
 
-        $root_element = Chalk::Semiring::SPPFViterbiElement->new(
-            score     => 0,
-            path      => [],
-            sppf_node => $forest->get_or_create_symbol_node( "ROOT", 0, 0 ),
-            forest    => $forest
+        # Create composite
+        $composite = Chalk::Semiring::Composite->new(
+            semirings => [$sppf_semiring, $viterbi_semiring]
         );
 
+        # Expose forest for backward compatibility
+        $forest = $sppf_semiring->forest;
+
+        # Wrap identity elements
         $mul_id = Chalk::Semiring::SPPFViterbiElement->new(
-            score     => 0,
-            path      => ['ε'],
-            sppf_node => $forest->get_or_create_symbol_node( "ε", 0, 0 ),
-            forest    => $forest
+            composite => $composite->mul_id
         );
 
         $add_id = Chalk::Semiring::SPPFViterbiElement->new(
-            score     => -1e10,
-            path      => [],
-            sppf_node => $forest->get_or_create_symbol_node( "⊥", 0, 0 ),
-            forest    => $forest
+            composite => $composite->add_id
         );
+
+        $root_element = $mul_id;  # For compatibility
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
-        my $symbol_node =
-          $forest->get_or_create_symbol_node( $rule->lhs, $start_pos, $end_pos );
+        my $composite_elem = $composite->init_element_from_rule($rule, $start_pos, $end_pos);
 
         return Chalk::Semiring::SPPFViterbiElement->new(
-            score     => log( $rule->probability ),
-            path      => [$rule],
-            sppf_node => $symbol_node,
-            forest    => $forest
+            composite => $composite_elem
         );
     }
 }
