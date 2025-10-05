@@ -46,11 +46,11 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
 
     method score() {
         # Return first element's score that has one
-        # If no element has a score() method, return undef
+        # If no element has a score() method, return nothing
         for my $elem ($elements->@*) {
             return $elem->score if $elem->can('score');
         }
-        return undef;
+        return;
     }
 
     method to_string(@) {
