@@ -120,11 +120,6 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
         return builtin::refaddr($sppf_node) == builtin::refaddr($other->sppf_node);
     }
 
-    method score() {
-        # For compatibility - pure SPPF doesn't have meaningful scores
-        return 1;
-    }
-
     method to_string(@) {
         return "SPPF:$sppf_node";
     }

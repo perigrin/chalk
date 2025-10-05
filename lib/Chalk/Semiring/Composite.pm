@@ -45,15 +45,12 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     }
 
     method score() {
-        # Return first meaningful score (not a dummy value of 1)
-        # This prefers Viterbi scores over SPPF dummy scores
+        # Return first element's score that has one
+        # If no element has a score() method, return undef
         for my $elem ($elements->@*) {
-            next unless $elem->can('score');
-            my $score = $elem->score;
-            return $score if $score != 1;  # Skip dummy scores
+            return $elem->score if $elem->can('score');
         }
-        # If all scores are 1 or no elements have scores, return 1
-        return 1;
+        return undef;
     }
 
     method to_string(@) {
