@@ -14,6 +14,8 @@ use Chalk;
 if ( !caller ) {
     # Parse command line options
     my $grammar_module = "Perl";  # default grammar module
+    my $semiring_type = "SPPF";   # default semiring
+    my $syntax_check_mode = 0;    # -c flag for syntax checking
     my @remaining_args;
 
     my $i = 0;
@@ -21,6 +23,13 @@ if ( !caller ) {
         if ($ARGV[$i] eq '-g' && $i < $#ARGV) {
             $grammar_module = $ARGV[$i + 1];
             $i += 2; # skip both -g and the grammar module name
+        } elsif ($ARGV[$i] eq '--semiring' && $i < $#ARGV) {
+            $semiring_type = $ARGV[$i + 1];
+            $i += 2; # skip both --semiring and the semiring type
+        } elsif ($ARGV[$i] eq '-c') {
+            $syntax_check_mode = 1;
+            $semiring_type = "Boolean";  # -c implies Boolean semiring
+            $i++;
         } else {
             push @remaining_args, $ARGV[$i];
             $i++;
@@ -78,19 +87,44 @@ if ( !caller ) {
     chomp($input) if defined($input);
 
     if ( defined($input) && length($input) > 0 ) {
-        # Create parser with grammar
-        my $parser = Chalk::Parser->new( grammar => $chalk_grammar );
+        # Create semiring based on type
+        my $semiring;
+        if ($semiring_type eq "Boolean") {
+            require Chalk::Semiring::Boolean;
+            $semiring = Chalk::Semiring::Boolean->new();
+        } elsif ($semiring_type eq "SPPF") {
+            require Chalk::Semiring::SPPF;
+            $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
+        } else {
+            die("Error: Unknown semiring type '$semiring_type'. Use 'Boolean' or 'SPPF'\n");
+        }
+
+        # Create parser with grammar and semiring
+        my $parser = Chalk::Parser->new(
+            grammar => $chalk_grammar,
+            semiring => $semiring
+        );
 
         # Parse the input
         my $result = $parser->parse_string($input);
 
         # Print the result
         if ($result) {
-            print("Parse successful: $result\n");
+            if ($syntax_check_mode) {
+                print("$ARGV[0] syntax OK\n") if @ARGV;
+                print("syntax OK\n") unless @ARGV;
+            } else {
+                print("Parse successful: $result\n");
+            }
             exit 0;  # Success - like perl -c
         }
         else {
-            print("Parse failed\n");
+            if ($syntax_check_mode) {
+                print("$ARGV[0] syntax error\n") if @ARGV;
+                print("syntax error\n") unless @ARGV;
+            } else {
+                print("Parse failed\n");
+            }
             exit 1;  # Failure - like perl -c
         }
     }
