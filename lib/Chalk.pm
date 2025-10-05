@@ -7,7 +7,7 @@ use open qw(:std :utf8);
 
 # Load all Chalk modules
 use Chalk::Base;
-use Chalk::SPPF;
+use Chalk::Semiring::SPPF;
 use Chalk::Grammar;
 use Chalk::Parser;
 

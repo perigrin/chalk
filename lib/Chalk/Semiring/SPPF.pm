@@ -6,7 +6,7 @@ use utf8;
 use Chalk::Base;
 
 # SPPF (Shared Packed Parse Forest) Node Classes
-class Chalk::SPPFSymbolNode {
+class Chalk::Semiring::SPPFSymbolNode {
     use overload '""' => 'to_string';
 
     field $symbol    :param :reader;
@@ -27,7 +27,7 @@ class Chalk::SPPFSymbolNode {
     method key() { "$symbol|$start_pos|$end_pos" }
 }
 
-class Chalk::SPPFPackedNode {
+class Chalk::Semiring::SPPFPackedNode {
     use overload '""' => 'to_string';
 
     field $rule :param :reader;
@@ -46,7 +46,7 @@ class Chalk::SPPFPackedNode {
     }
 }
 
-class Chalk::SPPFTerminalNode {
+class Chalk::Semiring::SPPFTerminalNode {
     use overload '""' => 'to_string';
 
     field $symbol    :param :reader;
@@ -60,7 +60,7 @@ class Chalk::SPPFTerminalNode {
     method key() { "$symbol|$start_pos|$end_pos" }
 }
 
-class Chalk::SPPFViterbiElement :isa(Chalk::Element) {
+class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
     field $score     :param :reader;
     field $path      :param :reader;
     field $sppf_node :param :reader;
@@ -72,7 +72,7 @@ class Chalk::SPPFViterbiElement :isa(Chalk::Element) {
         my $combined_node =
           $forest->create_sequence_node( $sppf_node, $other->sppf_node );
 
-        return Chalk::SPPFViterbiElement->new(
+        return Chalk::Semiring::SPPFViterbiElement->new(
             score     => $score + $other->score,
             path      => [ $path->@*, $other->path->@* ],
             sppf_node => $combined_node,
@@ -105,13 +105,13 @@ class Chalk::SPPFViterbiElement :isa(Chalk::Element) {
     method best_path()   { $path->[0] }
 }
 
-class Chalk::SPPFForest {
+class Chalk::Semiring::SPPFForest {
     field %symbol_nodes;
     field %terminal_nodes;
 
     method get_or_create_symbol_node( $symbol, $start_pos, $end_pos ) {
         my $key = "$symbol|$start_pos|$end_pos";
-        return $symbol_nodes{$key} //= Chalk::SPPFSymbolNode->new(
+        return $symbol_nodes{$key} //= Chalk::Semiring::SPPFSymbolNode->new(
             symbol    => $symbol,
             start_pos => $start_pos,
             end_pos   => $end_pos
@@ -120,7 +120,7 @@ class Chalk::SPPFForest {
 
     method get_or_create_terminal_node( $symbol, $start_pos, $end_pos ) {
         my $key = "$symbol|$start_pos|$end_pos";
-        return $terminal_nodes{$key} //= Chalk::SPPFTerminalNode->new(
+        return $terminal_nodes{$key} //= Chalk::Semiring::SPPFTerminalNode->new(
             symbol    => $symbol,
             start_pos => $start_pos,
             end_pos   => $end_pos
@@ -138,10 +138,10 @@ class Chalk::SPPFForest {
 
         # TODO: Implement proper SPPF alternative merging
         # For now, just add the alternative as a packed node (placeholder)
-        if ( $node1 isa Chalk::SPPFSymbolNode && $node2 isa Chalk::SPPFSymbolNode ) {
+        if ( $node1 isa Chalk::Semiring::SPPFSymbolNode && $node2 isa Chalk::Semiring::SPPFSymbolNode ) {
 
             # Add packed node representing the alternative
-            my $packed = Chalk::SPPFPackedNode->new( rule => undef );
+            my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
             $packed->add_child($node2);
             $node1->add_packed_node($packed);
         }
@@ -152,30 +152,30 @@ class Chalk::SPPFForest {
     }
 }
 
-class Chalk::SPPFViterbiSemiring :isa(Chalk::Semiring) {
+class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
     field $forest :reader;
     field $root_element :reader;
     field $mul_id :reader;
     field $add_id :reader;
 
     ADJUST {
-        $forest = Chalk::SPPFForest->new();
+        $forest = Chalk::Semiring::SPPFForest->new();
 
-        $root_element = Chalk::SPPFViterbiElement->new(
+        $root_element = Chalk::Semiring::SPPFViterbiElement->new(
             score     => 0,
             path      => [],
             sppf_node => $forest->get_or_create_symbol_node( "ROOT", 0, 0 ),
             forest    => $forest
         );
 
-        $mul_id = Chalk::SPPFViterbiElement->new(
+        $mul_id = Chalk::Semiring::SPPFViterbiElement->new(
             score     => 0,
             path      => ['ε'],
             sppf_node => $forest->get_or_create_symbol_node( "ε", 0, 0 ),
             forest    => $forest
         );
 
-        $add_id = Chalk::SPPFViterbiElement->new(
+        $add_id = Chalk::Semiring::SPPFViterbiElement->new(
             score     => -1e10,
             path      => [],
             sppf_node => $forest->get_or_create_symbol_node( "⊥", 0, 0 ),
@@ -187,7 +187,7 @@ class Chalk::SPPFViterbiSemiring :isa(Chalk::Semiring) {
         my $symbol_node =
           $forest->get_or_create_symbol_node( $rule->lhs, 0, 0 );
 
-        return Chalk::SPPFViterbiElement->new(
+        return Chalk::Semiring::SPPFViterbiElement->new(
             score     => log( $rule->probability ),
             path      => [$rule],
             sppf_node => $symbol_node,

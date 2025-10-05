@@ -3,7 +3,7 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
-use Chalk::SPPF;
+use Chalk::Semiring::SPPF;
 
 class Chalk::EarleyItem {
     use overload '""' => 'key';
@@ -120,7 +120,7 @@ class Chalk::EarleyChart {
 }
 
 class Chalk::Parser {
-    field $semiring :param = Chalk::SPPFViterbiSemiring->new();
+    field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
     field $grammar :param;
 
     method parse_tokens(@input) {
