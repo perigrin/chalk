@@ -80,6 +80,90 @@ class Chalk::Semiring::SPPFTerminalNode {
     method key() { "$symbol|$start_pos|$end_pos" }
 }
 
+# Pure SPPF Element - only tracks forest structure, no scoring
+class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
+    field $sppf_node :param :reader;
+    field $forest    :param :reader;
+
+    method multiply( $other, $swap = undef ) {
+        # Create new combined SPPF node representing sequence
+        my $combined_node =
+          $forest->create_sequence_node( $sppf_node, $other->sppf_node );
+
+        return Chalk::Semiring::SPPFElement->new(
+            sppf_node => $combined_node,
+            forest    => $forest
+        );
+    }
+
+    method add( $other, $swap = undef ) {
+        my $self_start = $sppf_node->start_pos;
+        my $self_end = $sppf_node->end_pos;
+        my $other_start = $other->sppf_node->start_pos;
+        my $other_end = $other->sppf_node->end_pos;
+
+        # Merge alternatives if they span the same range
+        if ($self_start == $other_start && $self_end == $other_end) {
+            $forest->add_alternative( $sppf_node, $other->sppf_node );
+        }
+
+        # For pure SPPF, we just return self (no score comparison)
+        return $self;
+    }
+
+    method equals( $other, $swap = undef ) {
+        return 0 unless ref($other) eq ref($self);
+        # Two SPPF elements are equal if they reference the same node
+        return builtin::refaddr($sppf_node) == builtin::refaddr($other->sppf_node);
+    }
+
+    method score() {
+        # For compatibility - pure SPPF doesn't have meaningful scores
+        return 1;
+    }
+
+    method to_string(@) {
+        return "SPPF:$sppf_node";
+    }
+}
+
+# Pure SPPF Semiring - only forest tracking, no Viterbi scoring
+class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
+    field $forest :reader;
+    field $root_element :reader;
+    field $mul_id :reader;
+    field $add_id :reader;
+
+    ADJUST {
+        $forest = Chalk::Semiring::SPPFForest->new();
+
+        $root_element = Chalk::Semiring::SPPFElement->new(
+            sppf_node => $forest->get_or_create_symbol_node( "ROOT", 0, 0 ),
+            forest    => $forest
+        );
+
+        $mul_id = Chalk::Semiring::SPPFElement->new(
+            sppf_node => $forest->get_or_create_symbol_node( "ε", 0, 0 ),
+            forest    => $forest
+        );
+
+        $add_id = Chalk::Semiring::SPPFElement->new(
+            sppf_node => $forest->get_or_create_symbol_node( "⊥", 0, 0 ),
+            forest    => $forest
+        );
+    }
+
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
+        my $symbol_node =
+          $forest->get_or_create_symbol_node( $rule->lhs, $start_pos, $end_pos );
+
+        return Chalk::Semiring::SPPFElement->new(
+            sppf_node => $symbol_node,
+            forest    => $forest
+        );
+    }
+}
+
 class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
     field $score     :param :reader;
     field $path      :param :reader;
