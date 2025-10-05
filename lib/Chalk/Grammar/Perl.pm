@@ -1,11 +1,12 @@
-#!/usr/bin/env perl
-# ABOUTME: Clean chalk grammar based on Guacamole grammar structure from guacamole.pm
-# ABOUTME: Using exact Guacamole naming conventions and patterns for consistency
+# ABOUTME: Chalk grammar for parsing Modern Perl (5.42+) with class syntax
+# ABOUTME: Based on Guacamole grammar structure with chalk-specific extensions
+package Chalk::Grammar::Perl;
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all defer);
-use FindBin qw($RealBin);
-use lib "$RealBin/lib";
-use Chalk;
+use Exporter 'import';
+use Chalk::Grammar;
+
+our @EXPORT = qw($chalk_grammar);
 
 our $chalk_grammar = Chalk::Grammar->build_grammar(
     ['WS_OPT'],    # Auto-insert WS_OPT between all symbols
@@ -894,3 +895,5 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'WS'     => [qr/#.*$/m], 1.0 ],    # Comments count as whitespace
     [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ], # Comment followed by whitespace
 );
+
+1;
