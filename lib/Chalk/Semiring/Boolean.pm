@@ -41,8 +41,9 @@ class Chalk::Semiring::Boolean :isa(Chalk::Semiring) {
     field $mul_id :reader = Chalk::Semiring::BooleanElement->new(value => 1);
     field $add_id :reader = Chalk::Semiring::BooleanElement->new(value => 0);
 
-    method init_element_from_rule($rule) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
         # All rules start as true (1) - they exist and can be used
+        # Boolean semiring ignores positions
         return Chalk::Semiring::BooleanElement->new(value => 1);
     }
 

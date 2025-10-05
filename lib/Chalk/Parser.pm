@@ -142,7 +142,7 @@ class Chalk::Parser {
                 end_pos   => 0,
             );
 
-            my $start_element = $semiring->init_element_from_rule($rule);
+            my $start_element = $semiring->init_element_from_rule($rule, 0, 0);
             $chart->add_element( $start_item, $start_element );
         }
 
@@ -327,7 +327,7 @@ class Chalk::Parser {
 
             # Only add if not already in chart
             unless ( $chart->has_item($predicted_item) ) {
-                my $rule_element = $semiring->init_element_from_rule($rule);
+                my $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos);
                 $chart->add_element( $predicted_item, $rule_element );
                 push( @$agenda, $predicted_item );
             }
@@ -362,7 +362,20 @@ class Chalk::Parser {
             end_pos   => $pos + $match_length
         );
 
-        $chart->add_element( $scanned_item, $element );
+        # Position semiring needs elements with updated positions to track spans
+        # Other semirings preserve the original element (maintain score, SPPF nodes, etc)
+        my $scanned_element;
+        if ($semiring->isa('Chalk::Semiring::Position')) {
+            $scanned_element = $semiring->init_element_from_rule(
+                $item->rule,
+                $scanned_item->start_pos,
+                $scanned_item->end_pos
+            );
+        } else {
+            $scanned_element = $element;
+        }
+
+        $chart->add_element( $scanned_item, $scanned_element );
     }
 }
 

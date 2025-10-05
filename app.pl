@@ -92,11 +92,14 @@ if ( !caller ) {
         if ($semiring_type eq "Boolean") {
             require Chalk::Semiring::Boolean;
             $semiring = Chalk::Semiring::Boolean->new();
+        } elsif ($semiring_type eq "Position") {
+            require Chalk::Semiring::Position;
+            $semiring = Chalk::Semiring::Position->new();
         } elsif ($semiring_type eq "SPPF") {
             require Chalk::Semiring::SPPF;
             $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
         } else {
-            die("Error: Unknown semiring type '$semiring_type'. Use 'Boolean' or 'SPPF'\n");
+            die("Error: Unknown semiring type '$semiring_type'. Use 'Boolean', 'Position', or 'SPPF'\n");
         }
 
         # Create parser with grammar and semiring
