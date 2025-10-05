@@ -3,7 +3,6 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
-use Scalar::Util qw(refaddr);
 use Chalk::Base;
 
 # SPPF (Shared Packed Parse Forest) Node Classes
