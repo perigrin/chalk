@@ -45,8 +45,14 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     }
 
     method score() {
-        # For compatibility - return first element's score if it has one
-        return $elements->[0]->score if $elements->[0]->can('score');
+        # Return first meaningful score (not a dummy value of 1)
+        # This prefers Viterbi scores over SPPF dummy scores
+        for my $elem ($elements->@*) {
+            next unless $elem->can('score');
+            my $score = $elem->score;
+            return $score if $score != 1;  # Skip dummy scores
+        }
+        # If all scores are 1 or no elements have scores, return 1
         return 1;
     }
 
