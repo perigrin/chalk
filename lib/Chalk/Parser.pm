@@ -123,12 +123,6 @@ class Chalk::Parser {
     field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
     field $grammar :param;
 
-    method parse_tokens(@input) {
-
-  # backward compatibility for some of our tests that predate the lexeme support
-        return $self->parse_string( join( '', @input ) );
-    }
-
     method parse_string($input_string) {
         my $chart = Chalk::EarleyChart->new( semiring => $semiring );
 
