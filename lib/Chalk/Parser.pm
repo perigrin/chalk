@@ -362,18 +362,13 @@ class Chalk::Parser {
             end_pos   => $pos + $match_length
         );
 
-        # Position semiring needs elements with updated positions to track spans
-        # Other semirings preserve the original element (maintain score, SPPF nodes, etc)
-        my $scanned_element;
-        if ($semiring->isa('Chalk::Semiring::Position')) {
-            $scanned_element = $semiring->init_element_from_rule(
-                $item->rule,
-                $scanned_item->start_pos,
-                $scanned_item->end_pos
-            );
-        } else {
-            $scanned_element = $element;
-        }
+        # All semirings receive position updates during scan
+        # Semirings can choose to use or ignore positions based on their needs
+        my $scanned_element = $semiring->init_element_from_rule(
+            $item->rule,
+            $scanned_item->start_pos,
+            $scanned_item->end_pos
+        );
 
         $chart->add_element( $scanned_item, $scanned_element );
     }
