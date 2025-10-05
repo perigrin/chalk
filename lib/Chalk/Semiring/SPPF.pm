@@ -109,8 +109,9 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
             $forest->add_alternative( $sppf_node, $other->sppf_node );
         }
 
-        # For pure SPPF, we just return self (no score comparison)
-        return $self;
+        # Prefer element that went further (for consistency with composite pattern)
+        # This allows SPPF to work correctly when composed with scoring semirings
+        return $self_end >= $other_end ? $self : $other;
     }
 
     method equals( $other, $swap = undef ) {
