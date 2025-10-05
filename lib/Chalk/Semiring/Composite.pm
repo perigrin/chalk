@@ -45,11 +45,19 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     }
 
     method score() {
-        # Return first element's score that has one
-        # If no element has a score() method, return nothing
+        # Sum scores from all elements that have them
+        # In log-probability space, sum = product of probabilities
+        my $total = 0;
+        my $has_score = 0;
+
         for my $elem ($elements->@*) {
-            return $elem->score if $elem->can('score');
+            if ($elem->can('score')) {
+                $total += $elem->score;
+                $has_score = 1;
+            }
         }
+
+        return $total if $has_score;
         return;
     }
 
