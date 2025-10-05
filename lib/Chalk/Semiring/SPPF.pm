@@ -15,6 +15,26 @@ class Chalk::Semiring::SPPFSymbolNode {
     field @packed_nodes;
 
     method add_packed_node($packed_node) {
+        my @new_children = $packed_node->children;
+
+        # Check if we already have a packed node with the same children
+        for my $existing (@packed_nodes) {
+            my @existing_children = $existing->children;
+
+            # Different sizes can't be duplicates, skip
+            next unless @existing_children == @new_children;
+
+            # Same size - check if all children are identical references
+            my $all_match = 1;
+            for my $i (0..$#existing_children) {
+                unless (refaddr($existing_children[$i]) == refaddr($new_children[$i])) {
+                    $all_match = 0;
+                    last;
+                }
+            }
+            return if $all_match;  # Found exact duplicate, don't add
+        }
+
         push( @packed_nodes, $packed_node );
     }
 
@@ -81,11 +101,15 @@ class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
     }
 
     method add( $other, $swap = undef ) {
+        my $self_start = $sppf_node->start_pos;
+        my $self_end = $sppf_node->end_pos;
+        my $other_start = $other->sppf_node->start_pos;
+        my $other_end = $other->sppf_node->end_pos;
 
-        # Add alternative to SPPF while keeping best score
-        $forest->add_alternative( $sppf_node, $other->sppf_node );
+        if ($self_start == $other_start && $self_end == $other_end) {
+            $forest->add_alternative( $sppf_node, $other->sppf_node );
+        }
 
-        # Return the better scoring element (classic Viterbi behavior)
         return $self if $score > $other->score;
         return $other;
     }
@@ -103,6 +127,10 @@ class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
 
     method probability() { exp($score) }
     method best_path()   { $path->[0] }
+
+    method validate_complete_parse($input_length) {
+        return $sppf_node->start_pos == 0 && $sppf_node->end_pos == $input_length;
+    }
 }
 
 class Chalk::Semiring::SPPFForest {
@@ -128,22 +156,26 @@ class Chalk::Semiring::SPPFForest {
     }
 
     method create_sequence_node( $left_node, $right_node ) {
+        my $start = $left_node->start_pos;
+        my $end = $right_node->end_pos;
 
- # TODO: Implement proper SPPF sequence node construction
- # For now, just return the left node (placeholder for proper SPPF construction)
-        return $left_node;
+        my $seq_node = $self->get_or_create_symbol_node( "SEQ", $start, $end );
+
+        my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
+        $packed->add_child($left_node);
+        $packed->add_child($right_node);
+        $seq_node->add_packed_node($packed);  # add_packed_node handles de-duplication
+
+        return $seq_node;
     }
 
     method add_alternative( $node1, $node2 ) {
+        return unless $node1 isa Chalk::Semiring::SPPFSymbolNode
+                   && $node2 isa Chalk::Semiring::SPPFSymbolNode;
 
-        # TODO: Implement proper SPPF alternative merging
-        # For now, just add the alternative as a packed node (placeholder)
-        if ( $node1 isa Chalk::Semiring::SPPFSymbolNode && $node2 isa Chalk::Semiring::SPPFSymbolNode ) {
-
-            # Add packed node representing the alternative
-            my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
-            $packed->add_child($node2);
-            $node1->add_packed_node($packed);
+        # Merge all packed nodes from node2 into node1
+        for my $packed ($node2->packed_nodes) {
+            $node1->add_packed_node($packed);  # add_packed_node handles de-duplication
         }
     }
 
@@ -184,10 +216,8 @@ class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
-        # FUTURE: Use actual positions when implementing proper SPPF (issue #28)
-        # For now, still hardcoded to [0,0] but signature accepts positions
         my $symbol_node =
-          $forest->get_or_create_symbol_node( $rule->lhs, 0, 0 );
+          $forest->get_or_create_symbol_node( $rule->lhs, $start_pos, $end_pos );
 
         return Chalk::Semiring::SPPFViterbiElement->new(
             score     => log( $rule->probability ),
