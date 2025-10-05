@@ -183,7 +183,9 @@ class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
         );
     }
 
-    method init_element_from_rule($rule) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
+        # FUTURE: Use actual positions when implementing proper SPPF (issue #28)
+        # For now, still hardcoded to [0,0] but signature accepts positions
         my $symbol_node =
           $forest->get_or_create_symbol_node( $rule->lhs, 0, 0 );
 
