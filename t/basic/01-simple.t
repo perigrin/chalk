@@ -11,5 +11,5 @@ my $grammar = Grammar->build_grammar( [ 'A' => [] ] );
 ok $grammar, $grammar;
 
 my $parser = Parser->new( grammar => $grammar );
-$parser->parse_tokens('A');
+$parser->parse_string('A');
 

@@ -326,12 +326,6 @@ class Parser {
     field $semiring :param = SPPFViterbiSemiring->new();
     field $grammar :param;
 
-    method parse_tokens(@input) {
-
-  # backward compatibility for some of our tests that predate the lexeme support
-        return $self->parse_string( join( '', @input ) );
-    }
-
     method parse_string($input_string) {
         my $chart = EarleyChart->new( semiring => $semiring );
 

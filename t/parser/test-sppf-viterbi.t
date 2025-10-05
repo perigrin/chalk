@@ -21,7 +21,7 @@ subtest 'Basic SPPFViterbi functionality' => sub {
         semiring => SPPFViterbiSemiring->new()
     );
     
-    my $result = $parser->parse_tokens(qw(n + n * n));
+    my $result = $parser->parse_string('n+n*n');
     ok $result, 'SPPFViterbi parse succeeds';
     isa_ok $result, 'SPPFViterbiElement';
     
@@ -53,10 +53,10 @@ subtest 'Compare with pure Viterbi' => sub {
         semiring => ViterbiSemiring->new()
     );
     
-    my $input = [qw(n + n * n)];
-    
-    my $sppf_result = $sppf_viterbi_parser->parse_tokens(@$input);
-    my $viterbi_result = $viterbi_parser->parse_tokens(@$input);
+    my $input = 'n+n*n';
+
+    my $sppf_result = $sppf_viterbi_parser->parse_string($input);
+    my $viterbi_result = $viterbi_parser->parse_string($input);
     
     ok $sppf_result, 'SPPF Viterbi parsing succeeds';
     ok $viterbi_result, 'Pure Viterbi parsing succeeds';
@@ -84,7 +84,7 @@ subtest 'SPPF forest access' => sub {
         semiring => $semiring
     );
     
-    my $result = $parser->parse_tokens(qw(n + n * n));
+    my $result = $parser->parse_string('n+n*n');
     ok $result, 'Parse for forest access';
     
     # Access the forest
@@ -116,7 +116,7 @@ subtest 'Simple non-ambiguous grammar' => sub {
         semiring => SPPFViterbiSemiring->new()
     );
     
-    my $result = $parser->parse_tokens(qw(a b));
+    my $result = $parser->parse_string('ab');
     ok $result, 'SPPFViterbi handles simple grammar';
     
     # Verify properties

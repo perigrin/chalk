@@ -34,7 +34,7 @@ my @tests = (
 
 for my $test (@tests) {
     my $input = join(' ', @$test);
-    my $result = $parser->parse_tokens(@$test);
+    my $result = $parser->parse_string(join('', @$test));
     say "$input: " . (defined $result ? "SUCCESS" : "FAIL");
 }
 

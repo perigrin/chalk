@@ -21,13 +21,13 @@ subtest 'Basic arithmetic grammar' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse_tokens(qw(num + num * num));
+    my $result = $parser->parse_string('num+num*num');
     ok $result, 'Parse num + num * num';
-    
-    $result = $parser->parse_tokens(qw/( num + num )/);
+
+    $result = $parser->parse_string('(num+num)');
     ok $result, 'Parse ( num + num )';
-    
-    $result = $parser->parse_tokens(qw/( ( num ) )/);
+
+    $result = $parser->parse_string('((num))');
     ok $result, 'Parse ( ( num ) )';
 };
 
@@ -40,16 +40,16 @@ subtest 'Ambiguous grammar' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse_tokens(qw(num + num * num));
+    my $result = $parser->parse_string('num+num*num');
     ok $result, 'Parse ambiguous num + num * num';
-    
+
     # With ViterbiSemiring, should pick best path
     my $viterbi_parser = Parser->new(
         grammar => $grammar,
         semiring => ViterbiSemiring->new()
     );
-    
-    $result = $viterbi_parser->parse_tokens(qw(num + num * num));
+
+    $result = $viterbi_parser->parse_string('num+num*num');
     ok $result, 'Viterbi parse ambiguous expression';
     isa_ok $result, 'ViterbiElement';
 };
@@ -62,10 +62,10 @@ subtest 'Left-recursive grammar' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse_tokens(qw(a));
+    my $result = $parser->parse_string('a');
     ok $result, 'Parse single a';
-    
-    $result = $parser->parse_tokens(qw(a a a));
+
+    $result = $parser->parse_string('aaa');
     ok $result, 'Parse a a a with left recursion';
 };
 
@@ -77,10 +77,10 @@ subtest 'Right-recursive grammar' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse_tokens(qw(a));
+    my $result = $parser->parse_string('a');
     ok $result, 'Parse single a';
-    
-    $result = $parser->parse_tokens(qw(a a a));
+
+    $result = $parser->parse_string('aaa');
     ok $result, 'Parse a a a with right recursion';
 };
 
@@ -95,16 +95,16 @@ subtest 'Empty productions' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse_tokens(qw(a b));
+    my $result = $parser->parse_string('ab');
     ok $result, 'Parse a b';
-    
-    $result = $parser->parse_tokens(qw(a));
+
+    $result = $parser->parse_string('a');
     ok $result, 'Parse a (B -> epsilon)';
-    
-    $result = $parser->parse_tokens(qw(b));
+
+    $result = $parser->parse_string('b');
     ok $result, 'Parse b (A -> epsilon)';
-    
-    $result = $parser->parse_tokens();
+
+    $result = $parser->parse_string('');
     ok $result, 'Parse empty (both epsilon)';
 };
 
@@ -124,11 +124,11 @@ subtest 'Boolean vs Viterbi semiring' => sub {
         semiring => ViterbiSemiring->new()
     );
     
-    my $bool_result = $bool_parser->parse_tokens(qw(a));
+    my $bool_result = $bool_parser->parse_string('a');
     ok $bool_result, 'Boolean parse succeeds';
     isa_ok $bool_result, 'BooleanElement';
-    
-    my $viterbi_result = $viterbi_parser->parse_tokens(qw(a));
+
+    my $viterbi_result = $viterbi_parser->parse_string('a');
     ok $viterbi_result, 'Viterbi parse succeeds';
     isa_ok $viterbi_result, 'ViterbiElement';
     
@@ -151,10 +151,10 @@ subtest 'Complex nested grammar' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse_tokens(qw(the cat chased the dog));
+    my $result = $parser->parse_string('thecatchasedthedog');
     ok $result, 'Parse the cat chased the dog';
-    
-    $result = $parser->parse_tokens(qw(cat chased dog));
+
+    $result = $parser->parse_string('catchaseddog');
     ok $result, 'Parse cat chased dog (no determiners)';
 };
 
@@ -165,9 +165,9 @@ subtest 'Invalid input rejection' => sub {
     
     my $parser = Parser->new(grammar => $grammar);
     
-    my $result = $parser->parse_tokens(qw(b));
+    my $result = $parser->parse_string('b');
     ok !$result, 'Reject invalid terminal';
-    
-    $result = $parser->parse_tokens(qw(a a));
+
+    $result = $parser->parse_string('aa');
     ok !$result, 'Reject too many tokens';
 };

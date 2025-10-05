@@ -22,19 +22,19 @@ subtest 'Statement sequence patterns' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Single statement
-    my $result = $parser->parse_tokens('print');
+    my $result = $parser->parse_string('print');
     ok $result, 'Parse single statement';
-    
+
     # Statement with semicolon
-    $result = $parser->parse_tokens('print', ';');
+    $result = $parser->parse_string('print;');
     ok $result, 'Parse statement with semicolon';
-    
+
     # Multiple statements
-    $result = $parser->parse_tokens('print', ';', 'print');
+    $result = $parser->parse_string('print;print');
     ok $result, 'Parse statement sequence';
-    
+
     # Long sequence
-    $result = $parser->parse_tokens('print', ';', 'print', ';', 'print');
+    $result = $parser->parse_string('print;print;print');
     ok $result, 'Parse long statement sequence';
 };
 
@@ -57,19 +57,19 @@ subtest 'Complex for statement patterns' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # C-style for loop
-    my $result = $parser->parse_tokens('for', '(', 'var', ';', 'var', ';', 'var', ')', '{}');
+    my $result = $parser->parse_string('for(var;var;var){}');
     ok $result, 'Parse C-style for loop';
-    
+
     # For loop with missing init
-    $result = $parser->parse_tokens('for', '(', ';', 'var', ';', 'var', ')', '{}');
+    $result = $parser->parse_string('for(;var;var){}');
     ok $result, 'Parse for loop with missing init';
-    
+
     # For loop with missing condition and increment
-    $result = $parser->parse_tokens('for', '(', ';', ';', 'var', ')', '{}');
+    $result = $parser->parse_string('for(;;var){}');
     ok $result, 'Parse for loop with missing condition and increment';
-    
+
     # Foreach-style loop
-    $result = $parser->parse_tokens('for', '(', 'expr', ')', '{}');
+    $result = $parser->parse_string('for(expr){}');
     ok $result, 'Parse foreach-style loop';
 };
 
@@ -89,19 +89,19 @@ subtest 'Deeply nested optional elements' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Full use statement
-    my $result = $parser->parse_tokens('use', 'Module', 'v1.0', 'args');
+    my $result = $parser->parse_string('useModulev1.0args');
     ok $result, 'Parse full use statement';
-    
+
     # Use with version only
-    $result = $parser->parse_tokens('use', 'v1.0');
+    $result = $parser->parse_string('usev1.0');
     ok $result, 'Parse use with version only';
-    
+
     # Use with module only
-    $result = $parser->parse_tokens('use', 'Module');
+    $result = $parser->parse_string('useModule');
     ok $result, 'Parse use with module only';
-    
+
     # Use with module and args
-    $result = $parser->parse_tokens('use', 'Module', 'args');
+    $result = $parser->parse_string('useModuleargs');
     ok $result, 'Parse use with module and args';
 };
 
@@ -123,32 +123,32 @@ subtest 'Highly ambiguous expression hierarchy' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Simple expression
-    my $result = $parser->parse_tokens('term');
+    my $result = $parser->parse_string('term');
     ok $result, 'Parse simple term';
-    
+
     # Binary operation
-    $result = $parser->parse_tokens('term', '+', 'term');
+    $result = $parser->parse_string('term+term');
     ok $result, 'Parse binary addition';
-    
+
     # Highly ambiguous expression
-    $result = $parser->parse_tokens('term', '+', 'term', '*', 'term', '-', 'term');
+    $result = $parser->parse_string('term+term*term-term');
     ok $result, 'Parse highly ambiguous expression';
-    
+
     # Expression with parentheses
-    $result = $parser->parse_tokens('(', 'term', '+', 'term', ')', '*', 'term');
+    $result = $parser->parse_string('(term+term)*term');
     ok $result, 'Parse parenthesized expression';
-    
+
     # Complex mixed operators
-    $result = $parser->parse_tokens('term', '**', 'term', '&&', 'term', '||', 'term');
+    $result = $parser->parse_string('term**term&&term||term');
     ok $result, 'Parse complex mixed operators';
-    
+
     # Test with SPPF semiring for ambiguous handling
     my $sppf_parser = Parser->new(
         grammar => $grammar,
         semiring => SPPFViterbiSemiring->new()
     );
-    
-    $result = $sppf_parser->parse_tokens('term', '+', 'term', '*', 'term');
+
+    $result = $sppf_parser->parse_string('term+term*term');
     ok $result, 'SPPF parse ambiguous expression';
     isa_ok $result, 'SPPFViterbiElement';
 };
@@ -167,18 +167,18 @@ subtest 'Recursive block structures' => sub {
     my $parser = Parser->new(grammar => $grammar);
     
     # Empty block
-    my $result = $parser->parse_tokens('{', '}');
+    my $result = $parser->parse_string('{}');
     ok $result, 'Parse empty block';
-    
+
     # Simple block
-    $result = $parser->parse_tokens('{', 'simple', '}');
+    $result = $parser->parse_string('{simple}');
     ok $result, 'Parse simple block';
-    
+
     # Nested blocks
-    $result = $parser->parse_tokens('{', 'simple', '{', 'simple', '}', 'simple', '}');
+    $result = $parser->parse_string('{simple{simple}simple}');
     ok $result, 'Parse nested blocks';
-    
+
     # Deeply nested blocks
-    $result = $parser->parse_tokens('{', '{', '{', 'simple', '}', '}', '}');
+    $result = $parser->parse_string('{{{simple}}}');
     ok $result, 'Parse deeply nested blocks';
 };

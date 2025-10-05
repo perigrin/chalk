@@ -21,7 +21,7 @@ subtest 'Simple ambiguous grammar with ViterbiSemiring' => sub {
         semiring => ViterbiSemiring->new()
     );
     
-    my $result = $parser->parse_tokens(qw(n + n * n));
+    my $result = $parser->parse_string('n+n*n');
     ok $result, 'Viterbi parse ambiguous expression';
     isa_ok $result, 'ViterbiElement';
     
@@ -41,7 +41,7 @@ subtest 'Simple ambiguous grammar with BooleanSemiring' => sub {
         semiring => BooleanSemiring->new()
     );
     
-    my $result = $parser->parse_tokens(qw(n + n * n));
+    my $result = $parser->parse_string('n+n*n');
     ok $result, 'Boolean parse ambiguous expression';
     isa_ok $result, 'BooleanElement';
     
@@ -69,17 +69,17 @@ subtest 'More complex ambiguous expression' => sub {
     );
     
     # Test complex expression
-    my $viterbi_result = $viterbi_parser->parse_tokens(qw(n + n * n - n / n));
+    my $viterbi_result = $viterbi_parser->parse_string('n+n*n-n/n');
     ok $viterbi_result, 'Viterbi parse complex expression';
-    
-    my $bool_result = $bool_parser->parse_tokens(qw(n + n * n - n / n));
+
+    my $bool_result = $bool_parser->parse_string('n+n*n-n/n');
     ok $bool_result, 'Boolean parse complex expression';
-    
+
     # Test with parentheses
-    $viterbi_result = $viterbi_parser->parse_tokens(qw/( n + n ) * n/);
+    $viterbi_result = $viterbi_parser->parse_string('(n+n)*n');
     ok $viterbi_result, 'Viterbi parse parenthesized expression';
-    
-    $bool_result = $bool_parser->parse_tokens(qw/( n + n ) * n/);
+
+    $bool_result = $bool_parser->parse_string('(n+n)*n');
     ok $bool_result, 'Boolean parse parenthesized expression';
     
     print "Complex Viterbi result: $viterbi_result\n" if $viterbi_result;
@@ -99,7 +99,7 @@ subtest 'Verify existing working grammars still work' => sub {
         semiring => ViterbiSemiring->new()
     );
     
-    my $result = $parser->parse_tokens(qw(num + num + num));
+    my $result = $parser->parse_string('num+num+num');
     ok $result, 'Known working grammar still works';
     print "Working grammar result: $result\n" if $result;
 };
