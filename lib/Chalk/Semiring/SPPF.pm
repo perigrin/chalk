@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
+use Scalar::Util qw(refaddr);
 use Chalk::Base;
 
 # SPPF (Shared Packed Parse Forest) Node Classes
@@ -141,24 +142,60 @@ class Chalk::Semiring::SPPFForest {
 
         my $seq_node = $self->get_or_create_symbol_node( "SEQ", $start, $end );
 
-        my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
-        $packed->add_child($left_node);
-        $packed->add_child($right_node);
-        $seq_node->add_packed_node($packed);
+        # Check if this packed node already exists
+        my $found_existing = 0;
+        for my $existing_packed ($seq_node->packed_nodes) {
+            my @existing_children = $existing_packed->children;
+            if (@existing_children == 2 &&
+                refaddr($existing_children[0]) == refaddr($left_node) &&
+                refaddr($existing_children[1]) == refaddr($right_node)) {
+                $found_existing = 1;
+                last;
+            }
+        }
+
+        # Only create new packed node if it doesn't exist
+        unless ($found_existing) {
+            my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
+            $packed->add_child($left_node);
+            $packed->add_child($right_node);
+            $seq_node->add_packed_node($packed);
+        }
 
         return $seq_node;
     }
 
     method add_alternative( $node1, $node2 ) {
+        return unless $node1 isa Chalk::Semiring::SPPFSymbolNode
+                   && $node2 isa Chalk::Semiring::SPPFSymbolNode;
 
-        # TODO: Implement proper SPPF alternative merging
-        # For now, just add the alternative as a packed node (placeholder)
-        if ( $node1 isa Chalk::Semiring::SPPFSymbolNode && $node2 isa Chalk::Semiring::SPPFSymbolNode ) {
+        # Merge all packed nodes from node2 into node1, de-duplicating
+        for my $packed2 ($node2->packed_nodes) {
+            my @children2 = $packed2->children;
 
-            # Add packed node representing the alternative
-            my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
-            $packed->add_child($node2);
-            $node1->add_packed_node($packed);
+            # Check if node1 already has a packed node with the same children
+            my $is_duplicate = 0;
+            for my $packed1 ($node1->packed_nodes) {
+                my @children1 = $packed1->children;
+
+                # Compare children arrays (same count and same node references)
+                if (@children1 == @children2) {
+                    my $all_match = 1;
+                    for my $i (0..$#children1) {
+                        unless (refaddr($children1[$i]) == refaddr($children2[$i])) {
+                            $all_match = 0;
+                            last;
+                        }
+                    }
+                    if ($all_match) {
+                        $is_duplicate = 1;
+                        last;
+                    }
+                }
+            }
+
+            # Only add if not a duplicate
+            $node1->add_packed_node($packed2) unless $is_duplicate;
         }
     }
 
