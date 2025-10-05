@@ -21,16 +21,18 @@ class Chalk::Semiring::SPPFSymbolNode {
         for my $existing (@packed_nodes) {
             my @existing_children = $existing->children;
 
-            if (@existing_children == @new_children) {
-                my $all_match = 1;
-                for my $i (0..$#existing_children) {
-                    unless (refaddr($existing_children[$i]) == refaddr($new_children[$i])) {
-                        $all_match = 0;
-                        last;
-                    }
+            # Different sizes can't be duplicates, skip
+            next unless @existing_children == @new_children;
+
+            # Same size - check if all children are identical references
+            my $all_match = 1;
+            for my $i (0..$#existing_children) {
+                unless (refaddr($existing_children[$i]) == refaddr($new_children[$i])) {
+                    $all_match = 0;
+                    last;
                 }
-                return if $all_match;  # Already have this packed node, don't add duplicate
             }
+            return if $all_match;  # Found exact duplicate, don't add
         }
 
         push( @packed_nodes, $packed_node );
