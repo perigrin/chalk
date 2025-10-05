@@ -15,6 +15,24 @@ class Chalk::Semiring::SPPFSymbolNode {
     field @packed_nodes;
 
     method add_packed_node($packed_node) {
+        my @new_children = $packed_node->children;
+
+        # Check if we already have a packed node with the same children
+        for my $existing (@packed_nodes) {
+            my @existing_children = $existing->children;
+
+            if (@existing_children == @new_children) {
+                my $all_match = 1;
+                for my $i (0..$#existing_children) {
+                    unless (refaddr($existing_children[$i]) == refaddr($new_children[$i])) {
+                        $all_match = 0;
+                        last;
+                    }
+                }
+                return if $all_match;  # Already have this packed node, don't add duplicate
+            }
+        }
+
         push( @packed_nodes, $packed_node );
     }
 
@@ -141,25 +159,10 @@ class Chalk::Semiring::SPPFForest {
 
         my $seq_node = $self->get_or_create_symbol_node( "SEQ", $start, $end );
 
-        # Check if this packed node already exists
-        my $found_existing = 0;
-        for my $existing_packed ($seq_node->packed_nodes) {
-            my @existing_children = $existing_packed->children;
-            if (@existing_children == 2 &&
-                refaddr($existing_children[0]) == refaddr($left_node) &&
-                refaddr($existing_children[1]) == refaddr($right_node)) {
-                $found_existing = 1;
-                last;
-            }
-        }
-
-        # Only create new packed node if it doesn't exist
-        unless ($found_existing) {
-            my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
-            $packed->add_child($left_node);
-            $packed->add_child($right_node);
-            $seq_node->add_packed_node($packed);
-        }
+        my $packed = Chalk::Semiring::SPPFPackedNode->new( rule => undef );
+        $packed->add_child($left_node);
+        $packed->add_child($right_node);
+        $seq_node->add_packed_node($packed);  # add_packed_node handles de-duplication
 
         return $seq_node;
     }
@@ -168,33 +171,9 @@ class Chalk::Semiring::SPPFForest {
         return unless $node1 isa Chalk::Semiring::SPPFSymbolNode
                    && $node2 isa Chalk::Semiring::SPPFSymbolNode;
 
-        # Merge all packed nodes from node2 into node1, de-duplicating
-        for my $packed2 ($node2->packed_nodes) {
-            my @children2 = $packed2->children;
-
-            # Check if node1 already has a packed node with the same children
-            my $is_duplicate = 0;
-            for my $packed1 ($node1->packed_nodes) {
-                my @children1 = $packed1->children;
-
-                # Compare children arrays (same count and same node references)
-                if (@children1 == @children2) {
-                    my $all_match = 1;
-                    for my $i (0..$#children1) {
-                        unless (refaddr($children1[$i]) == refaddr($children2[$i])) {
-                            $all_match = 0;
-                            last;
-                        }
-                    }
-                    if ($all_match) {
-                        $is_duplicate = 1;
-                        last;
-                    }
-                }
-            }
-
-            # Only add if not a duplicate
-            $node1->add_packed_node($packed2) unless $is_duplicate;
+        # Merge all packed nodes from node2 into node1
+        for my $packed ($node2->packed_nodes) {
+            $node1->add_packed_node($packed);  # add_packed_node handles de-duplication
         }
     }
 
