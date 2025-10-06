@@ -16,6 +16,7 @@ if ( !caller ) {
     my $grammar_module = "Perl";  # default grammar module
     my $semiring_type = "SPPF";   # default semiring
     my $syntax_check_mode = 0;    # -c flag for syntax checking
+    my $preprocess_enabled = 0;   # --preprocess flag for heredoc preprocessing
     my @remaining_args;
 
     my $i = 0;
@@ -29,6 +30,9 @@ if ( !caller ) {
         } elsif ($ARGV[$i] eq '-c') {
             $syntax_check_mode = 1;
             $semiring_type = "Boolean";  # -c implies Boolean semiring
+            $i++;
+        } elsif ($ARGV[$i] eq '--preprocess') {
+            $preprocess_enabled = 1;  # Enable heredoc preprocessing
             $i++;
         } else {
             push @remaining_args, $ARGV[$i];
@@ -105,7 +109,8 @@ if ( !caller ) {
         # Create parser with grammar and semiring
         my $parser = Chalk::Parser->new(
             grammar => $chalk_grammar,
-            semiring => $semiring
+            semiring => $semiring,
+            preprocess => $preprocess_enabled
         );
 
         # Parse the input
