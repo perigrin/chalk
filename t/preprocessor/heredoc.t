@@ -112,3 +112,87 @@ EOF
     like $output, qr/qq\{\}/, 'Transformed to empty qq{}';
     unlike $output, qr/<<EOF/, 'Removed heredoc syntax';
 };
+
+subtest 'Indented heredoc with single quotes' => sub {
+    my $input = q{    my $text = <<~'EOF';
+        Hello World
+        This is indented
+        Another line
+    EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/q\{/, 'Transformed to q{}';
+    like $output, qr/Hello World/, 'Contains heredoc content';
+    unlike $output, qr/<<~'EOF'/, 'Removed heredoc syntax';
+    unlike $output, qr/^    EOF$/m, 'Removed terminator';
+
+    # Check that leading indentation is stripped
+    unlike $output, qr/\n        Hello/, 'Indentation stripped from content';
+    like $output, qr/Hello World\nThis is indented\nAnother line/, 'Content properly dedented';
+};
+
+subtest 'Indented heredoc with double quotes' => sub {
+    my $input = q{    my $text = <<~"EOF";
+        Hello World
+        This is indented
+    EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/qq\{/, 'Transformed to qq{}';
+    like $output, qr/Hello World/, 'Contains heredoc content';
+    unlike $output, qr/<<~"EOF"/, 'Removed heredoc syntax';
+
+    # Check that leading indentation is stripped
+    unlike $output, qr/\n        Hello/, 'Indentation stripped from content';
+};
+
+subtest 'Indented heredoc bare' => sub {
+    my $input = q{    my $text = <<~EOF;
+        Hello World
+        This is indented
+    EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/qq\{/, 'Transformed to qq{}';
+    like $output, qr/Hello World/, 'Contains heredoc content';
+    unlike $output, qr/<<~EOF/, 'Removed heredoc syntax';
+
+    # Check that leading indentation is stripped
+    unlike $output, qr/\n        Hello/, 'Indentation stripped from content';
+};
+
+subtest 'Indented heredoc with mixed indentation' => sub {
+    my $input = q{    my $text = <<~'EOF';
+        First line
+            More indented
+        Back to normal
+    EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/q\{/, 'Transformed to q{}';
+
+    # First line should have no leading spaces (stripped)
+    like $output, qr/First line/, 'First line dedented';
+
+    # More indented line should retain relative indentation (4 extra spaces)
+    like $output, qr/\n    More indented/, 'Relative indentation preserved';
+
+    # Third line back to baseline
+    like $output, qr/\nBack to normal/, 'Back to baseline dedented';
+};
