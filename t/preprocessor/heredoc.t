@@ -196,3 +196,53 @@ subtest 'Indented heredoc with mixed indentation' => sub {
     # Third line back to baseline
     like $output, qr/\nBack to normal/, 'Back to baseline dedented';
 };
+
+subtest 'Multiple heredocs on same line' => sub {
+    my $input = q{my ($a, $b) = (<<'EOF1', <<'EOF2');
+First heredoc
+EOF1
+Second heredoc
+EOF2
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/q\{First heredoc\}/, 'First heredoc transformed';
+    like $output, qr/q\{Second heredoc\}/, 'Second heredoc transformed';
+    unlike $output, qr/<<'EOF1'/, 'First heredoc syntax removed';
+    unlike $output, qr/<<'EOF2'/, 'Second heredoc syntax removed';
+};
+
+subtest 'Edge case: Empty lines in heredoc' => sub {
+    my $input = q{my $text = <<'EOF';
+First line
+
+Third line (blank in between)
+EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/First line\n\nThird line/, 'Empty line preserved';
+};
+
+subtest 'Edge case: Heredoc delimiter appears in content' => sub {
+    my $input = q{my $text = <<'DELIM';
+This line mentions DELIM but not at start
+  DELIM with leading space
+Still going
+DELIM
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/mentions DELIM/, 'DELIM in content preserved';
+    like $output, qr/DELIM with leading space/, 'DELIM with space preserved';
+    unlike $output, qr/^DELIM$/m, 'Only terminator DELIM removed';
+};

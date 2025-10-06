@@ -25,98 +25,136 @@ class Chalk::Preprocessor {
             $input_line_num = $i + 1;
             my $line = $lines[$i];
 
-            my $matched = 0;
-            my $is_single_quoted = 0;
-            my $is_indented = 0;
-            my $prefix = '';
-            my $delimiter = '';
-            my $suffix = '';
+            # Collect all heredoc declarations on this line
+            my @heredocs;
+            my $working_line = $line;
 
-            # Check for indented single-quoted heredoc: <<~'DELIMITER'
-            if ($line =~ /^(.*?)(<<~'([^']+)')(.*)$/) {
-                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
-                $is_single_quoted = 1;
-                $is_indented = 1;
-                $matched = 1;
-            }
-            # Check for indented double-quoted heredoc: <<~"DELIMITER"
-            elsif ($line =~ /^(.*?)(<<~"([^"]+)")(.*)$/) {
-                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
-                $is_single_quoted = 0;
-                $is_indented = 1;
-                $matched = 1;
-            }
-            # Check for indented bare heredoc: <<~DELIMITER
-            elsif ($line =~ /^(.*?)(<<~(\w+))(.*)$/) {
-                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
-                $is_single_quoted = 0;
-                $is_indented = 1;
-                $matched = 1;
-            }
-            # Check for single-quoted heredoc: <<'DELIMITER'
-            elsif ($line =~ /^(.*?)(<<'([^']+)')(.*)$/) {
-                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
-                $is_single_quoted = 1;
-                $matched = 1;
-            }
-            # Check for double-quoted heredoc: <<"DELIMITER"
-            elsif ($line =~ /^(.*?)(<<"([^"]+)")(.*)$/) {
-                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
-                $is_single_quoted = 0;
-                $matched = 1;
-            }
-            # Check for bare heredoc: <<DELIMITER
-            elsif ($line =~ /^(.*?)(<<(\w+))(.*)$/) {
-                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
-                $is_single_quoted = 0;
-                $matched = 1;
-            }
+            # Keep finding heredocs until none remain
+            while (1) {
+                my $matched = 0;
+                my $is_single_quoted = 0;
+                my $is_indented = 0;
+                my $prefix = '';
+                my $delimiter = '';
+                my $heredoc_marker = '';
 
-            if ($matched) {
-                # Collect heredoc content until we find the terminator
-                my @heredoc_content;
-                my $j = $i + 1;
-                my $found_terminator = 0;
-
-                while ($j < @lines) {
-                    # For indented heredocs, the terminator can have leading whitespace
-                    # For non-indented heredocs, terminator must be exact match
-                    my $line_matches_delimiter = 0;
-                    if ($is_indented) {
-                        # Match terminator with optional leading whitespace
-                        $line_matches_delimiter = ($lines[$j] =~ /^\s*\Q$delimiter\E$/);
-                    } else {
-                        # Exact match only
-                        $line_matches_delimiter = ($lines[$j] eq $delimiter);
-                    }
-
-                    if ($line_matches_delimiter) {
-                        $found_terminator = 1;
-                        last;
-                    }
-                    push @heredoc_content, $lines[$j];
-                    $j++;
+                # Check for indented single-quoted heredoc: <<~'DELIMITER'
+                if ($working_line =~ /^(.*?)(<<~'([^']+)')(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 1;
+                    $is_indented = 1;
+                    $matched = 1;
+                }
+                # Check for indented double-quoted heredoc: <<~"DELIMITER"
+                elsif ($working_line =~ /^(.*?)(<<~"([^"]+)")(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 0;
+                    $is_indented = 1;
+                    $matched = 1;
+                }
+                # Check for indented bare heredoc: <<~DELIMITER
+                elsif ($working_line =~ /^(.*?)(<<~(\w+))(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 0;
+                    $is_indented = 1;
+                    $matched = 1;
+                }
+                # Check for single-quoted heredoc: <<'DELIMITER'
+                elsif ($working_line =~ /^(.*?)(<<'([^']+)')(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 1;
+                    $matched = 1;
+                }
+                # Check for double-quoted heredoc: <<"DELIMITER"
+                elsif ($working_line =~ /^(.*?)(<<"([^"]+)")(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 0;
+                    $matched = 1;
+                }
+                # Check for bare heredoc: <<DELIMITER
+                elsif ($working_line =~ /^(.*?)(<<(\w+))(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 0;
+                    $matched = 1;
                 }
 
-                if ($found_terminator) {
-                    # Handle indentation stripping if <<~ was used
-                    if ($is_indented) {
-                        @heredoc_content = $self->strip_indentation(@heredoc_content);
+                if ($matched) {
+                    push @heredocs, {
+                        delimiter => $delimiter,
+                        is_single_quoted => $is_single_quoted,
+                        is_indented => $is_indented,
+                        prefix => $prefix,
+                        marker => $heredoc_marker,
+                    };
+                    # Replace the heredoc marker with a placeholder to continue searching
+                    $working_line =~ s/\Q$heredoc_marker\E/__HEREDOC_PLACEHOLDER__/;
+                } else {
+                    last;
+                }
+            }
+
+            if (@heredocs) {
+                # Collect content for each heredoc in order
+                my $j = $i + 1;
+                my @transformed_parts;
+                my $current_prefix = '';
+
+                for my $hd (@heredocs) {
+                    my @heredoc_content;
+                    my $found_terminator = 0;
+
+                    while ($j < @lines) {
+                        my $line_matches_delimiter = 0;
+                        if ($hd->{is_indented}) {
+                            $line_matches_delimiter = ($lines[$j] =~ /^\s*\Q$hd->{delimiter}\E$/);
+                        } else {
+                            $line_matches_delimiter = ($lines[$j] eq $hd->{delimiter});
+                        }
+
+                        if ($line_matches_delimiter) {
+                            $found_terminator = 1;
+                            $j++;  # Move past terminator
+                            last;
+                        }
+                        push @heredoc_content, $lines[$j];
+                        $j++;
                     }
 
-                    # Transform to q{...} or qq{...}
-                    my $content = join("\n", @heredoc_content);
-                    my $quote_op = $is_single_quoted ? 'q' : 'qq';
-                    my $transformed = "${prefix}${quote_op}{${content}}${suffix}";
+                    if ($found_terminator) {
+                        # Handle indentation stripping if <<~ was used
+                        if ($hd->{is_indented}) {
+                            @heredoc_content = $self->strip_indentation(@heredoc_content);
+                        }
+
+                        # Transform to q{...} or qq{...}
+                        my $content = join("\n", @heredoc_content);
+                        my $quote_op = $hd->{is_single_quoted} ? 'q' : 'qq';
+                        push @transformed_parts, {
+                            marker => $hd->{marker},
+                            replacement => "${quote_op}{${content}}",
+                        };
+                    } else {
+                        # If we couldn't find terminator, abandon transformation
+                        @transformed_parts = ();
+                        last;
+                    }
+                }
+
+                if (@transformed_parts) {
+                    # Replace all heredoc markers with their transformations
+                    my $transformed = $line;
+                    for my $part (@transformed_parts) {
+                        $transformed =~ s/\Q$part->{marker}\E/$part->{replacement}/;
+                    }
 
                     push @output_lines, $transformed;
                     $line_mapping{$output_line_num} = $input_line_num;
                     $output_line_num++;
 
-                    # Skip the heredoc content and terminator
-                    $i = $j;
+                    # Skip the heredoc content lines
+                    $i = $j - 1;  # -1 because for loop will increment
                 } else {
-                    # No terminator found, keep line as-is
+                    # Transformation failed, keep original
                     push @output_lines, $line;
                     $line_mapping{$output_line_num} = $input_line_num;
                     $output_line_num++;
