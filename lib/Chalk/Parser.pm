@@ -122,8 +122,17 @@ class Chalk::EarleyChart {
 class Chalk::Parser {
     field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
     field $grammar :param;
+    field $preprocess :param = 0;  # Enable heredoc preprocessing
 
     method parse_string($input_string) {
+        # Apply preprocessing if enabled
+        if ($preprocess) {
+            require Chalk::Preprocessor;
+            my $preprocessor = Chalk::Preprocessor->new(input => $input_string);
+            $preprocessor->transform();
+            $input_string = $preprocessor->output;
+        }
+
         my $chart = Chalk::EarleyChart->new( semiring => $semiring );
 
        # Initialize chart by predicting all rules for start symbol at position 0
