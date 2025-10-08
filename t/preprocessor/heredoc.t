@@ -61,3 +61,54 @@ END
     like $output, qr/%hashes/, 'Contains percent signs';
     like $output, qr/\\n/, 'Contains backslash-n literally';
 };
+
+subtest 'Double-quoted heredoc transformation (bare)' => sub {
+    my $input = q{my $text = <<EOF;
+Hello World
+This is a test
+EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    # Should transform to qq{...}
+    like $output, qr/qq\{/, 'Transformed to qq{}';
+    like $output, qr/Hello World/, 'Contains heredoc content';
+    like $output, qr/This is a test/, 'Contains all heredoc lines';
+    unlike $output, qr/<<EOF/, 'Removed heredoc syntax';
+    unlike $output, qr/^EOF$/m, 'Removed terminator';
+};
+
+subtest 'Double-quoted heredoc transformation (quoted)' => sub {
+    my $input = q{my $text = <<"EOF";
+Hello World
+This is a test
+EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    # Should transform to qq{...}
+    like $output, qr/qq\{/, 'Transformed to qq{}';
+    like $output, qr/Hello World/, 'Contains heredoc content';
+    like $output, qr/This is a test/, 'Contains all heredoc lines';
+    unlike $output, qr/<<"EOF"/, 'Removed heredoc syntax';
+    unlike $output, qr/^EOF$/m, 'Removed terminator';
+};
+
+subtest 'Empty double-quoted heredoc' => sub {
+    my $input = q{my $text = <<EOF;
+EOF
+};
+
+    my $preprocessor = Chalk::Preprocessor->new(input => $input);
+    $preprocessor->transform();
+    my $output = $preprocessor->output;
+
+    like $output, qr/qq\{\}/, 'Transformed to empty qq{}';
+    unlike $output, qr/<<EOF/, 'Removed heredoc syntax';
+};

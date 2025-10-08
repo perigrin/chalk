@@ -25,10 +25,32 @@ class Chalk::Preprocessor {
             $input_line_num = $i + 1;
             my $line = $lines[$i];
 
+            my $matched = 0;
+            my $is_single_quoted = 0;
+            my $prefix = '';
+            my $delimiter = '';
+            my $suffix = '';
+
             # Check for single-quoted heredoc: <<'DELIMITER'
             if ($line =~ /^(.*?)(<<'([^']+)')(.*)$/) {
-                my ($prefix, $heredoc_marker, $delimiter, $suffix) = ($1, $2, $3, $4);
+                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
+                $is_single_quoted = 1;
+                $matched = 1;
+            }
+            # Check for double-quoted heredoc: <<"DELIMITER"
+            elsif ($line =~ /^(.*?)(<<"([^"]+)")(.*)$/) {
+                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
+                $is_single_quoted = 0;
+                $matched = 1;
+            }
+            # Check for bare heredoc: <<DELIMITER
+            elsif ($line =~ /^(.*?)(<<(\w+))(.*)$/) {
+                ($prefix, $delimiter, $suffix) = ($1, $3, $4);
+                $is_single_quoted = 0;
+                $matched = 1;
+            }
 
+            if ($matched) {
                 # Collect heredoc content until we find the terminator
                 my @heredoc_content;
                 my $j = $i + 1;
@@ -44,9 +66,10 @@ class Chalk::Preprocessor {
                 }
 
                 if ($found_terminator) {
-                    # Transform to q{...}
+                    # Transform to q{...} or qq{...}
                     my $content = join("\n", @heredoc_content);
-                    my $transformed = "${prefix}q{${content}}${suffix}";
+                    my $quote_op = $is_single_quoted ? 'q' : 'qq';
+                    my $transformed = "${prefix}${quote_op}{${content}}${suffix}";
 
                     push @output_lines, $transformed;
                     $line_mapping{$output_line_num} = $input_line_num;
