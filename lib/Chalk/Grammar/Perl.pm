@@ -842,6 +842,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*/] ],
     [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
     [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
+    # q{} and qq{} quote operators (for heredoc preprocessor support)
+    [ 'QuotedString' => [qr/q\{(?:[^}]|\n)*\}/] ],   # q{} single-quote equivalent
+    [ 'QuotedString' => [qr/qq\{(?:[^}]|\n)*\}/] ],  # qq{} double-quote equivalent
 
     # Punctuation
     [ 'PackageSeparator' => ['::'] ],

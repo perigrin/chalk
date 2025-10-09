@@ -122,8 +122,23 @@ class Chalk::EarleyChart {
 class Chalk::Parser {
     field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
     field $grammar :param;
+    field $preprocess :param = [];  # Arrayref of preprocessor class names
 
     method parse_string($input_string) {
+        # Apply preprocessors in sequence
+        for my $preprocessor_class (@$preprocess) {
+            next unless defined $preprocessor_class;
+
+            # Load the preprocessor module
+            (my $file = $preprocessor_class) =~ s{::}{/}g;
+            require "$file.pm";
+
+            # Apply preprocessing
+            my $preprocessor = $preprocessor_class->new(input => $input_string);
+            $preprocessor->transform();
+            $input_string = $preprocessor->output;
+        }
+
         my $chart = Chalk::EarleyChart->new( semiring => $semiring );
 
        # Initialize chart by predicting all rules for start symbol at position 0
