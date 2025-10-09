@@ -98,35 +98,43 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ], 1.0 ],
 
     # Statements - chalk specific with expression support
-    [ 'Statement' => ['UseStatement'],     1.0 ],
-    [ 'Statement' => ['RequireStatement'], 1.0 ],    # Require statements
-    [ 'Statement' => ['FunctionCall'],     1.0 ],    # Function calls like print
-    [ 'Statement' => ['PrintExpr'],        1.0 ],
-    [ 'Statement' => ['DieExpr'],          1.0 ],
-    [ 'Statement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
-    [ 'Statement' => ['BuiltinFunctionCall'], 1.0 ],
-    [ 'Statement' => [ 'BuiltinFunctionCall', 'StatementModifier' ], 1.0 ]
+    # Low-precedence logical operators at statement level (or/and)
+    [ 'Statement' => [ 'Statement', 'or', 'Statement' ], 0.85 ],
+    [ 'Statement' => [ 'Statement', 'and', 'Statement' ], 0.85 ],
+    [ 'Statement' => ['BaseStatement'], 1.0 ],
+
+    # Base statements (before logical operators)
+    [ 'BaseStatement' => ['UseStatement'],     1.0 ],
+    [ 'BaseStatement' => ['RequireStatement'], 1.0 ],    # Require statements
+    [ 'BaseStatement' => ['FunctionCall'],     1.0 ],    # Function calls like print
+    [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
+    [ 'BaseStatement' => ['DieExpr'],          1.0 ],
+    [ 'BaseStatement' => ['WarnExpr'],         1.0 ],
+    [ 'BaseStatement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
+    [ 'BaseStatement' => [ 'WarnExpr', 'StatementModifier' ], 1.0 ],
+    [ 'BaseStatement' => ['BuiltinFunctionCall'], 1.0 ],
+    [ 'BaseStatement' => [ 'BuiltinFunctionCall', 'StatementModifier' ], 1.0 ]
     ,    # Print statements without parentheses
-    [ 'Statement' => ['BlockLevelExpression'], 1.0 ],   # Block-level expression
-    [ 'Statement' => ['EllipsisStatement'],    1.0 ],   # Ellipsis (...)
-    [ 'Statement' => ['FieldDecl'],            1.0 ],   # Field declarations
-    [ 'Statement' => ['VariableDecl'],       1.0 ], # my/our/local declarations
-    [ 'Statement' => ['ReturnStatement'],    1.0 ], # Return statements
-    [ 'Statement' => ['SubroutineDecl'],     1.0 ], # Subroutine declarations
-    [ 'Statement' => ['ConditionStatement'], 1.0 ], # If/unless/while statements
-    [ 'Statement' => [ 'ReturnStatement', 'StatementModifier' ], 1.0 ]
+    [ 'BaseStatement' => ['BlockLevelExpression'], 1.0 ],   # Block-level expression
+    [ 'BaseStatement' => ['EllipsisStatement'],    1.0 ],   # Ellipsis (...)
+    [ 'BaseStatement' => ['FieldDecl'],            1.0 ],   # Field declarations
+    [ 'BaseStatement' => ['VariableDecl'],       1.0 ], # my/our/local declarations
+    [ 'BaseStatement' => ['ReturnStatement'],    1.0 ], # Return statements
+    [ 'BaseStatement' => ['SubroutineDecl'],     1.0 ], # Subroutine declarations
+    [ 'BaseStatement' => ['ConditionStatement'], 1.0 ], # If/unless/while statements
+    [ 'BaseStatement' => [ 'ReturnStatement', 'StatementModifier' ], 1.0 ]
     ,                                               # Return with modifier
-    [ 'Statement' => [ 'BlockLevelExpression', 'StatementModifier' ], 1.0 ]
+    [ 'BaseStatement' => [ 'BlockLevelExpression', 'StatementModifier' ], 1.0 ]
     ,                                               # Expression with modifier
-    [ 'Statement' => [ 'ControlFlowStatement', 'StatementModifier' ], 1.0 ]
+    [ 'BaseStatement' => [ 'ControlFlowStatement', 'StatementModifier' ], 1.0 ]
     ,                                               # Control flow with modifier
 
     # Line-terminated statements (don't require semicolons)
     [ 'LineStatement' => ['Shebang'], 1.0 ],
     [ 'LineStatement' => ['Comment'], 1.0 ],
 
-    # Also allow comments directly as statements (higher accessibility)
-    [ 'Statement' => ['Comment'], 1.0 ],
+    # Also allow comments directly as base statements (higher accessibility)
+    [ 'BaseStatement' => ['Comment'], 1.0 ],
 
     # Class structure following guacamole PackageStatement pattern
     [
@@ -200,7 +208,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ReturnStatement' => ['return'],                 0.1 ],
 
     # Control flow statements - next, last, redo
-    [ 'Statement' => ['ControlFlowStatement'], 1.0 ],
+    [ 'BaseStatement' => ['ControlFlowStatement'], 1.0 ],
     [ 'ControlFlowStatement' => ['next'], 1.0 ],
     [ 'ControlFlowStatement' => ['last'], 1.0 ],
     [ 'ControlFlowStatement' => ['redo'], 1.0 ],
@@ -663,6 +671,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['FieldDecl'],              0.3 ],
     [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
     [ 'Value' => ['PrintExpr'],    0.3 ], # print statements without parentheses
+    [ 'Value' => ['WarnExpr'],     0.3 ], # warn statements without parentheses
     [ 'Value' => ['BuiltinFunctionCall'], 0.3 ], # Built-in function calls
 
     # Print expressions following guacamole OpKeywordPrintExpr pattern
@@ -678,7 +687,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # Die expressions following same pattern as PrintExpr
     [ 'DieExpr' => [ 'die', 'NonBraceExprComma' ], 1.0 ],    # die "string"
     [ 'DieExpr' => ['die'],                        1.0 ],    # bare die
-    
+
+    # Warn expressions following same pattern as DieExpr
+    [ 'WarnExpr' => [ 'warn', 'NonBraceExprComma' ], 1.0 ],  # warn "string"
+    [ 'WarnExpr' => ['warn'],                        1.0 ],  # bare warn
+
     # Built-in function calls (chdir, mkdir, etc.)
     [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'NonBraceExprComma' ], 1.0 ],
     [ 'BuiltinFunctionCall' => [ 'BuiltinFunction' ], 1.0 ],
