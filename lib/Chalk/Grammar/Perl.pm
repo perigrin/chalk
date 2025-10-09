@@ -117,6 +117,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ,                                               # Return with modifier
     [ 'Statement' => [ 'BlockLevelExpression', 'StatementModifier' ], 1.0 ]
     ,                                               # Expression with modifier
+    [ 'Statement' => [ 'ControlFlowStatement', 'StatementModifier' ], 1.0 ]
+    ,                                               # Control flow with modifier
 
     # Line-terminated statements (don't require semicolons)
     [ 'LineStatement' => ['Shebang'], 1.0 ],
@@ -196,12 +198,26 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ReturnStatement' => [ 'return', 'Expression' ], 1.0 ],
     [ 'ReturnStatement' => ['return'],                 0.1 ],
 
+    # Control flow statements - next, last, redo
+    [ 'Statement' => ['ControlFlowStatement'], 1.0 ],
+    [ 'ControlFlowStatement' => ['next'], 1.0 ],
+    [ 'ControlFlowStatement' => ['last'], 1.0 ],
+    [ 'ControlFlowStatement' => ['redo'], 1.0 ],
+    [ 'ControlFlowStatement' => [ 'next', 'Identifier' ], 1.0 ],  # next LABEL
+    [ 'ControlFlowStatement' => [ 'last', 'Identifier' ], 1.0 ],  # last LABEL
+    [ 'ControlFlowStatement' => [ 'redo', 'Identifier' ], 1.0 ],  # redo LABEL
+
     # Require statements - similar to UseStatement but simpler
     [ 'RequireStatement' => [ 'require', 'Expression' ], 1.0 ],
 
     # Statement modifiers - following Guacamole postfix patterns
     [ 'StatementModifier' => [ 'unless', 'Expression' ], 1.0 ],
     [ 'StatementModifier' => [ 'if',     'Expression' ], 1.0 ],
+    [ 'StatementModifier' => [ 'while',  'Expression' ], 1.0 ],
+    [ 'StatementModifier' => [ 'until',  'Expression' ], 1.0 ],
+    [ 'StatementModifier' => [ 'for',     'Expression' ], 1.0 ],
+    [ 'StatementModifier' => [ 'foreach', 'Expression' ], 1.0 ],
+    [ 'StatementModifier' => [ 'when',    'Expression' ], 1.0 ],
 
     # Guacamole UseStatement components
     [ 'OpKeywordUse' => ['use'] ],
@@ -638,6 +654,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['FieldDecl'],              0.3 ],
     [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
     [ 'Value' => ['PrintExpr'],    0.3 ], # print statements without parentheses
+    [ 'Value' => ['BuiltinFunctionCall'], 0.3 ], # Built-in function calls
 
     # Print expressions following guacamole OpKeywordPrintExpr pattern
     [ 'PrintExpr' => [ 'print', 'NonBraceExprComma' ], 1.0 ],   # print "string"
