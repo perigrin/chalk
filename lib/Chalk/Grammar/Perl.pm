@@ -695,7 +695,20 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # Built-in function calls (chdir, mkdir, etc.)
     [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'NonBraceExprComma' ], 1.0 ],
     [ 'BuiltinFunctionCall' => [ 'BuiltinFunction' ], 1.0 ],
-    [ 'BuiltinFunction' => [qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|open|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/] ],
+    [ 'BuiltinFunctionCall' => ['OpenExpr'], 1.0 ],  # Special handling for open
+    [ 'BuiltinFunction' => [qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/] ],
+
+    # Open expressions with inline variable declarations
+    # Two-argument open: open my $fh, "file" or open our $fh, "file"
+    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
+    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
+
+    # Three-argument open with inline declarations: open my $fh, "<", $file
+    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'NonBraceExprComma', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
+    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'NonBraceExprComma', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
+
+    # Standard open patterns (already working, kept for completeness)
+    [ 'OpenExpr' => [ 'open', 'NonBraceExprComma' ], 1.0 ],
 
 # NonBraceExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
     [
@@ -932,7 +945,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     [ 'OpAssignKeywordExpr' => [qr/goto|last/] ],
 
-    [ 'OpListKeywordExpr' => [qr/warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|open|read|write|sysread|syswrite|recv|send|select/] ],
+    [ 'OpListKeywordExpr' => [qr/warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/] ],
 
     # Whitespace rules (needed for auto_insert)
     [ 'WS_OPT' => [],         0.1 ],

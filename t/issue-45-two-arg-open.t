@@ -121,4 +121,49 @@ subtest 'rs.t exact patterns' => sub {
        'Should parse rs.t line 31: open TESTFILE, "<./foo"');
 };
 
+# Test two-arg open with inline variable declarations (our/my) - rs.t line 97
+subtest 'open with inline variable declarations' => sub {
+    # Basic our variable declaration
+    ok($parser->parse_string('open our $T, "./foo"'),
+       'Should parse: open our $T, "./foo"');
+
+    # Basic my variable declaration
+    ok($parser->parse_string('open my $T, "./foo"'),
+       'Should parse: open my $T, "./foo"');
+
+    # With read mode
+    ok($parser->parse_string('open our $fh, "<./file"'),
+       'Should parse: open our $fh, "<./file"');
+
+    ok($parser->parse_string('open my $fh, "<./file"'),
+       'Should parse: open my $fh, "<./file"');
+
+    # With write mode
+    ok($parser->parse_string('open our $fh, ">./file"'),
+       'Should parse: open our $fh, ">./file"');
+
+    ok($parser->parse_string('open my $fh, ">./file"'),
+       'Should parse: open my $fh, ">./file"');
+
+    # With append mode
+    ok($parser->parse_string('open our $fh, ">>./file"'),
+       'Should parse: open our $fh, ">>./file"');
+
+    ok($parser->parse_string('open my $fh, ">>./file"'),
+       'Should parse: open my $fh, ">>./file"');
+
+    # With variables in path
+    ok($parser->parse_string('open our $fh, ">$filename"'),
+       'Should parse: open our $fh, ">$filename"');
+
+    ok($parser->parse_string('open my $fh, "<$input"'),
+       'Should parse: open my $fh, "<$input"');
+};
+
+# Test the exact failing pattern from rs.t line 97
+subtest 'rs.t line 97 - open with our variable' => sub {
+    ok($parser->parse_string('open our $T, "./foo"'),
+       'Should parse rs.t line 97: open our $T, "./foo"');
+};
+
 done_testing();
