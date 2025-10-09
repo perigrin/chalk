@@ -122,13 +122,19 @@ class Chalk::EarleyChart {
 class Chalk::Parser {
     field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
     field $grammar :param;
-    field $preprocess :param = 0;  # Enable heredoc preprocessing
+    field $preprocess :param = ['Chalk::Preprocessor::Heredoc'];  # Arrayref of preprocessor class names
 
     method parse_string($input_string) {
-        # Apply preprocessing if enabled
-        if ($preprocess) {
-            require Chalk::Preprocessor;
-            my $preprocessor = Chalk::Preprocessor->new(input => $input_string);
+        # Apply preprocessors in sequence
+        for my $preprocessor_class (@$preprocess) {
+            next unless defined $preprocessor_class;
+
+            # Load the preprocessor module
+            (my $file = $preprocessor_class) =~ s{::}{/}g;
+            require "$file.pm";
+
+            # Apply preprocessing
+            my $preprocessor = $preprocessor_class->new(input => $input_string);
             $preprocessor->transform();
             $input_string = $preprocessor->output;
         }

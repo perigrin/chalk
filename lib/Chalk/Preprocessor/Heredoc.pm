@@ -1,10 +1,10 @@
 # ABOUTME: Preprocessor for Chalk::Parser to transform heredoc syntax to q{}/qq{}
 # ABOUTME: Enables heredoc support without complex grammar rules via source transformation
-package Chalk::Preprocessor;
+package Chalk::Preprocessor::Heredoc;
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 
-class Chalk::Preprocessor {
+class Chalk::Preprocessor::Heredoc {
     field $input :param :reader;
     field $output :reader = '';
     field @line_map :reader;  # Maps output lines to input lines
