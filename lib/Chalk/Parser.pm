@@ -122,7 +122,7 @@ class Chalk::EarleyChart {
 class Chalk::Parser {
     field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
     field $grammar :param;
-    field $preprocess :param = ['Chalk::Preprocessor::Heredoc'];  # Arrayref of preprocessor class names
+    field $preprocess :param = [];  # Arrayref of preprocessor class names
 
     method parse_string($input_string) {
         # Apply preprocessors in sequence
