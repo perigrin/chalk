@@ -840,6 +840,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'VariableBase' => [qr/\$#\w+/] ],       # Array length variables ($#array)
 
     # Global variables following guacamole GlobalVariables pattern
+    [ 'VariableBase' => [qr/\$\$/] ],         # $$ - process ID (special case)
     [ 'VariableBase' => [qr/\$[!"#%&'()*+,\-.\/:;<=>?\@\[\\\]^_`|~]/] ],
     [ 'VariableBase' => [qr/\$\^\w+/] ]  # Special caret variables like $^X
     ,                                         # Global special vars
