@@ -34,7 +34,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ,    # Line + more
 
 # BlockStatement - statements that contain blocks and don't need semicolons (following guacamole)
-    [ 'BlockStatement' => ['ClassDecl'],  1.0 ],
+    [ 'BlockStatement' => ['ClassDecl'],   1.0 ],
+    [ 'BlockStatement' => ['PackageDecl'], 1.0 ],
     [ 'BlockStatement' => ['MethodDecl'], 1.0 ]
     ,    # Full method definitions with blocks
     [ 'BlockStatement' => ['AdjustBlock'], 1.0 ]
@@ -137,10 +138,21 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # Class structure following guacamole PackageStatement pattern
     [
-        'ClassDecl' => [ 'class', 'Identifier', 'Inheritance', 'Block' ],
+        'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Inheritance', 'Block' ],
         1.0
     ],
-    [ 'ClassDecl' => [ 'class', 'Identifier', 'Block' ], 1.0 ],
+    [ 'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Block' ], 1.0 ],
+    [ 'ClassDecl' => [ 'class', 'Identifier', 'Inheritance', 'Block' ], 0.9 ],
+    [ 'ClassDecl' => [ 'class', 'Identifier', 'Block' ], 0.9 ],
+
+    # Package declarations (traditional Perl OO)
+    # With block - no semicolon needed (BlockStatement)
+    [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier', 'Block' ], 1.0 ],
+    [ 'PackageDecl' => [ 'package', 'Identifier', 'Block' ], 0.9 ],
+
+    # Without block - these need semicolons, so they're BaseStatements not BlockStatements
+    [ 'BaseStatement' => [ 'package', 'QualifiedIdentifier' ], 1.0 ],
+    [ 'BaseStatement' => [ 'package', 'Identifier' ], 0.9 ],
 
 # Method declarations are identical to subroutine declarations (following guacamole)
     [ 'MethodDecl' => [ 'method', 'Identifier', 'SubDefinition' ], 1.0 ],
@@ -447,7 +459,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'NonBraceExprValue0' => ['NonBraceValue'],       0.8 ],
     [ 'NonBraceExprValue0' => ['OpUnaryKeywordExpr'],  0.5 ],
     [ 'NonBraceValue'      => ['Variable'],            0.4 ],
-    [ 'NonBraceValue'      => ['Identifier'],          0.4 ],
+    [ 'NonBraceValue'      => ['QualifiedIdentifier'], 0.4 ],  # Foo::Bar for method calls
+    [ 'NonBraceValue'      => ['Identifier'],          0.3 ],  # Plain identifiers (lower priority)
     [ 'NonBraceValue'      => ['Number'],              0.3 ],
     [ 'NonBraceValue'      => ['UnaryExpression'],     0.3 ],
     [ 'NonBraceValue'      => ['QuotedString'],        0.3 ],
@@ -654,8 +667,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'PostfixDeref' => [qr/[@%\$]\*/] ],
 
     # Value rules - basic terminals needed for chalk
-    [ 'Value' => ['Variable'],   0.4 ], # Now includes $hash{key}, @array[index]
-    [ 'Value' => ['Identifier'], 0.4 ],
+    [ 'Value' => ['Variable'],           0.4 ], # Now includes $hash{key}, @array[index]
+    [ 'Value' => ['QualifiedIdentifier'], 0.4 ],  # Foo::Bar for method calls
+    [ 'Value' => ['Identifier'],          0.3 ],  # Plain identifiers (lower priority)
     [ 'Value' => ['Number'],     0.3 ],
     [ 'Value' => ['QuotedString'],           0.3 ],
     [ 'Value' => [ '(', 'Expression', ')' ], 0.3 ],
@@ -910,7 +924,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'PackageSeparator' => ['::'] ],
     
     # Qualified identifiers for package method calls like utf8::native_to_unicode
-    [ 'QualifiedIdentifier' => [ 'Identifier', 'PackageSeparator', 'Identifier' ], 1.0 ],
+    # Made recursive to support multi-level package names like Chalk::Semiring::Boolean
+    [ 'QualifiedIdentifier' => [ 'Identifier', 'PackageSeparator', 'QualifiedIdentifier' ], 1.0 ],
+    [ 'QualifiedIdentifier' => [ 'Identifier', 'PackageSeparator', 'Identifier' ], 0.9 ],
 
     # ParameterList for method calls - simplified using ExpressionList
     [ 'ParameterList' => ['ExpressionList'],       1.0 ],
