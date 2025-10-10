@@ -7,19 +7,25 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
+use Chalk::Semiring::Boolean;
+use Chalk::Semiring::Viterbi;
 
 subtest 'Basic arithmetic grammar' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + T)] ],
-        [ 'E' => ['T'] ],
-        [ 'T' => [qw(T * F)] ],
-        [ 'T' => ['F'] ],
-        [ 'F' => [qw/( E )/] ],
-        [ 'F' => ['num'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + T)] ],
+            [ 'E' => ['T'] ],
+            [ 'T' => [qw(T * F)] ],
+            [ 'T' => ['F'] ],
+            [ 'F' => [qw/( E )/] ],
+            [ 'F' => ['num'] ],
+        ]
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('num+num*num');
     ok $result, 'Parse num + num * num';
@@ -32,35 +38,39 @@ subtest 'Basic arithmetic grammar' => sub {
 };
 
 subtest 'Ambiguous grammar' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['num'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['num'] ],
+        ]
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('num+num*num');
     ok $result, 'Parse ambiguous num + num * num';
 
     # With ViterbiSemiring, should pick best path
-    my $viterbi_parser = Parser->new(
+    my $viterbi_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => ViterbiSemiring->new()
+        semiring => Chalk::Semiring::Viterbi->new()
     );
 
     $result = $viterbi_parser->parse_string('num+num*num');
     ok $result, 'Viterbi parse ambiguous expression';
-    isa_ok $result, 'ViterbiElement';
+    isa_ok $result, 'Chalk::Semiring::ViterbiElement';
 };
 
 subtest 'Left-recursive grammar' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'S' => [qw(S a)] ],
-        [ 'S' => ['a'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'S' => [qw(S a)] ],
+            [ 'S' => ['a'] ],
+        ]
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('a');
     ok $result, 'Parse single a';
@@ -70,12 +80,14 @@ subtest 'Left-recursive grammar' => sub {
 };
 
 subtest 'Right-recursive grammar' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'S' => [qw(a S)] ],
-        [ 'S' => ['a'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'S' => [qw(a S)] ],
+            [ 'S' => ['a'] ],
+        ]
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('a');
     ok $result, 'Parse single a';
@@ -85,15 +97,17 @@ subtest 'Right-recursive grammar' => sub {
 };
 
 subtest 'Empty productions' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'S' => [qw(A B)] ],
-        [ 'A' => ['a'] ],
-        [ 'A' => [] ],  # epsilon
-        [ 'B' => ['b'] ],
-        [ 'B' => [] ],  # epsilon
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'S' => [qw(A B)] ],
+            [ 'A' => ['a'] ],
+            [ 'A' => [] ],  # epsilon
+            [ 'B' => ['b'] ],
+            [ 'B' => [] ],  # epsilon
+        ]
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('ab');
     ok $result, 'Parse a b';
@@ -109,28 +123,30 @@ subtest 'Empty productions' => sub {
 };
 
 subtest 'Boolean vs Viterbi semiring' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'S' => ['A'] ],
-        [ 'A' => ['a'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'S' => ['A'] ],
+            [ 'A' => ['a'] ],
+        ]
     );
     
-    my $bool_parser = Parser->new(
+    my $bool_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => BooleanSemiring->new()
+        semiring => Chalk::Semiring::Boolean->new()
     );
-    
-    my $viterbi_parser = Parser->new(
+
+    my $viterbi_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => ViterbiSemiring->new()
+        semiring => Chalk::Semiring::Viterbi->new()
     );
-    
+
     my $bool_result = $bool_parser->parse_string('a');
     ok $bool_result, 'Boolean parse succeeds';
-    isa_ok $bool_result, 'BooleanElement';
+    isa_ok $bool_result, 'Chalk::Semiring::BooleanElement';
 
     my $viterbi_result = $viterbi_parser->parse_string('a');
     ok $viterbi_result, 'Viterbi parse succeeds';
-    isa_ok $viterbi_result, 'ViterbiElement';
+    isa_ok $viterbi_result, 'Chalk::Semiring::ViterbiElement';
     
     # Viterbi should have path information
     ok $viterbi_result->path, 'Viterbi has path';
@@ -138,18 +154,20 @@ subtest 'Boolean vs Viterbi semiring' => sub {
 };
 
 subtest 'Complex nested grammar' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'S' => [qw(NP VP)] ],
-        [ 'NP' => [qw(Det N)] ],
-        [ 'NP' => ['N'] ],
-        [ 'VP' => [qw(V NP)] ],
-        [ 'Det' => ['the'] ],
-        [ 'N' => ['cat'] ],
-        [ 'N' => ['dog'] ],
-        [ 'V' => ['chased'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'S' => [qw(NP VP)] ],
+            [ 'NP' => [qw(Det N)] ],
+            [ 'NP' => ['N'] ],
+            [ 'VP' => [qw(V NP)] ],
+            [ 'Det' => ['the'] ],
+            [ 'N' => ['cat'] ],
+            [ 'N' => ['dog'] ],
+            [ 'V' => ['chased'] ],
+        ]
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('thecatchasedthedog');
     ok $result, 'Parse the cat chased the dog';
@@ -159,11 +177,13 @@ subtest 'Complex nested grammar' => sub {
 };
 
 subtest 'Invalid input rejection' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'S' => ['a'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'S' => ['a'] ],
+        ]
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('b');
     ok !$result, 'Reject invalid terminal';

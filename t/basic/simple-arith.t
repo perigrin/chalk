@@ -4,19 +4,20 @@
 use 5.42.0;
 use Test2::V0;
 use FindBin      qw($RealBin);
+use lib "$RealBin/../../lib";
 use experimental qw(defer);
+use Chalk::Grammar;
+use Chalk::Parser;
 defer { done_testing() }
 
-require "$RealBin/../chalk";
-
 # Simple arithmetic
-my $grammar = Grammar->build_grammar(
+my $grammar = Chalk::Grammar->build_grammar(
     rules => [
         [ 'E' => ['num'] ],
     ]
 );
 
-my $parser = Parser->new(grammar => $grammar);
+my $parser = Chalk::Parser->new(grammar => $grammar);
 
 my $result = $parser->parse_string('num');
 say "Single num result: " . (defined $result ? ref($result) . " - $result" : "undef");
@@ -24,14 +25,14 @@ say "Single num result: " . (defined $result ? ref($result) . " - $result" : "un
 ok $result, "Parse single num";
 
 # Now try with addition
-$grammar = Grammar->build_grammar(
+$grammar = Chalk::Grammar->build_grammar(
     rules => [
         [ 'E' => [qw(E + E)] ],
         [ 'E' => ['num'] ],
     ]
 );
 
-$parser = Parser->new(grammar => $grammar);
+$parser = Chalk::Parser->new(grammar => $grammar);
 $result = $parser->parse_string('num+num');
 say "Addition result: " . (defined $result ? ref($result) . " - $result" : "undef");
 

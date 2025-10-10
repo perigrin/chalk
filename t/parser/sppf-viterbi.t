@@ -7,23 +7,29 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
+use Chalk::Semiring::SPPF;
+use Chalk::Semiring::Viterbi;
 
 subtest 'Basic SPPFViterbi functionality' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
     
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => SPPFViterbiSemiring->new()
+        semiring => Chalk::Semiring::SPPFViterbiSemiring->new()
     );
-    
+
     my $result = $parser->parse_string('n+n*n');
     ok $result, 'SPPFViterbi parse succeeds';
-    isa_ok $result, 'SPPFViterbiElement';
+    isa_ok $result, 'Chalk::Semiring::SPPFViterbiElement';
     
     # Should have both Viterbi properties
     ok defined($result->score), 'Has Viterbi score';
@@ -31,26 +37,28 @@ subtest 'Basic SPPFViterbi functionality' => sub {
     
     # And SPPF properties
     ok $result->sppf_node, 'Has SPPF node';
-    isa_ok $result->sppf_node, 'SPPFSymbolNode';
+    isa_ok $result->sppf_node, 'Chalk::Semiring::SPPFSymbolNode';
     
     print "SPPFViterbi result: $result\n";
 };
 
 subtest 'Compare with pure Viterbi' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
     
-    my $sppf_viterbi_parser = Parser->new(
+    my $sppf_viterbi_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => SPPFViterbiSemiring->new()
+        semiring => Chalk::Semiring::SPPFViterbiSemiring->new()
     );
-    
-    my $viterbi_parser = Parser->new(
+
+    my $viterbi_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => ViterbiSemiring->new()
+        semiring => Chalk::Semiring::Viterbi->new()
     );
     
     my $input = 'n+n*n';
@@ -72,14 +80,16 @@ subtest 'Compare with pure Viterbi' => sub {
 };
 
 subtest 'SPPF forest access' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
     
-    my $semiring = SPPFViterbiSemiring->new();
-    my $parser = Parser->new(
+    my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
         semiring => $semiring
     );
@@ -90,7 +100,7 @@ subtest 'SPPF forest access' => sub {
     # Access the forest
     my $forest = $semiring->forest();
     ok $forest, 'Can access SPPF forest';
-    isa_ok $forest, 'SPPFForest';
+    isa_ok $forest, 'Chalk::Semiring::SPPFForest';
     
     # Should have symbol nodes
     my $nodes_hash = $forest->nodes();
@@ -105,15 +115,17 @@ subtest 'SPPF forest access' => sub {
 
 subtest 'Simple non-ambiguous grammar' => sub {
     # Test with a simple grammar to ensure basic functionality
-    my $grammar = Grammar->build_grammar(
-        [ 'S' => [qw(A B)] ],
-        [ 'A' => ['a'] ],
-        [ 'B' => ['b'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'S' => [qw(A B)] ],
+            [ 'A' => ['a'] ],
+            [ 'B' => ['b'] ],
+        ]
     );
     
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => SPPFViterbiSemiring->new()
+        semiring => Chalk::Semiring::SPPFViterbiSemiring->new()
     );
     
     my $result = $parser->parse_string('ab');

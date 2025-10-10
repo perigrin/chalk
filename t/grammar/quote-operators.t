@@ -7,41 +7,49 @@ use FindBin qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 subtest 'Single q{} operator parsing' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+        ]
     );
 
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     my $result = $parser->parse_string('my$text=q{HelloWorld};');
     ok $result, 'Parse q{} operator';
 };
 
 subtest 'Single qq{} operator parsing' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        ]
     );
 
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     my $result = $parser->parse_string('my$text=qq{HelloWorld};');
     ok $result, 'Parse qq{} operator';
 };
 
 subtest 'Mixed quote operators' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
-        [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+            [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        ]
     );
 
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string('my$text=q{singlequoted};');
     ok $result, 'Parse q{} in mixed grammar';
@@ -51,14 +59,16 @@ subtest 'Mixed quote operators' => sub {
 };
 
 subtest 'Empty quote operators' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
-        [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+            [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        ]
     );
 
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string('my$text=q{};');
     ok $result, 'Parse empty q{}';
@@ -68,14 +78,16 @@ subtest 'Empty quote operators' => sub {
 };
 
 subtest 'Quote operators with newlines' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{(?:[^}]|\n)*\}/] ],
-        [ 'QuotedString' => [qr/qq\{(?:[^}]|\n)*\}/] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{(?:[^}]|\n)*\}/] ],
+            [ 'QuotedString' => [qr/qq\{(?:[^}]|\n)*\}/] ],
+        ]
     );
 
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("my\$text=q{line1\nline2};");
     ok $result, 'Parse q{} with newline';

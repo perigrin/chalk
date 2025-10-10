@@ -9,14 +9,18 @@ use Test2::V0;
 use FindBin qw($RealBin);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 subtest 'Basic lexeme support' => sub {
     # Test with exact string literals (should work like before)
-    my $grammar = Grammar->build_grammar(
-        [ 'Rule' => ['hello', 'world'] ]
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Rule' => ['hello', 'world'] ]
+        ]
     );
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('helloworld');
     ok $result, 'Parse string with exact literals';
@@ -24,10 +28,12 @@ subtest 'Basic lexeme support' => sub {
 
 subtest 'Regex pattern support' => sub {
     # Test with regex patterns for identifiers
-    my $grammar = Grammar->build_grammar(
-        [ 'Rule' => [qr/[a-zA-Z]+/, qr/\d+/] ]
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Rule' => [qr/[a-zA-Z]+/, qr/\d+/] ]
+        ]
     );
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('hello123');
     ok $result, 'Parse string with regex patterns';
@@ -38,10 +44,12 @@ subtest 'Regex pattern support' => sub {
 
 subtest 'Mixed literals and patterns' => sub {
     # Test mixing exact strings and patterns
-    my $grammar = Grammar->build_grammar(
-        [ 'Rule' => ['class', qr/[a-zA-Z_][a-zA-Z0-9_]*/, '{', '}'] ]
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'Rule' => ['class', qr/[a-zA-Z_][a-zA-Z0-9_]*/, '{', '}'] ]
+        ]
     );
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('classElement{}');
     ok $result, 'Parse with mixed literals and patterns';

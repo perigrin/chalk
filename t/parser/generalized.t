@@ -7,18 +7,22 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 # Test without artificial start rule - E can derive multiple ways
-my $grammar = Grammar->build_grammar(
-    [ 'E' => [qw(E + T)] ],   # First rule - was causing issues before
-    [ 'E' => ['T'] ],         # Second rule - should also work
-    [ 'T' => ['num'] ],
+my $grammar = Chalk::Grammar->build_grammar(
+    rules => [
+        [ 'E' => [qw(E + T)] ],   # First rule - was causing issues before
+        [ 'E' => ['T'] ],         # Second rule - should also work
+        [ 'T' => ['num'] ],
+    ]
 );
 
 say "Start symbol: " . $grammar->start_symbol;
 
-my $parser = Parser->new(grammar => $grammar);
+my $parser = Chalk::Parser->new(grammar => $grammar);
 
 # Test simple case that uses E -> T -> num
 my $result = $parser->parse_string('num');

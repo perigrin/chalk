@@ -7,65 +7,75 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
+use Chalk::Semiring::Boolean;
+use Chalk::Semiring::Viterbi;
 
 subtest 'Simple ambiguous grammar with ViterbiSemiring' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
     
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => ViterbiSemiring->new()
+        semiring => Chalk::Semiring::Viterbi->new()
     );
-    
+
     my $result = $parser->parse_string('n+n*n');
     ok $result, 'Viterbi parse ambiguous expression';
-    isa_ok $result, 'ViterbiElement';
+    isa_ok $result, 'Chalk::Semiring::ViterbiElement';
     
     print "Viterbi result: $result\n";
     print "Path: " . join(", ", map { $_->to_string } $result->path->@*) . "\n";
 };
 
 subtest 'Simple ambiguous grammar with BooleanSemiring' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
     
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => BooleanSemiring->new()
+        semiring => Chalk::Semiring::Boolean->new()
     );
-    
+
     my $result = $parser->parse_string('n+n*n');
     ok $result, 'Boolean parse ambiguous expression';
-    isa_ok $result, 'BooleanElement';
+    isa_ok $result, 'Chalk::Semiring::BooleanElement';
     
     print "Boolean result: $result\n";
 };
 
 subtest 'More complex ambiguous expression' => sub {
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => [qw(E - E)] ],
-        [ 'E' => [qw(E / E)] ],
-        [ 'E' => [qw(( E ))] ],
-        [ 'E' => ['n'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => [qw(E - E)] ],
+            [ 'E' => [qw(E / E)] ],
+            [ 'E' => [qw(( E ))] ],
+            [ 'E' => ['n'] ],
+        ]
     );
     
-    my $viterbi_parser = Parser->new(
+    my $viterbi_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => ViterbiSemiring->new()
+        semiring => Chalk::Semiring::Viterbi->new()
     );
-    
-    my $bool_parser = Parser->new(
+
+    my $bool_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => BooleanSemiring->new()
+        semiring => Chalk::Semiring::Boolean->new()
     );
     
     # Test complex expression
@@ -88,15 +98,17 @@ subtest 'More complex ambiguous expression' => sub {
 
 subtest 'Verify existing working grammars still work' => sub {
     # Test a known working grammar from our existing tests
-    my $grammar = Grammar->build_grammar(
-        [ 'E' => [qw(E + T)] ],
-        [ 'E' => ['T'] ],
-        [ 'T' => ['num'] ],
+    my $grammar = Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E' => [qw(E + T)] ],
+            [ 'E' => ['T'] ],
+            [ 'T' => ['num'] ],
+        ]
     );
     
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => ViterbiSemiring->new()
+        semiring => Chalk::Semiring::Viterbi->new()
     );
     
     my $result = $parser->parse_string('num+num+num');
