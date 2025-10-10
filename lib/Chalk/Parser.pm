@@ -30,6 +30,23 @@ class Chalk::EarleyItem {
     method key(@) { $key }
 }
 
+# Leo Items: Limited optimization for right-recursive grammar patterns
+#
+# This is a LIMITED implementation of Joop Leo's optimization (1991) for right-recursive
+# grammars.  It creates "Leo items" only in DETERMINISTIC cases where:
+# 1. Exactly one Earley item is waiting for the completed symbol
+# 2. The waiting item will be complete after this one reduction
+# 3. The rule is right-recursive (LHS appears as last RHS symbol)
+#
+# Why limited? Full Leo would create items even with multiple waiting items and maintain
+# a hash lookup by (position, symbol). Our grammar has 41 right-recursive rules, but
+# performance testing shows grammar complexity (960+ rules) is the main bottleneck,
+# not right-recursion specifically. This limited implementation provides O(n) behavior
+# for simple right-recursive chains (ArrowChain, StatementList) without the complexity
+# of full Leo.
+#
+# See t/optimization/test-leo-items.t for verification tests.
+# See issue #10 for detailed analysis and rationale.
 class Chalk::LeoItem {
     use overload '""' => 'key';
 
