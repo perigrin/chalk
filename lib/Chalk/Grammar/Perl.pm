@@ -68,6 +68,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # Unless statement rules following guacamole ConditionUnlessExpr pattern
     [ 'UnlessStatement' => [ 'unless', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'UnlessStatement' => [ 'unless', '(', 'Expression', ')', 'Block', 'else', 'Block' ], 1.0 ],  # unless-else
     [ 'UnlessStatement' => [ 'unless', 'Expression' ], 1.0 ],    # Postfix form
 
     # Block structure for conditional statements
