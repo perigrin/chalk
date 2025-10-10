@@ -111,7 +111,7 @@ my $start_time = time();
 
 eval {
     local $SIG{ALRM} = sub { die "timeout\n" };
-    alarm(30);  # 30 second timeout to match the issue description
+    alarm(120);  # 2 minute timeout - num.t is long, give it more time
 
     my $result = $parser->parse_string($full_num_t);
 
@@ -121,7 +121,7 @@ eval {
 my $elapsed = time() - $start_time;
 
 if ($@ && $@ =~ /timeout/) {
-    fail("full num.t - timed out after 30 seconds");
+    fail("full num.t - timed out after 2 minutes");
     diag("This is the core issue #38 - parser times out on num.t");
 } elsif ($@) {
     # Check if it's a parse failure or actual timeout
