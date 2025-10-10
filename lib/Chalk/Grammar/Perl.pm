@@ -106,6 +106,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # Base statements (before logical operators)
     [ 'BaseStatement' => ['UseStatement'],     1.0 ],
     [ 'BaseStatement' => ['RequireStatement'], 1.0 ],    # Require statements
+    [ 'BaseStatement' => ['EvalBlock'],        1.0 ],    # eval { ... } blocks
     [ 'BaseStatement' => ['FunctionCall'],     1.0 ],    # Function calls like print
     [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
     [ 'BaseStatement' => ['DieExpr'],          1.0 ],
@@ -665,6 +666,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['FunctionCall'], 0.3 ],
     [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc.
     [ 'Value' => ['ExpressionBlock'],        0.3 ],    # { expr } blocks
+    [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
     [ 'Value' => ['QLikeValue'],             0.8 ],
     [ 'Value' => ['DiamondExpr'],            0.3 ],    # <$fh> constructs
     [ 'Value' => ['@'],                      0.3 ],
@@ -810,6 +812,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 # Expression block for grep/map/sort - supports both single expressions and statement lists
     [ 'ExpressionBlock' => [ '{', 'Expression',    '}' ], 1.0 ],
     [ 'ExpressionBlock' => [ '{', 'StatementList', '}' ], 1.0 ],
+
+    # Eval block for exception handling (try-catch pattern)
+    [ 'EvalBlock' => [ 'eval', 'Block' ], 1.0 ],
 
     # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
     [
