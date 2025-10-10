@@ -4,10 +4,10 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all defer);
 use FindBin qw($RealBin);
-use lib "$RealBin/lib";
-use Chalk;
 
-our $chalk_grammar = Chalk::Grammar->build_grammar(
+require "$RealBin/chalk";
+
+our $chalk_grammar = Grammar->build_grammar(
     ['WS_OPT'],    # Auto-insert WS_OPT between all symbols
 
     # Program structure - adapted from original chalk grammar

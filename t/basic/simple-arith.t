@@ -11,7 +11,9 @@ require "$RealBin/../chalk";
 
 # Simple arithmetic
 my $grammar = Grammar->build_grammar(
-    [ 'E' => ['num'] ],
+    rules => [
+        [ 'E' => ['num'] ],
+    ]
 );
 
 my $parser = Parser->new(grammar => $grammar);
@@ -23,8 +25,10 @@ ok $result, "Parse single num";
 
 # Now try with addition
 $grammar = Grammar->build_grammar(
-    [ 'E' => [qw(E + E)] ],
-    [ 'E' => ['num'] ],
+    rules => [
+        [ 'E' => [qw(E + E)] ],
+        [ 'E' => ['num'] ],
+    ]
 );
 
 $parser = Parser->new(grammar => $grammar);

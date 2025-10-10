@@ -88,16 +88,19 @@ class Chalk::Grammar {
         return [ ( map { $_, @$items } @list[ 0 .. $#list - 1 ] ), $list[-1] ];
     }
 
-    sub build_grammar( $class, $auto_insert, @rules ) {
+    sub build_grammar( $class, %args ) {
+        my $auto_insert = $args{auto_insert} // [];
+        my $rules_array = $args{rules} // [];
+
         my %rules = ();
-        for my $r (@rules) {
+        for my $r (@$rules_array) {
             my ( $lhs, $rhs ) = @$r;
             if ( @$auto_insert && @$rhs > 1 ) {
                 $r->[1] = insert( $auto_insert, @$rhs );
             }
             push( @{ $rules{$lhs} //= [] }, new_rule(@$r) );
         }
-        return Chalk::Grammar->new( rules => \%rules, start_symbol => $rules[0]->[0] );
+        return Chalk::Grammar->new( rules => \%rules, start_symbol => $rules_array->[0]->[0] );
     }
 
     method start_rule() { return $rules->{$start_symbol}->[0] }

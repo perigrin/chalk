@@ -9,7 +9,8 @@ use Chalk::Grammar;
 our @EXPORT = qw($chalk_grammar);
 
 our $chalk_grammar = Chalk::Grammar->build_grammar(
-    ['WS_OPT'],    # Auto-insert WS_OPT between all symbols
+    auto_insert => ['WS_OPT'],
+    rules => [
 
     # Program structure - adapted from original chalk grammar
     [ 'Program' => ['StatementList'],              1.0 ],
@@ -957,6 +958,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'WS'     => [qr/\s+/m], 1.0 ],
     [ 'WS'     => [qr/#.*$/m], 1.0 ],    # Comments count as whitespace
     [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ], # Comment followed by whitespace
+    ]
 );
 
 1;

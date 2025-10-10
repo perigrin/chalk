@@ -7,7 +7,11 @@ defer { done_testing() }
 
 require "$RealBin/../chalk";
 
-my $grammar = Grammar->build_grammar( [ 'A' => [] ] );
+my $grammar = Grammar->build_grammar(
+    rules => [
+        [ 'A' => [] ]
+    ]
+);
 ok $grammar, $grammar;
 
 my $parser = Parser->new( grammar => $grammar );
