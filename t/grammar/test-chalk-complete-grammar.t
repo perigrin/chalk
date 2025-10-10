@@ -15,157 +15,159 @@ use Chalk::Parser;
 
 # Build a comprehensive grammar for chalk's modern Perl syntax
 my $chalk_grammar = Chalk::Grammar->build_grammar(
-    # Top-level program structure
-    [ 'Program' => ['TopLevelDecls'] ],
-    [ 'TopLevelDecls' => ['TopLevelDecl'] ],
-    [ 'TopLevelDecls' => [qw(TopLevelDecl TopLevelDecls)] ],
-    
-    # Top-level declarations
-    [ 'TopLevelDecl' => ['PragmaDecl'] ],
-    [ 'TopLevelDecl' => ['ClassDecl'] ],
-    
-    # Pragma declarations (use statements)
-    [ 'PragmaDecl' => [qw(use Version ;)] ],
-    [ 'PragmaDecl' => [qw(use experimental List ;)] ],
-    [ 'PragmaDecl' => [qw(use ModuleName ;)] ],
-    
-    # Class declarations
-    [ 'ClassDecl' => [qw(class Identifier InheritanceClause { ClassBody })] ],
-    [ 'ClassDecl' => [qw(class Identifier { ClassBody })] ],
-    [ 'InheritanceClause' => [qw(:isa( Identifier ))] ],
-    
-    # Class body
-    [ 'ClassBody' => ['ClassMember'] ],
-    [ 'ClassBody' => [qw(ClassMember ClassBody)] ],
-    [ 'ClassMember' => ['UseOverload'] ],
-    [ 'ClassMember' => ['FieldDecl'] ],
-    [ 'ClassMember' => ['MethodDecl'] ],
-    
-    # Use overload declarations
-    [ 'UseOverload' => [qw(use overload OverloadList ;)] ],
-    [ 'OverloadList' => ['OverloadSpec'] ],
-    [ 'OverloadList' => ['OverloadSpec', ',', 'OverloadList'] ],
-    [ 'OverloadSpec' => [qw(QuotedString => QuotedString)] ],
-    [ 'OverloadSpec' => [qw(Identifier => Number)] ],
-    
-    # Field declarations
-    [ 'FieldDecl' => [qw(field Variable AttributeList = Expression ;)] ],
-    [ 'FieldDecl' => [qw(field Variable AttributeList ;)] ],
-    [ 'FieldDecl' => [qw(field Variable = Expression ;)] ],
-    [ 'FieldDecl' => [qw(field Variable ;)] ],
-    [ 'AttributeList' => ['Attribute'] ],
-    [ 'AttributeList' => [qw(Attribute AttributeList)] ],
-    [ 'Attribute' => [':param'] ],
-    [ 'Attribute' => [':reader'] ],
-    
-    # Method declarations
-    [ 'MethodDecl' => [qw(method Identifier ( ParamList ) Block)] ],
-    [ 'MethodDecl' => [qw(method Identifier ( ) Block)] ],
-    [ 'MethodDecl' => [qw(method Identifier (@) Block)] ],
-    [ 'ParamList' => ['Param'] ],
-    [ 'ParamList' => ['Param', ',', 'ParamList'] ],
-    [ 'Param' => [qw(Variable = Default)] ],
-    [ 'Param' => ['Variable'] ],
-    [ 'Default' => ['undef'] ],
-    [ 'Default' => ['Number'] ],
-    
-    # Blocks and statements
-    [ 'Block' => [qw({ StatementList })] ],
-    [ 'Block' => [qw({ })] ],
-    [ 'StatementList' => ['Statement'] ],
-    [ 'StatementList' => [qw(Statement StatementList)] ],
-    [ 'Statement' => [qw(return Expression ;)] ],
-    [ 'Statement' => [qw(my Variable = Expression ;)] ],
-    [ 'Statement' => [qw(state Variable = Expression ;)] ],
-    [ 'Statement' => [qw(for my Variable ( Expression ) Block)] ],
-    [ 'Statement' => [qw(if ( Expression ) Block)] ],
-    [ 'Statement' => [qw(Expression ;)] ],
-    [ 'Statement' => [qw({ StatementList })] ],  # Nested block
-    [ 'Statement' => ['Ellipsis'] ],
-    
-    # Expressions
-    [ 'Expression' => ['MethodCall'] ],
-    [ 'Expression' => ['Constructor'] ],
-    [ 'Expression' => ['HashAccess'] ],
-    [ 'Expression' => ['StringConcat'] ],
-    [ 'Expression' => ['PostfixDeref'] ],
-    [ 'Expression' => ['BuiltinCall'] ],
-    [ 'Expression' => ['Variable'] ],
-    [ 'Expression' => ['Literal'] ],
-    [ 'Expression' => [qw(( Expression ))] ],
-    
-    # Method calls and constructors
-    [ 'MethodCall' => [qw(Expression -> Identifier ( ArgList ))] ],
-    [ 'MethodCall' => [qw(Expression -> Identifier ( ))] ],
-    [ 'Constructor' => [qw(Identifier -> new ( ArgList ))] ],
-    [ 'Constructor' => [qw(Identifier -> new ( ))] ],
-    
-    # Hash access and assignment
-    [ 'HashAccess' => [qw(Variable { Expression })] ],
-    [ 'HashAccess' => [qw(Variable { Expression } //= Expression)] ],
-    
-    # String concatenation
-    [ 'StringConcat' => [qw(Expression . Expression)] ],
-    
-    # Postfix dereference
-    [ 'PostfixDeref' => [qw(Expression -> ArrayDeref)] ],
-    [ 'PostfixDeref' => [qw(Expression -> HashDeref)] ],
-    [ 'ArrayDeref' => ['@*'] ],
-    [ 'HashDeref' => ['%*'] ],
-    
-    # Builtin function calls
-    [ 'BuiltinCall' => [qw(all { Block } Expression)] ],
-    [ 'BuiltinCall' => [qw(any { Block } Expression)] ],
-    
-    # Argument lists
-    [ 'ArgList' => ['Argument'] ],
-    [ 'ArgList' => ['Argument', ',', 'ArgList'] ],
-    [ 'Argument' => [qw(Identifier => Expression)] ],
-    [ 'Argument' => ['Expression'] ],
-    
-    # Variables
-    [ 'Variable' => ['ScalarVar'] ],
-    [ 'Variable' => ['ArrayVar'] ],
-    [ 'Variable' => ['HashVar'] ],
-    [ 'ScalarVar' => ['$var'] ],
-    [ 'ArrayVar' => ['@var'] ],
-    [ 'HashVar' => ['%var'] ],
-    
-    # Literals and identifiers
-    [ 'Literal' => ['Number'] ],
-    [ 'Literal' => ['QuotedString'] ],
-    [ 'Literal' => ['ArrayRef'] ],
-    [ 'Literal' => ['HashRef'] ],
-    [ 'ArrayRef' => [qw([ ])] ],
-    [ 'ArrayRef' => [qw([ ExprList ])] ],
-    [ 'HashRef' => [qw({ })] ],
-    [ 'HashRef' => [qw({ HashPairs })] ],
-    [ 'ExprList' => ['Expression'] ],
-    [ 'ExprList' => ['Expression', ',', 'ExprList'] ],
-    [ 'HashPairs' => ['HashPair'] ],
-    [ 'HashPairs' => ['HashPair', ',', 'HashPairs'] ],
-    [ 'HashPair' => [qw(Expression => Expression)] ],
-    
-    # Terminal symbols
-    [ 'Identifier' => ['Element'] ],
-    [ 'Identifier' => ['ViterbiElement'] ],
-    [ 'Identifier' => ['SPPFForest'] ],
-    [ 'Identifier' => ['new'] ],
-    [ 'Identifier' => ['method'] ],
-    [ 'ModuleName' => ['overload'] ],
-    [ 'ModuleName' => ['experimental'] ],
-    [ 'Number' => ['0'] ],
-    [ 'Number' => ['1'] ],
-    [ 'Number' => ['-1e10'] ],
-    [ 'QuotedString' => ["'+'"] ],
-    [ 'QuotedString' => ["'add'"] ],
-    [ 'QuotedString' => ["'ε'"] ],
-    [ 'QuotedString' => ['"string"'] ],
-    [ 'Version' => ['5.42.0'] ],
-    [ 'List' => [qw(( StringList ))] ],
-    [ 'StringList' => ['QuotedString'] ],
-    [ 'StringList' => [qw(QuotedString StringList)] ],
-    [ 'Ellipsis' => ['...'] ],
+    rules => [
+        # Top-level program structure
+        [ 'Program' => ['TopLevelDecls'] ],
+        [ 'TopLevelDecls' => ['TopLevelDecl'] ],
+        [ 'TopLevelDecls' => [qw(TopLevelDecl TopLevelDecls)] ],
+
+        # Top-level declarations
+        [ 'TopLevelDecl' => ['PragmaDecl'] ],
+        [ 'TopLevelDecl' => ['ClassDecl'] ],
+
+        # Pragma declarations (use statements)
+        [ 'PragmaDecl' => [qw(use Version ;)] ],
+        [ 'PragmaDecl' => [qw(use experimental List ;)] ],
+        [ 'PragmaDecl' => [qw(use ModuleName ;)] ],
+
+        # Class declarations
+        [ 'ClassDecl' => [qw(class Identifier InheritanceClause { ClassBody })] ],
+        [ 'ClassDecl' => [qw(class Identifier { ClassBody })] ],
+        [ 'InheritanceClause' => [qw(:isa( Identifier ))] ],
+
+        # Class body
+        [ 'ClassBody' => ['ClassMember'] ],
+        [ 'ClassBody' => [qw(ClassMember ClassBody)] ],
+        [ 'ClassMember' => ['UseOverload'] ],
+        [ 'ClassMember' => ['FieldDecl'] ],
+        [ 'ClassMember' => ['MethodDecl'] ],
+
+        # Use overload declarations
+        [ 'UseOverload' => [qw(use overload OverloadList ;)] ],
+        [ 'OverloadList' => ['OverloadSpec'] ],
+        [ 'OverloadList' => ['OverloadSpec', ',', 'OverloadList'] ],
+        [ 'OverloadSpec' => [qw(QuotedString => QuotedString)] ],
+        [ 'OverloadSpec' => [qw(Identifier => Number)] ],
+
+        # Field declarations
+        [ 'FieldDecl' => [qw(field Variable AttributeList = Expression ;)] ],
+        [ 'FieldDecl' => [qw(field Variable AttributeList ;)] ],
+        [ 'FieldDecl' => [qw(field Variable = Expression ;)] ],
+        [ 'FieldDecl' => [qw(field Variable ;)] ],
+        [ 'AttributeList' => ['Attribute'] ],
+        [ 'AttributeList' => [qw(Attribute AttributeList)] ],
+        [ 'Attribute' => [':param'] ],
+        [ 'Attribute' => [':reader'] ],
+
+        # Method declarations
+        [ 'MethodDecl' => [qw(method Identifier ( ParamList ) Block)] ],
+        [ 'MethodDecl' => [qw(method Identifier ( ) Block)] ],
+        [ 'MethodDecl' => [qw(method Identifier (@) Block)] ],
+        [ 'ParamList' => ['Param'] ],
+        [ 'ParamList' => ['Param', ',', 'ParamList'] ],
+        [ 'Param' => [qw(Variable = Default)] ],
+        [ 'Param' => ['Variable'] ],
+        [ 'Default' => ['undef'] ],
+        [ 'Default' => ['Number'] ],
+
+        # Blocks and statements
+        [ 'Block' => [qw({ StatementList })] ],
+        [ 'Block' => [qw({ })] ],
+        [ 'StatementList' => ['Statement'] ],
+        [ 'StatementList' => [qw(Statement StatementList)] ],
+        [ 'Statement' => [qw(return Expression ;)] ],
+        [ 'Statement' => [qw(my Variable = Expression ;)] ],
+        [ 'Statement' => [qw(state Variable = Expression ;)] ],
+        [ 'Statement' => [qw(for my Variable ( Expression ) Block)] ],
+        [ 'Statement' => [qw(if ( Expression ) Block)] ],
+        [ 'Statement' => [qw(Expression ;)] ],
+        [ 'Statement' => [qw({ StatementList })] ],  # Nested block
+        [ 'Statement' => ['Ellipsis'] ],
+
+        # Expressions
+        [ 'Expression' => ['MethodCall'] ],
+        [ 'Expression' => ['Constructor'] ],
+        [ 'Expression' => ['HashAccess'] ],
+        [ 'Expression' => ['StringConcat'] ],
+        [ 'Expression' => ['PostfixDeref'] ],
+        [ 'Expression' => ['BuiltinCall'] ],
+        [ 'Expression' => ['Variable'] ],
+        [ 'Expression' => ['Literal'] ],
+        [ 'Expression' => [qw(( Expression ))] ],
+
+        # Method calls and constructors
+        [ 'MethodCall' => [qw(Expression -> Identifier ( ArgList ))] ],
+        [ 'MethodCall' => [qw(Expression -> Identifier ( ))] ],
+        [ 'Constructor' => [qw(Identifier -> new ( ArgList ))] ],
+        [ 'Constructor' => [qw(Identifier -> new ( ))] ],
+
+        # Hash access and assignment
+        [ 'HashAccess' => [qw(Variable { Expression })] ],
+        [ 'HashAccess' => [qw(Variable { Expression } //= Expression)] ],
+
+        # String concatenation
+        [ 'StringConcat' => [qw(Expression . Expression)] ],
+
+        # Postfix dereference
+        [ 'PostfixDeref' => [qw(Expression -> ArrayDeref)] ],
+        [ 'PostfixDeref' => [qw(Expression -> HashDeref)] ],
+        [ 'ArrayDeref' => ['@*'] ],
+        [ 'HashDeref' => ['%*'] ],
+
+        # Builtin function calls
+        [ 'BuiltinCall' => [qw(all { Block } Expression)] ],
+        [ 'BuiltinCall' => [qw(any { Block } Expression)] ],
+
+        # Argument lists
+        [ 'ArgList' => ['Argument'] ],
+        [ 'ArgList' => ['Argument', ',', 'ArgList'] ],
+        [ 'Argument' => [qw(Identifier => Expression)] ],
+        [ 'Argument' => ['Expression'] ],
+
+        # Variables
+        [ 'Variable' => ['ScalarVar'] ],
+        [ 'Variable' => ['ArrayVar'] ],
+        [ 'Variable' => ['HashVar'] ],
+        [ 'ScalarVar' => ['$var'] ],
+        [ 'ArrayVar' => ['@var'] ],
+        [ 'HashVar' => ['%var'] ],
+
+        # Literals and identifiers
+        [ 'Literal' => ['Number'] ],
+        [ 'Literal' => ['QuotedString'] ],
+        [ 'Literal' => ['ArrayRef'] ],
+        [ 'Literal' => ['HashRef'] ],
+        [ 'ArrayRef' => [qw([ ])] ],
+        [ 'ArrayRef' => [qw([ ExprList ])] ],
+        [ 'HashRef' => [qw({ })] ],
+        [ 'HashRef' => [qw({ HashPairs })] ],
+        [ 'ExprList' => ['Expression'] ],
+        [ 'ExprList' => ['Expression', ',', 'ExprList'] ],
+        [ 'HashPairs' => ['HashPair'] ],
+        [ 'HashPairs' => ['HashPair', ',', 'HashPairs'] ],
+        [ 'HashPair' => [qw(Expression => Expression)] ],
+
+        # Terminal symbols
+        [ 'Identifier' => ['Element'] ],
+        [ 'Identifier' => ['ViterbiElement'] ],
+        [ 'Identifier' => ['SPPFForest'] ],
+        [ 'Identifier' => ['new'] ],
+        [ 'Identifier' => ['method'] ],
+        [ 'ModuleName' => ['overload'] ],
+        [ 'ModuleName' => ['experimental'] ],
+        [ 'Number' => ['0'] ],
+        [ 'Number' => ['1'] ],
+        [ 'Number' => ['-1e10'] ],
+        [ 'QuotedString' => ["'+'"] ],
+        [ 'QuotedString' => ["'add'"] ],
+        [ 'QuotedString' => ["'ε'"] ],
+        [ 'QuotedString' => ['"string"'] ],
+        [ 'Version' => ['5.42.0'] ],
+        [ 'List' => [qw(( StringList ))] ],
+        [ 'StringList' => ['QuotedString'] ],
+        [ 'StringList' => [qw(QuotedString StringList)] ],
+        [ 'Ellipsis' => ['...'] ],
+    ]
 );
 
 subtest 'Basic class structure' => sub {

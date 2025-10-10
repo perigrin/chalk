@@ -15,11 +15,13 @@ use Chalk::Semiring::SPPF;
 subtest 'Statement sequence patterns' => sub {
     # Based on Guacamole: StatementSeq ::= Statement | Statement Semicolon | Statement Semicolon StatementSeq
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'StatementSeq' => ['Statement'] ],
-        [ 'StatementSeq' => [qw(Statement Semicolon)] ],
-        [ 'StatementSeq' => [qw(Statement Semicolon StatementSeq)] ],  # Right-recursive
-        [ 'Statement' => ['print'] ],
-        [ 'Semicolon' => [';'] ],
+        rules => [
+            [ 'StatementSeq' => ['Statement'] ],
+            [ 'StatementSeq' => [qw(Statement Semicolon)] ],
+            [ 'StatementSeq' => [qw(Statement Semicolon StatementSeq)] ],  # Right-recursive
+            [ 'Statement' => ['print'] ],
+            [ 'Semicolon' => [';'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -44,17 +46,19 @@ subtest 'Statement sequence patterns' => sub {
 subtest 'Complex for statement patterns' => sub {
     # Simplified version of Guacamole ForStatement with multiple alternatives
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon Statement RParen Block)] ],
-        [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon RParen Block)] ],
-        [ 'ForStatement' => [qw(for LParen Semicolon Statement Semicolon Statement RParen Block)] ],
-        [ 'ForStatement' => [qw(for LParen Semicolon Semicolon Statement RParen Block)] ],
-        [ 'ForStatement' => [qw(for LParen Expression RParen Block)] ],
-        [ 'Statement' => ['var'] ],
-        [ 'Expression' => ['expr'] ],
-        [ 'Block' => ['{}'] ],
-        [ 'LParen' => ['('] ],
-        [ 'RParen' => [')'] ],
-        [ 'Semicolon' => [';'] ],
+        rules => [
+            [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon Statement RParen Block)] ],
+            [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon RParen Block)] ],
+            [ 'ForStatement' => [qw(for LParen Semicolon Statement Semicolon Statement RParen Block)] ],
+            [ 'ForStatement' => [qw(for LParen Semicolon Semicolon Statement RParen Block)] ],
+            [ 'ForStatement' => [qw(for LParen Expression RParen Block)] ],
+            [ 'Statement' => ['var'] ],
+            [ 'Expression' => ['expr'] ],
+            [ 'Block' => ['{}'] ],
+            [ 'LParen' => ['('] ],
+            [ 'RParen' => [')'] ],
+            [ 'Semicolon' => [';'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -79,14 +83,16 @@ subtest 'Complex for statement patterns' => sub {
 subtest 'Deeply nested optional elements' => sub {
     # Pattern with many optional elements like Guacamole UseStatement
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'UseStatement' => [qw(use Class Version Expression)] ],
-        [ 'UseStatement' => [qw(use Class Version)] ],
-        [ 'UseStatement' => [qw(use Class Expression)] ],
-        [ 'UseStatement' => [qw(use Version)] ],
-        [ 'UseStatement' => [qw(use Class)] ],
-        [ 'Class' => ['Module'] ],
-        [ 'Version' => ['v1.0'] ],
-        [ 'Expression' => ['args'] ],
+        rules => [
+            [ 'UseStatement' => [qw(use Class Version Expression)] ],
+            [ 'UseStatement' => [qw(use Class Version)] ],
+            [ 'UseStatement' => [qw(use Class Expression)] ],
+            [ 'UseStatement' => [qw(use Version)] ],
+            [ 'UseStatement' => [qw(use Class)] ],
+            [ 'Class' => ['Module'] ],
+            [ 'Version' => ['v1.0'] ],
+            [ 'Expression' => ['args'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -111,16 +117,18 @@ subtest 'Deeply nested optional elements' => sub {
 subtest 'Highly ambiguous expression hierarchy' => sub {
     # Simplified version of Guacamole's expression precedence
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Expression' => [qw(Expression + Expression)] ],
-        [ 'Expression' => [qw(Expression * Expression)] ],
-        [ 'Expression' => [qw(Expression - Expression)] ],
-        [ 'Expression' => [qw(Expression / Expression)] ],
-        [ 'Expression' => [qw(Expression % Expression)] ],
-        [ 'Expression' => [qw(Expression ** Expression)] ],
-        [ 'Expression' => [qw(Expression && Expression)] ],
-        [ 'Expression' => [qw(Expression || Expression)] ],
-        [ 'Expression' => [qw(( Expression ))] ],
-        [ 'Expression' => ['term'] ],
+        rules => [
+            [ 'Expression' => [qw(Expression + Expression)] ],
+            [ 'Expression' => [qw(Expression * Expression)] ],
+            [ 'Expression' => [qw(Expression - Expression)] ],
+            [ 'Expression' => [qw(Expression / Expression)] ],
+            [ 'Expression' => [qw(Expression % Expression)] ],
+            [ 'Expression' => [qw(Expression ** Expression)] ],
+            [ 'Expression' => [qw(Expression && Expression)] ],
+            [ 'Expression' => [qw(Expression || Expression)] ],
+            [ 'Expression' => [qw(( Expression ))] ],
+            [ 'Expression' => ['term'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -153,18 +161,20 @@ subtest 'Highly ambiguous expression hierarchy' => sub {
 
     $result = $sppf_parser->parse_string('term+term*term');
     ok $result, 'SPPF parse ambiguous expression';
-    isa_ok $result, 'SPPFViterbiElement';
+    isa_ok $result, 'Chalk::Semiring::SPPFViterbiElement';
 };
 
 subtest 'Recursive block structures' => sub {
     # Pattern like Guacamole BlockStatement with nested blocks
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Block' => [qw({ StatementList })] ],
-        [ 'Block' => [qw({ })] ],  # Empty block
-        [ 'StatementList' => ['Statement'] ],
-        [ 'StatementList' => [qw(Statement StatementList)] ],
-        [ 'Statement' => ['simple'] ],
-        [ 'Statement' => ['Block'] ],  # Recursive: statements can contain blocks
+        rules => [
+            [ 'Block' => [qw({ StatementList })] ],
+            [ 'Block' => [qw({ })] ],  # Empty block
+            [ 'StatementList' => ['Statement'] ],
+            [ 'StatementList' => [qw(Statement StatementList)] ],
+            [ 'Statement' => ['simple'] ],
+            [ 'Statement' => ['Block'] ],  # Recursive: statements can contain blocks
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);

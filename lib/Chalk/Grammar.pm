@@ -88,47 +88,19 @@ class Chalk::Grammar {
         return [ ( map { $_, @$items } @list[ 0 .. $#list - 1 ] ), $list[-1] ];
     }
 
-    sub build_grammar( $class, @args ) {
-        my $auto_insert;
-        my @rules;
+    sub build_grammar( $class, %args ) {
+        my $auto_insert = $args{auto_insert} // [];
+        my $rules_array = $args{rules} // [];
 
-        # Support both calling conventions:
-        # 1. Named parameters: build_grammar(auto_insert => [...], rules => [...])
-        # 2. Positional: build_grammar($auto_insert, @rules) or build_grammar(@rules)
-
-        if (@args > 0 && !ref($args[0]) && ($args[0] eq 'auto_insert' || $args[0] eq 'rules')) {
-            # Named parameter format
-            my %params = @args;
-            $auto_insert = $params{auto_insert} // [];
-            @rules = @{ $params{rules} // [] };
-        } else {
-            # Positional format
-            my $first = shift(@args) // [];
-
-            # Auto-detection: If $first looks like a rule (2+ element arrayref where 2nd element is arrayref),
-            # then it's the first rule, not auto_insert.
-            # Rules are: [ 'LHS', [ 'RHS', 'items' ], optional_probability ]
-            # Auto-insert arrays are: [ 'SYMBOL' ] or [ 'SYMBOL1', 'SYMBOL2' ] (strings, not arrayrefs)
-            if ( ref($first) eq 'ARRAY' && @$first >= 2 && ref($first->[1]) eq 'ARRAY' ) {
-                # First arg is a rule, not auto_insert
-                $auto_insert = [];
-                @rules = ($first, @args);
-            } else {
-                # First arg is auto_insert
-                $auto_insert = $first;
-                @rules = @args;
-            }
-        }
-
-        my %rules_hash = ();
-        for my $r (@rules) {
+        my %rules = ();
+        for my $r (@$rules_array) {
             my ( $lhs, $rhs ) = @$r;
             if ( @$auto_insert && @$rhs > 1 ) {
                 $r->[1] = insert( $auto_insert, @$rhs );
             }
-            push( @{ $rules_hash{$lhs} //= [] }, new_rule(@$r) );
+            push( @{ $rules{$lhs} //= [] }, new_rule(@$r) );
         }
-        return Chalk::Grammar->new( rules => \%rules_hash, start_symbol => $rules[0]->[0] );
+        return Chalk::Grammar->new( rules => \%rules, start_symbol => $rules_array->[0]->[0] );
     }
 
     method start_rule() { return $rules->{$start_symbol}->[0] }

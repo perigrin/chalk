@@ -13,10 +13,12 @@ use Chalk::Parser;
 
 subtest 'Variable types' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'VarDecl' => [qw(field Variable ;)] ],
-        [ 'Variable' => ['$scalar'] ],
-        [ 'Variable' => ['@array'] ],
-        [ 'Variable' => ['%hash'] ],
+        rules => [
+            [ 'VarDecl' => [qw(field Variable ;)] ],
+            [ 'Variable' => ['$scalar'] ],
+            [ 'Variable' => ['@array'] ],
+            [ 'Variable' => ['%hash'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -33,11 +35,13 @@ subtest 'Variable types' => sub {
 
 subtest 'Postfix dereference syntax' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Expression' => [qw(Variable -> PostfixDeref)] ],
-        [ 'Expression' => ['Variable'] ],
-        [ 'PostfixDeref' => ['@*'] ],
-        [ 'PostfixDeref' => ['%*'] ],
-        [ 'Variable' => ['$var'] ],
+        rules => [
+            [ 'Expression' => [qw(Variable -> PostfixDeref)] ],
+            [ 'Expression' => ['Variable'] ],
+            [ 'PostfixDeref' => ['@*'] ],
+            [ 'PostfixDeref' => ['%*'] ],
+            [ 'Variable' => ['$var'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -54,12 +58,14 @@ subtest 'Postfix dereference syntax' => sub {
 
 subtest 'String concatenation' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Expression' => [qw(Expression . Expression)] ],
-        [ 'Expression' => ['String'] ],
-        [ 'Expression' => ['Variable'] ],
-        [ 'String' => ['"literal"'] ],
-        [ 'String' => ['|'] ],
-        [ 'Variable' => ['$var'] ],
+        rules => [
+            [ 'Expression' => [qw(Expression . Expression)] ],
+            [ 'Expression' => ['String'] ],
+            [ 'Expression' => ['Variable'] ],
+            [ 'String' => ['"literal"'] ],
+            [ 'String' => ['|'] ],
+            [ 'Variable' => ['$var'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -76,18 +82,20 @@ subtest 'String concatenation' => sub {
 
 subtest 'Method calls and constructors' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Expression' => [qw(Class -> new ( ArgList ))] ],
-        [ 'Expression' => [qw(Class -> new ( ))] ],
-        [ 'Expression' => [qw(Variable -> method ( ArgList ))] ],
-        [ 'Expression' => [qw(Variable -> method ( ))] ],
-        [ 'ArgList' => ['Arg'] ],
-        [ 'ArgList' => ['Arg', ',', 'ArgList'] ],
-        [ 'Arg' => [qw(Key => Value)] ],
-        [ 'Arg' => ['Value'] ],
-        [ 'Key' => ['key'] ],
-        [ 'Value' => ['value'] ],
-        [ 'Class' => ['Constructor'] ],
-        [ 'Variable' => ['$obj'] ],
+        rules => [
+            [ 'Expression' => [qw(Class -> new ( ArgList ))] ],
+            [ 'Expression' => [qw(Class -> new ( ))] ],
+            [ 'Expression' => [qw(Variable -> method ( ArgList ))] ],
+            [ 'Expression' => [qw(Variable -> method ( ))] ],
+            [ 'ArgList' => ['Arg'] ],
+            [ 'ArgList' => ['Arg', ',', 'ArgList'] ],
+            [ 'Arg' => [qw(Key => Value)] ],
+            [ 'Arg' => ['Value'] ],
+            [ 'Key' => ['key'] ],
+            [ 'Value' => ['value'] ],
+            [ 'Class' => ['Constructor'] ],
+            [ 'Variable' => ['$obj'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -107,12 +115,14 @@ subtest 'Method calls and constructors' => sub {
 
 subtest 'Hash subscript and assignment' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Expression' => [qw(Variable { Key } //= Value)] ],
-        [ 'Expression' => [qw(Variable { Key })] ],
-        [ 'Variable' => ['%hash'] ],
-        [ 'Variable' => ['$hash'] ],
-        [ 'Key' => ['$key'] ],
-        [ 'Value' => ['value'] ],
+        rules => [
+            [ 'Expression' => [qw(Variable { Key } //= Value)] ],
+            [ 'Expression' => [qw(Variable { Key })] ],
+            [ 'Variable' => ['%hash'] ],
+            [ 'Variable' => ['$hash'] ],
+            [ 'Key' => ['$key'] ],
+            [ 'Value' => ['value'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);

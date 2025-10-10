@@ -13,8 +13,10 @@ use Chalk::Parser;
 
 subtest 'Zero-length whitespace patterns' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Test' => ['WS_OPT', 'word', 'WS_OPT'] ],
-        [ 'WS_OPT' => [qr/\s*/] ],  # Zero-length whitespace pattern
+        rules => [
+            [ 'Test' => ['WS_OPT', 'word', 'WS_OPT'] ],
+            [ 'WS_OPT' => [qr/\s*/] ],  # Zero-length whitespace pattern
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -44,8 +46,10 @@ subtest 'Zero-length whitespace patterns' => sub {
 
 subtest 'Optional patterns' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Test' => ['prefix', 'OPT_SUFFIX'] ],
-        [ 'OPT_SUFFIX' => [qr/suffix?/] ],  # Optional 's' at end
+        rules => [
+            [ 'Test' => ['prefix', 'OPT_SUFFIX'] ],
+            [ 'OPT_SUFFIX' => [qr/suffix?/] ],  # Optional 's' at end
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -61,10 +65,12 @@ subtest 'Optional patterns' => sub {
 
 subtest 'Mixed zero-length and regular patterns' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Statement' => ['WS_OPT', 'word', 'WS', 'word', 'WS_OPT', 'SEMI_OPT'] ],
-        [ 'WS' => [qr/\s+/] ],           # Required whitespace
-        [ 'WS_OPT' => [qr/\s*/] ],       # Optional whitespace  
-        [ 'SEMI_OPT' => [qr/;?/] ],      # Optional semicolon
+        rules => [
+            [ 'Statement' => ['WS_OPT', 'word', 'WS', 'word', 'WS_OPT', 'SEMI_OPT'] ],
+            [ 'WS' => [qr/\s+/] ],           # Required whitespace
+            [ 'WS_OPT' => [qr/\s*/] ],       # Optional whitespace
+            [ 'SEMI_OPT' => [qr/;?/] ],      # Optional semicolon
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);

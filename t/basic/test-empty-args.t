@@ -13,10 +13,12 @@ use Chalk::Parser;
 
 subtest 'Empty argument lists' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Call' => [qw(name ( ))] ],
-        [ 'Call' => [qw(name ( ArgList ))] ],
-        [ 'ArgList' => ['arg'] ],
-        [ 'ArgList' => [qw(arg , ArgList)] ],
+        rules => [
+            [ 'Call' => [qw(name ( ))] ],
+            [ 'Call' => [qw(name ( ArgList ))] ],
+            [ 'ArgList' => ['arg'] ],
+            [ 'ArgList' => [qw(arg , ArgList)] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -30,11 +32,13 @@ subtest 'Empty argument lists' => sub {
 
 subtest 'Optional argument lists' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Call' => [qw(name ( OptArgList ))] ],
-        [ 'OptArgList' => ['ArgList'] ],
-        [ 'OptArgList' => [] ],  # Empty production
-        [ 'ArgList' => ['arg'] ],
-        [ 'ArgList' => [qw(arg , ArgList)] ],
+        rules => [
+            [ 'Call' => [qw(name ( OptArgList ))] ],
+            [ 'OptArgList' => ['ArgList'] ],
+            [ 'OptArgList' => [] ],  # Empty production
+            [ 'ArgList' => ['arg'] ],
+            [ 'ArgList' => [qw(arg , ArgList)] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -48,11 +52,13 @@ subtest 'Optional argument lists' => sub {
 
 subtest 'Method chain debugging' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Expression' => [qw(Object -> Method)] ],
-        [ 'Object' => ['Class'] ],
-        [ 'Method' => [qw(new ( ))] ],
-        [ 'Method' => [qw(new ( ArgList ))] ],
-        [ 'ArgList' => ['arg'] ],
+        rules => [
+            [ 'Expression' => [qw(Object -> Method)] ],
+            [ 'Object' => ['Class'] ],
+            [ 'Method' => [qw(new ( ))] ],
+            [ 'Method' => [qw(new ( ArgList ))] ],
+            [ 'ArgList' => ['arg'] ],
+        ]
     );
     
     my $parser = Chalk::Parser->new(grammar => $grammar);

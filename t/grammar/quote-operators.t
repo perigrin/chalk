@@ -13,9 +13,11 @@ use Chalk::Parser;
 
 subtest 'Single q{} operator parsing' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -25,9 +27,11 @@ subtest 'Single q{} operator parsing' => sub {
 
 subtest 'Single qq{} operator parsing' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -37,10 +41,12 @@ subtest 'Single qq{} operator parsing' => sub {
 
 subtest 'Mixed quote operators' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
-        [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+            [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -54,10 +60,12 @@ subtest 'Mixed quote operators' => sub {
 
 subtest 'Empty quote operators' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
-        [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{[^}]*\}/] ],
+            [ 'QuotedString' => [qr/qq\{[^}]*\}/] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -71,10 +79,12 @@ subtest 'Empty quote operators' => sub {
 
 subtest 'Quote operators with newlines' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
-        [ 'Variable' => ['$text'] ],
-        [ 'QuotedString' => [qr/q\{(?:[^}]|\n)*\}/] ],
-        [ 'QuotedString' => [qr/qq\{(?:[^}]|\n)*\}/] ],
+        rules => [
+            [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
+            [ 'Variable' => ['$text'] ],
+            [ 'QuotedString' => [qr/q\{(?:[^}]|\n)*\}/] ],
+            [ 'QuotedString' => [qr/qq\{(?:[^}]|\n)*\}/] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);

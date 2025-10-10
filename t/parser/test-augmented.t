@@ -13,13 +13,15 @@ use Chalk::Parser;
 
 # Grammar with augmented start rule
 my $grammar = Chalk::Grammar->build_grammar(
-    [ 'S' => ['E'] ],           # Augmented start rule
-    [ 'E' => [qw(E + T)] ],
-    [ 'E' => ['T'] ],
-    [ 'T' => [qw(T * F)] ],
-    [ 'T' => ['F'] ],
-    [ 'F' => [qw/( E )/] ],
-    [ 'F' => ['num'] ],
+    rules => [
+        [ 'S' => ['E'] ],           # Augmented start rule
+        [ 'E' => [qw(E + T)] ],
+        [ 'E' => ['T'] ],
+        [ 'T' => [qw(T * F)] ],
+        [ 'T' => ['F'] ],
+        [ 'F' => [qw/( E )/] ],
+        [ 'F' => ['num'] ],
+    ]
 );
 
 say "Start rule: " . $grammar->start_rule;

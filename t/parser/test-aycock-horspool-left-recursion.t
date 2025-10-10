@@ -13,8 +13,10 @@ use Chalk::Parser;
 
 subtest 'Direct left-recursion (baseline)' => sub {
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'S' => [qw(S a)] ],
-        [ 'S' => ['a'] ],
+        rules => [
+            [ 'S' => [qw(S a)] ],
+            [ 'S' => ['a'] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -33,10 +35,12 @@ subtest 'Indirect left-recursion (A -> B alpha, B -> A beta)' => sub {
     # A -> c
     # B -> d
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'A' => [qw(B a)] ],
-        [ 'B' => [qw(A b)] ],
-        [ 'A' => ['c'] ],
-        [ 'B' => ['d'] ],
+        rules => [
+            [ 'A' => [qw(B a)] ],
+            [ 'B' => [qw(A b)] ],
+            [ 'A' => ['c'] ],
+            [ 'B' => ['d'] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -67,10 +71,12 @@ subtest 'Indirect left-recursion (three-way cycle)' => sub {
     # C -> A z
     # A -> w
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'A' => [qw(B x)] ],
-        [ 'B' => [qw(C y)] ],
-        [ 'C' => [qw(A z)] ],
-        [ 'A' => ['w'] ],
+        rules => [
+            [ 'A' => [qw(B x)] ],
+            [ 'B' => [qw(C y)] ],
+            [ 'C' => [qw(A z)] ],
+            [ 'A' => ['w'] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -95,10 +101,12 @@ subtest 'Hidden left-recursion through nullable symbols' => sub {
     # B -> c
     # B -> (epsilon)
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'A' => [qw(B A a)] ],
-        [ 'A' => ['b'] ],
-        [ 'B' => ['c'] ],
-        [ 'B' => [] ],  # epsilon - makes B nullable
+        rules => [
+            [ 'A' => [qw(B A a)] ],
+            [ 'A' => ['b'] ],
+            [ 'B' => ['c'] ],
+            [ 'B' => [] ],  # epsilon - makes B nullable
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -133,12 +141,14 @@ subtest 'Hidden left-recursion with multiple nullable symbols' => sub {
     # Y -> d
     # Y -> (epsilon)
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'S' => [qw(X Y S a)] ],
-        [ 'S' => ['b'] ],
-        [ 'X' => ['c'] ],
-        [ 'X' => [] ],
-        [ 'Y' => ['d'] ],
-        [ 'Y' => [] ],
+        rules => [
+            [ 'S' => [qw(X Y S a)] ],
+            [ 'S' => ['b'] ],
+            [ 'X' => ['c'] ],
+            [ 'X' => [] ],
+            [ 'Y' => ['d'] ],
+            [ 'Y' => [] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -172,9 +182,11 @@ subtest 'Seed and grow phases for left-recursive parsing' => sub {
     # Classic left-recursive expression grammar
     # This tests that we properly seed with base cases and grow
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'E' => [qw(E + T)] ],  # Left-recursive
-        [ 'E' => ['T'] ],         # Base case (seed)
-        [ 'T' => ['num'] ],
+        rules => [
+            [ 'E' => [qw(E + T)] ],  # Left-recursive
+            [ 'E' => ['T'] ],         # Base case (seed)
+            [ 'T' => ['num'] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -199,9 +211,11 @@ subtest 'Seed and grow phases for left-recursive parsing' => sub {
 subtest 'Seed and grow with multiple left-recursive rules' => sub {
     # Grammar with multiple left-recursive alternatives
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'E' => [qw(E + E)] ],   # Left-recursive addition
-        [ 'E' => [qw(E * E)] ],   # Left-recursive multiplication
-        [ 'E' => ['num'] ],       # Base case (seed)
+        rules => [
+            [ 'E' => [qw(E + E)] ],   # Left-recursive addition
+            [ 'E' => [qw(E * E)] ],   # Left-recursive multiplication
+            [ 'E' => ['num'] ],       # Base case (seed)
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);
@@ -234,11 +248,13 @@ subtest 'Combined indirect and hidden left-recursion' => sub {
     # C -> (epsilon)
     # A -> z
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'A' => [qw(B A x)] ],
-        [ 'B' => ['C'] ],
-        [ 'C' => [qw(A y)] ],
-        [ 'C' => [] ],      # makes C (and thus B) nullable
-        [ 'A' => ['z'] ],
+        rules => [
+            [ 'A' => [qw(B A x)] ],
+            [ 'B' => ['C'] ],
+            [ 'C' => [qw(A y)] ],
+            [ 'C' => [] ],      # makes C (and thus B) nullable
+            [ 'A' => ['z'] ],
+        ]
     );
 
     my $parser = Chalk::Parser->new(grammar => $grammar);

@@ -15,12 +15,12 @@ use Chalk::Parser;
 
 subtest 'Zero token regression test' => sub {
     # This was the original failing case - '0' token would fail due to falsiness
-    my $grammar = Chalk::Grammar->build_grammar([ 'Rule' => ['0'] ]);
+    my $grammar = Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['0'] ] ]);
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('0');
     ok $result, "Parse '0' token succeeds";
-    isa_ok $result, ['ViterbiElement'], "Result is ViterbiElement";
+    isa_ok $result, ['Chalk::Semiring::SPPFViterbiElement'], "Result is SPPFViterbiElement";
     
     # Verify the actual parse result makes sense
     like $result->to_string, qr/Rule -> 0/, "Parse contains expected rule";
@@ -28,7 +28,7 @@ subtest 'Zero token regression test' => sub {
 
 subtest 'Other falsy values still work' => sub {
     # Make sure we didn't break other falsy values
-    my $grammar = Chalk::Grammar->build_grammar([ 'Rule' => [''] ]);
+    my $grammar = Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => [''] ] ]);
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('');
@@ -37,7 +37,7 @@ subtest 'Other falsy values still work' => sub {
 
 subtest 'Compare with truthy values' => sub {
     # Sanity check that truthy values still work
-    my $grammar = Chalk::Grammar->build_grammar([ 'Rule' => ['1'] ]);
+    my $grammar = Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['1'] ] ]);
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('1');

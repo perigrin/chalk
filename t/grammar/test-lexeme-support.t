@@ -16,7 +16,9 @@ use Chalk::Parser;
 subtest 'Basic lexeme support' => sub {
     # Test with exact string literals (should work like before)
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Rule' => ['hello', 'world'] ]
+        rules => [
+            [ 'Rule' => ['hello', 'world'] ]
+        ]
     );
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
@@ -27,7 +29,9 @@ subtest 'Basic lexeme support' => sub {
 subtest 'Regex pattern support' => sub {
     # Test with regex patterns for identifiers
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Rule' => [qr/[a-zA-Z]+/, qr/\d+/] ]
+        rules => [
+            [ 'Rule' => [qr/[a-zA-Z]+/, qr/\d+/] ]
+        ]
     );
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
@@ -41,7 +45,9 @@ subtest 'Regex pattern support' => sub {
 subtest 'Mixed literals and patterns' => sub {
     # Test mixing exact strings and patterns
     my $grammar = Chalk::Grammar->build_grammar(
-        [ 'Rule' => ['class', qr/[a-zA-Z_][a-zA-Z0-9_]*/, '{', '}'] ]
+        rules => [
+            [ 'Rule' => ['class', qr/[a-zA-Z_][a-zA-Z0-9_]*/, '{', '}'] ]
+        ]
     );
     my $parser = Chalk::Parser->new(grammar => $grammar);
     

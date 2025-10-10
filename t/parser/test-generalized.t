@@ -13,9 +13,11 @@ use Chalk::Parser;
 
 # Test without artificial start rule - E can derive multiple ways
 my $grammar = Chalk::Grammar->build_grammar(
-    [ 'E' => [qw(E + T)] ],   # First rule - was causing issues before
-    [ 'E' => ['T'] ],         # Second rule - should also work
-    [ 'T' => ['num'] ],
+    rules => [
+        [ 'E' => [qw(E + T)] ],   # First rule - was causing issues before
+        [ 'E' => ['T'] ],         # Second rule - should also work
+        [ 'T' => ['num'] ],
+    ]
 );
 
 say "Start symbol: " . $grammar->start_symbol;
