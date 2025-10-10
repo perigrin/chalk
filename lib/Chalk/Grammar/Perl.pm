@@ -98,12 +98,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ], 1.0 ],
 
     # Statements - chalk specific with expression support
-    # Low-precedence logical operators at statement level (or/and)
-    [ 'Statement' => [ 'Statement', 'or', 'Statement' ], 0.85 ],
-    [ 'Statement' => [ 'Statement', 'and', 'Statement' ], 0.85 ],
     [ 'Statement' => ['BaseStatement'], 1.0 ],
 
-    # Base statements (before logical operators)
+    # Base statements
     [ 'BaseStatement' => ['UseStatement'],     1.0 ],
     [ 'BaseStatement' => ['RequireStatement'], 1.0 ],    # Require statements
     [ 'BaseStatement' => ['EvalBlock'],        1.0 ],    # eval { ... } blocks
@@ -113,9 +110,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BaseStatement' => ['WarnExpr'],         1.0 ],
     [ 'BaseStatement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
     [ 'BaseStatement' => [ 'WarnExpr', 'StatementModifier' ], 1.0 ],
-    [ 'BaseStatement' => ['BuiltinFunctionCall'], 1.0 ],
+    [ 'BaseStatement' => ['BuiltinFunctionCall'], 0.1 ],  # Very low - prefer BlockLevelExpression
     [ 'BaseStatement' => [ 'BuiltinFunctionCall', 'StatementModifier' ], 1.0 ]
-    ,    # Print statements without parentheses
+    ,    # But keep high for statement modifiers
     [ 'BaseStatement' => ['BlockLevelExpression'], 1.0 ],   # Block-level expression
     [ 'BaseStatement' => ['EllipsisStatement'],    1.0 ],   # Ellipsis (...)
     [ 'BaseStatement' => ['FieldDecl'],            1.0 ],   # Field declarations
@@ -442,6 +439,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # NonBraceExprValue* rules
     [ 'NonBraceExprValueU' => ['NonBraceValue'],       1.0 ],
     [ 'NonBraceExprValueR' => ['NonBraceValue'],       0.8 ],
+    [ 'NonBraceExprValueR' => ['BuiltinFunctionCall'], 0.6 ],  # Built-in functions for or/and contexts
     [ 'NonBraceExprValueR' => ['OpListKeywordExpr'],   0.5 ],
     [ 'NonBraceExprValueR' => ['OpAssignKeywordExpr'], 0.5 ],
     [ 'NonBraceExprValueR' => ['OpUnaryKeywordExpr'],  0.5 ],
@@ -673,6 +671,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['FieldDecl'],              0.3 ],
     [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
     [ 'Value' => ['PrintExpr'],    0.3 ], # print statements without parentheses
+    [ 'Value' => ['DieExpr'],      0.3 ], # die statements without parentheses
     [ 'Value' => ['WarnExpr'],     0.3 ], # warn statements without parentheses
     [ 'Value' => ['BuiltinFunctionCall'], 0.3 ], # Built-in function calls
 
@@ -950,7 +949,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     [ 'OpAssignKeywordExpr' => [qr/goto|last/] ],
 
-    [ 'OpListKeywordExpr' => [qr/warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/] ],
+    [ 'OpListKeywordExpr' => [qr/die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/] ],
 
     # Whitespace rules (needed for auto_insert)
     [ 'WS_OPT' => [],         0.1 ],
