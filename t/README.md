@@ -30,9 +30,11 @@ Grammar definition and language-specific parsing tests:
 
 ### `optimization/`
 Performance optimization and advanced parsing technique tests:
+- `test-leo-items.t` - Leo optimization for right-recursive patterns (verifies limited Leo implementation works correctly)
+
+**Planned tests** (not yet implemented):
 - `test-left-recursion.t` - Left recursion handling
 - `test-left-recursion-performance.t` - Left recursion performance benchmarks
-- `test-leo-items.t` - Leo optimization item handling
 - `test-memoization.t` - Parse result memoization
 - `test-nullability.t` - Nullable rule detection
 - `test-nullability-optimization.t` - Nullable rule optimization
