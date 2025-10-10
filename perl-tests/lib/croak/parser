@@ -1,0 +1,6 @@
+__END__
+# NAME double free of op
+sub all (&@);
+all { $_->[0] } map { [ }
+EXPECT
+syntax error at - line 2, near "[ }"
