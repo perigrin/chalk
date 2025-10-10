@@ -384,10 +384,13 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # NonBrace unary expressions
     [ 'NonBraceExprUnaryR' => [ 'OpUnary', 'NonBraceExprUnaryR' ], 0.8 ],
+    [ 'NonBraceExprUnaryR' => [ 'FileTestOp', 'NonBraceExprUnaryR' ], 0.8 ],
     [ 'NonBraceExprUnaryR' => ['NonBraceExprPowerR'], 0.3 ],
     [ 'NonBraceExprUnary0' => [ 'OpUnary', 'NonBraceExprUnary0' ], 0.8 ],
+    [ 'NonBraceExprUnary0' => [ 'FileTestOp', 'NonBraceExprUnary0' ], 0.8 ],
     [ 'NonBraceExprUnary0' => ['NonBraceExprPower0'], 0.3 ],
     [ 'NonBraceExprUnaryU' => [ 'OpUnary', 'NonBraceExprUnaryU' ], 0.8 ],
+    [ 'NonBraceExprUnaryU' => [ 'FileTestOp', 'NonBraceExprUnaryU' ], 0.8 ],
     [ 'NonBraceExprUnaryU' => ['NonBraceExprPowerU'], 0.3 ],
 
     # NonBrace power expressions
@@ -440,8 +443,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'NonBraceValue'      => ['UnaryExpression'],     0.3 ],
     [ 'NonBraceValue'      => ['QuotedString'],        0.3 ],
 
-    # Unary expressions (for things like -1e10, !$flag, etc.)
+    # Unary expressions (for things like -1e10, !$flag, -d 't', etc.)
     [ 'UnaryExpression' => [ 'OpUnary', 'NonBraceValue' ], 1.0 ],
+    [ 'UnaryExpression' => [ 'FileTestOp', 'NonBraceValue' ], 1.0 ],
     [ 'NonBraceValue'   => [ '(', 'Expression', ')' ],     0.3 ],
     [ 'NonBraceValue'   => ['ArrayRef'],                   0.3 ],
     [ 'NonBraceValue'   => ['FunctionCall'],               0.3 ],
@@ -569,12 +573,16 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ExprRegexU' => ['ExprUnaryU'],                            0.3 ],
 
     [ 'ExprUnaryR' => [ 'OpUnary', 'ExprUnaryR' ], 0.8 ],
+    [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ], 0.8 ],
     [ 'ExprUnaryR' => ['ExprPowerR'],              0.3 ],
     [ 'ExprUnaryL' => [ 'OpUnary', 'ExprUnaryL' ], 0.8 ],
+    [ 'ExprUnaryL' => [ 'FileTestOp', 'ExprUnaryL' ], 0.8 ],
     [ 'ExprUnaryL' => ['ExprPowerL'],              0.3 ],
     [ 'ExprUnary0' => [ 'OpUnary', 'ExprUnary0' ], 0.8 ],
+    [ 'ExprUnary0' => [ 'FileTestOp', 'ExprUnary0' ], 0.8 ],
     [ 'ExprUnary0' => ['ExprPower0'],              0.3 ],
     [ 'ExprUnaryU' => [ 'OpUnary', 'ExprUnaryU' ], 0.8 ],
+    [ 'ExprUnaryU' => [ 'FileTestOp', 'ExprUnaryU' ], 0.8 ],
     [ 'ExprUnaryU' => ['ExprPowerU'],              0.3 ],
 
     [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ], 0.8 ],
@@ -735,6 +743,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'NonBraceExprMulL' => ['NonBraceExprRegexL'], 0.3 ],
     
     [ 'NonBraceExprRegexL'  => ['NonBraceExprUnaryL'],  0.3 ],
+    [ 'NonBraceExprUnaryL'  => [ 'OpUnary', 'NonBraceExprUnaryL' ], 0.8 ],
+    [ 'NonBraceExprUnaryL'  => [ 'FileTestOp', 'NonBraceExprUnaryL' ], 0.8 ],
     [ 'NonBraceExprUnaryL'  => ['NonBraceExprPowerL'],  0.3 ],
     [ 'NonBraceExprPowerL'  => ['NonBraceExprIncL'],    0.3 ],
     [ 'NonBraceExprIncL' => [ 'OpInc', 'NonBraceExprIncL' ], 0.8 ],      # Pre-increment
@@ -898,6 +908,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ,                                                           # key => value
 
     # File test operators - unary operators that test file properties
+    [ 'FileTestOp' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],
     [ 'OpUnaryKeywordExpr' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],  # File test operators
     
     # Keyword expressions - termination points for Expression chain
