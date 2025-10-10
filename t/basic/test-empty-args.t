@@ -7,17 +7,19 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 subtest 'Empty argument lists' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Call' => [qw(name ( ))] ],
         [ 'Call' => [qw(name ( ArgList ))] ],
         [ 'ArgList' => ['arg'] ],
         [ 'ArgList' => [qw(arg , ArgList)] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('name(arg)');
     ok $result, 'Parse call with args';
@@ -27,7 +29,7 @@ subtest 'Empty argument lists' => sub {
 };
 
 subtest 'Optional argument lists' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Call' => [qw(name ( OptArgList ))] ],
         [ 'OptArgList' => ['ArgList'] ],
         [ 'OptArgList' => [] ],  # Empty production
@@ -35,7 +37,7 @@ subtest 'Optional argument lists' => sub {
         [ 'ArgList' => [qw(arg , ArgList)] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('name(arg)');
     ok $result, 'Parse call with args using optional';
@@ -45,7 +47,7 @@ subtest 'Optional argument lists' => sub {
 };
 
 subtest 'Method chain debugging' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Expression' => [qw(Object -> Method)] ],
         [ 'Object' => ['Class'] ],
         [ 'Method' => [qw(new ( ))] ],
@@ -53,7 +55,7 @@ subtest 'Method chain debugging' => sub {
         [ 'ArgList' => ['arg'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('Class->new(arg)');
     ok $result, 'Parse method with args';

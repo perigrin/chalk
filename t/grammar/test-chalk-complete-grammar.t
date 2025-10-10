@@ -9,10 +9,12 @@ use Test2::V0;
 use FindBin      qw($RealBin);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 # Build a comprehensive grammar for chalk's modern Perl syntax
-my $chalk_grammar = Grammar->build_grammar(
+my $chalk_grammar = Chalk::Grammar->build_grammar(
     # Top-level program structure
     [ 'Program' => ['TopLevelDecls'] ],
     [ 'TopLevelDecls' => ['TopLevelDecl'] ],
@@ -167,7 +169,7 @@ my $chalk_grammar = Grammar->build_grammar(
 );
 
 subtest 'Basic class structure' => sub {
-    my $parser = Parser->new(grammar => $chalk_grammar);
+    my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     
     # Simple class
     my $result = $parser->parse_string(
@@ -183,7 +185,7 @@ subtest 'Basic class structure' => sub {
 };
 
 subtest 'Overload declarations' => sub {
-    my $parser = Parser->new(grammar => $chalk_grammar);
+    my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     
     my $result = $parser->parse_string(
         'classElement{useoverload\'+\'=>\'add\';}'
@@ -199,7 +201,7 @@ subtest 'Overload declarations' => sub {
 };
 
 subtest 'Method declarations' => sub {
-    my $parser = Parser->new(grammar => $chalk_grammar);
+    my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     
     # Method with empty parameter list
     my $result = $parser->parse_string(
@@ -221,7 +223,7 @@ subtest 'Method declarations' => sub {
 };
 
 subtest 'Complex expressions' => sub {
-    my $parser = Parser->new(grammar => $chalk_grammar);
+    my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     
     # Constructor call
     my $result = $parser->parse_string(
@@ -239,7 +241,7 @@ subtest 'Complex expressions' => sub {
 };
 
 subtest 'Field initialization' => sub {
-    my $parser = Parser->new(grammar => $chalk_grammar);
+    my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     
     # Field with array reference initialization
     my $result = $parser->parse_string(
@@ -257,7 +259,7 @@ subtest 'Field initialization' => sub {
 };
 
 subtest 'Complete chalk class pattern' => sub {
-    my $parser = Parser->new(grammar => $chalk_grammar);
+    my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     
     # Parse a complete class like ViterbiSemiring
     todo "complete ViterbiElement-style class needs lexeme support" => sub {

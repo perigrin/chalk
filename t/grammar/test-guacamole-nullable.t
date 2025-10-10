@@ -7,11 +7,14 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
+use Chalk::Semiring::Boolean;
 
 subtest 'Optional semicolon patterns' => sub {
     # Pattern where semicolons are optional in many contexts
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Program' => ['StatementList'] ],
         [ 'StatementList' => ['Statement'] ],
         [ 'StatementList' => [qw(Statement OptSemi StatementList)] ],
@@ -20,7 +23,7 @@ subtest 'Optional semicolon patterns' => sub {
         [ 'Statement' => ['cmd'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     # Statements without semicolons
     my $result = $parser->parse_string('cmdcmdcmd');
@@ -37,7 +40,7 @@ subtest 'Optional semicolon patterns' => sub {
 
 subtest 'Optional parameter lists' => sub {
     # Pattern like function calls with optional parameter lists
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'FuncCall' => [qw(name ( ParamList ))] ],
         [ 'FuncCall' => [qw(name ( ))] ],  # Empty params
         [ 'ParamList' => ['Param'] ],
@@ -45,7 +48,7 @@ subtest 'Optional parameter lists' => sub {
         [ 'Param' => ['arg'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     # Function with no parameters
     my $result = $parser->parse_string('name()');
@@ -62,7 +65,7 @@ subtest 'Optional parameter lists' => sub {
 
 subtest 'Nested optional structures' => sub {
     # Complex nesting like Guacamole conditional expressions
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'IfStmt' => [qw(if ( Expr ) Block ElseClause)] ],
         [ 'IfStmt' => [qw(if ( Expr ) Block)] ],  # No else
         [ 'ElseClause' => [qw(else Block)] ],
@@ -74,7 +77,7 @@ subtest 'Nested optional structures' => sub {
         [ 'Expr' => ['test'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     # Simple if without else
     my $result = $parser->parse_string('if(test){stmt}');
@@ -95,7 +98,7 @@ subtest 'Nested optional structures' => sub {
 
 subtest 'Highly nullable expression chains' => sub {
     # Pattern with many nullable elements that could cause combinatorial explosion
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Expr' => [qw(Prefix Term Suffix)] ],
         [ 'Prefix' => ['!'] ],
         [ 'Prefix' => ['-'] ],
@@ -109,7 +112,7 @@ subtest 'Highly nullable expression chains' => sub {
         [ 'Method' => ['method'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     # Minimal expression
     my $result = $parser->parse_string('var');
@@ -138,7 +141,7 @@ subtest 'Highly nullable expression chains' => sub {
 
 subtest 'Performance with nullable chains' => sub {
     # Test that our nullability optimization handles complex cases efficiently
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'S' => [qw(A B C D E)] ],
         [ 'A' => ['a'] ],
         [ 'A' => [] ],  # Nullable
@@ -151,7 +154,7 @@ subtest 'Performance with nullable chains' => sub {
         [ 'E' => ['e'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     # All elements present
     my $result = $parser->parse_string('abcde');
@@ -166,12 +169,12 @@ subtest 'Performance with nullable chains' => sub {
     ok $result, 'Parse with maximum nullable elements';
 
     # Test with Boolean semiring for performance
-    my $bool_parser = Parser->new(
+    my $bool_parser = Chalk::Parser->new(
         grammar => $grammar,
-        semiring => BooleanSemiring->new()
+        semiring => Chalk::Semiring::Boolean->new()
     );
 
     $result = $bool_parser->parse_string('e');
     ok $result, 'Boolean parse with maximum nullable elements';
-    isa_ok $result, 'BooleanElement';
+    isa_ok $result, 'Chalk::Semiring::BooleanElement';
 };

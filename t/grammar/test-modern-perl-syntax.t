@@ -7,17 +7,19 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 subtest 'Variable types' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'VarDecl' => [qw(field Variable ;)] ],
         [ 'Variable' => ['$scalar'] ],
         [ 'Variable' => ['@array'] ],
         [ 'Variable' => ['%hash'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('field$scalar;');
     ok $result, 'Parse scalar variable';
@@ -30,7 +32,7 @@ subtest 'Variable types' => sub {
 };
 
 subtest 'Postfix dereference syntax' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Expression' => [qw(Variable -> PostfixDeref)] ],
         [ 'Expression' => ['Variable'] ],
         [ 'PostfixDeref' => ['@*'] ],
@@ -38,7 +40,7 @@ subtest 'Postfix dereference syntax' => sub {
         [ 'Variable' => ['$var'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('$var');
     ok $result, 'Parse simple variable';
@@ -51,7 +53,7 @@ subtest 'Postfix dereference syntax' => sub {
 };
 
 subtest 'String concatenation' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Expression' => [qw(Expression . Expression)] ],
         [ 'Expression' => ['String'] ],
         [ 'Expression' => ['Variable'] ],
@@ -60,7 +62,7 @@ subtest 'String concatenation' => sub {
         [ 'Variable' => ['$var'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('"literal"');
     ok $result, 'Parse string literal';
@@ -73,7 +75,7 @@ subtest 'String concatenation' => sub {
 };
 
 subtest 'Method calls and constructors' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Expression' => [qw(Class -> new ( ArgList ))] ],
         [ 'Expression' => [qw(Class -> new ( ))] ],
         [ 'Expression' => [qw(Variable -> method ( ArgList ))] ],
@@ -88,7 +90,7 @@ subtest 'Method calls and constructors' => sub {
         [ 'Variable' => ['$obj'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('Constructor->new()');
     ok $result, 'Parse constructor with no args';
@@ -104,7 +106,7 @@ subtest 'Method calls and constructors' => sub {
 };
 
 subtest 'Hash subscript and assignment' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'Expression' => [qw(Variable { Key } //= Value)] ],
         [ 'Expression' => [qw(Variable { Key })] ],
         [ 'Variable' => ['%hash'] ],
@@ -113,7 +115,7 @@ subtest 'Hash subscript and assignment' => sub {
         [ 'Value' => ['value'] ],
     );
     
-    my $parser = Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('%hash{$key}');
     ok $result, 'Parse hash subscript';

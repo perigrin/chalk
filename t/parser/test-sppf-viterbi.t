@@ -7,16 +7,18 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 subtest 'Basic SPPFViterbi functionality' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'E' => [qw(E + E)] ],
         [ 'E' => [qw(E * E)] ],
         [ 'E' => ['n'] ],
     );
     
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
         semiring => SPPFViterbiSemiring->new()
     );
@@ -37,18 +39,18 @@ subtest 'Basic SPPFViterbi functionality' => sub {
 };
 
 subtest 'Compare with pure Viterbi' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'E' => [qw(E + E)] ],
         [ 'E' => [qw(E * E)] ],
         [ 'E' => ['n'] ],
     );
     
-    my $sppf_viterbi_parser = Parser->new(
+    my $sppf_viterbi_parser = Chalk::Parser->new(
         grammar => $grammar,
         semiring => SPPFViterbiSemiring->new()
     );
     
-    my $viterbi_parser = Parser->new(
+    my $viterbi_parser = Chalk::Parser->new(
         grammar => $grammar,
         semiring => ViterbiSemiring->new()
     );
@@ -72,14 +74,14 @@ subtest 'Compare with pure Viterbi' => sub {
 };
 
 subtest 'SPPF forest access' => sub {
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'E' => [qw(E + E)] ],
         [ 'E' => [qw(E * E)] ],
         [ 'E' => ['n'] ],
     );
     
     my $semiring = SPPFViterbiSemiring->new();
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
         semiring => $semiring
     );
@@ -105,13 +107,13 @@ subtest 'SPPF forest access' => sub {
 
 subtest 'Simple non-ambiguous grammar' => sub {
     # Test with a simple grammar to ensure basic functionality
-    my $grammar = Grammar->build_grammar(
+    my $grammar = Chalk::Grammar->build_grammar(
         [ 'S' => [qw(A B)] ],
         [ 'A' => ['a'] ],
         [ 'B' => ['b'] ],
     );
     
-    my $parser = Parser->new(
+    my $parser = Chalk::Parser->new(
         grammar => $grammar,
         semiring => SPPFViterbiSemiring->new()
     );

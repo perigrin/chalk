@@ -5,15 +5,17 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
-my $grammar = Grammar->build_grammar(
+my $grammar = Chalk::Grammar->build_grammar(
     rules => [
         [ 'A' => [] ]
     ]
 );
 ok $grammar, $grammar;
 
-my $parser = Parser->new( grammar => $grammar );
+my $parser = Chalk::Parser->new( grammar => $grammar );
 $parser->parse_string('A');
 

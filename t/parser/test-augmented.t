@@ -7,10 +7,12 @@ use FindBin      qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-require "$RealBin/../chalk";
+use lib "$RealBin/../../lib";
+use Chalk::Grammar;
+use Chalk::Parser;
 
 # Grammar with augmented start rule
-my $grammar = Grammar->build_grammar(
+my $grammar = Chalk::Grammar->build_grammar(
     [ 'S' => ['E'] ],           # Augmented start rule
     [ 'E' => [qw(E + T)] ],
     [ 'E' => ['T'] ],
@@ -22,7 +24,7 @@ my $grammar = Grammar->build_grammar(
 
 say "Start rule: " . $grammar->start_rule;
 
-my $parser = Parser->new(grammar => $grammar);
+my $parser = Chalk::Parser->new(grammar => $grammar);
 
 # Test the failing cases
 my @tests = (
