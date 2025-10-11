@@ -474,6 +474,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'UnaryExpression' => [ 'FileTestOp', 'NonBraceValue' ], 1.0 ],
     [ 'NonBraceValue'   => [ '(', 'Expression', ')' ],     0.3 ],
     [ 'NonBraceValue'   => ['ArrayRef'],                   0.3 ],
+    [ 'NonBraceValue'   => ['HashRef'],                    0.3 ],  # Allow hash refs in push/etc
     [ 'NonBraceValue'   => ['FunctionCall'],               0.3 ],
     [ 'NonBraceValue'   => ['QLikeValue'],                 0.8 ],
     [ 'NonBraceValue'   => ['@'],                          0.3 ],
