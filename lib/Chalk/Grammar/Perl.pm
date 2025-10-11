@@ -432,21 +432,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'NonBraceExprIncU' => [ 'NonBraceExprIncU', 'OpInc' ], 0.8 ],
     [ 'NonBraceExprIncU' => ['NonBraceExprArrowU'], 0.3 ],
 
-    # NonBrace arrow expressions
-    [
-        'NonBraceExprArrowR' => [ 'NonBraceExprArrowU', 'OpArrow', 'ArrowRHS' ],
-        0.8
-    ],
+    # NonBrace arrow expressions - use ArrowChain like regular ExprArrow* rules
+    [ 'NonBraceExprArrowR' => [ 'NonBraceExprValueR', 'ArrowChain' ], 0.8 ],
     [ 'NonBraceExprArrowR' => ['NonBraceExprValueR'], 0.3 ],
-    [
-        'NonBraceExprArrow0' => [ 'NonBraceExprArrowU', 'OpArrow', 'ArrowRHS' ],
-        0.8
-    ],
+    [ 'NonBraceExprArrow0' => [ 'NonBraceExprValue0', 'ArrowChain' ], 0.8 ],
     [ 'NonBraceExprArrow0' => ['NonBraceExprValue0'], 0.3 ],
-    [
-        'NonBraceExprArrowU' => [ 'NonBraceExprArrowU', 'OpArrow', 'ArrowRHS' ],
-        0.8
-    ],
+    [ 'NonBraceExprArrowU' => [ 'NonBraceExprValueU', 'ArrowChain' ], 0.8 ],
     [ 'NonBraceExprArrowU' => ['NonBraceExprValueU'], 0.3 ],
 
     # NonBraceExprValue* rules
@@ -640,8 +631,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ExprArrowU' => ['ExprValueU'],                 0.3 ],
 
     # ArrowChain - right-recursive chain of arrow operations
-    [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS', 'ArrowChain' ], 0.8 ],
-    [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS' ], 0.3 ],
+    [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS', 'ArrowChain' ], 1.0 ],
+    [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS' ], 0.8 ],  # Prefer continuing chain over terminating
 
     # Value rules - matching Guacamole ExprValue* rules exactly
     [ 'ExprValueU' => ['Value'],               1.0 ],
@@ -657,8 +648,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # ArrowRHS - method calls, array/hash indexing, postfix dereferencing
     [ 'ArrowRHS' => ['Identifier'],                              0.5 ],
-    [ 'ArrowRHS' => [ 'Identifier', '(', 'ParameterList', ')' ], 0.4 ],
-    [ 'ArrowRHS' => [ 'Identifier', '(', ')' ],                  0.4 ],
+    [ 'ArrowRHS' => [ 'Identifier', '(', 'ParameterList', ')' ], 1.0 ],  # Match FunctionCall priority
+    [ 'ArrowRHS' => [ 'Identifier', '(', ')' ],                  1.0 ],  # Match FunctionCall priority
     [ 'ArrowRHS' => [ '[', 'Expression', ']' ],                  0.3 ],
     [ 'ArrowRHS' => [ '{', 'Expression', '}' ],                  0.3 ],
     [ 'ArrowRHS' => ['PostfixDeref'], 0.3 ], # ->@*, ->%*, ->$* (postfix derefs)

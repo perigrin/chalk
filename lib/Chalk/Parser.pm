@@ -3,7 +3,7 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
-use Chalk::Semiring::SPPF;
+use Chalk::Semiring::Boolean;
 
 class Chalk::EarleyItem {
     use overload '""' => 'key';
@@ -137,7 +137,7 @@ class Chalk::EarleyChart {
 }
 
 class Chalk::Parser {
-    field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
+    field $semiring :param = Chalk::Semiring::Boolean->new();
     field $grammar :param;
     field $preprocess :param = [];  # Arrayref of preprocessor class names
 
