@@ -881,8 +881,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'VariableBase' => [qr/\$\^\w+/] ]  # Special caret variables like $^X
     ,                                         # Global special vars
 
-    # Scalar dereference patterns: @$var, %$var, *$var, &$var
+    # Scalar dereference patterns: @$var, %$var, *$var, &$var, $#$var
     [ 'VariableBase' => [qr/[@%&*]\$\w+/] ],    # All dereference types
+    [ 'VariableBase' => [qr/\$#\$\w+/] ],       # Array length of dereferenced scalar ($#$ref)
 
  # Complex dereference patterns from guacamole: @{ Expression }, %{ Expression }
     [ 'VariableBase' => [ '@{', 'Expression', '}' ], 1.0 ]
