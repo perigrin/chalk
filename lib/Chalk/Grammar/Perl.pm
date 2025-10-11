@@ -115,6 +115,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BaseStatement' => ['EvalBlock'],        1.0 ],    # eval { ... } blocks
     [ 'BaseStatement' => ['FunctionCall'],     1.0 ],    # Function calls like print
     [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
+    [ 'BaseStatement' => ['PatternMatchStatement'], 1.0 ],  # Bare regex as statement
     [ 'BaseStatement' => ['DieExpr'],          1.0 ],
     [ 'BaseStatement' => ['WarnExpr'],         1.0 ],
     [ 'BaseStatement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
@@ -702,9 +703,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # Print with filehandle: print FILEHANDLE "string"
     [ 'PrintExpr' => [ 'print', 'Identifier', 'NonBraceExprComma' ], 1.0 ],         # print FH "string"
     [ 'PrintExpr' => [ 'print', 'Identifier' ], 1.0 ],                              # print FH
-    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'NonBraceExprComma' ], 1.0 ],  # print STDOUT "string"  
+    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'NonBraceExprComma' ], 1.0 ],  # print STDOUT "string"
     [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ], 1.0 ],                       # print STDOUT
-    
+
+    # Pattern match statements - bare regex as statement (implicit $_ =~ /.../ binding)
+    [ 'PatternMatchStatement' => ['QLikeValue'], 1.0 ],
+
     # Die expressions following same pattern as PrintExpr
     [ 'DieExpr' => [ 'die', 'NonBraceExprComma' ], 1.0 ],    # die "string"
     [ 'DieExpr' => ['die'],                        1.0 ],    # bare die
