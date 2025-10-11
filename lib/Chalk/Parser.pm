@@ -147,7 +147,7 @@ class Chalk::Parser {
             next unless defined $preprocessor_class;
 
             # Load the preprocessor module
-            (my $file = $preprocessor_class) =~ s{::}{/}g;
+            (my $file = $preprocessor_class) =~ s|::|/|g;
             require "$file.pm";
 
             # Apply preprocessing

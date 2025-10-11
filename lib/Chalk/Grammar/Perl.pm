@@ -266,6 +266,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'QLikeValue' => [qr/m\|[^|]*\|[a-z]*/] ],   # m|...|flags
     [ 'QLikeValue' => [qr/`[^`]*`/] ],            # `backticks`
 
+    # Substitution operators s/// with various delimiters (no curly braces - too ambiguous)
+    [ 'QLikeValue' => [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}] ],  # s/.../.../ with escapes
+    [ 'QLikeValue' => [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}] ],  # s|...|...| with escapes
+    [ 'QLikeValue' => [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}] ],  # s!...!...! with escapes
+    [ 'QLikeValue' => [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}] ],  # s#...#...# with escapes
+
     [ 'FieldAttributeList' => ['FieldAttribute'] ],
     [ 'FieldAttributeList' => [ 'FieldAttribute', 'FieldAttributeList' ] ],
     [ 'FieldAttribute'     => [':param'] ],
