@@ -86,7 +86,15 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'LoopStatement' => ['ForStatement'],   1.0 ],
     [ 'LoopStatement' => ['WhileStatement'], 1.0 ],
 
-    # For statement - foreach style variations
+    # For statement - C-style and foreach style variations
+    # C-style for loops: for (init; condition; increment) { ... }
+    [ 'ForStatement' => [ 'for', '(', 'Expression', ';', 'Expression', ';', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'ForStatement' => [ 'for', '(', ';', 'Expression', ';', 'Expression', ')', 'Block' ], 1.0 ],  # No init
+    [ 'ForStatement' => [ 'for', '(', 'Expression', ';', ';', 'Expression', ')', 'Block' ], 1.0 ],  # No condition
+    [ 'ForStatement' => [ 'for', '(', 'Expression', ';', 'Expression', ';', ')', 'Block' ], 1.0 ],  # No increment
+    [ 'ForStatement' => [ 'for', '(', ';', ';', ')', 'Block' ], 1.0 ],  # Infinite loop: for (;;)
+
+    # Foreach style variations
     [
         'ForStatement' =>
           [ 'for', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ],
