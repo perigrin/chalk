@@ -48,7 +48,6 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BlockStatement' => ['BeginBlock'],         1.0 ],  # BEGIN blocks
     [ 'BlockStatement' => ['EndBlock'],           1.0 ],   # END blocks
     [ 'BlockStatement' => ['Block'],              1.0 ],   # Bare blocks
-    ,    # Comments can appear in block contexts
 
   # Conditional statements (if/unless/while/until) - following guacamole pattern
     [ 'ConditionStatement' => ['IfStatement'],     1.0 ],
@@ -263,7 +262,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ,                                              # qr/.../flags with escapes
     [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ],    # /.../flags with escapes
     [ 'QLikeValue' => [qr/m![^!]*![a-z]*/] ],     # m!...!flags
-    [ 'QLikeValue' => [qr/m#[^#]*#[a-z]*/] ],     # m#...#flags  
+    [ 'QLikeValue' => [qr/m#[^#]*#[a-z]*/] ],     # m#...#flags
     [ 'QLikeValue' => [qr/m\|[^|]*\|[a-z]*/] ],   # m|...|flags
     [ 'QLikeValue' => [qr/`[^`]*`/] ],            # `backticks`
 
@@ -855,7 +854,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # Operators - basic ones needed for chalk
     [ 'OpComma'   => [qr/,|=>/] ],
-    [ 'OpAssign'  => [qr/\/\/=|\|\|=|&&=|\.=|=/] ],  # Assignment operators
+    [ 'OpAssign'  => [qr/\+=|-=|\*=|\/=|%=|\/\/=|\|\|=|&&=|\.=|&=|\|=|\^=|<<=|>>=|=/] ],  # Assignment operators (compound before simple)
     [ 'OpArrow'   => ['->'] ],
     [ 'OpAdd'     => [qr/[+\-]/] ],
     [ 'OpMulti'   => [qr/[*\/]/] ],
