@@ -411,9 +411,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'NonBraceExprMulU' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexU' ], 0.8 ],
     [ 'NonBraceExprMulU' => ['NonBraceExprRegexU'], 0.3 ],
 
-    # NonBrace regex expressions
+    # NonBrace regex expressions - ADD OpRegex support for print statements
+    [ 'NonBraceExprRegexR' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnaryR' ], 0.8 ],
     [ 'NonBraceExprRegexR' => ['NonBraceExprUnaryR'], 0.3 ],
+    [ 'NonBraceExprRegex0' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnary0' ], 0.8 ],
     [ 'NonBraceExprRegex0' => ['NonBraceExprUnary0'], 0.3 ],
+    [ 'NonBraceExprRegexU' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnaryU' ], 0.8 ],
     [ 'NonBraceExprRegexU' => ['NonBraceExprUnaryU'], 0.3 ],
 
     # NonBrace unary expressions
@@ -794,7 +797,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'NonBraceExprMulL' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexL' ], 0.8 ],
     [ 'NonBraceExprMulL' => ['NonBraceExprRegexL'], 0.3 ],
     
-    [ 'NonBraceExprRegexL'  => ['NonBraceExprUnaryL'],  0.3 ],
+    [ 'NonBraceExprRegexL' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnaryL' ], 0.8 ],
+    [ 'NonBraceExprRegexL' => ['NonBraceExprUnaryL'], 0.3 ],
     [ 'NonBraceExprUnaryL'  => [ 'OpUnary', 'NonBraceExprUnaryL' ], 0.8 ],
     [ 'NonBraceExprUnaryL'  => [ 'FileTestOp', 'NonBraceExprUnaryL' ], 0.8 ],
     [ 'NonBraceExprUnaryL'  => ['NonBraceExprPowerL'],  0.3 ],
@@ -865,6 +869,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ],    # sort { ... } @list
 
     # Operators - basic ones needed for chalk
+    # OpRegex needs longer match (!~) before shorter (=~)
+    [ 'OpRegex'   => [qr/!~|=~/] ],  # Regex binding operators: !~ and =~
     [ 'OpComma'   => [qr/,|=>/] ],
     [ 'OpAssign'  => [qr/\+=|-=|\*=|\/=|%=|\/\/=|\|\|=|&&=|\.=|&=|\|=|\^=|<<=|>>=|=/] ],  # Assignment operators (compound before simple)
     [ 'OpArrow'   => ['->'] ],
@@ -880,8 +886,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'OpEqual'   => [qr/==|!=|<=>|eq|ne|cmp|isa/] ],
     [ 'OpInequal' => [qr/<=|>=|<|>|lt|gt|le|ge/] ],
     [ 'OpShift'   => [qr/<<|>>/] ],
-    [ 'OpRegex'   => [qr/=~|!~/] ],
-    [ 'OpUnary'   => [qr/[!~\\+\-]/] ],
+    [ 'OpUnary'   => [qr/[\\+\-]/] ],  # Removed ! and ~ to avoid conflict with !~
+    [ 'OpUnary'   => ['!'] ],  # Define ! separately
+    [ 'OpUnary'   => ['~'] ],  # Define ~ separately
     [ 'OpPower'   => ['**'] ],
     [ 'OpInc'     => [qr/\+\+|--/] ],
 
