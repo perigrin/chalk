@@ -67,9 +67,10 @@ class Chalk::Preprocessor::HeredocV2 {
                         }
 
                         my $quote_op = $hd->{is_single_quoted} ? 'q' : 'qq';
+                        my ($open, $close) = $self->choose_delimiters($content);
                         push @transformed_parts, {
                             marker => $hd->{marker},
-                            replacement => "${quote_op}{${content}}",
+                            replacement => "${quote_op}${open}${content}${close}",
                         };
                     } else {
                         $all_found = 0;
@@ -222,6 +223,35 @@ class Chalk::Preprocessor::HeredocV2 {
         }
 
         return @stripped;
+    }
+
+    method choose_delimiters($content) {
+        # Choose delimiters that don't conflict with the content
+        # Try delimiter pairs in order of preference
+        my @delimiter_pairs = (
+            ['{', '}'],   # Default, most common
+            ['(', ')'],   # First alternative
+            ['[', ']'],   # Second alternative
+            ['<', '>'],   # Third alternative
+            ['|', '|'],   # Symmetric delimiter
+            ['/', '/'],   # Another symmetric option
+            ['#', '#'],   # Less common
+            ['!', '!'],   # Even less common
+            ['@', '@'],   # Rare but valid
+            ['%', '%'],   # Very rare
+        );
+
+        for my $pair (@delimiter_pairs) {
+            my ($open, $close) = @$pair;
+            # Check if the closing delimiter appears unbalanced in content
+            # For now, simple check: if close delimiter not in content, use it
+            if (index($content, $close) == -1) {
+                return ($open, $close);
+            }
+        }
+
+        # Fallback to {} if nothing works (shouldn't happen in practice)
+        return ('{', '}');
     }
 
     method map_line($output_line) {
