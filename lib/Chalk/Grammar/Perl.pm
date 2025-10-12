@@ -117,7 +117,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BaseStatement' => ['UseStatement'],     1.0 ],
     [ 'BaseStatement' => ['RequireStatement'], 1.0 ],    # Require statements
     [ 'BaseStatement' => ['EvalBlock'],        1.0 ],    # eval { ... } blocks
-    [ 'BaseStatement' => ['FunctionCall'],     1.0 ],    # Function calls like print
+    [ 'BaseStatement' => ['FunctionCall'],     1.0 ],    # Function calls with parentheses
+    [ 'BaseStatement' => ['ListOperatorCall'], 1.0 ],    # Function calls without parentheses (list operator syntax)
     [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
     [ 'BaseStatement' => [ 'PrintExpr', 'StatementModifier' ], 1.0 ],  # print with if/unless/etc
     [ 'BaseStatement' => ['PatternMatchStatement'], 1.0 ],  # Bare regex as statement
@@ -838,8 +839,14 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'FunctionCall' => [ 'Identifier', '(', ')' ], 1.0 ],    # func()
     
     # Qualified function calls for package methods
-    [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', 'ParameterList', ')' ], 1.0 ], # pkg::func(args)  
+    [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', 'ParameterList', ')' ], 1.0 ], # pkg::func(args)
     [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', ')' ], 1.0 ],                 # pkg::func()
+
+    # List operator syntax for user-defined functions (statement context only)
+    # This allows function calls without parentheses like: func "arg", $var
+    # Only available in BaseStatement, not in Value/Expression to avoid ambiguity
+    [ 'ListOperatorCall' => [ 'Identifier', 'NonBraceExprComma' ], 1.0 ],               # func "arg", $var
+    [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'NonBraceExprComma' ], 1.0 ],     # Pkg::func "arg", $var
 
 # Expression block for grep/map/sort - supports both single expressions and statement lists
     [ 'ExpressionBlock' => [ '{', 'Expression',    '}' ], 1.0 ],
