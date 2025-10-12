@@ -928,15 +928,17 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
     [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
     # q{} and qq{} quote operators (for heredoc preprocessor support)
-    [ 'QuotedString' => [qr/q\{(?:[^}]|\n)*\}/] ],   # q{} single-quote equivalent
-    [ 'QuotedString' => [qr/qq\{(?:[^}]|\n)*\}/] ],  # qq{} double-quote equivalent
+    # \s* allows whitespace (including newlines) between operator and delimiter
+    [ 'QuotedString' => [qr/q\s*\{(?:[^}]|\n)*\}/] ],   # q{} single-quote equivalent
+    [ 'QuotedString' => [qr/qq\s*\{(?:[^}]|\n)*\}/] ],  # qq{} double-quote equivalent
     # Alternative quote delimiters - q(...), qq(...), q[...], qq[...], q<...>, qq<...>
-    [ 'QuotedString' => [qr/q\((?:[^)]|\n)*\)/] ],   # q() single-quote
-    [ 'QuotedString' => [qr/qq\((?:[^)]|\n)*\)/] ],  # qq() double-quote
-    [ 'QuotedString' => [qr/q\[(?:[^\]]|\n)*\]/] ],  # q[] single-quote
-    [ 'QuotedString' => [qr/qq\[(?:[^\]]|\n)*\]/] ], # qq[] double-quote
-    [ 'QuotedString' => [qr/q<(?:[^>]|\n)*>/] ],     # q<> single-quote
-    [ 'QuotedString' => [qr/qq<(?:[^>]|\n)*>/] ],    # qq<> double-quote
+    # \s* allows whitespace (including newlines) between operator and delimiter
+    [ 'QuotedString' => [qr/q\s*\((?:[^)]|\n)*\)/] ],   # q() single-quote
+    [ 'QuotedString' => [qr/qq\s*\((?:[^)]|\n)*\)/] ],  # qq() double-quote
+    [ 'QuotedString' => [qr/q\s*\[(?:[^\]]|\n)*\]/] ],  # q[] single-quote
+    [ 'QuotedString' => [qr/qq\s*\[(?:[^\]]|\n)*\]/] ], # qq[] double-quote
+    [ 'QuotedString' => [qr/q\s*<(?:[^>]|\n)*>/] ],     # q<> single-quote
+    [ 'QuotedString' => [qr/qq\s*<(?:[^>]|\n)*>/] ],    # qq<> double-quote
 
     # Punctuation
     [ 'PackageSeparator' => ['::'] ],
