@@ -52,6 +52,13 @@ class Chalk::Preprocessor::Heredoc {
                     $is_indented = 1;
                     $matched = 1;
                 }
+                # Check for indented backslash-quoted heredoc: <<~\DELIMITER
+                elsif ($working_line =~ /^(.*?)(<<~\\(\w+))(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 1;  # backslash is like single-quote (no interpolation)
+                    $is_indented = 1;
+                    $matched = 1;
+                }
                 # Check for indented bare heredoc: <<~DELIMITER
                 elsif ($working_line =~ /^(.*?)(<<~(\w+))(.*)$/) {
                     ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
@@ -69,6 +76,12 @@ class Chalk::Preprocessor::Heredoc {
                 elsif ($working_line =~ /^(.*?)(<<"([^"]+)")(.*)$/) {
                     ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
                     $is_single_quoted = 0;
+                    $matched = 1;
+                }
+                # Check for backslash-quoted heredoc: <<\DELIMITER
+                elsif ($working_line =~ /^(.*?)(<<\\(\w+))(.*)$/) {
+                    ($prefix, $heredoc_marker, $delimiter) = ($1, $2, $3);
+                    $is_single_quoted = 1;  # backslash is like single-quote (no interpolation)
                     $matched = 1;
                 }
                 # Check for bare heredoc: <<DELIMITER
