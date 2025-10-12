@@ -930,6 +930,13 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # q{} and qq{} quote operators (for heredoc preprocessor support)
     [ 'QuotedString' => [qr/q\{(?:[^}]|\n)*\}/] ],   # q{} single-quote equivalent
     [ 'QuotedString' => [qr/qq\{(?:[^}]|\n)*\}/] ],  # qq{} double-quote equivalent
+    # Alternative quote delimiters - q(...), qq(...), q[...], qq[...], q<...>, qq<...>
+    [ 'QuotedString' => [qr/q\((?:[^)]|\n)*\)/] ],   # q() single-quote
+    [ 'QuotedString' => [qr/qq\((?:[^)]|\n)*\)/] ],  # qq() double-quote
+    [ 'QuotedString' => [qr/q\[(?:[^\]]|\n)*\]/] ],  # q[] single-quote
+    [ 'QuotedString' => [qr/qq\[(?:[^\]]|\n)*\]/] ], # qq[] double-quote
+    [ 'QuotedString' => [qr/q<(?:[^>]|\n)*>/] ],     # q<> single-quote
+    [ 'QuotedString' => [qr/qq<(?:[^>]|\n)*>/] ],    # qq<> double-quote
 
     # Punctuation
     [ 'PackageSeparator' => ['::'] ],
