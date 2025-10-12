@@ -934,10 +934,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*/] ],
     [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
     [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
-    # q{} and qq{} quote operators (for heredoc preprocessor support)
+    # q{} and qq{} quote operators with balanced brace matching (supports nested braces)
     # \s* allows whitespace (including newlines) between operator and delimiter
-    [ 'QuotedString' => [qr/q\s*\{(?:[^}]|\n)*\}/] ],   # q{} single-quote equivalent
-    [ 'QuotedString' => [qr/qq\s*\{(?:[^}]|\n)*\}/] ],  # qq{} double-quote equivalent
+    # Pattern matches balanced braces up to 3 levels deep
+    [ 'QuotedString' => [qr/q\s*\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/] ],   # q{} with balanced braces
+    [ 'QuotedString' => [qr/qq\s*\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/] ],  # qq{} with balanced braces
     # Alternative quote delimiters - q(...), qq(...), q[...], qq[...], q<...>, qq<...>
     # \s* allows whitespace (including newlines) between operator and delimiter
     [ 'QuotedString' => [qr/q\s*\((?:[^)]|\n)*\)/] ],   # q() single-quote
