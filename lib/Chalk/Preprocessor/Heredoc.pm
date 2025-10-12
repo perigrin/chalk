@@ -141,6 +141,12 @@ class Chalk::Preprocessor::Heredoc {
 
                         # Transform to q{...} or qq{...}
                         my $content = join("\n", @heredoc_content);
+
+                        # Recursively transform any heredocs inside the content
+                        my $inner_preprocessor = Chalk::Preprocessor::Heredoc->new(input => $content);
+                        $inner_preprocessor->transform();
+                        $content = $inner_preprocessor->output;
+
                         my $quote_op = $hd->{is_single_quoted} ? 'q' : 'qq';
                         push @transformed_parts, {
                             marker => $hd->{marker},
