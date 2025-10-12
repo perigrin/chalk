@@ -119,6 +119,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BaseStatement' => ['EvalBlock'],        1.0 ],    # eval { ... } blocks
     [ 'BaseStatement' => ['FunctionCall'],     1.0 ],    # Function calls like print
     [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
+    [ 'BaseStatement' => [ 'PrintExpr', 'StatementModifier' ], 1.0 ],  # print with if/unless/etc
     [ 'BaseStatement' => ['PatternMatchStatement'], 1.0 ],  # Bare regex as statement
     [ 'BaseStatement' => ['DieExpr'],          1.0 ],
     [ 'BaseStatement' => ['WarnExpr'],         1.0 ],
