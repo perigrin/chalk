@@ -57,6 +57,15 @@ class Chalk::Preprocessor::HeredocV2 {
                         }
 
                         my $content = join("\n", @heredoc_content);
+
+                        # Recursively transform nested heredocs ONLY in double-quoted heredocs
+                        # Single-quoted heredocs don't interpolate, so <<FOO inside them is literal
+                        if (!$hd->{is_single_quoted}) {
+                            my $inner_preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $content);
+                            $inner_preprocessor->transform();
+                            $content = $inner_preprocessor->output;
+                        }
+
                         my $quote_op = $hd->{is_single_quoted} ? 'q' : 'qq';
                         push @transformed_parts, {
                             marker => $hd->{marker},
