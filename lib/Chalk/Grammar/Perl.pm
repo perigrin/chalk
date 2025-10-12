@@ -15,8 +15,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # Program structure - adapted from original chalk grammar
     [ 'Program' => ['StatementList'],              1.0 ],
     [ 'Program' => [ 'StatementList', 'WS_OPT' ],  1.0 ],  # With trailing whitespace
+    [ 'Program' => [ 'WS_OPT', 'StatementList' ], 1.0 ],  # With leading whitespace
+    [ 'Program' => [ 'WS_OPT', 'StatementList', 'WS_OPT' ], 1.0 ],  # With both leading and trailing
     [ 'Program' => [ 'Shebang', 'StatementList' ], 2.0 ],
     [ 'Program' => [ 'Shebang', 'StatementList', 'WS_OPT' ], 2.0 ],  # Shebang with trailing whitespace
+    [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList' ], 2.0 ],  # Shebang with whitespace before statements
+    [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList', 'WS_OPT' ], 2.0 ],  # Shebang with both
 
   # Statement lists - adapted for chalk with reduced ambiguity
   # Prioritize simpler patterns to prevent parsing explosion
