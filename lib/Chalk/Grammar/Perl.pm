@@ -836,8 +836,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ExpressionBlock' => [ '{', 'Expression',    '}' ], 1.0 ],
     [ 'ExpressionBlock' => [ '{', 'StatementList', '}' ], 1.0 ],
 
-    # Eval block for exception handling (try-catch pattern)
-    [ 'EvalBlock' => [ 'eval', 'Block' ], 1.0 ],
+    # Eval - supports both block and string/expression forms
+    [ 'EvalBlock' => [ 'eval', 'Block' ], 1.0 ],       # eval { ... }
+    [ 'EvalBlock' => [ 'eval', 'Expression' ], 1.0 ],  # eval 'string' or eval $expr
 
     # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
     [
