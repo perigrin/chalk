@@ -16,7 +16,7 @@ if ( !caller ) {
     my $grammar_module = "Perl";  # default grammar module
     my $semiring_type = "SPPF";   # default semiring
     my $syntax_check_mode = 0;    # -c flag for syntax checking
-    my $preprocess = [];          # arrayref of preprocessor class names
+    my $preprocess = ['Chalk::Preprocessor::HeredocV2'];  # default to HeredocV2
     my @remaining_args;
 
     my $i = 0;
@@ -32,7 +32,7 @@ if ( !caller ) {
             $semiring_type = "Boolean";  # -c implies Boolean semiring
             $i++;
         } elsif ($ARGV[$i] eq '--preprocess') {
-            $preprocess = ['Chalk::Preprocessor::Heredoc'];  # Enable heredoc preprocessing
+            $preprocess = ['Chalk::Preprocessor::HeredocV2'];  # Enable heredoc preprocessing
             $i++;
         } else {
             push @remaining_args, $ARGV[$i];
