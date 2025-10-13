@@ -686,8 +686,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['ArrayRef'],     0.3 ],
     [ 'Value' => ['HashRef'],      0.3 ],
     [ 'Value' => ['FunctionCall'], 0.3 ],
-    [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc.
-    [ 'Value' => ['Block'],                  0.3 ],    # { expr } blocks (merged from ExpressionBlock)
+    [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc. (blocks explicitly after keywords)
+    # Block removed from Value - blocks only at statement level or after keywords (not bare values)
     [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
     [ 'Value' => ['QLikeValue'],             0.8 ],
     [ 'Value' => ['Diamond'],                0.3 ],    # <$fh> constructs (merged from DiamondExpr)
