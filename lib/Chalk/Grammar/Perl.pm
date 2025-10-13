@@ -1051,6 +1051,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'WS'     => [qr/\s+/m], 1.0 ],
     [ 'WS'     => [qr/#[^\n]*\n?/m], 1.0 ],    # Comments count as whitespace (includes optional newline)
     [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ], # Comment followed by whitespace
+    [ 'WS'     => [qr/\n=[a-z]\w+\b.*?\n=cut\b.*?\n/s], 1.0 ], # POD documentation blocks
     ]
 );
 
