@@ -267,12 +267,13 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # qr operator split like m to allow comments between operator and delimiter
     [ 'QLikeValue' => [ 'QROp', 'MDelimited' ] ],                 # qr with any delimiter + optional flags
     # s operator with specific delimiters - specific patterns to avoid greedy QDelimited matching
-    [ 'QLikeValue' => [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}] ],  # s/search/replace/flags
-    [ 'QLikeValue' => [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}] ],  # s|search|replace|flags
-    [ 'QLikeValue' => [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}] ],  # s!search!replace!flags
-    [ 'QLikeValue' => [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}] ],  # s#search#replace#flags
+    # Higher probabilities (2.0) to prefer these over the general SOp + QDelimited + MDelimited rule
+    [ 'QLikeValue' => [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}], 2.0 ],  # s/search/replace/flags
+    [ 'QLikeValue' => [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}], 2.0 ],  # s|search|replace|flags
+    [ 'QLikeValue' => [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}], 2.0 ],  # s!search!replace!flags
+    [ 'QLikeValue' => [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}], 2.0 ],  # s#search#replace#flags
     # s operator split to allow comments - works with paired delimiters like s[...][...] (search, replacement)
-    [ 'QLikeValue' => [ 'SOp', 'QDelimited', 'MDelimited' ] ],    # s with delimiters + optional flags on replacement
+    [ 'QLikeValue' => [ 'SOp', 'QDelimited', 'MDelimited' ], 0.5 ],    # s with delimiters + optional flags on replacement (lower priority)
     [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ],    # /.../flags with escapes
     [ 'QLikeValue' => [qr/`[^`]*`/] ],            # `backticks`
 
@@ -917,15 +918,16 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'VariableBase' => [qr/\$\$\w+/] ],        # Scalar dereference ($$ref)
     [ 'VariableBase' => [qr/\$#\$\w+/] ],       # Array length of dereferenced scalar ($#$ref)
 
- # Complex dereference patterns from guacamole: ${ Expression }, @{ Expression }, %{ Expression }
-    [ 'VariableBase' => [ '${', 'Expression', '}' ], 1.0 ]
-    ,                                           # Scalar deref: ${ expr }
-    [ 'VariableBase' => [ '$', '{', 'Expression', '}' ], 1.0 ]
-    ,                                           # Scalar deref with space: $ { expr }
-    [ 'VariableBase' => [ '@{', 'Expression', '}' ], 1.0 ]
-    ,                                           # Array deref: @{ expr }
-    [ 'VariableBase' => [ '%{', 'Expression', '}' ], 1.0 ]
-    ,                                           # Hash deref: %{ expr }
+ # Complex dereference patterns: ${ Block }, @{ Block }, %{ Block }
+    # These accept Block (StatementList) not Expression, allowing: ${ s|||; "" }
+    [ 'VariableBase' => [ '${', 'StatementList', '}' ], 1.0 ]
+    ,                                           # Scalar deref: ${ block }
+    [ 'VariableBase' => [ '$', '{', 'StatementList', '}' ], 1.0 ]
+    ,                                           # Scalar deref with space: $ { block }
+    [ 'VariableBase' => [ '@{', 'StatementList', '}' ], 1.0 ]
+    ,                                           # Array deref: @{ block }
+    [ 'VariableBase' => [ '%{', 'StatementList', '}' ], 1.0 ]
+    ,                                           # Hash deref: %{ block }
     [ 'VariableBase' => [ '@[', 'Expression', ']' ], 1.0 ]
     ,                                           # Array slice: @[ expr ]
     [ 'VariableBase' => [ '%[', 'Expression', ']' ], 1.0 ]
@@ -975,16 +977,17 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'QDelimited' => [qr/\|(?:[^|\\]|\\.)*\|/] ],  # |...|
 
     # Delimited match content - like QDelimited but with optional regex flags
+    # Possessive quantifiers (*+) prevent backtracking across large spans
     [ 'MDelimited' => [qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/] ],  # {} with balanced braces + flags
-    [ 'MDelimited' => [qr/\((?:[^)]|\n)*\)[a-z]*/] ],   # () + flags
-    [ 'MDelimited' => [qr/\[(?:[^\]]|\n)*\][a-z]*/] ],  # [] + flags
-    [ 'MDelimited' => [qr/<(?:[^>]|\n)*>[a-z]*/] ],     # <> + flags
-    [ 'MDelimited' => [qr/"(?:[^"\\]|\\.)*"[a-z]*/] ],  # "" + flags
-    [ 'MDelimited' => [qr/'(?:[^'\\]|\\.)*'[a-z]*/] ],  # '' + flags
+    [ 'MDelimited' => [qr/\((?:[^)]|\\.)*+\)[a-z]*/] ],   # () + flags
+    [ 'MDelimited' => [qr/\[(?:[^\]]|\\.)*+\][a-z]*/] ],  # [] + flags
+    [ 'MDelimited' => [qr/<(?:[^>]|\\.)*+>[a-z]*/] ],     # <> + flags
+    [ 'MDelimited' => [qr/"(?:[^"\\]|\\.)*+"[a-z]*/] ],  # "" + flags
+    [ 'MDelimited' => [qr/'(?:[^'\\]|\\.)*+'[a-z]*/] ],  # '' + flags
     [ 'MDelimited' => [qr{/(?:[^/\\]|\\.)*+/[a-z]*}] ],  # /.../flags
-    [ 'MDelimited' => [qr/!(?:[^!\\]|\\.)*![a-z]*/] ],  # !...!flags
-    [ 'MDelimited' => [qr/#(?:[^#\\]|\\.)*#[a-z]*/] ],  # #...#flags
-    [ 'MDelimited' => [qr/\|(?:[^|\\]|\\.)*\|[a-z]*/] ],  # |...|flags
+    [ 'MDelimited' => [qr/!(?:[^!\\]|\\.)*+![a-z]*/] ],  # !...!flags
+    [ 'MDelimited' => [qr/#(?:[^#\\]|\\.)*+#[a-z]*/] ],  # #...#flags
+    [ 'MDelimited' => [qr/\|(?:[^|\\]|\\.)*+\|(?![|])[a-z]*/] ],  # |...|flags (negative lookahead to prevent matching ||)
 
     # Punctuation
     [ 'PackageSeparator' => ['::'] ],
