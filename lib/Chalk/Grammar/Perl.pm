@@ -918,16 +918,15 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'VariableBase' => [qr/\$\$\w+/] ],        # Scalar dereference ($$ref)
     [ 'VariableBase' => [qr/\$#\$\w+/] ],       # Array length of dereferenced scalar ($#$ref)
 
- # Complex dereference patterns: ${ Block }, @{ Block }, %{ Block }
-    # These accept Block (StatementList) not Expression, allowing: ${ s|||; "" }
-    [ 'VariableBase' => [ '${', 'StatementList', '}' ], 1.0 ]
-    ,                                           # Scalar deref: ${ block }
-    [ 'VariableBase' => [ '$', '{', 'StatementList', '}' ], 1.0 ]
-    ,                                           # Scalar deref with space: $ { block }
-    [ 'VariableBase' => [ '@{', 'StatementList', '}' ], 1.0 ]
-    ,                                           # Array deref: @{ block }
-    [ 'VariableBase' => [ '%{', 'StatementList', '}' ], 1.0 ]
-    ,                                           # Hash deref: %{ block }
+ # Complex dereference patterns from guacamole: ${ Expression }, @{ Expression }, %{ Expression }
+    [ 'VariableBase' => [ '${', 'Expression', '}' ], 1.0 ]
+    ,                                           # Scalar deref: ${ expr }
+    [ 'VariableBase' => [ '$', '{', 'Expression', '}' ], 1.0 ]
+    ,                                           # Scalar deref with space: $ { expr }
+    [ 'VariableBase' => [ '@{', 'Expression', '}' ], 1.0 ]
+    ,                                           # Array deref: @{ expr }
+    [ 'VariableBase' => [ '%{', 'Expression', '}' ], 1.0 ]
+    ,                                           # Hash deref: %{ expr }
     [ 'VariableBase' => [ '@[', 'Expression', ']' ], 1.0 ]
     ,                                           # Array slice: @[ expr ]
     [ 'VariableBase' => [ '%[', 'Expression', ']' ], 1.0 ]

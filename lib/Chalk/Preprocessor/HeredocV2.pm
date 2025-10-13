@@ -132,9 +132,19 @@ class Chalk::Preprocessor::HeredocV2 {
         }
 
         # Find comment range (everything after # to end of line)
+        # But only if the # is not inside a string
         if ($working_line =~ /(#)/) {
             my $comment_pos = $-[0];  # Start position of the match
-            push @excluded_ranges, [$comment_pos, length($working_line)];
+            # Check if this # is inside an already-excluded string
+            my $in_string = 0;
+            for my $range (@excluded_ranges) {
+                if ($comment_pos >= $range->[0] && $comment_pos < $range->[1]) {
+                    $in_string = 1;
+                    last;
+                }
+            }
+            # Only exclude as comment if not inside a string
+            push @excluded_ranges, [$comment_pos, length($working_line)] unless $in_string;
         }
 
         # Helper to check if position is excluded
