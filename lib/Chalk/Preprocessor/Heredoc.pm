@@ -13,6 +13,36 @@ class Chalk::Preprocessor::Heredoc {
         $self->transform_heredocs();
     }
 
+    method is_inside_string_literal($text) {
+        # Check if the end of $text is inside an unclosed string literal
+        # Returns true if we're inside ' or " quotes
+
+        my $in_single = 0;  # Inside single quotes
+        my $in_double = 0;  # Inside double quotes
+        my $escaped = 0;    # Previous char was backslash
+
+        for my $char (split //, $text) {
+            if ($escaped) {
+                $escaped = 0;
+                next;
+            }
+
+            if ($char eq '\\') {
+                $escaped = 1;
+                next;
+            }
+
+            if ($char eq "'" && !$in_double) {
+                $in_single = !$in_single;
+            }
+            elsif ($char eq '"' && !$in_single) {
+                $in_double = !$in_double;
+            }
+        }
+
+        return $in_single || $in_double;
+    }
+
     method transform_heredocs() {
         my @lines = split /\n/, $input, -1;
         my @output_lines;
@@ -92,13 +122,16 @@ class Chalk::Preprocessor::Heredoc {
                 }
 
                 if ($matched) {
-                    push @heredocs, {
-                        delimiter => $delimiter,
-                        is_single_quoted => $is_single_quoted,
-                        is_indented => $is_indented,
-                        prefix => $prefix,
-                        marker => $heredoc_marker,
-                    };
+                    # Skip this heredoc if it's inside a string literal
+                    unless ($self->is_inside_string_literal($prefix)) {
+                        push @heredocs, {
+                            delimiter => $delimiter,
+                            is_single_quoted => $is_single_quoted,
+                            is_indented => $is_indented,
+                            prefix => $prefix,
+                            marker => $heredoc_marker,
+                        };
+                    }
                     # Replace the heredoc marker with a placeholder to continue searching
                     $working_line =~ s/\Q$heredoc_marker\E/__HEREDOC_PLACEHOLDER__/;
                 } else {
