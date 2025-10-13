@@ -22,20 +22,14 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList' ], 2.0 ],  # Shebang with whitespace before statements
     [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList', 'WS_OPT' ], 2.0 ],  # Shebang with both
 
-  # Statement lists - adapted for chalk with reduced ambiguity
-  # Prioritize simpler patterns to prevent parsing explosion
-  # StatementList following Perl semicolon rules
+  # Statement lists - adapted from guacamole grammar
   # Semicolons required between statements, optional for last statement in block
     [ 'StatementList' => [], 0.1 ],    # Empty statement list (for empty blocks)
-    [ 'StatementList' => ['Statement'], 1.0 ]
-    ,    # Single statement (last in block, no semicolon needed)
+    [ 'StatementList' => ['Statement'], 1.0 ],    # Single statement (last in block, no semicolon needed)
     [ 'StatementList' => ['BlockStatement'], 0.95 ],    # Single block statement
-    [ 'StatementList' => [ 'Statement', ';', 'StatementList' ], 0.9 ]
-    ,    # Statement + semicolon + more statements
-    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ]
-    ,    # Block + more statements
-    [ 'StatementList' => [ 'LineStatement', 'StatementList' ], 0.7 ]
-    ,    # Line + more
+    [ 'StatementList' => [ 'Statement', ';', 'StatementList' ], 0.9 ],    # Statement + semicolon + more statements
+    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ],    # Block + more statements
+    [ 'StatementList' => [ 'LineStatement', 'StatementList' ], 0.7 ],    # Line + more
 
 # BlockStatement - statements that contain blocks and don't need semicolons (following guacamole)
     [ 'BlockStatement' => ['ClassDecl'],   1.0 ],
@@ -121,7 +115,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BaseStatement' => ['ListOperatorCall'], 1.0 ],    # Function calls without parentheses (list operator syntax)
     [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
     [ 'BaseStatement' => [ 'PrintExpr', 'StatementModifier' ], 1.0 ],  # print with if/unless/etc
-    [ 'BaseStatement' => ['PatternMatchStatement'], 1.0 ],  # Bare regex as statement
+    [ 'BaseStatement' => ['QLikeValue'], 1.0 ],  # Bare regex as statement (merged from PatternMatchStatement)
     [ 'BaseStatement' => ['DieExpr'],          1.0 ],
     [ 'BaseStatement' => ['WarnExpr'],         1.0 ],
     [ 'BaseStatement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
@@ -692,11 +686,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['ArrayRef'],     0.3 ],
     [ 'Value' => ['HashRef'],      0.3 ],
     [ 'Value' => ['FunctionCall'], 0.3 ],
-    [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc.
-    [ 'Value' => ['ExpressionBlock'],        0.3 ],    # { expr } blocks
+    [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc. (blocks explicitly after keywords)
+    # Block removed from Value - blocks only at statement level or after keywords (not bare values)
     [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
     [ 'Value' => ['QLikeValue'],             0.8 ],
-    [ 'Value' => ['DiamondExpr'],            0.3 ],    # <$fh> constructs
+    [ 'Value' => ['Diamond'],                0.3 ],    # <$fh> constructs (merged from DiamondExpr)
     [ 'Value' => ['@'],                      0.3 ],
     [ 'Value' => ['FieldDecl'],              0.3 ],
     [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
@@ -715,8 +709,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'NonBraceExprComma' ], 1.0 ],  # print STDOUT "string"
     [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ], 1.0 ],                       # print STDOUT
 
-    # Pattern match statements - bare regex as statement (implicit $_ =~ /.../ binding)
-    [ 'PatternMatchStatement' => ['QLikeValue'], 1.0 ],
+    # Pattern match statements merged into BaseStatement => QLikeValue (removed wrapper)
 
     # Die expressions following same pattern as PrintExpr
     [ 'DieExpr' => [ 'die', 'NonBraceExprComma' ], 1.0 ],    # die "string"
@@ -819,10 +812,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'OpTriThen' => ['?'] ],
     [ 'OpTriElse' => [':'] ],
 
-    # Diamond expressions following guacamole pattern
-    [ 'DiamondExpr' => ['Diamond'], 1.0 ],
-
-    # Diamond operator: <$fh>, <STDIN>, <>, <try>
+    # Diamond operator: <$fh>, <STDIN>, <>, <try> (DiamondExpr merged into Diamond)
     [ 'Diamond' => [ '<', 'Variable',          '>' ], 1.0 ],
     [ 'Diamond' => [ '<', 'BuiltinFilehandle', '>' ], 1.0 ],
     [ 'Diamond' => [ '<', 'Identifier',        '>' ], 1.0 ],  # Bareword filehandles
@@ -848,9 +838,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ListOperatorCall' => [ 'Identifier', 'NonBraceExprComma' ], 1.0 ],               # func "arg", $var
     [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'NonBraceExprComma' ], 1.0 ],     # Pkg::func "arg", $var
 
-# Expression block for grep/map/sort - supports both single expressions and statement lists
-    [ 'ExpressionBlock' => [ '{', 'Expression',    '}' ], 1.0 ],
-    [ 'ExpressionBlock' => [ '{', 'StatementList', '}' ], 1.0 ],
+# Expression block for grep/map/sort merged into Block
+    # Removed ExpressionBlock - Block already handles both Expression and StatementList
+    # since expressions can appear in StatementList through BlockLevelExpression
 
     # Eval - supports both block and string/expression forms
     [ 'EvalBlock' => [ 'eval', 'Block' ], 1.0 ],       # eval { ... }
@@ -858,25 +848,25 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
     [
-        'UnaryKeywordExpression' => [ 'grep', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'grep', 'Block', 'Expression' ],
         1.0
     ],    # grep { ... } @list
     [ 'UnaryKeywordExpression' => [ 'grep', 'Expression' ], 1.0 ]
     ,     # grep EXPR, @list
     [
-        'UnaryKeywordExpression' => [ 'all', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'all', 'Block', 'Expression' ],
         1.0
     ],    # all { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'any', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'any', 'Block', 'Expression' ],
         1.0
     ],    # any { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'map', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'map', 'Block', 'Expression' ],
         1.0
     ],    # map { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'sort', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'sort', 'Block', 'Expression' ],
         1.0
     ],    # sort { ... } @list
 
@@ -910,7 +900,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Variable' => ['VariableBase'], 0.9 ],    # Lower priority for base case
 
     # Base variable patterns (without subscripts) - all sigils in one rule
-    [ 'VariableBase' => [qr/[\$@%&*]\w+/] ],  # All variable types with sigils
+    [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*/] ],  # All variable types with sigils, including qualified (e.g., *Package::Name)
     [ 'VariableBase' => [qr/\$#\w+/] ],       # Array length variables ($#array)
 
     # Global variables following guacamole GlobalVariables pattern
@@ -956,7 +946,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     [ 'ArrayElem'    => [ '[', 'Expression', ']' ], 1.0 ],
     [ 'HashElem'     => [ '{', 'Expression', '}' ], 1.0 ],
-    [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*/] ],
+    [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/] ],  # Support qualified identifiers, including pathological cases like foo::::bar
     [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
     [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
     # q{} and qq{} quote operators with balanced brace matching (supports nested braces)
