@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# ABOUTME: Test Chalk::Preprocessor::Heredoc transformation to q{}/qq{}
+# ABOUTME: Test Chalk::Preprocessor::HeredocV2 transformation to q{}/qq{}
 # ABOUTME: Verify single-quoted, double-quoted, and indented heredoc support
 use 5.42.0;
 use Test2::V0;
@@ -8,7 +8,7 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
-use Chalk::Preprocessor::Heredoc;
+use Chalk::Preprocessor::HeredocV2;
 
 subtest 'Single-quoted heredoc transformation' => sub {
     my $input = q{my $text = <<'EOF';
@@ -17,7 +17,7 @@ This is a test
 EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -34,7 +34,7 @@ subtest 'Empty single-quoted heredoc' => sub {
 EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -51,7 +51,7 @@ Line with \n escapes
 END
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -69,7 +69,7 @@ This is a test
 EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -88,7 +88,7 @@ This is a test
 EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -105,7 +105,7 @@ subtest 'Empty double-quoted heredoc' => sub {
 EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -121,7 +121,7 @@ subtest 'Indented heredoc with single quotes' => sub {
     EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -142,7 +142,7 @@ subtest 'Indented heredoc with double quotes' => sub {
     EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -161,7 +161,7 @@ subtest 'Indented heredoc bare' => sub {
     EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -181,7 +181,7 @@ subtest 'Indented heredoc with mixed indentation' => sub {
     EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -205,7 +205,7 @@ Second heredoc
 EOF2
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -223,7 +223,7 @@ Third line (blank in between)
 EOF
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 
@@ -238,7 +238,7 @@ Still going
 DELIM
 };
 
-    my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $input);
+    my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $input);
     $preprocessor->transform();
     my $output = $preprocessor->output;
 

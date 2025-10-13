@@ -10,7 +10,7 @@ defer { done_testing() }
 use lib "$RealBin/../lib";
 use Chalk::Grammar::Perl;
 use Chalk::Parser;
-use Chalk::Preprocessor::Heredoc;
+use Chalk::Preprocessor::HeredocV2;
 
 # Get all .t files in perl-tests/base/
 my $base_dir = "$RealBin/../perl-tests/base";
@@ -40,7 +40,7 @@ foreach my $filename (@t_files) {
         close $fh;
 
         # Preprocess heredocs
-        my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $source);
+        my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $source);
         $preprocessor->transform();
         my $preprocessed = $preprocessor->output;
 

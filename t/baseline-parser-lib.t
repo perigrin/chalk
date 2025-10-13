@@ -10,7 +10,7 @@ defer { done_testing() }
 use lib "$RealBin/../lib";
 use Chalk::Grammar::Perl;
 use Chalk::Parser;
-use Chalk::Preprocessor::Heredoc;
+use Chalk::Preprocessor::HeredocV2;
 use File::Find;
 
 # Get all .pm files in lib/
@@ -48,7 +48,7 @@ foreach my $file (@pm_files) {
         close $fh;
 
         # Preprocess heredocs
-        my $preprocessor = Chalk::Preprocessor::Heredoc->new(input => $source);
+        my $preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $source);
         $preprocessor->transform();
         my $preprocessed = $preprocessor->output;
 

@@ -2,9 +2,11 @@
 # ABOUTME: Uses mini-grammar to correctly parse heredoc markers in code context
 package Chalk::Preprocessor::HeredocV2;
 use 5.42.0;
+use utf8;
+use open qw(:std :utf8);
+
 use experimental qw(class builtin keyword_any keyword_all);
-use Chalk::Preprocessor::HeredocGrammar;
-use Chalk::Parser;
+#use Chalk::Parser;
 
 class Chalk::Preprocessor::HeredocV2 {
     field $input :param :reader;

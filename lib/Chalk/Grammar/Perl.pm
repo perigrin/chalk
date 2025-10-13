@@ -2,6 +2,8 @@
 # ABOUTME: Based on Guacamole grammar structure with chalk-specific extensions
 package Chalk::Grammar::Perl;
 use 5.42.0;
+use utf8;
+use open qw(:std :utf8);
 use experimental qw(class builtin keyword_any keyword_all defer);
 use Exporter 'import';
 use Chalk::Grammar;
@@ -58,7 +60,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'ElsifChain' ], 1.0 ],
     [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'else', 'Block' ], 1.0 ],
     [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'ElsifChain', 'else', 'Block' ], 1.0 ],
-    
+
     # Elsif chain can be one or more elsif blocks
     [ 'ElsifChain' => [ 'elsif', '(', 'Expression', ')', 'Block' ], 1.0 ],
     [ 'ElsifChain' => [ 'elsif', '(', 'Expression', ')', 'Block', 'ElsifChain' ], 1.0 ],
@@ -184,6 +186,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # SubSigsDefinition is just a parenthetical expression
     [ 'SubSigsDefinition' => [ '(', 'Expression', ')' ], 1.0 ],
+    [ 'SubSigsDefinition' => [ '(', qr/\(\s*(?:\\\[[\$\@\%\&\*]+\s*\]|[\$\@\%\&\*\_;\s])*?\)/, ')' ], 1.0 ],
     [ 'SubSigsDefinition' => [ '(', ')' ], 1.0 ],
 
     # Anonymous subroutines as values - with optional attributes
@@ -391,7 +394,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ],
     [ 'ExprEq0' => ['ExprNeq0'], 0.3 ],
 
-    # NonBrace inequality expressions  
+    # NonBrace inequality expressions
     [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ], 0.8 ],
     [ 'ExprNeqR' => ['ExprShiftR'], 0.3 ],
     [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ], 0.8 ],
@@ -405,9 +408,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ], 0.8 ],
     [ 'ExprShiftU' => ['ExprAddU'], 0.3 ],
 
-    # NonBrace addition expressions  
+    # NonBrace addition expressions
     [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ], 0.8 ],
-    [ 'ExprAddR' => [ 'ExprAddU', '.', 'ExprMulR' ], 0.8 ], 
+    [ 'ExprAddR' => [ 'ExprAddU', '.', 'ExprMulR' ], 0.8 ],
     [ 'ExprAddR' => ['ExprMulR'], 0.3 ],
     [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ], 0.8 ],
     [ 'ExprAdd0' => [ 'ExprAddU', '.', 'ExprMul0' ], 0.8 ],
@@ -721,7 +724,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # Print expressions following guacamole OpKeywordPrintExpr pattern
     [ 'PrintExpr' => [ 'print', 'ExprComma' ], 1.0 ],   # print "string"
     [ 'PrintExpr' => ['print'],                        1.0 ],   # bare print
-    
+
     # Print with filehandle: print FILEHANDLE "string"
     [ 'PrintExpr' => [ 'print', 'Identifier', 'ExprComma' ], 1.0 ],         # print FH "string"
     [ 'PrintExpr' => [ 'print', 'Identifier' ], 1.0 ],                              # print FH
@@ -793,7 +796,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ],
     [ 'ExprRangeL' => ['ExprLogOrL'], 0.3 ],
 
-    # Continue chain for NonBrace left-associative expressions  
+    # Continue chain for NonBrace left-associative expressions
     [ 'ExprLogOrL'  => ['ExprLogAndL'], 0.3 ],
     [ 'ExprLogAndL' => ['ExprBinOrL'],  0.3 ],
     [ 'ExprBinOrL'  => ['ExprBinAndL'], 0.3 ],
@@ -801,20 +804,20 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ExprEqL'     => ['ExprNeqL'],    0.3 ],
     [ 'ExprNeqL' => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ], 0.8 ],
     [ 'ExprNeqL'    => ['ExprShiftL'],  0.3 ],
-    
+
     # NonBrace shift expressions (left-associative)
     [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ], 0.8 ],
     [ 'ExprShiftL' => ['ExprAddL'], 0.3 ],
-    
+
     # NonBrace addition expressions (left-associative)
     [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ], 0.8 ],
     [ 'ExprAddL' => [ 'ExprAddU', '.', 'ExprMulL' ], 0.8 ],
     [ 'ExprAddL' => ['ExprMulL'], 0.3 ],
-    
+
     # NonBrace multiplication expressions (left-associative)
     [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ], 0.8 ],
     [ 'ExprMulL' => ['ExprRegexL'], 0.3 ],
-    
+
     [ 'ExprRegexL' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ], 0.8 ],
     [ 'ExprRegexL' => ['ExprUnaryL'], 0.3 ],
     [ 'ExprUnaryL'  => [ 'OpUnary', 'ExprUnaryL' ], 0.8 ],
@@ -822,7 +825,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ExprUnaryL'  => ['ExprPowerL'],  0.3 ],
     [ 'ExprPowerL'  => ['ExprIncL'],    0.3 ],
     [ 'ExprIncL' => [ 'OpInc', 'ExprIncL' ], 0.8 ],      # Pre-increment
-    [ 'ExprIncL' => [ 'ExprIncL', 'OpInc' ], 0.8 ],      # Post-increment  
+    [ 'ExprIncL' => [ 'ExprIncL', 'OpInc' ], 0.8 ],      # Post-increment
     [ 'ExprIncL'    => ['ExprArrowL'],  0.3 ],
     [ 'ExprArrowL'  => ['ExprValueUL'],  0.3 ],
     [ 'ExprValueUL'  => ['Value'],       0.8 ],
@@ -1020,7 +1023,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # Punctuation
     [ 'PackageSeparator' => ['::'] ],
-    
+
     # Qualified identifiers for package method calls like utf8::native_to_unicode
     # Made recursive to support multi-level package names like Chalk::Semiring::Boolean
     [ 'QualifiedIdentifier' => [ 'Identifier', 'PackageSeparator', 'QualifiedIdentifier' ], 1.0 ],
@@ -1040,7 +1043,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'HashRef'  => [ '{', '}' ],                    1.0 ],    # Empty hash
 
     # Optimal 3-rule ExpressionList - balances functionality with performance
-    [ 'ExpressionList' => ['Expression'], 1.0 ],                # Single expression 
+    [ 'ExpressionList' => ['Expression'], 1.0 ],                # Single expression
     [ 'ExpressionList' => [ 'Expression', 'OpComma', 'ExpressionList' ], 1.0 ], # Standard recursion
     [ 'ExpressionList' => [ 'Comment', 'ExpressionList' ], 1.0 ], # Comment-prefixed lists
 
@@ -1057,7 +1060,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # File test operators - unary operators that test file properties
     [ 'FileTestOp' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],
     [ 'OpUnaryKeywordExpr' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],  # File test operators
-    
+
     # Keyword expressions - termination points for Expression chain
     # For chalk, we only need basic ones that could appear
     [ 'OpUnaryKeywordExpr' => [qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/] ],
