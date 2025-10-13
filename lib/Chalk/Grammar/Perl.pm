@@ -287,23 +287,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     ,                                              # First rule - higher prob
     [ 'ExprNameOr' => ['ExprNameAnd'], 0.3 ],      # Fallback - lower prob
 
-# BlockLevelExpression - uses NonBraceExprAssignR to avoid brace ambiguity
-# TODO: Allow bare Expressions without an explicit return as the last statement in a block
-    [ 'BlockLevelExpression' => ['BlockLevelExprNameOr'], 1.0 ],
-    [
-        'BlockLevelExprNameOr' =>
-          [ 'BlockLevelExprNameOr', 'OpNameOr', 'ExprNameAnd' ],
-        0.8
-    ],
-    [ 'BlockLevelExprNameOr' => ['BlockLevelExprNameAnd'], 0.3 ],
-    [
-        'BlockLevelExprNameAnd' =>
-          [ 'BlockLevelExprNameAnd', 'OpNameAnd', 'ExprNameNot' ],
-        0.8
-    ],
-    [ 'BlockLevelExprNameAnd' => ['BlockLevelExprNameNot'],      0.3 ],
-    [ 'BlockLevelExprNameNot' => [ 'OpNameNot', 'ExprNameNot' ], 0.8 ],
-    [ 'BlockLevelExprNameNot' => ['NonBraceExprComma'],          0.3 ],
+# BlockLevelExpression - simplified to use regular Expression hierarchy
+# Experiment: Remove BlockLevel* intermediates to reduce parser state
+# Previously used NonBraceExprAssignR to avoid brace ambiguity, but testing shows
+# the regular Expression hierarchy handles this correctly via probabilities
+    [ 'BlockLevelExpression' => ['Expression'], 1.0 ],
 
     # NonBraceExprAssignR - avoids consuming braces as hash refs
     [
