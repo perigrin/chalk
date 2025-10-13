@@ -28,7 +28,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'StatementList' => ['Statement'], 1.0 ],    # Single statement (last in block, no semicolon needed)
     [ 'StatementList' => ['BlockStatement'], 0.95 ],    # Single block statement
     [ 'StatementList' => [ 'Statement', ';', 'StatementList' ], 0.9 ],    # Statement + semicolon + more statements
-    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ],    # Block + more statements
+    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ],    # Block + more statements (no semicolon)
+    [ 'StatementList' => [ 'BlockStatement', ';', 'StatementList' ], 0.8 ],    # Block + optional semicolon + more statements
     [ 'StatementList' => [ 'LineStatement', 'StatementList' ], 0.7 ],    # Line + more
 
 # BlockStatement - statements that contain blocks and don't need semicolons (following guacamole)
@@ -184,6 +185,13 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # SubSigsDefinition is just a parenthetical expression
     [ 'SubSigsDefinition' => [ '(', 'Expression', ')' ], 1.0 ],
     [ 'SubSigsDefinition' => [ '(', ')' ], 1.0 ],
+
+    # Anonymous subroutines as values - with optional attributes
+    [ 'Value' => [ 'sub', 'SubAttribute', 'SubDefinition' ], 0.3 ],  # sub :lvalue { ... }
+    [ 'Value' => [ 'sub', 'SubDefinition' ], 0.3 ],                  # sub { ... }
+
+    # Subroutine attributes
+    [ 'SubAttribute' => [qr/:[a-zA-Z_]\w*/] ],  # :lvalue, :method, :prototype(...), etc.
 
  # UseStatement - reordered with higher probabilities for more specific patterns
  # to reduce parsing ambiguity and prevent exponential explosion
@@ -477,10 +485,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value'      => ['Number'],              0.3 ],
     [ 'Value'      => ['UnaryExpression'],     0.3 ],
     [ 'Value'      => ['QuotedString'],        0.3 ],
+    [ 'Value'      => ['Ellipsis'],            0.3 ],  # Yada-yada operator ... as value
 
     # Unary expressions (for things like -1e10, !$flag, -d 't', etc.)
     [ 'UnaryExpression' => [ 'OpUnary', 'Value' ], 1.0 ],
     [ 'UnaryExpression' => [ 'FileTestOp', 'Value' ], 1.0 ],
+    [ 'Value'   => [ '(', 'Expression', ')', 'ElemSeq1' ], 0.3 ],  # (expr)[0] - subscripted parenthesized expression
     [ 'Value'   => [ '(', 'Expression', ')' ],     0.3 ],
     [ 'Value'   => ['ArrayRef'],                   0.3 ],
     [ 'Value'   => ['HashRef'],                    0.3 ],  # Allow hash refs in push/etc
@@ -695,7 +705,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['HashRef'],      0.3 ],
     [ 'Value' => ['FunctionCall'], 0.3 ],
     [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc. (blocks explicitly after keywords)
-    # Block removed from Value - blocks only at statement level or after keywords (not bare values)
+    [ 'Value' => ['Block'],                  0.3 ],    # Bare blocks as values (e.g., -l {0})
     [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
     [ 'Value' => [ 'QLikeValue', 'ElemSeq1' ], 1.0 ],  # qw"b"[0], qw()[1], etc. - subscripted qw/regex
     [ 'Value' => ['QLikeValue'],             0.8 ],
@@ -836,10 +846,13 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         1.0
     ],                                     # func(args)
     [ 'FunctionCall' => [ 'Identifier', '(', ')' ], 1.0 ],    # func()
-    
+
     # Qualified function calls for package methods
     [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', 'ParameterList', ')' ], 1.0 ], # pkg::func(args)
     [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', ')' ], 1.0 ],                 # pkg::func()
+
+    # Code reference calls: &{expr}()
+    [ 'FunctionCall' => [ '&{', 'Expression', '}' ], 1.0 ],  # &{$coderef} or &{sub {...}}
 
     # List operator syntax for user-defined functions (statement context only)
     # This allows function calls without parentheses like: func "arg", $var
@@ -886,7 +899,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'OpAssign'  => [qr/\+=|-=|\*=|\/=|%=|\/\/=|\|\|=|&&=|\.=|&=|\|=|\^=|<<=|>>=|=/] ],  # Assignment operators (compound before simple)
     [ 'OpArrow'   => ['->'] ],
     [ 'OpAdd'     => [qr/[+\-]/] ],
-    [ 'OpMulti'   => [qr/[*\/]/] ],
+    [ 'OpMulti'   => [qr/[*\/x]/] ],  # Multiplication, division, and repetition (x)
     [ 'OpLogOr'   => [qr/\|\||\/\//] ],              # Logical or and defined-or
     [ 'OpLogAnd'  => [qr/&&/] ],
     [ 'OpNameOr'  => ['or'] ],
@@ -909,10 +922,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Variable' => ['VariableBase'], 0.9 ],    # Lower priority for base case
 
     # Base variable patterns (without subscripts) - all sigils in one rule
+    [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*::/] ],  # Variables with trailing :: (e.g., $foo::) - must come first
     [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*/] ],  # All variable types with sigils, including qualified (e.g., *Package::Name)
     [ 'VariableBase' => [qr/\$#\w+/] ],       # Array length variables ($#array)
 
     # Global variables following guacamole GlobalVariables pattern
+    [ 'VariableBase' => [qr/\$::/] ],         # $:: - main package symbol table
     [ 'VariableBase' => [qr/\$\$/] ],         # $$ - process ID (special case)
     [ 'VariableBase' => [qr/\$[!"#%&'()*+,\-.\/:;<=>?\@\[\\\]^_`|~]/] ],
     [ 'VariableBase' => [qr/\$\^\w+/] ]  # Special caret variables like $^X
@@ -1058,7 +1073,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'WS'     => [qr/\s+/m], 1.0 ],
     [ 'WS'     => [qr/#[^\n]*\n?/m], 1.0 ],    # Comments count as whitespace (includes optional newline)
     [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ], # Comment followed by whitespace
-    [ 'WS'     => [qr/\n=[a-z]\w+\b.*?\n=cut\b.*?\n/s], 1.0 ], # POD documentation blocks
+    [ 'WS'     => [qr/\n=[a-z]\w+\b.*?\n=cut\b.*?\n/s], 1.0 ], # POD blocks (with leading newline)
+    [ 'WS'     => [qr/=[a-z]\w+\b.*?\n=cut\b.*?\n/s], 1.0 ],   # POD blocks (at start of parsing or after WS)
     ]
 );
 
