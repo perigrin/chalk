@@ -289,192 +289,194 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
 # BlockLevelExpression - simplified to use regular Expression hierarchy
 # Experiment: Remove BlockLevel* intermediates to reduce parser state
-# Previously used NonBraceExprAssignR to avoid brace ambiguity, but testing shows
+# Previously used ExprAssignR to avoid brace ambiguity, but testing shows
 # the regular Expression hierarchy handles this correctly via probabilities
     [ 'BlockLevelExpression' => ['Expression'], 1.0 ],
 
-    # NonBraceExprAssignR - avoids consuming braces as hash refs
+    # ExprAssignR - avoids consuming braces as hash refs
     [
-        'NonBraceExprAssignR' =>
-          [ 'NonBraceExprCond0', 'OpAssign', 'ExprAssignR' ],
+        'ExprAssignR' =>
+          [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ],
         0.8
     ],
-    [ 'NonBraceExprAssignR' => ['NonBraceExprCondR'], 0.3 ],
+    [ 'ExprAssignR' => ['ExprCondR'], 0.3 ],
 
  # NonBrace conditional expressions need to go through the full precedence chain
     [
-        'NonBraceExprCondR' => [
-            'NonBraceExprRange0', 'OpTriThen',
+        'ExprCondR' => [
+            'ExprRange0', 'OpTriThen',
             'ExprRangeR',         'OpTriElse',
             'ExprCondR'
         ],
         0.8
     ],
-    [ 'NonBraceExprCondR' => ['NonBraceExprRangeR'], 0.3 ],
+    [ 'ExprCondR' => ['ExprRangeR'], 0.3 ],
     [
-        'NonBraceExprCond0' => [
-            'NonBraceExprRange0', 'OpTriThen',
+        'ExprCond0' => [
+            'ExprRange0', 'OpTriThen',
             'ExprRange0',         'OpTriElse',
             'ExprCond0'
         ],
         0.8
     ],
-    [ 'NonBraceExprCond0' => ['NonBraceExprRange0'], 0.3 ],
+    [ 'ExprCond0' => ['ExprRange0'], 0.3 ],
 
     # NonBrace range and other precedence levels
     [
-        'NonBraceExprRangeR' =>
-          [ 'NonBraceExprLogOr0', 'OpRange', 'ExprLogOrR' ],
+        'ExprRangeR' =>
+          [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ],
         0.8
     ],
-    [ 'NonBraceExprRangeR' => ['NonBraceExprLogOrR'], 0.3 ],
+    [ 'ExprRangeR' => ['ExprLogOrR'], 0.3 ],
     [
-        'NonBraceExprRange0' =>
-          [ 'NonBraceExprLogOr0', 'OpRange', 'ExprLogOr0' ],
+        'ExprRange0' =>
+          [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ],
         0.8
     ],
-    [ 'NonBraceExprRange0' => ['NonBraceExprLogOr0'], 0.3 ],
+    [ 'ExprRange0' => ['ExprLogOr0'], 0.3 ],
 
 # Continue through precedence chain: LogOr -> LogAnd -> BinOr -> BinAnd -> Eq -> Neq -> Shift -> Add -> Mul -> Regex -> Power -> Inc -> Arrow -> Value
-    [ 'NonBraceExprLogOrR' => [ 'NonBraceExprLogOr0', 'OpLogOr', 'NonBraceExprLogAndR' ], 0.8 ],
-    [ 'NonBraceExprLogOrR' => ['NonBraceExprLogAndR'], 0.3 ],
-    [ 'NonBraceExprLogOr0' => [ 'NonBraceExprLogOr0', 'OpLogOr', 'NonBraceExprLogAnd0' ], 0.8 ],
-    [ 'NonBraceExprLogOr0' => ['NonBraceExprLogAnd0'], 0.3 ],
+    [ 'ExprLogOrR' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndR' ], 0.8 ],
+    [ 'ExprLogOrR' => ['ExprLogAndR'], 0.3 ],
+    [ 'ExprLogOr0' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAnd0' ], 0.8 ],
+    [ 'ExprLogOr0' => ['ExprLogAnd0'], 0.3 ],
 
     # NonBrace logical AND expressions
-    [ 'NonBraceExprLogAndR' => [ 'NonBraceExprLogAnd0', 'OpLogAnd', 'NonBraceExprBinOrR' ], 0.8 ],
-    [ 'NonBraceExprLogAndR' => ['NonBraceExprBinOrR'], 0.3 ],
-    [ 'NonBraceExprLogAnd0' => [ 'NonBraceExprLogAnd0', 'OpLogAnd', 'NonBraceExprBinOr0' ], 0.8 ],
-    [ 'NonBraceExprLogAnd0' => ['NonBraceExprBinOr0'], 0.3 ],
+    [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ], 0.8 ],
+    [ 'ExprLogAndR' => ['ExprBinOrR'], 0.3 ],
+    [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOr0' ], 0.8 ],
+    [ 'ExprLogAnd0' => ['ExprBinOr0'], 0.3 ],
 
     # NonBrace binary OR expressions
-    [ 'NonBraceExprBinOrR' => ['NonBraceExprBinAndR'], 0.3 ],
-    [ 'NonBraceExprBinOr0' => ['NonBraceExprBinAnd0'], 0.3 ],
+    [ 'ExprBinOrR' => ['ExprBinAndR'], 0.3 ],
+    [ 'ExprBinOr0' => ['ExprBinAnd0'], 0.3 ],
 
     # NonBrace binary AND expressions
-    [ 'NonBraceExprBinAndR' => ['NonBraceExprEqR'], 0.3 ],
-    [ 'NonBraceExprBinAnd0' => ['NonBraceExprEq0'], 0.3 ],
+    [ 'ExprBinAndR' => ['ExprEqR'], 0.3 ],
+    [ 'ExprBinAnd0' => ['ExprEq0'], 0.3 ],
 
     # NonBrace equality expressions (this is what we were missing!)
     [
-        'NonBraceExprEqR' =>
-          [ 'NonBraceExprNeq0', 'OpEqual', 'NonBraceExprNeqR' ],
+        'ExprEqR' =>
+          [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ],
         0.8
     ],
-    [ 'NonBraceExprEqR' => ['NonBraceExprNeqR'], 0.3 ],
+    [ 'ExprEqR' => ['ExprNeqR'], 0.3 ],
     [
-        'NonBraceExprEq0' =>
-          [ 'NonBraceExprNeq0', 'OpEqual', 'NonBraceExprNeq0' ],
+        'ExprEq0' =>
+          [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ],
         0.8
     ],
-    [ 'NonBraceExprEq0' => ['NonBraceExprNeq0'], 0.3 ],
+    [ 'ExprEq0' => ['ExprNeq0'], 0.3 ],
 
     # NonBrace inequality expressions  
-    [ 'NonBraceExprNeqR' => [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShiftR' ], 0.8 ],
-    [ 'NonBraceExprNeqR' => ['NonBraceExprShiftR'], 0.3 ],
-    [ 'NonBraceExprNeq0' => [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShift0' ], 0.8 ],
-    [ 'NonBraceExprNeq0' => ['NonBraceExprShift0'], 0.3 ],
+    [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ], 0.8 ],
+    [ 'ExprNeqR' => ['ExprShiftR'], 0.3 ],
+    [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ], 0.8 ],
+    [ 'ExprNeq0' => ['ExprShift0'], 0.3 ],
 
     # NonBrace shift expressions
-    [ 'NonBraceExprShiftR' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddR' ], 0.8 ],
-    [ 'NonBraceExprShiftR' => ['NonBraceExprAddR'], 0.3 ],
-    [ 'NonBraceExprShift0' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAdd0' ], 0.8 ],
-    [ 'NonBraceExprShift0' => ['NonBraceExprAdd0'], 0.3 ],
-    [ 'NonBraceExprShiftU' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddU' ], 0.8 ],
-    [ 'NonBraceExprShiftU' => ['NonBraceExprAddU'], 0.3 ],
+    [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ], 0.8 ],
+    [ 'ExprShiftR' => ['ExprAddR'], 0.3 ],
+    [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd0' ], 0.8 ],
+    [ 'ExprShift0' => ['ExprAdd0'], 0.3 ],
+    [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ], 0.8 ],
+    [ 'ExprShiftU' => ['ExprAddU'], 0.3 ],
 
     # NonBrace addition expressions  
-    [ 'NonBraceExprAddR' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulR' ], 0.8 ],
-    [ 'NonBraceExprAddR' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulR' ], 0.8 ], 
-    [ 'NonBraceExprAddR' => ['NonBraceExprMulR'], 0.3 ],
-    [ 'NonBraceExprAdd0' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMul0' ], 0.8 ],
-    [ 'NonBraceExprAdd0' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMul0' ], 0.8 ],
-    [ 'NonBraceExprAdd0' => ['NonBraceExprMul0'], 0.3 ],
-    [ 'NonBraceExprAddU' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulU' ], 0.8 ],
-    [ 'NonBraceExprAddU' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulU' ], 0.8 ],
-    [ 'NonBraceExprAddU' => ['NonBraceExprMulU'], 0.3 ],
+    [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ], 0.8 ],
+    [ 'ExprAddR' => [ 'ExprAddU', '.', 'ExprMulR' ], 0.8 ], 
+    [ 'ExprAddR' => ['ExprMulR'], 0.3 ],
+    [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ], 0.8 ],
+    [ 'ExprAdd0' => [ 'ExprAddU', '.', 'ExprMul0' ], 0.8 ],
+    [ 'ExprAdd0' => ['ExprMul0'], 0.3 ],
+    [ 'ExprAddU' => [ 'ExprAddU', 'OpAdd', 'ExprMulU' ], 0.8 ],
+    [ 'ExprAddU' => [ 'ExprAddU', '.', 'ExprMulU' ], 0.8 ],
+    [ 'ExprAddU' => ['ExprMulU'], 0.3 ],
 
     # NonBrace multiplication expressions
-    [ 'NonBraceExprMulR' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexR' ], 0.8 ],
-    [ 'NonBraceExprMulR' => ['NonBraceExprRegexR'], 0.3 ],
-    [ 'NonBraceExprMul0' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegex0' ], 0.8 ],
-    [ 'NonBraceExprMul0' => ['NonBraceExprRegex0'], 0.3 ],
-    [ 'NonBraceExprMulU' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexU' ], 0.8 ],
-    [ 'NonBraceExprMulU' => ['NonBraceExprRegexU'], 0.3 ],
+    [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ], 0.8 ],
+    [ 'ExprMulR' => ['ExprRegexR'], 0.3 ],
+    [ 'ExprMul0' => [ 'ExprMulU', 'OpMulti', 'ExprRegex0' ], 0.8 ],
+    [ 'ExprMul0' => ['ExprRegex0'], 0.3 ],
+    [ 'ExprMulU' => [ 'ExprMulU', 'OpMulti', 'ExprRegexU' ], 0.8 ],
+    [ 'ExprMulU' => ['ExprRegexU'], 0.3 ],
 
     # NonBrace regex expressions - ADD OpRegex support for print statements
-    [ 'NonBraceExprRegexR' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnaryR' ], 0.8 ],
-    [ 'NonBraceExprRegexR' => ['NonBraceExprUnaryR'], 0.3 ],
-    [ 'NonBraceExprRegex0' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnary0' ], 0.8 ],
-    [ 'NonBraceExprRegex0' => ['NonBraceExprUnary0'], 0.3 ],
-    [ 'NonBraceExprRegexU' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnaryU' ], 0.8 ],
-    [ 'NonBraceExprRegexU' => ['NonBraceExprUnaryU'], 0.3 ],
+    [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ], 0.8 ],
+    [ 'ExprRegexR' => ['ExprUnaryR'], 0.3 ],
+    [ 'ExprRegex0' => [ 'ExprRegexU', 'OpRegex', 'ExprUnary0' ], 0.8 ],
+    [ 'ExprRegex0' => ['ExprUnary0'], 0.3 ],
+    [ 'ExprRegexU' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryU' ], 0.8 ],
+    [ 'ExprRegexU' => ['ExprUnaryU'], 0.3 ],
 
     # NonBrace unary expressions
-    [ 'NonBraceExprUnaryR' => [ 'OpUnary', 'NonBraceExprUnaryR' ], 0.8 ],
-    [ 'NonBraceExprUnaryR' => [ 'FileTestOp', 'NonBraceExprUnaryR' ], 0.8 ],
-    [ 'NonBraceExprUnaryR' => ['NonBraceExprPowerR'], 0.3 ],
-    [ 'NonBraceExprUnary0' => [ 'OpUnary', 'NonBraceExprUnary0' ], 0.8 ],
-    [ 'NonBraceExprUnary0' => [ 'FileTestOp', 'NonBraceExprUnary0' ], 0.8 ],
-    [ 'NonBraceExprUnary0' => ['NonBraceExprPower0'], 0.3 ],
-    [ 'NonBraceExprUnaryU' => [ 'OpUnary', 'NonBraceExprUnaryU' ], 0.8 ],
-    [ 'NonBraceExprUnaryU' => [ 'FileTestOp', 'NonBraceExprUnaryU' ], 0.8 ],
-    [ 'NonBraceExprUnaryU' => ['NonBraceExprPowerU'], 0.3 ],
+    [ 'ExprUnaryR' => [ 'OpUnary', 'ExprUnaryR' ], 0.8 ],
+    [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ], 0.8 ],
+    [ 'ExprUnaryR' => ['ExprPowerR'], 0.3 ],
+    [ 'ExprUnary0' => [ 'OpUnary', 'ExprUnary0' ], 0.8 ],
+    [ 'ExprUnary0' => [ 'FileTestOp', 'ExprUnary0' ], 0.8 ],
+    [ 'ExprUnary0' => ['ExprPower0'], 0.3 ],
+    [ 'ExprUnaryU' => [ 'OpUnary', 'ExprUnaryU' ], 0.8 ],
+    [ 'ExprUnaryU' => [ 'FileTestOp', 'ExprUnaryU' ], 0.8 ],
+    [ 'ExprUnaryU' => ['ExprPowerU'], 0.3 ],
 
     # NonBrace power expressions
-    [ 'NonBraceExprPowerR' => [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnaryR' ], 0.8 ],
-    [ 'NonBraceExprPowerR' => ['NonBraceExprIncR'], 0.3 ],
-    [ 'NonBraceExprPower0' => [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnary0' ], 0.8 ],
-    [ 'NonBraceExprPower0' => ['NonBraceExprInc0'], 0.3 ],
-    [ 'NonBraceExprPowerU' => [ 'NonBraceExprIncU', 'OpPower', 'NonBraceExprUnaryU' ], 0.8 ],
-    [ 'NonBraceExprPowerU' => ['NonBraceExprIncU'], 0.3 ],
+    [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ], 0.8 ],
+    [ 'ExprPowerR' => ['ExprIncR'], 0.3 ],
+    [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary0' ], 0.8 ],
+    [ 'ExprPower0' => ['ExprInc0'], 0.3 ],
+    [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnaryU' ], 0.8 ],
+    [ 'ExprPowerU' => ['ExprIncU'], 0.3 ],
 
     # NonBrace increment expressions
-    [ 'NonBraceExprIncR' => [ 'OpInc', 'NonBraceExprIncR' ], 0.8 ],
-    [ 'NonBraceExprIncR' => [ 'NonBraceExprIncR', 'OpInc' ], 0.8 ],
-    [ 'NonBraceExprIncR' => ['NonBraceExprArrowR'], 0.3 ],
-    [ 'NonBraceExprInc0' => [ 'OpInc', 'NonBraceExprInc0' ], 0.8 ],
-    [ 'NonBraceExprInc0' => [ 'NonBraceExprInc0', 'OpInc' ], 0.8 ],
-    [ 'NonBraceExprInc0' => ['NonBraceExprArrow0'], 0.3 ],
-    [ 'NonBraceExprIncU' => [ 'OpInc', 'NonBraceExprIncU' ], 0.8 ],
-    [ 'NonBraceExprIncU' => [ 'NonBraceExprIncU', 'OpInc' ], 0.8 ],
-    [ 'NonBraceExprIncU' => ['NonBraceExprArrowU'], 0.3 ],
+    [ 'ExprIncR' => [ 'OpInc', 'ExprIncR' ], 0.8 ],
+    [ 'ExprIncR' => [ 'ExprIncR', 'OpInc' ], 0.8 ],
+    [ 'ExprIncR' => ['ExprArrowR'], 0.3 ],
+    [ 'ExprInc0' => [ 'OpInc', 'ExprInc0' ], 0.8 ],
+    [ 'ExprInc0' => [ 'ExprInc0', 'OpInc' ], 0.8 ],
+    [ 'ExprInc0' => ['ExprArrow0'], 0.3 ],
+    [ 'ExprIncU' => [ 'OpInc', 'ExprIncU' ], 0.8 ],
+    [ 'ExprIncU' => [ 'ExprIncU', 'OpInc' ], 0.8 ],
+    [ 'ExprIncU' => ['ExprArrowU'], 0.3 ],
 
     # NonBrace arrow expressions - use ArrowChain like regular ExprArrow* rules
-    [ 'NonBraceExprArrowR' => [ 'NonBraceExprValueR', 'ArrowChain' ], 0.8 ],
-    [ 'NonBraceExprArrowR' => ['NonBraceExprValueR'], 0.3 ],
-    [ 'NonBraceExprArrow0' => [ 'NonBraceExprValue0', 'ArrowChain' ], 0.8 ],
-    [ 'NonBraceExprArrow0' => ['NonBraceExprValue0'], 0.3 ],
-    [ 'NonBraceExprArrowU' => [ 'NonBraceExprValueU', 'ArrowChain' ], 0.8 ],
-    [ 'NonBraceExprArrowU' => ['NonBraceExprValueU'], 0.3 ],
+    [ 'ExprArrowR' => [ 'ExprValueUR', 'ArrowChain' ], 0.8 ],
+    [ 'ExprArrowR' => ['ExprValueUR'], 0.3 ],
+    [ 'ExprArrow0' => [ 'ExprValueU0', 'ArrowChain' ], 0.8 ],
+    [ 'ExprArrow0' => ['ExprValueU0'], 0.3 ],
+    [ 'ExprArrowU' => [ 'ExprValueUU', 'ArrowChain' ], 0.8 ],
+    [ 'ExprArrowU' => ['ExprValueUU'], 0.3 ],
 
-    # NonBraceExprValue* rules
-    [ 'NonBraceExprValueU' => ['NonBraceValue'],       1.0 ],
-    [ 'NonBraceExprValueR' => ['NonBraceValue'],       0.8 ],
-    [ 'NonBraceExprValueR' => ['BuiltinFunctionCall'], 0.6 ],  # Built-in functions for or/and contexts
-    [ 'NonBraceExprValueR' => ['OpListKeywordExpr'],   0.5 ],
-    [ 'NonBraceExprValueR' => ['OpAssignKeywordExpr'], 0.5 ],
-    [ 'NonBraceExprValueR' => ['OpUnaryKeywordExpr'],  0.5 ],
-    [ 'NonBraceExprValue0' => ['NonBraceValue'],       0.8 ],
-    [ 'NonBraceExprValue0' => ['OpUnaryKeywordExpr'],  0.5 ],
-    [ 'NonBraceValue'      => ['Variable'],            0.4 ],
-    [ 'NonBraceValue'      => ['QualifiedIdentifier'], 0.4 ],  # Foo::Bar for method calls
-    [ 'NonBraceValue'      => ['Identifier'],          0.3 ],  # Plain identifiers (lower priority)
-    [ 'NonBraceValue'      => ['Number'],              0.3 ],
-    [ 'NonBraceValue'      => ['UnaryExpression'],     0.3 ],
-    [ 'NonBraceValue'      => ['QuotedString'],        0.3 ],
+    # ExprValueU* rules
+    [ 'ExprValueUU' => ['Value'],       1.0 ],
+    [ 'ExprValueUR' => ['Value'],       0.8 ],
+    [ 'ExprValueUR' => ['BuiltinFunctionCall'], 0.6 ],  # Built-in functions for or/and contexts
+    [ 'ExprValueUR' => ['OpListKeywordExpr'],   0.5 ],
+    [ 'ExprValueUR' => ['OpAssignKeywordExpr'], 0.5 ],
+    [ 'ExprValueUR' => ['OpUnaryKeywordExpr'],  0.5 ],
+    [ 'ExprValueU0' => ['Value'],       0.8 ],
+    [ 'ExprValueU0' => ['OpUnaryKeywordExpr'],  0.5 ],
+    [ 'Value'      => ['Variable'],            0.4 ],
+    [ 'Value'      => ['QualifiedIdentifier'], 0.4 ],  # Foo::Bar for method calls
+    [ 'Value'      => ['Identifier'],          0.3 ],  # Plain identifiers (lower priority)
+    [ 'Value'      => ['Number'],              0.3 ],
+    [ 'Value'      => ['UnaryExpression'],     0.3 ],
+    [ 'Value'      => ['QuotedString'],        0.3 ],
 
     # Unary expressions (for things like -1e10, !$flag, -d 't', etc.)
-    [ 'UnaryExpression' => [ 'OpUnary', 'NonBraceValue' ], 1.0 ],
-    [ 'UnaryExpression' => [ 'FileTestOp', 'NonBraceValue' ], 1.0 ],
-    [ 'NonBraceValue'   => [ '(', 'Expression', ')' ],     0.3 ],
-    [ 'NonBraceValue'   => ['ArrayRef'],                   0.3 ],
-    [ 'NonBraceValue'   => ['HashRef'],                    0.3 ],  # Allow hash refs in push/etc
-    [ 'NonBraceValue'   => ['FunctionCall'],               0.3 ],
-    [ 'NonBraceValue'   => [ 'QLikeValue', 'ElemSeq1' ],   1.0 ],  # qw"b"[0], etc. in expressions
-    [ 'NonBraceValue'   => ['QLikeValue'],                 0.8 ],
-    [ 'NonBraceValue'   => ['@'],                          0.3 ],
-    [ 'NonBraceValue'   => ['FieldDecl'],                  0.3 ],
+    [ 'UnaryExpression' => [ 'OpUnary', 'Value' ], 1.0 ],
+    [ 'UnaryExpression' => [ 'FileTestOp', 'Value' ], 1.0 ],
+    [ 'Value'   => [ '(', 'Expression', ')' ],     0.3 ],
+    [ 'Value'   => ['ArrayRef'],                   0.3 ],
+    [ 'Value'   => ['HashRef'],                    0.3 ],  # Allow hash refs in push/etc
+    [ 'Value'   => ['EvalBlock'],                  0.3 ],  # eval { } - keyword disambiguates from bare block
+    [ 'Value'   => ['FunctionCall'],               0.3 ],
+    [ 'Value'   => [ 'QLikeValue', 'ElemSeq1' ],   1.0 ],  # qw"b"[0], etc. in expressions
+    [ 'Value'   => ['QLikeValue'],                 0.8 ],
+    [ 'Value'   => ['Diamond'],                    0.3 ],  # <$fh>, <STDIN>, <> constructs
+    [ 'Value'   => ['@'],                          0.3 ],
+    [ 'Value'   => ['FieldDecl'],                  0.3 ],
 
     [ 'ExprNameAnd' => [ 'ExprNameAnd', 'OpNameAnd', 'ExprNameNot' ], 0.8 ],
     [ 'ExprNameAnd' => ['ExprNameNot'],                               0.3 ],
@@ -693,113 +695,113 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['BuiltinFunctionCall'], 0.3 ], # Built-in function calls
 
     # Print expressions following guacamole OpKeywordPrintExpr pattern
-    [ 'PrintExpr' => [ 'print', 'NonBraceExprComma' ], 1.0 ],   # print "string"
+    [ 'PrintExpr' => [ 'print', 'ExprComma' ], 1.0 ],   # print "string"
     [ 'PrintExpr' => ['print'],                        1.0 ],   # bare print
     
     # Print with filehandle: print FILEHANDLE "string"
-    [ 'PrintExpr' => [ 'print', 'Identifier', 'NonBraceExprComma' ], 1.0 ],         # print FH "string"
+    [ 'PrintExpr' => [ 'print', 'Identifier', 'ExprComma' ], 1.0 ],         # print FH "string"
     [ 'PrintExpr' => [ 'print', 'Identifier' ], 1.0 ],                              # print FH
-    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'NonBraceExprComma' ], 1.0 ],  # print STDOUT "string"
+    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'ExprComma' ], 1.0 ],  # print STDOUT "string"
     [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ], 1.0 ],                       # print STDOUT
 
     # Pattern match statements merged into BaseStatement => QLikeValue (removed wrapper)
 
     # Die expressions following same pattern as PrintExpr
-    [ 'DieExpr' => [ 'die', 'NonBraceExprComma' ], 1.0 ],    # die "string"
+    [ 'DieExpr' => [ 'die', 'ExprComma' ], 1.0 ],    # die "string"
     [ 'DieExpr' => ['die'],                        1.0 ],    # bare die
 
     # Warn expressions following same pattern as DieExpr
-    [ 'WarnExpr' => [ 'warn', 'NonBraceExprComma' ], 1.0 ],  # warn "string"
+    [ 'WarnExpr' => [ 'warn', 'ExprComma' ], 1.0 ],  # warn "string"
     [ 'WarnExpr' => ['warn'],                        1.0 ],  # bare warn
 
     # Built-in function calls (chdir, mkdir, etc.)
-    [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'NonBraceExprComma' ], 1.0 ],
+    [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'ExprComma' ], 1.0 ],
     [ 'BuiltinFunctionCall' => [ 'BuiltinFunction' ], 1.0 ],
     [ 'BuiltinFunctionCall' => ['OpenExpr'], 1.0 ],  # Special handling for open
     [ 'BuiltinFunction' => [qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/] ],
 
     # Open expressions with inline variable declarations
     # Two-argument open: open my $fh, "file" or open our $fh, "file"
-    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
-    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
+    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'ExprComma' ], 1.0 ],
+    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'ExprComma' ], 1.0 ],
 
     # Three-argument open with inline declarations: open my $fh, "<", $file
-    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'NonBraceExprComma', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
-    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'NonBraceExprComma', 'OpComma', 'NonBraceExprComma' ], 1.0 ],
+    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'ExprComma', 'OpComma', 'ExprComma' ], 1.0 ],
+    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'ExprComma', 'OpComma', 'ExprComma' ], 1.0 ],
 
     # Standard open patterns (already working, kept for completeness)
-    [ 'OpenExpr' => [ 'open', 'NonBraceExprComma' ], 1.0 ],
+    [ 'OpenExpr' => [ 'open', 'ExprComma' ], 1.0 ],
 
-# NonBraceExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
+# ExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
     [
-        'NonBraceExprComma' =>
-          [ 'NonBraceExprAssignL', 'OpComma', 'NonBraceExprComma' ],
+        'ExprComma' =>
+          [ 'ExprAssignL', 'OpComma', 'ExprComma' ],
         0.8
     ],
-    [ 'NonBraceExprComma' => [ 'NonBraceExprAssignL', 'OpComma' ], 0.7 ]
+    [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ], 0.7 ]
     ,                                                           # Trailing comma
-    [ 'NonBraceExprComma' => ['NonBraceExprAssignR'], 0.3 ],    # Single item
+    [ 'ExprComma' => ['ExprAssignR'], 0.3 ],    # Single item
 
-    # NonBraceExprAssignL for left-associative assignments in print context
+    # ExprAssignL for left-associative assignments in print context
     [
-        'NonBraceExprAssignL' =>
-          [ 'NonBraceExprCond0', 'OpAssign', 'NonBraceExprAssignL' ],
+        'ExprAssignL' =>
+          [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ],
         0.8
     ],
-    [ 'NonBraceExprAssignL' => ['NonBraceExprCondL'], 0.3 ],
+    [ 'ExprAssignL' => ['ExprCondL'], 0.3 ],
 
-    # NonBraceExprCondL for conditional expressions in print context
+    # ExprCondL for conditional expressions in print context
     [
-        'NonBraceExprCondL' => [
-            'NonBraceExprRange0', 'OpTriThen',
-            'NonBraceExprRangeL', 'OpTriElse',
-            'NonBraceExprCondL'
+        'ExprCondL' => [
+            'ExprRange0', 'OpTriThen',
+            'ExprRangeL', 'OpTriElse',
+            'ExprCondL'
         ],
         0.8
     ],
-    [ 'NonBraceExprCondL' => ['NonBraceExprRangeL'], 0.3 ],
+    [ 'ExprCondL' => ['ExprRangeL'], 0.3 ],
 
-    # NonBraceExprRangeL for range expressions in print context
+    # ExprRangeL for range expressions in print context
     [
-        'NonBraceExprRangeL' =>
-          [ 'NonBraceExprLogOr0', 'OpRange', 'NonBraceExprLogOrL' ],
+        'ExprRangeL' =>
+          [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ],
         0.8
     ],
-    [ 'NonBraceExprRangeL' => ['NonBraceExprLogOrL'], 0.3 ],
+    [ 'ExprRangeL' => ['ExprLogOrL'], 0.3 ],
 
     # Continue chain for NonBrace left-associative expressions  
-    [ 'NonBraceExprLogOrL'  => ['NonBraceExprLogAndL'], 0.3 ],
-    [ 'NonBraceExprLogAndL' => ['NonBraceExprBinOrL'],  0.3 ],
-    [ 'NonBraceExprBinOrL'  => ['NonBraceExprBinAndL'], 0.3 ],
-    [ 'NonBraceExprBinAndL' => ['NonBraceExprEqL'],     0.3 ],
-    [ 'NonBraceExprEqL'     => ['NonBraceExprNeqL'],    0.3 ],
-    [ 'NonBraceExprNeqL' => [ 'NonBraceExprShift0', 'OpInequal', 'NonBraceExprShiftL' ], 0.8 ],
-    [ 'NonBraceExprNeqL'    => ['NonBraceExprShiftL'],  0.3 ],
+    [ 'ExprLogOrL'  => ['ExprLogAndL'], 0.3 ],
+    [ 'ExprLogAndL' => ['ExprBinOrL'],  0.3 ],
+    [ 'ExprBinOrL'  => ['ExprBinAndL'], 0.3 ],
+    [ 'ExprBinAndL' => ['ExprEqL'],     0.3 ],
+    [ 'ExprEqL'     => ['ExprNeqL'],    0.3 ],
+    [ 'ExprNeqL' => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ], 0.8 ],
+    [ 'ExprNeqL'    => ['ExprShiftL'],  0.3 ],
     
     # NonBrace shift expressions (left-associative)
-    [ 'NonBraceExprShiftL' => [ 'NonBraceExprShiftU', 'OpShift', 'NonBraceExprAddL' ], 0.8 ],
-    [ 'NonBraceExprShiftL' => ['NonBraceExprAddL'], 0.3 ],
+    [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ], 0.8 ],
+    [ 'ExprShiftL' => ['ExprAddL'], 0.3 ],
     
     # NonBrace addition expressions (left-associative)
-    [ 'NonBraceExprAddL' => [ 'NonBraceExprAddU', 'OpAdd', 'NonBraceExprMulL' ], 0.8 ],
-    [ 'NonBraceExprAddL' => [ 'NonBraceExprAddU', '.', 'NonBraceExprMulL' ], 0.8 ],
-    [ 'NonBraceExprAddL' => ['NonBraceExprMulL'], 0.3 ],
+    [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ], 0.8 ],
+    [ 'ExprAddL' => [ 'ExprAddU', '.', 'ExprMulL' ], 0.8 ],
+    [ 'ExprAddL' => ['ExprMulL'], 0.3 ],
     
     # NonBrace multiplication expressions (left-associative)
-    [ 'NonBraceExprMulL' => [ 'NonBraceExprMulU', 'OpMulti', 'NonBraceExprRegexL' ], 0.8 ],
-    [ 'NonBraceExprMulL' => ['NonBraceExprRegexL'], 0.3 ],
+    [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ], 0.8 ],
+    [ 'ExprMulL' => ['ExprRegexL'], 0.3 ],
     
-    [ 'NonBraceExprRegexL' => [ 'NonBraceExprRegexU', 'OpRegex', 'NonBraceExprUnaryL' ], 0.8 ],
-    [ 'NonBraceExprRegexL' => ['NonBraceExprUnaryL'], 0.3 ],
-    [ 'NonBraceExprUnaryL'  => [ 'OpUnary', 'NonBraceExprUnaryL' ], 0.8 ],
-    [ 'NonBraceExprUnaryL'  => [ 'FileTestOp', 'NonBraceExprUnaryL' ], 0.8 ],
-    [ 'NonBraceExprUnaryL'  => ['NonBraceExprPowerL'],  0.3 ],
-    [ 'NonBraceExprPowerL'  => ['NonBraceExprIncL'],    0.3 ],
-    [ 'NonBraceExprIncL' => [ 'OpInc', 'NonBraceExprIncL' ], 0.8 ],      # Pre-increment
-    [ 'NonBraceExprIncL' => [ 'NonBraceExprIncL', 'OpInc' ], 0.8 ],      # Post-increment  
-    [ 'NonBraceExprIncL'    => ['NonBraceExprArrowL'],  0.3 ],
-    [ 'NonBraceExprArrowL'  => ['NonBraceExprValueL'],  0.3 ],
-    [ 'NonBraceExprValueL'  => ['NonBraceValue'],       0.8 ],
+    [ 'ExprRegexL' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ], 0.8 ],
+    [ 'ExprRegexL' => ['ExprUnaryL'], 0.3 ],
+    [ 'ExprUnaryL'  => [ 'OpUnary', 'ExprUnaryL' ], 0.8 ],
+    [ 'ExprUnaryL'  => [ 'FileTestOp', 'ExprUnaryL' ], 0.8 ],
+    [ 'ExprUnaryL'  => ['ExprPowerL'],  0.3 ],
+    [ 'ExprPowerL'  => ['ExprIncL'],    0.3 ],
+    [ 'ExprIncL' => [ 'OpInc', 'ExprIncL' ], 0.8 ],      # Pre-increment
+    [ 'ExprIncL' => [ 'ExprIncL', 'OpInc' ], 0.8 ],      # Post-increment  
+    [ 'ExprIncL'    => ['ExprArrowL'],  0.3 ],
+    [ 'ExprArrowL'  => ['ExprValueUL'],  0.3 ],
+    [ 'ExprValueUL'  => ['Value'],       0.8 ],
 
     # Add missing operators for ternary expressions
     [ 'OpTriThen' => ['?'] ],
@@ -828,8 +830,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     # List operator syntax for user-defined functions (statement context only)
     # This allows function calls without parentheses like: func "arg", $var
     # Only available in BaseStatement, not in Value/Expression to avoid ambiguity
-    [ 'ListOperatorCall' => [ 'Identifier', 'NonBraceExprComma' ], 1.0 ],               # func "arg", $var
-    [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'NonBraceExprComma' ], 1.0 ],     # Pkg::func "arg", $var
+    [ 'ListOperatorCall' => [ 'Identifier', 'ExprComma' ], 1.0 ],               # func "arg", $var
+    [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'ExprComma' ], 1.0 ],     # Pkg::func "arg", $var
 
 # Expression block for grep/map/sort merged into Block
     # Removed ExpressionBlock - Block already handles both Expression and StatementList
