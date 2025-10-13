@@ -900,7 +900,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Variable' => ['VariableBase'], 0.9 ],    # Lower priority for base case
 
     # Base variable patterns (without subscripts) - all sigils in one rule
-    [ 'VariableBase' => [qr/[\$@%&*]\w+/] ],  # All variable types with sigils
+    [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*/] ],  # All variable types with sigils, including qualified (e.g., *Package::Name)
     [ 'VariableBase' => [qr/\$#\w+/] ],       # Array length variables ($#array)
 
     # Global variables following guacamole GlobalVariables pattern
@@ -946,7 +946,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     [ 'ArrayElem'    => [ '[', 'Expression', ']' ], 1.0 ],
     [ 'HashElem'     => [ '{', 'Expression', '}' ], 1.0 ],
-    [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*/] ],
+    [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/] ],  # Support qualified identifiers, including pathological cases like foo::::bar
     [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
     [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
     # q{} and qq{} quote operators with balanced brace matching (supports nested braces)
