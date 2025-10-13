@@ -132,8 +132,9 @@ class Chalk::Preprocessor::HeredocV2 {
         }
 
         # Find comment range (everything after # to end of line)
-        if ($working_line =~ /#/) {
-            push @excluded_ranges, [pos($working_line) - 1, length($working_line)];
+        if ($working_line =~ /(#)/) {
+            my $comment_pos = $-[0];  # Start position of the match
+            push @excluded_ranges, [$comment_pos, length($working_line)];
         }
 
         # Helper to check if position is excluded
