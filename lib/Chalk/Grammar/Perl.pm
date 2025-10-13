@@ -274,6 +274,19 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'QLikeValue' => [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}], 2.0 ],  # s#search#replace#flags
     # s operator split to allow comments - works with paired delimiters like s[...][...] (search, replacement)
     [ 'QLikeValue' => [ 'SOp', 'QDelimited', 'MDelimited' ], 0.5 ],    # s with delimiters + optional flags on replacement (lower priority)
+    # tr and y operators with specific delimiters - similar to s/// patterns
+    # Higher probabilities (2.0) to prefer these over the general TROp/YOp + QDelimited + QDelimited rule
+    [ 'QLikeValue' => [qr{tr/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*}], 2.0 ],  # tr/search/replace/flags
+    [ 'QLikeValue' => [qr{tr\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}], 2.0 ],  # tr|search|replace|flags
+    [ 'QLikeValue' => [qr{tr!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}], 2.0 ],  # tr!search!replace!flags
+    [ 'QLikeValue' => [qr{tr#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}], 2.0 ],  # tr#search#replace#flags
+    [ 'QLikeValue' => [qr{y/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*}], 2.0 ],   # y/search/replace/flags
+    [ 'QLikeValue' => [qr{y\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}], 2.0 ], # y|search|replace|flags
+    [ 'QLikeValue' => [qr{y!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}], 2.0 ],   # y!search!replace!flags
+    [ 'QLikeValue' => [qr{y#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}], 2.0 ],   # y#search#replace#flags
+    # tr/y operators split to allow comments - works with paired delimiters like tr[...][...] (search, replacement)
+    [ 'QLikeValue' => [ 'TROp', 'QDelimited', 'QDelimited' ], 0.5 ],    # tr with delimiters + optional flags
+    [ 'QLikeValue' => [ 'YOp', 'QDelimited', 'QDelimited' ], 0.5 ],     # y with delimiters + optional flags
     [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ],    # /.../flags with escapes
     [ 'QLikeValue' => [qr/`[^`]*`/] ],            # `backticks`
 
@@ -962,6 +975,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'MOp' => [qr/m(?!s)/] ],   # m match operator (not ms - negative lookahead for future s/// support)
     [ 'QROp' => [qr/qr/] ],      # qr compiled regex operator
     [ 'SOp' => [qr/s/] ],        # s substitution operator
+    [ 'TROp' => [qr/tr/] ],      # tr transliteration operator
+    [ 'YOp' => [qr/y/] ],        # y transliteration operator (alias for tr)
 
     # Delimited quote content - various delimiters
     [ 'QDelimited' => [qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/] ],  # {} with balanced braces
