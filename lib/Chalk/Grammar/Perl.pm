@@ -100,6 +100,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ForStatement' => [ 'foreach', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
     [ 'ForStatement' => [ 'for', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
     [ 'ForStatement' => [ 'foreach', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
+    [ 'ForStatement' => [ 'for', '(', 'Expression', ')', 'Block' ], 1.0 ],      # for (list) - uses $_
+    [ 'ForStatement' => [ 'foreach', '(', 'Expression', ')', 'Block' ], 1.0 ],  # foreach (list) - uses $_
 
     # While statement - while ( condition ) { ... }
     [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ], 1.0 ],
@@ -115,6 +117,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BaseStatement' => ['ListOperatorCall'], 1.0 ],    # Function calls without parentheses (list operator syntax)
     [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
     [ 'BaseStatement' => [ 'PrintExpr', 'StatementModifier' ], 1.0 ],  # print with if/unless/etc
+    [ 'BaseStatement' => [ 'QLikeValue', 'ElemSeq1' ], 1.0 ],  # qw"b"[0] as statement
     [ 'BaseStatement' => ['QLikeValue'], 1.0 ],  # Bare regex as statement (merged from PatternMatchStatement)
     [ 'BaseStatement' => ['DieExpr'],          1.0 ],
     [ 'BaseStatement' => ['WarnExpr'],         1.0 ],
@@ -257,21 +260,21 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'VersionExpr' => [qr/v?(?:\d+\.?){1,3}/] ],
 
    # QLikeValue - qw() expressions and regex patterns matching Guacamole pattern
-    [ 'QLikeValue' => [qr/qw\([^)]*\)/] ],                        # qw(...)
-    [ 'QLikeValue' => [qr/qr\{[^}]*\}[a-z]*/] ],                  # qr{...}flags
-    [ 'QLikeValue' => [qr/qr\/((?:[^\/]|(?<=\\)\/)*)\/[a-z]*/] ]
-    ,                                              # qr/.../flags with escapes
+    # qw operator split like q/qq to allow comments between operator and delimiter
+    [ 'QLikeValue' => [ 'QWOp', 'QDelimited' ] ],                 # qw with any delimiter
+    # m operator split like q/qq/qw to allow comments between operator and delimiter
+    [ 'QLikeValue' => [ 'MOp', 'MDelimited' ] ],                  # m with any delimiter + optional flags
+    # qr operator split like m to allow comments between operator and delimiter
+    [ 'QLikeValue' => [ 'QROp', 'MDelimited' ] ],                 # qr with any delimiter + optional flags
+    # s operator with specific delimiters - specific patterns to avoid greedy QDelimited matching
+    [ 'QLikeValue' => [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}] ],  # s/search/replace/flags
+    [ 'QLikeValue' => [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}] ],  # s|search|replace|flags
+    [ 'QLikeValue' => [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}] ],  # s!search!replace!flags
+    [ 'QLikeValue' => [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}] ],  # s#search#replace#flags
+    # s operator split to allow comments - works with paired delimiters like s[...][...] (search, replacement)
+    [ 'QLikeValue' => [ 'SOp', 'QDelimited', 'MDelimited' ] ],    # s with delimiters + optional flags on replacement
     [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ],    # /.../flags with escapes
-    [ 'QLikeValue' => [qr/m![^!]*![a-z]*/] ],     # m!...!flags
-    [ 'QLikeValue' => [qr/m#[^#]*#[a-z]*/] ],     # m#...#flags
-    [ 'QLikeValue' => [qr/m\|[^|]*\|[a-z]*/] ],   # m|...|flags
     [ 'QLikeValue' => [qr/`[^`]*`/] ],            # `backticks`
-
-    # Substitution operators s/// with various delimiters (no curly braces - too ambiguous)
-    [ 'QLikeValue' => [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}] ],  # s/.../.../ with escapes
-    [ 'QLikeValue' => [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}] ],  # s|...|...| with escapes
-    [ 'QLikeValue' => [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}] ],  # s!...!...! with escapes
-    [ 'QLikeValue' => [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}] ],  # s#...#...# with escapes
 
     [ 'FieldAttributeList' => ['FieldAttribute'] ],
     [ 'FieldAttributeList' => [ 'FieldAttribute', 'FieldAttributeList' ] ],
@@ -480,6 +483,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'NonBraceValue'   => ['ArrayRef'],                   0.3 ],
     [ 'NonBraceValue'   => ['HashRef'],                    0.3 ],  # Allow hash refs in push/etc
     [ 'NonBraceValue'   => ['FunctionCall'],               0.3 ],
+    [ 'NonBraceValue'   => [ 'QLikeValue', 'ElemSeq1' ],   1.0 ],  # qw"b"[0], etc. in expressions
     [ 'NonBraceValue'   => ['QLikeValue'],                 0.8 ],
     [ 'NonBraceValue'   => ['@'],                          0.3 ],
     [ 'NonBraceValue'   => ['FieldDecl'],                  0.3 ],
@@ -689,6 +693,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc. (blocks explicitly after keywords)
     # Block removed from Value - blocks only at statement level or after keywords (not bare values)
     [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
+    [ 'Value' => [ 'QLikeValue', 'ElemSeq1' ], 1.0 ],  # qw"b"[0], qw()[1], etc. - subscripted qw/regex
     [ 'Value' => ['QLikeValue'],             0.8 ],
     [ 'Value' => ['Diamond'],                0.3 ],    # <$fh> constructs (merged from DiamondExpr)
     [ 'Value' => ['@'],                      0.3 ],
@@ -941,6 +946,10 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ElemSeq0' => ['Element'],               1.0 ],
     [ 'ElemSeq0' => [ 'Element', 'ElemSeq0' ], 0.8 ], # Multiple subscripts
 
+    # Non-empty element sequence (one or more subscripts) - for qw()[0] etc.
+    [ 'ElemSeq1' => ['Element'],               1.0 ],
+    [ 'ElemSeq1' => [ 'Element', 'ElemSeq0' ], 0.8 ],
+
     [ 'Element' => ['ArrayElem'], 1.0 ],
     [ 'Element' => ['HashElem'],  1.0 ],
 
@@ -949,19 +958,43 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/] ],  # Support qualified identifiers, including pathological cases like foo::::bar
     [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
     [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
-    # q{} and qq{} quote operators with balanced brace matching (supports nested braces)
-    # \s* allows whitespace (including newlines) between operator and delimiter
-    # Pattern matches balanced braces up to 3 levels deep
-    [ 'QuotedString' => [qr/q\s*\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/] ],   # q{} with balanced braces
-    [ 'QuotedString' => [qr/qq\s*\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/] ],  # qq{} with balanced braces
-    # Alternative quote delimiters - q(...), qq(...), q[...], qq[...], q<...>, qq<...>
-    # \s* allows whitespace (including newlines) between operator and delimiter
-    [ 'QuotedString' => [qr/q\s*\((?:[^)]|\n)*\)/] ],   # q() single-quote
-    [ 'QuotedString' => [qr/qq\s*\((?:[^)]|\n)*\)/] ],  # qq() double-quote
-    [ 'QuotedString' => [qr/q\s*\[(?:[^\]]|\n)*\]/] ],  # q[] single-quote
-    [ 'QuotedString' => [qr/qq\s*\[(?:[^\]]|\n)*\]/] ], # qq[] double-quote
-    [ 'QuotedString' => [qr/q\s*<(?:[^>]|\n)*>/] ],     # q<> single-quote
-    [ 'QuotedString' => [qr/qq\s*<(?:[^>]|\n)*>/] ],    # qq<> double-quote
+
+    # q/qq quote operators - split into operator and delimited content
+    # This allows auto_insert WS_OPT to handle comments between operator and delimiter
+    [ 'QuotedString' => [ 'QOp', 'QDelimited' ] ],
+    [ 'QuotedString' => [ 'QQOp', 'QDelimited' ] ],
+
+    # Quote operators as terminals (not literals, so auto_insert WS_OPT works)
+    [ 'QOp' => [qr/q(?!q)/] ],   # q but not qq (negative lookahead)
+    [ 'QQOp' => [qr/qq/] ],
+    [ 'QWOp' => [qr/qw/] ],      # qw word list operator
+    [ 'MOp' => [qr/m(?!s)/] ],   # m match operator (not ms - negative lookahead for future s/// support)
+    [ 'QROp' => [qr/qr/] ],      # qr compiled regex operator
+    [ 'SOp' => [qr/s/] ],        # s substitution operator
+
+    # Delimited quote content - various delimiters
+    [ 'QDelimited' => [qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/] ],  # {} with balanced braces
+    [ 'QDelimited' => [qr/\((?:[^)]|\n)*\)/] ],   # ()
+    [ 'QDelimited' => [qr/\[(?:[^\]]|\n)*\]/] ],  # []
+    [ 'QDelimited' => [qr/<(?:[^>]|\n)*>/] ],     # <>
+    [ 'QDelimited' => [qr/"(?:[^"\\]|\\.)*"/] ],  # ""
+    [ 'QDelimited' => [qr/'(?:[^'\\]|\\.)*'/] ],  # ''
+    [ 'QDelimited' => [qr{/(?:[^/\\]|\\.)*+/}] ],  # /.../
+    [ 'QDelimited' => [qr/!(?:[^!\\]|\\.)*!/] ],  # !...!
+    [ 'QDelimited' => [qr/#(?:[^#\\]|\\.)*#/] ],  # #...#
+    [ 'QDelimited' => [qr/\|(?:[^|\\]|\\.)*\|/] ],  # |...|
+
+    # Delimited match content - like QDelimited but with optional regex flags
+    [ 'MDelimited' => [qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/] ],  # {} with balanced braces + flags
+    [ 'MDelimited' => [qr/\((?:[^)]|\n)*\)[a-z]*/] ],   # () + flags
+    [ 'MDelimited' => [qr/\[(?:[^\]]|\n)*\][a-z]*/] ],  # [] + flags
+    [ 'MDelimited' => [qr/<(?:[^>]|\n)*>[a-z]*/] ],     # <> + flags
+    [ 'MDelimited' => [qr/"(?:[^"\\]|\\.)*"[a-z]*/] ],  # "" + flags
+    [ 'MDelimited' => [qr/'(?:[^'\\]|\\.)*'[a-z]*/] ],  # '' + flags
+    [ 'MDelimited' => [qr{/(?:[^/\\]|\\.)*+/[a-z]*}] ],  # /.../flags
+    [ 'MDelimited' => [qr/!(?:[^!\\]|\\.)*![a-z]*/] ],  # !...!flags
+    [ 'MDelimited' => [qr/#(?:[^#\\]|\\.)*#[a-z]*/] ],  # #...#flags
+    [ 'MDelimited' => [qr/\|(?:[^|\\]|\\.)*\|[a-z]*/] ],  # |...|flags
 
     # Punctuation
     [ 'PackageSeparator' => ['::'] ],
@@ -1012,10 +1045,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'OpListKeywordExpr' => [qr/die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/] ],
 
     # Whitespace rules (needed for auto_insert)
-    [ 'WS_OPT' => [],         0.1 ],
-    [ 'WS_OPT' => ['WS'],     1.0 ],
+    [ 'WS_OPT' => [],             0.1 ],
+    [ 'WS_OPT' => ['WS'],         1.0 ],
+    [ 'WS_OPT' => ['WS', 'WS_OPT'], 1.0 ],  # Multiple WS tokens (space + comment, etc.)
     [ 'WS'     => [qr/\s+/m], 1.0 ],
-    [ 'WS'     => [qr/#.*$/m], 1.0 ],    # Comments count as whitespace
+    [ 'WS'     => [qr/#[^\n]*\n?/m], 1.0 ],    # Comments count as whitespace (includes optional newline)
     [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ], # Comment followed by whitespace
     ]
 );
