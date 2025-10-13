@@ -22,20 +22,14 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList' ], 2.0 ],  # Shebang with whitespace before statements
     [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList', 'WS_OPT' ], 2.0 ],  # Shebang with both
 
-  # Statement lists - adapted for chalk with reduced ambiguity
-  # Prioritize simpler patterns to prevent parsing explosion
-  # StatementList following Perl semicolon rules
+  # Statement lists - adapted from guacamole grammar
   # Semicolons required between statements, optional for last statement in block
     [ 'StatementList' => [], 0.1 ],    # Empty statement list (for empty blocks)
-    [ 'StatementList' => ['Statement'], 1.0 ]
-    ,    # Single statement (last in block, no semicolon needed)
+    [ 'StatementList' => ['Statement'], 1.0 ],    # Single statement (last in block, no semicolon needed)
     [ 'StatementList' => ['BlockStatement'], 0.95 ],    # Single block statement
-    [ 'StatementList' => [ 'Statement', ';', 'StatementList' ], 0.9 ]
-    ,    # Statement + semicolon + more statements
-    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ]
-    ,    # Block + more statements
-    [ 'StatementList' => [ 'LineStatement', 'StatementList' ], 0.7 ]
-    ,    # Line + more
+    [ 'StatementList' => [ 'Statement', ';', 'StatementList' ], 0.9 ],    # Statement + semicolon + more statements
+    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ],    # Block + more statements
+    [ 'StatementList' => [ 'LineStatement', 'StatementList' ], 0.7 ],    # Line + more
 
 # BlockStatement - statements that contain blocks and don't need semicolons (following guacamole)
     [ 'BlockStatement' => ['ClassDecl'],   1.0 ],
@@ -693,7 +687,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['HashRef'],      0.3 ],
     [ 'Value' => ['FunctionCall'], 0.3 ],
     [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc.
-    [ 'Value' => ['ExpressionBlock'],        0.3 ],    # { expr } blocks
+    [ 'Value' => ['Block'],                  0.3 ],    # { expr } blocks (merged from ExpressionBlock)
     [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
     [ 'Value' => ['QLikeValue'],             0.8 ],
     [ 'Value' => ['DiamondExpr'],            0.3 ],    # <$fh> constructs
@@ -848,9 +842,9 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'ListOperatorCall' => [ 'Identifier', 'NonBraceExprComma' ], 1.0 ],               # func "arg", $var
     [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'NonBraceExprComma' ], 1.0 ],     # Pkg::func "arg", $var
 
-# Expression block for grep/map/sort - supports both single expressions and statement lists
-    [ 'ExpressionBlock' => [ '{', 'Expression',    '}' ], 1.0 ],
-    [ 'ExpressionBlock' => [ '{', 'StatementList', '}' ], 1.0 ],
+# Expression block for grep/map/sort merged into Block
+    # Removed ExpressionBlock - Block already handles both Expression and StatementList
+    # since expressions can appear in StatementList through BlockLevelExpression
 
     # Eval - supports both block and string/expression forms
     [ 'EvalBlock' => [ 'eval', 'Block' ], 1.0 ],       # eval { ... }
@@ -858,25 +852,25 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
     # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
     [
-        'UnaryKeywordExpression' => [ 'grep', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'grep', 'Block', 'Expression' ],
         1.0
     ],    # grep { ... } @list
     [ 'UnaryKeywordExpression' => [ 'grep', 'Expression' ], 1.0 ]
     ,     # grep EXPR, @list
     [
-        'UnaryKeywordExpression' => [ 'all', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'all', 'Block', 'Expression' ],
         1.0
     ],    # all { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'any', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'any', 'Block', 'Expression' ],
         1.0
     ],    # any { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'map', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'map', 'Block', 'Expression' ],
         1.0
     ],    # map { ... } @list
     [
-        'UnaryKeywordExpression' => [ 'sort', 'ExpressionBlock', 'Expression' ],
+        'UnaryKeywordExpression' => [ 'sort', 'Block', 'Expression' ],
         1.0
     ],    # sort { ... } @list
 
