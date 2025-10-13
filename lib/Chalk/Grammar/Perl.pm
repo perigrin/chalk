@@ -115,7 +115,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'BaseStatement' => ['ListOperatorCall'], 1.0 ],    # Function calls without parentheses (list operator syntax)
     [ 'BaseStatement' => ['PrintExpr'],        1.0 ],
     [ 'BaseStatement' => [ 'PrintExpr', 'StatementModifier' ], 1.0 ],  # print with if/unless/etc
-    [ 'BaseStatement' => ['PatternMatchStatement'], 1.0 ],  # Bare regex as statement
+    [ 'BaseStatement' => ['QLikeValue'], 1.0 ],  # Bare regex as statement (merged from PatternMatchStatement)
     [ 'BaseStatement' => ['DieExpr'],          1.0 ],
     [ 'BaseStatement' => ['WarnExpr'],         1.0 ],
     [ 'BaseStatement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
@@ -690,7 +690,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'Value' => ['Block'],                  0.3 ],    # { expr } blocks (merged from ExpressionBlock)
     [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
     [ 'Value' => ['QLikeValue'],             0.8 ],
-    [ 'Value' => ['DiamondExpr'],            0.3 ],    # <$fh> constructs
+    [ 'Value' => ['Diamond'],                0.3 ],    # <$fh> constructs (merged from DiamondExpr)
     [ 'Value' => ['@'],                      0.3 ],
     [ 'Value' => ['FieldDecl'],              0.3 ],
     [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
@@ -709,8 +709,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'NonBraceExprComma' ], 1.0 ],  # print STDOUT "string"
     [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ], 1.0 ],                       # print STDOUT
 
-    # Pattern match statements - bare regex as statement (implicit $_ =~ /.../ binding)
-    [ 'PatternMatchStatement' => ['QLikeValue'], 1.0 ],
+    # Pattern match statements merged into BaseStatement => QLikeValue (removed wrapper)
 
     # Die expressions following same pattern as PrintExpr
     [ 'DieExpr' => [ 'die', 'NonBraceExprComma' ], 1.0 ],    # die "string"
@@ -813,10 +812,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
     [ 'OpTriThen' => ['?'] ],
     [ 'OpTriElse' => [':'] ],
 
-    # Diamond expressions following guacamole pattern
-    [ 'DiamondExpr' => ['Diamond'], 1.0 ],
-
-    # Diamond operator: <$fh>, <STDIN>, <>, <try>
+    # Diamond operator: <$fh>, <STDIN>, <>, <try> (DiamondExpr merged into Diamond)
     [ 'Diamond' => [ '<', 'Variable',          '>' ], 1.0 ],
     [ 'Diamond' => [ '<', 'BuiltinFilehandle', '>' ], 1.0 ],
     [ 'Diamond' => [ '<', 'Identifier',        '>' ], 1.0 ],  # Bareword filehandles
