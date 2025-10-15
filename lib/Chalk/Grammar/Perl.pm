@@ -12,1072 +12,1169 @@ our @EXPORT = qw($chalk_grammar);
 
 our $chalk_grammar = Chalk::Grammar->build_grammar(
     auto_insert => ['WS_OPT'],
-    rules => [
+    rules       => [
 
-    # Program structure - adapted from original chalk grammar
-    [ 'Program' => ['StatementList'],              1.0 ],
-    [ 'Program' => [ 'StatementList', 'WS_OPT' ],  1.0 ],  # With trailing whitespace
-    [ 'Program' => [ 'WS_OPT', 'StatementList' ], 1.0 ],  # With leading whitespace
-    [ 'Program' => [ 'WS_OPT', 'StatementList', 'WS_OPT' ], 1.0 ],  # With both leading and trailing
-    [ 'Program' => [ 'Shebang', 'StatementList' ], 2.0 ],
-    [ 'Program' => [ 'Shebang', 'StatementList', 'WS_OPT' ], 2.0 ],  # Shebang with trailing whitespace
-    [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList' ], 2.0 ],  # Shebang with whitespace before statements
-    [ 'Program' => [ 'Shebang', 'WS_OPT', 'StatementList', 'WS_OPT' ], 2.0 ],  # Shebang with both
+        # Program structure - adapted from original chalk grammar
+        [ 'Program' => ['StatementList'] ],
+        [ 'Program' => [ 'WS_OPT',  'StatementList', 'WS_OPT' ] ],
+        [ 'Program' => [ 'Shebang', 'StatementList', 'WS_OPT' ] ],
 
-  # Statement lists - adapted from guacamole grammar
+  # Statement lists -
   # Semicolons required between statements, optional for last statement in block
-    [ 'StatementList' => [], 0.1 ],    # Empty statement list (for empty blocks)
-    [ 'StatementList' => ['Statement'], 1.0 ],    # Single statement (last in block, no semicolon needed)
-    [ 'StatementList' => ['BlockStatement'], 0.95 ],    # Single block statement
-    [ 'StatementList' => [ 'Statement', ';', 'StatementList' ], 0.9 ],    # Statement + semicolon + more statements
-    [ 'StatementList' => [ 'BlockStatement', 'StatementList' ], 0.8 ],    # Block + more statements (no semicolon)
-    [ 'StatementList' => [ 'BlockStatement', ';', 'StatementList' ], 0.8 ],    # Block + optional semicolon + more statements
-    [ 'StatementList' => [ 'LineStatement', 'StatementList' ], 0.7 ],    # Line + more
+        [ 'StatementList' => [] ],
+        [ 'StatementList' => ['Statement'] ],
+        [ 'StatementList' => [ 'Statement', ';', 'StatementList' ] ],
+        [ 'StatementList' => [ 'Statement', 'StatementList' ] ],
 
-# BlockStatement - statements that contain blocks and don't need semicolons (following guacamole)
-    [ 'BlockStatement' => ['ClassDecl'],   1.0 ],
-    [ 'BlockStatement' => ['PackageDecl'], 1.0 ],
-    [ 'BlockStatement' => ['MethodDecl'], 1.0 ]
-    ,    # Full method definitions with blocks
-    [ 'BlockStatement' => ['AdjustBlock'], 1.0 ]
-    ,    # ADJUST blocks for class initialization
-    [ 'BlockStatement' => ['SubroutineDecl'], 1.0 ]
-    ,    # Subroutine declarations with blocks
-    [ 'BlockStatement' => ['LoopStatement'],      1.0 ],  # Loop statements
-    [ 'BlockStatement' => ['ConditionStatement'], 1.0 ],  # If/unless statements
-    [ 'BlockStatement' => ['Comment'],            1.0 ],
-    [ 'BlockStatement' => ['BeginBlock'],         1.0 ],  # BEGIN blocks
-    [ 'BlockStatement' => ['EndBlock'],           1.0 ],   # END blocks
-    [ 'BlockStatement' => ['Block'],              1.0 ],   # Bare blocks
+        # Base statements
+        [ 'Statement' => [ 'Statement',  'StatementModifier' ] ],
+        [ 'Statement' => [ 'QLikeValue', 'ElemSeq1' ] ], # qw"b"[0] as statement
+        [ 'Statement' => ['AdjustBlock'] ],
+        [ 'Statement' => ['BeginBlock'] ],
+        [ 'Statement' => ['Block'] ],                    # Bare blocks
+        [ 'Statement' => ['BlockStatement'] ],
+        [ 'Statement' => ['BuiltinFunctionCall'] ],
+        [ 'Statement' => ['ClassDecl'] ],
+        [ 'Statement' => ['Comment'] ],
+        [ 'Statement' => ['ControlFlowStatement'] ],     # next, last, redo
+        [ 'Statement' => ['DieExpr'] ],   # Lower - prefer checking for modifier
+        [ 'Statement' => ['EllipsisStatement'] ],    # Ellipsis (...)
+        [ 'Statement' => ['EndBlock'] ],
+        [ 'Statement' => ['EvalBlock'] ],            # eval { ... } blocks
+        [ 'Statement' => ['Expression'] ],
+        [ 'Statement' => ['FieldDecl'] ],            # Field declarations
+        [ 'Statement' => ['FunctionCall'] ],   # Function calls with parentheses
+        [ 'Statement' => ['LineStatement'] ],
+        [ 'Statement' => ['ListOperatorCall'] ],    # calls sans-parentheses
+        [ 'Statement' => ['LoopBlock'] ],           # Loop statements
+        [ 'Statement' => ['MethodDecl'] ],
+        [ 'Statement' => ['PackageDecl'] ],
+        [ 'Statement' => ['PrintExpr'] ],
+        [ 'Statement' => ['QLikeValue'] ],
+        [ 'Statement' => ['RequireStatement'] ],    # Require statements
+        [ 'Statement' => ['ReturnStatement'] ],     # Return statements
+        [ 'Statement' => ['SubroutineDecl'] ],
+        [ 'Statement' => ['UseStatement'] ],
+        [ 'Statement' => ['VariableDecl'] ],        # my/our/local declarations
+        [ 'Statement' => ['WarnExpr'] ],
+        [ 'Statement' => ['IfStatement'] ],
+        [ 'Statement' => ['UnlessStatement'] ],
 
-  # Conditional statements (if/unless/while/until) - following guacamole pattern
-    [ 'ConditionStatement' => ['IfStatement'],     1.0 ],
-    [ 'ConditionStatement' => ['UnlessStatement'], 1.0 ],
-    [ 'ConditionStatement' => ['ElsifStatement'],  1.0 ],
+        [ 'IfStatement'     => [ 'if',     'ConditionalStatement' ] ],
+        [ 'UnlessStatement' => [ 'unless', 'ConditionalStatement' ] ],
 
-    # If statement rules with proper elsif chaining
-    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'ElsifChain' ], 1.0 ],
-    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'else', 'Block' ], 1.0 ],
-    [ 'IfStatement' => [ 'if', '(', 'Expression', ')', 'Block', 'ElsifChain', 'else', 'Block' ], 1.0 ],
+        [ 'ConditionalStatement' => [ '(', 'Expression', ')', 'Block' ] ],
+        [ 'ConditionalStatement' => [ 'ConditionalStatement', 'ElsifChain' ] ],
+        [ 'ConditionalStatement' => [ 'ConditionalStatement', 'ElseBlock' ] ],
 
-    # Elsif chain can be one or more elsif blocks
-    [ 'ElsifChain' => [ 'elsif', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'ElsifChain' => [ 'elsif', '(', 'Expression', ')', 'Block', 'ElsifChain' ], 1.0 ],
+        [ 'ElsifChain' => [ 'elsif', 'ConditionalStatement' ] ],
 
-    # Standalone elsif statement (for backwards compatibility)
-    [ 'ElsifStatement' => [ 'elsif', '(', 'Expression', ')', 'Block' ], 1.0 ],
+        [ 'ElseBlock' => [ 'else', 'Block' ] ],
 
-    # Unless statement rules following guacamole ConditionUnlessExpr pattern
-    [ 'UnlessStatement' => [ 'unless', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'UnlessStatement' => [ 'unless', '(', 'Expression', ')', 'Block', 'else', 'Block' ], 1.0 ],  # unless-else
-    [ 'UnlessStatement' => [ 'unless', 'Expression' ], 1.0 ],    # Postfix form
+        # Block structure for conditional statements
+        [ 'Block' => [ '{', 'StatementList', '}' ] ],
+        [ 'Block' => [ '{', '}' ] ],
 
-    # Block structure for conditional statements
-    [ 'Block' => [ '{', 'StatementList', '}' ], 1.0 ],
-    [ 'Block' => [ '{', '}' ], 1.0 ],
+        # ADJUST block for class initialization
+        [ 'AdjustBlock' => [ 'ADJUST', 'Block' ] ],
+        [ 'BeginBlock'  => [ 'BEGIN',  'Block' ] ],
+        [ 'EndBlock'    => [ 'END',    'Block' ] ],
 
-    # ADJUST block for class initialization
-    [ 'AdjustBlock' => [ 'ADJUST', 'Block' ], 1.0 ],
-    [ 'BeginBlock'  => [ 'BEGIN', 'Block' ],  1.0 ],
-    [ 'EndBlock'    => [ 'END', 'Block' ],    1.0 ],
+        # Loop statements (following guacamole pattern)
+        [ 'LoopBlock' => ['ForStatement'] ],
+        [ 'LoopBlock' => ['WhileStatement'] ],
 
-    # Loop statements (following guacamole pattern)
-    [ 'LoopStatement' => ['ForStatement'],   1.0 ],
-    [ 'LoopStatement' => ['WhileStatement'], 1.0 ],
+        # For statement - C-style and foreach style variations
+        # C-style for loops: for (init; condition; increment) { ... }
+        [
+            'ForStatement' => [
+                qr/for(?:each)?/, '(', 'Expression', ';',
+                'Expression',     ';', 'Expression', ')',
+                'Block'
+            ]
+        ],
+        [
+            'ForStatement' => [
+                qr/for(?:each)?/, '(', ';', 'Expression', ';', 'Expression',
+                ')', 'Block'
+            ]
+        ],    # No init
+        [
+            'ForStatement' => [
+                qr/for(?:each)?/, '(', 'Expression', ';', ';', 'Expression',
+                ')', 'Block'
+            ]
+        ],    # No condition
+        [
+            'ForStatement' => [
+                qr/for(?:each)?/, '(', 'Expression', ';',
+                'Expression',     ';', ')',          'Block'
+            ]
+        ],    # No increment
+        [ 'ForStatement' => [ qr/for(?:each)?/, '(', ';', ';', ')', 'Block' ] ]
+        ,     # Infinite loop: for (;;)
 
-    # For statement - C-style and foreach style variations
-    # C-style for loops: for (init; condition; increment) { ... }
-    [ 'ForStatement' => [ 'for', '(', 'Expression', ';', 'Expression', ';', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'ForStatement' => [ 'for', '(', ';', 'Expression', ';', 'Expression', ')', 'Block' ], 1.0 ],  # No init
-    [ 'ForStatement' => [ 'for', '(', 'Expression', ';', ';', 'Expression', ')', 'Block' ], 1.0 ],  # No condition
-    [ 'ForStatement' => [ 'for', '(', 'Expression', ';', 'Expression', ';', ')', 'Block' ], 1.0 ],  # No increment
-    [ 'ForStatement' => [ 'for', '(', ';', ';', ')', 'Block' ], 1.0 ],  # Infinite loop: for (;;)
+        # Foreach style variations
+        [
+            'ForStatement' => [
+                qr/for(?:each)?/, 'VariableDecl',
+                '(',              'Expression',
+                ')',              'Block'
+            ]
+        ],
+        [
+            'ForStatement' =>
+              [ qr/for(?:each)?/, '(', 'Expression', ')', 'Block' ]
+        ],
 
-    # Foreach style variations
-    [
-        'ForStatement' =>
-          [ 'for', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ],
-        1.0
-    ],
-    [ 'ForStatement' => [ 'foreach', 'my', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'ForStatement' => [ 'for', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'ForStatement' => [ 'foreach', 'VariableBase', '(', 'Expression', ')', 'Block' ], 1.0 ],
-    [ 'ForStatement' => [ 'for', '(', 'Expression', ')', 'Block' ], 1.0 ],      # for (list) - uses $_
-    [ 'ForStatement' => [ 'foreach', '(', 'Expression', ')', 'Block' ], 1.0 ],  # foreach (list) - uses $_
+        # While statement - while ( condition ) { ... }
+        [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ] ],
 
-    # While statement - while ( condition ) { ... }
-    [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ], 1.0 ],
+        # Line-terminated statements (don't require semicolons)
+        [ 'LineStatement' => ['Comment'] ],
 
-    # Statements - chalk specific with expression support
-    [ 'Statement' => ['BaseStatement'], 1.0 ],
+        # Class structure following guacamole PackageStatement pattern
+        [
+            'ClassDecl' =>
+              [ 'class', 'QualifiedIdentifier', 'Inheritance', 'Block' ],
+        ],
+        [ 'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Block' ] ],
+        [ 'ClassDecl' => [ 'class', 'Identifier', 'Inheritance', 'Block' ] ],
+        [ 'ClassDecl' => [ 'class', 'Identifier', 'Block' ] ],
 
-    # Base statements
-    [ 'BaseStatement' => ['UseStatement'],     1.0 ],
-    [ 'BaseStatement' => ['RequireStatement'], 1.0 ],    # Require statements
-    [ 'BaseStatement' => ['EvalBlock'],        1.0 ],    # eval { ... } blocks
-    [ 'BaseStatement' => ['FunctionCall'],     1.0 ],    # Function calls with parentheses
-    [ 'BaseStatement' => ['ListOperatorCall'], 1.0 ],    # Function calls without parentheses (list operator syntax)
-    [ 'BaseStatement' => ['PrintExpr'],        0.3 ],  # Lower - prefer checking for modifier
-    [ 'BaseStatement' => [ 'PrintExpr', 'StatementModifier' ], 1.0 ],  # print with if/unless/etc
-    [ 'BaseStatement' => [ 'QLikeValue', 'ElemSeq1' ], 1.0 ],  # qw"b"[0] as statement
-    [ 'BaseStatement' => ['QLikeValue'], 1.0 ],  # Bare regex as statement (merged from PatternMatchStatement)
-    [ 'BaseStatement' => ['DieExpr'],          0.3 ],  # Lower - prefer checking for modifier
-    [ 'BaseStatement' => ['WarnExpr'],         0.3 ],  # Lower - prefer checking for modifier
-    [ 'BaseStatement' => [ 'DieExpr', 'StatementModifier' ], 1.0 ],
-    [ 'BaseStatement' => [ 'WarnExpr', 'StatementModifier' ], 1.0 ],
-    [ 'BaseStatement' => ['BuiltinFunctionCall'], 0.1 ],  # Very low - prefer BlockLevelExpression
-    [ 'BaseStatement' => [ 'BuiltinFunctionCall', 'StatementModifier' ], 1.0 ]
-    ,    # But keep high for statement modifiers
-    [ 'BaseStatement' => ['BlockLevelExpression'], 1.0 ],   # Block-level expression
-    [ 'BaseStatement' => ['EllipsisStatement'],    1.0 ],   # Ellipsis (...)
-    [ 'BaseStatement' => ['FieldDecl'],            1.0 ],   # Field declarations
-    [ 'BaseStatement' => ['VariableDecl'],       1.0 ], # my/our/local declarations
-    [ 'BaseStatement' => ['ReturnStatement'],    1.0 ], # Return statements
-    [ 'BaseStatement' => ['SubroutineDecl'],     1.0 ], # Subroutine declarations
-    [ 'BaseStatement' => ['ConditionStatement'], 1.0 ], # If/unless/while statements
-    [ 'BaseStatement' => [ 'ReturnStatement', 'StatementModifier' ], 1.0 ]
-    ,                                               # Return with modifier
-    [ 'BaseStatement' => [ 'BlockLevelExpression', 'StatementModifier' ], 1.0 ]
-    ,                                               # Expression with modifier
-    [ 'BaseStatement' => [ 'ControlFlowStatement', 'StatementModifier' ], 1.0 ]
-    ,                                               # Control flow with modifier
+        # Package declarations (traditional Perl OO)
+        # With block - no semicolon needed (BlockStatement)
+        [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier', 'Block' ] ],
+        [ 'PackageDecl' => [ 'package', 'Identifier',          'Block' ] ],
 
-    # Line-terminated statements (don't require semicolons)
-    [ 'LineStatement' => ['Shebang'], 1.0 ],
-    [ 'LineStatement' => ['Comment'], 1.0 ],
-
-    # Also allow comments directly as base statements (higher accessibility)
-    [ 'BaseStatement' => ['Comment'], 1.0 ],
-
-    # Class structure following guacamole PackageStatement pattern
-    [
-        'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Inheritance', 'Block' ],
-        1.0
-    ],
-    [ 'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Block' ], 1.0 ],
-    [ 'ClassDecl' => [ 'class', 'Identifier', 'Inheritance', 'Block' ], 0.9 ],
-    [ 'ClassDecl' => [ 'class', 'Identifier', 'Block' ], 0.9 ],
-
-    # Package declarations (traditional Perl OO)
-    # With block - no semicolon needed (BlockStatement)
-    [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier', 'Block' ], 1.0 ],
-    [ 'PackageDecl' => [ 'package', 'Identifier', 'Block' ], 0.9 ],
-
-    # Without block - these need semicolons, so they're BaseStatements not BlockStatements
-    [ 'BaseStatement' => [ 'package', 'QualifiedIdentifier' ], 1.0 ],
-    [ 'BaseStatement' => [ 'package', 'Identifier' ], 0.9 ],
+# Without block - these need semicolons, so they're Statements not BlockStatements
+        [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier' ] ],
+        [ 'PackageDecl' => [ 'package', 'Identifier' ] ],
 
 # Method declarations are identical to subroutine declarations (following guacamole)
-    [ 'MethodDecl' => [ 'method', 'Identifier', 'SubDefinition' ], 1.0 ],
-    [ 'MethodDecl' => [ 'method', 'Identifier' ], 1.0 ],   # Forward declaration
+        [ 'MethodDecl' => [ 'method', 'Identifier', 'SubDefinition' ] ],
+        [ 'MethodDecl' => [ 'method', 'Identifier' ] ],    # Forward declaration
 
-    # Subroutine declarations
-    [ 'SubroutineDecl' => [ 'sub', 'Identifier', 'SubDefinition' ], 1.0 ],
-    [ 'SubroutineDecl' => [ 'sub', 'Identifier' ], 1.0 ],  # Forward declaration
-    [ 'SubroutineDecl' => [ 'my', 'sub', 'Identifier', 'SubDefinition' ], 1.0 ]
-    ,                                                      # my sub
-    [ 'SubroutineDecl' => [ 'my', 'sub', 'Identifier' ], 1.0 ]
-    ,                                                      # my sub forward decl
+        # Subroutine declarations
+        [ 'SubroutineDecl' => [ 'sub', 'Identifier', 'SubDefinition' ] ],
+        [ 'SubroutineDecl' => [ 'sub', 'Identifier' ] ],   # Forward declaration
+        [ 'SubroutineDecl' => [ 'my',  'sub', 'Identifier', 'SubDefinition' ] ]
+        ,                                                  # my sub
+        [ 'SubroutineDecl' => [ 'my', 'sub', 'Identifier' ] ]
+        ,                                                  # my sub forward decl
 
-    # SubDefinition from guacamole grammar
-    [ 'SubDefinition' => [ 'SubSigsDefinition', 'Block' ], 1.0 ],
-    [ 'SubDefinition' => ['Block'],                        1.0 ],
+        # SubDefinition from guacamole grammar
+        [ 'SubDefinition' => [ 'SubSigsDefinition', 'Block' ] ],
+        [ 'SubDefinition' => ['Block'] ],
 
-    # SubSigsDefinition is just a parenthetical expression
-    [ 'SubSigsDefinition' => [ '(', 'Expression', ')' ], 1.0 ],
-    [ 'SubSigsDefinition' => [ '(', qr/\(\s*(?:\\\[[\$\@\%\&\*]+\s*\]|[\$\@\%\&\*\_;\s])*?\)/, ')' ], 1.0 ],
-    [ 'SubSigsDefinition' => [ '(', ')' ], 1.0 ],
+        # SubSigsDefinition is just a parenthetical expression
+        [ 'SubSigsDefinition' => [ '(', 'Expression', ')' ] ],
+        [
+            'SubSigsDefinition' => [
+                '(', qr/\(\s*(?:\\\[[\$\@\%\&\*]+\s*\]|[\$\@\%\&\*\_;\s])*?\)/,
+                ')'
+            ]
+        ],
+        [ 'SubSigsDefinition' => [ '(', ')' ] ],
 
-    # Anonymous subroutines as values - with optional attributes
-    [ 'Value' => [ 'sub', 'SubAttribute', 'SubDefinition' ], 0.3 ],  # sub :lvalue { ... }
-    [ 'Value' => [ 'sub', 'SubDefinition' ], 0.3 ],                  # sub { ... }
+        # Anonymous subroutines as values - with optional attributes
+        [ 'Value' => [ 'sub', 'SubAttribute', 'SubDefinition' ] ]
+        ,                                             # sub :lvalue { ... }
+        [ 'Value' => [ 'sub', 'SubDefinition' ] ],    # sub { ... }
 
-    # Subroutine attributes
-    [ 'SubAttribute' => [qr/:[a-zA-Z_]\w*/] ],  # :lvalue, :method, :prototype(...), etc.
+        # Subroutine attributes
+        [ 'SubAttribute' => [qr/:[a-zA-Z_]\w*/] ]
+        ,    # :lvalue, :method, :prototype(...), etc.
 
  # UseStatement - reordered with higher probabilities for more specific patterns
  # to reduce parsing ambiguity and prevent exponential explosion
-    [
-        'UseStatement' =>
-          [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr', 'Expression' ],
-        0.9
-    ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent', 'Expression' ],  0.8 ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'VersionExpr' ],               0.7 ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr' ], 0.6 ],
-    [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent' ],                0.5 ],
+        [
+            'UseStatement' =>
+              [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr', 'Expression' ],
+            0.9
+        ],
+        [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent', 'Expression' ] ],
+        [ 'UseStatement' => [ 'OpKeywordUse', 'VersionExpr' ] ],
+        [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr' ] ],
+        [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent' ] ],
 
-    [ 'Inheritance' => [ ':isa(', 'ClassIdent', ')' ], 1.0 ],
+        [ 'Inheritance' => [ ':isa(', 'ClassIdent', ')' ] ],
 
-    # Field declarations - simplified like Guacamole Modifier Variable pattern
-    [ 'FieldDecl' => [ 'field', 'Variable', 'FieldAttributeList' ], 1.0 ],
-    [ 'FieldDecl' => [ 'field', 'Variable' ], 1.0 ],
+      # Field declarations - simplified like Guacamole Modifier Variable pattern
+        [ 'FieldDecl' => [ 'field', 'Variable', 'FieldAttributeList' ] ],
+        [ 'FieldDecl' => [ 'field', 'Variable' ] ],
 
-    # Variable declarations - my/our/local/state
-    [ 'VariableDecl' => [ 'my', 'Variable', '=', 'Expression' ],    1.0 ],
-    [ 'VariableDecl' => [ 'my', 'Variable' ],                       1.0 ],
-    [ 'VariableDecl' => [ 'our', 'Variable', '=', 'Expression' ],   1.0 ],
-    [ 'VariableDecl' => [ 'our', 'Variable' ],                      1.0 ],
-    [ 'VariableDecl' => [ 'local', 'Variable', '=', 'Expression' ], 1.0 ],
-    [ 'VariableDecl' => [ 'local', 'Variable' ],                    1.0 ],
+        # Variable declarations - my/our/local/state
+        [ 'VariableDecl' => [ 'my',    'Variable', '=', 'Expression' ] ],
+        [ 'VariableDecl' => [ 'my',    'Variable' ] ],
+        [ 'VariableDecl' => [ 'our',   'Variable', '=', 'Expression' ] ],
+        [ 'VariableDecl' => [ 'our',   'Variable' ] ],
+        [ 'VariableDecl' => [ 'local', 'Variable', '=', 'Expression' ] ],
+        [ 'VariableDecl' => [ 'local', 'Variable' ] ],
 
 # Local can also be used with any lvalue expression (hash elements, array elements, etc.)
-    [ 'VariableDecl' => [ 'local', 'Expression', '=', 'Expression' ], 1.0 ],
-    [ 'VariableDecl' => [ 'state', 'Variable',   '=', 'Expression' ], 1.0 ],
-    [ 'VariableDecl' => [ 'state', 'Variable' ], 1.0 ],
+        [ 'VariableDecl' => [ 'local', 'Expression', '=', 'Expression' ] ],
+        [ 'VariableDecl' => [ 'state', 'Variable',   '=', 'Expression' ] ],
+        [ 'VariableDecl' => [ 'state', 'Variable' ] ],
 
 # Basic terminals - include newlines since comments/shebangs are line-oriented
 # TODO: Allow inline comments within parameter lists and expressions, not just after complete statements
-    [ 'Shebang' => [qr/#!.*$/m] ],
-    [ 'Comment' => [qr/#.*$/m] ],    # Whitespace already consumed by WS/WS_OPT
+        [ 'Shebang' => [qr/#!.*$/m] ],
+        [ 'Comment' => [qr/#.*$/m] ], # Whitespace already consumed by WS/WS_OPT
 
-    # Ellipsis statement
-    [ 'EllipsisStatement' => ['Ellipsis'] ],
-    [ 'Ellipsis'          => ['...'] ],
+        # Ellipsis statement
+        [ 'EllipsisStatement' => ['Ellipsis'] ],
+        [ 'Ellipsis'          => ['...'] ],
 
-    # Return statements - following Guacamole OpKeywordReturnExpr pattern
-    [ 'ReturnStatement' => [ 'return', 'Expression' ], 1.0 ],
-    [ 'ReturnStatement' => ['return'],                 0.1 ],
+        # Return statements - following Guacamole OpKeywordReturnExpr pattern
+        [ 'ReturnStatement' => [ 'return', 'Expression' ] ],
+        [ 'ReturnStatement' => ['return'] ],
 
-    # Control flow statements - next, last, redo
-    [ 'BaseStatement' => ['ControlFlowStatement'], 1.0 ],
-    [ 'ControlFlowStatement' => ['next'], 1.0 ],
-    [ 'ControlFlowStatement' => ['last'], 1.0 ],
-    [ 'ControlFlowStatement' => ['redo'], 1.0 ],
-    [ 'ControlFlowStatement' => [ 'next', 'Identifier' ], 1.0 ],  # next LABEL
-    [ 'ControlFlowStatement' => [ 'last', 'Identifier' ], 1.0 ],  # last LABEL
-    [ 'ControlFlowStatement' => [ 'redo', 'Identifier' ], 1.0 ],  # redo LABEL
+        [ 'ControlFlowStatement' => ['next'] ],
+        [ 'ControlFlowStatement' => ['last'] ],
+        [ 'ControlFlowStatement' => ['redo'] ],
+        [ 'ControlFlowStatement' => [ 'next', 'Identifier' ] ],    # next LABEL
+        [ 'ControlFlowStatement' => [ 'last', 'Identifier' ] ],    # last LABEL
+        [ 'ControlFlowStatement' => [ 'redo', 'Identifier' ] ],    # redo LABEL
 
-    # Require statements - similar to UseStatement but simpler
-    [ 'RequireStatement' => [ 'require', 'Expression' ], 1.0 ],
+        # Require statements - similar to UseStatement but simpler
+        [ 'RequireStatement' => [ 'require', 'Expression' ] ],
 
-    # Statement modifiers - following Guacamole postfix patterns
-    [ 'StatementModifier' => [ 'unless', 'Expression' ], 1.0 ],
-    [ 'StatementModifier' => [ 'if',     'Expression' ], 1.0 ],
-    [ 'StatementModifier' => [ 'while',  'Expression' ], 1.0 ],
-    [ 'StatementModifier' => [ 'until',  'Expression' ], 1.0 ],
-    [ 'StatementModifier' => [ 'for',     'Expression' ], 1.0 ],
-    [ 'StatementModifier' => [ 'foreach', 'Expression' ], 1.0 ],
-    [ 'StatementModifier' => [ 'when',    'Expression' ], 1.0 ],
+        # Statement modifiers - following Guacamole postfix patterns
+        [ 'StatementModifier' => [ 'unless',  'Expression' ] ],
+        [ 'StatementModifier' => [ 'if',      'Expression' ] ],
+        [ 'StatementModifier' => [ 'while',   'Expression' ] ],
+        [ 'StatementModifier' => [ 'until',   'Expression' ] ],
+        [ 'StatementModifier' => [ 'for',     'Expression' ] ],
+        [ 'StatementModifier' => [ 'foreach', 'Expression' ] ],
+        [ 'StatementModifier' => [ 'when',    'Expression' ] ],
 
-    # Guacamole UseStatement components
-    [ 'OpKeywordUse' => ['use'] ],
-    [ 'ClassIdent'   => ['SubNameExpr'] ],
+        # Guacamole UseStatement components
+        [ 'OpKeywordUse' => ['use'] ],
+        [ 'ClassIdent'   => ['SubNameExpr'] ],
 
-    # SubNameExpr and VersionExpr definitions (simplified for chalk)
-    [ 'SubNameExpr' => ['Identifier'] ],
-    [ 'SubNameExpr' => [ 'Identifier', 'PackageSeparator', 'SubNameExpr' ] ],
-    [ 'VersionExpr' => [qr/v?(?:\d+\.?){1,3}/] ],
+        # SubNameExpr and VersionExpr definitions (simplified for chalk)
+        [ 'SubNameExpr' => ['Identifier'] ],
+        [
+            'SubNameExpr' => [ 'Identifier', 'PackageSeparator', 'SubNameExpr' ]
+        ],
+        [ 'VersionExpr' => [qr/v?(?:\d+\.?){1,3}/] ],
 
-   # QLikeValue - qw() expressions and regex patterns matching Guacamole pattern
-    # qw operator split like q/qq to allow comments between operator and delimiter
-    [ 'QLikeValue' => [ 'QWOp', 'QDelimited' ] ],                 # qw with any delimiter
-    # m operator split like q/qq/qw to allow comments between operator and delimiter
-    [ 'QLikeValue' => [ 'MOp', 'MDelimited' ] ],                  # m with any delimiter + optional flags
-    # qr operator split like m to allow comments between operator and delimiter
-    [ 'QLikeValue' => [ 'QROp', 'MDelimited' ] ],                 # qr with any delimiter + optional flags
-    # s operator with specific delimiters - specific patterns to avoid greedy QDelimited matching
-    # Higher probabilities (2.0) to prefer these over the general SOp + QDelimited + MDelimited rule
-    [ 'QLikeValue' => [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}], 2.0 ],  # s/search/replace/flags
-    [ 'QLikeValue' => [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}], 2.0 ],  # s|search|replace|flags
-    [ 'QLikeValue' => [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}], 2.0 ],  # s!search!replace!flags
-    [ 'QLikeValue' => [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}], 2.0 ],  # s#search#replace#flags
-    # s operator split to allow comments - works with paired delimiters like s[...][...] (search, replacement)
-    [ 'QLikeValue' => [ 'SOp', 'QDelimited', 'MDelimited' ], 0.5 ],    # s with delimiters + optional flags on replacement (lower priority)
-    # tr and y operators with specific delimiters - similar to s/// patterns
-    # Higher probabilities (2.0) to prefer these over the general TROp/YOp + QDelimited + QDelimited rule
-    [ 'QLikeValue' => [qr{tr/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*}], 2.0 ],  # tr/search/replace/flags
-    [ 'QLikeValue' => [qr{tr\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}], 2.0 ],  # tr|search|replace|flags
-    [ 'QLikeValue' => [qr{tr!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}], 2.0 ],  # tr!search!replace!flags
-    [ 'QLikeValue' => [qr{tr#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}], 2.0 ],  # tr#search#replace#flags
-    [ 'QLikeValue' => [qr{y/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*}], 2.0 ],   # y/search/replace/flags
-    [ 'QLikeValue' => [qr{y\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}], 2.0 ], # y|search|replace|flags
-    [ 'QLikeValue' => [qr{y!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}], 2.0 ],   # y!search!replace!flags
-    [ 'QLikeValue' => [qr{y#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}], 2.0 ],   # y#search#replace#flags
-    # tr/y operators split to allow comments - works with paired delimiters like tr[...][...] (search, replacement)
-    [ 'QLikeValue' => [ 'TROp', 'QDelimited', 'QDelimited' ], 0.5 ],    # tr with delimiters + optional flags
-    [ 'QLikeValue' => [ 'YOp', 'QDelimited', 'QDelimited' ], 0.5 ],     # y with delimiters + optional flags
-    [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ],    # /.../flags with escapes
-    [ 'QLikeValue' => [qr/`[^`]*`/] ],            # `backticks`
+  # QLikeValue - qw() expressions and regex patterns matching Guacamole pattern
+  # qw operator split like q/qq to allow comments between operator and delimiter
+        [ 'QLikeValue' => [ 'QWOp', 'QDelimited' ] ],    # qw with any delimiter
+         # m operator split like q/qq/qw to allow comments between operator and delimiter
+        [ 'QLikeValue' => [ 'MOp', 'MDelimited' ] ]
+        ,    # m with any delimiter + optional flags
+         # qr operator split like m to allow comments between operator and delimiter
+        [ 'QLikeValue' => [ 'QROp', 'MDelimited' ] ]
+        ,    # qr with any delimiter + optional flags
+         # s operator with specific delimiters - specific patterns to avoid greedy QDelimited matching
+         # Higher probabilities (2.0) to prefer these over the general SOp + QDelimited + MDelimited rule
+        [
+            'QLikeValue' =>
+              [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}]
+        ],    # s/search/replace/flags
+        [
+            'QLikeValue' =>
+              [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}]
+        ],    # s|search|replace|flags
+        [
+            'QLikeValue' =>
+              [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}]
+        ],    # s!search!replace!flags
+        [
+            'QLikeValue' =>
+              [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}]
+        ],    # s#search#replace#flags
+         # s operator split to allow comments - works with paired delimiters like s[...][...] (search, replacement)
+        [ 'QLikeValue' => [ 'SOp', 'QDelimited', 'MDelimited' ] ]
+        ,   # s with delimiters + optional flags on replacement (lower priority)
+         # tr and y operators with specific delimiters - similar to s/// patterns
+         # Higher probabilities (2.0) to prefer these over the general TROp/YOp + QDelimited + QDelimited rule
+        [ 'QLikeValue' => [qr{tr/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*}] ]
+        ,    # tr/search/replace/flags
+        [
+            'QLikeValue' =>
+              [qr{tr\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}]
+        ],    # tr|search|replace|flags
+        [ 'QLikeValue' => [qr{tr!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}] ]
+        ,     # tr!search!replace!flags
+        [ 'QLikeValue' => [qr{tr#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}] ]
+        ,     # tr#search#replace#flags
+        [ 'QLikeValue' => [qr{y/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*}] ]
+        ,     # y/search/replace/flags
+        [
+            'QLikeValue' => [qr{y\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}]
+        ],    # y|search|replace|flags
+        [ 'QLikeValue' => [qr{y!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}] ]
+        ,     # y!search!replace!flags
+        [ 'QLikeValue' => [qr{y#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}] ]
+        ,     # y#search#replace#flags
+         # tr/y operators split to allow comments - works with paired delimiters like tr[...][...] (search, replacement)
+        [ 'QLikeValue' => [ 'TROp', 'QDelimited', 'QDelimited' ] ]
+        ,    # tr with delimiters + optional flags
+        [ 'QLikeValue' => [ 'YOp', 'QDelimited', 'QDelimited' ] ]
+        ,    # y with delimiters + optional flags
+        [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ]
+        ,                                     # /.../flags with escapes
+        [ 'QLikeValue' => [qr/`[^`]*`/] ],    # `backticks`
 
-    [ 'FieldAttributeList' => ['FieldAttribute'] ],
-    [ 'FieldAttributeList' => [ 'FieldAttribute', 'FieldAttributeList' ] ],
-    [ 'FieldAttribute'     => [':param'] ],
-    [ 'FieldAttribute'     => [':reader'] ],
+        [ 'FieldAttributeList' => ['FieldAttribute'] ],
+        [ 'FieldAttributeList' => [ 'FieldAttribute', 'FieldAttributeList' ] ],
+        [ 'FieldAttribute'     => [':param'] ],
+        [ 'FieldAttribute'     => [':reader'] ],
 
 # Expression hierarchy - Full Guacamole hierarchy with probabilities emulating action => ::first
-    [ 'Expression' => ['ExprNameOr'],                              0.8 ],
-    [ 'ExprNameOr' => [ 'ExprNameOr', 'OpNameOr', 'ExprNameAnd' ], 0.8 ]
-    ,                                              # First rule - higher prob
-    [ 'ExprNameOr' => ['ExprNameAnd'], 0.3 ],      # Fallback - lower prob
+        [ 'Expression' => ['ExprNameOr'] ],
+        [ 'ExprNameOr' => [ 'ExprNameOr', 'OpNameOr', 'ExprNameAnd' ] ]
+        ,                                       # First rule - higher prob
+        [ 'ExprNameOr' => ['ExprNameAnd'] ],    # Fallback - lower prob
 
-# BlockLevelExpression - simplified to use regular Expression hierarchy
-# Experiment: Remove BlockLevel* intermediates to reduce parser state
-# Previously used ExprAssignR to avoid brace ambiguity, but testing shows
-# the regular Expression hierarchy handles this correctly via probabilities
-    [ 'BlockLevelExpression' => ['Expression'], 1.0 ],
+     # BlockLevelExpression - simplified to use regular Expression hierarchy
+     # Experiment: Remove BlockLevel* intermediates to reduce parser state
+     # Previously used ExprAssignR to avoid brace ambiguity, but testing shows
+     # the regular Expression hierarchy handles this correctly via probabilities
+        [ 'BlockLevelExpression' => ['Expression'] ],
 
-    # ExprAssignR - avoids consuming braces as hash refs
-    [
-        'ExprAssignR' =>
-          [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ],
-        0.8
-    ],
-    [ 'ExprAssignR' => ['ExprCondR'], 0.3 ],
+        # ExprAssignR - avoids consuming braces as hash refs
+        [
+            'ExprAssignR' => [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ],
+            0.8
+        ],
+        [ 'ExprAssignR' => ['ExprCondR'] ],
 
  # NonBrace conditional expressions need to go through the full precedence chain
-    [
-        'ExprCondR' => [
-            'ExprRange0', 'OpTriThen',
-            'ExprRangeR',         'OpTriElse',
-            'ExprCondR'
+        [
+            'ExprCondR' => [
+                'ExprRange0', 'OpTriThen', 'ExprRangeR', 'OpTriElse',
+                'ExprCondR'
+            ],
+            0.8
         ],
-        0.8
-    ],
-    [ 'ExprCondR' => ['ExprRangeR'], 0.3 ],
-    [
-        'ExprCond0' => [
-            'ExprRange0', 'OpTriThen',
-            'ExprRange0',         'OpTriElse',
-            'ExprCond0'
+        [ 'ExprCondR' => ['ExprRangeR'] ],
+        [
+            'ExprCond0' => [
+                'ExprRange0', 'OpTriThen', 'ExprRange0', 'OpTriElse',
+                'ExprCond0'
+            ],
+            0.8
         ],
-        0.8
-    ],
-    [ 'ExprCond0' => ['ExprRange0'], 0.3 ],
+        [ 'ExprCond0' => ['ExprRange0'] ],
 
-    # NonBrace range and other precedence levels
-    [
-        'ExprRangeR' =>
-          [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ],
-        0.8
-    ],
-    [ 'ExprRangeR' => ['ExprLogOrR'], 0.3 ],
-    [
-        'ExprRange0' =>
-          [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ],
-        0.8
-    ],
-    [ 'ExprRange0' => ['ExprLogOr0'], 0.3 ],
+        # NonBrace range and other precedence levels
+        [
+            'ExprRangeR' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ],
+            0.8
+        ],
+        [ 'ExprRangeR' => ['ExprLogOrR'] ],
+        [
+            'ExprRange0' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ],
+            0.8
+        ],
+        [ 'ExprRange0' => ['ExprLogOr0'] ],
 
 # Continue through precedence chain: LogOr -> LogAnd -> BinOr -> BinAnd -> Eq -> Neq -> Shift -> Add -> Mul -> Regex -> Power -> Inc -> Arrow -> Value
-    [ 'ExprLogOrR' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndR' ], 0.8 ],
-    [ 'ExprLogOrR' => ['ExprLogAndR'], 0.3 ],
-    [ 'ExprLogOr0' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAnd0' ], 0.8 ],
-    [ 'ExprLogOr0' => ['ExprLogAnd0'], 0.3 ],
+        [ 'ExprLogOrR' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndR' ] ],
+        [ 'ExprLogOrR' => ['ExprLogAndR'] ],
+        [ 'ExprLogOr0' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAnd0' ] ],
+        [ 'ExprLogOr0' => ['ExprLogAnd0'] ],
 
-    # NonBrace logical AND expressions
-    [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ], 0.8 ],
-    [ 'ExprLogAndR' => ['ExprBinOrR'], 0.3 ],
-    [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOr0' ], 0.8 ],
-    [ 'ExprLogAnd0' => ['ExprBinOr0'], 0.3 ],
+        # NonBrace logical AND expressions
+        [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ] ],
+        [ 'ExprLogAndR' => ['ExprBinOrR'] ],
+        [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOr0' ] ],
+        [ 'ExprLogAnd0' => ['ExprBinOr0'] ],
 
-    # NonBrace binary OR expressions
-    [ 'ExprBinOrR' => ['ExprBinAndR'], 0.3 ],
-    [ 'ExprBinOr0' => ['ExprBinAnd0'], 0.3 ],
+        # NonBrace binary OR expressions
+        [ 'ExprBinOrR' => ['ExprBinAndR'] ],
+        [ 'ExprBinOr0' => ['ExprBinAnd0'] ],
 
-    # NonBrace binary AND expressions
-    [ 'ExprBinAndR' => ['ExprEqR'], 0.3 ],
-    [ 'ExprBinAnd0' => ['ExprEq0'], 0.3 ],
+        # NonBrace binary AND expressions
+        [ 'ExprBinAndR' => ['ExprEqR'] ],
+        [ 'ExprBinAnd0' => ['ExprEq0'] ],
 
-    # NonBrace equality expressions (this is what we were missing!)
-    [
-        'ExprEqR' =>
-          [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ],
-        0.8
-    ],
-    [ 'ExprEqR' => ['ExprNeqR'], 0.3 ],
-    [
-        'ExprEq0' =>
-          [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ],
-        0.8
-    ],
-    [ 'ExprEq0' => ['ExprNeq0'], 0.3 ],
-
-    # NonBrace inequality expressions
-    [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ], 0.8 ],
-    [ 'ExprNeqR' => ['ExprShiftR'], 0.3 ],
-    [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ], 0.8 ],
-    [ 'ExprNeq0' => ['ExprShift0'], 0.3 ],
-
-    # NonBrace shift expressions
-    [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ], 0.8 ],
-    [ 'ExprShiftR' => ['ExprAddR'], 0.3 ],
-    [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd0' ], 0.8 ],
-    [ 'ExprShift0' => ['ExprAdd0'], 0.3 ],
-    [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ], 0.8 ],
-    [ 'ExprShiftU' => ['ExprAddU'], 0.3 ],
-
-    # NonBrace addition expressions
-    [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ], 0.8 ],
-    [ 'ExprAddR' => [ 'ExprAddU', '.', 'ExprMulR' ], 0.8 ],
-    [ 'ExprAddR' => ['ExprMulR'], 0.3 ],
-    [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ], 0.8 ],
-    [ 'ExprAdd0' => [ 'ExprAddU', '.', 'ExprMul0' ], 0.8 ],
-    [ 'ExprAdd0' => ['ExprMul0'], 0.3 ],
-    [ 'ExprAddU' => [ 'ExprAddU', 'OpAdd', 'ExprMulU' ], 0.8 ],
-    [ 'ExprAddU' => [ 'ExprAddU', '.', 'ExprMulU' ], 0.8 ],
-    [ 'ExprAddU' => ['ExprMulU'], 0.3 ],
-
-    # NonBrace multiplication expressions
-    [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ], 0.8 ],
-    [ 'ExprMulR' => ['ExprRegexR'], 0.3 ],
-    [ 'ExprMul0' => [ 'ExprMulU', 'OpMulti', 'ExprRegex0' ], 0.8 ],
-    [ 'ExprMul0' => ['ExprRegex0'], 0.3 ],
-    [ 'ExprMulU' => [ 'ExprMulU', 'OpMulti', 'ExprRegexU' ], 0.8 ],
-    [ 'ExprMulU' => ['ExprRegexU'], 0.3 ],
-
-    # NonBrace regex expressions - ADD OpRegex support for print statements
-    [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprRegexR' => ['ExprUnaryR'], 0.3 ],
-    [ 'ExprRegex0' => [ 'ExprRegexU', 'OpRegex', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprRegex0' => ['ExprUnary0'], 0.3 ],
-    [ 'ExprRegexU' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprRegexU' => ['ExprUnaryU'], 0.3 ],
-
-    # NonBrace unary expressions
-    [ 'ExprUnaryR' => [ 'OpUnary', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprUnaryR' => ['ExprPowerR'], 0.3 ],
-    [ 'ExprUnary0' => [ 'OpUnary', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprUnary0' => [ 'FileTestOp', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprUnary0' => ['ExprPower0'], 0.3 ],
-    [ 'ExprUnaryU' => [ 'OpUnary', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprUnaryU' => [ 'FileTestOp', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprUnaryU' => ['ExprPowerU'], 0.3 ],
-
-    # NonBrace power expressions
-    [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprPowerR' => ['ExprIncR'], 0.3 ],
-    [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprPower0' => ['ExprInc0'], 0.3 ],
-    [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprPowerU' => ['ExprIncU'], 0.3 ],
-
-    # NonBrace increment expressions
-    [ 'ExprIncR' => [ 'OpInc', 'ExprIncR' ], 0.8 ],
-    [ 'ExprIncR' => [ 'ExprIncR', 'OpInc' ], 0.8 ],
-    [ 'ExprIncR' => ['ExprArrowR'], 0.3 ],
-    [ 'ExprInc0' => [ 'OpInc', 'ExprInc0' ], 0.8 ],
-    [ 'ExprInc0' => [ 'ExprInc0', 'OpInc' ], 0.8 ],
-    [ 'ExprInc0' => ['ExprArrow0'], 0.3 ],
-    [ 'ExprIncU' => [ 'OpInc', 'ExprIncU' ], 0.8 ],
-    [ 'ExprIncU' => [ 'ExprIncU', 'OpInc' ], 0.8 ],
-    [ 'ExprIncU' => ['ExprArrowU'], 0.3 ],
-
-    # NonBrace arrow expressions - use ArrowChain like regular ExprArrow* rules
-    [ 'ExprArrowR' => [ 'ExprValueUR', 'ArrowChain' ], 0.8 ],
-    [ 'ExprArrowR' => ['ExprValueUR'], 0.3 ],
-    [ 'ExprArrow0' => [ 'ExprValueU0', 'ArrowChain' ], 0.8 ],
-    [ 'ExprArrow0' => ['ExprValueU0'], 0.3 ],
-    [ 'ExprArrowU' => [ 'ExprValueUU', 'ArrowChain' ], 0.8 ],
-    [ 'ExprArrowU' => ['ExprValueUU'], 0.3 ],
-
-    # ExprValueU* rules
-    [ 'ExprValueUU' => ['Value'],       1.0 ],
-    [ 'ExprValueUR' => ['Value'],       0.8 ],
-    [ 'ExprValueUR' => ['BuiltinFunctionCall'], 0.6 ],  # Built-in functions for or/and contexts
-    [ 'ExprValueUR' => ['OpListKeywordExpr'],   0.5 ],
-    [ 'ExprValueUR' => ['OpAssignKeywordExpr'], 0.5 ],
-    [ 'ExprValueUR' => ['OpUnaryKeywordExpr'],  0.5 ],
-    [ 'ExprValueU0' => ['Value'],       0.8 ],
-    [ 'ExprValueU0' => ['OpUnaryKeywordExpr'],  0.5 ],
-    [ 'Value'      => ['Variable'],            0.4 ],
-    [ 'Value'      => ['QualifiedIdentifier'], 0.4 ],  # Foo::Bar for method calls
-    [ 'Value'      => ['Identifier'],          0.3 ],  # Plain identifiers (lower priority)
-    [ 'Value'      => ['Number'],              0.3 ],
-    [ 'Value'      => ['UnaryExpression'],     0.3 ],
-    [ 'Value'      => ['QuotedString'],        0.3 ],
-    [ 'Value'      => ['Ellipsis'],            0.3 ],  # Yada-yada operator ... as value
-
-    # Unary expressions (for things like -1e10, !$flag, -d 't', etc.)
-    [ 'UnaryExpression' => [ 'OpUnary', 'Value' ], 1.0 ],
-    [ 'UnaryExpression' => [ 'FileTestOp', 'Value' ], 1.0 ],
-    [ 'Value'   => [ '(', 'Expression', ')', 'ElemSeq1' ], 0.3 ],  # (expr)[0] - subscripted parenthesized expression
-    [ 'Value'   => [ '(', 'Expression', ')' ],     0.3 ],
-    [ 'Value'   => ['ArrayRef'],                   0.3 ],
-    [ 'Value'   => ['HashRef'],                    0.3 ],  # Allow hash refs in push/etc
-    [ 'Value'   => ['EvalBlock'],                  0.3 ],  # eval { } - keyword disambiguates from bare block
-    [ 'Value'   => ['FunctionCall'],               0.3 ],
-    [ 'Value'   => [ 'QLikeValue', 'ElemSeq1' ],   1.0 ],  # qw"b"[0], etc. in expressions
-    [ 'Value'   => ['QLikeValue'],                 0.8 ],
-    [ 'Value'   => ['Diamond'],                    0.3 ],  # <$fh>, <STDIN>, <> constructs
-    [ 'Value'   => ['@'],                          0.3 ],
-    [ 'Value'   => ['FieldDecl'],                  0.3 ],
-
-    [ 'ExprNameAnd' => [ 'ExprNameAnd', 'OpNameAnd', 'ExprNameNot' ], 0.8 ],
-    [ 'ExprNameAnd' => ['ExprNameNot'],                               0.3 ],
-    [ 'ExprNameNot' => [ 'OpNameNot', 'ExprNameNot' ],                0.8 ],
-    [ 'ExprNameNot' => ['ExprComma'],                                 0.3 ],
-    [ 'ExprComma'   => [ 'ExprAssignL', 'OpComma', 'ExprComma' ],     0.8 ]
-    ,    # Comma list - higher prob
-    [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ], 0.7 ], # Trailing comma
-    [ 'ExprComma' => ['ExprAssignR'],              0.3 ], # Single item fallback
-    [ 'ExprAssignR' => [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ], 0.8 ],
-    [ 'ExprAssignR' => ['ExprCondR'],                              0.3 ],
-    [ 'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ], 0.8 ],
-    [ 'ExprAssignL' => ['OpAssignKeywordExpr'],                    0.5 ],
-    [ 'ExprAssignL' => ['ExprCondL'],                              0.3 ],
-    [
-        'ExprCondR' => [ 'ExprRange0', '?', 'ExprRangeR', ':', 'ExprCondR' ],
-        0.8
-    ],
-    [ 'ExprCondR' => ['ExprRangeR'], 0.3 ],
-    [
-        'ExprCondL' => [ 'ExprRange0', '?', 'ExprRangeL', ':', 'ExprCondL' ],
-        0.8
-    ],
-    [ 'ExprCondL' => ['ExprRangeL'], 0.3 ],
-    [
-        'ExprCond0' => [ 'ExprRange0', '?', 'ExprRange0', ':', 'ExprCond0' ],
-        0.8
-    ],
-    [ 'ExprCond0'  => ['ExprRange0'],                             0.3 ],
-    [ 'ExprRangeR' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ],  0.8 ],
-    [ 'ExprRangeR' => ['ExprLogOrR'],                             0.3 ],
-    [ 'ExprRangeL' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ],  0.8 ],
-    [ 'ExprRangeL' => ['ExprLogOrL'],                             0.3 ],
-    [ 'ExprRange0' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ],  0.8 ],
-    [ 'ExprRange0' => ['ExprLogOr0'],                             0.3 ],
-    [ 'ExprLogOrR' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndR' ], 0.8 ],
-    [ 'ExprLogOrR' => ['ExprLogAndR'],                            0.3 ],
-    [ 'ExprLogOrL' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndL' ], 0.8 ],
-    [ 'ExprLogOrL' => ['ExprLogAndL'],                            0.3 ],
-    [ 'ExprLogOr0' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAnd0' ], 0.8 ],
-    [ 'ExprLogOr0' => ['ExprLogAnd0'],                            0.3 ],
-
-    # Continue the chain down to Value
-    [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ], 0.8 ],
-    [ 'ExprLogAndR' => [ 'ExprBinOrR', 'Comment' ],                0.7 ], # Expression with trailing comment
-    [ 'ExprLogAndR' => ['ExprBinOrR'],                              0.3 ],
-    [ 'ExprLogAndL' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrL' ], 0.8 ],
-    [ 'ExprLogAndL' => ['ExprBinOrL'],                              0.3 ],
-    [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOr0' ], 0.8 ],
-    [ 'ExprLogAnd0' => ['ExprBinOr0'],                              0.3 ],
-
-    [ 'ExprBinOrR' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndR' ], 0.8 ],
-    [ 'ExprBinOrR' => ['ExprBinAndR'],                            0.3 ],
-    [ 'ExprBinOrL' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndL' ], 0.8 ],
-    [ 'ExprBinOrL' => ['ExprBinAndL'],                            0.3 ],
-    [ 'ExprBinOr0' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAnd0' ], 0.8 ],
-    [ 'ExprBinOr0' => ['ExprBinAnd0'],                            0.3 ],
-
-    [ 'ExprBinAndR' => [ 'ExprBinAnd0', '&', 'ExprEqR' ], 0.8 ],
-    [ 'ExprBinAndR' => ['ExprEqR'],                       0.3 ],
-    [ 'ExprBinAndL' => [ 'ExprBinAnd0', '&', 'ExprEqL' ], 0.8 ],
-    [ 'ExprBinAndL' => ['ExprEqL'],                       0.3 ],
-    [ 'ExprBinAnd0' => [ 'ExprBinAnd0', '&', 'ExprEq0' ], 0.8 ],
-    [ 'ExprBinAnd0' => ['ExprEq0'],                       0.3 ],
-
-    # Complete the missing expression hierarchy levels
-    [ 'ExprEqR' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ], 0.8 ],
-    [ 'ExprEqR' => ['ExprNeqR'],                          0.3 ],
-    [ 'ExprEqL' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqL' ], 0.8 ],
-    [ 'ExprEqL' => ['ExprNeqL'],                          0.3 ],
-    [ 'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ], 0.8 ],
-    [ 'ExprEq0' => ['ExprNeq0'],                          0.3 ],
-
-    [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ], 0.8 ],
-    [ 'ExprNeqR' => ['ExprShiftR'],                              0.3 ],
-    [ 'ExprNeqL' => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ], 0.8 ],
-    [ 'ExprNeqL' => ['ExprShiftL'],                              0.3 ],
-    [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ], 0.8 ],
-    [ 'ExprNeq0' => ['ExprShift0'],                              0.3 ],
-
-    [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ], 0.8 ],
-    [ 'ExprShiftR' => ['ExprAddR'],                            0.3 ],
-    [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ], 0.8 ],
-    [ 'ExprShiftL' => ['ExprAddL'],                            0.3 ],
-    [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd0' ], 0.8 ],
-    [ 'ExprShift0' => ['ExprAdd0'],                            0.3 ],
-    [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ], 0.8 ],
-    [ 'ExprShiftU' => ['ExprAddU'],                            0.3 ],
-
-    [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ], 0.8 ],
-    [ 'ExprAddR' => [ 'ExprAddU', '.', 'ExprMulR' ],     0.8 ],
-    [ 'ExprAddR' => ['ExprMulR'],                        0.3 ],
-    [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ], 0.8 ],
-    [ 'ExprAddL' => [ 'ExprAddU', '.', 'ExprMulL' ],     0.8 ],
-    [ 'ExprAddL' => ['ExprMulL'],                        0.3 ],
-    [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ], 0.8 ],
-    [ 'ExprAdd0' => [ 'ExprAddU', '.', 'ExprMul0' ],     0.8 ],
-    [ 'ExprAdd0' => ['ExprMul0'],                        0.3 ],
-    [ 'ExprAddU' => [ 'ExprAddU', 'OpAdd', 'ExprMulU' ], 0.8 ],
-    [ 'ExprAddU' => [ 'ExprAddU', '.', 'ExprMulU' ],     0.8 ],
-    [ 'ExprAddU' => ['ExprMulU'],                        0.3 ],
-
-    [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ], 0.8 ],
-    [ 'ExprMulR' => ['ExprRegexR'],                          0.3 ],
-    [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ], 0.8 ],
-    [ 'ExprMulL' => ['ExprRegexL'],                          0.3 ],
-    [ 'ExprMul0' => [ 'ExprMulU', 'OpMulti', 'ExprRegex0' ], 0.8 ],
-    [ 'ExprMul0' => ['ExprRegex0'],                          0.3 ],
-    [ 'ExprMulU' => [ 'ExprMulU', 'OpMulti', 'ExprRegexU' ], 0.8 ],
-    [ 'ExprMulU' => ['ExprRegexU'],                          0.3 ],
-
-    [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprRegexR' => ['ExprUnaryR'],                            0.3 ],
-    [ 'ExprRegexL' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ], 0.8 ],
-    [ 'ExprRegexL' => ['ExprUnaryL'],                            0.3 ],
-    [ 'ExprRegex0' => [ 'ExprRegexU', 'OpRegex', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprRegex0' => ['ExprUnary0'],                            0.3 ],
-    [ 'ExprRegexU' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprRegexU' => ['ExprUnaryU'],                            0.3 ],
-
-    [ 'ExprUnaryR' => [ 'OpUnary', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprUnaryR' => ['ExprPowerR'],              0.3 ],
-    [ 'ExprUnaryL' => [ 'OpUnary', 'ExprUnaryL' ], 0.8 ],
-    [ 'ExprUnaryL' => [ 'FileTestOp', 'ExprUnaryL' ], 0.8 ],
-    [ 'ExprUnaryL' => ['ExprPowerL'],              0.3 ],
-    [ 'ExprUnary0' => [ 'OpUnary', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprUnary0' => [ 'FileTestOp', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprUnary0' => ['ExprPower0'],              0.3 ],
-    [ 'ExprUnaryU' => [ 'OpUnary', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprUnaryU' => [ 'FileTestOp', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprUnaryU' => ['ExprPowerU'],              0.3 ],
-
-    [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ], 0.8 ],
-    [ 'ExprPowerR' => ['ExprIncR'],                            0.3 ],
-    [ 'ExprPowerL' => [ 'ExprIncU', 'OpPower', 'ExprUnaryL' ], 0.8 ],
-    [ 'ExprPowerL' => ['ExprIncL'],                            0.3 ],
-    [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary0' ], 0.8 ],
-    [ 'ExprPower0' => ['ExprInc0'],                            0.3 ],
-    [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnaryU' ], 0.8 ],
-    [ 'ExprPowerU' => ['ExprIncU'],                            0.3 ],
-
-    [ 'ExprIncR' => [ 'OpInc', 'ExprArrowR' ], 0.8 ],
-    [ 'ExprIncR' => [ 'ExprArrowL', 'OpInc' ], 0.7 ],
-    [ 'ExprIncR' => ['ExprArrowR'],            0.3 ],
-    [ 'ExprIncL' => [ 'OpInc', 'ExprArrowL' ], 0.8 ],
-    [ 'ExprIncL' => [ 'ExprArrowR', 'OpInc' ], 0.7 ],
-    [ 'ExprIncL' => ['ExprArrowL'],            0.3 ],
-    [ 'ExprInc0' => [ 'OpInc', 'ExprArrow0' ], 0.8 ],
-    [ 'ExprInc0' => [ 'ExprArrowR', 'OpInc' ], 0.7 ],
-    [ 'ExprInc0' => ['ExprArrow0'],            0.3 ],
-    [ 'ExprIncU' => [ 'OpInc', 'ExprArrowU' ], 0.8 ],
-    [ 'ExprIncU' => [ 'ExprArrowR', 'OpInc' ], 0.7 ],
-    [ 'ExprIncU' => ['ExprArrowU'],            0.3 ],
-
-    # Arrow expressions - eliminate left recursion to prevent parsing explosion
-    [ 'ExprArrowR' => [ 'ExprValueR', 'ArrowChain' ], 0.8 ],
-    [ 'ExprArrowR' => ['ExprValueR'],                 0.3 ],
-    [ 'ExprArrowL' => [ 'ExprValueL', 'ArrowChain' ], 0.8 ],
-    [ 'ExprArrowL' => ['ExprValueL'],                 0.3 ],
-    [ 'ExprArrow0' => [ 'ExprValue0', 'ArrowChain' ], 0.8 ],
-    [ 'ExprArrow0' => ['ExprValue0'],                 0.3 ],
-    [ 'ExprArrowU' => [ 'ExprValueU', 'ArrowChain' ], 0.8 ],
-    [ 'ExprArrowU' => ['ExprValueU'],                 0.3 ],
-
-    # ArrowChain - right-recursive chain of arrow operations
-    [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS', 'ArrowChain' ], 1.0 ],
-    [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS' ], 0.8 ],  # Prefer continuing chain over terminating
-
-    # Value rules - matching Guacamole ExprValue* rules exactly
-    [ 'ExprValueU' => ['Value'],               1.0 ],
-    [ 'ExprValue0' => ['Value'],               0.8 ],
-    [ 'ExprValue0' => ['OpUnaryKeywordExpr'],  0.5 ],
-    [ 'ExprValueL' => ['Value'],               0.8 ],
-    [ 'ExprValueL' => ['OpAssignKeywordExpr'], 0.5 ],
-    [ 'ExprValueL' => ['OpUnaryKeywordExpr'],  0.5 ],
-    [ 'ExprValueR' => ['Value'],               0.8 ],
-    [ 'ExprValueR' => ['OpListKeywordExpr'],   0.5 ],
-    [ 'ExprValueR' => ['OpAssignKeywordExpr'], 0.5 ],
-    [ 'ExprValueR' => ['OpUnaryKeywordExpr'],  0.5 ],
-
-    # ArrowRHS - method calls, array/hash indexing, postfix dereferencing
-    [ 'ArrowRHS' => ['Identifier'],                              0.5 ],
-    [ 'ArrowRHS' => [ 'Identifier', '(', 'ParameterList', ')' ], 1.0 ],  # Match FunctionCall priority
-    [ 'ArrowRHS' => [ 'Identifier', '(', ')' ],                  1.0 ],  # Match FunctionCall priority
-    [ 'ArrowRHS' => [ '[', 'Expression', ']' ],                  0.3 ],
-    [ 'ArrowRHS' => [ '{', 'Expression', '}' ],                  0.3 ],
-    [ 'ArrowRHS' => ['PostfixDeref'], 0.3 ], # ->@*, ->%*, ->$* (postfix derefs)
-
-    # Postfix dereferencing operators - atomic tokens
-    [ 'PostfixDeref' => [qr/[@%\$]\*/] ],
-
-    # Value rules - basic terminals needed for chalk
-    [ 'Value' => ['Variable'],           0.4 ], # Now includes $hash{key}, @array[index]
-    [ 'Value' => ['QualifiedIdentifier'], 0.4 ],  # Foo::Bar for method calls
-    [ 'Value' => ['Identifier'],          0.3 ],  # Plain identifiers (lower priority)
-    [ 'Value' => ['Number'],     0.3 ],
-    [ 'Value' => ['QuotedString'],           0.3 ],
-    [ 'Value' => [ '(', 'Expression', ')' ], 0.3 ],
-    [ 'Value' => [ '(', ')' ],     0.3 ],    # Empty parentheses (empty list)
-    [ 'Value' => ['ArrayRef'],     0.3 ],
-    [ 'Value' => ['HashRef'],      0.3 ],
-    [ 'Value' => ['FunctionCall'], 0.3 ],
-    [ 'Value' => ['UnaryKeywordExpression'], 0.3 ],    # grep/map/sort etc. (blocks explicitly after keywords)
-    [ 'Value' => ['Block'],                  0.3 ],    # Bare blocks as values (e.g., -l {0})
-    [ 'Value' => ['EvalBlock'],              0.3 ],    # eval { ... } blocks
-    [ 'Value' => [ 'QLikeValue', 'ElemSeq1' ], 1.0 ],  # qw"b"[0], qw()[1], etc. - subscripted qw/regex
-    [ 'Value' => ['QLikeValue'],             0.8 ],
-    [ 'Value' => ['Diamond'],                0.3 ],    # <$fh> constructs (merged from DiamondExpr)
-    [ 'Value' => ['@'],                      0.3 ],
-    [ 'Value' => ['FieldDecl'],              0.3 ],
-    [ 'Value' => ['VariableDecl'], 0.3 ], # my $var = expr as expression
-    [ 'Value' => ['PrintExpr'],    0.3 ], # print statements without parentheses
-    [ 'Value' => ['DieExpr'],      0.3 ], # die statements without parentheses
-    [ 'Value' => ['WarnExpr'],     0.3 ], # warn statements without parentheses
-    [ 'Value' => ['BuiltinFunctionCall'], 0.3 ], # Built-in function calls
-
-    # Print expressions following guacamole OpKeywordPrintExpr pattern
-    [ 'PrintExpr' => [ 'print', 'ExprComma' ], 1.0 ],   # print "string"
-    [ 'PrintExpr' => ['print'],                        1.0 ],   # bare print
-
-    # Print with filehandle: print FILEHANDLE "string"
-    [ 'PrintExpr' => [ 'print', 'Identifier', 'ExprComma' ], 1.0 ],         # print FH "string"
-    [ 'PrintExpr' => [ 'print', 'Identifier' ], 1.0 ],                              # print FH
-    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'ExprComma' ], 1.0 ],  # print STDOUT "string"
-    [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ], 1.0 ],                       # print STDOUT
-
-    # Pattern match statements merged into BaseStatement => QLikeValue (removed wrapper)
-
-    # Die expressions following same pattern as PrintExpr
-    [ 'DieExpr' => [ 'die', 'ExprComma' ], 1.0 ],    # die "string"
-    [ 'DieExpr' => ['die'],                        1.0 ],    # bare die
-
-    # Warn expressions following same pattern as DieExpr
-    [ 'WarnExpr' => [ 'warn', 'ExprComma' ], 1.0 ],  # warn "string"
-    [ 'WarnExpr' => ['warn'],                        1.0 ],  # bare warn
-
-    # Built-in function calls (chdir, mkdir, etc.)
-    [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'ExprComma' ], 1.0 ],
-    [ 'BuiltinFunctionCall' => [ 'BuiltinFunction' ], 1.0 ],
-    [ 'BuiltinFunctionCall' => ['OpenExpr'], 1.0 ],  # Special handling for open
-    [ 'BuiltinFunction' => [qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/] ],
-
-    # Open expressions with inline variable declarations
-    # Two-argument open: open my $fh, "file" or open our $fh, "file"
-    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'ExprComma' ], 1.0 ],
-    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'ExprComma' ], 1.0 ],
-
-    # Three-argument open with inline declarations: open my $fh, "<", $file
-    [ 'OpenExpr' => [ 'open', 'my', 'VariableBase', 'OpComma', 'ExprComma', 'OpComma', 'ExprComma' ], 1.0 ],
-    [ 'OpenExpr' => [ 'open', 'our', 'VariableBase', 'OpComma', 'ExprComma', 'OpComma', 'ExprComma' ], 1.0 ],
-
-    # Standard open patterns (already working, kept for completeness)
-    [ 'OpenExpr' => [ 'open', 'ExprComma' ], 1.0 ],
-
-# ExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
-    [
-        'ExprComma' =>
-          [ 'ExprAssignL', 'OpComma', 'ExprComma' ],
-        0.8
-    ],
-    [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ], 0.7 ]
-    ,                                                           # Trailing comma
-    [ 'ExprComma' => ['ExprAssignR'], 0.3 ],    # Single item
-
-    # ExprAssignL for left-associative assignments in print context
-    [
-        'ExprAssignL' =>
-          [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ],
-        0.8
-    ],
-    [ 'ExprAssignL' => ['ExprCondL'], 0.3 ],
-
-    # ExprCondL for conditional expressions in print context
-    [
-        'ExprCondL' => [
-            'ExprRange0', 'OpTriThen',
-            'ExprRangeL', 'OpTriElse',
-            'ExprCondL'
+        # NonBrace equality expressions (this is what we were missing!)
+        [
+            'ExprEqR' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ],
+            0.8
         ],
-        0.8
-    ],
-    [ 'ExprCondL' => ['ExprRangeL'], 0.3 ],
+        [ 'ExprEqR' => ['ExprNeqR'] ],
+        [
+            'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ],
+            0.8
+        ],
+        [ 'ExprEq0' => ['ExprNeq0'] ],
 
-    # ExprRangeL for range expressions in print context
-    [
-        'ExprRangeL' =>
-          [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ],
-        0.8
-    ],
-    [ 'ExprRangeL' => ['ExprLogOrL'], 0.3 ],
+        # NonBrace inequality expressions
+        [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ] ],
+        [ 'ExprNeqR' => ['ExprShiftR'] ],
+        [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ] ],
+        [ 'ExprNeq0' => ['ExprShift0'] ],
 
-    # Continue chain for NonBrace left-associative expressions
-    [ 'ExprLogOrL'  => ['ExprLogAndL'], 0.3 ],
-    [ 'ExprLogAndL' => ['ExprBinOrL'],  0.3 ],
-    [ 'ExprBinOrL'  => ['ExprBinAndL'], 0.3 ],
-    [ 'ExprBinAndL' => ['ExprEqL'],     0.3 ],
-    [ 'ExprEqL'     => ['ExprNeqL'],    0.3 ],
-    [ 'ExprNeqL' => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ], 0.8 ],
-    [ 'ExprNeqL'    => ['ExprShiftL'],  0.3 ],
+        # NonBrace shift expressions
+        [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ] ],
+        [ 'ExprShiftR' => ['ExprAddR'] ],
+        [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd0' ] ],
+        [ 'ExprShift0' => ['ExprAdd0'] ],
+        [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ] ],
+        [ 'ExprShiftU' => ['ExprAddU'] ],
 
-    # NonBrace shift expressions (left-associative)
-    [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ], 0.8 ],
-    [ 'ExprShiftL' => ['ExprAddL'], 0.3 ],
+        # NonBrace addition expressions
+        [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ] ],
+        [ 'ExprAddR' => [ 'ExprAddU', '.',     'ExprMulR' ] ],
+        [ 'ExprAddR' => ['ExprMulR'] ],
+        [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ] ],
+        [ 'ExprAdd0' => [ 'ExprAddU', '.',     'ExprMul0' ] ],
+        [ 'ExprAdd0' => ['ExprMul0'] ],
+        [ 'ExprAddU' => [ 'ExprAddU', 'OpAdd', 'ExprMulU' ] ],
+        [ 'ExprAddU' => [ 'ExprAddU', '.',     'ExprMulU' ] ],
+        [ 'ExprAddU' => ['ExprMulU'] ],
 
-    # NonBrace addition expressions (left-associative)
-    [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ], 0.8 ],
-    [ 'ExprAddL' => [ 'ExprAddU', '.', 'ExprMulL' ], 0.8 ],
-    [ 'ExprAddL' => ['ExprMulL'], 0.3 ],
+        # NonBrace multiplication expressions
+        [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ] ],
+        [ 'ExprMulR' => ['ExprRegexR'] ],
+        [ 'ExprMul0' => [ 'ExprMulU', 'OpMulti', 'ExprRegex0' ] ],
+        [ 'ExprMul0' => ['ExprRegex0'] ],
+        [ 'ExprMulU' => [ 'ExprMulU', 'OpMulti', 'ExprRegexU' ] ],
+        [ 'ExprMulU' => ['ExprRegexU'] ],
 
-    # NonBrace multiplication expressions (left-associative)
-    [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ], 0.8 ],
-    [ 'ExprMulL' => ['ExprRegexL'], 0.3 ],
+        # NonBrace regex expressions - ADD OpRegex support for print statements
+        [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ] ],
+        [ 'ExprRegexR' => ['ExprUnaryR'] ],
+        [ 'ExprRegex0' => [ 'ExprRegexU', 'OpRegex', 'ExprUnary0' ] ],
+        [ 'ExprRegex0' => ['ExprUnary0'] ],
+        [ 'ExprRegexU' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryU' ] ],
+        [ 'ExprRegexU' => ['ExprUnaryU'] ],
 
-    [ 'ExprRegexL' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ], 0.8 ],
-    [ 'ExprRegexL' => ['ExprUnaryL'], 0.3 ],
-    [ 'ExprUnaryL'  => [ 'OpUnary', 'ExprUnaryL' ], 0.8 ],
-    [ 'ExprUnaryL'  => [ 'FileTestOp', 'ExprUnaryL' ], 0.8 ],
-    [ 'ExprUnaryL'  => ['ExprPowerL'],  0.3 ],
-    [ 'ExprPowerL'  => ['ExprIncL'],    0.3 ],
-    [ 'ExprIncL' => [ 'OpInc', 'ExprIncL' ], 0.8 ],      # Pre-increment
-    [ 'ExprIncL' => [ 'ExprIncL', 'OpInc' ], 0.8 ],      # Post-increment
-    [ 'ExprIncL'    => ['ExprArrowL'],  0.3 ],
-    [ 'ExprArrowL'  => ['ExprValueUL'],  0.3 ],
-    [ 'ExprValueUL'  => ['Value'],       0.8 ],
+        # NonBrace unary expressions
+        [ 'ExprUnaryR' => [ 'OpUnary',    'ExprUnaryR' ] ],
+        [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ] ],
+        [ 'ExprUnaryR' => ['ExprPowerR'] ],
+        [ 'ExprUnary0' => [ 'OpUnary',    'ExprUnary0' ] ],
+        [ 'ExprUnary0' => [ 'FileTestOp', 'ExprUnary0' ] ],
+        [ 'ExprUnary0' => ['ExprPower0'] ],
+        [ 'ExprUnaryU' => [ 'OpUnary',    'ExprUnaryU' ] ],
+        [ 'ExprUnaryU' => [ 'FileTestOp', 'ExprUnaryU' ] ],
+        [ 'ExprUnaryU' => ['ExprPowerU'] ],
 
-    # Add missing operators for ternary expressions
-    [ 'OpTriThen' => ['?'] ],
-    [ 'OpTriElse' => [':'] ],
+        # NonBrace power expressions
+        [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ] ],
+        [ 'ExprPowerR' => ['ExprIncR'] ],
+        [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary0' ] ],
+        [ 'ExprPower0' => ['ExprInc0'] ],
+        [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnaryU' ] ],
+        [ 'ExprPowerU' => ['ExprIncU'] ],
 
-    # Diamond operator: <$fh>, <STDIN>, <>, <try> (DiamondExpr merged into Diamond)
-    [ 'Diamond' => [ '<', 'Variable',          '>' ], 1.0 ],
-    [ 'Diamond' => [ '<', 'BuiltinFilehandle', '>' ], 1.0 ],
-    [ 'Diamond' => [ '<', 'Identifier',        '>' ], 1.0 ],  # Bareword filehandles
-    [ 'Diamond' => [ '<', '>' ], 1.0 ],    # Empty diamond <>
+        # NonBrace increment expressions
+        [ 'ExprIncR' => [ 'OpInc',    'ExprIncR' ] ],
+        [ 'ExprIncR' => [ 'ExprIncR', 'OpInc' ] ],
+        [ 'ExprIncR' => ['ExprArrowR'] ],
+        [ 'ExprInc0' => [ 'OpInc',    'ExprInc0' ] ],
+        [ 'ExprInc0' => [ 'ExprInc0', 'OpInc' ] ],
+        [ 'ExprInc0' => ['ExprArrow0'] ],
+        [ 'ExprIncU' => [ 'OpInc',    'ExprIncU' ] ],
+        [ 'ExprIncU' => [ 'ExprIncU', 'OpInc' ] ],
+        [ 'ExprIncU' => ['ExprArrowU'] ],
 
-    # Built-in filehandles
-    [ 'BuiltinFilehandle' => [qr/STDIN|STDOUT|STDERR|ARGV|ARGVOUT|DATA/] ],
+     # NonBrace arrow expressions - use ArrowChain like regular ExprArrow* rules
+        [ 'ExprArrowR' => [ 'ExprValueUR', 'ArrowChain' ] ],
+        [ 'ExprArrowR' => ['ExprValueUR'] ],
+        [ 'ExprArrow0' => [ 'ExprValueU0', 'ArrowChain' ] ],
+        [ 'ExprArrow0' => ['ExprValueU0'] ],
+        [ 'ExprArrowU' => [ 'ExprValueUU', 'ArrowChain' ] ],
+        [ 'ExprArrowU' => ['ExprValueUU'] ],
 
-    # Function calls following Guacamole SubCall pattern
-    [
-        'FunctionCall' => [ 'Identifier', '(', 'ParameterList', ')' ],
-        1.0
-    ],                                     # func(args)
-    [ 'FunctionCall' => [ 'Identifier', '(', ')' ], 1.0 ],    # func()
+        # ExprValueU* rules
+        [ 'ExprValueUU' => ['Value'] ],
+        [ 'ExprValueUR' => ['Value'] ],
+        [ 'ExprValueUR' => ['BuiltinFunctionCall'] ]
+        ,    # Built-in functions for or/and contexts
+        [ 'ExprValueUR' => ['OpListKeywordExpr'] ],
+        [ 'ExprValueUR' => ['OpAssignKeywordExpr'] ],
+        [ 'ExprValueUR' => ['OpUnaryKeywordExpr'] ],
+        [ 'ExprValueU0' => ['Value'] ],
+        [ 'ExprValueU0' => ['OpUnaryKeywordExpr'] ],
+        [ 'Value'       => ['Variable'] ],
+        [ 'Value' => ['QualifiedIdentifier'] ],    # Foo::Bar for method calls
+        [ 'Value' => ['Identifier'] ],      # Plain identifiers (lower priority)
+        [ 'Value' => ['Number'] ],
+        [ 'Value' => ['UnaryExpression'] ],
+        [ 'Value' => ['QuotedString'] ],
+        [ 'Value' => ['Ellipsis'] ],        # Yada-yada operator ... as value
 
-    # Qualified function calls for package methods
-    [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', 'ParameterList', ')' ], 1.0 ], # pkg::func(args)
-    [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', ')' ], 1.0 ],                 # pkg::func()
+        # Unary expressions (for things like -1e10, !$flag, -d 't', etc.)
+        [ 'UnaryExpression' => [ 'OpUnary',    'Value' ] ],
+        [ 'UnaryExpression' => [ 'FileTestOp', 'Value' ] ],
+        [ 'Value'           => [ '(',          'Expression', ')', 'ElemSeq1' ] ]
+        ,    # (expr)[0] - subscripted parenthesized expression
+        [ 'Value' => [ '(', 'Expression', ')' ] ],
+        [ 'Value' => ['ArrayRef'] ],
+        [ 'Value' => ['HashRef'] ],                # Allow hash refs in push/etc
+        [ 'Value' => ['EvalBlock'] ]
+        ,    # eval { } - keyword disambiguates from bare block
+        [ 'Value' => ['FunctionCall'] ],
+        [ 'Value' => [ 'QLikeValue', 'ElemSeq1' ] ]
+        ,    # qw"b"[0], etc. in expressions
+        [ 'Value' => ['QLikeValue'] ],
+        [ 'Value' => ['Diamond'] ],      # <$fh>, <STDIN>, <> constructs
+        [ 'Value' => ['@'] ],
+        [ 'Value' => ['FieldDecl'] ],
 
-    # Code reference calls: &{expr}()
-    [ 'FunctionCall' => [ '&{', 'Expression', '}' ], 1.0 ],  # &{$coderef} or &{sub {...}}
+        [ 'ExprNameAnd' => [ 'ExprNameAnd', 'OpNameAnd', 'ExprNameNot' ] ],
+        [ 'ExprNameAnd' => ['ExprNameNot'] ],
+        [ 'ExprNameNot' => [ 'OpNameNot', 'ExprNameNot' ] ],
+        [ 'ExprNameNot' => ['ExprComma'] ],
+        [ 'ExprComma'   => [ 'ExprAssignL', 'OpComma', 'ExprComma' ] ]
+        ,                                # Comma list - higher prob
+        [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ] ],  # Trailing comma
+        [ 'ExprComma' => ['ExprAssignR'] ],               # Single item fallback
+        [ 'ExprAssignR' => [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ] ],
+        [ 'ExprAssignR' => ['ExprCondR'] ],
+        [ 'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ] ],
+        [ 'ExprAssignL' => ['OpAssignKeywordExpr'] ],
+        [ 'ExprAssignL' => ['ExprCondL'] ],
+        [
+            'ExprCondR' =>
+              [ 'ExprRange0', '?', 'ExprRangeR', ':', 'ExprCondR' ],
+            0.8
+        ],
+        [ 'ExprCondR' => ['ExprRangeR'] ],
+        [
+            'ExprCondL' =>
+              [ 'ExprRange0', '?', 'ExprRangeL', ':', 'ExprCondL' ],
+            0.8
+        ],
+        [ 'ExprCondL' => ['ExprRangeL'] ],
+        [
+            'ExprCond0' =>
+              [ 'ExprRange0', '?', 'ExprRange0', ':', 'ExprCond0' ],
+            0.8
+        ],
+        [ 'ExprCond0'  => ['ExprRange0'] ],
+        [ 'ExprRangeR' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ] ],
+        [ 'ExprRangeR' => ['ExprLogOrR'] ],
+        [ 'ExprRangeL' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ] ],
+        [ 'ExprRangeL' => ['ExprLogOrL'] ],
+        [ 'ExprRange0' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ] ],
+        [ 'ExprRange0' => ['ExprLogOr0'] ],
+        [ 'ExprLogOrR' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndR' ] ],
+        [ 'ExprLogOrR' => ['ExprLogAndR'] ],
+        [ 'ExprLogOrL' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndL' ] ],
+        [ 'ExprLogOrL' => ['ExprLogAndL'] ],
+        [ 'ExprLogOr0' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAnd0' ] ],
+        [ 'ExprLogOr0' => ['ExprLogAnd0'] ],
 
-    # List operator syntax for user-defined functions (statement context only)
-    # This allows function calls without parentheses like: func "arg", $var
-    # Only available in BaseStatement, not in Value/Expression to avoid ambiguity
-    [ 'ListOperatorCall' => [ 'Identifier', 'ExprComma' ], 1.0 ],               # func "arg", $var
-    [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'ExprComma' ], 1.0 ],     # Pkg::func "arg", $var
+        # Continue the chain down to Value
+        [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ] ],
+        [ 'ExprLogAndR' => [ 'ExprBinOrR',  'Comment' ] ]
+        ,    # Expression with trailing comment
+        [ 'ExprLogAndR' => ['ExprBinOrR'] ],
+        [ 'ExprLogAndL' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrL' ] ],
+        [ 'ExprLogAndL' => ['ExprBinOrL'] ],
+        [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOr0' ] ],
+        [ 'ExprLogAnd0' => ['ExprBinOr0'] ],
+
+        [ 'ExprBinOrR' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndR' ] ],
+        [ 'ExprBinOrR' => ['ExprBinAndR'] ],
+        [ 'ExprBinOrL' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndL' ] ],
+        [ 'ExprBinOrL' => ['ExprBinAndL'] ],
+        [ 'ExprBinOr0' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAnd0' ] ],
+        [ 'ExprBinOr0' => ['ExprBinAnd0'] ],
+
+        [ 'ExprBinAndR' => [ 'ExprBinAnd0', '&', 'ExprEqR' ] ],
+        [ 'ExprBinAndR' => ['ExprEqR'] ],
+        [ 'ExprBinAndL' => [ 'ExprBinAnd0', '&', 'ExprEqL' ] ],
+        [ 'ExprBinAndL' => ['ExprEqL'] ],
+        [ 'ExprBinAnd0' => [ 'ExprBinAnd0', '&', 'ExprEq0' ] ],
+        [ 'ExprBinAnd0' => ['ExprEq0'] ],
+
+        # Complete the missing expression hierarchy levels
+        [ 'ExprEqR' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ] ],
+        [ 'ExprEqR' => ['ExprNeqR'] ],
+        [ 'ExprEqL' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqL' ] ],
+        [ 'ExprEqL' => ['ExprNeqL'] ],
+        [ 'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ] ],
+        [ 'ExprEq0' => ['ExprNeq0'] ],
+
+        [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ] ],
+        [ 'ExprNeqR' => ['ExprShiftR'] ],
+        [ 'ExprNeqL' => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ] ],
+        [ 'ExprNeqL' => ['ExprShiftL'] ],
+        [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ] ],
+        [ 'ExprNeq0' => ['ExprShift0'] ],
+
+        [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ] ],
+        [ 'ExprShiftR' => ['ExprAddR'] ],
+        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ] ],
+        [ 'ExprShiftL' => ['ExprAddL'] ],
+        [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd0' ] ],
+        [ 'ExprShift0' => ['ExprAdd0'] ],
+        [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ] ],
+        [ 'ExprShiftU' => ['ExprAddU'] ],
+
+        [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ] ],
+        [ 'ExprAddR' => [ 'ExprAddU', '.',     'ExprMulR' ] ],
+        [ 'ExprAddR' => ['ExprMulR'] ],
+        [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ] ],
+        [ 'ExprAddL' => [ 'ExprAddU', '.',     'ExprMulL' ] ],
+        [ 'ExprAddL' => ['ExprMulL'] ],
+        [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ] ],
+        [ 'ExprAdd0' => [ 'ExprAddU', '.',     'ExprMul0' ] ],
+        [ 'ExprAdd0' => ['ExprMul0'] ],
+        [ 'ExprAddU' => [ 'ExprAddU', 'OpAdd', 'ExprMulU' ] ],
+        [ 'ExprAddU' => [ 'ExprAddU', '.',     'ExprMulU' ] ],
+        [ 'ExprAddU' => ['ExprMulU'] ],
+
+        [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ] ],
+        [ 'ExprMulR' => ['ExprRegexR'] ],
+        [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ] ],
+        [ 'ExprMulL' => ['ExprRegexL'] ],
+        [ 'ExprMul0' => [ 'ExprMulU', 'OpMulti', 'ExprRegex0' ] ],
+        [ 'ExprMul0' => ['ExprRegex0'] ],
+        [ 'ExprMulU' => [ 'ExprMulU', 'OpMulti', 'ExprRegexU' ] ],
+        [ 'ExprMulU' => ['ExprRegexU'] ],
+
+        [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ] ],
+        [ 'ExprRegexR' => ['ExprUnaryR'] ],
+        [ 'ExprRegexL' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ] ],
+        [ 'ExprRegexL' => ['ExprUnaryL'] ],
+        [ 'ExprRegex0' => [ 'ExprRegexU', 'OpRegex', 'ExprUnary0' ] ],
+        [ 'ExprRegex0' => ['ExprUnary0'] ],
+        [ 'ExprRegexU' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryU' ] ],
+        [ 'ExprRegexU' => ['ExprUnaryU'] ],
+
+        [ 'ExprUnaryR' => [ 'OpUnary',    'ExprUnaryR' ] ],
+        [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ] ],
+        [ 'ExprUnaryR' => ['ExprPowerR'] ],
+        [ 'ExprUnaryL' => [ 'OpUnary',    'ExprUnaryL' ] ],
+        [ 'ExprUnaryL' => [ 'FileTestOp', 'ExprUnaryL' ] ],
+        [ 'ExprUnaryL' => ['ExprPowerL'] ],
+        [ 'ExprUnary0' => [ 'OpUnary',    'ExprUnary0' ] ],
+        [ 'ExprUnary0' => [ 'FileTestOp', 'ExprUnary0' ] ],
+        [ 'ExprUnary0' => ['ExprPower0'] ],
+        [ 'ExprUnaryU' => [ 'OpUnary',    'ExprUnaryU' ] ],
+        [ 'ExprUnaryU' => [ 'FileTestOp', 'ExprUnaryU' ] ],
+        [ 'ExprUnaryU' => ['ExprPowerU'] ],
+
+        [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ] ],
+        [ 'ExprPowerR' => ['ExprIncR'] ],
+        [ 'ExprPowerL' => [ 'ExprIncU', 'OpPower', 'ExprUnaryL' ] ],
+        [ 'ExprPowerL' => ['ExprIncL'] ],
+        [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary0' ] ],
+        [ 'ExprPower0' => ['ExprInc0'] ],
+        [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnaryU' ] ],
+        [ 'ExprPowerU' => ['ExprIncU'] ],
+
+        [ 'ExprIncR' => [ 'OpInc',      'ExprArrowR' ] ],
+        [ 'ExprIncR' => [ 'ExprArrowL', 'OpInc' ] ],
+        [ 'ExprIncR' => ['ExprArrowR'] ],
+        [ 'ExprIncL' => [ 'OpInc',      'ExprArrowL' ] ],
+        [ 'ExprIncL' => [ 'ExprArrowR', 'OpInc' ] ],
+        [ 'ExprIncL' => ['ExprArrowL'] ],
+        [ 'ExprInc0' => [ 'OpInc',      'ExprArrow0' ] ],
+        [ 'ExprInc0' => [ 'ExprArrowR', 'OpInc' ] ],
+        [ 'ExprInc0' => ['ExprArrow0'] ],
+        [ 'ExprIncU' => [ 'OpInc',      'ExprArrowU' ] ],
+        [ 'ExprIncU' => [ 'ExprArrowR', 'OpInc' ] ],
+        [ 'ExprIncU' => ['ExprArrowU'] ],
+
+     # Arrow expressions - eliminate left recursion to prevent parsing explosion
+        [ 'ExprArrowR' => [ 'ExprValueR', 'ArrowChain' ] ],
+        [ 'ExprArrowR' => ['ExprValueR'] ],
+        [ 'ExprArrowL' => [ 'ExprValueL', 'ArrowChain' ] ],
+        [ 'ExprArrowL' => ['ExprValueL'] ],
+        [ 'ExprArrow0' => [ 'ExprValue0', 'ArrowChain' ] ],
+        [ 'ExprArrow0' => ['ExprValue0'] ],
+        [ 'ExprArrowU' => [ 'ExprValueU', 'ArrowChain' ] ],
+        [ 'ExprArrowU' => ['ExprValueU'] ],
+
+        # ArrowChain - right-recursive chain of arrow operations
+        [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS', 'ArrowChain' ] ],
+        [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS' ] ]
+        ,    # Prefer continuing chain over terminating
+
+        # Value rules - matching Guacamole ExprValue* rules exactly
+        [ 'ExprValueU' => ['Value'] ],
+        [ 'ExprValue0' => ['Value'] ],
+        [ 'ExprValue0' => ['OpUnaryKeywordExpr'] ],
+        [ 'ExprValueL' => ['Value'] ],
+        [ 'ExprValueL' => ['OpAssignKeywordExpr'] ],
+        [ 'ExprValueL' => ['OpUnaryKeywordExpr'] ],
+        [ 'ExprValueR' => ['Value'] ],
+        [ 'ExprValueR' => ['OpListKeywordExpr'] ],
+        [ 'ExprValueR' => ['OpAssignKeywordExpr'] ],
+        [ 'ExprValueR' => ['OpUnaryKeywordExpr'] ],
+
+        # ArrowRHS - method calls, array/hash indexing, postfix dereferencing
+        [ 'ArrowRHS' => ['Identifier'] ],
+        [ 'ArrowRHS' => [ 'Identifier', '(', 'ParameterList', ')' ] ]
+        ,                                    # Match FunctionCall priority
+        [ 'ArrowRHS' => [ 'Identifier', '(', ')' ] ]
+        ,                                    # Match FunctionCall priority
+        [ 'ArrowRHS' => [ '[', 'Expression', ']' ] ],
+        [ 'ArrowRHS' => [ '{', 'Expression', '}' ] ],
+        [ 'ArrowRHS' => ['PostfixDeref'] ],  # ->@*, ->%*, ->$* (postfix derefs)
+
+        # Postfix dereferencing operators - atomic tokens
+        [ 'PostfixDeref' => [qr/[@%\$]\*/] ],
+
+        # Value rules - basic terminals needed for chalk
+        [ 'Value' => ['Variable'] ],    # Now includes $hash{key}, @array[index]
+        [ 'Value' => ['QualifiedIdentifier'] ],    # Foo::Bar for method calls
+        [ 'Value' => ['Identifier'] ],     # Plain identifiers (lower priority)
+        [ 'Value' => ['Number'] ],
+        [ 'Value' => ['QuotedString'] ],
+        [ 'Value' => [ '(', 'Expression', ')' ] ],
+        [ 'Value' => [ '(', ')' ] ],       # Empty parentheses (empty list)
+        [ 'Value' => ['ArrayRef'] ],
+        [ 'Value' => ['HashRef'] ],
+        [ 'Value' => ['FunctionCall'] ],
+        [ 'Value' => ['UnaryKeywordExpression'] ]
+        ,    # grep/map/sort etc. (blocks explicitly after keywords)
+        [ 'Value' => ['Block'] ],        # Bare blocks as values (e.g., -l {0})
+        [ 'Value' => ['EvalBlock'] ],    # eval { ... } blocks
+        [ 'Value' => [ 'QLikeValue', 'ElemSeq1' ] ]
+        ,    # qw"b"[0], qw()[1], etc. - subscripted qw/regex
+        [ 'Value' => ['QLikeValue'] ],
+        [ 'Value' => ['Diamond'] ], # <$fh> constructs (merged from DiamondExpr)
+        [ 'Value' => ['@'] ],
+        [ 'Value' => ['FieldDecl'] ],
+        [ 'Value' => ['VariableDecl'] ],  # my $var = expr as expression
+        [ 'Value' => ['PrintExpr'] ],     # print statements without parentheses
+        [ 'Value' => ['DieExpr'] ],       # die statements without parentheses
+        [ 'Value' => ['WarnExpr'] ],      # warn statements without parentheses
+        [ 'Value' => ['BuiltinFunctionCall'] ],    # Built-in function calls
+
+        # Print expressions following guacamole OpKeywordPrintExpr pattern
+        [ 'PrintExpr' => [ 'print', 'ExprComma' ] ],    # print "string"
+        [ 'PrintExpr' => ['print'] ],                   # bare print
+
+        # Print with filehandle: print FILEHANDLE "string"
+        [ 'PrintExpr' => [ 'print', 'Identifier', 'ExprComma' ] ]
+        ,                                                # print FH "string"
+        [ 'PrintExpr' => [ 'print', 'Identifier' ] ],    # print FH
+        [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'ExprComma' ] ]
+        ,                                                # print STDOUT "string"
+        [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ] ],    # print STDOUT
+
+# Pattern match statements merged into Statement => QLikeValue (removed wrapper)
+
+        # Die expressions following same pattern as PrintExpr
+        [ 'DieExpr' => [ 'die', 'ExprComma' ] ],    # die "string"
+        [ 'DieExpr' => ['die'] ],                   # bare die
+
+        # Warn expressions following same pattern as DieExpr
+        [ 'WarnExpr' => [ 'warn', 'ExprComma' ] ],    # warn "string"
+        [ 'WarnExpr' => ['warn'] ],                   # bare warn
+
+        # Built-in function calls (chdir, mkdir, etc.)
+        [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'ExprComma' ] ],
+        [ 'BuiltinFunctionCall' => ['BuiltinFunction'] ],
+        [ 'BuiltinFunctionCall' => ['OpenExpr'] ],   # Special handling for open
+        [
+            'BuiltinFunction' => [
+qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/
+            ]
+        ],
+
+        # Open expressions with inline variable declarations
+        # Two-argument open: open my $fh, "file" or open our $fh, "file"
+        [
+            'OpenExpr' =>
+              [ 'open', 'my', 'VariableBase', 'OpComma', 'ExprComma' ]
+        ],
+        [
+            'OpenExpr' =>
+              [ 'open', 'our', 'VariableBase', 'OpComma', 'ExprComma' ]
+        ],
+
+        # Three-argument open with inline declarations: open my $fh, "<", $file
+        [
+            'OpenExpr' => [
+                'open',      'my',      'VariableBase', 'OpComma',
+                'ExprComma', 'OpComma', 'ExprComma'
+            ]
+        ],
+        [
+            'OpenExpr' => [
+                'open',      'our',     'VariableBase', 'OpComma',
+                'ExprComma', 'OpComma', 'ExprComma'
+            ]
+        ],
+
+        # Standard open patterns (already working, kept for completeness)
+        [ 'OpenExpr' => [ 'open', 'ExprComma' ] ],
+
+  # ExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
+        [
+            'ExprComma' => [ 'ExprAssignL', 'OpComma', 'ExprComma' ],
+            0.8
+        ],
+        [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ] ],    # Trailing comma
+        [ 'ExprComma' => ['ExprAssignR'] ],                 # Single item
+
+        # ExprAssignL for left-associative assignments in print context
+        [
+            'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ],
+            0.8
+        ],
+        [ 'ExprAssignL' => ['ExprCondL'] ],
+
+        # ExprCondL for conditional expressions in print context
+        [
+            'ExprCondL' => [
+                'ExprRange0', 'OpTriThen', 'ExprRangeL', 'OpTriElse',
+                'ExprCondL'
+            ],
+            0.8
+        ],
+        [ 'ExprCondL' => ['ExprRangeL'] ],
+
+        # ExprRangeL for range expressions in print context
+        [
+            'ExprRangeL' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ],
+            0.8
+        ],
+        [ 'ExprRangeL' => ['ExprLogOrL'] ],
+
+        # Continue chain for NonBrace left-associative expressions
+        [ 'ExprLogOrL'  => ['ExprLogAndL'] ],
+        [ 'ExprLogAndL' => ['ExprBinOrL'] ],
+        [ 'ExprBinOrL'  => ['ExprBinAndL'] ],
+        [ 'ExprBinAndL' => ['ExprEqL'] ],
+        [ 'ExprEqL'     => ['ExprNeqL'] ],
+        [ 'ExprNeqL'    => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ] ],
+        [ 'ExprNeqL'    => ['ExprShiftL'] ],
+
+        # NonBrace shift expressions (left-associative)
+        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ] ],
+        [ 'ExprShiftL' => ['ExprAddL'] ],
+
+        # NonBrace addition expressions (left-associative)
+        [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ] ],
+        [ 'ExprAddL' => [ 'ExprAddU', '.',     'ExprMulL' ] ],
+        [ 'ExprAddL' => ['ExprMulL'] ],
+
+        # NonBrace multiplication expressions (left-associative)
+        [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ] ],
+        [ 'ExprMulL' => ['ExprRegexL'] ],
+
+        [ 'ExprRegexL'  => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ] ],
+        [ 'ExprRegexL'  => ['ExprUnaryL'] ],
+        [ 'ExprUnaryL'  => [ 'OpUnary',    'ExprUnaryL' ] ],
+        [ 'ExprUnaryL'  => [ 'FileTestOp', 'ExprUnaryL' ] ],
+        [ 'ExprUnaryL'  => ['ExprPowerL'] ],
+        [ 'ExprPowerL'  => ['ExprIncL'] ],
+        [ 'ExprIncL'    => [ 'OpInc',    'ExprIncL' ] ],    # Pre-increment
+        [ 'ExprIncL'    => [ 'ExprIncL', 'OpInc' ] ],       # Post-increment
+        [ 'ExprIncL'    => ['ExprArrowL'] ],
+        [ 'ExprArrowL'  => ['ExprValueUL'] ],
+        [ 'ExprValueUL' => ['Value'] ],
+
+        # Add missing operators for ternary expressions
+        [ 'OpTriThen' => ['?'] ],
+        [ 'OpTriElse' => [':'] ],
+
+ # Diamond operator: <$fh>, <STDIN>, <>, <try> (DiamondExpr merged into Diamond)
+        [ 'Diamond' => [ '<', 'Variable',          '>' ] ],
+        [ 'Diamond' => [ '<', 'BuiltinFilehandle', '>' ] ],
+        [ 'Diamond' => [ '<', 'Identifier', '>' ] ],    # Bareword filehandles
+        [ 'Diamond' => [ '<', '>' ] ],                  # Empty diamond <>
+
+        # Built-in filehandles
+        [ 'BuiltinFilehandle' => [qr/STDIN|STDOUT|STDERR|ARGV|ARGVOUT|DATA/] ],
+
+        # Function calls following Guacamole SubCall pattern
+        [
+            'FunctionCall' => [ 'Identifier', '(', 'ParameterList', ')' ],
+            1.0
+        ],                                              # func(args)
+        [ 'FunctionCall' => [ 'Identifier', '(', ')' ] ],    # func()
+
+        # Qualified function calls for package methods
+        [
+            'FunctionCall' =>
+              [ 'QualifiedIdentifier', '(', 'ParameterList', ')' ]
+        ],                                                   # pkg::func(args)
+        [ 'FunctionCall' => [ 'QualifiedIdentifier', '(', ')' ] ], # pkg::func()
+
+        # Code reference calls: &{expr}()
+        [ 'FunctionCall' => [ '&{', 'Expression', '}' ] ]
+        ,    # &{$coderef} or &{sub {...}}
+
+      # List operator syntax for user-defined functions (statement context only)
+      # This allows function calls without parentheses like: func "arg", $var
+      # Only available in Statement, not in Value/Expression to avoid ambiguity
+        [ 'ListOperatorCall' => [ 'Identifier', 'ExprComma' ] ]
+        ,    # func "arg", $var
+        [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'ExprComma' ] ]
+        ,    # Pkg::func "arg", $var
 
 # Expression block for grep/map/sort merged into Block
-    # Removed ExpressionBlock - Block already handles both Expression and StatementList
-    # since expressions can appear in StatementList through BlockLevelExpression
+# Removed ExpressionBlock - Block already handles both Expression and StatementList
+# since expressions can appear in StatementList through BlockLevelExpression
 
-    # Eval - supports both block and string/expression forms
-    [ 'EvalBlock' => [ 'eval', 'Block' ], 1.0 ],       # eval { ... }
-    [ 'EvalBlock' => [ 'eval', 'Expression' ], 1.0 ],  # eval 'string' or eval $expr
+        # Eval - supports both block and string/expression forms
+        [ 'EvalBlock' => [ 'eval', 'Block' ] ],       # eval { ... }
+        [ 'EvalBlock' => [ 'eval', 'Expression' ] ]
+        ,    # eval 'string' or eval $expr
 
-    # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
-    [
-        'UnaryKeywordExpression' => [ 'grep', 'Block', 'Expression' ],
-        1.0
-    ],    # grep { ... } @list
-    [ 'UnaryKeywordExpression' => [ 'grep', 'Expression' ], 1.0 ]
-    ,     # grep EXPR, @list
-    [
-        'UnaryKeywordExpression' => [ 'all', 'Block', 'Expression' ],
-        1.0
-    ],    # all { ... } @list
-    [
-        'UnaryKeywordExpression' => [ 'any', 'Block', 'Expression' ],
-        1.0
-    ],    # any { ... } @list
-    [
-        'UnaryKeywordExpression' => [ 'map', 'Block', 'Expression' ],
-        1.0
-    ],    # map { ... } @list
-    [
-        'UnaryKeywordExpression' => [ 'sort', 'Block', 'Expression' ],
-        1.0
-    ],    # sort { ... } @list
+      # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
+        [
+            'UnaryKeywordExpression' => [ 'grep', 'Block', 'Expression' ],
+            1.0
+        ],    # grep { ... } @list
+        [ 'UnaryKeywordExpression' => [ 'grep', 'Expression' ] ]
+        ,     # grep EXPR, @list
+        [
+            'UnaryKeywordExpression' => [ 'all', 'Block', 'Expression' ],
+            1.0
+        ],    # all { ... } @list
+        [
+            'UnaryKeywordExpression' => [ 'any', 'Block', 'Expression' ],
+            1.0
+        ],    # any { ... } @list
+        [
+            'UnaryKeywordExpression' => [ 'map', 'Block', 'Expression' ],
+            1.0
+        ],    # map { ... } @list
+        [
+            'UnaryKeywordExpression' => [ 'sort', 'Block', 'Expression' ],
+            1.0
+        ],    # sort { ... } @list
 
-    # Operators - basic ones needed for chalk
-    # OpRegex needs longer match (!~) before shorter (=~)
-    [ 'OpRegex'   => [qr/!~|=~/] ],  # Regex binding operators: !~ and =~
-    [ 'OpComma'   => [qr/,|=>/] ],
-    [ 'OpAssign'  => [qr/\+=|-=|\*=|\/=|%=|\/\/=|\|\|=|&&=|\.=|&=|\|=|\^=|<<=|>>=|=/] ],  # Assignment operators (compound before simple)
-    [ 'OpArrow'   => ['->'] ],
-    [ 'OpAdd'     => [qr/[+\-]/] ],
-    [ 'OpMulti'   => [qr/[*\/x]/] ],  # Multiplication, division, and repetition (x)
-    [ 'OpLogOr'   => [qr/\|\||\/\//] ],              # Logical or and defined-or
-    [ 'OpLogAnd'  => [qr/&&/] ],
-    [ 'OpNameOr'  => ['or'] ],
-    [ 'OpNameAnd' => ['and'] ],
-    [ 'OpNameNot' => ['not'] ],
-    [ 'OpRange'   => ['..'] ],
-    [ 'OpBinOr'   => [qr/[|^]/] ],
-    [ 'OpEqual'   => [qr/==|!=|<=>|eq|ne|cmp|isa/] ],
-    [ 'OpInequal' => [qr/<=|>=|<|>|lt|gt|le|ge/] ],
-    [ 'OpShift'   => [qr/<<|>>/] ],
-    [ 'OpUnary'   => [qr/[\\+\-]/] ],  # Removed ! and ~ to avoid conflict with !~
-    [ 'OpUnary'   => ['!'] ],  # Define ! separately
-    [ 'OpUnary'   => ['~'] ],  # Define ~ separately
-    [ 'OpPower'   => ['**'] ],
-    [ 'OpInc'     => [qr/\+\+|--/] ],
+        # Operators - basic ones needed for chalk
+        # OpRegex needs longer match (!~) before shorter (=~)
+        [ 'OpRegex' => [qr/!~|=~/] ],    # Regex binding operators: !~ and =~
+        [ 'OpComma' => [qr/,|=>/] ],
+        [
+            'OpAssign' =>
+              [qr/\+=|-=|\*=|\/=|%=|\/\/=|\|\|=|&&=|\.=|&=|\|=|\^=|<<=|>>=|=/]
+        ],    # Assignment operators (compound before simple)
+        [ 'OpArrow' => ['->'] ],
+        [ 'OpAdd'   => [qr/[+\-]/] ],
+        [ 'OpMulti' => [qr/[*\/x]/] ]
+        ,     # Multiplication, division, and repetition (x)
+        [ 'OpLogOr'   => [qr/\|\||\/\//] ],    # Logical or and defined-or
+        [ 'OpLogAnd'  => [qr/&&/] ],
+        [ 'OpNameOr'  => ['or'] ],
+        [ 'OpNameAnd' => ['and'] ],
+        [ 'OpNameNot' => ['not'] ],
+        [ 'OpRange'   => ['..'] ],
+        [ 'OpBinOr'   => [qr/[|^]/] ],
+        [ 'OpEqual'   => [qr/==|!=|<=>|eq|ne|cmp|isa/] ],
+        [ 'OpInequal' => [qr/<=|>=|<|>|lt|gt|le|ge/] ],
+        [ 'OpShift'   => [qr/<<|>>/] ],
+        [ 'OpUnary'   => [qr/[\\+\-]/] ]
+        ,    # Removed ! and ~ to avoid conflict with !~
+        [ 'OpUnary' => ['!'] ],           # Define ! separately
+        [ 'OpUnary' => ['~'] ],           # Define ~ separately
+        [ 'OpPower' => ['**'] ],
+        [ 'OpInc'   => [qr/\+\+|--/] ],
 
-    # Terminal definitions for chalk - following guacamole.pm pattern
-    # Variables with optional element sequences (subscripts)
-    [ 'Variable' => [ 'VariableBase', 'ElemSeq0' ], 1.0 ],
-    [ 'Variable' => ['VariableBase'], 0.9 ],    # Lower priority for base case
+        # Variables with optional element sequences (subscripts)
+        [ 'Variable' => [ 'VariableBase', 'ElemSeq0' ] ],
+        [ 'Variable' => ['VariableBase'] ],    # Lower priority for base case
 
-    # Base variable patterns (without subscripts) - all sigils in one rule
-    [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*::/] ],  # Variables with trailing :: (e.g., $foo::) - must come first
-    [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*/] ],  # All variable types with sigils, including qualified (e.g., *Package::Name)
-    [ 'VariableBase' => [qr/\$#\w+/] ],       # Array length variables ($#array)
+        # Base variable patterns (without subscripts) - all sigils in one rule
+        [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*::/] ]
+        ,    # Variables with trailing :: (e.g., $foo::) - must come first
+        [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*/] ]
+        , # All variable types with sigils, including qualified (e.g., *Package::Name)
+        [ 'VariableBase' => [qr/\$#\w+/] ],   # Array length variables ($#array)
 
-    # Global variables following guacamole GlobalVariables pattern
-    [ 'VariableBase' => [qr/\$::/] ],         # $:: - main package symbol table
-    [ 'VariableBase' => [qr/\$\$/] ],         # $$ - process ID (special case)
-    [ 'VariableBase' => [qr/\$[!"#%&'()*+,\-.\/:;<=>?\@\[\\\]^_`|~]/] ],
-    [ 'VariableBase' => [qr/\$\^\w+/] ]  # Special caret variables like $^X
-    ,                                         # Global special vars
+        # Global variables following guacamole GlobalVariables pattern
+        [ 'VariableBase' => [qr/\$::/] ],     # $:: - main package symbol table
+        [ 'VariableBase' => [qr/\$\$/] ],     # $$ - process ID (special case)
+        [ 'VariableBase' => [qr/\$[!"#%&'()*+,\-.\/:;<=>?\@\[\\\]^_`|~]/] ],
+        [ 'VariableBase' => [qr/\$\^\w+/] ]   # Special caret variables like $^X
+        ,                                     # Global special vars
 
-    # Caret variables in braces: ${^NAME}, $ {^NAME}, @{^NAME}, %{^NAME}
-    [ 'VariableBase' => [ '${', '^', 'Identifier', '}' ], 1.0 ],  # ${^NAME}
-    [ 'VariableBase' => [ '$', '{', '^', 'Identifier', '}' ], 1.0 ],  # $ {^NAME}
-    [ 'VariableBase' => [ '@{', '^', 'Identifier', '}' ], 1.0 ],  # @{^NAME}
-    [ 'VariableBase' => [ '@', '{', '^', 'Identifier', '}' ], 1.0 ],  # @ {^NAME}
-    [ 'VariableBase' => [ '%{', '^', 'Identifier', '}' ], 1.0 ],  # %{^NAME}
-    [ 'VariableBase' => [ '%', '{', '^', 'Identifier', '}' ], 1.0 ],  # % {^NAME}
+        # Caret variables in braces: ${^NAME}, $ {^NAME}, @{^NAME}, %{^NAME}
+        [ 'VariableBase' => [ '${', '^', 'Identifier', '}' ] ],      # ${^NAME}
+        [ 'VariableBase' => [ '$',  '{', '^', 'Identifier', '}' ] ], # $ {^NAME}
+        [ 'VariableBase' => [ '@{', '^', 'Identifier', '}' ] ],      # @{^NAME}
+        [ 'VariableBase' => [ '@',  '{', '^', 'Identifier', '}' ] ], # @ {^NAME}
+        [ 'VariableBase' => [ '%{', '^', 'Identifier', '}' ] ],      # %{^NAME}
+        [ 'VariableBase' => [ '%',  '{', '^', 'Identifier', '}' ] ], # % {^NAME}
 
-    # Scalar dereference patterns: @$var, %$var, *$var, &$var, $$var, $#$var
-    [ 'VariableBase' => [qr/[@%&*]\$\w+/] ],    # All dereference types except $$
-    [ 'VariableBase' => [qr/\$\$\w+/] ],        # Scalar dereference ($$ref)
-    [ 'VariableBase' => [qr/\$#\$\w+/] ],       # Array length of dereferenced scalar ($#$ref)
+        # Scalar dereference patterns: @$var, %$var, *$var, &$var, $$var, $#$var
+        [ 'VariableBase' => [qr/[@%&*]\$\w+/] ]
+        ,    # All dereference types except $$
+        [ 'VariableBase' => [qr/\$\$\w+/] ],    # Scalar dereference ($$ref)
+        [ 'VariableBase' => [qr/\$#\$\w+/] ]
+        ,    # Array length of dereferenced scalar ($#$ref)
 
- # Complex dereference patterns from guacamole: ${ Expression }, @{ Expression }, %{ Expression }
-    [ 'VariableBase' => [ '${', 'Expression', '}' ], 1.0 ]
-    ,                                           # Scalar deref: ${ expr }
-    [ 'VariableBase' => [ '$', '{', 'Expression', '}' ], 1.0 ]
-    ,                                           # Scalar deref with space: $ { expr }
-    [ 'VariableBase' => [ '@{', 'Expression', '}' ], 1.0 ]
-    ,                                           # Array deref: @{ expr }
-    [ 'VariableBase' => [ '%{', 'Expression', '}' ], 1.0 ]
-    ,                                           # Hash deref: %{ expr }
-    [ 'VariableBase' => [ '@[', 'Expression', ']' ], 1.0 ]
-    ,                                           # Array slice: @[ expr ]
-    [ 'VariableBase' => [ '%[', 'Expression', ']' ], 1.0 ]
-    ,                                           # Hash slice: %[ expr ]
+# Complex dereference patterns from guacamole: ${ Expression }, @{ Expression }, %{ Expression }
+        [ 'VariableBase' => [ '${', 'Expression', '}' ] ]
+        ,    # Scalar deref: ${ expr }
+        [ 'VariableBase' => [ '$', '{', 'Expression', '}' ] ]
+        ,    # Scalar deref with space: $ { expr }
+        [ 'VariableBase' => [ '@{', 'Expression', '}' ] ]
+        ,    # Array deref: @{ expr }
+        [ 'VariableBase' => [ '%{', 'Expression', '}' ] ]
+        ,    # Hash deref: %{ expr }
+        [ 'VariableBase' => [ '@[', 'Expression', ']' ] ]
+        ,    # Array slice: @[ expr ]
+        [ 'VariableBase' => [ '%[', 'Expression', ']' ] ]
+        ,    # Hash slice: %[ expr ]
 
-    # Element sequences for subscripting
-    [ 'ElemSeq0' => [],                        0.1 ], # Empty sequence (epsilon)
-    [ 'ElemSeq0' => ['Element'],               1.0 ],
-    [ 'ElemSeq0' => [ 'Element', 'ElemSeq0' ], 0.8 ], # Multiple subscripts
+        # Element sequences for subscripting
+        [ 'ElemSeq0' => [] ],                         # Empty sequence (epsilon)
+        [ 'ElemSeq0' => ['Element'] ],
+        [ 'ElemSeq0' => [ 'Element', 'ElemSeq0' ] ],  # Multiple subscripts
 
-    # Non-empty element sequence (one or more subscripts) - for qw()[0] etc.
-    [ 'ElemSeq1' => ['Element'],               1.0 ],
-    [ 'ElemSeq1' => [ 'Element', 'ElemSeq0' ], 0.8 ],
+        # Non-empty element sequence (one or more subscripts) - for qw()[0] etc.
+        [ 'ElemSeq1' => ['Element'] ],
+        [ 'ElemSeq1' => [ 'Element', 'ElemSeq0' ] ],
 
-    [ 'Element' => ['ArrayElem'], 1.0 ],
-    [ 'Element' => ['HashElem'],  1.0 ],
+        [ 'Element' => ['ArrayElem'] ],
+        [ 'Element' => ['HashElem'] ],
 
-    [ 'ArrayElem'    => [ '[', 'Expression', ']' ], 1.0 ],
-    [ 'HashElem'     => [ '{', 'Expression', '}' ], 1.0 ],
-    [ 'Identifier'   => [qr/[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/] ],  # Support qualified identifiers, including pathological cases like foo::::bar
-    [ 'Number'       => [qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/] ],
-    [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
+        [ 'ArrayElem' => [ '[', 'Expression', ']' ] ],
+        [ 'HashElem'  => [ '{', 'Expression', '}' ] ],
+        [
+            'Identifier' =>
+              [qr/[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/]
+        ]
+        , # Support qualified identifiers, including pathological cases like foo::::bar
+        [
+            'Number' => [
+qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/
+            ]
+        ],
+        [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
 
-    # q/qq quote operators - split into operator and delimited content
-    # This allows auto_insert WS_OPT to handle comments between operator and delimiter
-    [ 'QuotedString' => [ 'QOp', 'QDelimited' ] ],
-    [ 'QuotedString' => [ 'QQOp', 'QDelimited' ] ],
+# q/qq quote operators - split into operator and delimited content
+# This allows auto_insert WS_OPT to handle comments between operator and delimiter
+        [ 'QuotedString' => [ 'QOp',  'QDelimited' ] ],
+        [ 'QuotedString' => [ 'QQOp', 'QDelimited' ] ],
 
-    # Quote operators as terminals (not literals, so auto_insert WS_OPT works)
-    [ 'QOp' => [qr/q(?!q)/] ],   # q but not qq (negative lookahead)
-    [ 'QQOp' => [qr/qq/] ],
-    [ 'QWOp' => [qr/qw/] ],      # qw word list operator
-    [ 'MOp' => [qr/m(?!s)/] ],   # m match operator (not ms - negative lookahead for future s/// support)
-    [ 'QROp' => [qr/qr/] ],      # qr compiled regex operator
-    [ 'SOp' => [qr/s/] ],        # s substitution operator
-    [ 'TROp' => [qr/tr/] ],      # tr transliteration operator
-    [ 'YOp' => [qr/y/] ],        # y transliteration operator (alias for tr)
+      # Quote operators as terminals (not literals, so auto_insert WS_OPT works)
+        [ 'QOp'  => [qr/q(?!q)/] ],    # q but not qq (negative lookahead)
+        [ 'QQOp' => [qr/qq/] ],
+        [ 'QWOp' => [qr/qw/] ],        # qw word list operator
+        [ 'MOp'  => [qr/m(?!s)/] ]
+        , # m match operator (not ms - negative lookahead for future s/// support)
+        [ 'QROp' => [qr/qr/] ],    # qr compiled regex operator
+        [ 'SOp'  => [qr/s/] ],     # s substitution operator
+        [ 'TROp' => [qr/tr/] ],    # tr transliteration operator
+        [ 'YOp'  => [qr/y/] ],     # y transliteration operator (alias for tr)
 
-    # Delimited quote content - various delimiters
-    [ 'QDelimited' => [qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/] ],  # {} with balanced braces
-    [ 'QDelimited' => [qr/\((?:[^)]|\n)*\)/] ],   # ()
-    [ 'QDelimited' => [qr/\[(?:[^\]]|\n)*\]/] ],  # []
-    [ 'QDelimited' => [qr/<(?:[^>]|\n)*>/] ],     # <>
-    [ 'QDelimited' => [qr/"(?:[^"\\]|\\.)*"/] ],  # ""
-    [ 'QDelimited' => [qr/'(?:[^'\\]|\\.)*'/] ],  # ''
-    [ 'QDelimited' => [qr{/(?:[^/\\]|\\.)*+/}] ],  # /.../
-    [ 'QDelimited' => [qr/!(?:[^!\\]|\\.)*!/] ],  # !...!
-    [ 'QDelimited' => [qr/#(?:[^#\\]|\\.)*#/] ],  # #...#
-    [ 'QDelimited' => [qr/\|(?:[^|\\]|\\.)*\|/] ],  # |...|
+        # Delimited quote content - various delimiters
+        [
+            'QDelimited' => [
+qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/
+            ]
+        ],                         # {} with balanced braces
+        [ 'QDelimited' => [qr/\((?:[^)]|\n)*\)/] ],       # ()
+        [ 'QDelimited' => [qr/\[(?:[^\]]|\n)*\]/] ],      # []
+        [ 'QDelimited' => [qr/<(?:[^>]|\n)*>/] ],         # <>
+        [ 'QDelimited' => [qr/"(?:[^"\\]|\\.)*"/] ],      # ""
+        [ 'QDelimited' => [qr/'(?:[^'\\]|\\.)*'/] ],      # ''
+        [ 'QDelimited' => [qr{/(?:[^/\\]|\\.)*+/}] ],     # /.../
+        [ 'QDelimited' => [qr/!(?:[^!\\]|\\.)*!/] ],      # !...!
+        [ 'QDelimited' => [qr/#(?:[^#\\]|\\.)*#/] ],      # #...#
+        [ 'QDelimited' => [qr/\|(?:[^|\\]|\\.)*\|/] ],    # |...|
 
-    # Delimited match content - like QDelimited but with optional regex flags
-    # Possessive quantifiers (*+) prevent backtracking across large spans
-    [ 'MDelimited' => [qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/] ],  # {} with balanced braces + flags
-    [ 'MDelimited' => [qr/\((?:[^)]|\\.)*+\)[a-z]*/] ],   # () + flags
-    [ 'MDelimited' => [qr/\[(?:[^\]]|\\.)*+\][a-z]*/] ],  # [] + flags
-    [ 'MDelimited' => [qr/<(?:[^>]|\\.)*+>[a-z]*/] ],     # <> + flags
-    [ 'MDelimited' => [qr/"(?:[^"\\]|\\.)*+"[a-z]*/] ],  # "" + flags
-    [ 'MDelimited' => [qr/'(?:[^'\\]|\\.)*+'[a-z]*/] ],  # '' + flags
-    [ 'MDelimited' => [qr{/(?:[^/\\]|\\.)*+/[a-z]*}] ],  # /.../flags
-    [ 'MDelimited' => [qr/!(?:[^!\\]|\\.)*+![a-z]*/] ],  # !...!flags
-    [ 'MDelimited' => [qr/#(?:[^#\\]|\\.)*+#[a-z]*/] ],  # #...#flags
-    [ 'MDelimited' => [qr/\|(?:[^|\\]|\\.)*+\|(?![|])[a-z]*/] ],  # |...|flags (negative lookahead to prevent matching ||)
+       # Delimited match content - like QDelimited but with optional regex flags
+       # Possessive quantifiers (*+) prevent backtracking across large spans
+        [
+            'MDelimited' => [
+qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
+            ]
+        ],    # {} with balanced braces + flags
+        [ 'MDelimited' => [qr/\((?:[^)]|\\.)*+\)[a-z]*/] ],         # () + flags
+        [ 'MDelimited' => [qr/\[(?:[^\]]|\\.)*+\][a-z]*/] ],        # [] + flags
+        [ 'MDelimited' => [qr/<(?:[^>]|\\.)*+>[a-z]*/] ],           # <> + flags
+        [ 'MDelimited' => [qr/"(?:[^"\\]|\\.)*+"[a-z]*/] ],         # "" + flags
+        [ 'MDelimited' => [qr/'(?:[^'\\]|\\.)*+'[a-z]*/] ],         # '' + flags
+        [ 'MDelimited' => [qr{/(?:[^/\\]|\\.)*+/[a-z]*}] ],         # /.../flags
+        [ 'MDelimited' => [qr/!(?:[^!\\]|\\.)*+![a-z]*/] ],         # !...!flags
+        [ 'MDelimited' => [qr/#(?:[^#\\]|\\.)*+#[a-z]*/] ],         # #...#flags
+        [ 'MDelimited' => [qr/\|(?:[^|\\]|\\.)*+\|(?![|])[a-z]*/] ]
+        ,    # |...|flags (negative lookahead to prevent matching ||)
 
-    # Punctuation
-    [ 'PackageSeparator' => ['::'] ],
+        # Punctuation
+        [ 'PackageSeparator' => ['::'] ],
 
-    # Qualified identifiers for package method calls like utf8::native_to_unicode
-    # Made recursive to support multi-level package names like Chalk::Semiring::Boolean
-    [ 'QualifiedIdentifier' => [ 'Identifier', 'PackageSeparator', 'QualifiedIdentifier' ], 1.0 ],
-    [ 'QualifiedIdentifier' => [ 'Identifier', 'PackageSeparator', 'Identifier' ], 0.9 ],
+# Qualified identifiers for package method calls like utf8::native_to_unicode
+# Made recursive to support multi-level package names like Chalk::Semiring::Boolean
+        [
+            'QualifiedIdentifier' =>
+              [ 'Identifier', 'PackageSeparator', 'QualifiedIdentifier' ]
+        ],
+        [
+            'QualifiedIdentifier' =>
+              [ 'Identifier', 'PackageSeparator', 'Identifier' ]
+        ],
 
-    # ParameterList for method calls - simplified using ExpressionList
-    [ 'ParameterList' => ['ExpressionList'],       1.0 ],
-    [ 'ParameterList' => [ 'OpComma', 'Comment' ], 1.0 ]
-    ,                                           # Just comma with comment
-    [ 'ParameterList' => ['Comment'], 1.0 ],    # Just a comment
-    [ 'ParameterList' => [],          1.0 ],    # Empty parameter list
+        # ParameterList for method calls - simplified using ExpressionList
+        [ 'ParameterList' => ['ExpressionList'] ],
+        [ 'ParameterList' => [ 'OpComma', 'Comment' ] ]
+        ,                                      # Just comma with comment
+        [ 'ParameterList' => ['Comment'] ],    # Just a comment
+        [ 'ParameterList' => [] ],             # Empty parameter list
 
-    # ArrayRef and HashRef
-    [ 'ArrayRef' => [ '[', 'ExpressionList', ']' ],  1.0 ],
-    [ 'ArrayRef' => [ '[', ']' ],                    1.0 ],    # Empty array
-    [ 'HashRef'  => [ '{', 'HashElementList', '}' ], 1.0 ],
-    [ 'HashRef'  => [ '{', '}' ],                    1.0 ],    # Empty hash
+        # ArrayRef and HashRef
+        [ 'ArrayRef' => [ '[', 'ExpressionList', ']' ] ],
+        [ 'ArrayRef' => [ '[', ']' ] ],        # Empty array
+        [ 'HashRef'  => [ '{', 'HashElementList', '}' ] ],
+        [ 'HashRef'  => [ '{', '}' ] ],        # Empty hash
 
-    # Optimal 3-rule ExpressionList - balances functionality with performance
-    [ 'ExpressionList' => ['Expression'], 1.0 ],                # Single expression
-    [ 'ExpressionList' => [ 'Expression', 'OpComma', 'ExpressionList' ], 1.0 ], # Standard recursion
-    [ 'ExpressionList' => [ 'Comment', 'ExpressionList' ], 1.0 ], # Comment-prefixed lists
+       # Optimal 3-rule ExpressionList - balances functionality with performance
+        [ 'ExpressionList' => ['Expression'] ],    # Single expression
+        [ 'ExpressionList' => [ 'Expression', 'OpComma', 'ExpressionList' ] ]
+        ,                                          # Standard recursion
+        [ 'ExpressionList' => [ 'Comment', 'ExpressionList' ] ]
+        ,                                          # Comment-prefixed lists
 
-    [ 'HashElementList' => ['HashElement'], 1.0 ],
-    [
-        'HashElementList' => [ 'HashElement', 'OpComma', 'HashElementList' ],
-        1.0
-    ],
-    [ 'HashElementList' => [ 'HashElement', 'OpComma' ], 1.0 ], # Trailing comma
+        [ 'HashElementList' => ['HashElement'] ],
+        [
+            'HashElementList' =>
+              [ 'HashElement', 'OpComma', 'HashElementList' ],
+            1.0
+        ],
+        [ 'HashElementList' => [ 'HashElement', 'OpComma' ] ],  # Trailing comma
 
-    [ 'HashElement' => [ 'Expression', 'OpComma', 'Expression' ], 1.0 ]
-    ,                                                           # key => value
+        [ 'HashElement' => [ 'Expression', 'OpComma', 'Expression' ] ]
+        ,                                                       # key => value
 
-    # File test operators - unary operators that test file properties
-    [ 'FileTestOp' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],
-    [ 'OpUnaryKeywordExpr' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],  # File test operators
+        # File test operators - unary operators that test file properties
+        [ 'FileTestOp'         => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],
+        [ 'OpUnaryKeywordExpr' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ]
+        ,    # File test operators
 
-    # Keyword expressions - termination points for Expression chain
-    # For chalk, we only need basic ones that could appear
-    [ 'OpUnaryKeywordExpr' => [qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/] ],
+        # Keyword expressions - termination points for Expression chain
+        # For chalk, we only need basic ones that could appear
+        [
+            'OpUnaryKeywordExpr' => [
+qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/
+            ]
+        ],
 
-    [ 'OpAssignKeywordExpr' => [qr/goto|last/] ],
+        [ 'OpAssignKeywordExpr' => [qr/goto|last/] ],
 
-    [ 'OpListKeywordExpr' => [qr/die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/] ],
+        [
+            'OpListKeywordExpr' => [
+qr/die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/
+            ]
+        ],
 
-    # Whitespace rules (needed for auto_insert)
-    [ 'WS_OPT' => [],             0.1 ],
-    [ 'WS_OPT' => ['WS'],         1.0 ],
-    [ 'WS_OPT' => ['WS', 'WS_OPT'], 1.0 ],  # Multiple WS tokens (space + comment, etc.)
-    [ 'WS'     => [qr/\s+/m], 1.0 ],
-    [ 'WS'     => [qr/#[^\n]*\n?/m], 1.0 ],    # Comments count as whitespace (includes optional newline)
-    [ 'WS'     => [qr/#.*\n\s+/m], 1.0 ], # Comment followed by whitespace
-    [ 'WS'     => [qr/\n=[a-z]\w+\b.*?\n=cut\b.*?\n/s], 1.0 ], # POD blocks (with leading newline)
-    [ 'WS'     => [qr/=[a-z]\w+\b.*?\n=cut\b.*?\n/s], 1.0 ],   # POD blocks (at start of parsing or after WS)
+        # Whitespace rules (needed for auto_insert)
+        [ 'WS_OPT' => [] ],
+        [ 'WS_OPT' => ['WS'] ],
+        [ 'WS_OPT' => [ 'WS', 'WS_OPT' ] ]
+        ,    # Multiple WS tokens (space + comment, etc.)
+        [ 'WS' => [qr/\s+/m] ],
+        [ 'WS' => [qr/#[^\n]*\n?/m] ]
+        ,    # Comments count as whitespace (includes optional newline)
+        [ 'WS' => [qr/#.*\n\s+/m] ],    # Comment followed by whitespace
+        [ 'WS' => [qr/\n=[a-z]\w+\b.*?\n=cut\b.*?\n/s] ]
+        ,                               # POD blocks (with leading newline)
+        [ 'WS' => [qr/=[a-z]\w+\b.*?\n=cut\b.*?\n/s] ]
+        ,    # POD blocks (at start of parsing or after WS)
     ]
 );
 
