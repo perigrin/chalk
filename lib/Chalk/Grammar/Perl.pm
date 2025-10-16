@@ -44,7 +44,6 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Statement' => ['LineStatement'] ],
         [ 'Statement' => ['ListOperatorCall'] ],    # calls sans-parentheses
         [ 'Statement' => ['LoopBlock'] ],           # Loop statements
-        [ 'Statement' => ['MethodDecl'] ],
         [ 'Statement' => ['PackageDecl'] ],
         [ 'Statement' => ['PrintExpr'] ],
         [ 'Statement' => ['QLikeValue'] ],
@@ -136,17 +135,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier' ] ],
         [ 'PackageDecl' => [ 'package', 'Identifier' ] ],
 
-# Method declarations are identical to subroutine declarations (following guacamole)
-        [ 'MethodDecl' => [ 'method', 'Identifier', 'SubDefinition' ] ],
-        [ 'MethodDecl' => [ 'method', 'Identifier' ] ],    # Forward declaration
-
-        # Subroutine declarations
-        [ 'SubroutineDecl' => [ 'sub', 'Identifier', 'SubDefinition' ] ],
-        [ 'SubroutineDecl' => [ 'sub', 'Identifier' ] ],   # Forward declaration
-        [ 'SubroutineDecl' => [ 'my',  'sub', 'Identifier', 'SubDefinition' ] ]
-        ,                                                  # my sub
-        [ 'SubroutineDecl' => [ 'my', 'sub', 'Identifier' ] ]
-        ,                                                  # my sub forward decl
+# Subroutine and method declarations (methods are identical to subs)
+        [ 'SubroutineDecl' => [ qr/method|sub/, 'Identifier', 'SubDefinition' ] ],
+        [ 'SubroutineDecl' => [ qr/method|sub/, 'Identifier' ] ],
+        [ 'SubroutineDecl' => [ 'my', qr/method|sub/, 'Identifier', 'SubDefinition' ] ],
+        [ 'SubroutineDecl' => [ 'my', qr/method|sub/, 'Identifier' ] ],
 
         # SubDefinition from guacamole grammar
         [ 'SubDefinition' => [ 'SubSigsDefinition', 'Block' ] ],
