@@ -30,16 +30,13 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Statement' => [ 'Statement',  'StatementModifier' ] ],
         [ 'Statement' => [ 'QLikeValue', 'ElemSeq1' ] ], # qw"b"[0] as statement
         [ 'Statement' => ['AdjustBlock'] ],
-        [ 'Statement' => ['BeginBlock'] ],
         [ 'Statement' => ['Block'] ],                    # Bare blocks
-        [ 'Statement' => ['BlockStatement'] ],
         [ 'Statement' => ['BuiltinFunctionCall'] ],
         [ 'Statement' => ['ClassDecl'] ],
         [ 'Statement' => ['Comment'] ],
         [ 'Statement' => ['ControlFlowStatement'] ],     # next, last, redo
         [ 'Statement' => ['DieExpr'] ],   # Lower - prefer checking for modifier
         [ 'Statement' => ['EllipsisStatement'] ],    # Ellipsis (...)
-        [ 'Statement' => ['EndBlock'] ],
         [ 'Statement' => ['EvalBlock'] ],            # eval { ... } blocks
         [ 'Statement' => ['Expression'] ],
         [ 'Statement' => ['FieldDecl'] ],            # Field declarations
@@ -75,10 +72,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Block' => [ '{', 'StatementList', '}' ] ],
         [ 'Block' => [ '{', '}' ] ],
 
-        # ADJUST block for class initialization
-        [ 'AdjustBlock' => [ 'ADJUST', 'Block' ] ],
-        [ 'BeginBlock'  => [ 'BEGIN',  'Block' ] ],
-        [ 'EndBlock'    => [ 'END',    'Block' ] ],
+        # Special blocks for class initialization and program lifecycle
+        [ 'AdjustBlock' => [ qr/ADJUST|BEGIN|END/, 'Block' ] ],
 
         # Loop statements (following guacamole pattern)
         [ 'LoopBlock' => ['ForStatement'] ],
@@ -133,21 +128,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         # Line-terminated statements (don't require semicolons)
         [ 'LineStatement' => ['Comment'] ],
 
-        # Class structure following guacamole PackageStatement pattern
-        [
-            'ClassDecl' =>
-              [ 'class', 'QualifiedIdentifier', 'Inheritance', 'Block' ],
-        ],
+        # Class and package declarations
+        [ 'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Inheritance', 'Block' ] ],
         [ 'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Block' ] ],
-        [ 'ClassDecl' => [ 'class', 'Identifier', 'Inheritance', 'Block' ] ],
-        [ 'ClassDecl' => [ 'class', 'Identifier', 'Block' ] ],
-
-        # Package declarations (traditional Perl OO)
-        # With block - no semicolon needed (BlockStatement)
-        [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier', 'Block' ] ],
-        [ 'PackageDecl' => [ 'package', 'Identifier',          'Block' ] ],
-
-# Without block - these need semicolons, so they're Statements not BlockStatements
+        [ 'PackageDecl' => [ qr/class|package/, 'Identifier', 'Inheritance', 'Block' ] ],
+        [ 'PackageDecl' => [ qr/class|package/, 'Identifier', 'Block' ] ],
         [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier' ] ],
         [ 'PackageDecl' => [ 'package', 'Identifier' ] ],
 
@@ -190,8 +175,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
  # to reduce parsing ambiguity and prevent exponential explosion
         [
             'UseStatement' =>
-              [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr', 'Expression' ],
-            0.9
+              [ 'OpKeywordUse', 'ClassIdent', 'VersionExpr', 'Expression' ]
         ],
         [ 'UseStatement' => [ 'OpKeywordUse', 'ClassIdent', 'Expression' ] ],
         [ 'UseStatement' => [ 'OpKeywordUse', 'VersionExpr' ] ],
@@ -205,17 +189,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'FieldDecl' => [ 'field', 'Variable' ] ],
 
         # Variable declarations - my/our/local/state
-        [ 'VariableDecl' => [ 'my',    'Variable', '=', 'Expression' ] ],
-        [ 'VariableDecl' => [ 'my',    'Variable' ] ],
-        [ 'VariableDecl' => [ 'our',   'Variable', '=', 'Expression' ] ],
-        [ 'VariableDecl' => [ 'our',   'Variable' ] ],
+        [ 'VariableDecl' => [ qr/my|our|state/, 'Variable', '=', 'Expression' ] ],
+        [ 'VariableDecl' => [ qr/my|our|state/, 'Variable' ] ],
         [ 'VariableDecl' => [ 'local', 'Variable', '=', 'Expression' ] ],
         [ 'VariableDecl' => [ 'local', 'Variable' ] ],
-
-# Local can also be used with any lvalue expression (hash elements, array elements, etc.)
         [ 'VariableDecl' => [ 'local', 'Expression', '=', 'Expression' ] ],
-        [ 'VariableDecl' => [ 'state', 'Variable',   '=', 'Expression' ] ],
-        [ 'VariableDecl' => [ 'state', 'Variable' ] ],
 
 # Basic terminals - include newlines since comments/shebangs are line-oriented
 # TODO: Allow inline comments within parameter lists and expressions, not just after complete statements
@@ -230,24 +208,14 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ReturnStatement' => [ 'return', 'Expression' ] ],
         [ 'ReturnStatement' => ['return'] ],
 
-        [ 'ControlFlowStatement' => ['next'] ],
-        [ 'ControlFlowStatement' => ['last'] ],
-        [ 'ControlFlowStatement' => ['redo'] ],
-        [ 'ControlFlowStatement' => [ 'next', 'Identifier' ] ],    # next LABEL
-        [ 'ControlFlowStatement' => [ 'last', 'Identifier' ] ],    # last LABEL
-        [ 'ControlFlowStatement' => [ 'redo', 'Identifier' ] ],    # redo LABEL
+        [ 'ControlFlowStatement' => [qr/next|last|redo/] ],
+        [ 'ControlFlowStatement' => [ qr/next|last|redo/, 'Identifier' ] ],
 
         # Require statements - similar to UseStatement but simpler
         [ 'RequireStatement' => [ 'require', 'Expression' ] ],
 
         # Statement modifiers - following Guacamole postfix patterns
-        [ 'StatementModifier' => [ 'unless',  'Expression' ] ],
-        [ 'StatementModifier' => [ 'if',      'Expression' ] ],
-        [ 'StatementModifier' => [ 'while',   'Expression' ] ],
-        [ 'StatementModifier' => [ 'until',   'Expression' ] ],
-        [ 'StatementModifier' => [ 'for',     'Expression' ] ],
-        [ 'StatementModifier' => [ 'foreach', 'Expression' ] ],
-        [ 'StatementModifier' => [ 'when',    'Expression' ] ],
+        [ 'StatementModifier' => [ qr/unless|if|while|until|for(?:each)?|when/, 'Expression' ] ],
 
         # Guacamole UseStatement components
         [ 'OpKeywordUse' => ['use'] ],
@@ -339,8 +307,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
         # ExprAssignR - avoids consuming braces as hash refs
         [
-            'ExprAssignR' => [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ],
-            0.8
+            'ExprAssignR' => [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ]
         ],
         [ 'ExprAssignR' => ['ExprCondR'] ],
 
@@ -349,28 +316,24 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
             'ExprCondR' => [
                 'ExprRange0', 'OpTriThen', 'ExprRangeR', 'OpTriElse',
                 'ExprCondR'
-            ],
-            0.8
+            ]
         ],
         [ 'ExprCondR' => ['ExprRangeR'] ],
         [
             'ExprCond0' => [
                 'ExprRange0', 'OpTriThen', 'ExprRange0', 'OpTriElse',
                 'ExprCond0'
-            ],
-            0.8
+            ]
         ],
         [ 'ExprCond0' => ['ExprRange0'] ],
 
         # NonBrace range and other precedence levels
         [
-            'ExprRangeR' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ],
-            0.8
+            'ExprRangeR' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ]
         ],
         [ 'ExprRangeR' => ['ExprLogOrR'] ],
         [
-            'ExprRange0' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ],
-            0.8
+            'ExprRange0' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ]
         ],
         [ 'ExprRange0' => ['ExprLogOr0'] ],
 
@@ -396,13 +359,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
         # NonBrace equality expressions (this is what we were missing!)
         [
-            'ExprEqR' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ],
-            0.8
+            'ExprEqR' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ]
         ],
         [ 'ExprEqR' => ['ExprNeqR'] ],
         [
-            'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ],
-            0.8
+            'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ]
         ],
         [ 'ExprEq0' => ['ExprNeq0'] ],
 
@@ -536,20 +497,17 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprAssignL' => ['ExprCondL'] ],
         [
             'ExprCondR' =>
-              [ 'ExprRange0', '?', 'ExprRangeR', ':', 'ExprCondR' ],
-            0.8
+              [ 'ExprRange0', '?', 'ExprRangeR', ':', 'ExprCondR' ]
         ],
         [ 'ExprCondR' => ['ExprRangeR'] ],
         [
             'ExprCondL' =>
-              [ 'ExprRange0', '?', 'ExprRangeL', ':', 'ExprCondL' ],
-            0.8
+              [ 'ExprRange0', '?', 'ExprRangeL', ':', 'ExprCondL' ]
         ],
         [ 'ExprCondL' => ['ExprRangeL'] ],
         [
             'ExprCond0' =>
-              [ 'ExprRange0', '?', 'ExprRange0', ':', 'ExprCond0' ],
-            0.8
+              [ 'ExprRange0', '?', 'ExprRange0', ':', 'ExprCond0' ]
         ],
         [ 'ExprCond0'  => ['ExprRange0'] ],
         [ 'ExprRangeR' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ] ],
@@ -808,16 +766,14 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
 
   # ExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
         [
-            'ExprComma' => [ 'ExprAssignL', 'OpComma', 'ExprComma' ],
-            0.8
+            'ExprComma' => [ 'ExprAssignL', 'OpComma', 'ExprComma' ]
         ],
         [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ] ],    # Trailing comma
         [ 'ExprComma' => ['ExprAssignR'] ],                 # Single item
 
         # ExprAssignL for left-associative assignments in print context
         [
-            'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ],
-            0.8
+            'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ]
         ],
         [ 'ExprAssignL' => ['ExprCondL'] ],
 
@@ -826,15 +782,13 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
             'ExprCondL' => [
                 'ExprRange0', 'OpTriThen', 'ExprRangeL', 'OpTriElse',
                 'ExprCondL'
-            ],
-            0.8
+            ]
         ],
         [ 'ExprCondL' => ['ExprRangeL'] ],
 
         # ExprRangeL for range expressions in print context
         [
-            'ExprRangeL' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ],
-            0.8
+            'ExprRangeL' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ]
         ],
         [ 'ExprRangeL' => ['ExprLogOrL'] ],
 
@@ -887,8 +841,7 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
 
         # Function calls following Guacamole SubCall pattern
         [
-            'FunctionCall' => [ 'Identifier', '(', 'ParameterList', ')' ],
-            1.0
+            'FunctionCall' => [ 'Identifier', '(', 'ParameterList', ')' ]
         ],                                              # func(args)
         [ 'FunctionCall' => [ 'Identifier', '(', ')' ] ],    # func()
 
@@ -922,26 +875,21 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
 
       # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
         [
-            'UnaryKeywordExpression' => [ 'grep', 'Block', 'Expression' ],
-            1.0
+            'UnaryKeywordExpression' => [ 'grep', 'Block', 'Expression' ]
         ],    # grep { ... } @list
         [ 'UnaryKeywordExpression' => [ 'grep', 'Expression' ] ]
         ,     # grep EXPR, @list
         [
-            'UnaryKeywordExpression' => [ 'all', 'Block', 'Expression' ],
-            1.0
+            'UnaryKeywordExpression' => [ 'all', 'Block', 'Expression' ]
         ],    # all { ... } @list
         [
-            'UnaryKeywordExpression' => [ 'any', 'Block', 'Expression' ],
-            1.0
+            'UnaryKeywordExpression' => [ 'any', 'Block', 'Expression' ]
         ],    # any { ... } @list
         [
-            'UnaryKeywordExpression' => [ 'map', 'Block', 'Expression' ],
-            1.0
+            'UnaryKeywordExpression' => [ 'map', 'Block', 'Expression' ]
         ],    # map { ... } @list
         [
-            'UnaryKeywordExpression' => [ 'sort', 'Block', 'Expression' ],
-            1.0
+            'UnaryKeywordExpression' => [ 'sort', 'Block', 'Expression' ]
         ],    # sort { ... } @list
 
         # Operators - basic ones needed for chalk
@@ -1133,8 +1081,7 @@ qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
         [ 'HashElementList' => ['HashElement'] ],
         [
             'HashElementList' =>
-              [ 'HashElement', 'OpComma', 'HashElementList' ],
-            1.0
+              [ 'HashElement', 'OpComma', 'HashElementList' ]
         ],
         [ 'HashElementList' => [ 'HashElement', 'OpComma' ] ],  # Trailing comma
 
