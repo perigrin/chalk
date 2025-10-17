@@ -154,6 +154,14 @@ class Chalk::EarleyChart {
             my $element = $self->get_element($item);
             if ($element) {
                 $result = $result + $element;
+
+                # Early termination for Boolean semiring: we only need to know
+                # IF a parse exists, not enumerate ALL parses. This prevents
+                # memory exhaustion when parsing highly ambiguous inputs like
+                # the grammar file itself (which has exponentially many parses).
+                if ($result != $semiring->add_id) {
+                    return $result;
+                }
             }
         }
 
