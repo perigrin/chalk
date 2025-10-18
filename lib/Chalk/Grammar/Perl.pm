@@ -15,6 +15,15 @@ my $RE_BALANCED_BRACES_FLAGS = qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]
 my $RE_BUILTIN_FUNCTIONS = qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/;
 my $RE_UNARY_KEYWORDS = qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/;
 my $RE_LIST_KEYWORDS = qr/die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/;
+my $RE_FOR = qr/for(?:each)?/;
+my $RE_METHOD_SUB = qr/method|sub/;
+my $RE_CLASS_PACKAGE = qr/class|package/;
+my $RE_MY_OUR_STATE = qr/my|our|state/;
+my $RE_CONTROL_FLOW = qr/next|last|redo/;
+my $RE_STMT_MODIFIER = qr/unless|if|while|until|for(?:each)?|when/;
+my $RE_IDENTIFIER = qr/[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/;
+my $RE_NUMBER = qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/;
+my $RE_FILETEST = qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/;
 
 our $chalk_grammar = Chalk::Grammar->build_grammar(
     auto_insert => ['WS_OPT'],
@@ -79,41 +88,41 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
         [
             'ForStatement' => [
-                qr/for(?:each)?/, '(', 'Expression', ';',
+                $RE_FOR, '(', 'Expression', ';',
                 'Expression',     ';', 'Expression', ')',
                 'Block'
             ]
         ],
         [
             'ForStatement' => [
-                qr/for(?:each)?/, '(', ';', 'Expression', ';', 'Expression',
+                $RE_FOR, '(', ';', 'Expression', ';', 'Expression',
                 ')', 'Block'
             ]
         ],
         [
             'ForStatement' => [
-                qr/for(?:each)?/, '(', 'Expression', ';', ';', 'Expression',
+                $RE_FOR, '(', 'Expression', ';', ';', 'Expression',
                 ')', 'Block'
             ]
         ],
         [
             'ForStatement' => [
-                qr/for(?:each)?/, '(', 'Expression', ';',
+                $RE_FOR, '(', 'Expression', ';',
                 'Expression',     ';', ')',          'Block'
             ]
         ],
-        [ 'ForStatement' => [ qr/for(?:each)?/, '(', ';', ';', ')', 'Block' ] ],
+        [ 'ForStatement' => [ $RE_FOR, '(', ';', ';', ')', 'Block' ] ],
 
         [
             'ForStatement' => [
-                qr/for(?:each)?/, 'VariableDecl',
+                $RE_FOR, 'VariableDecl',
                 '(',              'Expression',
                 ')',              'Block'
             ]
         ],
         [
             'ForStatement' =>
-              [ qr/for(?:each)?/, '(', 'Expression', ')', 'Block' ]
+              [ $RE_FOR, '(', 'Expression', ')', 'Block' ]
         ],
 
         [ 'WhileStatement' => [ 'while', '(', 'Expression', ')', 'Block' ] ],
@@ -122,15 +131,15 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
         [ 'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Inheritance', 'Block' ] ],
         [ 'ClassDecl' => [ 'class', 'QualifiedIdentifier', 'Block' ] ],
-        [ 'PackageDecl' => [ qr/class|package/, 'Identifier', 'Inheritance', 'Block' ] ],
-        [ 'PackageDecl' => [ qr/class|package/, 'Identifier', 'Block' ] ],
+        [ 'PackageDecl' => [ $RE_CLASS_PACKAGE, 'Identifier', 'Inheritance', 'Block' ] ],
+        [ 'PackageDecl' => [ $RE_CLASS_PACKAGE, 'Identifier', 'Block' ] ],
         [ 'PackageDecl' => [ 'package', 'QualifiedIdentifier' ] ],
         [ 'PackageDecl' => [ 'package', 'Identifier' ] ],
 
-        [ 'SubroutineDecl' => [ qr/method|sub/, 'Identifier', 'SubDefinition' ] ],
-        [ 'SubroutineDecl' => [ qr/method|sub/, 'Identifier' ] ],
-        [ 'SubroutineDecl' => [ 'my', qr/method|sub/, 'Identifier', 'SubDefinition' ] ],
-        [ 'SubroutineDecl' => [ 'my', qr/method|sub/, 'Identifier' ] ],
+        [ 'SubroutineDecl' => [ $RE_METHOD_SUB, 'Identifier', 'SubDefinition' ] ],
+        [ 'SubroutineDecl' => [ $RE_METHOD_SUB, 'Identifier' ] ],
+        [ 'SubroutineDecl' => [ 'my', $RE_METHOD_SUB, 'Identifier', 'SubDefinition' ] ],
+        [ 'SubroutineDecl' => [ 'my', $RE_METHOD_SUB, 'Identifier' ] ],
 
         [ 'SubDefinition' => [ 'SubSigsDefinition', 'Block' ] ],
         [ 'SubDefinition' => ['Block'] ],
@@ -165,8 +174,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'FieldDecl' => [ 'field', 'Variable', 'FieldAttributeList' ] ],
         [ 'FieldDecl' => [ 'field', 'Variable' ] ],
 
-        [ 'VariableDecl' => [ qr/my|our|state/, 'Variable', '=', 'Expression' ] ],
-        [ 'VariableDecl' => [ qr/my|our|state/, 'Variable' ] ],
+        [ 'VariableDecl' => [ $RE_MY_OUR_STATE, 'Variable', '=', 'Expression' ] ],
+        [ 'VariableDecl' => [ $RE_MY_OUR_STATE, 'Variable' ] ],
         [ 'VariableDecl' => [ 'local', 'Variable', '=', 'Expression' ] ],
         [ 'VariableDecl' => [ 'local', 'Variable' ] ],
         [ 'VariableDecl' => [ 'local', 'Expression', '=', 'Expression' ] ],
@@ -180,12 +189,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ReturnStatement' => [ 'return', 'Expression' ] ],
         [ 'ReturnStatement' => ['return'] ],
 
-        [ 'ControlFlowStatement' => [qr/next|last|redo/] ],
-        [ 'ControlFlowStatement' => [ qr/next|last|redo/, 'Identifier' ] ],
+        [ 'ControlFlowStatement' => [$RE_CONTROL_FLOW] ],
+        [ 'ControlFlowStatement' => [ $RE_CONTROL_FLOW, 'Identifier' ] ],
 
         [ 'RequireStatement' => [ 'require', 'Expression' ] ],
 
-        [ 'StatementModifier' => [ qr/unless|if|while|until|for(?:each)?|when/, 'Expression' ] ],
+        [ 'StatementModifier' => [ $RE_STMT_MODIFIER, 'Expression' ] ],
 
         [ 'OpKeywordUse' => ['use'] ],
         [ 'ClassIdent'   => ['SubNameExpr'] ],
@@ -549,12 +558,12 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'HashElem'  => [ '{', 'Expression', '}' ] ],
         [
             'Identifier' =>
-              [qr/[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/]
+              [$RE_IDENTIFIER]
         ]
         , # Support qualified identifiers, including pathological cases like foo::::bar
         [
             'Number' => [
-qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/
+$RE_NUMBER
             ]
         ],
         [ 'QuotedString' => [qr/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/] ],
@@ -633,8 +642,8 @@ qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[e
         [ 'HashElement' => [ 'Expression', 'OpComma', 'Expression' ] ]
         ,                                                       # key => value
 
-        [ 'FileTestOp'         => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],
-        [ 'OpUnaryKeywordExpr' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ]
+        [ 'FileTestOp'         => [$RE_FILETEST] ],
+        [ 'OpUnaryKeywordExpr' => [$RE_FILETEST] ]
         ,
 
         [ 'OpUnaryKeywordExpr' => [$RE_UNARY_KEYWORDS] ],
