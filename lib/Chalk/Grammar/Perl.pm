@@ -389,20 +389,14 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprMul' => [ 'ExprMul', 'OpMulti', 'ExprRegex' ] ],
         [ 'ExprMul' => ['ExprRegex'] ],
 
-        # Delegation rules for ExprRegex (to be removed when ExprRegex is simplified)
-        [ 'ExprRegex' => ['ExprRegexR'] ],
-        [ 'ExprRegex' => ['ExprRegexL'] ],
-        [ 'ExprRegex' => ['ExprRegex0'] ],
-        [ 'ExprRegex' => ['ExprRegexU'] ],
+        [ 'ExprRegex' => [ 'ExprRegex', 'OpRegex', 'ExprUnary' ] ],
+        [ 'ExprRegex' => ['ExprUnary'] ],
 
-        [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ] ],
-        [ 'ExprRegexR' => ['ExprUnaryR'] ],
-        [ 'ExprRegexL' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ] ],
-        [ 'ExprRegexL' => ['ExprUnaryL'] ],
-        [ 'ExprRegex0' => [ 'ExprRegexU', 'OpRegex', 'ExprUnary0' ] ],
-        [ 'ExprRegex0' => ['ExprUnary0'] ],
-        [ 'ExprRegexU' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryU' ] ],
-        [ 'ExprRegexU' => ['ExprUnaryU'] ],
+        # Delegation rules for ExprUnary (to be removed when ExprUnary handles variants)
+        [ 'ExprUnary' => ['ExprUnaryR'] ],
+        [ 'ExprUnary' => ['ExprUnaryL'] ],
+        [ 'ExprUnary' => ['ExprUnary0'] ],
+        [ 'ExprUnary' => ['ExprUnaryU'] ],
 
         [ 'ExprUnaryR' => [ 'OpUnary',    'ExprUnaryR' ] ],
         [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ] ],
@@ -603,8 +597,6 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'ExprNeqL' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
         [ 'ExprNeqL' => ['ExprShift'] ],
 
-        [ 'ExprRegexL'  => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ] ],
-        [ 'ExprRegexL'  => ['ExprUnaryL'] ],
         [ 'ExprUnaryL'  => [ 'OpUnary',    'ExprUnaryL' ] ],
         [ 'ExprUnaryL'  => [ 'FileTestOp', 'ExprUnaryL' ] ],
         [ 'ExprUnaryL'  => ['ExprPowerL'] ],
