@@ -371,22 +371,17 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ] ],
         [ 'ExprEq0' => ['ExprNeq0'] ],
 
-        [ 'ExprNeqR' => [ 'ExprShift0', 'OpInequal', 'ExprShiftR' ] ],
-        [ 'ExprNeqR' => ['ExprShiftR'] ],
-        [ 'ExprNeqL' => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ] ],
-        [ 'ExprNeqL' => ['ExprShiftL'] ],
-        [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ] ],
-        [ 'ExprNeq0' => ['ExprShift0'] ],
+        [ 'ExprNeqR' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
+        [ 'ExprNeqR' => ['ExprShift'] ],
+        [ 'ExprNeqL' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
+        [ 'ExprNeqL' => ['ExprShift'] ],
+        [ 'ExprNeq0' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
+        [ 'ExprNeq0' => ['ExprShift'] ],
 
-        [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
-        [ 'ExprShiftR' => ['ExprAdd'] ],
-        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
-        [ 'ExprShiftL' => ['ExprAdd'] ],
-        [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
-        [ 'ExprShift0' => ['ExprAdd'] ],
-        [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
-        [ 'ExprShiftU' => ['ExprAdd'] ],
+        [ 'ExprShift' => [ 'ExprShift', 'OpShift', 'ExprAdd' ] ],
+        [ 'ExprShift' => ['ExprAdd'] ],
 
+        # Delegation rules for ExprAdd (to be removed when ExprAdd handles variants)
         [ 'ExprAdd' => [ 'ExprAdd', 'OpAdd', 'ExprMul' ] ],
         [ 'ExprAdd' => [ 'ExprAdd', '.',     'ExprMul' ] ],
         [ 'ExprAdd' => ['ExprMul'] ],
@@ -605,12 +600,8 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'ExprBinOrL'  => ['ExprBinAndL'] ],
         [ 'ExprBinAndL' => ['ExprEqL'] ],
         [ 'ExprEqL'     => ['ExprNeqL'] ],
-        [ 'ExprNeqL'    => [ 'ExprShift0', 'OpInequal', 'ExprShiftL' ] ],
-        [ 'ExprNeqL'    => ['ExprShiftL'] ],
-
-        # NonBrace shift expressions (left-associative)
-        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
-        [ 'ExprShiftL' => ['ExprAdd'] ],
+        [ 'ExprNeqL' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
+        [ 'ExprNeqL' => ['ExprShift'] ],
 
         [ 'ExprRegexL'  => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ] ],
         [ 'ExprRegexL'  => ['ExprUnaryL'] ],
