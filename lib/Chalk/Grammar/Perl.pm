@@ -417,18 +417,24 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprInc' => ['ExprInc0'] ],
         [ 'ExprInc' => ['ExprIncU'] ],
 
-        [ 'ExprIncR' => [ 'OpInc',      'ExprArrowR' ] ],
-        [ 'ExprIncR' => [ 'ExprArrowL', 'OpInc' ] ],
+        [ 'ExprIncR' => [ 'OpInc',    'ExprArrow' ] ],
+        [ 'ExprIncR' => [ 'ExprArrow', 'OpInc' ] ],
         [ 'ExprIncR' => ['ExprArrowR'] ],
-        [ 'ExprIncL' => [ 'OpInc',      'ExprArrowL' ] ],
-        [ 'ExprIncL' => [ 'ExprArrowR', 'OpInc' ] ],
+        [ 'ExprIncL' => [ 'OpInc',    'ExprArrow' ] ],
+        [ 'ExprIncL' => [ 'ExprArrow', 'OpInc' ] ],
         [ 'ExprIncL' => ['ExprArrowL'] ],
-        [ 'ExprInc0' => [ 'OpInc',      'ExprArrow0' ] ],
-        [ 'ExprInc0' => [ 'ExprArrowR', 'OpInc' ] ],
+        [ 'ExprInc0' => [ 'OpInc',    'ExprArrow' ] ],
+        [ 'ExprInc0' => [ 'ExprArrow', 'OpInc' ] ],
         [ 'ExprInc0' => ['ExprArrow0'] ],
-        [ 'ExprIncU' => [ 'OpInc',      'ExprArrowU' ] ],
-        [ 'ExprIncU' => [ 'ExprArrowR', 'OpInc' ] ],
+        [ 'ExprIncU' => [ 'OpInc',    'ExprArrow' ] ],
+        [ 'ExprIncU' => [ 'ExprArrow', 'OpInc' ] ],
         [ 'ExprIncU' => ['ExprArrowU'] ],
+
+        # Delegation rules for ExprArrow (to be removed when ExprArrow handles variants)
+        [ 'ExprArrow' => ['ExprArrowR'] ],
+        [ 'ExprArrow' => ['ExprArrowL'] ],
+        [ 'ExprArrow' => ['ExprArrow0'] ],
+        [ 'ExprArrow' => ['ExprArrowU'] ],
 
      # Arrow expressions - eliminate left recursion to prevent parsing explosion
         [ 'ExprArrowR' => [ 'ExprValueR', 'ArrowChain' ] ],
