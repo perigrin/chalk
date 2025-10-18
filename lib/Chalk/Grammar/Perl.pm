@@ -313,25 +313,23 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprAssignL' => ['ExprCondL'] ],
         [
             'ExprCondR' =>
-              [ 'ExprRange0', '?', 'ExprRangeR', ':', 'ExprCondR' ]
+              [ 'ExprRange', '?', 'ExprRange', ':', 'ExprCondR' ]
         ],
-        [ 'ExprCondR' => ['ExprRangeR'] ],
+        [ 'ExprCondR' => ['ExprRange'] ],
         [
             'ExprCondL' =>
-              [ 'ExprRange0', '?', 'ExprRangeL', ':', 'ExprCondL' ]
+              [ 'ExprRange', '?', 'ExprRange', ':', 'ExprCondL' ]
         ],
-        [ 'ExprCondL' => ['ExprRangeL'] ],
+        [ 'ExprCondL' => ['ExprRange'] ],
         [
             'ExprCond0' =>
-              [ 'ExprRange0', '?', 'ExprRange0', ':', 'ExprCond0' ]
+              [ 'ExprRange', '?', 'ExprRange', ':', 'ExprCond0' ]
         ],
-        [ 'ExprCond0'  => ['ExprRange0'] ],
-        [ 'ExprRangeR' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
-        [ 'ExprRangeR' => ['ExprLogOr'] ],
-        [ 'ExprRangeL' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
-        [ 'ExprRangeL' => ['ExprLogOr'] ],
-        [ 'ExprRange0' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
-        [ 'ExprRange0' => ['ExprLogOr'] ],
+        [ 'ExprCond0'  => ['ExprRange'] ],
+
+        # ExprRange: Non-associative .. operator
+        [ 'ExprRange' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
+        [ 'ExprRange' => ['ExprLogOr'] ],
 
         # ExprLogOr: Left-associative || and // operators
         [ 'ExprLogOr' => [ 'ExprLogOr', 'OpLogOr', 'ExprLogAnd' ] ],
@@ -560,17 +558,11 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         # ExprCondL for conditional expressions in print context
         [
             'ExprCondL' => [
-                'ExprRange0', 'OpTriThen', 'ExprRangeL', 'OpTriElse',
+                'ExprRange', 'OpTriThen', 'ExprRange', 'OpTriElse',
                 'ExprCondL'
             ]
         ],
-        [ 'ExprCondL' => ['ExprRangeL'] ],
-
-        # ExprRangeL for range expressions in print context
-        [
-            'ExprRangeL' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ]
-        ],
-        [ 'ExprRangeL' => ['ExprLogOr'] ],
+        [ 'ExprCondL' => ['ExprRange'] ],
 
         # Continue chain for NonBrace left-associative expressions
 
