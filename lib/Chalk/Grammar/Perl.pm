@@ -378,27 +378,24 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprNeq0' => [ 'ExprShift0', 'OpInequal', 'ExprShift0' ] ],
         [ 'ExprNeq0' => ['ExprShift0'] ],
 
-        [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAddR' ] ],
-        [ 'ExprShiftR' => ['ExprAddR'] ],
-        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ] ],
-        [ 'ExprShiftL' => ['ExprAddL'] ],
-        [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd0' ] ],
-        [ 'ExprShift0' => ['ExprAdd0'] ],
-        [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAddU' ] ],
-        [ 'ExprShiftU' => ['ExprAddU'] ],
+        [ 'ExprShiftR' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
+        [ 'ExprShiftR' => ['ExprAdd'] ],
+        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
+        [ 'ExprShiftL' => ['ExprAdd'] ],
+        [ 'ExprShift0' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
+        [ 'ExprShift0' => ['ExprAdd'] ],
+        [ 'ExprShiftU' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
+        [ 'ExprShiftU' => ['ExprAdd'] ],
 
-        [ 'ExprAddR' => [ 'ExprAddU', 'OpAdd', 'ExprMulR' ] ],
-        [ 'ExprAddR' => [ 'ExprAddU', '.',     'ExprMulR' ] ],
-        [ 'ExprAddR' => ['ExprMulR'] ],
-        [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ] ],
-        [ 'ExprAddL' => [ 'ExprAddU', '.',     'ExprMulL' ] ],
-        [ 'ExprAddL' => ['ExprMulL'] ],
-        [ 'ExprAdd0' => [ 'ExprAddU', 'OpAdd', 'ExprMul0' ] ],
-        [ 'ExprAdd0' => [ 'ExprAddU', '.',     'ExprMul0' ] ],
-        [ 'ExprAdd0' => ['ExprMul0'] ],
-        [ 'ExprAddU' => [ 'ExprAddU', 'OpAdd', 'ExprMulU' ] ],
-        [ 'ExprAddU' => [ 'ExprAddU', '.',     'ExprMulU' ] ],
-        [ 'ExprAddU' => ['ExprMulU'] ],
+        [ 'ExprAdd' => [ 'ExprAdd', 'OpAdd', 'ExprMul' ] ],
+        [ 'ExprAdd' => [ 'ExprAdd', '.',     'ExprMul' ] ],
+        [ 'ExprAdd' => ['ExprMul'] ],
+
+        # Delegation rules for ExprMul (to be removed when ExprMul is simplified)
+        [ 'ExprMul' => ['ExprMulR'] ],
+        [ 'ExprMul' => ['ExprMulL'] ],
+        [ 'ExprMul' => ['ExprMul0'] ],
+        [ 'ExprMul' => ['ExprMulU'] ],
 
         [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ] ],
         [ 'ExprMulR' => ['ExprRegexR'] ],
@@ -618,13 +615,8 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'ExprNeqL'    => ['ExprShiftL'] ],
 
         # NonBrace shift expressions (left-associative)
-        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAddL' ] ],
-        [ 'ExprShiftL' => ['ExprAddL'] ],
-
-        # NonBrace addition expressions (left-associative)
-        [ 'ExprAddL' => [ 'ExprAddU', 'OpAdd', 'ExprMulL' ] ],
-        [ 'ExprAddL' => [ 'ExprAddU', '.',     'ExprMulL' ] ],
-        [ 'ExprAddL' => ['ExprMulL'] ],
+        [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
+        [ 'ExprShiftL' => ['ExprAdd'] ],
 
         # NonBrace multiplication expressions (left-associative)
         [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ] ],

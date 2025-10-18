@@ -1,0 +1,125 @@
+# New Simplified Expression Hierarchy (22-25 non-terminals)
+# Based on EXPRESSION_RADICAL_SIMPLIFICATION.md
+
+# Top level
+[ 'Expression' => ['ExprNameOr'] ],
+
+# Named operators (already simple - left-associative)
+[ 'ExprNameOr' => [ 'ExprNameOr', 'OpNameOr', 'ExprNameAnd' ] ],
+[ 'ExprNameOr' => ['ExprNameAnd'] ],
+
+[ 'ExprNameAnd' => [ 'ExprNameAnd', 'OpNameAnd', 'ExprNameNot' ] ],
+[ 'ExprNameAnd' => ['ExprNameNot'] ],
+
+[ 'ExprNameNot' => [ 'OpNameNot', 'ExprNameNot' ] ],
+[ 'ExprNameNot' => ['ExprComma'] ],
+
+# Comma (left-associative)
+# NOTE: ExprComma is used in print/die/warn contexts where we need to avoid
+# parsing braces as hashrefs. It uses the main expression hierarchy.
+[ 'ExprComma' => [ 'ExprAssign', 'OpComma', 'ExprComma' ] ],
+[ 'ExprComma' => [ 'ExprAssign', 'OpComma' ] ],  # Trailing comma
+[ 'ExprComma' => ['ExprAssign'] ],
+
+# Assignment (RIGHT-ASSOCIATIVE!)
+[ 'ExprAssign' => [ 'ExprCond', 'OpAssign', 'ExprAssign' ] ],
+[ 'ExprAssign' => ['ExprCond'] ],
+
+# Ternary conditional (RIGHT-ASSOCIATIVE!)
+[ 'ExprCond' => [ 'ExprRange', 'OpTriThen', 'ExprRange', 'OpTriElse', 'ExprCond' ] ],
+[ 'ExprCond' => ['ExprRange'] ],
+
+# Range (non-associative in Perl, but parse as left-assoc)
+[ 'ExprRange' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
+[ 'ExprRange' => ['ExprLogOr'] ],
+
+# Logical OR (left-associative)
+[ 'ExprLogOr' => [ 'ExprLogOr', 'OpLogOr', 'ExprLogAnd' ] ],
+[ 'ExprLogOr' => ['ExprLogAnd'] ],
+
+# Logical AND (left-associative)
+[ 'ExprLogAnd' => [ 'ExprLogAnd', 'OpLogAnd', 'ExprBinOr' ] ],
+[ 'ExprLogAnd' => ['ExprBinOr'] ],
+
+# Bitwise OR (left-associative)
+[ 'ExprBinOr' => [ 'ExprBinOr', 'OpBinOr', 'ExprBinAnd' ] ],
+[ 'ExprBinOr' => ['ExprBinAnd'] ],
+
+# Bitwise AND (left-associative)
+[ 'ExprBinAnd' => [ 'ExprBinAnd', '&', 'ExprEq' ] ],
+[ 'ExprBinAnd' => ['ExprEq'] ],
+
+# Equality (left-associative)
+[ 'ExprEq' => [ 'ExprNeq', 'OpEqual', 'ExprNeq' ] ],
+[ 'ExprEq' => ['ExprNeq'] ],
+
+# Inequality/relational (left-associative)
+[ 'ExprNeq' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
+[ 'ExprNeq' => ['ExprShift'] ],
+
+# Shift (left-associative)
+[ 'ExprShift' => [ 'ExprShift', 'OpShift', 'ExprAdd' ] ],
+[ 'ExprShift' => ['ExprAdd'] ],
+
+# Addition/Subtraction/Concatenation (left-associative)
+[ 'ExprAdd' => [ 'ExprAdd', 'OpAdd', 'ExprMul' ] ],
+[ 'ExprAdd' => [ 'ExprAdd', '.', 'ExprMul' ] ],  # String concatenation
+[ 'ExprAdd' => ['ExprMul'] ],
+
+# Multiplication/Division (left-associative)
+[ 'ExprMul' => [ 'ExprMul', 'OpMulti', 'ExprRegex' ] ],
+[ 'ExprMul' => ['ExprRegex'] ],
+
+# Regex binding (left-associative)
+[ 'ExprRegex' => [ 'ExprRegex', 'OpRegex', 'ExprUnary' ] ],
+[ 'ExprRegex' => ['ExprUnary'] ],
+
+# Unary prefix operators
+[ 'ExprUnary' => [ 'OpUnary', 'ExprUnary' ] ],
+[ 'ExprUnary' => [ 'FileTestOp', 'ExprUnary' ] ],
+[ 'ExprUnary' => ['ExprPower'] ],
+
+# Power (RIGHT-ASSOCIATIVE!)
+[ 'ExprPower' => [ 'ExprInc', 'OpPower', 'ExprPower' ] ],
+[ 'ExprPower' => ['ExprInc'] ],
+
+# Increment/Decrement (prefix and postfix)
+[ 'ExprInc' => [ 'OpInc', 'ExprArrow' ] ],
+[ 'ExprInc' => [ 'ExprArrow', 'OpInc' ] ],
+[ 'ExprInc' => ['ExprArrow'] ],
+
+# Arrow/method calls (left-associative via ArrowChain)
+[ 'ExprArrow' => [ 'ExprValue', 'ArrowChain' ] ],
+[ 'ExprArrow' => ['ExprValue'] ],
+
+# ArrowChain - right-recursive chain
+[ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS', 'ArrowChain' ] ],
+[ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS' ] ],
+
+# Value (terminal expressions)
+[ 'ExprValue' => ['Value'] ],
+[ 'ExprValue' => ['UnaryKeywordExpression'] ],
+[ 'ExprValue' => ['OpListKeywordExpr'] ],
+[ 'ExprValue' => ['OpAssignKeywordExpr'] ],
+[ 'ExprValue' => ['OpUnaryKeywordExpr'] ],
+
+# Supporting operators
+[ 'OpTriThen' => ['?'] ],
+[ 'OpTriElse' => [':'] ],
+
+# ArrowRHS - method calls, array/hash indexing
+[ 'ArrowRHS' => ['Identifier'] ],
+[ 'ArrowRHS' => [ 'Identifier', '(', 'ParameterList', ')' ] ],
+[ 'ArrowRHS' => [ 'Identifier', '(', ')' ] ],
+[ 'ArrowRHS' => [ '[', 'Expression', ']' ] ],
+[ 'ArrowRHS' => [ '{', 'Expression', '}' ] ],
+[ 'ArrowRHS' => ['PostfixDeref'] ],
+
+# Postfix dereferencing
+[ 'PostfixDeref' => [qr/[@%\$]\*/] ],
+
+# Summary:
+# - 22 Expr* non-terminals (down from 72!)
+# - 3 right-associative operators explicitly handled: =, **, ?:
+# - All others are left-associative with direct left-recursion
+# - Clean separation of concerns
