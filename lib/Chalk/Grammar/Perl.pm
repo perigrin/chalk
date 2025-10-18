@@ -302,30 +302,14 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprNameAnd' => ['ExprNameNot'] ],
         [ 'ExprNameNot' => [ 'OpNameNot', 'ExprNameNot' ] ],
         [ 'ExprNameNot' => ['ExprComma'] ],
-        [ 'ExprComma'   => [ 'ExprAssignL', 'OpComma', 'ExprComma' ] ]
+        [ 'ExprComma'   => [ 'ExprAssign', 'OpComma', 'ExprComma' ] ]
         ,                                # Comma list - higher prob
-        [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ] ],  # Trailing comma
-        [ 'ExprComma' => ['ExprAssignR'] ],               # Single item fallback
-        [ 'ExprAssignR' => [ 'ExprCond0', 'OpAssign', 'ExprAssignR' ] ],
-        [ 'ExprAssignR' => ['ExprCondR'] ],
-        [ 'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ] ],
-        [ 'ExprAssignL' => ['OpAssignKeywordExpr'] ],
-        [ 'ExprAssignL' => ['ExprCondL'] ],
-        [
-            'ExprCondR' =>
-              [ 'ExprRange', '?', 'ExprRange', ':', 'ExprCondR' ]
-        ],
-        [ 'ExprCondR' => ['ExprRange'] ],
-        [
-            'ExprCondL' =>
-              [ 'ExprRange', '?', 'ExprRange', ':', 'ExprCondL' ]
-        ],
-        [ 'ExprCondL' => ['ExprRange'] ],
-        [
-            'ExprCond0' =>
-              [ 'ExprRange', '?', 'ExprRange', ':', 'ExprCond0' ]
-        ],
-        [ 'ExprCond0'  => ['ExprRange'] ],
+        [ 'ExprComma' => [ 'ExprAssign', 'OpComma' ] ],  # Trailing comma
+        [ 'ExprComma' => ['ExprAssign'] ],               # Single item fallback
+        [ 'ExprAssign' => [ 'ExprCond', 'OpAssign', 'ExprAssign' ] ],  # Right-recursive
+        [ 'ExprAssign' => ['ExprCond'] ],
+        [ 'ExprCond' => [ 'ExprRange', '?', 'ExprRange', ':', 'ExprCond' ] ],  # Right-recursive
+        [ 'ExprCond' => ['ExprRange'] ],
 
         # ExprRange: Non-associative .. operator
         [ 'ExprRange' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
@@ -375,72 +359,29 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprUnary' => [ 'FileTestOp', 'ExprUnary' ] ],
         [ 'ExprUnary' => ['ExprPower'] ],
 
-        # Delegation rules for ExprPower (to be removed when ExprPower handles variants)
-        [ 'ExprPower' => ['ExprPowerR'] ],
-        [ 'ExprPower' => ['ExprPowerL'] ],
-        [ 'ExprPower' => ['ExprPower0'] ],
-        [ 'ExprPower' => ['ExprPowerU'] ],
+        # ExprPower: Right-associative ** operator
+        [ 'ExprPower' => [ 'ExprInc', 'OpPower', 'ExprPower' ] ],  # Right-recursive: RHS is ExprPower!
+        [ 'ExprPower' => ['ExprInc'] ],
 
-        [ 'ExprPowerR' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
-        [ 'ExprPowerR' => ['ExprIncR'] ],
-        [ 'ExprPowerL' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
-        [ 'ExprPowerL' => ['ExprIncL'] ],
-        [ 'ExprPower0' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
-        [ 'ExprPower0' => ['ExprInc0'] ],
-        [ 'ExprPowerU' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
-        [ 'ExprPowerU' => ['ExprIncU'] ],
+        # ExprInc: Increment/decrement operators (++/--)
+        [ 'ExprInc' => [ 'OpInc',    'ExprArrow' ] ],  # Pre-increment
+        [ 'ExprInc' => [ 'ExprArrow', 'OpInc' ] ],     # Post-increment
+        [ 'ExprInc' => ['ExprArrow'] ],
 
-        # Delegation rules for ExprInc (to be removed when ExprInc handles variants)
-        [ 'ExprInc' => ['ExprIncR'] ],
-        [ 'ExprInc' => ['ExprIncL'] ],
-        [ 'ExprInc' => ['ExprInc0'] ],
-        [ 'ExprInc' => ['ExprIncU'] ],
-
-        [ 'ExprIncR' => [ 'OpInc',    'ExprArrow' ] ],
-        [ 'ExprIncR' => [ 'ExprArrow', 'OpInc' ] ],
-        [ 'ExprIncR' => ['ExprArrowR'] ],
-        [ 'ExprIncL' => [ 'OpInc',    'ExprArrow' ] ],
-        [ 'ExprIncL' => [ 'ExprArrow', 'OpInc' ] ],
-        [ 'ExprIncL' => ['ExprArrowL'] ],
-        [ 'ExprInc0' => [ 'OpInc',    'ExprArrow' ] ],
-        [ 'ExprInc0' => [ 'ExprArrow', 'OpInc' ] ],
-        [ 'ExprInc0' => ['ExprArrow0'] ],
-        [ 'ExprIncU' => [ 'OpInc',    'ExprArrow' ] ],
-        [ 'ExprIncU' => [ 'ExprArrow', 'OpInc' ] ],
-        [ 'ExprIncU' => ['ExprArrowU'] ],
-
-        # Delegation rules for ExprArrow (to be removed when ExprArrow handles variants)
-        [ 'ExprArrow' => ['ExprArrowR'] ],
-        [ 'ExprArrow' => ['ExprArrowL'] ],
-        [ 'ExprArrow' => ['ExprArrow0'] ],
-        [ 'ExprArrow' => ['ExprArrowU'] ],
-
-     # Arrow expressions - eliminate left recursion to prevent parsing explosion
-        [ 'ExprArrowR' => [ 'ExprValueR', 'ArrowChain' ] ],
-        [ 'ExprArrowR' => ['ExprValueR'] ],
-        [ 'ExprArrowL' => [ 'ExprValueL', 'ArrowChain' ] ],
-        [ 'ExprArrowL' => ['ExprValueL'] ],
-        [ 'ExprArrow0' => [ 'ExprValue0', 'ArrowChain' ] ],
-        [ 'ExprArrow0' => ['ExprValue0'] ],
-        [ 'ExprArrowU' => [ 'ExprValueU', 'ArrowChain' ] ],
-        [ 'ExprArrowU' => ['ExprValueU'] ],
+        # Arrow expressions - right-recursive chain to prevent parsing explosion
+        [ 'ExprArrow' => [ 'ExprValue', 'ArrowChain' ] ],
+        [ 'ExprArrow' => ['ExprValue'] ],
 
         # ArrowChain - right-recursive chain of arrow operations
         [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS', 'ArrowChain' ] ],
         [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS' ] ]
         ,    # Prefer continuing chain over terminating
 
-        # Value rules - matching Guacamole ExprValue* rules exactly
-        [ 'ExprValueU' => ['Value'] ],
-        [ 'ExprValue0' => ['Value'] ],
-        [ 'ExprValue0' => ['OpUnaryKeywordExpr'] ],
-        [ 'ExprValueL' => ['Value'] ],
-        [ 'ExprValueL' => ['OpAssignKeywordExpr'] ],
-        [ 'ExprValueL' => ['OpUnaryKeywordExpr'] ],
-        [ 'ExprValueR' => ['Value'] ],
-        [ 'ExprValueR' => ['OpListKeywordExpr'] ],
-        [ 'ExprValueR' => ['OpAssignKeywordExpr'] ],
-        [ 'ExprValueR' => ['OpUnaryKeywordExpr'] ],
+        # Value rules - unified ExprValue handles all keyword expressions
+        [ 'ExprValue' => ['Value'] ],
+        [ 'ExprValue' => ['OpListKeywordExpr'] ],
+        [ 'ExprValue' => ['OpAssignKeywordExpr'] ],
+        [ 'ExprValue' => ['OpUnaryKeywordExpr'] ],
 
         # ArrowRHS - method calls, array/hash indexing, postfix dereferencing
         [ 'ArrowRHS' => ['Identifier'] ],
@@ -542,38 +483,7 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         # Standard open patterns (already working, kept for completeness)
         [ 'OpenExpr' => [ 'open', 'ExprComma' ] ],
 
-  # ExprComma for print arguments (following guacamole OpListKeywordArgNonBrace)
-        [
-            'ExprComma' => [ 'ExprAssignL', 'OpComma', 'ExprComma' ]
-        ],
-        [ 'ExprComma' => [ 'ExprAssignL', 'OpComma' ] ],    # Trailing comma
-        [ 'ExprComma' => ['ExprAssignR'] ],                 # Single item
-
-        # ExprAssignL for left-associative assignments in print context
-        [
-            'ExprAssignL' => [ 'ExprCond0', 'OpAssign', 'ExprAssignL' ]
-        ],
-        [ 'ExprAssignL' => ['ExprCondL'] ],
-
-        # ExprCondL for conditional expressions in print context
-        [
-            'ExprCondL' => [
-                'ExprRange', 'OpTriThen', 'ExprRange', 'OpTriElse',
-                'ExprCondL'
-            ]
-        ],
-        [ 'ExprCondL' => ['ExprRange'] ],
-
-        # Continue chain for NonBrace left-associative expressions
-
-        [ 'ExprPowerL'  => ['ExprIncL'] ],
-        [ 'ExprIncL'    => [ 'OpInc',    'ExprIncL' ] ],    # Pre-increment
-        [ 'ExprIncL'    => [ 'ExprIncL', 'OpInc' ] ],       # Post-increment
-        [ 'ExprIncL'    => ['ExprArrowL'] ],
-        [ 'ExprArrowL'  => ['ExprValueUL'] ],
-        [ 'ExprValueUL' => ['Value'] ],
-
-        # Add missing operators for ternary expressions
+        # Operators for ternary expressions
         [ 'OpTriThen' => ['?'] ],
         [ 'OpTriElse' => [':'] ],
 
