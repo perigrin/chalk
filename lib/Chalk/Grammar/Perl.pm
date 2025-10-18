@@ -337,15 +337,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprLogOr' => [ 'ExprLogOr', 'OpLogOr', 'ExprLogAnd' ] ],
         [ 'ExprLogOr' => ['ExprLogAnd'] ],
 
-        # Continue the chain down to Value
-        [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ] ],
-        [ 'ExprLogAndR' => [ 'ExprBinOrR',  'Comment' ] ]
+        # ExprLogAnd: Left-associative && operator
+        [ 'ExprLogAnd' => [ 'ExprLogAnd', 'OpLogAnd', 'ExprBinOr' ] ],
+        [ 'ExprLogAnd' => [ 'ExprBinOr',  'Comment' ] ]
         ,    # Expression with trailing comment
-        [ 'ExprLogAndR' => ['ExprBinOrR'] ],
-        [ 'ExprLogAndL' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrL' ] ],
-        [ 'ExprLogAndL' => ['ExprBinOrL'] ],
-        [ 'ExprLogAnd0' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOr0' ] ],
-        [ 'ExprLogAnd0' => ['ExprBinOr0'] ],
+        [ 'ExprLogAnd' => ['ExprBinOr'] ],
 
         [ 'ExprBinOrR' => [ 'ExprBinOr0', 'OpBinOr', 'ExprBinAndR' ] ],
         [ 'ExprBinOrR' => ['ExprBinAndR'] ],
@@ -590,7 +586,6 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'ExprRangeL' => ['ExprLogOr'] ],
 
         # Continue chain for NonBrace left-associative expressions
-        [ 'ExprLogAndL' => ['ExprBinOrL'] ],
         [ 'ExprBinOrL'  => ['ExprBinAndL'] ],
         [ 'ExprBinAndL' => ['ExprEqL'] ],
         [ 'ExprEqL'     => ['ExprNeqL'] ],
