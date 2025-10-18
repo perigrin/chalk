@@ -28,7 +28,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
         # Base statements
         [ 'Statement' => [ 'Statement',  'StatementModifier' ] ],
-        [ 'Statement' => [ 'QLikeValue', 'ElemSeq1' ] ], # qw"b"[0] as statement
+        [ 'Statement' => [ 'QLikeValue', 'ElementIndexChain' ] ], # qw"b"[0] as statement
         [ 'Statement' => ['AdjustBlock'] ],
         [ 'Statement' => ['Block'] ],                    # Bare blocks
         [ 'Statement' => ['BuiltinFunctionCall'] ],
@@ -402,8 +402,10 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Value' => ['Identifier'] ],     # Plain identifiers (lower priority)
         [ 'Value' => ['Number'] ],
         [ 'Value' => ['QuotedString'] ],
+        [ 'Value' => [ '(', 'Expression', ')', 'ElementIndexChain' ] ],  # (expr)[0] - subscripted parenthesized expression
         [ 'Value' => [ '(', 'Expression', ')' ] ],
         [ 'Value' => [ '(', ')' ] ],       # Empty parentheses (empty list)
+        [ 'Value' => ['Ellipsis'] ],       # Yada-yada operator ... as value
         [ 'Value' => ['ArrayRef'] ],
         [ 'Value' => ['HashRef'] ],
         [ 'Value' => ['FunctionCall'] ],
@@ -411,7 +413,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         ,    # grep/map/sort etc. (blocks explicitly after keywords)
         [ 'Value' => ['Block'] ],        # Bare blocks as values (e.g., -l {0})
         [ 'Value' => ['EvalBlock'] ],    # eval { ... } blocks
-        [ 'Value' => [ 'QLikeValue', 'ElemSeq1' ] ]
+        [ 'Value' => [ 'QLikeValue', 'ElementIndexChain' ] ]
         ,    # qw"b"[0], qw()[1], etc. - subscripted qw/regex
         [ 'Value' => ['QLikeValue'] ],
         [ 'Value' => ['Diamond'] ], # <$fh> constructs (merged from DiamondExpr)
@@ -578,8 +580,8 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'OpPower' => ['**'] ],
         [ 'OpInc'   => [qr/\+\+|--/] ],
 
-        # Variables with optional element sequences (subscripts)
-        [ 'Variable' => [ 'VariableBase', 'ElemSeq0' ] ],
+        # Variables with optional element index chains (subscripts)
+        [ 'Variable' => [ 'VariableBase', 'MaybeElementIndexChain' ] ],
         [ 'Variable' => ['VariableBase'] ],    # Lower priority for base case
 
         # Base variable patterns (without subscripts) - all sigils in one rule
@@ -625,14 +627,15 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'VariableBase' => [ '%[', 'Expression', ']' ] ]
         ,    # Hash slice: %[ expr ]
 
-        # Element sequences for subscripting
-        [ 'ElemSeq0' => [] ],                         # Empty sequence (epsilon)
-        [ 'ElemSeq0' => ['Element'] ],
-        [ 'ElemSeq0' => [ 'Element', 'ElemSeq0' ] ],  # Multiple subscripts
+        # Element index chains for subscripting (e.g., [0], {key}, [0]{x}[1])
+        # MaybeElementIndexChain: zero or more subscripts (can be empty)
+        [ 'MaybeElementIndexChain' => [] ],                         # Empty chain (epsilon)
+        [ 'MaybeElementIndexChain' => ['Element'] ],
+        [ 'MaybeElementIndexChain' => [ 'Element', 'MaybeElementIndexChain' ] ],  # Multiple subscripts
 
-        # Non-empty element sequence (one or more subscripts) - for qw()[0] etc.
-        [ 'ElemSeq1' => ['Element'] ],
-        [ 'ElemSeq1' => [ 'Element', 'ElemSeq0' ] ],
+        # ElementIndexChain: one or more subscripts (non-empty) - for qw()[0], (expr)[0], etc.
+        [ 'ElementIndexChain' => ['Element'] ],
+        [ 'ElementIndexChain' => [ 'Element', 'MaybeElementIndexChain' ] ],
 
         [ 'Element' => ['ArrayElem'] ],
         [ 'Element' => ['HashElem'] ],
