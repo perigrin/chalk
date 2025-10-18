@@ -10,6 +10,13 @@ use Chalk::Grammar;
 
 our @EXPORT = qw($chalk_grammar);
 
+# Extract complex patterns to reduce parser ambiguity during self-hosting
+my $RE_BALANCED_BRACES = qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/;
+my $RE_BALANCED_BRACES_FLAGS = qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/;
+my $RE_BUILTIN_FUNCTIONS = qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/;
+my $RE_UNARY_KEYWORDS = qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/;
+my $RE_LIST_KEYWORDS = qr/die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/;
+
 our $chalk_grammar = Chalk::Grammar->build_grammar(
     auto_insert => ['WS_OPT'],
     rules       => [
@@ -36,18 +43,18 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Statement' => ['Comment'] ],
         [ 'Statement' => ['ControlFlowStatement'] ],     # next, last, redo
         [ 'Statement' => ['DieExpr'] ],   # Lower - prefer checking for modifier
-        [ 'Statement' => ['EllipsisStatement'] ],    # Ellipsis (...)
+        [ 'Statement' => ['EllipsisStatement'] ],
         [ 'Statement' => ['EvalBlock'] ],            # eval { ... } blocks
         [ 'Statement' => ['Expression'] ],
         [ 'Statement' => ['FieldDecl'] ],            # Field declarations
         [ 'Statement' => ['FunctionCall'] ],   # Function calls with parentheses
         [ 'Statement' => ['LineStatement'] ],
-        [ 'Statement' => ['ListOperatorCall'] ],    # calls sans-parentheses
+        [ 'Statement' => ['ListOperatorCall'] ],
         [ 'Statement' => ['LoopBlock'] ],           # Loop statements
         [ 'Statement' => ['PackageDecl'] ],
         [ 'Statement' => ['PrintExpr'] ],
         [ 'Statement' => ['QLikeValue'] ],
-        [ 'Statement' => ['RequireStatement'] ],    # Require statements
+        [ 'Statement' => ['RequireStatement'] ],
         [ 'Statement' => ['ReturnStatement'] ],     # Return statements
         [ 'Statement' => ['SubroutineDecl'] ],
         [ 'Statement' => ['UseStatement'] ],
@@ -92,19 +99,19 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
                 qr/for(?:each)?/, '(', ';', 'Expression', ';', 'Expression',
                 ')', 'Block'
             ]
-        ],    # No init
+        ],
         [
             'ForStatement' => [
                 qr/for(?:each)?/, '(', 'Expression', ';', ';', 'Expression',
                 ')', 'Block'
             ]
-        ],    # No condition
+        ],
         [
             'ForStatement' => [
                 qr/for(?:each)?/, '(', 'Expression', ';',
                 'Expression',     ';', ')',          'Block'
             ]
-        ],    # No increment
+        ],
         [ 'ForStatement' => [ qr/for(?:each)?/, '(', ';', ';', ')', 'Block' ] ]
         ,     # Infinite loop: for (;;)
 
@@ -158,11 +165,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         # Anonymous subroutines as values - with optional attributes
         [ 'Value' => [ 'sub', 'SubAttribute', 'SubDefinition' ] ]
         ,                                             # sub :lvalue { ... }
-        [ 'Value' => [ 'sub', 'SubDefinition' ] ],    # sub { ... }
+        [ 'Value' => [ 'sub', 'SubDefinition' ] ],
 
         # Subroutine attributes
         [ 'SubAttribute' => [qr/:[a-zA-Z_]\w*/] ]
-        ,    # :lvalue, :method, :prototype(...), etc.
+        ,
 
  # UseStatement - reordered with higher probabilities for more specific patterns
  # to reduce parsing ambiguity and prevent exponential explosion
@@ -223,42 +230,42 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
 
   # QLikeValue - qw() expressions and regex patterns matching Guacamole pattern
   # qw operator split like q/qq to allow comments between operator and delimiter
-        [ 'QLikeValue' => [ 'QWOp', 'QDelimited' ] ],    # qw with any delimiter
+        [ 'QLikeValue' => [ 'QWOp', 'QDelimited' ] ],
          # m operator split like q/qq/qw to allow comments between operator and delimiter
         [ 'QLikeValue' => [ 'MOp', 'MDelimited' ] ]
-        ,    # m with any delimiter + optional flags
+        ,
          # qr operator split like m to allow comments between operator and delimiter
         [ 'QLikeValue' => [ 'QROp', 'MDelimited' ] ]
-        ,    # qr with any delimiter + optional flags
+        ,
          # s operator with specific delimiters - specific patterns to avoid greedy QDelimited matching
          # Higher probabilities (2.0) to prefer these over the general SOp + QDelimited + MDelimited rule
         [
             'QLikeValue' =>
               [qr{s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*}]
-        ],    # s/search/replace/flags
+        ],
         [
             'QLikeValue' =>
               [qr{s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*}]
-        ],    # s|search|replace|flags
+        ],
         [
             'QLikeValue' =>
               [qr{s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*}]
-        ],    # s!search!replace!flags
+        ],
         [
             'QLikeValue' =>
               [qr{s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*}]
-        ],    # s#search#replace#flags
+        ],
          # s operator split to allow comments - works with paired delimiters like s[...][...] (search, replacement)
         [ 'QLikeValue' => [ 'SOp', 'QDelimited', 'MDelimited' ] ]
         ,   # s with delimiters + optional flags on replacement (lower priority)
          # tr and y operators with specific delimiters - similar to s/// patterns
          # Higher probabilities (2.0) to prefer these over the general TROp/YOp + QDelimited + QDelimited rule
         [ 'QLikeValue' => [qr{tr/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*}] ]
-        ,    # tr/search/replace/flags
+        ,
         [
             'QLikeValue' =>
               [qr{tr\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}]
-        ],    # tr|search|replace|flags
+        ],
         [ 'QLikeValue' => [qr{tr!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}] ]
         ,     # tr!search!replace!flags
         [ 'QLikeValue' => [qr{tr#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}] ]
@@ -267,19 +274,19 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         ,     # y/search/replace/flags
         [
             'QLikeValue' => [qr{y\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*}]
-        ],    # y|search|replace|flags
+        ],
         [ 'QLikeValue' => [qr{y!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*}] ]
         ,     # y!search!replace!flags
         [ 'QLikeValue' => [qr{y#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*}] ]
         ,     # y#search#replace#flags
          # tr/y operators split to allow comments - works with paired delimiters like tr[...][...] (search, replacement)
         [ 'QLikeValue' => [ 'TROp', 'QDelimited', 'QDelimited' ] ]
-        ,    # tr with delimiters + optional flags
+        ,
         [ 'QLikeValue' => [ 'YOp', 'QDelimited', 'QDelimited' ] ]
-        ,    # y with delimiters + optional flags
+        ,
         [ 'QLikeValue' => [qr/\/((?:[^\/\\]|\\.)*)\/[gimsxoac]*/] ]
         ,                                     # /.../flags with escapes
-        [ 'QLikeValue' => [qr/`[^`]*`/] ],    # `backticks`
+        [ 'QLikeValue' => [qr/`[^`]*`/] ],
 
         [ 'FieldAttributeList' => ['FieldAttribute'] ],
         [ 'FieldAttributeList' => [ 'FieldAttribute', 'FieldAttributeList' ] ],
@@ -290,7 +297,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Expression' => ['ExprNameOr'] ],
         [ 'ExprNameOr' => [ 'ExprNameOr', 'OpNameOr', 'ExprNameAnd' ] ]
         ,                                       # First rule - higher prob
-        [ 'ExprNameOr' => ['ExprNameAnd'] ],    # Fallback - lower prob
+        [ 'ExprNameOr' => ['ExprNameAnd'] ],
 
      # BlockLevelExpression - simplified to use regular Expression hierarchy
      # Experiment: Remove BlockLevel* intermediates to reduce parser state
@@ -322,7 +329,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         # ExprLogAnd: Left-associative && operator
         [ 'ExprLogAnd' => [ 'ExprLogAnd', 'OpLogAnd', 'ExprBinOr' ] ],
         [ 'ExprLogAnd' => [ 'ExprBinOr',  'Comment' ] ]
-        ,    # Expression with trailing comment
+        ,
         [ 'ExprLogAnd' => ['ExprBinOr'] ],
 
         # ExprBinOr: Left-associative | and ^ operators
@@ -375,7 +382,7 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         # ArrowChain - right-recursive chain of arrow operations
         [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS', 'ArrowChain' ] ],
         [ 'ArrowChain' => [ 'OpArrow', 'ArrowRHS' ] ]
-        ,    # Prefer continuing chain over terminating
+        ,
 
         # Value rules - unified ExprValue handles all keyword expressions
         [ 'ExprValue' => ['Value'] ],
@@ -397,8 +404,8 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'PostfixDeref' => [qr/[@%\$]\*/] ],
 
         # Value rules - basic terminals needed for chalk
-        [ 'Value' => ['Variable'] ],    # Now includes $hash{key}, @array[index]
-        [ 'Value' => ['QualifiedIdentifier'] ],    # Foo::Bar for method calls
+        [ 'Value' => ['Variable'] ],
+        [ 'Value' => ['QualifiedIdentifier'] ],
         [ 'Value' => ['Identifier'] ],     # Plain identifiers (lower priority)
         [ 'Value' => ['Number'] ],
         [ 'Value' => ['QuotedString'] ],
@@ -410,11 +417,11 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Value' => ['HashRef'] ],
         [ 'Value' => ['FunctionCall'] ],
         [ 'Value' => ['UnaryKeywordExpression'] ]
-        ,    # grep/map/sort etc. (blocks explicitly after keywords)
+        ,
         [ 'Value' => ['Block'] ],        # Bare blocks as values (e.g., -l {0})
-        [ 'Value' => ['EvalBlock'] ],    # eval { ... } blocks
+        [ 'Value' => ['EvalBlock'] ],
         [ 'Value' => [ 'QLikeValue', 'ElementIndexChain' ] ]
-        ,    # qw"b"[0], qw()[1], etc. - subscripted qw/regex
+        ,
         [ 'Value' => ['QLikeValue'] ],
         [ 'Value' => ['Diamond'] ], # <$fh> constructs (merged from DiamondExpr)
         [ 'Value' => ['@'] ],
@@ -423,39 +430,35 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'Value' => ['PrintExpr'] ],     # print statements without parentheses
         [ 'Value' => ['DieExpr'] ],       # die statements without parentheses
         [ 'Value' => ['WarnExpr'] ],      # warn statements without parentheses
-        [ 'Value' => ['BuiltinFunctionCall'] ],    # Built-in function calls
+        [ 'Value' => ['BuiltinFunctionCall'] ],
 
         # Print expressions following guacamole OpKeywordPrintExpr pattern
-        [ 'PrintExpr' => [ 'print', 'ExprComma' ] ],    # print "string"
+        [ 'PrintExpr' => [ 'print', 'ExprComma' ] ],
         [ 'PrintExpr' => ['print'] ],                   # bare print
 
         # Print with filehandle: print FILEHANDLE "string"
         [ 'PrintExpr' => [ 'print', 'Identifier', 'ExprComma' ] ]
         ,                                                # print FH "string"
-        [ 'PrintExpr' => [ 'print', 'Identifier' ] ],    # print FH
+        [ 'PrintExpr' => [ 'print', 'Identifier' ] ],
         [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle', 'ExprComma' ] ]
         ,                                                # print STDOUT "string"
-        [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ] ],    # print STDOUT
+        [ 'PrintExpr' => [ 'print', 'BuiltinFilehandle' ] ],
 
 # Pattern match statements merged into Statement => QLikeValue (removed wrapper)
 
         # Die expressions following same pattern as PrintExpr
-        [ 'DieExpr' => [ 'die', 'ExprComma' ] ],    # die "string"
+        [ 'DieExpr' => [ 'die', 'ExprComma' ] ],
         [ 'DieExpr' => ['die'] ],                   # bare die
 
         # Warn expressions following same pattern as DieExpr
-        [ 'WarnExpr' => [ 'warn', 'ExprComma' ] ],    # warn "string"
+        [ 'WarnExpr' => [ 'warn', 'ExprComma' ] ],
         [ 'WarnExpr' => ['warn'] ],                   # bare warn
 
         # Built-in function calls (chdir, mkdir, etc.)
         [ 'BuiltinFunctionCall' => [ 'BuiltinFunction', 'ExprComma' ] ],
         [ 'BuiltinFunctionCall' => ['BuiltinFunction'] ],
-        [ 'BuiltinFunctionCall' => ['OpenExpr'] ],   # Special handling for open
-        [
-            'BuiltinFunction' => [
-qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/
-            ]
-        ],
+        [ 'BuiltinFunctionCall' => ['OpenExpr'] ],
+        [ 'BuiltinFunction' => [$RE_BUILTIN_FUNCTIONS] ],
 
         # Open expressions with inline variable declarations
         # Two-argument open: open my $fh, "file" or open our $fh, "file"
@@ -492,7 +495,7 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
  # Diamond operator: <$fh>, <STDIN>, <>, <try> (DiamondExpr merged into Diamond)
         [ 'Diamond' => [ '<', 'Variable',          '>' ] ],
         [ 'Diamond' => [ '<', 'BuiltinFilehandle', '>' ] ],
-        [ 'Diamond' => [ '<', 'Identifier', '>' ] ],    # Bareword filehandles
+        [ 'Diamond' => [ '<', 'Identifier', '>' ] ],
         [ 'Diamond' => [ '<', '>' ] ],                  # Empty diamond <>
 
         # Built-in filehandles
@@ -502,7 +505,7 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [
             'FunctionCall' => [ 'Identifier', '(', 'ParameterList', ')' ]
         ],                                              # func(args)
-        [ 'FunctionCall' => [ 'Identifier', '(', ')' ] ],    # func()
+        [ 'FunctionCall' => [ 'Identifier', '(', ')' ] ],
 
         # Qualified function calls for package methods
         [
@@ -513,15 +516,15 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
 
         # Code reference calls: &{expr}()
         [ 'FunctionCall' => [ '&{', 'Expression', '}' ] ]
-        ,    # &{$coderef} or &{sub {...}}
+        ,
 
       # List operator syntax for user-defined functions (statement context only)
       # This allows function calls without parentheses like: func "arg", $var
       # Only available in Statement, not in Value/Expression to avoid ambiguity
         [ 'ListOperatorCall' => [ 'Identifier', 'ExprComma' ] ]
-        ,    # func "arg", $var
+        ,
         [ 'ListOperatorCall' => [ 'QualifiedIdentifier', 'ExprComma' ] ]
-        ,    # Pkg::func "arg", $var
+        ,
 
 # Expression block for grep/map/sort merged into Block
 # Removed ExpressionBlock - Block already handles both Expression and StatementList
@@ -530,40 +533,40 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         # Eval - supports both block and string/expression forms
         [ 'EvalBlock' => [ 'eval', 'Block' ] ],       # eval { ... }
         [ 'EvalBlock' => [ 'eval', 'Expression' ] ]
-        ,    # eval 'string' or eval $expr
+        ,
 
       # Unary keyword expressions following guacamole.pm OpKeyword*Expr patterns
         [
             'UnaryKeywordExpression' => [ 'grep', 'Block', 'Expression' ]
-        ],    # grep { ... } @list
+        ],
         [ 'UnaryKeywordExpression' => [ 'grep', 'Expression' ] ]
         ,     # grep EXPR, @list
         [
             'UnaryKeywordExpression' => [ 'all', 'Block', 'Expression' ]
-        ],    # all { ... } @list
+        ],
         [
             'UnaryKeywordExpression' => [ 'any', 'Block', 'Expression' ]
-        ],    # any { ... } @list
+        ],
         [
             'UnaryKeywordExpression' => [ 'map', 'Block', 'Expression' ]
-        ],    # map { ... } @list
+        ],
         [
             'UnaryKeywordExpression' => [ 'sort', 'Block', 'Expression' ]
-        ],    # sort { ... } @list
+        ],
 
         # Operators - basic ones needed for chalk
         # OpRegex needs longer match (!~) before shorter (=~)
-        [ 'OpRegex' => [qr/!~|=~/] ],    # Regex binding operators: !~ and =~
+        [ 'OpRegex' => [qr/!~|=~/] ],
         [ 'OpComma' => [qr/,|=>/] ],
         [
             'OpAssign' =>
               [qr/\+=|-=|\*=|\/=|%=|\/\/=|\|\|=|&&=|\.=|&=|\|=|\^=|<<=|>>=|=/]
-        ],    # Assignment operators (compound before simple)
+        ],
         [ 'OpArrow' => ['->'] ],
         [ 'OpAdd'   => [qr/[+\-]/] ],
         [ 'OpMulti' => [qr/[*\/x]/] ]
         ,     # Multiplication, division, and repetition (x)
-        [ 'OpLogOr'   => [qr/\|\||\/\//] ],    # Logical or and defined-or
+        [ 'OpLogOr'   => [qr/\|\||\/\//] ],
         [ 'OpLogAnd'  => [qr/&&/] ],
         [ 'OpNameOr'  => ['or'] ],
         [ 'OpNameAnd' => ['and'] ],
@@ -574,7 +577,7 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'OpInequal' => [qr/<=|>=|<|>|lt|gt|le|ge/] ],
         [ 'OpShift'   => [qr/<<|>>/] ],
         [ 'OpUnary'   => [qr/[\\+\-]/] ]
-        ,    # Removed ! and ~ to avoid conflict with !~
+        ,
         [ 'OpUnary' => ['!'] ],           # Define ! separately
         [ 'OpUnary' => ['~'] ],           # Define ~ separately
         [ 'OpPower' => ['**'] ],
@@ -582,11 +585,11 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
 
         # Variables with optional element index chains (subscripts)
         [ 'Variable' => [ 'VariableBase', 'MaybeElementIndexChain' ] ],
-        [ 'Variable' => ['VariableBase'] ],    # Lower priority for base case
+        [ 'Variable' => ['VariableBase'] ],
 
         # Base variable patterns (without subscripts) - all sigils in one rule
         [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*::/] ]
-        ,    # Variables with trailing :: (e.g., $foo::) - must come first
+        ,
         [ 'VariableBase' => [qr/[\$@%&*]\w+(?:::\w+)*/] ]
         , # All variable types with sigils, including qualified (e.g., *Package::Name)
         [ 'VariableBase' => [qr/\$#\w+/] ],   # Array length variables ($#array)
@@ -608,24 +611,24 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
 
         # Scalar dereference patterns: @$var, %$var, *$var, &$var, $$var, $#$var
         [ 'VariableBase' => [qr/[@%&*]\$\w+/] ]
-        ,    # All dereference types except $$
-        [ 'VariableBase' => [qr/\$\$\w+/] ],    # Scalar dereference ($$ref)
+        ,
+        [ 'VariableBase' => [qr/\$\$\w+/] ],
         [ 'VariableBase' => [qr/\$#\$\w+/] ]
-        ,    # Array length of dereferenced scalar ($#$ref)
+        ,
 
 # Complex dereference patterns from guacamole: ${ Expression }, @{ Expression }, %{ Expression }
         [ 'VariableBase' => [ '${', 'Expression', '}' ] ]
-        ,    # Scalar deref: ${ expr }
+        ,
         [ 'VariableBase' => [ '$', '{', 'Expression', '}' ] ]
-        ,    # Scalar deref with space: $ { expr }
+        ,
         [ 'VariableBase' => [ '@{', 'Expression', '}' ] ]
-        ,    # Array deref: @{ expr }
+        ,
         [ 'VariableBase' => [ '%{', 'Expression', '}' ] ]
-        ,    # Hash deref: %{ expr }
+        ,
         [ 'VariableBase' => [ '@[', 'Expression', ']' ] ]
-        ,    # Array slice: @[ expr ]
+        ,
         [ 'VariableBase' => [ '%[', 'Expression', ']' ] ]
-        ,    # Hash slice: %[ expr ]
+        ,
 
         # Element index chains for subscripting (e.g., [0], {key}, [0]{x}[1])
         # MaybeElementIndexChain: zero or more subscripts (can be empty)
@@ -660,22 +663,18 @@ qr/(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[e
         [ 'QuotedString' => [ 'QQOp', 'QDelimited' ] ],
 
       # Quote operators as terminals (not literals, so auto_insert WS_OPT works)
-        [ 'QOp'  => [qr/q(?!q)/] ],    # q but not qq (negative lookahead)
+        [ 'QOp'  => [qr/q(?!q)/] ],
         [ 'QQOp' => [qr/qq/] ],
         [ 'QWOp' => [qr/qw/] ],        # qw word list operator
         [ 'MOp'  => [qr/m(?!s)/] ]
         , # m match operator (not ms - negative lookahead for future s/// support)
-        [ 'QROp' => [qr/qr/] ],    # qr compiled regex operator
+        [ 'QROp' => [qr/qr/] ],
         [ 'SOp'  => [qr/s/] ],     # s substitution operator
-        [ 'TROp' => [qr/tr/] ],    # tr transliteration operator
+        [ 'TROp' => [qr/tr/] ],
         [ 'YOp'  => [qr/y/] ],     # y transliteration operator (alias for tr)
 
         # Delimited quote content - various delimiters
-        [
-            'QDelimited' => [
-qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/
-            ]
-        ],                         # {} with balanced braces
+        [ 'QDelimited' => [$RE_BALANCED_BRACES] ],  # {} with balanced braces
         [ 'QDelimited' => [qr/\((?:[^)]|\n)*\)/] ],       # ()
         [ 'QDelimited' => [qr/\[(?:[^\]]|\n)*\]/] ],      # []
         [ 'QDelimited' => [qr/<(?:[^>]|\n)*>/] ],         # <>
@@ -684,15 +683,11 @@ qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/
         [ 'QDelimited' => [qr{/(?:[^/\\]|\\.)*+/}] ],     # /.../
         [ 'QDelimited' => [qr/!(?:[^!\\]|\\.)*!/] ],      # !...!
         [ 'QDelimited' => [qr/#(?:[^#\\]|\\.)*#/] ],      # #...#
-        [ 'QDelimited' => [qr/\|(?:[^|\\]|\\.)*\|/] ],    # |...|
+        [ 'QDelimited' => [qr/\|(?:[^|\\]|\\.)*\|/] ],
 
        # Delimited match content - like QDelimited but with optional regex flags
        # Possessive quantifiers (*+) prevent backtracking across large spans
-        [
-            'MDelimited' => [
-qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
-            ]
-        ],    # {} with balanced braces + flags
+        [ 'MDelimited' => [$RE_BALANCED_BRACES_FLAGS] ],  # {} with balanced braces + flags
         [ 'MDelimited' => [qr/\((?:[^)]|\\.)*+\)[a-z]*/] ],         # () + flags
         [ 'MDelimited' => [qr/\[(?:[^\]]|\\.)*+\][a-z]*/] ],        # [] + flags
         [ 'MDelimited' => [qr/<(?:[^>]|\\.)*+>[a-z]*/] ],           # <> + flags
@@ -702,7 +697,7 @@ qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
         [ 'MDelimited' => [qr/!(?:[^!\\]|\\.)*+![a-z]*/] ],         # !...!flags
         [ 'MDelimited' => [qr/#(?:[^#\\]|\\.)*+#[a-z]*/] ],         # #...#flags
         [ 'MDelimited' => [qr/\|(?:[^|\\]|\\.)*+\|(?![|])[a-z]*/] ]
-        ,    # |...|flags (negative lookahead to prevent matching ||)
+        ,
 
         # Punctuation
         [ 'PackageSeparator' => ['::'] ],
@@ -722,7 +717,7 @@ qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
         [ 'ParameterList' => ['ExpressionList'] ],
         [ 'ParameterList' => [ 'OpComma', 'Comment' ] ]
         ,                                      # Just comma with comment
-        [ 'ParameterList' => ['Comment'] ],    # Just a comment
+        [ 'ParameterList' => ['Comment'] ],
         [ 'ParameterList' => [] ],             # Empty parameter list
 
         # ArrayRef and HashRef
@@ -732,7 +727,7 @@ qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
         [ 'HashRef'  => [ '{', '}' ] ],        # Empty hash
 
        # Optimal 3-rule ExpressionList - balances functionality with performance
-        [ 'ExpressionList' => ['Expression'] ],    # Single expression
+        [ 'ExpressionList' => ['Expression'] ],
         [ 'ExpressionList' => [ 'Expression', 'OpComma', 'ExpressionList' ] ]
         ,                                          # Standard recursion
         [ 'ExpressionList' => [ 'Comment', 'ExpressionList' ] ]
@@ -751,37 +746,27 @@ qr/\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
         # File test operators - unary operators that test file properties
         [ 'FileTestOp'         => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ],
         [ 'OpUnaryKeywordExpr' => [qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/] ]
-        ,    # File test operators
+        ,
 
         # Keyword expressions - termination points for Expression chain
-        # For chalk, we only need basic ones that could appear
-        [
-            'OpUnaryKeywordExpr' => [
-qr/return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/
-            ]
-        ],
+        [ 'OpUnaryKeywordExpr' => [$RE_UNARY_KEYWORDS] ],
 
         [ 'OpAssignKeywordExpr' => [qr/goto|last/] ],
-
-        [
-            'OpListKeywordExpr' => [
-qr/die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/
-            ]
-        ],
+        [ 'OpListKeywordExpr' => [$RE_LIST_KEYWORDS] ],
 
         # Whitespace rules (needed for auto_insert)
         [ 'WS_OPT' => [] ],
         [ 'WS_OPT' => ['WS'] ],
         [ 'WS_OPT' => [ 'WS', 'WS_OPT' ] ]
-        ,    # Multiple WS tokens (space + comment, etc.)
+        ,
         [ 'WS' => [qr/\s+/m] ],
         [ 'WS' => [qr/#[^\n]*\n?/m] ]
-        ,    # Comments count as whitespace (includes optional newline)
-        [ 'WS' => [qr/#.*\n\s+/m] ],    # Comment followed by whitespace
+        ,
+        [ 'WS' => [qr/#.*\n\s+/m] ],
         [ 'WS' => [qr/\n=[a-z]\w+\b.*?\n=cut\b.*?\n/s] ]
         ,                               # POD blocks (with leading newline)
         [ 'WS' => [qr/=[a-z]\w+\b.*?\n=cut\b.*?\n/s] ]
-        ,    # POD blocks (at start of parsing or after WS)
+        ,
     ]
 );
 
