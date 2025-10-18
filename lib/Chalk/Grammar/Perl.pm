@@ -351,20 +351,13 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprBinAnd' => [ 'ExprBinAnd', '&', 'ExprEq' ] ],
         [ 'ExprBinAnd' => ['ExprEq'] ],
 
-        # Complete the missing expression hierarchy levels
-        [ 'ExprEqR' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqR' ] ],
-        [ 'ExprEqR' => ['ExprNeqR'] ],
-        [ 'ExprEqL' => [ 'ExprNeq0', 'OpEqual', 'ExprNeqL' ] ],
-        [ 'ExprEqL' => ['ExprNeqL'] ],
-        [ 'ExprEq0' => [ 'ExprNeq0', 'OpEqual', 'ExprNeq0' ] ],
-        [ 'ExprEq0' => ['ExprNeq0'] ],
+        # ExprEq: Non-associative == eq != operators
+        [ 'ExprEq' => [ 'ExprNeq', 'OpEqual', 'ExprNeq' ] ],
+        [ 'ExprEq' => ['ExprNeq'] ],
 
-        [ 'ExprNeqR' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
-        [ 'ExprNeqR' => ['ExprShift'] ],
-        [ 'ExprNeqL' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
-        [ 'ExprNeqL' => ['ExprShift'] ],
-        [ 'ExprNeq0' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
-        [ 'ExprNeq0' => ['ExprShift'] ],
+        # ExprNeq: Non-associative < > <= >= operators
+        [ 'ExprNeq' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
+        [ 'ExprNeq' => ['ExprShift'] ],
 
         [ 'ExprShift' => [ 'ExprShift', 'OpShift', 'ExprAdd' ] ],
         [ 'ExprShift' => ['ExprAdd'] ],
@@ -580,9 +573,6 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'ExprRangeL' => ['ExprLogOr'] ],
 
         # Continue chain for NonBrace left-associative expressions
-        [ 'ExprEqL'     => ['ExprNeqL'] ],
-        [ 'ExprNeqL' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
-        [ 'ExprNeqL' => ['ExprShift'] ],
 
         [ 'ExprPowerL'  => ['ExprIncL'] ],
         [ 'ExprIncL'    => [ 'OpInc',    'ExprIncL' ] ],    # Pre-increment
