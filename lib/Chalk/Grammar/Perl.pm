@@ -326,18 +326,16 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
               [ 'ExprRange0', '?', 'ExprRange0', ':', 'ExprCond0' ]
         ],
         [ 'ExprCond0'  => ['ExprRange0'] ],
-        [ 'ExprRangeR' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrR' ] ],
-        [ 'ExprRangeR' => ['ExprLogOrR'] ],
-        [ 'ExprRangeL' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ] ],
-        [ 'ExprRangeL' => ['ExprLogOrL'] ],
-        [ 'ExprRange0' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOr0' ] ],
-        [ 'ExprRange0' => ['ExprLogOr0'] ],
-        [ 'ExprLogOrR' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndR' ] ],
-        [ 'ExprLogOrR' => ['ExprLogAndR'] ],
-        [ 'ExprLogOrL' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAndL' ] ],
-        [ 'ExprLogOrL' => ['ExprLogAndL'] ],
-        [ 'ExprLogOr0' => [ 'ExprLogOr0', 'OpLogOr', 'ExprLogAnd0' ] ],
-        [ 'ExprLogOr0' => ['ExprLogAnd0'] ],
+        [ 'ExprRangeR' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
+        [ 'ExprRangeR' => ['ExprLogOr'] ],
+        [ 'ExprRangeL' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
+        [ 'ExprRangeL' => ['ExprLogOr'] ],
+        [ 'ExprRange0' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ] ],
+        [ 'ExprRange0' => ['ExprLogOr'] ],
+
+        # ExprLogOr: Left-associative || and // operators
+        [ 'ExprLogOr' => [ 'ExprLogOr', 'OpLogOr', 'ExprLogAnd' ] ],
+        [ 'ExprLogOr' => ['ExprLogAnd'] ],
 
         # Continue the chain down to Value
         [ 'ExprLogAndR' => [ 'ExprLogAnd0', 'OpLogAnd', 'ExprBinOrR' ] ],
@@ -587,12 +585,11 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
 
         # ExprRangeL for range expressions in print context
         [
-            'ExprRangeL' => [ 'ExprLogOr0', 'OpRange', 'ExprLogOrL' ]
+            'ExprRangeL' => [ 'ExprLogOr', 'OpRange', 'ExprLogOr' ]
         ],
-        [ 'ExprRangeL' => ['ExprLogOrL'] ],
+        [ 'ExprRangeL' => ['ExprLogOr'] ],
 
         # Continue chain for NonBrace left-associative expressions
-        [ 'ExprLogOrL'  => ['ExprLogAndL'] ],
         [ 'ExprLogAndL' => ['ExprBinOrL'] ],
         [ 'ExprBinOrL'  => ['ExprBinAndL'] ],
         [ 'ExprBinAndL' => ['ExprEqL'] ],
