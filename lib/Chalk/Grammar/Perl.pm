@@ -392,32 +392,23 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprRegex' => [ 'ExprRegex', 'OpRegex', 'ExprUnary' ] ],
         [ 'ExprRegex' => ['ExprUnary'] ],
 
-        # Delegation rules for ExprUnary (to be removed when ExprUnary handles variants)
-        [ 'ExprUnary' => ['ExprUnaryR'] ],
-        [ 'ExprUnary' => ['ExprUnaryL'] ],
-        [ 'ExprUnary' => ['ExprUnary0'] ],
-        [ 'ExprUnary' => ['ExprUnaryU'] ],
+        [ 'ExprUnary' => [ 'OpUnary',    'ExprUnary' ] ],
+        [ 'ExprUnary' => [ 'FileTestOp', 'ExprUnary' ] ],
+        [ 'ExprUnary' => ['ExprPower'] ],
 
-        [ 'ExprUnaryR' => [ 'OpUnary',    'ExprUnaryR' ] ],
-        [ 'ExprUnaryR' => [ 'FileTestOp', 'ExprUnaryR' ] ],
-        [ 'ExprUnaryR' => ['ExprPowerR'] ],
-        [ 'ExprUnaryL' => [ 'OpUnary',    'ExprUnaryL' ] ],
-        [ 'ExprUnaryL' => [ 'FileTestOp', 'ExprUnaryL' ] ],
-        [ 'ExprUnaryL' => ['ExprPowerL'] ],
-        [ 'ExprUnary0' => [ 'OpUnary',    'ExprUnary0' ] ],
-        [ 'ExprUnary0' => [ 'FileTestOp', 'ExprUnary0' ] ],
-        [ 'ExprUnary0' => ['ExprPower0'] ],
-        [ 'ExprUnaryU' => [ 'OpUnary',    'ExprUnaryU' ] ],
-        [ 'ExprUnaryU' => [ 'FileTestOp', 'ExprUnaryU' ] ],
-        [ 'ExprUnaryU' => ['ExprPowerU'] ],
+        # Delegation rules for ExprPower (to be removed when ExprPower handles variants)
+        [ 'ExprPower' => ['ExprPowerR'] ],
+        [ 'ExprPower' => ['ExprPowerL'] ],
+        [ 'ExprPower' => ['ExprPower0'] ],
+        [ 'ExprPower' => ['ExprPowerU'] ],
 
-        [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnaryR' ] ],
+        [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPowerR' => ['ExprIncR'] ],
-        [ 'ExprPowerL' => [ 'ExprIncU', 'OpPower', 'ExprUnaryL' ] ],
+        [ 'ExprPowerL' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPowerL' => ['ExprIncL'] ],
-        [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary0' ] ],
+        [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPower0' => ['ExprInc0'] ],
-        [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnaryU' ] ],
+        [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPowerU' => ['ExprIncU'] ],
 
         [ 'ExprIncR' => [ 'OpInc',      'ExprArrowR' ] ],
@@ -597,9 +588,6 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         [ 'ExprNeqL' => [ 'ExprShift', 'OpInequal', 'ExprShift' ] ],
         [ 'ExprNeqL' => ['ExprShift'] ],
 
-        [ 'ExprUnaryL'  => [ 'OpUnary',    'ExprUnaryL' ] ],
-        [ 'ExprUnaryL'  => [ 'FileTestOp', 'ExprUnaryL' ] ],
-        [ 'ExprUnaryL'  => ['ExprPowerL'] ],
         [ 'ExprPowerL'  => ['ExprIncL'] ],
         [ 'ExprIncL'    => [ 'OpInc',    'ExprIncL' ] ],    # Pre-increment
         [ 'ExprIncL'    => [ 'ExprIncL', 'OpInc' ] ],       # Post-increment
