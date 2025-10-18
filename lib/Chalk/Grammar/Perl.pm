@@ -402,14 +402,20 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprPower' => ['ExprPower0'] ],
         [ 'ExprPower' => ['ExprPowerU'] ],
 
-        [ 'ExprPowerR' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
+        [ 'ExprPowerR' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPowerR' => ['ExprIncR'] ],
-        [ 'ExprPowerL' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
+        [ 'ExprPowerL' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPowerL' => ['ExprIncL'] ],
-        [ 'ExprPower0' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
+        [ 'ExprPower0' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPower0' => ['ExprInc0'] ],
-        [ 'ExprPowerU' => [ 'ExprIncU', 'OpPower', 'ExprUnary' ] ],
+        [ 'ExprPowerU' => [ 'ExprInc', 'OpPower', 'ExprUnary' ] ],
         [ 'ExprPowerU' => ['ExprIncU'] ],
+
+        # Delegation rules for ExprInc (to be removed when ExprInc handles variants)
+        [ 'ExprInc' => ['ExprIncR'] ],
+        [ 'ExprInc' => ['ExprIncL'] ],
+        [ 'ExprInc' => ['ExprInc0'] ],
+        [ 'ExprInc' => ['ExprIncU'] ],
 
         [ 'ExprIncR' => [ 'OpInc',      'ExprArrowR' ] ],
         [ 'ExprIncR' => [ 'ExprArrowL', 'OpInc' ] ],
