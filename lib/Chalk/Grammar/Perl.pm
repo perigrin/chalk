@@ -391,20 +391,14 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         [ 'ExprAdd' => [ 'ExprAdd', '.',     'ExprMul' ] ],
         [ 'ExprAdd' => ['ExprMul'] ],
 
-        # Delegation rules for ExprMul (to be removed when ExprMul is simplified)
-        [ 'ExprMul' => ['ExprMulR'] ],
-        [ 'ExprMul' => ['ExprMulL'] ],
-        [ 'ExprMul' => ['ExprMul0'] ],
-        [ 'ExprMul' => ['ExprMulU'] ],
+        [ 'ExprMul' => [ 'ExprMul', 'OpMulti', 'ExprRegex' ] ],
+        [ 'ExprMul' => ['ExprRegex'] ],
 
-        [ 'ExprMulR' => [ 'ExprMulU', 'OpMulti', 'ExprRegexR' ] ],
-        [ 'ExprMulR' => ['ExprRegexR'] ],
-        [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ] ],
-        [ 'ExprMulL' => ['ExprRegexL'] ],
-        [ 'ExprMul0' => [ 'ExprMulU', 'OpMulti', 'ExprRegex0' ] ],
-        [ 'ExprMul0' => ['ExprRegex0'] ],
-        [ 'ExprMulU' => [ 'ExprMulU', 'OpMulti', 'ExprRegexU' ] ],
-        [ 'ExprMulU' => ['ExprRegexU'] ],
+        # Delegation rules for ExprRegex (to be removed when ExprRegex is simplified)
+        [ 'ExprRegex' => ['ExprRegexR'] ],
+        [ 'ExprRegex' => ['ExprRegexL'] ],
+        [ 'ExprRegex' => ['ExprRegex0'] ],
+        [ 'ExprRegex' => ['ExprRegexU'] ],
 
         [ 'ExprRegexR' => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryR' ] ],
         [ 'ExprRegexR' => ['ExprUnaryR'] ],
@@ -617,10 +611,6 @@ qr/chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|
         # NonBrace shift expressions (left-associative)
         [ 'ExprShiftL' => [ 'ExprShiftU', 'OpShift', 'ExprAdd' ] ],
         [ 'ExprShiftL' => ['ExprAdd'] ],
-
-        # NonBrace multiplication expressions (left-associative)
-        [ 'ExprMulL' => [ 'ExprMulU', 'OpMulti', 'ExprRegexL' ] ],
-        [ 'ExprMulL' => ['ExprRegexL'] ],
 
         [ 'ExprRegexL'  => [ 'ExprRegexU', 'OpRegex', 'ExprUnaryL' ] ],
         [ 'ExprRegexL'  => ['ExprUnaryL'] ],
