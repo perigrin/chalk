@@ -28,10 +28,6 @@ class Chalk::Semiring::ViterbiElement :isa(Chalk::Element) {
             && join(',', $path->@*) eq join(',', $other->path->@*);
     }
 
-    method score() {
-        return $score;
-    }
-
     method to_string(@) {
         return sprintf('%.4f[%s]', exp($score), join(',', $path->@*));
     }

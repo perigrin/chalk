@@ -3,7 +3,7 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
-use Chalk::Semiring::SPPF;
+use Chalk::Semiring::Boolean;
 
 class Chalk::EarleyItem {
     use overload '""' => 'key';
@@ -71,6 +71,8 @@ class Chalk::EarleyChart {
     field @by_end_pos;
     field %predicted;    # Track what we've predicted at each position
     field %completed;    # Track what we've completed
+    field %waiting_for;  # Index: waiting_for{symbol}{pos} = [items waiting for symbol at pos]
+    field %leo_waiting_for;  # Index: leo_waiting_for{symbol}{pos} = [Leo items waiting for symbol at pos]
 
     method add_item($earley_item) {
         $chart{ $earley_item->key } = $earley_item;
@@ -85,11 +87,35 @@ class Chalk::EarleyChart {
 
         push( $by_end_pos[ $item->end_pos ]->@*, $item );
 
+        # Index by what they're waiting for
+        if ($item isa Chalk::LeoItem) {
+            # Leo items are indexed by their symbol and end position
+            my $symbol = $item->symbol;
+            push @{$leo_waiting_for{$symbol}{$item->end_pos} //= []}, $item;
+        }
+        elsif (!$item->complete) {
+            # Regular items indexed by next_symbol
+            my $next_sym = $item->next_symbol;
+            if ($next_sym) {
+                push @{$waiting_for{$next_sym}{$item->end_pos} //= []}, $item;
+            }
+        }
+
         return $chart{$key};
     }
 
     method items_ending_at($end_pos) {
         return $by_end_pos[$end_pos]->@* if $by_end_pos[$end_pos];
+        return;
+    }
+
+    method items_waiting_for($symbol, $pos) {
+        return $waiting_for{$symbol}{$pos}->@* if exists($waiting_for{$symbol}{$pos});
+        return;
+    }
+
+    method leo_items_waiting_for($symbol, $pos) {
+        return $leo_waiting_for{$symbol}{$pos}->@* if exists($leo_waiting_for{$symbol}{$pos});
         return;
     }
 
@@ -128,6 +154,14 @@ class Chalk::EarleyChart {
             my $element = $self->get_element($item);
             if ($element) {
                 $result = $result + $element;
+
+                # Early termination for Boolean semiring: we only need to know
+                # IF a parse exists, not enumerate ALL parses. This prevents
+                # memory exhaustion when parsing highly ambiguous inputs like
+                # the grammar file itself (which has exponentially many parses).
+                if ($result != $semiring->add_id) {
+                    return $result;
+                }
             }
         }
 
@@ -137,7 +171,7 @@ class Chalk::EarleyChart {
 }
 
 class Chalk::Parser {
-    field $semiring :param = Chalk::Semiring::SPPFViterbiSemiring->new();
+    field $semiring :param = Chalk::Semiring::Boolean->new();
     field $grammar :param;
     field $preprocess :param = [];  # Arrayref of preprocessor class names
 
@@ -147,7 +181,7 @@ class Chalk::Parser {
             next unless defined $preprocessor_class;
 
             # Load the preprocessor module
-            (my $file = $preprocessor_class) =~ s{::}{/}g;
+            (my $file = $preprocessor_class) =~ s|::|/|g;
             require "$file.pm";
 
             # Apply preprocessing
@@ -239,15 +273,10 @@ class Chalk::Parser {
 
         my $lhs = $completed_item->rule->lhs;
 
-        my @waiting = $chart->items_ending_at( $completed_item->start_pos );
-
-        # Separate Leo items from regular items
-        my @leo_waiting =
-          grep { $_ isa Chalk::LeoItem && $_->symbol eq $lhs } @waiting;
-        my @regular_waiting =
-          grep { !( $_ isa Chalk::LeoItem ) && !$_->complete } @waiting;
-
-        my @waiting_for_lhs = grep { $_->next_symbol eq $lhs } @regular_waiting;
+        # Use indexed lookups to get items waiting for this symbol
+        # This avoids the expensive grep operations with isa checks
+        my @waiting_for_lhs = $chart->items_waiting_for($lhs, $completed_item->start_pos);
+        my @leo_waiting = $chart->leo_items_waiting_for($lhs, $completed_item->start_pos);
 
   # Check for deterministic reduction (only if no Leo items waiting)
   # Leo items are only for deterministic right-recursive chains where:

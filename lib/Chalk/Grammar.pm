@@ -68,10 +68,27 @@ class Chalk::Grammar {
     field $rules        :param :reader;
     field $start_symbol :param :reader;
     field %nullable_cache;
+    field %rules_waiting_for;  # Pre-computed: which rules can wait for which symbols
 
     ADJUST {
         for my $s ( keys(%$rules) ) {
             $self->is_nullable($s);
+        }
+
+        # Pre-compute which rules can wait for which symbols
+        # For each rule A -> α B β, rule A can wait for symbol B
+        for my $lhs (keys %$rules) {
+            for my $rule (@{$rules->{$lhs}}) {
+                my @rhs = $rule->rhs->@*;
+                for my $i (0 .. $#rhs) {
+                    my $symbol = $rhs[$i];
+                    # This rule can have its dot before $symbol
+                    push @{$rules_waiting_for{$symbol} //= []}, {
+                        rule => $rule,
+                        dot_pos => $i,
+                    };
+                }
+            }
         }
     }
 
@@ -131,6 +148,12 @@ class Chalk::Grammar {
         # Cache the result
         $nullable_cache{$symbol} = $result;
         return $result;
+    }
+
+    method rules_waiting_for($symbol) {
+        # Returns list of { rule, dot_pos } that can wait for this symbol
+        return $rules_waiting_for{$symbol}->@* if exists($rules_waiting_for{$symbol});
+        return;
     }
 
     method to_string(@) {

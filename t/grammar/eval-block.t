@@ -8,12 +8,21 @@ use utf8;
 use Test::More;
 use lib 'lib';
 use Chalk::Parser;
-use Chalk::Grammar::Perl;
-use Chalk::Semiring::Boolean;
+use Chalk::BNF;
+use FindBin qw($RealBin);
+use File::Spec;
+
+# Load grammar from BNF file
+my $bnf_file = File::Spec->catfile($RealBin, "..", "..", "grammar", "perl.bnf");
+open my $grammar_fh, "<:utf8", $bnf_file or die "Cannot open $bnf_file: $!";
+my $bnf_content = do { local $/; <$grammar_fh> };
+close $grammar_fh;
+my $chalk_grammar = Chalk::BNF::build_chalk_grammar($bnf_content, "Program");
+
 
 # Initialize parser with grammar and semiring
 my $parser = Chalk::Parser->new(
-    grammar => $Chalk::Grammar::Perl::chalk_grammar,
+    grammar => $chalk_grammar,
     semiring => Chalk::Semiring::Boolean->new(),
 );
 

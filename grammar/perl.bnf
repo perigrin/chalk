@@ -1,0 +1,468 @@
+# Pattern definitions
+%PATTERN_1% = /unless|if|while|until|for(?:each)?|when/u
+%PATTERN_10% = /\n=[a-z]\w+\b.*?\n=cut\b.*?\n/us
+%PATTERN_11% = /=[a-z]\w+\b.*?\n=cut\b.*?\n/us
+%PATTERN_12% = /my|our|state/u
+%PATTERN_13% = /ADJUST|BEGIN|END/u
+%PATTERN_14% = /m(?!s)/u
+%PATTERN_15% = /\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/u
+%PATTERN_16% = /\((?:[^)]|\n)*\)/u
+%PATTERN_17% = /\[(?:[^\]]|\n)*\]/u
+%PATTERN_18% = /<(?:[^>]|\n)*>/u
+%PATTERN_19% = /"(?:[^"\\]|\\.)*"/u
+%PATTERN_2% = /die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/u
+%PATTERN_20% = /'(?:[^'\\]|\\.)*'/u
+%PATTERN_21% = //(?:[^/\\]|\\.)*+//u
+%PATTERN_22% = /!(?:[^!\\]|\\.)*!/u
+%PATTERN_23% = /#(?:[^#\\]|\\.)*#/u
+%PATTERN_24% = /\|(?:[^|\\]|\\.)*\|/u
+%PATTERN_25% = /[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/u
+%PATTERN_26% = /v?(?:\d+\.?){1,3}/u
+%PATTERN_27% = /\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/u
+%PATTERN_28% = /\((?:[^)]|\\.)*+\)[a-z]*/u
+%PATTERN_29% = /\[(?:[^\]]|\\.)*+\][a-z]*/u
+%PATTERN_3% = /<<|>>/u
+%PATTERN_30% = /<(?:[^>]|\\.)*+>[a-z]*/u
+%PATTERN_31% = /"(?:[^"\\]|\\.)*+"[a-z]*/u
+%PATTERN_32% = /'(?:[^'\\]|\\.)*+'[a-z]*/u
+%PATTERN_33% = //(?:[^/\\]|\\.)*+/[a-z]*/u
+%PATTERN_34% = /!(?:[^!\\]|\\.)*+![a-z]*/u
+%PATTERN_35% = /#(?:[^#\\]|\\.)*+#[a-z]*/u
+%PATTERN_36% = /\|(?:[^|\\]|\\.)*+\|(?![|])[a-z]*/u
+%PATTERN_37% = /qq/u
+%PATTERN_38% = /\|\||///u
+%PATTERN_39% = /[*/x]/u
+%PATTERN_4% = /[\\+\-]/u
+%PATTERN_40% = /for(?:each)?/u
+%PATTERN_41% = /\+\+|--/u
+%PATTERN_42% = /class|package/u
+%PATTERN_43% = /q(?!q)/u
+%PATTERN_44% = /[\$@%&*]\w+(?:::\w+)*::/u
+%PATTERN_45% = /[\$@%&*]\w+(?:::\w+)*/u
+%PATTERN_46% = /\$#\w+/u
+%PATTERN_47% = /\$::/u
+%PATTERN_48% = /\$\$/u
+%PATTERN_49% = /\$[!"#%&'()*+,\-./:;<=>?\@\[\\\]^_`|~]/u
+%PATTERN_5% = /&&/u
+%PATTERN_50% = /\$\^\w+/u
+%PATTERN_51% = /[@%&*]\$\w+/u
+%PATTERN_52% = /\$\$\w+/u
+%PATTERN_53% = /\$#\$\w+/u
+%PATTERN_54% = /==|!=|<=>|eq|ne|cmp|isa/u
+%PATTERN_55% = /!~|=~/u
+%PATTERN_56% = /-[rwxoRWXOezsfdlpSbctugkTBMAC]/u
+%PATTERN_57% = /qw/u
+%PATTERN_58% = /method|sub/u
+%PATTERN_59% = /[|^]/u
+%PATTERN_6% = /s/u
+%PATTERN_60% = /y/u
+%PATTERN_61% = /STDIN|STDOUT|STDERR|ARGV|ARGVOUT|DATA/u
+%PATTERN_62% = /chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/u
+%PATTERN_63% = /<=|>=|<|>|lt|gt|le|ge/u
+%PATTERN_64% = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/u
+%PATTERN_65% = /\+=|-=|\*=|/=|%=|//=|\|\|=|&&=|\.=|&=|\|=|\^=|<<=|>>=|=/u
+%PATTERN_66% = /#!.*$/um
+%PATTERN_67% = /qr/u
+%PATTERN_68% = /goto|last/u
+%PATTERN_69% = /:[a-zA-Z_]\w*/u
+%PATTERN_7% = /\s+/um
+%PATTERN_70% = /next|last|redo/u
+%PATTERN_71% = /return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/u
+%PATTERN_72% = /,|=>/u
+%PATTERN_73% = /#.*$/um
+%PATTERN_74% = /[+\-]/u
+%PATTERN_75% = /s/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[msixpodualgcern]*/u
+%PATTERN_76% = /s\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[msixpodualgcern]*/u
+%PATTERN_77% = /s!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![msixpodualgcern]*/u
+%PATTERN_78% = /s#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[msixpodualgcern]*/u
+%PATTERN_79% = /tr/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*/u
+%PATTERN_8% = /#[^\n]*\n?/um
+%PATTERN_80% = /tr\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*/u
+%PATTERN_81% = /tr!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*/u
+%PATTERN_82% = /tr#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*/u
+%PATTERN_83% = /y/(?:[^/\\]|\\.)*+/(?:[^/\\]|\\.)*+/[cdsr]*/u
+%PATTERN_84% = /y\|(?:[^|\\]|\\.)*+\|(?:[^|\\]|\\.)*+\|[cdsr]*/u
+%PATTERN_85% = /y!(?:[^!\\]|\\.)*+!(?:[^!\\]|\\.)*+![cdsr]*/u
+%PATTERN_86% = /y#(?:[^#\\]|\\.)*+#(?:[^#\\]|\\.)*+#[cdsr]*/u
+%PATTERN_87% = //((?:[^/\\]|\\.)*)/[gimsxoac]*/u
+%PATTERN_88% = /`[^`]*`/u
+%PATTERN_89% = /(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/u
+%PATTERN_9% = /#.*\n\s+/um
+%PATTERN_90% = /tr/u
+%PATTERN_91% = /[@%\$]\*/u
+
+# Grammar rules
+AdjustBlock -> %PATTERN_13% WS_OPT Block
+ArrayElem -> '[' WS_OPT Expression WS_OPT ']'
+ArrayRef -> '[' WS_OPT ExpressionList WS_OPT ']'
+ArrayRef -> '[' WS_OPT ']'
+ArrowChain -> OpArrow WS_OPT ArrowRHS WS_OPT ArrowChain
+ArrowChain -> OpArrow WS_OPT ArrowRHS
+ArrowRHS -> Identifier
+ArrowRHS -> Identifier WS_OPT '(' WS_OPT ParameterList WS_OPT ')'
+ArrowRHS -> Identifier WS_OPT '(' WS_OPT ')'
+ArrowRHS -> '(' WS_OPT ParameterList WS_OPT ')'
+ArrowRHS -> '(' WS_OPT ')'
+ArrowRHS -> '[' WS_OPT Expression WS_OPT ']'
+ArrowRHS -> '{' WS_OPT Expression WS_OPT '}'
+ArrowRHS -> PostfixDeref
+Block -> '{' WS_OPT StatementList WS_OPT '}'
+Block -> '{' WS_OPT '}'
+BlockLevelExpression -> Expression
+BuiltinFilehandle -> %PATTERN_61%
+BuiltinFunction -> %PATTERN_62%
+BuiltinFunctionCall -> BuiltinFunction WS_OPT ExprComma
+BuiltinFunctionCall -> BuiltinFunction
+BuiltinFunctionCall -> OpenExpr
+ClassDecl -> class WS_OPT QualifiedIdentifier WS_OPT Inheritance WS_OPT Block
+ClassDecl -> class WS_OPT QualifiedIdentifier WS_OPT Block
+ClassIdent -> SubNameExpr
+Comment -> %PATTERN_73%
+ConditionalStatement -> '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ConditionalStatement -> ConditionalStatement WS_OPT ElsifChain
+ConditionalStatement -> ConditionalStatement WS_OPT ElseBlock
+ControlFlowStatement -> %PATTERN_70%
+ControlFlowStatement -> %PATTERN_70% WS_OPT Identifier
+Diamond -> '<' WS_OPT Variable WS_OPT '>'
+Diamond -> '<' WS_OPT BuiltinFilehandle WS_OPT '>'
+Diamond -> '<' WS_OPT Identifier WS_OPT '>'
+Diamond -> '<' WS_OPT '>'
+DieExpr -> die WS_OPT ExprComma
+DieExpr -> die
+Element -> ArrayElem
+Element -> HashElem
+ElementIndexChain -> Element
+ElementIndexChain -> Element WS_OPT MaybeElementIndexChain
+Ellipsis -> '...'
+EllipsisStatement -> Ellipsis
+ElseBlock -> else WS_OPT Block
+ElsifChain -> elsif WS_OPT ConditionalStatement
+EvalBlock -> eval WS_OPT Block
+EvalBlock -> eval WS_OPT Expression
+ExprAdd -> ExprAdd WS_OPT OpAdd WS_OPT ExprMul
+ExprAdd -> ExprAdd WS_OPT '.' WS_OPT ExprMul
+ExprAdd -> ExprMul
+ExprArrow -> ExprValue WS_OPT ArrowChain
+ExprArrow -> ExprValue
+ExprAssign -> ExprCond WS_OPT OpAssign WS_OPT ExprAssign
+ExprAssign -> ExprCond
+ExprBinAnd -> ExprBinAnd WS_OPT '&' WS_OPT ExprEq
+ExprBinAnd -> ExprEq
+ExprBinOr -> ExprBinOr WS_OPT OpBinOr WS_OPT ExprBinAnd
+ExprBinOr -> ExprBinAnd
+ExprComma -> ExprAssign WS_OPT OpComma WS_OPT ExprComma
+ExprComma -> ExprAssign WS_OPT OpComma
+ExprComma -> ExprAssign
+ExprCond -> ExprRange WS_OPT '?' WS_OPT ExprRange WS_OPT ':' WS_OPT ExprCond
+ExprCond -> ExprRange
+ExprEq -> ExprNeq WS_OPT OpEqual WS_OPT ExprNeq
+ExprEq -> ExprNeq
+ExprInc -> OpInc WS_OPT ExprArrow
+ExprInc -> ExprArrow WS_OPT OpInc
+ExprInc -> ExprArrow
+ExprLogAnd -> ExprLogAnd WS_OPT OpLogAnd WS_OPT ExprBinOr
+ExprLogAnd -> ExprBinOr WS_OPT Comment
+ExprLogAnd -> ExprBinOr
+ExprLogOr -> ExprLogOr WS_OPT OpLogOr WS_OPT ExprLogAnd
+ExprLogOr -> ExprLogAnd
+ExprMul -> ExprMul WS_OPT OpMulti WS_OPT ExprRegex
+ExprMul -> ExprRegex
+ExprNameAnd -> ExprNameAnd WS_OPT OpNameAnd WS_OPT ExprNameNot
+ExprNameAnd -> ExprNameNot
+ExprNameNot -> OpNameNot WS_OPT ExprNameNot
+ExprNameNot -> ExprComma
+ExprNameOr -> ExprNameOr WS_OPT OpNameOr WS_OPT ExprNameAnd
+ExprNameOr -> ExprNameAnd
+ExprNeq -> ExprShift WS_OPT OpInequal WS_OPT ExprShift
+ExprNeq -> ExprShift
+ExprPower -> ExprInc WS_OPT OpPower WS_OPT ExprPower
+ExprPower -> ExprInc
+ExprRange -> ExprLogOr WS_OPT OpRange WS_OPT ExprLogOr
+ExprRange -> ExprLogOr
+ExprRegex -> ExprRegex WS_OPT OpRegex WS_OPT ExprUnary
+ExprRegex -> ExprUnary
+ExprShift -> ExprShift WS_OPT OpShift WS_OPT ExprAdd
+ExprShift -> ExprAdd
+ExprUnary -> OpUnary WS_OPT ExprUnary
+ExprUnary -> FileTestOp WS_OPT ExprUnary
+ExprUnary -> ExprPower
+ExprValue -> Value
+ExprValue -> OpListKeywordExpr
+ExprValue -> OpAssignKeywordExpr
+ExprValue -> OpUnaryKeywordExpr
+Expression -> ExprNameOr
+ExpressionList -> Expression
+ExpressionList -> Expression WS_OPT OpComma WS_OPT ExpressionList
+ExpressionList -> Comment WS_OPT ExpressionList
+ExpressionList ->
+FieldAttribute -> ':param'
+FieldAttribute -> ':reader'
+FieldAttributeList -> FieldAttribute
+FieldAttributeList -> FieldAttribute WS_OPT FieldAttributeList
+FieldDecl -> field WS_OPT Variable WS_OPT FieldAttributeList
+FieldDecl -> field WS_OPT Variable
+FileTestOp -> %PATTERN_56%
+ForStatement -> %PATTERN_40% WS_OPT '(' WS_OPT Expression WS_OPT ';' WS_OPT Expression WS_OPT ';' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ForStatement -> %PATTERN_40% WS_OPT '(' WS_OPT ';' WS_OPT Expression WS_OPT ';' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ForStatement -> %PATTERN_40% WS_OPT '(' WS_OPT Expression WS_OPT ';' WS_OPT ';' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ForStatement -> %PATTERN_40% WS_OPT '(' WS_OPT Expression WS_OPT ';' WS_OPT Expression WS_OPT ';' WS_OPT ')' WS_OPT Block
+ForStatement -> %PATTERN_40% WS_OPT '(' WS_OPT ';' WS_OPT ';' WS_OPT ')' WS_OPT Block
+ForStatement -> %PATTERN_40% WS_OPT VariableDecl WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ForStatement -> %PATTERN_40% WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+FunctionCall -> Identifier WS_OPT '(' WS_OPT ParameterList WS_OPT ')'
+FunctionCall -> Identifier WS_OPT '(' WS_OPT ')'
+FunctionCall -> QualifiedIdentifier WS_OPT '(' WS_OPT ParameterList WS_OPT ')'
+FunctionCall -> QualifiedIdentifier WS_OPT '(' WS_OPT ')'
+FunctionCall -> '&{' WS_OPT Expression WS_OPT '}'
+HashElem -> '{' WS_OPT Expression WS_OPT '}'
+HashElement -> Expression WS_OPT OpComma WS_OPT Expression
+HashElementList -> HashElement
+HashElementList -> HashElement WS_OPT OpComma WS_OPT HashElementList
+HashElementList -> HashElement WS_OPT OpComma
+HashRef -> '{' WS_OPT HashElementList WS_OPT '}'
+HashRef -> '{' WS_OPT '}'
+Identifier -> %PATTERN_25%
+IfStatement -> if WS_OPT ConditionalStatement
+Inheritance -> ':isa(' WS_OPT ClassIdent WS_OPT ')'
+LineStatement -> Comment
+ListOperatorCall -> Identifier WS_OPT ExprComma
+ListOperatorCall -> QualifiedIdentifier WS_OPT ExprComma
+LoopBlock -> ForStatement
+LoopBlock -> WhileStatement
+MDelimited -> %PATTERN_27%
+MDelimited -> %PATTERN_28%
+MDelimited -> %PATTERN_29%
+MDelimited -> %PATTERN_30%
+MDelimited -> %PATTERN_31%
+MDelimited -> %PATTERN_32%
+MDelimited -> %PATTERN_33%
+MDelimited -> %PATTERN_34%
+MDelimited -> %PATTERN_35%
+MDelimited -> %PATTERN_36%
+MOp -> %PATTERN_14%
+MaybeElementIndexChain -> 
+MaybeElementIndexChain -> Element
+MaybeElementIndexChain -> Element WS_OPT MaybeElementIndexChain
+Number -> %PATTERN_89%
+OpAdd -> %PATTERN_74%
+OpArrow -> '->'
+OpAssign -> %PATTERN_65%
+OpAssignKeywordExpr -> %PATTERN_68%
+OpBinOr -> %PATTERN_59%
+OpComma -> %PATTERN_72%
+OpEqual -> %PATTERN_54%
+OpInc -> %PATTERN_41%
+OpInequal -> %PATTERN_63%
+OpKeywordUse -> use
+OpListKeywordExpr -> %PATTERN_2%
+OpLogAnd -> %PATTERN_5%
+OpLogOr -> %PATTERN_38%
+OpMulti -> %PATTERN_39%
+OpNameAnd -> and
+OpNameNot -> not
+OpNameOr -> or
+OpPower -> '**'
+OpRange -> '..'
+OpRegex -> %PATTERN_55%
+OpShift -> %PATTERN_3%
+OpTriElse -> ':'
+OpTriThen -> '?'
+OpUnary -> %PATTERN_4%
+OpUnary -> '!'
+OpUnary -> '~'
+OpUnaryKeywordExpr -> %PATTERN_56%
+OpUnaryKeywordExpr -> %PATTERN_71%
+OpenExpr -> open WS_OPT my WS_OPT VariableBase WS_OPT OpComma WS_OPT ExprComma
+OpenExpr -> open WS_OPT our WS_OPT VariableBase WS_OPT OpComma WS_OPT ExprComma
+OpenExpr -> open WS_OPT my WS_OPT VariableBase WS_OPT OpComma WS_OPT ExprComma WS_OPT OpComma WS_OPT ExprComma
+OpenExpr -> open WS_OPT our WS_OPT VariableBase WS_OPT OpComma WS_OPT ExprComma WS_OPT OpComma WS_OPT ExprComma
+OpenExpr -> open WS_OPT ExprComma
+PackageDecl -> %PATTERN_42% WS_OPT Identifier WS_OPT Inheritance WS_OPT Block
+PackageDecl -> %PATTERN_42% WS_OPT Identifier WS_OPT Block
+PackageDecl -> package WS_OPT QualifiedIdentifier
+PackageDecl -> package WS_OPT Identifier
+PackageSeparator -> ::
+ParameterList -> ExpressionList
+ParameterList -> OpComma WS_OPT Comment
+ParameterList -> Comment
+ParameterList -> 
+PostfixDeref -> %PATTERN_91%
+PrintExpr -> print WS_OPT ExprComma
+PrintExpr -> print
+PrintExpr -> print WS_OPT Identifier WS_OPT ExprComma
+PrintExpr -> print WS_OPT Identifier
+PrintExpr -> print WS_OPT BuiltinFilehandle WS_OPT ExprComma
+PrintExpr -> print WS_OPT BuiltinFilehandle
+Program -> StatementList
+Program -> WS_OPT WS_OPT StatementList WS_OPT WS_OPT
+Program -> Shebang WS_OPT StatementList WS_OPT WS_OPT
+QDelimited -> %PATTERN_15%
+QDelimited -> %PATTERN_16%
+QDelimited -> %PATTERN_17%
+QDelimited -> %PATTERN_18%
+QDelimited -> %PATTERN_19%
+QDelimited -> %PATTERN_20%
+QDelimited -> %PATTERN_21%
+QDelimited -> %PATTERN_22%
+QDelimited -> %PATTERN_23%
+QDelimited -> %PATTERN_24%
+QLikeValue -> QWOp WS_OPT QDelimited
+QLikeValue -> MOp WS_OPT MDelimited
+QLikeValue -> QROp WS_OPT MDelimited
+QLikeValue -> %PATTERN_75%
+QLikeValue -> %PATTERN_76%
+QLikeValue -> %PATTERN_77%
+QLikeValue -> %PATTERN_78%
+QLikeValue -> SOp WS_OPT QDelimited WS_OPT MDelimited
+QLikeValue -> %PATTERN_79%
+QLikeValue -> %PATTERN_80%
+QLikeValue -> %PATTERN_81%
+QLikeValue -> %PATTERN_82%
+QLikeValue -> %PATTERN_83%
+QLikeValue -> %PATTERN_84%
+QLikeValue -> %PATTERN_85%
+QLikeValue -> %PATTERN_86%
+QLikeValue -> TROp WS_OPT QDelimited WS_OPT QDelimited
+QLikeValue -> YOp WS_OPT QDelimited WS_OPT QDelimited
+QLikeValue -> %PATTERN_87%
+QLikeValue -> %PATTERN_88%
+QOp -> %PATTERN_43%
+QQOp -> %PATTERN_37%
+QROp -> %PATTERN_67%
+QWOp -> %PATTERN_57%
+QualifiedIdentifier -> Identifier WS_OPT PackageSeparator WS_OPT QualifiedIdentifier
+QualifiedIdentifier -> Identifier WS_OPT PackageSeparator WS_OPT Identifier
+QuotedString -> %PATTERN_64%
+QuotedString -> QOp WS_OPT QDelimited
+QuotedString -> QQOp WS_OPT QDelimited
+RequireStatement -> require WS_OPT Expression
+ReturnStatement -> return WS_OPT Expression
+ReturnStatement -> return
+SOp -> %PATTERN_6%
+Shebang -> %PATTERN_66%
+Statement -> Statement WS_OPT StatementModifier
+Statement -> QLikeValue WS_OPT ElementIndexChain
+Statement -> AdjustBlock
+Statement -> Block
+Statement -> BuiltinFunctionCall
+Statement -> ClassDecl
+Statement -> Comment
+Statement -> ControlFlowStatement
+Statement -> DieExpr
+Statement -> EllipsisStatement
+Statement -> EvalBlock
+Statement -> Expression
+Statement -> FieldDecl
+Statement -> FunctionCall
+Statement -> LineStatement
+Statement -> ListOperatorCall
+Statement -> LoopBlock
+Statement -> PackageDecl
+Statement -> PrintExpr
+Statement -> QLikeValue
+Statement -> RequireStatement
+Statement -> ReturnStatement
+Statement -> SubroutineDecl
+Statement -> UseStatement
+Statement -> VariableDecl
+Statement -> WarnExpr
+Statement -> IfStatement
+Statement -> UnlessStatement
+StatementList -> 
+StatementList -> Statement
+StatementList -> Statement WS_OPT ';' WS_OPT StatementList
+StatementList -> Statement WS_OPT StatementList
+StatementModifier -> %PATTERN_1% WS_OPT Expression
+SubAttribute -> %PATTERN_69%
+SubDefinition -> SubSigsDefinition WS_OPT Block
+SubDefinition -> Block
+SubNameExpr -> Identifier
+SubNameExpr -> Identifier WS_OPT PackageSeparator WS_OPT SubNameExpr
+SubSigsDefinition -> '(' WS_OPT Expression WS_OPT ')'
+SubSigsDefinition -> '(' WS_OPT ')'
+SubroutineDecl -> %PATTERN_58% WS_OPT Identifier WS_OPT SubDefinition
+SubroutineDecl -> %PATTERN_58% WS_OPT Identifier
+SubroutineDecl -> my WS_OPT %PATTERN_58% WS_OPT Identifier WS_OPT SubDefinition
+SubroutineDecl -> my WS_OPT %PATTERN_58% WS_OPT Identifier
+TROp -> %PATTERN_90%
+UnaryKeywordExpression -> grep WS_OPT Block WS_OPT Expression
+UnaryKeywordExpression -> grep WS_OPT Expression
+UnaryKeywordExpression -> all WS_OPT Block WS_OPT Expression
+UnaryKeywordExpression -> any WS_OPT Block WS_OPT Expression
+UnaryKeywordExpression -> map WS_OPT Block WS_OPT Expression
+UnaryKeywordExpression -> sort WS_OPT Block WS_OPT Expression
+UnlessStatement -> unless WS_OPT ConditionalStatement
+UseStatement -> OpKeywordUse WS_OPT ClassIdent WS_OPT VersionExpr WS_OPT Expression
+UseStatement -> OpKeywordUse WS_OPT ClassIdent WS_OPT Expression
+UseStatement -> OpKeywordUse WS_OPT VersionExpr
+UseStatement -> OpKeywordUse WS_OPT ClassIdent WS_OPT VersionExpr
+UseStatement -> OpKeywordUse WS_OPT ClassIdent
+Value -> sub WS_OPT SubAttribute WS_OPT SubDefinition
+Value -> sub WS_OPT SubDefinition
+Value -> Variable
+Value -> QualifiedIdentifier
+Value -> Identifier
+Value -> Number
+Value -> QuotedString
+Value -> '(' WS_OPT Expression WS_OPT ')' WS_OPT ElementIndexChain
+Value -> '(' WS_OPT Expression WS_OPT ')'
+Value -> '(' WS_OPT ')'
+Value -> Ellipsis
+Value -> ArrayRef
+Value -> HashRef
+Value -> FunctionCall
+Value -> UnaryKeywordExpression
+Value -> Block
+Value -> EvalBlock
+Value -> QLikeValue WS_OPT ElementIndexChain
+Value -> QLikeValue
+Value -> Diamond
+Value -> '@'
+Value -> FieldDecl
+Value -> VariableDecl
+Value -> PrintExpr
+Value -> DieExpr
+Value -> WarnExpr
+Value -> BuiltinFunctionCall
+Variable -> VariableBase WS_OPT MaybeElementIndexChain
+Variable -> VariableBase
+VariableBase -> %PATTERN_44%
+VariableBase -> %PATTERN_45%
+VariableBase -> %PATTERN_46%
+VariableBase -> %PATTERN_47%
+VariableBase -> %PATTERN_48%
+VariableBase -> %PATTERN_49%
+VariableBase -> %PATTERN_50%
+VariableBase -> '${' WS_OPT '^' WS_OPT Identifier WS_OPT '}'
+VariableBase -> '$' WS_OPT '{' WS_OPT '^' WS_OPT Identifier WS_OPT '}'
+VariableBase -> '@{' WS_OPT '^' WS_OPT Identifier WS_OPT '}'
+VariableBase -> '@' WS_OPT '{' WS_OPT '^' WS_OPT Identifier WS_OPT '}'
+VariableBase -> '%{' WS_OPT '^' WS_OPT Identifier WS_OPT '}'
+VariableBase -> '%' WS_OPT '{' WS_OPT '^' WS_OPT Identifier WS_OPT '}'
+VariableBase -> %PATTERN_51%
+VariableBase -> %PATTERN_52%
+VariableBase -> %PATTERN_53%
+VariableBase -> '${' WS_OPT Expression WS_OPT '}'
+VariableBase -> '$' WS_OPT '{' WS_OPT Expression WS_OPT '}'
+VariableBase -> '@{' WS_OPT Expression WS_OPT '}'
+VariableBase -> '%{' WS_OPT Expression WS_OPT '}'
+VariableBase -> '@[' WS_OPT Expression WS_OPT ']'
+VariableBase -> '%[' WS_OPT Expression WS_OPT ']'
+VariableDecl -> %PATTERN_12% WS_OPT Variable WS_OPT '=' WS_OPT Expression
+VariableDecl -> %PATTERN_12% WS_OPT Variable
+VariableDecl -> local WS_OPT Variable WS_OPT '=' WS_OPT Expression
+VariableDecl -> local WS_OPT Variable
+VariableDecl -> local WS_OPT Expression WS_OPT '=' WS_OPT Expression
+VersionExpr -> %PATTERN_26%
+WS -> %PATTERN_7%
+WS -> %PATTERN_8%
+WS -> %PATTERN_9%
+WS -> %PATTERN_10%
+WS -> %PATTERN_11%
+WS_OPT -> 
+WS_OPT -> WS
+WS_OPT -> WS WS_OPT WS_OPT
+WarnExpr -> warn WS_OPT ExprComma
+WarnExpr -> warn
+WhileStatement -> while WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+YOp -> %PATTERN_60%
