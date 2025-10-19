@@ -50,7 +50,7 @@ if ( !caller ) {
 
     # Map grammar names to BNF files
     my %grammar_files = (
-        'Perl' => 'perl-full.bnf',
+        'Perl' => 'perl.bnf',
     );
 
     if (exists $grammar_files{$grammar_module}) {
