@@ -28,7 +28,6 @@ my $RE_FILETEST = qr/-[rwxoRWXOezsfdlpSbctugkTBMAC]/;
 our $chalk_grammar = Chalk::Grammar->build_grammar(
     auto_insert => ['WS_OPT'],
     rules       => [
-
         [ 'Program' => ['StatementList'] ],
         [ 'Program' => [ 'WS_OPT',  'StatementList', 'WS_OPT' ] ],
         [ 'Program' => [ 'Shebang', 'StatementList', 'WS_OPT' ] ],
@@ -344,6 +343,10 @@ our $chalk_grammar = Chalk::Grammar->build_grammar(
         ,                                    # Match FunctionCall priority
         [ 'ArrowRHS' => [ 'Identifier', '(', ')' ] ]
         ,                                    # Match FunctionCall priority
+        [ 'ArrowRHS' => [ '(', 'ParameterList', ')' ] ]
+        ,                                    # Coderef dereference: $sub->($args)
+        [ 'ArrowRHS' => [ '(', ')' ] ]
+        ,                                    # Coderef dereference: $sub->()
         [ 'ArrowRHS' => [ '[', 'Expression', ']' ] ],
         [ 'ArrowRHS' => [ '{', 'Expression', '}' ] ],
         [ 'ArrowRHS' => ['PostfixDeref'] ],  # ->@*, ->%*, ->$* (postfix derefs)

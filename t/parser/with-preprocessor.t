@@ -20,7 +20,7 @@ EOF
 
     my $parser = Chalk::Parser->new(
         grammar => $chalk_grammar,
-        preprocess => ['Chalk::Preprocessor::HeredocV2'],
+        preprocess => ['Chalk::Preprocessor::Heredoc'],
         semiring => Chalk::Semiring::Boolean->new(),
     );
 
@@ -36,7 +36,7 @@ EOF
 
     my $parser = Chalk::Parser->new(
         grammar => $chalk_grammar,
-        preprocess => ['Chalk::Preprocessor::HeredocV2'],
+        preprocess => ['Chalk::Preprocessor::Heredoc'],
         semiring => Chalk::Semiring::Boolean->new(),
     );
 
@@ -53,7 +53,7 @@ EOF
 
     my $parser = Chalk::Parser->new(
         grammar => $chalk_grammar,
-        preprocess => ['Chalk::Preprocessor::HeredocV2'],
+        preprocess => ['Chalk::Preprocessor::Heredoc'],
         semiring => Chalk::Semiring::Boolean->new(),
     );
 
@@ -71,7 +71,7 @@ EOF2
 
     my $parser = Chalk::Parser->new(
         grammar => $chalk_grammar,
-        preprocess => ['Chalk::Preprocessor::HeredocV2'],
+        preprocess => ['Chalk::Preprocessor::Heredoc'],
         semiring => Chalk::Semiring::Boolean->new(),
     );
 
@@ -88,7 +88,7 @@ my $y = $x + 10;};
 
     my $parser = Chalk::Parser->new(
         grammar => $chalk_grammar,
-        preprocess => ['Chalk::Preprocessor::HeredocV2'],
+        preprocess => ['Chalk::Preprocessor::Heredoc'],
         semiring => Chalk::Semiring::Boolean->new(),
     );
 

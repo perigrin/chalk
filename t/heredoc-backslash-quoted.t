@@ -10,7 +10,7 @@ use Chalk::Parser;
 
 my $parser = Chalk::Parser->new(
     grammar => $Chalk::Grammar::Perl::chalk_grammar,
-    preprocess => ['Chalk::Preprocessor::HeredocV2'],
+    preprocess => ['Chalk::Preprocessor::Heredoc'],
 );
 
 # Suppress warnings during parsing

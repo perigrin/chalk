@@ -1,6 +1,6 @@
 # ABOUTME: Grammar-based heredoc preprocessor for Chalk::Parser
 # ABOUTME: Uses mini-grammar to correctly parse heredoc markers in code context
-package Chalk::Preprocessor::HeredocV2;
+package Chalk::Preprocessor::Heredoc;
 use 5.42.0;
 use utf8;
 use open qw(:std :utf8);
@@ -8,7 +8,7 @@ use open qw(:std :utf8);
 use experimental qw(class builtin keyword_any keyword_all);
 #use Chalk::Parser;
 
-class Chalk::Preprocessor::HeredocV2 {
+class Chalk::Preprocessor::Heredoc {
     field $input :param :reader;
     field $output :reader = '';
     field @line_map :reader;
@@ -63,7 +63,7 @@ class Chalk::Preprocessor::HeredocV2 {
                         # Recursively transform nested heredocs ONLY in double-quoted heredocs
                         # Single-quoted heredocs don't interpolate, so <<FOO inside them is literal
                         if (!$hd->{is_single_quoted}) {
-                            my $inner_preprocessor = Chalk::Preprocessor::HeredocV2->new(input => $content);
+                            my $inner_preprocessor = Chalk::Preprocessor::Heredoc->new(input => $content);
                             $inner_preprocessor->transform();
                             $content = $inner_preprocessor->output;
                         }

@@ -4,11 +4,11 @@ use 5.42.0;
 use Test2::V0;
 use Chalk::Parser;
 use Chalk::Grammar::Perl;
-use Chalk::Preprocessor::HeredocV2;
+use Chalk::Preprocessor::Heredoc;
 
 my $parser = Chalk::Parser->new(
     grammar => $Chalk::Grammar::Perl::chalk_grammar,
-    preprocess => ['Chalk::Preprocessor::HeredocV2']
+    preprocess => ['Chalk::Preprocessor::Heredoc']
 );
 
 # The actual failing expression from line 540
