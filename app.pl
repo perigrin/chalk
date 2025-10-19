@@ -41,47 +41,55 @@ if ( !caller ) {
     }
     @ARGV = @remaining_args;
 
-    # Normalize grammar module name - prepend Chalk::Grammar:: if needed
-    unless ($grammar_module =~ /::/) {
-        $grammar_module = "Chalk::Grammar::$grammar_module";
-    }
-
-    # Convert package name to file path for require
-    my $grammar_file = $grammar_module;
-    $grammar_file =~ s{::}{/}g;
-    $grammar_file .= ".pm";
-
-    # Load the grammar module
-    eval {
-        require $grammar_file;
-        $grammar_module->import();
-    };
-    if ($@) {
-        die("Error: Failed to load grammar module '$grammar_module': $@\n");
-    }
-
     # Build grammar from BNF file
-    our $chalk_grammar;
-    if ($grammar_module eq 'Chalk::Grammar::Perl') {
-        use File::Basename qw(dirname);
-        use File::Spec;
+    use File::Basename qw(dirname);
+    use File::Spec;
+    use Chalk::BNF;
 
-        my $bnf_file = File::Spec->catfile($RealBin, 'grammar', 'perl-full.bnf');
+    our $chalk_grammar;
+
+    # Map grammar names to BNF files
+    my %grammar_files = (
+        'Perl' => 'perl-full.bnf',
+    );
+
+    if (exists $grammar_files{$grammar_module}) {
+        # Load from BNF file
+        my $bnf_file = File::Spec->catfile($RealBin, 'grammar', $grammar_files{$grammar_module});
         open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
         my $content = do { local $/; <$fh> };
         close $fh;
 
-        no strict 'refs';
-        $chalk_grammar = &{"${grammar_module}::build_perl_grammar"}($content);
+        # Perl grammar uses 'Program' as start symbol
+        my $start_symbol = $grammar_module eq 'Perl' ? 'Program' : undef;
+        $chalk_grammar = Chalk::BNF::build_chalk_grammar($content, $start_symbol);
     } else {
-        # Try to get $chalk_grammar export for other grammars
+        # Try loading as a module
+        my $full_module_name = $grammar_module;
+        unless ($full_module_name =~ /::/) {
+            $full_module_name = "Chalk::Grammar::$full_module_name";
+        }
+
+        my $grammar_file = $full_module_name;
+        $grammar_file =~ s{::}{/}g;
+        $grammar_file .= ".pm";
+
+        eval {
+            require $grammar_file;
+            $full_module_name->import();
+        };
+        if ($@) {
+            die("Error: Failed to load grammar module '$full_module_name': $@\n");
+        }
+
+        # Try to get $chalk_grammar export
         no strict 'refs';
-        $chalk_grammar = ${"${grammar_module}::chalk_grammar"};
+        $chalk_grammar = ${"${full_module_name}::chalk_grammar"};
     }
 
     # Verify grammar loaded
     if ( !defined($chalk_grammar) ) {
-        die("Error: Grammar not loaded from module '$grammar_module'!\n");
+        die("Error: Grammar not loaded for '$grammar_module'!\n");
     }
 
     # Read input from STDIN or command line file

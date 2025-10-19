@@ -3,6 +3,7 @@
 package Chalk::BNF;
 use 5.42.0;
 use utf8;
+use Chalk::Grammar;
 
 sub parse_bnf_file($filename) {
     open my $fh, '<:utf8', $filename or die "Cannot open $filename: $!";
@@ -10,6 +11,21 @@ sub parse_bnf_file($filename) {
     close $fh;
 
     return parse_bnf_string($content);
+}
+
+sub build_chalk_grammar($bnf_content, $start_symbol = undef) {
+    my $rules = parse_bnf_string($bnf_content);
+
+    # If start symbol specified, ensure it's first
+    if (defined $start_symbol) {
+        my @ordered_rules = (
+            (grep { $_->[0] eq $start_symbol } @$rules),
+            (grep { $_->[0] ne $start_symbol } @$rules)
+        );
+        $rules = \@ordered_rules;
+    }
+
+    return Chalk::Grammar->build_grammar(rules => $rules);
 }
 
 sub parse_bnf_string($content) {
