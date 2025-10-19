@@ -194,6 +194,7 @@ Expression -> ExprNameOr
 ExpressionList -> Expression
 ExpressionList -> Expression WS_OPT OpComma WS_OPT ExpressionList
 ExpressionList -> Comment WS_OPT ExpressionList
+ExpressionList ->
 FieldAttribute -> ':param'
 FieldAttribute -> ':reader'
 FieldAttributeList -> FieldAttribute
