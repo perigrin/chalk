@@ -1,0 +1,177 @@
+# Chalk Perl Grammar - Single File Format
+# ABOUTME: Complete Perl grammar with inline pattern definitions
+# ABOUTME: Simple line-based format for bootstrap self-hosting
+
+# Pattern definitions (must come before use)
+# Format: %PATTERN_NAME% = /regex/flags
+
+%RE_FOR% = /for(?:each)?/
+%RE_METHOD_SUB% = /method|sub/
+%RE_CLASS_PACKAGE% = /class|package/
+%RE_MY_OUR_STATE% = /my|our|state/
+%RE_CONTROL_FLOW% = /next|last|redo/
+%RE_STMT_MODIFIER% = /unless|if|while|until|for(?:each)?|when/
+%RE_IDENTIFIER% = /[a-zA-Z_][a-zA-Z0-9_]*(?:::+[a-zA-Z_][a-zA-Z0-9_]*)*/
+%RE_NUMBER% = /(?:0[bB][01]+|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[0-7]+|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/
+%RE_FILETEST% = /-[rwxoRWXOezsfdlpSbctugkTBMAC]/
+%RE_ADJUST% = /ADJUST|BEGIN|END/
+%RE_SHEBANG% = /#!.*$/m
+%RE_COMMENT% = /#.*$/m
+%RE_BUILTIN_FUNCTIONS% = /chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|close|eof|tell|seek|truncate|fileno|flock|binmode|read|write|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|require/
+%RE_UNARY_KEYWORDS% = /return|last|next|redo|chdir|mkdir|rmdir|unlink|chmod|chown|utime|rename|link|symlink|readlink|stat|lstat|sleep|exit|system|exec|fork|wait|waitpid|kill|alarm|umask|exists|defined|delete|ref|bless|tied|untie|tie|scalar|wantarray|caller|reset|undef|length|chr|ord|uc|lc|ucfirst|lcfirst|quotemeta|abs|int|sqrt|exp|log|sin|cos|atan2|rand|srand|time|localtime|gmtime|times|close|eof|tell|seek|truncate|fileno|flock|binmode/
+%RE_LIST_KEYWORDS% = /die|warn|print|say|printf|sprintf|join|split|grep|map|sort|reverse|keys|values|each|push|pop|shift|unshift|splice|pack|unpack|read|write|sysread|syswrite|recv|send|select/
+%RE_BALANCED_BRACES% = /\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}/
+%RE_BALANCED_BRACES_FLAGS% = /\{(?:[^{}]++|\{(?:[^{}]++|\{(?:[^{}]++|\{[^{}]*+\})*+\})*+\})*+\}[a-z]*/
+
+# Grammar rules start here
+# Format: LHS -> RHS
+# Empty RHS means epsilon rule
+
+# Top level
+Program -> StatementList
+Program -> WS_OPT StatementList WS_OPT
+Program -> Shebang StatementList WS_OPT
+
+# Statement lists
+StatementList ->
+StatementList -> Statement
+StatementList -> Statement ';' StatementList
+StatementList -> Statement StatementList
+
+# Core statement types
+Statement -> Statement StatementModifier
+Statement -> QLikeValue ElementIndexChain
+Statement -> AdjustBlock
+Statement -> Block
+Statement -> BuiltinFunctionCall
+Statement -> ClassDecl
+Statement -> Comment
+Statement -> ControlFlowStatement
+Statement -> DieExpr
+Statement -> EllipsisStatement
+Statement -> EvalBlock
+Statement -> Expression
+Statement -> FieldDecl
+Statement -> FunctionCall
+Statement -> LineStatement
+Statement -> ListOperatorCall
+Statement -> LoopBlock
+Statement -> PackageDecl
+Statement -> PrintExpr
+Statement -> QLikeValue
+Statement -> RequireStatement
+Statement -> ReturnStatement
+Statement -> SubroutineDecl
+Statement -> UseStatement
+Statement -> VariableDecl
+Statement -> WarnExpr
+Statement -> IfStatement
+Statement -> UnlessStatement
+
+# Conditionals
+IfStatement -> 'if' ConditionalStatement
+UnlessStatement -> 'unless' ConditionalStatement
+
+ConditionalStatement -> '(' Expression ')' Block
+ConditionalStatement -> ConditionalStatement ElsifChain
+ConditionalStatement -> ConditionalStatement ElseBlock
+
+ElsifChain -> 'elsif' ConditionalStatement
+ElseBlock -> 'else' Block
+
+# Blocks
+Block -> '{' StatementList '}'
+Block -> '{' '}'
+
+AdjustBlock -> %RE_ADJUST% Block
+
+# Loops
+LoopBlock -> ForStatement
+LoopBlock -> WhileStatement
+
+ForStatement -> %RE_FOR% '(' Expression ';' Expression ';' Expression ')' Block
+ForStatement -> %RE_FOR% '(' ';' Expression ';' Expression ')' Block
+ForStatement -> %RE_FOR% '(' Expression ';' ';' Expression ')' Block
+ForStatement -> %RE_FOR% '(' Expression ';' Expression ';' ')' Block
+ForStatement -> %RE_FOR% '(' ';' ';' ')' Block
+ForStatement -> %RE_FOR% VariableDecl '(' Expression ')' Block
+ForStatement -> %RE_FOR% '(' Expression ')' Block
+
+WhileStatement -> 'while' '(' Expression ')' Block
+
+LineStatement -> Comment
+
+# Comments
+Shebang -> %RE_SHEBANG%
+Comment -> %RE_COMMENT%
+
+# Class and package declarations
+ClassDecl -> 'class' QualifiedIdentifier Inheritance Block
+ClassDecl -> 'class' QualifiedIdentifier Block
+PackageDecl -> %RE_CLASS_PACKAGE% Identifier Inheritance Block
+PackageDecl -> %RE_CLASS_PACKAGE% Identifier Block
+PackageDecl -> 'package' QualifiedIdentifier
+PackageDecl -> 'package' Identifier
+
+# Subroutine declarations
+SubroutineDecl -> %RE_METHOD_SUB% Identifier SubDefinition
+SubroutineDecl -> %RE_METHOD_SUB% Identifier
+SubroutineDecl -> 'my' %RE_METHOD_SUB% Identifier SubDefinition
+SubroutineDecl -> 'my' %RE_METHOD_SUB% Identifier
+
+SubDefinition -> SubSigsDefinition Block
+SubDefinition -> Block
+
+SubSigsDefinition -> '(' Expression ')'
+SubSigsDefinition -> '(' ')'
+
+# Values with sub
+Value -> 'sub' SubAttribute SubDefinition
+Value -> 'sub' SubDefinition
+
+SubAttribute -> /:[a-zA-Z_]\w*/
+
+# Use statements
+UseStatement -> OpKeywordUse ClassIdent VersionExpr Expression
+UseStatement -> OpKeywordUse ClassIdent Expression
+UseStatement -> OpKeywordUse VersionExpr
+UseStatement -> OpKeywordUse ClassIdent VersionExpr
+UseStatement -> OpKeywordUse ClassIdent
+
+Inheritance -> ':isa(' ClassIdent ')'
+
+# Field declarations
+FieldDecl -> 'field' Variable FieldAttributeList
+FieldDecl -> 'field' Variable
+
+# Variable declarations
+VariableDecl -> %RE_MY_OUR_STATE% Variable '=' Expression
+VariableDecl -> %RE_MY_OUR_STATE% Variable
+VariableDecl -> 'local' Variable '=' Expression
+VariableDecl -> 'local' Variable
+VariableDecl -> 'local' Expression '=' Expression
+
+# Special statements
+EllipsisStatement -> Ellipsis
+Ellipsis -> '...'
+
+ReturnStatement -> 'return' Expression
+ReturnStatement -> 'return'
+
+ControlFlowStatement -> %RE_CONTROL_FLOW%
+ControlFlowStatement -> %RE_CONTROL_FLOW% Identifier
+
+RequireStatement -> 'require' Expression
+
+StatementModifier -> %RE_STMT_MODIFIER% Expression
+
+OpKeywordUse -> 'use'
+ClassIdent -> SubNameExpr
+
+SubNameExpr -> Identifier
+SubNameExpr -> Identifier PackageSeparator SubNameExpr
+
+VersionExpr -> /v?(?:\d+\.?){1,3}/
+
+# Continue with all remaining rules...
+# This is just a sample showing the format
