@@ -60,9 +60,21 @@ if ( !caller ) {
         die("Error: Failed to load grammar module '$grammar_module': $@\n");
     }
 
-    # Access the grammar from the loaded module
+    # Build grammar from BNF file
     our $chalk_grammar;
-    {
+    if ($grammar_module eq 'Chalk::Grammar::Perl') {
+        use File::Basename qw(dirname);
+        use File::Spec;
+
+        my $bnf_file = File::Spec->catfile($RealBin, 'grammar', 'perl-full.bnf');
+        open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
+        my $content = do { local $/; <$fh> };
+        close $fh;
+
+        no strict 'refs';
+        $chalk_grammar = &{"${grammar_module}::build_perl_grammar"}($content);
+    } else {
+        # Try to get $chalk_grammar export for other grammars
         no strict 'refs';
         $chalk_grammar = ${"${grammar_module}::chalk_grammar"};
     }

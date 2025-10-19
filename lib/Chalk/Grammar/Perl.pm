@@ -9,7 +9,7 @@ use Exporter 'import';
 use Chalk::Grammar;
 use Chalk::BNF;
 
-our @EXPORT = qw($chalk_grammar build_perl_grammar);
+our @EXPORT = qw(build_perl_grammar);
 
 # Build a Perl grammar from BNF content string
 sub build_perl_grammar($bnf_content) {
@@ -24,26 +24,6 @@ sub build_perl_grammar($bnf_content) {
     return Chalk::Grammar->build_grammar(
         rules => \@ordered_rules
     );
-}
-
-# Default grammar loaded from perl-full.bnf at module load time
-# File I/O happens here for backward compatibility, but users should
-# prefer calling build_perl_grammar() with their own content
-our $chalk_grammar;
-BEGIN {
-    use File::Basename qw(dirname);
-    use File::Spec;
-
-    my $grammar_file = File::Spec->catfile(
-        dirname(__FILE__), '..', '..', '..', 'grammar', 'perl-full.bnf'
-    );
-
-    open my $fh, '<:utf8', $grammar_file
-        or die "Cannot open $grammar_file: $!";
-    my $content = do { local $/; <$fh> };
-    close $fh;
-
-    $chalk_grammar = build_perl_grammar($content);
 }
 
 1;
