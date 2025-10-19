@@ -7,7 +7,7 @@ use open qw(:std :utf8);
 use experimental qw(class builtin keyword_any keyword_all defer);
 use Exporter 'import';
 use Chalk::Grammar;
-use Chalk::Grammar::BNF;
+use Chalk::BNF;
 use FindBin qw($RealBin);
 
 our @EXPORT = qw($chalk_grammar);
@@ -19,7 +19,7 @@ use File::Spec;
 
 my $grammar_file = File::Spec->catfile(dirname(__FILE__), '..', '..', '..', 'grammar', 'perl-full.bnf');
 
-my $rules = Chalk::Grammar::BNF::parse_bnf_file($grammar_file);
+my $rules = Chalk::BNF::parse_bnf_file($grammar_file);
 
 # Ensure Program is the first rule (start symbol)
 my @ordered_rules = (
