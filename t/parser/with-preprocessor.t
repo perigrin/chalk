@@ -3,14 +3,23 @@
 # ABOUTME: Verify full heredoc->q{}/qq{} transformation and parsing pipeline
 use 5.42.0;
 use Test2::V0;
+use experimental qw(defer);
 use FindBin qw($RealBin);
 use lib "$RealBin/../../lib";
-use experimental qw(defer);
-defer { done_testing() }
+use File::Spec;
 
-use Chalk::Grammar::Perl qw($chalk_grammar);
+# Load grammar from BNF file
+my $bnf_file = File::Spec->catfile($RealBin, "..", "..", "grammar", "perl.bnf");
+open my $grammar_fh, "<:utf8", $bnf_file or die "Cannot open $bnf_file: $!";
+my $bnf_content = do { local $/; <$grammar_fh> };
+close $grammar_fh;
+my $chalk_grammar = Chalk::BNF::build_chalk_grammar($bnf_content, "Program");
+
+use Chalk::BNF;
 use Chalk::Parser;
 use Chalk::Semiring::Boolean;
+
+defer { done_testing() }
 
 subtest 'Parse simple heredoc with preprocessing' => sub {
     my $code = q{my $text = <<'EOF';

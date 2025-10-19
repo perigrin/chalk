@@ -8,6 +8,14 @@ use Chalk::Parser;
 use Chalk::BNF;
 use FindBin qw($RealBin);
 use Chalk::Semiring::Boolean;
+use File::Spec;
+
+# Load grammar from BNF file
+my $bnf_file = File::Spec->catfile($RealBin, "..", "..", "grammar", "perl.bnf");
+open my $grammar_fh, "<:utf8", $bnf_file or die "Cannot open $bnf_file: $!";
+my $bnf_content = do { local $/; <$grammar_fh> };
+close $grammar_fh;
+my $chalk_grammar = Chalk::BNF::build_chalk_grammar($bnf_content, "Program");
 
 # Helper to validate expression against real Perl
 sub perl_accepts {
