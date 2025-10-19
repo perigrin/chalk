@@ -3,11 +3,12 @@
 use 5.42.0;
 use experimental qw(class builtin);
 use Test::More;
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Parser;
 
 my $parser = Chalk::Parser->new(
-    grammar => $Chalk::Grammar::Perl::chalk_grammar,
+    grammar => $chalk_grammar,
 );
 
 # Test that we now accept valid Perl that was previously rejected by NonBrace* hierarchy

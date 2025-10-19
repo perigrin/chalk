@@ -8,7 +8,8 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../lib";
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Parser;
 use Chalk::Preprocessor::Heredoc;
 use File::Find;
@@ -30,7 +31,7 @@ find(
 # Sort for consistent test ordering
 @t_files = sort @t_files;
 
-my $parser = Chalk::Parser->new(grammar => $Chalk::Grammar::Perl::chalk_grammar);
+my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
 
 my $total = scalar @t_files;
 my $passed = 0;

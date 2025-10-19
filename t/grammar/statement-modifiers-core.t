@@ -7,12 +7,13 @@ use utf8;
 use Test::More;
 use lib 'lib';
 use Chalk::Parser;
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Semiring::Boolean;
 
 # Create parser
 my $parser = Chalk::Parser->new(
-    grammar => $Chalk::Grammar::Perl::chalk_grammar,
+    grammar => $chalk_grammar,
     semiring => Chalk::Semiring::Boolean->new(),
 );
 

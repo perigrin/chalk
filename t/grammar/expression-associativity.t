@@ -5,7 +5,8 @@ use 5.42.0;
 use experimental qw(class builtin);
 use Test::More;
 use Chalk::Parser;
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Semiring::Boolean;
 
 # Helper to validate expression against real Perl
@@ -24,7 +25,7 @@ sub perl_rejects {
 # Test right-associative operators (must associate right-to-left)
 subtest 'Right-associative operators' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 
@@ -53,7 +54,7 @@ subtest 'Right-associative operators' => sub {
 # Test left-associative operators (must associate left-to-right)
 subtest 'Left-associative operators' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 
@@ -116,7 +117,7 @@ subtest 'Left-associative operators' => sub {
 # Test precedence (ensure nesting is preserved)
 subtest 'Operator precedence' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 
@@ -147,7 +148,7 @@ subtest 'Operator precedence' => sub {
 # Test that named operators work correctly
 subtest 'Named operators (or, and, not)' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 
@@ -168,7 +169,7 @@ subtest 'Named operators (or, and, not)' => sub {
 # Test range operator
 subtest 'Range operator' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 
@@ -185,7 +186,7 @@ subtest 'Range operator' => sub {
 # Test comma operator
 subtest 'Comma operator' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 
@@ -203,7 +204,7 @@ subtest 'Comma operator' => sub {
 # Validate against real Perl - Chalk should accept what Perl accepts
 subtest 'Validate against real Perl (valid expressions)' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 
@@ -231,7 +232,7 @@ subtest 'Validate against real Perl (valid expressions)' => sub {
 # Validate against real Perl - Chalk should reject what Perl rejects
 subtest 'Validate against real Perl (invalid expressions)' => sub {
     my $parser = Chalk::Parser->new(
-        grammar   => $Chalk::Grammar::Perl::chalk_grammar,
+        grammar   => $chalk_grammar,
         semiring  => Chalk::Semiring::Boolean->new(),
     );
 

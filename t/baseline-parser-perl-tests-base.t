@@ -8,7 +8,8 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../lib";
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Parser;
 use Chalk::Preprocessor::Heredoc;
 
@@ -18,7 +19,7 @@ opendir my $dh, $base_dir or die "Cannot open $base_dir: $!";
 my @t_files = sort grep { /\.t$/ && -f "$base_dir/$_" } readdir($dh);
 closedir $dh;
 
-my $parser = Chalk::Parser->new(grammar => $Chalk::Grammar::Perl::chalk_grammar);
+my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
 
 my $total = scalar @t_files;
 my $passed = 0;

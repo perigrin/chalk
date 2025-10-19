@@ -3,11 +3,12 @@
 use 5.42.0;
 use Test2::V0;
 use Chalk::Parser;
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Preprocessor::Heredoc;
 
 my $parser = Chalk::Parser->new(
-    grammar => $Chalk::Grammar::Perl::chalk_grammar,
+    grammar => $chalk_grammar,
     preprocess => ['Chalk::Preprocessor::Heredoc']
 );
 

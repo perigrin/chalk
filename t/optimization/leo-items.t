@@ -3,7 +3,8 @@
 use 5.42.0;
 use experimental qw(class builtin);
 use Test::More;
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Parser;
 use Chalk::Semiring::Boolean;
 

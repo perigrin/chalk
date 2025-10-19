@@ -5,11 +5,12 @@ use 5.42.0;
 use utf8;
 use lib 'lib';
 use Test::More tests => 5;
-use Chalk::Grammar::Perl;
+use Chalk::BNF;
+use FindBin qw($RealBin);
 use Chalk::Parser;
 
 my $parser = Chalk::Parser->new(
-    grammar => $Chalk::Grammar::Perl::chalk_grammar,
+    grammar => $chalk_grammar,
     preprocess => ['Chalk::Preprocessor::Heredoc'],
 );
 
