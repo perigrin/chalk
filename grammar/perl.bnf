@@ -240,7 +240,7 @@ MDelimited -> %PATTERN_34%
 MDelimited -> %PATTERN_35%
 MDelimited -> %PATTERN_36%
 MOp -> %PATTERN_14%
-MaybeElementIndexChain -> 
+MaybeElementIndexChain ->
 MaybeElementIndexChain -> Element
 MaybeElementIndexChain -> Element WS_OPT MaybeElementIndexChain
 Number -> %PATTERN_89%
@@ -285,7 +285,7 @@ PackageSeparator -> ::
 ParameterList -> ExpressionList
 ParameterList -> OpComma WS_OPT Comment
 ParameterList -> Comment
-ParameterList -> 
+ParameterList ->
 PostfixDeref -> %PATTERN_91%
 PrintExpr -> print WS_OPT ExprComma
 PrintExpr -> print
@@ -368,7 +368,7 @@ Statement -> VariableDecl
 Statement -> WarnExpr
 Statement -> IfStatement
 Statement -> UnlessStatement
-StatementList -> 
+StatementList ->
 StatementList -> Statement
 StatementList -> Statement WS_OPT ';' WS_OPT StatementList
 StatementList -> Statement WS_OPT StatementList
@@ -459,7 +459,7 @@ WS -> %PATTERN_8%
 WS -> %PATTERN_9%
 WS -> %PATTERN_10%
 WS -> %PATTERN_11%
-WS_OPT -> 
+WS_OPT ->
 WS_OPT -> WS
 WS_OPT -> WS WS_OPT WS_OPT
 WarnExpr -> warn WS_OPT ExprComma

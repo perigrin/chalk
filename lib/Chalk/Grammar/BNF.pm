@@ -149,6 +149,10 @@ $grammar = _build_bnf_grammar(
         # Example: class, method, field
         ['BarewordTerminal', [qr/[a-z][a-z0-9_]*/]],
 
+        # Symbol bareword terminals: operators and symbols (like ::, ->, etc.)
+        # Example: ::, ->, ...
+        ['BarewordTerminal', [qr/[^A-Z\s'%][^A-Z\s'%\->]*/]],
+
         # Nonterminals: identifiers starting with capital letter
         # Example: Block, StatementList, WS_OPT
         ['Nonterminal', [qr/[A-Z][a-zA-Z0-9_]*/]],
