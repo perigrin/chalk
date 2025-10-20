@@ -1,123 +1,75 @@
-# ABOUTME: Simple BNF file parser for loading grammar rules
-# ABOUTME: Avoids complex nested structures for bootstrap self-hosting
+# ABOUTME: BNF grammar parser using semantic actions architecture
+# ABOUTME: Primary API: parse_bnf() - parses BNF content and returns Chalk::Grammar
 package Chalk::BNF;
 use 5.42.0;
 use utf8;
 use Chalk::Grammar;
+use Chalk::Grammar::BNF;
+use Chalk::Parser;
+use Chalk::Semiring::Semantic;
 
-sub parse_bnf_file($filename) {
-    open my $fh, '<:utf8', $filename or die "Cannot open $filename: $!";
-    my $content = do { local $/; <$fh> };
-    close $fh;
+sub parse_bnf($bnf_content) {
+    # Parse BNF using hand-coded BNF grammar with semantic actions
+    # Returns Chalk::Grammar object directly from parsing
+    #
+    # This parser fully supports all BNF syntax including grammar rules,
+    # terminals, nonterminals, pattern definitions, and comments.
 
-    return parse_bnf_string($content);
+    my $bnf_grammar = Chalk::Grammar::BNF->grammar;
+
+    # Create environment with pattern table for storing %NAME% definitions
+    my %env = (
+        patterns => {}  # Pattern name => compiled regex
+    );
+
+    my $semiring = Chalk::Semiring::Semantic->new(
+        env => \%env,
+        grammar => $bnf_grammar
+    );
+
+    my $parser = Chalk::Parser->new(
+        grammar => $bnf_grammar,
+        semiring => $semiring
+    );
+
+    my $result = $parser->parse_string($bnf_content);
+
+    # Extract Grammar object from semantic result
+    return $result ? $result->context->extract : undef;
 }
 
 sub build_chalk_grammar($bnf_content, $start_symbol = undef) {
-    my $rules = parse_bnf_string($bnf_content);
+    # Use new semantic actions parser
+    my $grammar = parse_bnf($bnf_content);
 
-    # If start symbol specified, ensure it's first
-    if (defined $start_symbol) {
-        my @ordered_rules = (
-            (grep { $_->[0] eq $start_symbol } @$rules),
-            (grep { $_->[0] ne $start_symbol } @$rules)
-        );
-        $rules = \@ordered_rules;
+    return undef unless $grammar;
+
+    # If start symbol specified and different from current, rebuild with correct start
+    if (defined $start_symbol && $grammar->start_symbol ne $start_symbol) {
+        # Extract all rules and rebuild with specified start symbol
+        my %all_rules = %{$grammar->rules};
+
+        # Reorder to ensure start symbol is first
+        my @rules_array;
+
+        # Add start symbol rules first
+        if (exists $all_rules{$start_symbol}) {
+            for my $rule (@{$all_rules{$start_symbol}}) {
+                push @rules_array, [$start_symbol, $rule->rhs];
+            }
+        }
+
+        # Add all other rules
+        for my $lhs (sort grep { $_ ne $start_symbol } keys %all_rules) {
+            for my $rule (@{$all_rules{$lhs}}) {
+                push @rules_array, [$lhs, $rule->rhs];
+            }
+        }
+
+        return Chalk::Grammar->build_grammar(rules => \@rules_array);
     }
 
-    return Chalk::Grammar->build_grammar(rules => $rules);
-}
-
-sub parse_bnf_string($content) {
-    my %patterns;
-    my @rules;
-
-    my @lines = split /\n/, $content;
-    for my $line (@lines) {
-        $line = trim($line);
-
-        # Skip blank lines
-        next if $line eq '';
-
-        # Pattern definition: %NAME% = /regex/flags
-        # Must match before comment stripping since patterns may contain #
-        if ( $line =~ /^%(\w+)%\s*=\s*\/(.+)\/([a-z]*)/ ) {
-            my ( $name, $pattern, $flags ) = ( $1, $2, $3 || '' );
-            $patterns{$name} = qr/(?$flags:$pattern)/;
-            next;
-        }
-
-        # Strip comments AFTER checking for pattern definitions
-        $line =~ s/#.*$//;
-        $line = trim($line);
-        next if $line eq '';
-
-        # Grammar rule: LHS -> RHS
-        if ( $line =~ /^(\w+)\s*->\s*(.*)$/ ) {
-            my ( $lhs, $rhs ) = ( $1, $2 );
-
-            # Empty RHS means epsilon rule
-            if ( $rhs eq '' ) {
-                push @rules, [ $lhs => [] ];
-                next;
-            }
-
-            # Parse RHS tokens
-            my @rhs_tokens = parse_rhs( $rhs, \%patterns );
-            push @rules, [ $lhs => \@rhs_tokens ];
-        }
-        else {
-            die "Invalid BNF syntax: $line\n";
-        }
-    }
-
-    return \@rules;
-}
-
-sub parse_rhs {
-    my ( $rhs, $patterns ) = @_;
-    my @tokens;
-
-    # Tokenize RHS, handling quoted strings and regexes
-    while ( $rhs =~ /\S/ ) {
-        $rhs = trim($rhs);
-
-        # Single-quoted string (terminal)
-        if ( $rhs =~ /^'([^']*)'/ ) {
-            push @tokens, $1;
-            $rhs = substr( $rhs, length($&) );
-        }
-
-        # Pattern reference %NAME%
-        elsif ( $rhs =~ /^%(\w+)%/ ) {
-            my $pattern_name = $1;
-            if ( exists $patterns->{$pattern_name} ) {
-                push @tokens, $patterns->{$pattern_name};
-            }
-            else {
-                die "Undefined pattern: $pattern_name\n";
-            }
-            $rhs = substr( $rhs, length($&) );
-        }
-
-        # Regex pattern /pattern/flags
-        elsif ( $rhs =~ m{^/(.+?)/([a-z]*)?} ) {
-            my ( $pattern, $flags ) = ( $1, $2 // '' );
-            push @tokens, qr/(?$flags:$pattern)/;
-            $rhs = substr( $rhs, length($&) );
-        }
-
-        # Nonterminal or special symbol
-        elsif ( $rhs =~ /^([\w:]+|[^\s'\/]+)/ ) {
-            push @tokens, $1;
-            $rhs = substr( $rhs, length($&) );
-        }
-        else {
-            last;
-        }
-    }
-
-    return @tokens;
+    return $grammar;
 }
 
 1;

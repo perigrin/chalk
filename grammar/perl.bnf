@@ -92,6 +92,12 @@
 %PATTERN_91% = /[@%\$]\*/u
 
 # Grammar rules
+
+# Grammar rules - Start symbol
+Program -> StatementList
+Program -> WS_OPT WS_OPT StatementList WS_OPT WS_OPT
+Program -> Shebang WS_OPT StatementList WS_OPT WS_OPT
+
 AdjustBlock -> %PATTERN_13% WS_OPT Block
 ArrayElem -> '[' WS_OPT Expression WS_OPT ']'
 ArrayRef -> '[' WS_OPT ExpressionList WS_OPT ']'
@@ -240,7 +246,7 @@ MDelimited -> %PATTERN_34%
 MDelimited -> %PATTERN_35%
 MDelimited -> %PATTERN_36%
 MOp -> %PATTERN_14%
-MaybeElementIndexChain -> 
+MaybeElementIndexChain ->
 MaybeElementIndexChain -> Element
 MaybeElementIndexChain -> Element WS_OPT MaybeElementIndexChain
 Number -> %PATTERN_89%
@@ -285,7 +291,7 @@ PackageSeparator -> ::
 ParameterList -> ExpressionList
 ParameterList -> OpComma WS_OPT Comment
 ParameterList -> Comment
-ParameterList -> 
+ParameterList ->
 PostfixDeref -> %PATTERN_91%
 PrintExpr -> print WS_OPT ExprComma
 PrintExpr -> print
@@ -293,9 +299,6 @@ PrintExpr -> print WS_OPT Identifier WS_OPT ExprComma
 PrintExpr -> print WS_OPT Identifier
 PrintExpr -> print WS_OPT BuiltinFilehandle WS_OPT ExprComma
 PrintExpr -> print WS_OPT BuiltinFilehandle
-Program -> StatementList
-Program -> WS_OPT WS_OPT StatementList WS_OPT WS_OPT
-Program -> Shebang WS_OPT StatementList WS_OPT WS_OPT
 QDelimited -> %PATTERN_15%
 QDelimited -> %PATTERN_16%
 QDelimited -> %PATTERN_17%
@@ -368,7 +371,7 @@ Statement -> VariableDecl
 Statement -> WarnExpr
 Statement -> IfStatement
 Statement -> UnlessStatement
-StatementList -> 
+StatementList ->
 StatementList -> Statement
 StatementList -> Statement WS_OPT ';' WS_OPT StatementList
 StatementList -> Statement WS_OPT StatementList
@@ -459,7 +462,7 @@ WS -> %PATTERN_8%
 WS -> %PATTERN_9%
 WS -> %PATTERN_10%
 WS -> %PATTERN_11%
-WS_OPT -> 
+WS_OPT ->
 WS_OPT -> WS
 WS_OPT -> WS WS_OPT WS_OPT
 WarnExpr -> warn WS_OPT ExprComma

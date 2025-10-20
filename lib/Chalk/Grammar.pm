@@ -35,8 +35,15 @@ class Chalk::GrammarRule {
         return $nullable = 1 if all {
             my @rules = $grammar->rules_for($_);
 
-            # Terminals (no rules) are not nullable
-            return 0 unless @rules;
+            # Terminals (no rules) - check if nullable
+            unless (@rules) {
+                # For regex terminals, test if they match empty string
+                if (ref($_) eq 'Regexp') {
+                    return "" =~ $_;
+                }
+                # String terminals are not nullable (empty string would be in grammar as [])
+                return 0;
+            }
 
             # In cycle, assume not nullable
             return 0 if $seen->{$_};
@@ -61,6 +68,12 @@ class Chalk::GrammarRule {
         # If string literal, escape and convert to regex
         return $seen{$terminal} //=
           ref($terminal) eq 'Regexp' ? $terminal : qr/\Q$terminal\E/;
+    }
+
+    # Default semantic action: return children as array (for AST construction)
+    # Subclasses can override this method to provide custom semantic actions
+    method evaluate($context) {
+        return [map { $_->extract } $context->children->@*];
     }
 }
 
