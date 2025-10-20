@@ -28,10 +28,6 @@ use Chalk::Semiring::Semantic;
     isa_ok($grammar, 'Chalk::Grammar', 'Result is a Chalk::Grammar object');
 }
 
-done_testing();
-
-__END__
-
 # Test 2: Parse grammar rule with nonterminal and verify rules
 {
     my $bnf_grammar = Chalk::Grammar::BNF->grammar();

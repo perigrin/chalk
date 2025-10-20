@@ -477,13 +477,14 @@ class Chalk::Parser {
         );
 
         # For Semantic semiring, extract the matched terminal string value
+        # and multiply with current element to accumulate terminals in children
         my $scanned_element;
         if ($semiring isa Chalk::Semiring::Semantic) {
             # Extract the matched terminal value from input string
             my $matched_value = substr($input_string, $pos, $match_length);
 
             # Create a context with the terminal value as focus
-            my $ctx = Chalk::EvalContext->new(
+            my $terminal_ctx = Chalk::EvalContext->new(
                 focus => $matched_value,
                 children => [],
                 start_pos => $pos,
@@ -493,10 +494,13 @@ class Chalk::Parser {
                 rule => $item->rule
             );
 
-            $scanned_element = Chalk::Semiring::SemanticElement->new(
+            my $terminal_element = Chalk::Semiring::SemanticElement->new(
                 value => 1,
-                context => $ctx
+                context => $terminal_ctx
             );
+
+            # Multiply current element with terminal to accumulate in children
+            $scanned_element = $element * $terminal_element;
         } else {
             # All other semirings receive position updates during scan
             # Semirings can choose to use or ignore positions based on their needs

@@ -4,6 +4,9 @@ package Chalk::BNF;
 use 5.42.0;
 use utf8;
 use Chalk::Grammar;
+use Chalk::Grammar::BNF;
+use Chalk::Parser;
+use Chalk::Semiring::Semantic;
 
 sub parse_bnf_file($filename) {
     open my $fh, '<:utf8', $filename or die "Cannot open $filename: $!";
@@ -11,6 +14,33 @@ sub parse_bnf_file($filename) {
     close $fh;
 
     return parse_bnf_string($content);
+}
+
+sub parse_with_semantic_actions($bnf_content) {
+    # Parse BNF using hand-coded BNF grammar with semantic actions
+    # Returns Chalk::Grammar object directly from parsing
+    #
+    # NOTE: The hand-coded BNF grammar currently supports basic BNF syntax
+    # (grammar rules, terminals, nonterminals, pattern definitions, comments).
+    # More complex features in perl.bnf may not parse yet. Use parse_bnf_string()
+    # for full compatibility with existing BNF files.
+
+    my $bnf_grammar = Chalk::Grammar::BNF->grammar;
+
+    my $semiring = Chalk::Semiring::Semantic->new(
+        env => {},
+        grammar => $bnf_grammar
+    );
+
+    my $parser = Chalk::Parser->new(
+        grammar => $bnf_grammar,
+        semiring => $semiring
+    );
+
+    my $result = $parser->parse_string($bnf_content);
+
+    # Extract Grammar object from semantic result
+    return $result ? $result->context->extract : undef;
 }
 
 sub build_chalk_grammar($bnf_content, $start_symbol = undef) {
