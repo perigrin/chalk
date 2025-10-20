@@ -62,6 +62,12 @@ class Chalk::GrammarRule {
         return $seen{$terminal} //=
           ref($terminal) eq 'Regexp' ? $terminal : qr/\Q$terminal\E/;
     }
+
+    # Default semantic action: return children as array (for AST construction)
+    # Subclasses can override this method to provide custom semantic actions
+    method evaluate($context) {
+        return [map { $_->extract } $context->children->@*];
+    }
 }
 
 class Chalk::Grammar {
