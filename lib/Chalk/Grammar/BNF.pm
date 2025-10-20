@@ -120,8 +120,17 @@ $grammar = _build_bnf_grammar(
             qr/[a-z]*/                    # Optional flags
         ]],
 
-        # Grammar rules: LHS -> RHS
+        # Grammar rules: LHS -> RHS (with optional inline comment)
         # Example: Block -> '{' WS_OPT StatementList WS_OPT '}'
+        # Example with comment: Foo -> 'bar'  # inline comment
+        ['GrammarRule', [
+            qr/[A-Z][a-zA-Z0-9_]*/,  # LHS (nonterminal, starts with capital)
+            qr/\s*/,                  # Optional whitespace
+            '->',
+            qr/\s*/,                  # Optional whitespace
+            'RHS',
+            qr/\s*#[^\n]*/,           # Inline comment (with leading whitespace)
+        ]],
         ['GrammarRule', [
             qr/[A-Z][a-zA-Z0-9_]*/,  # LHS (nonterminal, starts with capital)
             qr/\s*/,                  # Optional whitespace

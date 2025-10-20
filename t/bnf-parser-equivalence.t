@@ -116,7 +116,7 @@ EOF
     grammars_equivalent($old_grammar, $new_grammar, "Full-line comments");
 }
 
-# Test 6: Inline comments (KNOWN LIMITATION - semantic actions don't support these yet)
+# Test 6: Inline comments
 {
     my $bnf = <<'EOF';
 Foo -> 'bar'  # inline comment
@@ -126,11 +126,7 @@ EOF
     my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf);
     my $new_grammar = Chalk::BNF::parse_with_semantic_actions($bnf);
 
-    ok($old_grammar, "Old parser handles inline comments");
-    TODO: {
-        local $TODO = "Semantic actions parser doesn't support inline comments yet";
-        ok($new_grammar, "New parser handles inline comments");
-    }
+    grammars_equivalent($old_grammar, $new_grammar, "Inline comments");
 }
 
 # Test 7: Parse grammar/bnf.bnf with both approaches
