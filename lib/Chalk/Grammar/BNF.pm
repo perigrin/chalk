@@ -12,6 +12,7 @@ use Chalk::Grammar::BNF::Rule::GrammarRule;
 use Chalk::Grammar::BNF::Rule::RHS;
 use Chalk::Grammar::BNF::Rule::RHSElement;
 use Chalk::Grammar::BNF::Rule::Terminal;
+use Chalk::Grammar::BNF::Rule::BarewordTerminal;
 use Chalk::Grammar::BNF::Rule::Nonterminal;
 use Chalk::Grammar::BNF::Rule::PatternDef;
 use Chalk::Grammar::BNF::Rule::PatternRef;
@@ -134,14 +135,19 @@ $grammar = _build_bnf_grammar(
         ['RHS', ['RHSElement']],
         ['RHS', ['RHSElement', qr/\s+/, 'RHS']],
 
-        # RHS elements can be terminals, nonterminals, or pattern references
+        # RHS elements can be terminals, nonterminals, pattern references, or barewords
         ['RHSElement', ['Terminal']],
         ['RHSElement', ['Nonterminal']],
         ['RHSElement', ['PatternRef']],
+        ['RHSElement', ['BarewordTerminal']],
 
         # Terminals: single-quoted strings
         # Example: 'foo', '{', '}'
         ['Terminal', ["'", qr/(?:[^'\\]|\\.)*/, "'"]],
+
+        # Bareword terminals: lowercase identifiers (keywords like class, method, field)
+        # Example: class, method, field
+        ['BarewordTerminal', [qr/[a-z][a-z0-9_]*/]],
 
         # Nonterminals: identifiers starting with capital letter
         # Example: Block, StatementList, WS_OPT
