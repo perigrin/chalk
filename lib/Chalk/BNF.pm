@@ -27,8 +27,13 @@ sub parse_with_semantic_actions($bnf_content) {
 
     my $bnf_grammar = Chalk::Grammar::BNF->grammar;
 
+    # Create environment with pattern table for storing %NAME% definitions
+    my %env = (
+        patterns => {}  # Pattern name => compiled regex
+    );
+
     my $semiring = Chalk::Semiring::Semantic->new(
-        env => {},
+        env => \%env,
         grammar => $bnf_grammar
     );
 
