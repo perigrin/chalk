@@ -260,6 +260,22 @@ class Chalk::Parser {
                         $self->scan( $item, $element, $chart, $pos,
                             $match_length );
                     }
+
+                    # Aycock-Horspool optimization for nullable terminals:
+                    # If the terminal can match empty string, also advance dot
+                    if (ref($next_sym) eq 'Regexp' && "" =~ $next_sym) {
+                        my $advanced_item = Chalk::EarleyItem->new(
+                            start_pos => $item->start_pos,
+                            rule      => $item->rule,
+                            dot_pos   => $item->dot_pos + 1,
+                            end_pos   => $item->end_pos
+                        );
+
+                        unless ( $chart->has_item($advanced_item) ) {
+                            $chart->add_element( $advanced_item, $element );
+                            push( @agenda, $advanced_item );
+                        }
+                    }
                 }
             }
         }

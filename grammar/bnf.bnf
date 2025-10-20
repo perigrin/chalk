@@ -1,0 +1,50 @@
+# BNF Grammar Definition
+# This file describes the BNF syntax itself
+
+# Pattern definitions
+%IDENTIFIER% = /[a-zA-Z_][a-zA-Z0-9_]*/u
+%NONTERMINAL% = /[A-Z][a-zA-Z0-9_]*/u
+%TERMINAL_CONTENT% = /(?:[^'\\]|\\.)*/u
+%REGEX_CONTENT% = /(?:[^\/\\]|\\.)*/u
+%FLAGS% = /[a-z]*/u
+%WHITESPACE% = /\s*/u
+%REQUIRED_WS% = /\s+/u
+%COMMENT% = /#[^\n]*/u
+
+# Top-level structure
+Grammar -> LineList
+
+# Line list (recursive)
+LineList -> Line LineList
+LineList -> Line
+LineList ->
+
+# Line types
+Line -> PatternDef '\n'
+Line -> GrammarRule '\n'
+Line -> Comment '\n'
+Line -> BlankLine
+
+# Pattern definition
+PatternDef -> '%' %IDENTIFIER% '%' %WHITESPACE% '=' %WHITESPACE% '/' %REGEX_CONTENT% '/' %FLAGS%
+
+# Grammar rule
+GrammarRule -> %NONTERMINAL% %WHITESPACE% '->' %WHITESPACE% RHS
+
+# Right-hand side
+RHS -> RHSElement %REQUIRED_WS% RHS
+RHS -> RHSElement
+
+# RHS elements
+RHSElement -> Terminal
+RHSElement -> Nonterminal
+RHSElement -> PatternRef
+
+# Terminals, nonterminals, pattern references
+Terminal -> '\'' %TERMINAL_CONTENT% '\''
+Nonterminal -> %NONTERMINAL%
+PatternRef -> '%' %IDENTIFIER% '%'
+
+# Comments and blank lines
+Comment -> %COMMENT%
+BlankLine -> '\n'
