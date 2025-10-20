@@ -118,9 +118,20 @@ sub parse_rhs {
         $rhs = trim($rhs);
 
         # Single-quoted string (terminal)
-        if ( $rhs =~ /^'([^']*)'/ ) {
-            push @tokens, $1;
-            $rhs = substr( $rhs, length($&) );
+        # Match the same pattern as Terminal rule: (?:[^'\\]|\\.)*
+        if ( $rhs =~ /^'((?:[^'\\]|\\.)*)'/ ) {
+            my $content = $1;
+            my $matched_len = length($&);  # IMPORTANT: Save length before any substitutions!
+            # Unescape backslash sequences to match new parser behavior
+            # IMPORTANT: Process \\ first to avoid double-processing
+            $content =~ s/\\\\/\x00/g;  # Temporarily replace \\ with null byte
+            $content =~ s/\\n/\n/g;
+            $content =~ s/\\t/\t/g;
+            $content =~ s/\\r/\r/g;
+            $content =~ s/\\'/'/g;   # \' becomes '
+            $content =~ s/\x00/\\/g;  # Restore \\ as single \
+            push @tokens, $content;
+            $rhs = substr( $rhs, $matched_len );  # Use saved length, not $&
         }
 
         # Pattern reference %NAME%

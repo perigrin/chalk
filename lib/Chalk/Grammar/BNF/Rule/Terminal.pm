@@ -18,12 +18,13 @@ class Chalk::Grammar::BNF::Rule::Terminal :isa(Chalk::GrammarRule) {
         if (@children >= 3) {
             my $content = $children[1];
             # Unescape backslash sequences
-            # Handle standard escape sequences: \n, \t, \r, etc.
+            # IMPORTANT: Process \\ first to avoid double-processing
+            $content =~ s/\\\\/\x00/g;  # Temporarily replace \\ with null byte
             $content =~ s/\\n/\n/g;
             $content =~ s/\\t/\t/g;
             $content =~ s/\\r/\r/g;
             $content =~ s/\\'/'/g;   # \' becomes '
-            $content =~ s/\\\\/\\/g;  # \\ becomes \
+            $content =~ s/\x00/\\/g;  # Restore \\ as single \
             return $content;
         }
 
