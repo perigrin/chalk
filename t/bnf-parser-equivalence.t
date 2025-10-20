@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: Phase 5 - Comparison test between old and new BNF parsing approaches
-# ABOUTME: Validates that parse_bnf_string() and parse_with_semantic_actions() produce equivalent grammars
+# ABOUTME: BNF parser feature tests - validates semantic actions parser functionality
+# ABOUTME: Tests various BNF features: terminals, nonterminals, comments, escape sequences, etc.
 
 use 5.42.0;
 use warnings;
