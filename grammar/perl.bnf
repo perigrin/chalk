@@ -92,6 +92,12 @@
 %PATTERN_91% = /[@%\$]\*/u
 
 # Grammar rules
+
+# Grammar rules - Start symbol
+Program -> StatementList
+Program -> WS_OPT WS_OPT StatementList WS_OPT WS_OPT
+Program -> Shebang WS_OPT StatementList WS_OPT WS_OPT
+
 AdjustBlock -> %PATTERN_13% WS_OPT Block
 ArrayElem -> '[' WS_OPT Expression WS_OPT ']'
 ArrayRef -> '[' WS_OPT ExpressionList WS_OPT ']'
@@ -293,9 +299,6 @@ PrintExpr -> print WS_OPT Identifier WS_OPT ExprComma
 PrintExpr -> print WS_OPT Identifier
 PrintExpr -> print WS_OPT BuiltinFilehandle WS_OPT ExprComma
 PrintExpr -> print WS_OPT BuiltinFilehandle
-Program -> StatementList
-Program -> WS_OPT WS_OPT StatementList WS_OPT WS_OPT
-Program -> Shebang WS_OPT StatementList WS_OPT WS_OPT
 QDelimited -> %PATTERN_15%
 QDelimited -> %PATTERN_16%
 QDelimited -> %PATTERN_17%
