@@ -92,6 +92,7 @@ $grammar = _build_bnf_grammar(
         # Pattern definitions: %NAME% = /regex/flags or //regex//flags
         # Example: %PATTERN_1% = /unless|if|while/u
         # Example: %PATTERN_21% = //(?:[^/\\]|\\.)*+//u
+        # Example: %PATTERN_38% = /\|\||///u  (captures rest of line, semantic action parses)
         ['PatternDef', [
             '%',
             qr/[a-zA-Z_][a-zA-Z0-9_]*/,  # Pattern name
@@ -100,9 +101,7 @@ $grammar = _build_bnf_grammar(
             '=',
             qr/\s*/,                      # Optional whitespace
             '/',
-            qr/(?:[^\/\\]|\\.)*/,         # Regex content (non-greedy, handle escapes)
-            '/',
-            qr/[a-z]*/                    # Optional flags
+            qr/[^\n]+/,                   # Rest of line (semantic action will parse)
         ]],
 
         # Pattern definition with double-slash delimiter

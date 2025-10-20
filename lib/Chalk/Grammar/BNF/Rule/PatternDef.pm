@@ -7,12 +7,9 @@ use experimental 'class';
 
 class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        # PatternDef -> '%' NAME '%' WS '=' WS '/' REGEX '/' FLAGS
-        # or
-        # PatternDef -> '%' NAME '%' WS '=' WS '//' REGEX '//' FLAGS
-        #
-        # Children structure depends on which alternative matched
-        # Both have same indices: [1]=name, [7]=regex, [9]=flags
+        # Two alternatives:
+        # 1. PatternDef -> '%' NAME '%' WS '=' WS '/' REST_OF_LINE (8 children)
+        # 2. PatternDef -> '%' NAME '%' WS '=' WS '//' REGEX '//' FLAGS (10 children)
 
         my @children = @{$context->children};
 
@@ -20,14 +17,30 @@ class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
         my $name_child = $children[1];
         my $name = $name_child->focus;
 
-        # Extract regex content (child 7)
-        my $regex_child = $children[7];
-        my $regex_content = $regex_child->focus;
+        my ($regex_content, $flags);
 
-        # Extract flags (child 9, optional - may not have a child if empty match)
-        my $flags = '';
-        if (defined $children[9]) {
-            $flags = $children[9]->focus // '';
+        if (scalar(@children) == 8) {
+            # Single-slash with rest-of-line (alternative 1)
+            my $rest = $children[7]->focus;
+
+            # Parse rest using greedy match like old parser
+            if ($rest =~ /^(.+)\/([a-z]*)$/) {
+                $regex_content = $1;
+                $flags = $2 // '';
+            } else {
+                die "Invalid single-slash pattern definition: /$rest\n";
+            }
+        } elsif (scalar(@children) == 9 || scalar(@children) == 10) {
+            # Double-slash with explicit structure (alternative 2)
+            # 9 children if flags empty, 10 if flags present
+            $regex_content = $children[7]->focus;
+            $flags = (defined $children[9] ? $children[9]->focus : '') // '';
+        } else {
+            # Debug: show what we got
+            my $child_summary = join(", ", map {
+                defined($_) ? (defined($_->focus) ? "'" . $_->focus . "'" : "undef-focus") : "undef"
+            } @children);
+            die "Unexpected PatternDef structure with " . scalar(@children) . " children: [$child_summary]\n";
         }
 
         # Compile the regex with flags
