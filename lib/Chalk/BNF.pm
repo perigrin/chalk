@@ -1,5 +1,5 @@
 # ABOUTME: BNF grammar parser using semantic actions architecture
-# ABOUTME: Primary API: parse_with_semantic_actions() - parses BNF and returns Chalk::Grammar
+# ABOUTME: Primary API: parse_bnf() - parses BNF content and returns Chalk::Grammar
 package Chalk::BNF;
 use 5.42.0;
 use utf8;
@@ -8,31 +8,7 @@ use Chalk::Grammar::BNF;
 use Chalk::Parser;
 use Chalk::Semiring::Semantic;
 
-# DEPRECATED: Use parse_with_semantic_actions instead
-# Kept for backwards compatibility only
-sub parse_bnf_file($filename) {
-    open my $fh, '<:utf8', $filename or die "Cannot open $filename: $!";
-    my $content = do { local $/; <$fh> };
-    close $fh;
-
-    # Use new parser
-    my $grammar = parse_with_semantic_actions($content);
-
-    # Return rules in old format for backwards compatibility
-    if ($grammar) {
-        my @rules;
-        for my $lhs (sort keys %{$grammar->rules}) {
-            for my $rule (@{$grammar->rules->{$lhs}}) {
-                push @rules, [$lhs, $rule->rhs];
-            }
-        }
-        return \@rules;
-    }
-
-    return [];
-}
-
-sub parse_with_semantic_actions($bnf_content) {
+sub parse_bnf($bnf_content) {
     # Parse BNF using hand-coded BNF grammar with semantic actions
     # Returns Chalk::Grammar object directly from parsing
     #
@@ -64,7 +40,7 @@ sub parse_with_semantic_actions($bnf_content) {
 
 sub build_chalk_grammar($bnf_content, $start_symbol = undef) {
     # Use new semantic actions parser
-    my $grammar = parse_with_semantic_actions($bnf_content);
+    my $grammar = parse_bnf($bnf_content);
 
     return undef unless $grammar;
 
@@ -95,8 +71,5 @@ sub build_chalk_grammar($bnf_content, $start_symbol = undef) {
 
     return $grammar;
 }
-
-# DEPRECATED: Old parser functions removed in favor of parse_with_semantic_actions
-# These functions are no longer maintained and may be removed in future versions
 
 1;

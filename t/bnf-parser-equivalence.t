@@ -56,7 +56,7 @@ sub grammars_equivalent {
     my $bnf = "Foo -> 'bar'\n";
 
     my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf);
-    my $new_grammar = Chalk::BNF::parse_with_semantic_actions($bnf);
+    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Simple rule");
 }
@@ -70,7 +70,7 @@ Term -> 'number'
 EOF
 
     my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf, 'Expr');
-    my $new_grammar = Chalk::BNF::parse_with_semantic_actions($bnf);
+    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Multiple rules");
 }
@@ -83,7 +83,7 @@ OptionalComma -> ','
 EOF
 
     my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf, 'OptionalComma');
-    my $new_grammar = Chalk::BNF::parse_with_semantic_actions($bnf);
+    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Empty production");
 }
@@ -96,7 +96,7 @@ Bar -> 'x'
 EOF
 
     my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf, 'Rule');
-    my $new_grammar = Chalk::BNF::parse_with_semantic_actions($bnf);
+    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Mixed terminals/nonterminals");
 }
@@ -111,7 +111,7 @@ Baz -> 'qux'
 EOF
 
     my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf);
-    my $new_grammar = Chalk::BNF::parse_with_semantic_actions($bnf);
+    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Full-line comments");
 }
@@ -124,7 +124,7 @@ Baz -> 'qux'
 EOF
 
     my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf);
-    my $new_grammar = Chalk::BNF::parse_with_semantic_actions($bnf);
+    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Inline comments");
 }
@@ -136,7 +136,7 @@ EOF
     close $fh;
 
     my $old_grammar = Chalk::BNF::build_chalk_grammar($content, 'Grammar');
-    my $new_grammar = Chalk::BNF::parse_with_semantic_actions($content);
+    my $new_grammar = Chalk::BNF::parse_bnf($content);
 
     ok($old_grammar, "Old parser handles bnf.bnf");
     ok($new_grammar, "New parser handles bnf.bnf");
