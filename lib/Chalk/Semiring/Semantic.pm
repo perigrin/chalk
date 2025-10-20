@@ -16,20 +16,43 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     method add( $other, $swap = undef ) {
         # For alternatives (choice), prefer non-zero value
         # If self has value 0 (is add_id), return other
-        # Otherwise prefer self (first alternative)
-        # Use numeric comparison only for numeric values
         if (defined($value) && $value =~ /^[0-9]+$/ && $value == 0) {
             return $other;
         }
+
+        # Prefer elements with evaluated focus (defined) over unevaluated (undef)
+        # This handles the case where we update the chart after evaluation
+        my $self_focus = $self->context->focus;
+        my $other_focus = $other->context->focus;
+
+        if (!defined($self_focus) && defined($other_focus)) {
+            return $other;
+        }
+        if (defined($self_focus) && !defined($other_focus)) {
+            return $self;
+        }
+
+        # For semantic values, prefer the alternative with more children
+        # (this handles ambiguous parses - we want the one that consumed more input)
+        my $self_children = scalar(@{$self->context->children});
+        my $other_children = scalar(@{$other->context->children});
+
+        if ($other_children > $self_children) {
+            return $other;
+        }
+
+        # Otherwise prefer self (first alternative)
         return $self;
     }
 
     method multiply( $other, $swap = undef ) {
-        # For sequences, combine contexts
-        # Create a new context that has both operands as children
+        # For sequences, append other's context to self's children
+        # This builds up the children list as we advance the dot through the rule
+        my @new_children = (@{$self->context->children}, $other->context);
+
         my $combined_ctx = Chalk::EvalContext->new(
             focus => undef,  # Not yet evaluated
-            children => [$self->context, $other->context],
+            children => \@new_children,
             start_pos => $self->context->start_pos,
             end_pos => $other->context->end_pos,
             env => $self->context->env,

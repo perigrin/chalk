@@ -150,9 +150,9 @@ use Chalk::Grammar;
     isa_ok($result, 'Chalk::Semiring::SemanticElement', 'multiply returns SemanticElement');
     isa_ok($result->context, 'Chalk::EvalContext', 'multiply combines contexts');
 
-    # The multiply operation should combine the contexts
-    # For now, we just check that it creates a valid context
-    is(scalar(@{$result->context->children}), 2, 'combined context has both children');
+    # The multiply operation appends other's context to self's children
+    # Since elem1 has 0 children, result should have 1 child (ctx2)
+    is(scalar(@{$result->context->children}), 1, 'combined context has other context as child');
 }
 
 # Test identity elements

@@ -159,7 +159,9 @@ class Chalk::EarleyChart {
                 # IF a parse exists, not enumerate ALL parses. This prevents
                 # memory exhaustion when parsing highly ambiguous inputs like
                 # the grammar file itself (which has exponentially many parses).
-                if ($result != $semiring->add_id) {
+                # For other semirings (like Semantic), we need to accumulate ALL
+                # parses to get the correct result.
+                if ($semiring isa Chalk::Semiring::Boolean && $result != $semiring->add_id) {
                     return $result;
                 }
             }
@@ -174,8 +176,10 @@ class Chalk::Parser {
     field $semiring :param = Chalk::Semiring::Boolean->new();
     field $grammar :param;
     field $preprocess :param = [];  # Arrayref of preprocessor class names
+    field $input_string;  # Store input string for semantic actions
 
-    method parse_string($input_string) {
+    method parse_string($input) {
+        $input_string = $input;  # Store for semantic actions
         # Apply preprocessors in sequence
         for my $preprocessor_class (@$preprocess) {
             next unless defined $preprocessor_class;
@@ -185,9 +189,9 @@ class Chalk::Parser {
             require "$file.pm";
 
             # Apply preprocessing
-            my $preprocessor = $preprocessor_class->new(input => $input_string);
+            my $preprocessor = $preprocessor_class->new(input => $input);
             $preprocessor->transform();
-            $input_string = $preprocessor->output;
+            $input = $preprocessor->output;
         }
 
         my $chart = Chalk::EarleyChart->new( semiring => $semiring );
@@ -208,12 +212,15 @@ class Chalk::Parser {
 
         # Process positions from 0 to end of string
         my $pos             = 0;
-        my $input_length    = length($input_string);
+        my $input_length    = length($input);
         my $last_active_pos = 0;
+
+        # Store input_string for semantic actions
+        $input_string = $input;
 
         while ( $pos <= $input_length ) {
             my @agenda_before = $chart->items_ending_at($pos);
-            $self->process_position_string( $pos, $chart, $input_string );
+            $self->process_position_string( $pos, $chart, $input );
 
             # Track the last position where we had active items
             if ( @agenda_before > 0 ) {
@@ -288,6 +295,42 @@ class Chalk::Parser {
         $chart->mark_completed($completed_item);
 
         my $lhs = $completed_item->rule->lhs;
+
+        # For Semantic semiring, evaluate the completed rule
+        # NOTE: We evaluate and set the focus, but keep the children so they can
+        # be accessed by parent rules during their evaluation
+        if ($semiring isa Chalk::Semiring::Semantic) {
+            # IMPORTANT: Get the LATEST element from the chart, not the one passed in!
+            # The element passed in might be stale if multiply operations happened
+            my $latest_element = $chart->get_element($completed_item);
+            if ($latest_element) {
+                $completed_element = $latest_element;
+            }
+
+            my $ctx = $completed_element->context;
+            my $evaluated_value = $completed_item->rule->evaluate($ctx);
+
+            # Create new context with evaluated focus but preserve children
+            my $new_ctx = Chalk::EvalContext->new(
+                focus => $evaluated_value,
+                children => $ctx->children,
+                start_pos => $ctx->start_pos,
+                end_pos => $ctx->end_pos,
+                env => $ctx->env,
+                grammar => $ctx->grammar,
+                rule => $ctx->rule
+            );
+
+            # Update the completed element with evaluated context
+            $completed_element = Chalk::Semiring::SemanticElement->new(
+                value => 1,
+                context => $new_ctx
+            );
+
+            # Update the chart with evaluated element so parent rules can access the evaluated focus
+            # The element has both the evaluated focus AND the accumulated children
+            $chart->add_element($completed_item, $completed_element);
+        }
 
         # Use indexed lookups to get items waiting for this symbol
         # This avoids the expensive grep operations with isa checks
@@ -433,13 +476,36 @@ class Chalk::Parser {
             end_pos   => $pos + $match_length
         );
 
-        # All semirings receive position updates during scan
-        # Semirings can choose to use or ignore positions based on their needs
-        my $scanned_element = $semiring->init_element_from_rule(
-            $item->rule,
-            $scanned_item->start_pos,
-            $scanned_item->end_pos
-        );
+        # For Semantic semiring, extract the matched terminal string value
+        my $scanned_element;
+        if ($semiring isa Chalk::Semiring::Semantic) {
+            # Extract the matched terminal value from input string
+            my $matched_value = substr($input_string, $pos, $match_length);
+
+            # Create a context with the terminal value as focus
+            my $ctx = Chalk::EvalContext->new(
+                focus => $matched_value,
+                children => [],
+                start_pos => $pos,
+                end_pos => $pos + $match_length,
+                env => $semiring->grammar->start_symbol,  # Use grammar
+                grammar => $grammar,
+                rule => $item->rule
+            );
+
+            $scanned_element = Chalk::Semiring::SemanticElement->new(
+                value => 1,
+                context => $ctx
+            );
+        } else {
+            # All other semirings receive position updates during scan
+            # Semirings can choose to use or ignore positions based on their needs
+            $scanned_element = $semiring->init_element_from_rule(
+                $item->rule,
+                $scanned_item->start_pos,
+                $scanned_item->end_pos
+            );
+        }
 
         $chart->add_element( $scanned_item, $scanned_element );
     }
