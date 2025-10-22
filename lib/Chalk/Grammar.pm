@@ -118,7 +118,7 @@ class Chalk::Grammar {
     }
 
    # Build a Grammar from BNF content with optional start symbol override
-   # Primarily used in tests - production code always uses the first nonterminal
+   # Production code (app.pl) provides start_symbol; defaults to first nonterminal if not specified
     sub build_from_bnf( $class, $bnf_content, $start_symbol = undef ) {
 
         # Parse BNF using hand-coded BNF grammar with semantic actions
