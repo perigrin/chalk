@@ -66,13 +66,13 @@ class Chalk::EvalContext {
 
     # Convenience method: get extracted value of child at index
     method child($index) {
-        return undef unless $index < scalar($children->@*);
+        return unless $index < scalar($children->@*);
         return $children->[$index]->extract;
     }
 
     # Convenience method: get child context at index
     method child_context($index) {
-        return undef unless $index < scalar($children->@*);
+        return unless $index < scalar($children->@*);
         return $children->[$index];
     }
 }
