@@ -11,6 +11,7 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use Chalk::Base;
 use Chalk::Semiring::Position;
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
@@ -59,7 +60,7 @@ subtest 'Position semiring identity elements' => sub {
 };
 
 subtest 'Position semiring with simple grammar - complete parse' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(a b)] ],
     );
@@ -78,7 +79,7 @@ subtest 'Position semiring with simple grammar - complete parse' => sub {
 };
 
 subtest 'Position semiring detects incomplete parse' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(a b c)] ],
     );

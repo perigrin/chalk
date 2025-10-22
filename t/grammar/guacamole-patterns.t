@@ -8,13 +8,14 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::SPPF;
 
 subtest 'Statement sequence patterns' => sub {
     # Based on Guacamole: StatementSeq ::= Statement | Statement Semicolon | Statement Semicolon StatementSeq
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'StatementSeq' => ['Statement'] ],
             [ 'StatementSeq' => [qw(Statement Semicolon)] ],
@@ -45,7 +46,7 @@ subtest 'Statement sequence patterns' => sub {
 
 subtest 'Complex for statement patterns' => sub {
     # Simplified version of Guacamole ForStatement with multiple alternatives
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon Statement RParen Block)] ],
             [ 'ForStatement' => [qw(for LParen Statement Semicolon Statement Semicolon RParen Block)] ],
@@ -82,7 +83,7 @@ subtest 'Complex for statement patterns' => sub {
 
 subtest 'Deeply nested optional elements' => sub {
     # Pattern with many optional elements like Guacamole UseStatement
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'UseStatement' => [qw(use Class Version Expression)] ],
             [ 'UseStatement' => [qw(use Class Version)] ],
@@ -116,7 +117,7 @@ subtest 'Deeply nested optional elements' => sub {
 
 subtest 'Highly ambiguous expression hierarchy' => sub {
     # Simplified version of Guacamole's expression precedence
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Expression' => [qw(Expression + Expression)] ],
             [ 'Expression' => [qw(Expression * Expression)] ],
@@ -166,7 +167,7 @@ subtest 'Highly ambiguous expression hierarchy' => sub {
 
 subtest 'Recursive block structures' => sub {
     # Pattern like Guacamole BlockStatement with nested blocks
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Block' => [qw({ StatementList })] ],
             [ 'Block' => [qw({ })] ],  # Empty block

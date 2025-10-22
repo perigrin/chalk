@@ -10,12 +10,13 @@ use FindBin qw($RealBin);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'Basic lexeme support' => sub {
     # Test with exact string literals (should work like before)
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Rule' => ['hello', 'world'] ]
         ]
@@ -28,7 +29,7 @@ subtest 'Basic lexeme support' => sub {
 
 subtest 'Regex pattern support' => sub {
     # Test with regex patterns for identifiers
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Rule' => [qr/[a-zA-Z]+/, qr/\d+/] ]
         ]
@@ -44,7 +45,7 @@ subtest 'Regex pattern support' => sub {
 
 subtest 'Mixed literals and patterns' => sub {
     # Test mixing exact strings and patterns
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Rule' => ['class', qr/[a-zA-Z_][a-zA-Z0-9_]*/, '{', '}'] ]
         ]

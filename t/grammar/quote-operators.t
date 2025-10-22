@@ -8,11 +8,12 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'Single q{} operator parsing' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
             [ 'Variable' => ['$text'] ],
@@ -26,7 +27,7 @@ subtest 'Single q{} operator parsing' => sub {
 };
 
 subtest 'Single qq{} operator parsing' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
             [ 'Variable' => ['$text'] ],
@@ -40,7 +41,7 @@ subtest 'Single qq{} operator parsing' => sub {
 };
 
 subtest 'Mixed quote operators' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
             [ 'Variable' => ['$text'] ],
@@ -59,7 +60,7 @@ subtest 'Mixed quote operators' => sub {
 };
 
 subtest 'Empty quote operators' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
             [ 'Variable' => ['$text'] ],
@@ -78,7 +79,7 @@ subtest 'Empty quote operators' => sub {
 };
 
 subtest 'Quote operators with newlines' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Statement' => ['my', 'Variable', '=', 'QuotedString', ';'] ],
             [ 'Variable' => ['$text'] ],

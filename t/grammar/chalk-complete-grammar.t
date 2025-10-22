@@ -10,11 +10,12 @@ use FindBin      qw($RealBin);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 # Build a comprehensive grammar for chalk's modern Perl syntax
-my $chalk_grammar = Chalk::Grammar->build_grammar(
+my $chalk_grammar = Test::Chalk::Grammar->build_grammar(
     rules => [
         # Top-level program structure
         [ 'Program' => ['TopLevelDecls'] ],

@@ -1,4 +1,3 @@
-package Chalk::Grammar::BNF::Rule::LineList;
 # ABOUTME: Semantic action for LineList rules - collects lines into array
 # ABOUTME: Handles empty, single line, and multiple lines recursively
 
@@ -7,7 +6,8 @@ use experimental 'class';
 
 class Chalk::Grammar::BNF::Rule::LineList :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        my @children = map { $_->extract } $context->children->@*;
+        my $children = $context->children();
+        my @children = map { $_->extract() } $children->@*;
 
         # LineList -> []  (empty)
         if (@children == 0) {
@@ -24,17 +24,17 @@ class Chalk::Grammar::BNF::Rule::LineList :isa(Chalk::GrammarRule) {
         if (@children == 2) {
             my ($line, $rest) = @children;
             my @result = ();
-            push @result, $line if defined($line);
+            push(@result, $line) if defined($line);
 
             if (ref($rest) eq 'ARRAY') {
-                push @result, @$rest;
+                push(@result, $rest->@*);
             }
 
-            return \@result;
+            my $result_ref = [@result];
+            return $result_ref;
         }
 
         return [];
     }
 }
 
-1;

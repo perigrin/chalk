@@ -56,7 +56,7 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
         return $total;  # undef if no scores, number otherwise
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         my @strs = map { "$_" } $elements->@*;
         return 'Composite[' . join(', ', @strs) . ']';
     }

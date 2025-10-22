@@ -13,7 +13,7 @@ use Chalk::Semiring::Semantic;
 
 # Test 1: Parse simple grammar rule and get Chalk::Grammar object
 {
-    my $bnf_grammar = Chalk::Grammar::BNF->grammar();
+    my $bnf_grammar = Chalk::Grammar::BNF->new()->grammar();
     my $semiring = Chalk::Semiring::Semantic->new(grammar => $bnf_grammar);
     my $parser = Chalk::Parser->new(
         grammar => $bnf_grammar,
@@ -30,7 +30,7 @@ use Chalk::Semiring::Semantic;
 
 # Test 2: Parse grammar rule with nonterminal and verify rules
 {
-    my $bnf_grammar = Chalk::Grammar::BNF->grammar();
+    my $bnf_grammar = Chalk::Grammar::BNF->new()->grammar();
     my $semiring = Chalk::Semiring::Semantic->new(grammar => $bnf_grammar);
     my $parser = Chalk::Parser->new(
         grammar => $bnf_grammar,
@@ -52,7 +52,7 @@ use Chalk::Semiring::Semantic;
 
 # Test 3: Parse multiple grammar rules
 {
-    my $bnf_grammar = Chalk::Grammar::BNF->grammar();
+    my $bnf_grammar = Chalk::Grammar::BNF->new()->grammar();
     my $semiring = Chalk::Semiring::Semantic->new(grammar => $bnf_grammar);
     my $parser = Chalk::Parser->new(
         grammar => $bnf_grammar,
@@ -79,7 +79,7 @@ EOF
 
 # Test 4: Parse empty production
 {
-    my $bnf_grammar = Chalk::Grammar::BNF->grammar();
+    my $bnf_grammar = Chalk::Grammar::BNF->new()->grammar();
     my $semiring = Chalk::Semiring::Semantic->new(grammar => $bnf_grammar);
     my $parser = Chalk::Parser->new(
         grammar => $bnf_grammar,
@@ -99,7 +99,7 @@ EOF
 
 # Test 5: Boolean semiring still works (backward compatibility)
 {
-    my $bnf_grammar = Chalk::Grammar::BNF->grammar();
+    my $bnf_grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $bnf_grammar);
 
     my $result = $parser->parse_string("Foo -> 'bar'\n");

@@ -1,6 +1,5 @@
-package Chalk::Grammar::BNF::Rule::GrammarRule;
-# ABOUTME: Semantic action for GrammarRule - builds [LHS, RHS] array for Grammar
-# ABOUTME: Extracts nonterminal name and RHS elements
+# ABOUTME: Semantic action for GrammarRule - creates Chalk::GrammarRule objects
+# ABOUTME: Extracts nonterminal name and RHS elements and wraps in GrammarRule object
 
 use 5.42.0;
 use experimental 'class';
@@ -17,7 +16,8 @@ class Chalk::Grammar::BNF::Rule::GrammarRule :isa(Chalk::GrammarRule) {
         #           [4] = RHS (array of symbols)
         #           [5] = optional inline comment (ignore if present)
 
-        my @children = map { $_->extract } $context->children->@*;
+        my $children = $context->children();
+        my @children = map { $_->extract() } $children->@*;
 
         # Extract LHS (nonterminal name)
         my $lhs = $children[0];
@@ -27,9 +27,12 @@ class Chalk::Grammar::BNF::Rule::GrammarRule :isa(Chalk::GrammarRule) {
         my $rhs = $children[4] // [];
         $rhs = [] unless ref($rhs) eq 'ARRAY';
 
-        # Return rule in format expected by build_grammar: [LHS, RHS]
-        return [$lhs, $rhs];
+        # Return a Chalk::GrammarRule object directly
+        return Chalk::GrammarRule->new(
+            lhs         => $lhs,
+            rhs         => $rhs,
+            probability => 1.0
+        );
     }
 }
 
-1;

@@ -11,11 +11,12 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use Chalk::Base;
 use Chalk::Semiring::SPPF;
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'SPPF terminal node position tracking' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => ['a'] ],
     );
@@ -36,7 +37,7 @@ subtest 'SPPF terminal node position tracking' => sub {
 };
 
 subtest 'SPPF sequence node position tracking' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(a b)] ],
     );
@@ -57,7 +58,7 @@ subtest 'SPPF sequence node position tracking' => sub {
 };
 
 subtest 'SPPF nested sequence position tracking' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(A B C)] ],
         [ 'A' => ['a'] ],
@@ -81,7 +82,7 @@ subtest 'SPPF nested sequence position tracking' => sub {
 };
 
 subtest 'SPPF complete parse validation' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(a b)] ],
     );
@@ -104,7 +105,7 @@ subtest 'SPPF complete parse validation' => sub {
 };
 
 subtest 'SPPF alternative node position consistency' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'E' => [qw(E + E)] ],
         [ 'E' => [qw(E * E)] ],
@@ -130,7 +131,7 @@ subtest 'SPPF alternative node position consistency' => sub {
 };
 
 subtest 'SPPF position tracking with longer input' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(a b c d)] ],
     );
@@ -151,7 +152,7 @@ subtest 'SPPF position tracking with longer input' => sub {
 };
 
 subtest 'SPPF empty input handling' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => ['ε'] ],  # Epsilon/empty production
     );
@@ -176,7 +177,7 @@ subtest 'SPPF empty input handling' => sub {
 };
 
 subtest 'SPPF forest node retrieval with positions' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(A B)] ],
         [ 'A' => ['a'] ],

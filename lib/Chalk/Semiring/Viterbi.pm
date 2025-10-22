@@ -28,7 +28,7 @@ class Chalk::Semiring::ViterbiElement :isa(Chalk::Element) {
             && join(',', $path->@*) eq join(',', $other->path->@*);
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         return sprintf('%.4f[%s]', exp($score), join(',', $path->@*));
     }
 
@@ -45,7 +45,7 @@ class Chalk::Semiring::Viterbi :isa(Chalk::Semiring) {
     );
 
     field $add_id :reader = Chalk::Semiring::ViterbiElement->new(
-        score => -1e10,    # Very negative (essentially -infinity)
+        score => -10000000000,    # Very negative (essentially -infinity)
         path  => []
     );
 

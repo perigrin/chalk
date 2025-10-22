@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# ABOUTME: Integration test for BNF semantic actions with parse_bnf()
+# ABOUTME: Integration test for BNF semantic actions with build_chalk_grammar()
 # ABOUTME: Validates semantic actions can parse real BNF files
 
 use 5.42.0;
@@ -7,15 +7,15 @@ use warnings;
 use Test::More;
 
 use lib 'lib';
-use Chalk::BNF;
+use Chalk::Grammar::BNF;
 use Chalk::Grammar;
 
-# Test 1: parse_bnf() works with simple BNF
+# Test 1: build_chalk_grammar() works with simple BNF
 {
     my $bnf = "Foo -> 'bar'\n";
-    my $grammar = Chalk::BNF::parse_bnf($bnf);
+    my $grammar = Chalk::Grammar->build_from_bnf($bnf);
 
-    ok($grammar, 'parse_bnf returns result');
+    ok($grammar, 'build_chalk_grammar returns result');
     isa_ok($grammar, 'Chalk::Grammar', 'Result is Grammar object');
 
     my @rules = $grammar->rules_for('Foo');
@@ -31,7 +31,7 @@ Expr -> Expr '+' Term
 Term -> 'number'
 EOF
 
-    my $grammar = Chalk::BNF::parse_bnf($bnf);
+    my $grammar = Chalk::Grammar->build_from_bnf($bnf);
     ok($grammar, 'Parses multiple rules');
 
     my @expr_rules = $grammar->rules_for('Expr');
@@ -44,7 +44,7 @@ EOF
 # Test 3: Works with empty productions
 {
     my $bnf = "OptionalComma ->\nOptionalComma -> ','\n";
-    my $grammar = Chalk::BNF::parse_bnf($bnf);
+    my $grammar = Chalk::Grammar->build_from_bnf($bnf);
 
     ok($grammar, 'Parses empty production');
     my @rules = $grammar->rules_for('OptionalComma');
@@ -61,7 +61,7 @@ EOF
     my $content = do { local $/; <$fh> };
     close $fh;
 
-    my $grammar = Chalk::BNF::parse_bnf($content);
+    my $grammar = Chalk::Grammar->build_from_bnf($content);
     ok($grammar, 'Parses grammar/bnf.bnf');
     isa_ok($grammar, 'Chalk::Grammar', 'bnf.bnf produces Grammar');
 
@@ -74,7 +74,7 @@ EOF
 # Test 5: build_chalk_grammar() still works
 {
     my $bnf = "Start -> 'hello'\nStart -> 'world'\n";
-    my $grammar = Chalk::BNF::build_chalk_grammar($bnf, 'Start');
+    my $grammar = Chalk::Grammar->build_from_bnf($bnf, 'Start');
 
     ok($grammar, 'build_chalk_grammar works');
     isa_ok($grammar, 'Chalk::Grammar');

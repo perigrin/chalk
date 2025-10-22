@@ -8,11 +8,12 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'Variable types' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'VarDecl' => [qw(field Variable ;)] ],
             [ 'Variable' => ['$scalar'] ],
@@ -34,7 +35,7 @@ subtest 'Variable types' => sub {
 };
 
 subtest 'Postfix dereference syntax' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Expression' => [qw(Variable -> PostfixDeref)] ],
             [ 'Expression' => ['Variable'] ],
@@ -57,7 +58,7 @@ subtest 'Postfix dereference syntax' => sub {
 };
 
 subtest 'String concatenation' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Expression' => [qw(Expression . Expression)] ],
             [ 'Expression' => ['String'] ],
@@ -81,7 +82,7 @@ subtest 'String concatenation' => sub {
 };
 
 subtest 'Method calls and constructors' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Expression' => [qw(Class -> new ( ArgList ))] ],
             [ 'Expression' => [qw(Class -> new ( ))] ],
@@ -114,7 +115,7 @@ subtest 'Method calls and constructors' => sub {
 };
 
 subtest 'Hash subscript and assignment' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Expression' => [qw(Variable { Key } //= Value)] ],
             [ 'Expression' => [qw(Variable { Key })] ],

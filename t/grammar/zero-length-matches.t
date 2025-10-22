@@ -8,11 +8,12 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'Zero-length whitespace patterns' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Test' => ['WS_OPT', 'word', 'WS_OPT'] ],
             [ 'WS_OPT' => [qr/\s*/] ],  # Zero-length whitespace pattern
@@ -45,7 +46,7 @@ subtest 'Zero-length whitespace patterns' => sub {
 };
 
 subtest 'Optional patterns' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Test' => ['prefix', 'OPT_SUFFIX'] ],
             [ 'OPT_SUFFIX' => [qr/suffix?/] ],  # Optional 's' at end
@@ -64,7 +65,7 @@ subtest 'Optional patterns' => sub {
 };
 
 subtest 'Mixed zero-length and regular patterns' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Statement' => ['WS_OPT', 'word', 'WS', 'word', 'WS_OPT', 'SEMI_OPT'] ],
             [ 'WS' => [qr/\s+/] ],           # Required whitespace

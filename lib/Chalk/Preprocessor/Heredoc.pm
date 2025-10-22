@@ -1,6 +1,5 @@
 # ABOUTME: Grammar-based heredoc preprocessor for Chalk::Parser
 # ABOUTME: Uses mini-grammar to correctly parse heredoc markers in code context
-package Chalk::Preprocessor::Heredoc;
 use 5.42.0;
 use utf8;
 use open qw(:std :utf8);
@@ -14,12 +13,13 @@ class Chalk::Preprocessor::Heredoc {
     field @line_map :reader;
 
     method transform() {
-        my @lines = split /\n/, $input, -1;
+        my $newline_pattern = qr/\n/;
+        my @lines = split $newline_pattern, $input, -1;
         my @output_lines;
         my %line_mapping;
         my $output_line_num = 0;
 
-        for (my $i = 0; $i < @lines; $i++) {
+        for my $i (0..$#lines) {
             my $input_line_num = $i + 1;
             my $line = $lines[$i];
 
@@ -39,7 +39,8 @@ class Chalk::Preprocessor::Heredoc {
                     while ($j < @lines) {
                         my $line_matches = 0;
                         if ($hd->{is_indented}) {
-                            $line_matches = ($lines[$j] =~ /^\s*\Q$hd->{delimiter}\E$/);
+                            my $delim_pattern = qr/^\s*\Q$hd->{delimiter}\E$/;
+                            $line_matches = ($lines[$j] =~ $delim_pattern);
                         } else {
                             $line_matches = ($lines[$j] eq $hd->{delimiter});
                         }
@@ -84,7 +85,12 @@ class Chalk::Preprocessor::Heredoc {
                     # Replace markers with transformations
                     my $transformed = $line;
                     for my $part (@transformed_parts) {
-                        $transformed =~ s/\Q$part->{marker}\E/$part->{replacement}/;
+                        my $marker = $part->{marker};
+                        my $replacement = $part->{replacement};
+                        my $pos = index($transformed, $marker);
+                        if ($pos >= 0) {
+                            substr($transformed, $pos, length($marker), $replacement);
+                        }
                     }
 
                     push @output_lines, $transformed;
@@ -120,22 +126,31 @@ class Chalk::Preprocessor::Heredoc {
         my @excluded_ranges;
 
         # Find single-quoted string ranges (but not heredoc markers like <<'EOF')
-        while ($working_line =~ /(?<!<)'(?:[^'\\]|\\.)*'/g) {
-            my $end = pos($working_line);
-            my $start = $end - length($&);
-            push @excluded_ranges, [$start, $end];
+        my $single_quote_pattern = qr/((?<!<)'(?:[^'\\]|\\.)*')/;
+        my $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $single_quote_pattern) {
+            my $match = $1;
+            my $match_start = $search_pos + $-[0];
+            my $match_end = $match_start + length($match);
+            $search_pos = $match_end;
+            push @excluded_ranges, [$match_start, $match_end];
         }
 
         # Find double-quoted string ranges
-        while ($working_line =~ /"(?:[^"\\]|\\.)*"/g) {
-            my $end = pos($working_line);
-            my $start = $end - length($&);
-            push @excluded_ranges, [$start, $end];
+        my $double_quote_pattern = qr/("(?:[^"\\]|\\.)*")/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $double_quote_pattern) {
+            my $match = $1;
+            my $match_start = $search_pos + $-[0];
+            my $match_end = $match_start + length($match);
+            $search_pos = $match_end;
+            push @excluded_ranges, [$match_start, $match_end];
         }
 
         # Find comment range (everything after # to end of line)
         # But only if the # is not inside a string
-        if ($working_line =~ /(#)/) {
+        my $comment_pattern = qr/(#)/;
+        if ($working_line =~ $comment_pattern) {
             my $comment_pos = $-[0];  # Start position of the match
             # Check if this # is inside an already-excluded string
             my $in_string = 0;
@@ -162,45 +177,85 @@ class Chalk::Preprocessor::Heredoc {
         my @markers;
 
         # Order matters - check quoted forms before bare forms
-        while ($working_line =~ /(<<~'([^']+)')/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 1, is_indented => 1 };
+        my $hd_sq_indent_pat = qr/(<<~'([^']+)')/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_sq_indent_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 1, is_indented => 1 };
         }
-        while ($working_line =~ /(<<~"([^"]+)")/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 0, is_indented => 1 };
+        my $hd_dq_indent_pat = qr/(<<~"([^"]+)")/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_dq_indent_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 0, is_indented => 1 };
         }
-        while ($working_line =~ /(<<~\\(\w+))/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 1, is_indented => 1 };
+        my $hd_esc_indent_pat = qr/(<<~\\(\w+))/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_esc_indent_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 1, is_indented => 1 };
         }
-        while ($working_line =~ /(<<~(\w+))/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 0, is_indented => 1 };
+        my $hd_bare_indent_pat = qr/(<<~(\w+))/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_bare_indent_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 0, is_indented => 1 };
         }
-        while ($working_line =~ /(<<'([^']+)')/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 1, is_indented => 0 };
+        my $hd_sq_pat = qr/(<<'([^']+)')/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_sq_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 1, is_indented => 0 };
         }
-        while ($working_line =~ /(<<"([^"]+)")/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 0, is_indented => 0 };
+        my $hd_dq_pat = qr/(<<"([^"]+)")/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_dq_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 0, is_indented => 0 };
         }
-        while ($working_line =~ /(<<\\(\w+))/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 1, is_indented => 0 };
+        my $hd_esc_pat = qr/(<<\\(\w+))/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_esc_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 1, is_indented => 0 };
         }
-        while ($working_line =~ /(<<(\w+))/g) {
-            my $pos = pos($working_line) - length($1);
-            next if $is_excluded->($pos);
-            push @markers, { marker => $1, delimiter => $2, is_single_quoted => 0, is_indented => 0 };
+        my $hd_bare_pat = qr/(<<(\w+))/;
+        $search_pos = 0;
+        while (substr($working_line, $search_pos) =~ $hd_bare_pat) {
+            my $match_pos = $search_pos + $-[0];
+            my $matched_marker = $1;
+            my $matched_delim = $2;
+            $search_pos = $match_pos + length($matched_marker);
+            next if $is_excluded->($match_pos);
+            push @markers, { marker => $matched_marker, delimiter => $matched_delim, is_single_quoted => 0, is_indented => 0 };
         }
 
         return @markers;
@@ -210,10 +265,12 @@ class Chalk::Preprocessor::Heredoc {
         return () unless @lines;
 
         my $min_indent = undef;
+        my $empty_line_pat = qr/^\s*$/;
+        my $leading_space_pat = qr/^(\s+)/;
         for my $line (@lines) {
-            next if $line =~ /^\s*$/;
+            next if $line =~ $empty_line_pat;
 
-            if ($line =~ /^(\s+)/) {
+            if ($line =~ $leading_space_pat) {
                 my $indent = length($1);
                 $min_indent = $indent if !defined($min_indent) || $indent < $min_indent;
             } else {
@@ -226,11 +283,13 @@ class Chalk::Preprocessor::Heredoc {
 
         my @stripped;
         for my $line (@lines) {
-            if ($line =~ /^\s*$/) {
+            if ($line =~ $empty_line_pat) {
                 push @stripped, $line;
             } else {
                 my $stripped_line = $line;
-                $stripped_line =~ s/^\s{$min_indent}//;
+                if (length($stripped_line) >= $min_indent) {
+                    $stripped_line = substr($stripped_line, $min_indent);
+                }
                 push @stripped, $stripped_line;
             }
         }
@@ -255,7 +314,7 @@ class Chalk::Preprocessor::Heredoc {
         );
 
         for my $pair (@delimiter_pairs) {
-            my ($open, $close) = @$pair;
+            my ($open, $close) = $pair->@*;
             # Check if the closing delimiter appears unbalanced in content
             # For now, simple check: if close delimiter not in content, use it
             if (index($content, $close) == -1) {
@@ -272,4 +331,3 @@ class Chalk::Preprocessor::Heredoc {
     }
 }
 
-1;

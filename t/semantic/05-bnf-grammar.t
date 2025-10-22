@@ -12,14 +12,14 @@ use Chalk::Parser;
 
 # Test that module loads and provides grammar
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     ok($grammar, 'Chalk::Grammar::BNF provides a grammar');
     isa_ok($grammar, 'Chalk::Grammar', 'grammar is a Chalk::Grammar');
 }
 
 # Test parsing a simple pattern definition
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("%FOO% = /bar/i\n");
@@ -28,7 +28,7 @@ use Chalk::Parser;
 
 # Test parsing pattern definition without flags
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("%PATTERN% = /test/\n");
@@ -40,7 +40,7 @@ use Chalk::Parser;
 
 # Test parsing a simple grammar rule
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("Rule -> 'foo' Bar\n");
@@ -49,7 +49,7 @@ use Chalk::Parser;
 
 # Test parsing grammar rule with pattern reference
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("Statement -> %PATTERN_1% Block\n");
@@ -58,7 +58,7 @@ use Chalk::Parser;
 
 # Test parsing grammar rule with terminals and nonterminals
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("ArrayRef -> '[' WS_OPT ']'\n");
@@ -67,7 +67,7 @@ use Chalk::Parser;
 
 # Test parsing comment line
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("# This is a comment\n");
@@ -76,7 +76,7 @@ use Chalk::Parser;
 
 # Test parsing blank line
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("\n");
@@ -85,7 +85,7 @@ use Chalk::Parser;
 
 # Test parsing multiple lines
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $bnf = <<'EOF';
@@ -102,7 +102,7 @@ EOF
 
 # Test parsing complex pattern with special chars
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("%PATTERN_1% = /unless|if|while/u\n");
@@ -111,7 +111,7 @@ EOF
 
 # Test parsing grammar rule with multiple RHS elements
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("Block -> '{' WS_OPT StatementList WS_OPT '}'\n");
@@ -120,7 +120,7 @@ EOF
 
 # Test parsing grammar rule with empty RHS
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("LineList ->\n");
@@ -129,7 +129,7 @@ EOF
 
 # Test parsing the BNF grammar definition file
 {
-    my $grammar = Chalk::Grammar::BNF->grammar();
+    my $grammar = Chalk::Grammar::BNF->new()->grammar();
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     open(my $fh, '<', 'grammar/bnf.bnf') or die "Cannot open grammar/bnf.bnf: $!";

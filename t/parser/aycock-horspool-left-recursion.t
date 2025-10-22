@@ -8,11 +8,12 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'Direct left-recursion (baseline)' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(S a)] ],
             [ 'S' => ['a'] ],
@@ -34,7 +35,7 @@ subtest 'Indirect left-recursion (A -> B alpha, B -> A beta)' => sub {
     # B -> A b
     # A -> c
     # B -> d
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'A' => [qw(B a)] ],
             [ 'B' => [qw(A b)] ],
@@ -70,7 +71,7 @@ subtest 'Indirect left-recursion (three-way cycle)' => sub {
     # B -> C y
     # C -> A z
     # A -> w
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'A' => [qw(B x)] ],
             [ 'B' => [qw(C y)] ],
@@ -100,7 +101,7 @@ subtest 'Hidden left-recursion through nullable symbols' => sub {
     # A -> b
     # B -> c
     # B -> (epsilon)
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'A' => [qw(B A a)] ],
             [ 'A' => ['b'] ],
@@ -140,7 +141,7 @@ subtest 'Hidden left-recursion with multiple nullable symbols' => sub {
     # X -> (epsilon)
     # Y -> d
     # Y -> (epsilon)
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(X Y S a)] ],
             [ 'S' => ['b'] ],
@@ -181,7 +182,7 @@ subtest 'Hidden left-recursion with multiple nullable symbols' => sub {
 subtest 'Seed and grow phases for left-recursive parsing' => sub {
     # Classic left-recursive expression grammar
     # This tests that we properly seed with base cases and grow
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + T)] ],  # Left-recursive
             [ 'E' => ['T'] ],         # Base case (seed)
@@ -210,7 +211,7 @@ subtest 'Seed and grow phases for left-recursive parsing' => sub {
 
 subtest 'Seed and grow with multiple left-recursive rules' => sub {
     # Grammar with multiple left-recursive alternatives
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],   # Left-recursive addition
             [ 'E' => [qw(E * E)] ],   # Left-recursive multiplication
@@ -247,7 +248,7 @@ subtest 'Combined indirect and hidden left-recursion' => sub {
     # C -> A y
     # C -> (epsilon)
     # A -> z
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'A' => [qw(B A x)] ],
             [ 'B' => ['C'] ],

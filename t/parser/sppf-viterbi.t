@@ -8,13 +8,14 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::SPPF;
 use Chalk::Semiring::Viterbi;
 
 subtest 'Basic SPPFViterbi functionality' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],
             [ 'E' => [qw(E * E)] ],
@@ -43,7 +44,7 @@ subtest 'Basic SPPFViterbi functionality' => sub {
 };
 
 subtest 'Compare with pure Viterbi' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],
             [ 'E' => [qw(E * E)] ],
@@ -80,7 +81,7 @@ subtest 'Compare with pure Viterbi' => sub {
 };
 
 subtest 'SPPF forest access' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],
             [ 'E' => [qw(E * E)] ],
@@ -115,7 +116,7 @@ subtest 'SPPF forest access' => sub {
 
 subtest 'Simple non-ambiguous grammar' => sub {
     # Test with a simple grammar to ensure basic functionality
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(A B)] ],
             [ 'A' => ['a'] ],

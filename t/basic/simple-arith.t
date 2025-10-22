@@ -6,12 +6,13 @@ use Test2::V0;
 use FindBin      qw($RealBin);
 use lib "$RealBin/../../lib";
 use experimental qw(defer);
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 defer { done_testing() }
 
 # Simple arithmetic
-my $grammar = Chalk::Grammar->build_grammar(
+my $grammar = Test::Chalk::Grammar->build_grammar(
     rules => [
         [ 'E' => ['num'] ],
     ]
@@ -25,7 +26,7 @@ say "Single num result: " . (defined $result ? ref($result) . " - $result" : "un
 ok $result, "Parse single num";
 
 # Now try with addition
-$grammar = Chalk::Grammar->build_grammar(
+$grammar = Test::Chalk::Grammar->build_grammar(
     rules => [
         [ 'E' => [qw(E + E)] ],
         [ 'E' => ['num'] ],

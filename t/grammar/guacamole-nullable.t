@@ -8,13 +8,14 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::Boolean;
 
 subtest 'Optional semicolon patterns' => sub {
     # Pattern where semicolons are optional in many contexts
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Program' => ['StatementList'] ],
             [ 'StatementList' => ['Statement'] ],
@@ -42,7 +43,7 @@ subtest 'Optional semicolon patterns' => sub {
 
 subtest 'Optional parameter lists' => sub {
     # Pattern like function calls with optional parameter lists
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'FuncCall' => [qw(name ( ParamList ))] ],
             [ 'FuncCall' => [qw(name ( ))] ],  # Empty params
@@ -69,7 +70,7 @@ subtest 'Optional parameter lists' => sub {
 
 subtest 'Nested optional structures' => sub {
     # Complex nesting like Guacamole conditional expressions
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'IfStmt' => [qw(if ( Expr ) Block ElseClause)] ],
             [ 'IfStmt' => [qw(if ( Expr ) Block)] ],  # No else
@@ -104,7 +105,7 @@ subtest 'Nested optional structures' => sub {
 
 subtest 'Highly nullable expression chains' => sub {
     # Pattern with many nullable elements that could cause combinatorial explosion
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Expr' => [qw(Prefix Term Suffix)] ],
             [ 'Prefix' => ['!'] ],
@@ -149,7 +150,7 @@ subtest 'Highly nullable expression chains' => sub {
 
 subtest 'Performance with nullable chains' => sub {
     # Test that our nullability optimization handles complex cases efficiently
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(A B C D E)] ],
             [ 'A' => ['a'] ],
