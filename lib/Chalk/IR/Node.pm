@@ -171,7 +171,7 @@ class Chalk::IR::Node {
         # Chapter 6: Proj node optimization for constant If conditions
         if ($op eq 'Proj') {
             # Check if this Proj is from an If node
-            if (scalar(@$inputs) > 0) {
+            if (scalar( $inputs->@* ) > 0) {
                 my $parent_id = $inputs->[0];
                 my $parent = $graph->get_node($parent_id);
                 if (defined($parent) && $parent->op eq 'If') {
@@ -187,7 +187,7 @@ class Chalk::IR::Node {
 
                         if ($is_live) {
                             # Live branch: pass through the If node's control input
-                            if (scalar(@{$parent->inputs}) > 0) {
+                            if (scalar( $parent->inputs->@* ) > 0) {
                                 my $ctrl_id = $parent->inputs->[0];
                                 my $ctrl_node = $graph->get_node($ctrl_id);
                                 if (defined($ctrl_node)) {
@@ -214,7 +214,7 @@ class Chalk::IR::Node {
         # Chapter 6: Region node collapse when only one input is live
         if ($op eq 'Region') {
             my @live_inputs;
-            for my $input_id (@$inputs) {
+            for my $input_id ($inputs->@*) {
                 my $input_node = $graph->get_node($input_id);
                 if (defined($input_node)) {
                     # Check if input is dead control (~Ctrl)
@@ -229,7 +229,7 @@ class Chalk::IR::Node {
             }
 
             # If only one live input, collapse to that input
-            if (scalar(@live_inputs) == 1) {
+            if (scalar( @live_inputs ) == 1) {
                 my $live_id = $live_inputs[0];
                 my $live_node = $graph->get_node($live_id);
                 if (defined($live_node)) {
@@ -264,13 +264,13 @@ class Chalk::IR::Node {
                         }
 
                         # If control is live, keep this alternative
-                        if (!$is_dead && $i < scalar(@$alternatives)) {
+                        if (!$is_dead && $i < scalar( $alternatives->@* )) {
                             push @live_values, $alternatives->[$i];
                         }
                     }
 
                     # If only one live value, replace Phi with that value
-                    if (scalar(@live_values) == 1) {
+                    if (scalar( @live_values ) == 1) {
                         my $value_ref = $live_values[0];
                         if ($value_ref->{op} eq 'NodeRef') {
                             my $value_node = $graph->get_node($value_ref->{node_id});

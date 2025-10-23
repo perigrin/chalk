@@ -322,6 +322,9 @@ Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT 
 Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
 Primary -> 'exists' '(' WS_OPT Expression WS_OPT ')'  # exists() builtin
 Primary -> 'defined' '(' WS_OPT Expression WS_OPT ')'  # defined() builtin
+Primary -> 'keys' '(' WS_OPT Expression WS_OPT ')'  # keys() builtin
+Primary -> 'values' '(' WS_OPT Expression WS_OPT ')'  # values() builtin
+Primary -> 'scalar' '(' WS_OPT Expression WS_OPT ')'  # scalar() builtin
 Primary -> 'map' WS_OPT Block WS_OPT Expression  # map BLOCK LIST
 Primary -> 'grep' WS_OPT Block WS_OPT Expression  # grep BLOCK LIST
 Primary -> 'all' WS_OPT Block WS_OPT Expression  # all BLOCK LIST
