@@ -27,12 +27,23 @@ class Chalk::IR::Node {
             my $right = $attributes->{right};
 
             # Both operands must be constants for folding
-            if (defined $left && defined $right &&
-                $left->{op} eq 'Constant' && $right->{op} eq 'Constant') {
-
-                my $left_val  = $left->{value};
-                my $right_val = $right->{value};
-                my $result;
+            my $left_is_const = 0;
+            if (defined($left)) {
+                if ($left->{op} eq 'Constant') {
+                    $left_is_const = 1;
+                }
+            }
+            my $right_is_const = 0;
+            if (defined($right)) {
+                if ($right->{op} eq 'Constant') {
+                    $right_is_const = 1;
+                }
+            }
+            if ($left_is_const) {
+                if ($right_is_const) {
+                    my $left_val  = $left->{value};
+                    my $right_val = $right->{value};
+                    my $result;
 
                 # Compute the result based on operation
                 if ($op eq 'Add') {
@@ -60,6 +71,42 @@ class Chalk::IR::Node {
                         type  => 'Int',
                     }
                 );
+                }
+            }
+        }
+
+        # Load nodes can be optimized if they reference a Store with a constant value
+        if ($op eq 'Load') {
+            my $store_id = $attributes->{store_id};
+            if (defined($store_id)) {
+                my $store_node = $graph->get_node($store_id);
+                my $is_store = 0;
+                if (defined($store_node)) {
+                    if ($store_node->op eq 'Store') {
+                        $is_store = 1;
+                    }
+                }
+                if ($is_store) {
+                    my $value_ref = $store_node->attributes->{value};
+                    my $is_const = 0;
+                    if (defined($value_ref)) {
+                        if ($value_ref->{op} eq 'Constant') {
+                            $is_const = 1;
+                        }
+                    }
+                    # If the stored value is a constant, fold the Load to that constant
+                    if ($is_const) {
+                        return Chalk::IR::Node->new(
+                            id         => $id,
+                            op         => 'Constant',
+                            inputs     => $inputs,
+                            attributes => {
+                                value => $value_ref->{value},
+                                type  => $value_ref->{type},
+                            }
+                        );
+                    }
+                }
             }
         }
 
