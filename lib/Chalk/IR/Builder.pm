@@ -44,6 +44,15 @@ class Chalk::IR::Builder {
         );
         $graph->add_node($start);
         $self->set_control($start->id);
+
+        # Create Proj nodes for each parameter and register in scope
+        for my $i (0..$#{$params}) {
+            my $param_name = $params->[$i];
+            my $proj = $self->build_proj_node($start, $i, $param_name);
+            # Register parameter Proj in scope so lookups return it directly
+            $scope->define($param_name, $proj->id);
+        }
+
         return $start;
     }
 
@@ -155,16 +164,24 @@ class Chalk::IR::Builder {
 
     # Create Load node (variable read)
     method build_load_node($var_name) {
-        my $store_id = $scope->lookup($var_name);
-        return undef unless $store_id;
+        my $node_id = $scope->lookup($var_name);
+        return undef unless $node_id;
 
+        # Check if this is a Proj node (parameter) - if so, return it directly
+        my $node = $graph->nodes->{$node_id};
+        if ($node && $node->op eq 'Proj') {
+            # Parameter: return the Proj node directly
+            return $node;
+        }
+
+        # Regular variable: create Load node from Store
         my $load = Chalk::IR::Node->new(
             id => $self->next_node_id(),
             op => 'Load',
-            inputs => [$current_control, $store_id],
+            inputs => [$current_control, $node_id],
             attributes => {
                 name => $var_name,
-                store_id => $store_id
+                store_id => $node_id
             }
         );
         $graph->add_node($load);
