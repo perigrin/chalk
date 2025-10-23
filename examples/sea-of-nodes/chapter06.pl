@@ -1,39 +1,40 @@
 #!/usr/bin/env perl
 # ABOUTME: Sea of Nodes IR Chapter 6 example: Dead Control Flow Elimination
 # ABOUTME: Demonstrates constant condition optimization and dead code elimination
+use 5.42.0;
 
-use v5.42;
-
-# Example 1: Constant true condition - dead else branch
-method always_true() {
-    if (1) {
-        return 42;
+class DeadCodeExample {
+    # Example 1: Constant true condition - dead else branch
+    method always_true() {
+        if (1) {
+            return 42;
+        }
+        return 0;  # Dead code - never reached
     }
-    return 0;  # Dead code - never reached
-}
 
-# Example 2: Constant false condition - dead then branch
-method always_false() {
-    if (0) {
-        return 42;  # Dead code - never reached
+    # Example 2: Constant false condition - dead then branch
+    method always_false() {
+        if (0) {
+            return 42;  # Dead code - never reached
+        }
+        return 0;
     }
-    return 0;
-}
 
-# Example 3: Constant comparison - always true
-method constant_comparison($x) {
-    if (5 > 3) {
-        return $x + 10;
+    # Example 3: Constant comparison - always true
+    method constant_comparison($x) {
+        if (5 > 3) {
+            return $x + 10;
+        }
+        return $x;  # Dead code
     }
-    return $x;  # Dead code
-}
 
-# Example 4: Variable condition - no optimization
-method variable_condition($x) {
-    if ($x > 0) {
-        return 1;
+    # Example 4: Variable condition - no optimization
+    method variable_condition($x) {
+        if ($x > 0) {
+            return 1;
+        }
+        return 0;
     }
-    return 0;
 }
 
 # Optimized IR for always_true() should be:

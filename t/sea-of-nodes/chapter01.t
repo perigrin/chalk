@@ -68,6 +68,40 @@ subtest 'Manual IR graph construction for return 42' => sub {
                'Return connects to Start (control) and Constant (data)');
 };
 
+# Test IR Builder generates correct IR from code
+subtest 'IR Builder generates correct IR for return 42' => sub {
+    use_ok('Chalk::IR::Builder');
+
+    my $builder = Chalk::IR::Builder->new();
+    my $graph = $builder->build_from_code("return 42;");
+
+    # Verify graph structure matches manual construction
+    ok($graph, 'Builder returns a graph');
+    is($graph->node_count, 3, 'Generated graph has 3 nodes');
+
+    # Verify Start node
+    my $start_node = $graph->get_node('node_0');
+    ok($start_node, 'Start node exists');
+    is($start_node->op, 'Start', 'Start node has correct op');
+    is(scalar @{$start_node->inputs}, 0, 'Start node has no inputs');
+    is($start_node->attributes->{function}, 'main', 'Start node has function name');
+
+    # Verify Constant node
+    my $const_node = $graph->get_node('node_1');
+    ok($const_node, 'Constant node exists');
+    is($const_node->op, 'Constant', 'Constant node has correct op');
+    cmp_deeply($const_node->inputs, ['node_0'], 'Constant connects to Start');
+    is($const_node->attributes->{value}, 42, 'Constant has value 42');
+    is($const_node->attributes->{type}, 'Int', 'Constant has type Int');
+
+    # Verify Return node
+    my $ret_node = $graph->get_node('node_2');
+    ok($ret_node, 'Return node exists');
+    is($ret_node->op, 'Return', 'Return node has correct op');
+    cmp_deeply($ret_node->inputs, ['node_0', 'node_1'],
+               'Return connects to Start (control) and Constant (data)');
+};
+
 # Test JSON serialization
 subtest 'JSON serialization' => sub {
     my $graph = Chalk::IR::Graph->new();

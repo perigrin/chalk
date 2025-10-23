@@ -19,6 +19,11 @@ class Chalk::IR::Node {
         };
     }
 
+    # Helper: Check if an attribute represents a constant value
+    sub _is_constant($attr) {
+        return defined($attr) && $attr->{op} eq 'Constant';
+    }
+
     method peephole($graph) {
         # Peephole optimization for constant folding
         # Check if this is an arithmetic operation with constant operands
@@ -27,23 +32,10 @@ class Chalk::IR::Node {
             my $right = $attributes->{right};
 
             # Both operands must be constants for folding
-            my $left_is_const = 0;
-            if (defined($left)) {
-                if ($left->{op} eq 'Constant') {
-                    $left_is_const = 1;
-                }
-            }
-            my $right_is_const = 0;
-            if (defined($right)) {
-                if ($right->{op} eq 'Constant') {
-                    $right_is_const = 1;
-                }
-            }
-            if ($left_is_const) {
-                if ($right_is_const) {
-                    my $left_val  = $left->{value};
-                    my $right_val = $right->{value};
-                    my $result;
+            if (_is_constant($left) && _is_constant($right)) {
+                my $left_val  = $left->{value};
+                my $right_val = $right->{value};
+                my $result;
 
                 # Compute the result based on operation
                 if ($op eq 'Add') {
@@ -56,7 +48,7 @@ class Chalk::IR::Node {
                     $result = $left_val - $right_val;
                 }
                 elsif ($op eq 'Divide') {
-                    # Avoid division by zero
+                    # Don't optimize division by zero - let it fail at runtime
                     return $self if $right_val == 0;
                     $result = int($left_val / $right_val);  # Integer division
                 }
@@ -71,7 +63,6 @@ class Chalk::IR::Node {
                         type  => 'Int',
                     }
                 );
-                }
             }
         }
 
@@ -81,55 +72,41 @@ class Chalk::IR::Node {
             my $right = $attributes->{right};
 
             # Both operands must be constants for folding
-            my $left_is_const = 0;
-            if (defined($left)) {
-                if ($left->{op} eq 'Constant') {
-                    $left_is_const = 1;
-                }
-            }
-            my $right_is_const = 0;
-            if (defined($right)) {
-                if ($right->{op} eq 'Constant') {
-                    $right_is_const = 1;
-                }
-            }
-            if ($left_is_const) {
-                if ($right_is_const) {
-                    my $left_val  = $left->{value};
-                    my $right_val = $right->{value};
-                    my $result;
+            if (_is_constant($left) && _is_constant($right)) {
+                my $left_val  = $left->{value};
+                my $right_val = $right->{value};
+                my $result;
 
-                    # Compute the result based on comparison operation
-                    if ($op eq 'GT') {
-                        $result = $left_val > $right_val ? 1 : 0;
-                    }
-                    elsif ($op eq 'LT') {
-                        $result = $left_val < $right_val ? 1 : 0;
-                    }
-                    elsif ($op eq 'EQ') {
-                        $result = $left_val == $right_val ? 1 : 0;
-                    }
-                    elsif ($op eq 'NE') {
-                        $result = $left_val != $right_val ? 1 : 0;
-                    }
-                    elsif ($op eq 'LE') {
-                        $result = $left_val <= $right_val ? 1 : 0;
-                    }
-                    elsif ($op eq 'GE') {
-                        $result = $left_val >= $right_val ? 1 : 0;
-                    }
-
-                    # Return a new Constant node with the folded result (1 or 0)
-                    return Chalk::IR::Node->new(
-                        id         => $id,  # Reuse the same ID
-                        op         => 'Constant',
-                        inputs     => $inputs,
-                        attributes => {
-                            value => $result,
-                            type  => 'Int',
-                        }
-                    );
+                # Compute the result based on comparison operation
+                if ($op eq 'GT') {
+                    $result = $left_val > $right_val ? 1 : 0;
                 }
+                elsif ($op eq 'LT') {
+                    $result = $left_val < $right_val ? 1 : 0;
+                }
+                elsif ($op eq 'EQ') {
+                    $result = $left_val == $right_val ? 1 : 0;
+                }
+                elsif ($op eq 'NE') {
+                    $result = $left_val != $right_val ? 1 : 0;
+                }
+                elsif ($op eq 'LE') {
+                    $result = $left_val <= $right_val ? 1 : 0;
+                }
+                elsif ($op eq 'GE') {
+                    $result = $left_val >= $right_val ? 1 : 0;
+                }
+
+                # Return a new Constant node with the folded result (1 or 0)
+                return Chalk::IR::Node->new(
+                    id         => $id,  # Reuse the same ID
+                    op         => 'Constant',
+                    inputs     => $inputs,
+                    attributes => {
+                        value => $result,
+                        type  => 'Int',
+                    }
+                );
             }
         }
 
@@ -138,22 +115,10 @@ class Chalk::IR::Node {
             my $store_id = $attributes->{store_id};
             if (defined($store_id)) {
                 my $store_node = $graph->get_node($store_id);
-                my $is_store = 0;
-                if (defined($store_node)) {
-                    if ($store_node->op eq 'Store') {
-                        $is_store = 1;
-                    }
-                }
-                if ($is_store) {
+                if (defined($store_node) && $store_node->op eq 'Store') {
                     my $value_ref = $store_node->attributes->{value};
-                    my $is_const = 0;
-                    if (defined($value_ref)) {
-                        if ($value_ref->{op} eq 'Constant') {
-                            $is_const = 1;
-                        }
-                    }
                     # If the stored value is a constant, fold the Load to that constant
-                    if ($is_const) {
+                    if (_is_constant($value_ref)) {
                         return Chalk::IR::Node->new(
                             id         => $id,
                             op         => 'Constant',

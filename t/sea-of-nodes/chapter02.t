@@ -202,6 +202,44 @@ subtest 'Manual IR graph construction for return 1 + 2 * 3' => sub {
                'Return connects to Start (control) and Add (data)');
 };
 
+# Test IR Builder generates correct IR for arithmetic expression
+subtest 'IR Builder generates correct IR for return 1 + 2 * 3' => sub {
+    use_ok('Chalk::IR::Builder');
+
+    my $builder = Chalk::IR::Builder->new();
+    my $graph = $builder->build_from_code("return 1 + 2 * 3;");
+
+    # Verify graph structure
+    ok($graph, 'Builder returns a graph');
+    is($graph->node_count, 4, 'Generated graph has 4 nodes (Start, Multiply, Add, Return)');
+
+    # Verify Start node
+    my $start_node = $graph->get_node('node_0');
+    ok($start_node, 'Start node exists');
+    is($start_node->op, 'Start', 'Start node has correct op');
+
+    # Verify Multiply node (2 * 3)
+    my $mul_node = $graph->get_node('node_1');
+    ok($mul_node, 'Multiply node exists');
+    is($mul_node->op, 'Multiply', 'Multiply node has correct op');
+    is($mul_node->attributes->{left}{value}, 2, 'Multiply left operand is 2');
+    is($mul_node->attributes->{right}{value}, 3, 'Multiply right operand is 3');
+
+    # Verify Add node (1 + mul_result)
+    my $add_node = $graph->get_node('node_2');
+    ok($add_node, 'Add node exists');
+    is($add_node->op, 'Add', 'Add node has correct op');
+    is($add_node->attributes->{left}{value}, 1, 'Add left operand is 1');
+    is($add_node->attributes->{right}{node_id}, 'node_1', 'Add right operand references Multiply');
+
+    # Verify Return node
+    my $ret_node = $graph->get_node('node_3');
+    ok($ret_node, 'Return node exists');
+    is($ret_node->op, 'Return', 'Return node has correct op');
+    cmp_deeply($ret_node->inputs, ['node_0', 'node_2'],
+               'Return connects to Start (control) and Add (data)');
+};
+
 # Test JSON serialization for arithmetic expressions
 subtest 'JSON serialization of arithmetic IR' => sub {
     my $graph = Chalk::IR::Graph->new();

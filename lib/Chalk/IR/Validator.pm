@@ -61,29 +61,35 @@ class Chalk::IR::Validator {
 
         # Check: All nodes reachable from Start (BFS traversal)
         if (defined($start_id)) {
+            # Build successor map once for O(n+e) BFS instead of O(n²)
+            # In Sea of Nodes, inputs point TO this node FROM others,
+            # so we need to reverse the edges to get successors
+            my %successors = ();
+            for my $node_id (keys( $nodes->%* )) {
+                $successors{$node_id} = [];
+            }
+            for my $node_id (keys( $nodes->%* )) {
+                my $node = $nodes->{$node_id};
+                for my $input_id ($node->inputs->@*) {
+                    if (exists($nodes->{$input_id})) {
+                        push $successors{$input_id}->@*, $node_id;
+                    }
+                }
+            }
+
+            # BFS using successor map
             my %reachable = ();
             my @queue = ($start_id);
             $reachable{$start_id} = 1;
 
             while (scalar( @queue ) > 0) {
                 my $current_id = shift @queue;
-                my $current_node = $nodes->{$current_id};
 
-                # Follow all outgoing edges (inputs reference other nodes)
-                # Note: In Sea of Nodes, inputs point TO this node FROM others,
-                # so we need to find nodes that reference this one
-                for my $other_id (keys( $nodes->%* )) {
-                    next if exists($reachable{$other_id});
-                    my $other_node = $nodes->{$other_id};
-
-                    # Check if other_node references current_node
-                    for my $input_id ($other_node->inputs->@*) {
-                        if ($input_id eq $current_id) {
-                            $reachable{$other_id} = 1;
-                            push @queue, $other_id;
-                            last;
-                        }
-                    }
+                # Follow all successors (nodes that depend on current node)
+                for my $successor_id ($successors{$current_id}->@*) {
+                    next if exists($reachable{$successor_id});
+                    $reachable{$successor_id} = 1;
+                    push @queue, $successor_id;
                 }
             }
 
@@ -150,6 +156,9 @@ class Chalk::IR::Validator {
 
         return \%dom unless defined($start_id);
 
+        # Compute node depths for _intersect heuristic
+        my $depth_map = $self->_compute_node_depths($graph);
+
         # Build reverse graph (predecessors)
         my %preds = ();  # node_id => [predecessor_ids]
         for my $node_id (keys( $nodes->%* )) {
@@ -202,7 +211,7 @@ class Chalk::IR::Validator {
                     next if $pred_id eq $new_idom;
                     next unless exists($dom{$pred_id});
 
-                    $new_idom = $self->_intersect(\%dom, $pred_id, $new_idom);
+                    $new_idom = $self->_intersect(\%dom, $pred_id, $new_idom, $depth_map);
                 }
 
                 # Update if changed
@@ -221,19 +230,19 @@ class Chalk::IR::Validator {
     }
 
     # Helper: Find intersection of two nodes in dominance tree
-    method _intersect($dom, $b1, $b2) {
+    method _intersect($dom, $b1, $b2, $depth_map = undef) {
         my $finger1 = $b1;
         my $finger2 = $b2;
 
         while ($finger1 ne $finger2) {
             # Move up dominance tree
-            while ($self->_node_depth($finger1) > $self->_node_depth($finger2)) {
+            while ($self->_node_depth($finger1, $depth_map) > $self->_node_depth($finger2, $depth_map)) {
                 $finger1 = $dom->{$finger1};
                 last unless defined($finger1);
             }
             last unless defined($finger1);
 
-            while ($self->_node_depth($finger2) > $self->_node_depth($finger1)) {
+            while ($self->_node_depth($finger2, $depth_map) > $self->_node_depth($finger1, $depth_map)) {
                 $finger2 = $dom->{$finger2};
                 last unless defined($finger2);
             }
@@ -254,9 +263,62 @@ class Chalk::IR::Validator {
         return $finger1;
     }
 
-    # Helper: Get node depth from node_id (simple heuristic: parse number)
-    method _node_depth($node_id) {
+    # Helper: Compute CFG depth for all nodes via BFS from Start
+    # Returns hashref mapping node_id => depth
+    method _compute_node_depths($graph) {
+        my $nodes = $graph->nodes;
+        my %depths = ();
+
+        # Find Start node
+        my $start_id = undef;
+        for my $node_id (keys( $nodes->%* )) {
+            my $node = $nodes->{$node_id};
+            if ($node->op eq 'Start') {
+                $start_id = $node_id;
+                last;
+            }
+        }
+
+        return \%depths unless defined($start_id);
+
+        # BFS to compute depths
+        my @queue = ($start_id);
+        $depths{$start_id} = 0;
+
+        while (scalar( @queue ) > 0) {
+            my $current_id = shift @queue;
+            my $current_depth = $depths{$current_id};
+
+            # Find all nodes that have current_id as input
+            for my $node_id (keys( $nodes->%* )) {
+                next if exists($depths{$node_id});
+                my $node = $nodes->{$node_id};
+
+                for my $input_id ($node->inputs->@*) {
+                    if ($input_id eq $current_id) {
+                        $depths{$node_id} = $current_depth + 1;
+                        push @queue, $node_id;
+                        last;
+                    }
+                }
+            }
+        }
+
+        return \%depths;
+    }
+
+    # Helper: Get node depth from cached depth map
+    # Falls back to parsing node_id for backward compatibility
+    method _node_depth($node_id, $depth_map = undef) {
         return 0 unless defined($node_id);
+
+        # Use cached depth if available
+        if (defined($depth_map) && exists($depth_map->{$node_id})) {
+            return $depth_map->{$node_id};
+        }
+
+        # Fallback: parse node_id (e.g., "node_123" => 123)
+        # This is a heuristic and may not reflect true CFG depth
         my $pattern = qr/node_(\d+)/;
         if ($node_id =~ $pattern) {
             return $1;
@@ -382,9 +444,20 @@ class Chalk::IR::Validator {
                     my $region_preds = $region_node->inputs;
                     my $expected_alternatives = scalar( $region_preds->@* );
 
-                    # Count phi alternatives from inputs array (first input is control, rest are values)
+                    # Count phi alternatives - check both inputs array and attributes
+                    # Phi nodes can store alternatives in two ways:
+                    # 1. In inputs array (after control input): inputs => [ctrl, val1, val2, ...]
+                    # 2. In attributes: attributes => { alternatives => [...] }
                     my $phi_inputs = $node->inputs;
                     my $actual_alternatives = scalar( $phi_inputs->@* ) - 1;  # Subtract control input
+
+                    # If alternatives not in inputs, check attributes
+                    if ($actual_alternatives == 0) {
+                        my $alt_attr = $node->attributes->{alternatives};
+                        if (defined($alt_attr) && ref($alt_attr) eq 'ARRAY') {
+                            $actual_alternatives = scalar( $alt_attr->@* );
+                        }
+                    }
 
                     if ($actual_alternatives != $expected_alternatives) {
                         push @errors, "Phi node $node_id in node $region_id expects $expected_alternatives value inputs ($expected_alternatives predecessors) but has $actual_alternatives";

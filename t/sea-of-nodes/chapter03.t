@@ -308,6 +308,53 @@ subtest 'Complete example: my $x = 5; return $x * 2' => sub {
     cmp_deeply($ret_node->inputs, ['node_0', 'node_3'], 'Return links to Start and Multiply');
 };
 
+# Test IR Builder generates correct IR for variable declaration and use
+subtest 'IR Builder generates correct IR for my $x = 5; return $x * 2' => sub {
+    use_ok('Chalk::IR::Builder');
+
+    my $builder = Chalk::IR::Builder->new();
+    my $graph = $builder->build_from_code("my \$x = 5; return \$x * 2;");
+
+    # Verify graph structure
+    ok($graph, 'Builder returns a graph');
+    is($graph->node_count, 5, 'Generated graph has 5 nodes (Start, Store, Load, Multiply, Return)');
+
+    # Verify Start node
+    my $start_node = $graph->get_node('node_0');
+    ok($start_node, 'Start node exists');
+    is($start_node->op, 'Start', 'Start node has correct op');
+
+    # Verify Store node (my $x = 5)
+    my $store_node = $graph->get_node('node_1');
+    ok($store_node, 'Store node exists');
+    is($store_node->op, 'Store', 'Store node has correct op');
+    is($store_node->attributes->{name}, '$x', 'Store has variable name $x');
+    is($store_node->attributes->{value}{value}, 5, 'Store has value 5');
+
+    # Verify Load node (read $x)
+    my $load_node = $graph->get_node('node_2');
+    ok($load_node, 'Load node exists');
+    is($load_node->op, 'Load', 'Load node has correct op');
+    is($load_node->attributes->{name}, '$x', 'Load has variable name $x');
+    is($load_node->attributes->{store_id}, 'node_1', 'Load references Store');
+
+    # Verify Multiply node ($x * 2)
+    my $mul_node = $graph->get_node('node_3');
+    ok($mul_node, 'Multiply node exists');
+    is($mul_node->op, 'Multiply', 'Multiply node has correct op');
+    is($mul_node->attributes->{left}{node_id}, 'node_2', 'Multiply left operand is Load');
+    is($mul_node->attributes->{right}{value}, 2, 'Multiply right operand is 2');
+
+    # Verify Return node
+    my $ret_node = $graph->get_node('node_4');
+    ok($ret_node, 'Return node exists');
+    is($ret_node->op, 'Return', 'Return node has correct op');
+    cmp_deeply($ret_node->inputs, ['node_0', 'node_3'], 'Return links to Start and Multiply');
+
+    # Verify Scope tracking
+    is($builder->scope->lookup('$x'), 'node_1', 'Scope tracks variable $x');
+};
+
 # Test JSON serialization of variables
 subtest 'JSON serialization with variables' => sub {
     my $graph = Chalk::IR::Graph->new();

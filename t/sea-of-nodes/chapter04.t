@@ -435,4 +435,54 @@ subtest 'Complete example: method calculate($arg) { return $arg + 10; }' => sub 
     is($scope->lookup('$arg'), 'node_2', 'Scope has parameter');
 };
 
+# Test IR Builder generates correct IR for method with parameter
+subtest 'IR Builder generates correct IR for method calculate($arg) { return $arg + 10; }' => sub {
+    use_ok('Chalk::IR::Builder');
+
+    my $builder = Chalk::IR::Builder->new();
+    my $graph = $builder->build_from_code("method calculate(\$arg) { return \$arg + 10; }");
+
+    # Verify graph structure
+    ok($graph, 'Builder returns a graph');
+    is($graph->node_count, 5, 'Generated graph has 5 nodes (Start, Ctrl, Arg, Add, Return)');
+
+    # Verify Start node with params
+    my $start_node = $graph->get_node('node_0');
+    ok($start_node, 'Start node exists');
+    is($start_node->op, 'Start', 'Start node has correct op');
+    is($start_node->attributes->{function}, 'calculate', 'Start has function name calculate');
+    cmp_deeply($start_node->attributes->{params}, ['$arg'], 'Start has parameter list');
+
+    # Verify Control projection ($ctrl)
+    my $ctrl_node = $graph->get_node('node_1');
+    ok($ctrl_node, 'Control projection exists');
+    is($ctrl_node->op, 'Proj', 'Control node is Proj');
+    is($ctrl_node->attributes->{index}, 0, 'Control has index 0');
+    is($ctrl_node->attributes->{label}, '$ctrl', 'Control has label $ctrl');
+
+    # Verify Arg projection
+    my $arg_node = $graph->get_node('node_2');
+    ok($arg_node, 'Arg projection exists');
+    is($arg_node->op, 'Proj', 'Arg node is Proj');
+    is($arg_node->attributes->{index}, 1, 'Arg has index 1');
+    is($arg_node->attributes->{label}, '$arg', 'Arg has label $arg');
+
+    # Verify Add node ($arg + 10)
+    my $add_node = $graph->get_node('node_3');
+    ok($add_node, 'Add node exists');
+    is($add_node->op, 'Add', 'Add node has correct op');
+    is($add_node->attributes->{left}{node_id}, 'node_2', 'Add left operand is arg projection');
+    is($add_node->attributes->{right}{value}, 10, 'Add right operand is 10');
+
+    # Verify Return node
+    my $ret_node = $graph->get_node('node_4');
+    ok($ret_node, 'Return node exists');
+    is($ret_node->op, 'Return', 'Return node has correct op');
+    cmp_deeply($ret_node->inputs, ['node_1', 'node_3'], 'Return uses control and Add result');
+
+    # Verify Scope tracking
+    is($builder->scope->lookup('$ctrl'), 'node_1', 'Scope tracks $ctrl');
+    is($builder->scope->lookup('$arg'), 'node_2', 'Scope tracks $arg');
+};
+
 done_testing();

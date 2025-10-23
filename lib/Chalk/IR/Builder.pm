@@ -142,7 +142,7 @@ class Chalk::IR::Builder {
         my $store = Chalk::IR::Node->new(
             id => $self->next_node_id(),
             op => 'Store',
-            inputs => [$current_control],
+            inputs => [$current_control, $value_node->id],
             attributes => {
                 name => $var_name,
                 value => { op => 'NodeRef', node_id => $value_node->id }
