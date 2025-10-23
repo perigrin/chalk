@@ -159,11 +159,12 @@ subtest 'validate_cfg detects unreachable nodes' => sub {
     my $graph = make_valid_simple_graph();
 
     # Add an isolated node not connected to Start
+    # Note: Constants are exempt from reachability checks, so use a different op
     my $orphan = Chalk::IR::Node->new(
         id => 'node_999',
-        op => 'Constant',
+        op => 'Add',  # Use non-Constant op to test reachability
         inputs => [],  # No connection to Start
-        attributes => { value => 99, type => 'Int' }
+        attributes => { left => {value => 1}, right => {value => 2} }
     );
     $graph->add_node($orphan);
 

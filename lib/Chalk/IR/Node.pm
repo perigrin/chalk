@@ -75,6 +75,64 @@ class Chalk::IR::Node {
             }
         }
 
+        # Check if this is a comparison operation with constant operands
+        if ($op eq 'GT' || $op eq 'LT' || $op eq 'EQ' || $op eq 'NE' || $op eq 'LE' || $op eq 'GE') {
+            my $left  = $attributes->{left};
+            my $right = $attributes->{right};
+
+            # Both operands must be constants for folding
+            my $left_is_const = 0;
+            if (defined($left)) {
+                if ($left->{op} eq 'Constant') {
+                    $left_is_const = 1;
+                }
+            }
+            my $right_is_const = 0;
+            if (defined($right)) {
+                if ($right->{op} eq 'Constant') {
+                    $right_is_const = 1;
+                }
+            }
+            if ($left_is_const) {
+                if ($right_is_const) {
+                    my $left_val  = $left->{value};
+                    my $right_val = $right->{value};
+                    my $result;
+
+                    # Compute the result based on comparison operation
+                    if ($op eq 'GT') {
+                        $result = $left_val > $right_val ? 1 : 0;
+                    }
+                    elsif ($op eq 'LT') {
+                        $result = $left_val < $right_val ? 1 : 0;
+                    }
+                    elsif ($op eq 'EQ') {
+                        $result = $left_val == $right_val ? 1 : 0;
+                    }
+                    elsif ($op eq 'NE') {
+                        $result = $left_val != $right_val ? 1 : 0;
+                    }
+                    elsif ($op eq 'LE') {
+                        $result = $left_val <= $right_val ? 1 : 0;
+                    }
+                    elsif ($op eq 'GE') {
+                        $result = $left_val >= $right_val ? 1 : 0;
+                    }
+
+                    # Return a new Constant node with the folded result (1 or 0)
+                    return Chalk::IR::Node->new(
+                        id         => $id,  # Reuse the same ID
+                        op         => 'Constant',
+                        inputs     => $inputs,
+                        attributes => {
+                            value => $result,
+                            type  => 'Int',
+                        }
+                    );
+                }
+            }
+        }
+
         # Load nodes can be optimized if they reference a Store with a constant value
         if ($op eq 'Load') {
             my $store_id = $attributes->{store_id};

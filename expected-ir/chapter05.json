@@ -1,0 +1,120 @@
+{
+  "version": "1.0",
+  "entry": "node_0",
+  "nodes": [
+    {
+      "id": "node_0",
+      "op": "Start",
+      "inputs": [],
+      "attributes": {
+        "function": "classify",
+        "params": ["$x"]
+      }
+    },
+    {
+      "id": "node_1",
+      "op": "Proj",
+      "inputs": ["node_0"],
+      "attributes": {
+        "index": 0,
+        "label": "$ctrl"
+      }
+    },
+    {
+      "id": "node_2",
+      "op": "Proj",
+      "inputs": ["node_0"],
+      "attributes": {
+        "index": 1,
+        "label": "$x"
+      }
+    },
+    {
+      "id": "node_3",
+      "op": "Constant",
+      "inputs": [],
+      "attributes": {
+        "value": 0,
+        "type": "Int"
+      }
+    },
+    {
+      "id": "node_4",
+      "op": "GT",
+      "inputs": ["node_1", "node_2", "node_3"],
+      "attributes": {
+        "left": {
+          "op": "NodeRef",
+          "node_id": "node_2"
+        },
+        "right": {
+          "op": "NodeRef",
+          "node_id": "node_3"
+        }
+      }
+    },
+    {
+      "id": "node_5",
+      "op": "If",
+      "inputs": ["node_1", "node_4"],
+      "attributes": {}
+    },
+    {
+      "id": "node_6",
+      "op": "Proj",
+      "inputs": ["node_5"],
+      "attributes": {
+        "index": 0,
+        "label": "true"
+      }
+    },
+    {
+      "id": "node_7",
+      "op": "Proj",
+      "inputs": ["node_5"],
+      "attributes": {
+        "index": 1,
+        "label": "false"
+      }
+    },
+    {
+      "id": "node_8",
+      "op": "Constant",
+      "inputs": [],
+      "attributes": {
+        "value": 1,
+        "type": "Int"
+      }
+    },
+    {
+      "id": "node_9",
+      "op": "Region",
+      "inputs": ["node_6", "node_7"],
+      "attributes": {}
+    },
+    {
+      "id": "node_10",
+      "op": "Phi",
+      "inputs": ["node_9", "node_8", "node_3"],
+      "attributes": {
+        "region_id": "node_9",
+        "alternatives": [
+          {
+            "op": "NodeRef",
+            "node_id": "node_8"
+          },
+          {
+            "op": "NodeRef",
+            "node_id": "node_3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_11",
+      "op": "Return",
+      "inputs": ["node_9", "node_10"],
+      "attributes": {}
+    }
+  ]
+}

@@ -87,10 +87,14 @@ class Chalk::IR::Validator {
                 }
             }
 
-            # Report unreachable nodes
+            # Report unreachable nodes (except Constants which are data-only)
             for my $node_id (keys $nodes->%*) {
                 if (not(exists($reachable{$node_id}))) {
-                    push @errors, "CFG validation failed: Node $node_id is not reachable from Start node";
+                    my $node = $nodes->{$node_id};
+                    # Constants are data-only nodes and don't need control flow reachability
+                    if ($node->op ne 'Constant') {
+                        push @errors, "CFG validation failed: Node $node_id is not reachable from Start node";
+                    }
                 }
             }
         }
