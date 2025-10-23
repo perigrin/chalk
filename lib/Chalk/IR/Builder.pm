@@ -301,6 +301,49 @@ class Chalk::IR::Builder {
         $graph->add_node($phi);
         return $phi;
     }
+
+    # Loop control flow nodes
+    method build_loop_node($entry_control = undef) {
+        my $ctrl = $entry_control // $current_control // '__CONTROL_PLACEHOLDER__';
+        my $loop = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Loop',
+            inputs => [$ctrl],  # Entry control; backedge added later
+            attributes => {}
+        );
+        $graph->add_node($loop);
+        return $loop;
+    }
+
+    method build_loop_phi_node($loop_node, $initial_value, $loop_value = undef) {
+        # Loop phi starts with control and initial value
+        # Loop value added later (lazy phi pattern)
+        my @inputs = ($loop_node->id, $initial_value);
+        push @inputs, $loop_value if defined $loop_value;
+
+        my $phi = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Phi',
+            inputs => \@inputs,
+            attributes => {}
+        );
+        $graph->add_node($phi);
+        return $phi;
+    }
+
+    # Function call nodes
+    method build_call_node($function_name, @arg_nodes) {
+        # Call: control, memory, arguments...
+        # For now, use current_control for both control and memory
+        my $call = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Call',
+            inputs => [$current_control, $current_control, map { $_->id } @arg_nodes],
+            attributes => { function => $function_name }
+        );
+        $graph->add_node($call);
+        return $call;
+    }
 }
 
 1;
