@@ -69,7 +69,8 @@ class Chalk::IR::Builder {
     }
 
     # Create Return node
-    method build_return_node($value_node) {
+    # If $control is undef, uses current_control. Otherwise uses provided control.
+    method build_return_node($value_node, $control = undef) {
         # Debug: check what we received
         my $ref_type = ref($value_node) || 'SCALAR';
         unless ($ref_type && $ref_type =~ /^Chalk::IR::Node/) {
@@ -79,14 +80,23 @@ class Chalk::IR::Builder {
             return undef;
         }
 
+        # Use provided control, or current_control, or '__CONTROL_PLACEHOLDER__'
+        my $ctrl = $control // $current_control // '__CONTROL_PLACEHOLDER__';
+
         my $return = Chalk::IR::Node->new(
             id => $self->next_node_id(),
             op => 'Return',
-            inputs => [$current_control, $value_node->id],
+            inputs => [$ctrl, $value_node->id],
             attributes => {}
         );
         $graph->add_node($return);
         return $return;
+    }
+
+    # Set control input for an existing node
+    method set_node_control($node, $control_id) {
+        my $inputs = $node->inputs;
+        $inputs->[0] = $control_id;  # Control is always first input
     }
 
     # Create arithmetic operation nodes

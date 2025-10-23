@@ -18,12 +18,14 @@ class Chalk::Grammar::Chalk::Rule::ReturnStatement :isa(Chalk::GrammarRule) {
         # For bare "return;", there's no expression value
         my $expr_node = $context->child(2);
 
-        # Build Return IR node
+        # Build Return IR node WITHOUT control assignment
+        # The control input will be '__CONTROL_PLACEHOLDER__'
+        # Parent rule (Block, ConditionalStatement, etc) must wire up control
         # If no expression, we might need to return undef/void
         # For now, require an expression
         return undef unless $expr_node;
 
-        return $builder->build_return_node($expr_node);
+        return $builder->build_return_node($expr_node, '__CONTROL_PLACEHOLDER__');
     }
 }
 
