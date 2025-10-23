@@ -202,6 +202,95 @@ class Chalk::IR::Builder {
         $graph->add_node($proj);
         return $proj;
     }
+
+    # Comparison nodes
+    method build_greater_node($left_node, $right_node) {
+        my $cmp = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Greater',
+            inputs => [$current_control, $left_node->id, $right_node->id],
+            attributes => {
+                left => { op => 'NodeRef', node_id => $left_node->id },
+                right => { op => 'NodeRef', node_id => $right_node->id }
+            }
+        );
+        $graph->add_node($cmp);
+        return $cmp;
+    }
+
+    method build_less_node($left_node, $right_node) {
+        my $cmp = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Less',
+            inputs => [$current_control, $left_node->id, $right_node->id],
+            attributes => {
+                left => { op => 'NodeRef', node_id => $left_node->id },
+                right => { op => 'NodeRef', node_id => $right_node->id }
+            }
+        );
+        $graph->add_node($cmp);
+        return $cmp;
+    }
+
+    method build_equal_node($left_node, $right_node) {
+        my $cmp = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Equal',
+            inputs => [$current_control, $left_node->id, $right_node->id],
+            attributes => {
+                left => { op => 'NodeRef', node_id => $left_node->id },
+                right => { op => 'NodeRef', node_id => $right_node->id }
+            }
+        );
+        $graph->add_node($cmp);
+        return $cmp;
+    }
+
+    # Control flow nodes
+    method build_if_node($condition_node) {
+        my $if_node = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'If',
+            inputs => [$current_control, $condition_node->id],
+            attributes => {
+                condition => { op => 'NodeRef', node_id => $condition_node->id }
+            }
+        );
+        $graph->add_node($if_node);
+        return $if_node;
+    }
+
+    method build_if_true_node($if_node) {
+        my $if_true = $self->build_proj_node($if_node, 0, 'IfTrue');
+        return $if_true;
+    }
+
+    method build_if_false_node($if_node) {
+        my $if_false = $self->build_proj_node($if_node, 1, 'IfFalse');
+        return $if_false;
+    }
+
+    method build_region_node(@control_inputs) {
+        my $region = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Region',
+            inputs => \@control_inputs,
+            attributes => {}
+        );
+        $graph->add_node($region);
+        return $region;
+    }
+
+    method build_phi_node($region_node, @value_inputs) {
+        my $phi = Chalk::IR::Node->new(
+            id => $self->next_node_id(),
+            op => 'Phi',
+            inputs => [$region_node->id, @value_inputs],
+            attributes => {}
+        );
+        $graph->add_node($phi);
+        return $phi;
+    }
 }
 
 1;
