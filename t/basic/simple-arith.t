@@ -6,6 +6,7 @@ use Test2::V0;
 use FindBin      qw($RealBin);
 use lib "$RealBin/../../lib";
 use experimental qw(defer);
+use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;

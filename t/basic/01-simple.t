@@ -6,6 +6,7 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
