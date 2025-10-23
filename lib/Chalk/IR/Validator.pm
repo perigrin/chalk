@@ -373,25 +373,20 @@ class Chalk::IR::Validator {
             my $region_id = $phi_inputs->[0];
             if (exists($nodes->{$region_id})) {
                 my $region_node = $nodes->{$region_id};
-                if ($region_node->op ne 'Region') {
-                    push @errors, "Phi node $node_id is not at a Region merge point (control input is " . $region_node->op . ")";
+                if ($region_node->op ne 'Region' && $region_node->op ne 'Loop') {
+                    push @errors, "Phi node $node_id is not at a Region/Loop merge point (control input is " . $region_node->op . ")";
                 }
                 else {
-                    # Count region predecessors
+                    # Count region/loop predecessors
                     my $region_preds = $region_node->inputs;
                     my $expected_alternatives = scalar($region_preds->@*);
 
-                    # Count phi alternatives
-                    my $alternatives = $node->attributes->{alternatives};
-                    my $actual_alternatives = 0;
-                    if (defined($alternatives)) {
-                        if (ref($alternatives) eq 'ARRAY') {
-                            $actual_alternatives = scalar($alternatives->@*);
-                        }
-                    }
+                    # Count phi alternatives from inputs array (first input is control, rest are values)
+                    my $phi_inputs = $node->inputs;
+                    my $actual_alternatives = scalar($phi_inputs->@*) - 1;  # Subtract control input
 
                     if ($actual_alternatives != $expected_alternatives) {
-                        push @errors, "Phi node $node_id in node $region_id expects $expected_alternatives inputs ($expected_alternatives predecessors) but has $actual_alternatives";
+                        push @errors, "Phi node $node_id in node $region_id expects $expected_alternatives value inputs ($expected_alternatives predecessors) but has $actual_alternatives";
                     }
                 }
             }
