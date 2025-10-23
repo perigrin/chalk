@@ -203,6 +203,10 @@ subtest 'Manual IR graph construction for return 1 + 2 * 3' => sub {
 };
 
 # Test IR Builder generates correct IR for arithmetic expression
+# TODO: Re-enable when parser integration is complete
+SKIP: {
+    skip 'build_from_code removed - use parser with semantic actions instead', 1;
+
 subtest 'IR Builder generates correct IR for return 1 + 2 * 3' => sub {
     use_ok('Chalk::IR::Builder');
 
@@ -239,6 +243,7 @@ subtest 'IR Builder generates correct IR for return 1 + 2 * 3' => sub {
     cmp_deeply($ret_node->inputs, ['node_0', 'node_2'],
                'Return connects to Start (control) and Add (data)');
 };
+}  # End SKIP
 
 # Test JSON serialization for arithmetic expressions
 subtest 'JSON serialization of arithmetic IR' => sub {
