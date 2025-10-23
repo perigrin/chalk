@@ -15,7 +15,7 @@ use File::Spec;
 
 # Get BNF grammar for parsing BNF files
 my $bnf_parser = Chalk::Grammar::BNF->new();
-my $bnf_grammar = $bnf_parser->grammar();
+my $bnf_grammar = $bnf_parser->grammar;
 my $parser = Chalk::Parser->new(grammar => $bnf_grammar);
 
 # Get all .bnf files in grammar/
