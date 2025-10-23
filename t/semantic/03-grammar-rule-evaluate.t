@@ -7,12 +7,13 @@ use warnings;
 use Test::More;
 
 use lib 'lib';
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::EvalContext;
 
 # Test that GrammarRule has evaluate method
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['a', 'b']],
         ]
@@ -24,7 +25,7 @@ use Chalk::EvalContext;
 
 # Test default evaluate implementation with no children
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => []],  # Empty production
         ]
@@ -49,7 +50,7 @@ use Chalk::EvalContext;
 
 # Test default evaluate implementation with children
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['a', 'b', 'c']],
         ]
@@ -106,7 +107,7 @@ use Chalk::EvalContext;
 
 # Test evaluate can access rule information
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['Expression' => ['Number', '+', 'Number']],
         ]

@@ -17,11 +17,11 @@ class Chalk::Semiring::SPPFSymbolNode {
     field @packed_nodes;
 
     method add_packed_node($packed_node) {
-        my @new_children = $packed_node->children;
+        my @new_children = $packed_node->children();
 
         # Check if we already have a packed node with the same children
         for my $existing (@packed_nodes) {
-            my @existing_children = $existing->children;
+            my @existing_children = $existing->children();
 
             # Different sizes can't be duplicates, skip
             next unless @existing_children == @new_children;
@@ -42,11 +42,11 @@ class Chalk::Semiring::SPPFSymbolNode {
 
     method packed_nodes() { @packed_nodes }
 
-    method to_string(@) {
-        return "$symbol\[$start_pos,$end_pos\]";
+    method to_string(@args) {
+        return "$symbol\[$start_pos(),$end_pos()\]";
     }
 
-    method key() { "$symbol|$start_pos|$end_pos" }
+    method key() { "$symbol()|$start_pos()|$end_pos()" }
 }
 
 class Chalk::Semiring::SPPFPackedNode {
@@ -61,7 +61,7 @@ class Chalk::Semiring::SPPFPackedNode {
 
     method children() { @children }
 
-    method to_string(@) {
+    method to_string(@args) {
         my $rule_str     = $rule ? $rule->to_string : "terminal";
         my $children_str = join( ", ", map { "$_" } @children );
         return "$rule_str -> [$children_str]";
@@ -75,11 +75,11 @@ class Chalk::Semiring::SPPFTerminalNode {
     field $start_pos :param :reader;
     field $end_pos   :param :reader;
 
-    method to_string(@) {
-        return "'$symbol'\[$start_pos,$end_pos\]";
+    method to_string(@args) {
+        return "'$symbol'\[$start_pos(),$end_pos()\]";
     }
 
-    method key() { "$symbol|$start_pos|$end_pos" }
+    method key() { "$symbol()|$start_pos()|$end_pos()" }
 }
 
 # Pure SPPF Element - only tracks forest structure, no scoring
@@ -89,8 +89,9 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
 
     method multiply( $other, $swap = undef ) {
         # Create new combined SPPF node representing sequence
+        my $other_node = $other->sppf_node();
         my $combined_node =
-          $forest->create_sequence_node( $sppf_node, $other->sppf_node );
+          $forest->create_sequence_node( $sppf_node, $other_node );
 
         return Chalk::Semiring::SPPFElement->new(
             sppf_node => $combined_node,
@@ -99,14 +100,15 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
     }
 
     method add( $other, $swap = undef ) {
-        my $self_start = $sppf_node->start_pos;
-        my $self_end = $sppf_node->end_pos;
-        my $other_start = $other->sppf_node->start_pos;
-        my $other_end = $other->sppf_node->end_pos;
+        my $self_start = $sppf_node->start_pos();
+        my $self_end = $sppf_node->end_pos();
+        my $other_node = $other->sppf_node();
+        my $other_start = $other_node->start_pos();
+        my $other_end = $other_node->end_pos();
 
         # Merge alternatives if they span the same range
         if ($self_start == $other_start && $self_end == $other_end) {
-            $forest->add_alternative( $sppf_node, $other->sppf_node );
+            $forest->add_alternative( $sppf_node, $other_node );
         }
 
         # Prefer element that went further (for consistency with composite pattern)
@@ -117,10 +119,11 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
     method equals( $other, $swap = undef ) {
         return 0 unless ref($other) eq ref($self);
         # Two SPPF elements are equal if they reference the same node
-        return builtin::refaddr($sppf_node) == builtin::refaddr($other->sppf_node);
+        my $other_node = $other->sppf_node();
+        return refaddr($sppf_node) == refaddr($other_node);
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         return "SPPF:$sppf_node";
     }
 }
@@ -152,8 +155,9 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
+        my $lhs = $rule->lhs();
         my $symbol_node =
-          $forest->get_or_create_symbol_node( $rule->lhs, $start_pos, $end_pos );
+          $forest->get_or_create_symbol_node( $lhs, $start_pos, $end_pos );
 
         return Chalk::Semiring::SPPFElement->new(
             sppf_node => $symbol_node,
@@ -169,31 +173,33 @@ class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
 
     # Convenience accessors for backward compatibility
     method score() {
-        return $composite->element_at(1)->score;
+        return $composite->element_at(1)->score();
     }
 
     method path() {
-        return $composite->element_at(1)->path;
+        return $composite->element_at(1)->path();
     }
 
     method sppf_node() {
-        return $composite->element_at(0)->sppf_node;
+        return $composite->element_at(0)->sppf_node();
     }
 
     method forest() {
-        return $composite->element_at(0)->forest;
+        return $composite->element_at(0)->forest();
     }
 
     # Delegate core operations to composite
     method multiply( $other, $swap = undef ) {
-        my $result = $composite->multiply($other->composite);
+        my $other_composite = $other->composite();
+        my $result = $composite->multiply($other_composite);
         return Chalk::Semiring::SPPFViterbiElement->new(
             composite => $result
         );
     }
 
     method add( $other, $swap = undef ) {
-        my $result = $composite->add($other->composite);
+        my $other_composite = $other->composite();
+        my $result = $composite->add($other_composite);
         return Chalk::Semiring::SPPFViterbiElement->new(
             composite => $result
         );
@@ -201,21 +207,31 @@ class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
 
     method equals( $other, $swap = undef ) {
         return 0 unless ref($other) eq ref($self);
-        return $composite->equals($other->composite);
+        my $other_composite = $other->composite();
+        return $composite->equals($other_composite);
     }
 
-    method to_string(@) {
+    method to_string(@args) {
+        my $score = $self->score();
+        my $path = $self->path();
+        my $node = $self->sppf_node();
         return sprintf( '%.4f[%s] SPPF:%s',
-            exp($self->score), join( ',', $self->path->@* ), $self->sppf_node );
+            exp($score), join( ',', $path->@* ), $node );
     }
 
     # Backward compatibility helpers
-    method probability() { exp($self->score) }
-    method best_path()   { $self->path->[0] }
+    method probability() {
+        my $score = $self->score();
+        return exp($score);
+    }
+    method best_path() {
+        my $path = $self->path();
+        return $path->[0];
+    }
 
     method validate_complete_parse($input_length) {
-        my $node = $self->sppf_node;
-        return $node->start_pos == 0 && $node->end_pos == $input_length;
+        my $node = $self->sppf_node();
+        return $node->start_pos() == 0 && $node->end_pos() == $input_length;
     }
 }
 
@@ -242,8 +258,8 @@ class Chalk::Semiring::SPPFForest {
     }
 
     method create_sequence_node( $left_node, $right_node ) {
-        my $start = $left_node->start_pos;
-        my $end = $right_node->end_pos;
+        my $start = $left_node->start_pos();
+        my $end = $right_node->end_pos();
 
         my $seq_node = $self->get_or_create_symbol_node( "SEQ", $start, $end );
 
@@ -256,11 +272,12 @@ class Chalk::Semiring::SPPFForest {
     }
 
     method add_alternative( $node1, $node2 ) {
-        return unless $node1 isa Chalk::Semiring::SPPFSymbolNode
-                   && $node2 isa Chalk::Semiring::SPPFSymbolNode;
+        my $class = 'Chalk::Semiring::SPPFSymbolNode';
+        return unless ref($node1) eq $class && ref($node2) eq $class;
 
         # Merge all packed nodes from node2 into node1
-        for my $packed ($node2->packed_nodes) {
+        my @nodes = $node2->packed_nodes();
+        for my $packed (@nodes) {
             $node1->add_packed_node($packed);  # add_packed_node handles de-duplication
         }
     }
@@ -292,15 +309,17 @@ class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
         );
 
         # Expose forest for backward compatibility
-        $forest = $sppf_semiring->forest;
+        $forest = $sppf_semiring->forest();
 
         # Wrap identity elements
+        my $comp_mul_id = $composite->mul_id();
         $mul_id = Chalk::Semiring::SPPFViterbiElement->new(
-            composite => $composite->mul_id
+            composite => $comp_mul_id
         );
 
+        my $comp_add_id = $composite->add_id();
         $add_id = Chalk::Semiring::SPPFViterbiElement->new(
-            composite => $composite->add_id
+            composite => $comp_add_id
         );
 
         $root_element = $mul_id;  # For compatibility

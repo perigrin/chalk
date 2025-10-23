@@ -31,7 +31,7 @@ class Chalk::Semiring::BooleanElement :isa(Chalk::Element) {
         return $value;
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         return $value ? '1' : '0';
     }
 }

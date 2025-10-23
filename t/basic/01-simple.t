@@ -6,10 +6,11 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
-my $grammar = Chalk::Grammar->build_grammar(
+my $grammar = Test::Chalk::Grammar->build_grammar(
     rules => [
         [ 'A' => [] ]
     ]

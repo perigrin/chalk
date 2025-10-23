@@ -1,0 +1,451 @@
+# ============================================================================
+# Chalk BNF Grammar - Restricted Perl Subset for Compilation
+# ============================================================================
+#
+# DESIGN PRINCIPLES:
+#
+# 1. **Classes Only - No Packages**
+#    Chalk exclusively uses modern Perl `class` syntax (5.40+). The `package`
+#    keyword is not supported in chalk.bnf. Classes provide clear object
+#    semantics suitable for compilation, while packages are namespace containers
+#    with ambiguous behavior.
+#
+# 2. **Static Parseability**
+#    All constructs must be statically parseable without runtime information.
+#    This excludes symbolic references, eval STRING, most special variables,
+#    and other dynamic features that complicate static analysis.
+#
+# 3. **Alignment with Standard Perl**
+#    Where beneficial for static parsing, we adopt restrictions from the
+#    Standard Perl specification (https://metacpan.org/pod/standard):
+#    - All hash keys must be quoted (no bareword auto-quoting)
+#    - No HEREDOCs (cannot be expressed in BNF)
+#    - No indirect object notation (ambiguous syntax)
+#    - Function calls must use parentheses
+#
+# 4. **Compilation Target**
+#    Grammar designed to enable compilation to intermediate representations
+#    (Sea of Nodes IR) with clear semantics suitable for optimization and
+#    formal verification.
+#
+# 5. **Self-Hosting**
+#    The grammar must parse all Chalk library code in lib/. Currently at
+#    100% self-hosting (26/26 files parse successfully).
+#
+# KEY EXCLUSIONS:
+#
+# - `package` declarations (use `class` instead)
+# - eval STRING (eval BLOCK may be acceptable)
+# - Symbolic references: $$var, &{$code}, *{$glob}
+# - Typeglobs and formats
+# - Most special variables (except $1, $2, @-, etc.)
+# - Indirect object syntax: new Class @args
+# - Barewords (except keywords and special cases)
+# - HEREDOCs (per Standard Perl - cannot express in BNF)
+# - Old-style OO (Moose, Moo, bless) - use `class` instead
+#
+# OPERATOR PRECEDENCE (lowest to highest):
+#
+# Assignment (=, +=, -=, //=, etc.)
+# Ternary (?:)
+# Logical OR (||, or, //)
+# Logical AND (&&, and)
+# Comparison (==, !=, eq, ne, <, >, <=, >=, cmp, <=>)
+# Regex match (=~, !~)
+# Range (..)
+# Concatenation (.)
+# Additive (+, -)
+# Multiplicative (*, /, %)
+# Unary (!, not, -, +, ++, --, \)
+# Postfix (++, --)
+# Primary (literals, variables, calls, array/hash access)
+#
+# ============================================================================
+
+# Pattern definitions
+%WS% = /[ \t\r\n]+/
+%COMMENT% = /#[^\n]*/
+%IDENTIFIER% = /[a-zA-Z_][a-zA-Z0-9_]*/
+%SPECIAL_IDENTIFIER% = /[0-9]+|[&`'+@!$-]|^[A-Z]|\{[^}]+\}/
+%INTEGER% = /[0-9]+/
+%FLOAT% = /[0-9]+\.[0-9]+/
+%VERSION% = /[0-9]+(?:\.[0-9]+)+/
+%SHEBANG% = /#!.*\n/
+%SINGLE_QUOTED_STRING% = /'(?:[^'\\]|\\.)*'/
+%DOUBLE_QUOTED_STRING% = /"(?:[^"\\]|\\.)*"/
+%REGEX_CONTENT% = /(?:[^\/\\]|\\.)+/
+%REGEX_FLAGS% = /[msixpodualn]*/
+%STRING_COMPARE_OP% = /eq|ne|lt|gt|le|ge|cmp/
+%NUM_COMPARE_OP% = /==|!=|<=|>=|<=>|<|>/
+%REGEX_MATCH_OP% = /=~|!~/
+%ASSIGN_OP% = /\/\/=|\|\|=|\+=|-=|\.=/
+
+# ============================================================================
+# GRAMMAR RULES - Organized Generic → Specific
+# ============================================================================
+
+# Start symbol (most generic)
+Program -> WS_OPT StatementList WS_OPT
+Program -> Shebang WS_OPT StatementList WS_OPT
+
+# Statement lists
+StatementList -> Statement WS_OPT ';' WS_OPT StatementList
+StatementList -> Statement WS_OPT StatementList
+StatementList -> Statement WS_OPT
+StatementList ->
+
+# Statements
+Statement -> ExpressionList
+Statement -> Block
+Statement -> UseStatement
+Statement -> VariableDeclaration
+Statement -> ReturnStatement
+Statement -> LoopControl
+Statement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
+
+# Blocks (literal blocks and block-containing statements)
+Block -> ClassDeclaration
+Block -> MethodDeclaration
+Block -> AdjustBlock
+Block -> LexicalSubroutine
+Block -> SubroutineDeclaration
+Block -> ConditionalStatement
+Block -> WhileStatement
+Block -> ForStatement
+Block -> '{' WS_OPT StatementList WS_OPT '}'
+
+ClassDeclaration -> 'class' WS_OPT QualifiedIdentifier WS_OPT Block
+ClassDeclaration -> 'class' WS_OPT QualifiedIdentifier WS_OPT AttributeList WS_OPT Block
+
+# Conditional keyword
+ConditionalKeyword -> 'if'
+ConditionalKeyword -> 'unless'
+
+# Conditional statements (block form)
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+
+# While loops
+WhileStatement -> 'while' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+
+# For loops (only foreach-style with explicit variable)
+ForStatement -> 'for' WS_OPT LexicalDeclarator WS_OPT Variable WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+
+# Return statements
+ReturnStatement -> 'return'
+ReturnStatement -> 'return' WS_OPT Expression
+ReturnStatement -> 'return' WS_OPT '(' WS_OPT ExpressionList WS_OPT ')'
+
+# Loop control
+LoopControl -> 'last'
+LoopControl -> 'next'
+
+# Declarations
+
+# Use statements
+UseStatement -> 'use' WS_OPT Number  # use 5.42.0
+UseStatement -> 'use' WS_OPT QualifiedIdentifier  # use Module
+UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT QuotedWordList  # use Module qw(...)
+UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT String  # use experimental 'class'
+UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT ExpressionList  # use overload ... => ...
+
+# Lexical declarator
+LexicalDeclarator -> 'my'
+LexicalDeclarator -> 'state'
+LexicalDeclarator -> 'field'
+
+# Variable declarations (with optional attributes for fields)
+VariableDeclaration -> LexicalDeclarator WS_OPT Variable
+VariableDeclaration -> LexicalDeclarator WS_OPT Variable WS_OPT AttributeList
+VariableDeclaration -> LexicalDeclarator WS_OPT Variable WS_OPT '=' WS_OPT Expression
+VariableDeclaration -> LexicalDeclarator WS_OPT Variable WS_OPT AttributeList WS_OPT '=' WS_OPT Expression
+VariableDeclaration -> LexicalDeclarator WS_OPT '(' WS_OPT VariableList WS_OPT ')' WS_OPT '=' WS_OPT Expression
+
+# Variable list for list assignment
+VariableList -> Variable WS_OPT ',' WS_OPT VariableList
+VariableList -> Variable
+
+# Method declarations
+MethodDeclaration -> 'method' WS_OPT Identifier WS_OPT '(' WS_OPT ParameterList WS_OPT ')' WS_OPT Block
+MethodDeclaration -> 'method' WS_OPT Identifier WS_OPT Block
+
+# ADJUST blocks
+AdjustBlock -> 'ADJUST' WS_OPT Block
+
+# Subroutines (package-level)
+SubroutineDeclaration -> 'sub' WS_OPT QualifiedIdentifier WS_OPT '(' WS_OPT ParameterList WS_OPT ')' WS_OPT Block
+SubroutineDeclaration -> 'sub' WS_OPT QualifiedIdentifier WS_OPT Block
+
+# Lexical subs
+LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
+
+# ============================================================================
+# Expression precedence hierarchy (Generic -> Specific)
+# ============================================================================
+#
+# PRECEDENCE CLIMBING PATTERN EXPLAINED:
+#
+# This grammar uses "precedence climbing" to encode operator precedence through
+# rule nesting. Lower precedence operators appear higher in the hierarchy
+# (closer to Expression), higher precedence operators appear deeper (closer
+# to Primary).
+#
+# HOW FALLTHROUGH RULES WORK:
+#
+# Each precedence level has TWO types of rules:
+#   1. FALLTHROUGH: Delegates to next higher precedence level
+#      Example: Assignment -> Ternary
+#      Meaning: "If there's no '=' operator, parse at Ternary precedence"
+#
+#   2. OPERATOR: Matches the actual operator for this level
+#      Example: Assignment -> Ternary '=' Assignment
+#      Meaning: "Parse left operand as Ternary, then '=', then right operand"
+#
+# IMPORTANT: Rule names indicate PRECEDENCE LEVEL, not result type!
+#
+# "Assignment -> Ternary" does NOT mean "parse a Ternary operator"
+# It means "parse at the Ternary precedence level (or anything higher precedence)"
+#
+# PARSE EXAMPLES:
+#
+# Example 1: $x = 0
+#   Expression -> Assignment -> Ternary '=' Assignment
+#                   ↓                       ↓
+#              (delegates through          (delegates through
+#               entire chain to            entire chain to
+#               Primary -> Variable)       Primary -> Literal)
+#   Result: Assignment node with Variable($x) and Literal(0) as children
+#
+# Example 2: $x || $y
+#   Expression -> Assignment -> Ternary -> LogicalOr '||' LogicalAnd
+#                   ↓           ↓          ↓                ↓
+#              (fallthrough) (fallthrough) (Variable)      (Variable)
+#   Result: LogicalOr node (NOT Ternary, NOT Assignment)
+#
+# Example 3: $a = $b ? 1 : 0
+#   Expression -> Assignment -> Ternary '=' Assignment
+#                   ↓                       ↓
+#              (fallthrough to Var)    Ternary '?' Expression ':' Ternary
+#                                         ↓            ↓            ↓
+#                                      (Var $b)     (Lit 1)      (Lit 0)
+#   Result: Assignment node containing Ternary node
+#
+# The Earley parser correctly distinguishes these because it matches complete
+# rules - the '=' or '?' terminals must actually be present in the input.
+#
+# Organized from lowest precedence (top) to highest (bottom)
+
+# Expression is the entry point (delegates to Assignment)
+Expression -> Assignment
+
+# Assignment operators (lowest precedence, right-associative)
+Assignment -> Ternary
+Assignment -> Ternary WS_OPT '=' WS_OPT Assignment
+Assignment -> Ternary WS_OPT %ASSIGN_OP% WS_OPT Assignment
+
+# Ternary operator (right-associative)
+Ternary -> LogicalOr
+Ternary -> LogicalOr WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Ternary
+
+# Logical OR operators (left-associative)
+LogicalOr -> LogicalAnd
+LogicalOr -> LogicalOr WS_OPT '||' WS_OPT LogicalAnd
+LogicalOr -> LogicalOr WS_OPT 'or' WS_OPT LogicalAnd
+LogicalOr -> LogicalOr WS_OPT '//' WS_OPT LogicalAnd
+
+# Logical AND operators (left-associative)
+LogicalAnd -> Comparison
+LogicalAnd -> LogicalAnd WS_OPT '&&' WS_OPT Comparison
+LogicalAnd -> LogicalAnd WS_OPT 'and' WS_OPT Comparison
+
+# Comparison operators (left-associative)
+Comparison -> RegexMatch
+Comparison -> Comparison WS_OPT %NUM_COMPARE_OP% WS_OPT RegexMatch
+Comparison -> Comparison WS_OPT %STRING_COMPARE_OP% WS_OPT RegexMatch
+Comparison -> Comparison WS_OPT 'isa' WS_OPT QualifiedIdentifier
+
+# Regex match operators (left-associative)
+RegexMatch -> Range
+RegexMatch -> RegexMatch WS_OPT %REGEX_MATCH_OP% WS_OPT Range
+
+# Range operator (left-associative)
+Range -> Concatenation
+Range -> Range WS_OPT '..' WS_OPT Concatenation
+
+# String concatenation (left-associative)
+Concatenation -> Additive
+Concatenation -> Concatenation WS_OPT '.' WS_OPT Additive
+
+# Additive operators (left-associative)
+Additive -> Multiplicative
+Additive -> Additive WS_OPT '+' WS_OPT Multiplicative
+Additive -> Additive WS_OPT '-' WS_OPT Multiplicative
+
+# Multiplicative operators (left-associative)
+Multiplicative -> Unary
+Multiplicative -> Multiplicative WS_OPT '*' WS_OPT Unary
+Multiplicative -> Multiplicative WS_OPT '/' WS_OPT Unary
+
+# Unary prefix operators (right-associative)
+Unary -> Postfix
+Unary -> '!' WS_OPT Unary
+Unary -> 'not' WS_OPT Unary
+Unary -> '-' WS_OPT Unary
+Unary -> '+' WS_OPT Unary
+Unary -> '++' WS_OPT Unary
+Unary -> '--' WS_OPT Unary
+Unary -> '\\' WS_OPT Unary  # Reference operator: \$var, \@array, \%hash
+
+# Postfix operators
+Postfix -> Primary
+Postfix -> Variable '++'
+Postfix -> Variable '--'
+
+# Expression lists (with optional trailing commas)
+ExpressionList -> Expression WS_OPT ',' WS_OPT ExpressionList
+ExpressionList -> Expression WS_OPT ','  # Trailing comma
+ExpressionList -> Expression
+ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression  # Fat comma pair
+ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Fat comma pair with trailing comma
+ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Pairs with more
+ExpressionList ->
+
+# Primary expressions (highest precedence)
+Primary -> Literal
+Primary -> Variable
+Primary -> Identifier  # Bareword (can be function name, method name, or string in context)
+Primary -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
+Primary -> Identifier '(' WS_OPT ')'  # Function call with no args
+Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
+Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
+Primary -> 'exists' '(' WS_OPT Expression WS_OPT ')'  # exists() builtin
+Primary -> 'defined' '(' WS_OPT Expression WS_OPT ')'  # defined() builtin
+Primary -> 'map' WS_OPT Block WS_OPT Expression  # map BLOCK LIST
+Primary -> 'grep' WS_OPT Block WS_OPT Expression  # grep BLOCK LIST
+Primary -> 'all' WS_OPT Block WS_OPT Expression  # all BLOCK LIST
+Primary -> 'any' WS_OPT Block WS_OPT Expression  # any BLOCK LIST
+Primary -> '[' WS_OPT ExpressionList WS_OPT ']'  # Array constructor
+Primary -> '[' WS_OPT ']'  # Empty array
+Primary -> '{' WS_OPT ExpressionList WS_OPT '}'  # Hash constructor
+Primary -> '{' WS_OPT '}'  # Empty hash
+Primary -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
+Primary -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
+Primary -> '...'  # Ellipsis / yada-yada operator
+
+# ============================================================================
+# HELPER RULES AND TERMINALS (Most specific)
+# ============================================================================
+
+# Parameter lists (for method/sub signatures)
+ParameterList -> Assignment
+ParameterList -> Assignment WS_OPT ',' WS_OPT ParameterList
+ParameterList ->  # Empty parameter list
+
+# Attribute lists (for fields and classes)
+AttributeList -> Attribute
+AttributeList -> Attribute WS_OPT AttributeList
+
+# Attributes
+Attribute -> ':param'
+Attribute -> ':reader'
+Attribute -> ':reader' '(' Identifier ')'
+Attribute -> ':isa' '(' QualifiedIdentifier ')'
+
+# Qualified identifiers for fully-qualified subs
+QualifiedIdentifier -> Identifier
+QualifiedIdentifier -> Identifier '::' QualifiedIdentifier
+
+# Variables
+Variable -> ScalarVar
+Variable -> ArrayVar
+Variable -> HashVar
+Variable -> ArraySize
+Variable -> Variable '->' '@' '*'  # Postfix array deref: $ref->@*
+Variable -> Variable '->' '%' '*'  # Postfix hash deref: $ref->%*
+
+ScalarVar -> '$' Identifier
+ScalarVar -> '$' %SPECIAL_IDENTIFIER%
+ArrayVar -> '@' Identifier
+ArrayVar -> '@' %SPECIAL_IDENTIFIER%
+HashVar -> '%' Identifier
+HashVar -> '%' %SPECIAL_IDENTIFIER%
+
+# Array size
+ArraySize -> '$#' Identifier         # $#array
+ArraySize -> '$#' '$' Identifier     # $#$arrayref
+
+# Array/Hash element access
+Variable -> ScalarVar '[' Expression ']'              # $arr[0]
+Variable -> ScalarVar '{' Expression '}'              # $hash{key}
+Variable -> ArrayVar '[' Expression ']'               # @arr[0..5] (slice with range expr)
+
+# Arrow notation (method-style dereference)
+Variable -> Variable '->' '[' Expression ']'          # $ref->[0]
+Variable -> Variable '->' '{' Expression '}'          # $ref->{key}
+
+# Method calls (instance)
+Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'
+Variable -> Variable '->' Identifier
+
+# Subroutine reference calls: $coderef->($arg)
+Variable -> Variable '->' '(' WS_OPT ExpressionList WS_OPT ')'
+Variable -> Variable '->' '(' WS_OPT ')'  # Coderef call with no args
+
+# Literals
+Literal -> Number
+Literal -> String
+Literal -> QuotedWordList
+Literal -> RegexPattern
+Literal -> RegexSubstitution
+Literal -> EmptyList
+Literal -> 'undef'
+
+EmptyList -> '(' WS_OPT ')'
+
+# Strings - only regular quoted strings
+String -> SingleQuotedString
+String -> DoubleQuotedString
+
+SingleQuotedString -> %SINGLE_QUOTED_STRING%
+DoubleQuotedString -> %DOUBLE_QUOTED_STRING%
+
+# Quote operators - only qw()
+QuotedWordList -> 'qw' '(' WordList ')'
+
+# Words in qw() can be identifiers or colon-prefixed symbols
+Word -> Identifier
+Word -> ':' Identifier
+
+WordList -> Word
+WordList -> Word WS_OPT WordList
+
+# Regex patterns
+RegexPattern -> 'qr' '/' RegexContent '/' RegexFlags
+
+# Regex substitution
+RegexSubstitution -> 's' '/' RegexContent '/' RegexContent '/' RegexFlags
+
+RegexContent -> %REGEX_CONTENT%
+
+RegexFlags -> %REGEX_FLAGS%
+RegexFlags ->
+
+# Numbers and versions
+Number -> %VERSION%
+Number -> %FLOAT%
+Number -> %INTEGER%
+
+# Identifiers
+Identifier -> %IDENTIFIER%
+
+# Shebang
+Shebang -> %SHEBANG%
+
+# Whitespace (includes comments - tagged for later processing)
+WS_OPT ->
+WS_OPT -> WS_ELEMENT WS_OPT
+
+WS_ELEMENT -> %WS%
+WS_ELEMENT -> %COMMENT%

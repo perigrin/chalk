@@ -8,13 +8,14 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::Boolean;
 use Chalk::Semiring::Viterbi;
 
 subtest 'Basic arithmetic grammar' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + T)] ],
             [ 'E' => ['T'] ],
@@ -38,7 +39,7 @@ subtest 'Basic arithmetic grammar' => sub {
 };
 
 subtest 'Ambiguous grammar' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],
             [ 'E' => [qw(E * E)] ],
@@ -63,7 +64,7 @@ subtest 'Ambiguous grammar' => sub {
 };
 
 subtest 'Left-recursive grammar' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(S a)] ],
             [ 'S' => ['a'] ],
@@ -80,7 +81,7 @@ subtest 'Left-recursive grammar' => sub {
 };
 
 subtest 'Right-recursive grammar' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(a S)] ],
             [ 'S' => ['a'] ],
@@ -97,7 +98,7 @@ subtest 'Right-recursive grammar' => sub {
 };
 
 subtest 'Empty productions' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(A B)] ],
             [ 'A' => ['a'] ],
@@ -123,7 +124,7 @@ subtest 'Empty productions' => sub {
 };
 
 subtest 'Boolean vs Viterbi semiring' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => ['A'] ],
             [ 'A' => ['a'] ],
@@ -154,7 +155,7 @@ subtest 'Boolean vs Viterbi semiring' => sub {
 };
 
 subtest 'Complex nested grammar' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => [qw(NP VP)] ],
             [ 'NP' => [qw(Det N)] ],
@@ -177,7 +178,7 @@ subtest 'Complex nested grammar' => sub {
 };
 
 subtest 'Invalid input rejection' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'S' => ['a'] ],
         ]

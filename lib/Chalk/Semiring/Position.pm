@@ -35,7 +35,7 @@ class Chalk::Semiring::PositionElement :isa(Chalk::Element) {
         return $end_pos - $start_pos;
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         return "[$start_pos,$end_pos]";
     }
 }

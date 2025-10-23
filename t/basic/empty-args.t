@@ -8,11 +8,12 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'Empty argument lists' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Call' => [qw(name ( ))] ],
             [ 'Call' => [qw(name ( ArgList ))] ],
@@ -31,7 +32,7 @@ subtest 'Empty argument lists' => sub {
 };
 
 subtest 'Optional argument lists' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Call' => [qw(name ( OptArgList ))] ],
             [ 'OptArgList' => ['ArgList'] ],
@@ -51,7 +52,7 @@ subtest 'Optional argument lists' => sub {
 };
 
 subtest 'Method chain debugging' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'Expression' => [qw(Object -> Method)] ],
             [ 'Object' => ['Class'] ],

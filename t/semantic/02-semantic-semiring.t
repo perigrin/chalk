@@ -10,6 +10,7 @@ use Scalar::Util qw(refaddr);
 use lib 'lib';
 use Chalk::Semiring::Semantic;
 use Chalk::EvalContext;
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 
 # Test basic element construction
@@ -36,7 +37,7 @@ use Chalk::Grammar;
 
 # Test semiring construction
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['a', 'b']],
         ]
@@ -54,7 +55,7 @@ use Chalk::Grammar;
 
 # Test init_element_from_rule
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['a', 'b']],
         ]
@@ -157,7 +158,7 @@ use Chalk::Grammar;
 
 # Test identity elements
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['a']],
         ]
@@ -198,7 +199,7 @@ use Chalk::Grammar;
 
 # Test with environment
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['a']],
         ]

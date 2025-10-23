@@ -27,7 +27,7 @@ class Chalk::EarleyItem {
         );
     }
 
-    method key(@) { $key }
+    method key(@args) { $key }
 }
 
 # Leo Items: Limited optimization for right-recursive grammar patterns
@@ -59,7 +59,7 @@ class Chalk::LeoItem {
     method complete()    { 1 }
     method next_symbol() { }
 
-    method key(@) {
+    method key(@args) {
         return "LEO:$symbol|$start_pos|$end_pos";
     }
 
@@ -85,19 +85,30 @@ class Chalk::EarleyChart {
         my $current = $self->get_element($key);
         $chart{$key} = $current ? $current + $element : $element;
 
-        push( $by_end_pos[ $item->end_pos ]->@*, $item );
+        my $end_pos = $item->end_pos;
+        push( $by_end_pos[$end_pos]->@*, $item );
 
         # Index by what they're waiting for
         if ($item isa Chalk::LeoItem) {
             # Leo items are indexed by their symbol and end position
             my $symbol = $item->symbol;
-            push @{$leo_waiting_for{$symbol}{$item->end_pos} //= []}, $item;
+            my $leo_end_pos = $item->end_pos;
+            $leo_waiting_for{$symbol} //= {};
+            my $leo_by_symbol = $leo_waiting_for{$symbol};
+            $leo_by_symbol->{$leo_end_pos} //= [];
+            my $leo_list = $leo_by_symbol->{$leo_end_pos};
+            push( $leo_list->@*, $item );
         }
         elsif (!$item->complete) {
             # Regular items indexed by next_symbol
             my $next_sym = $item->next_symbol;
             if ($next_sym) {
-                push @{$waiting_for{$next_sym}{$item->end_pos} //= []}, $item;
+                my $waiting_end_pos = $item->end_pos;
+                $waiting_for{$next_sym} //= {};
+                my $waiting_by_sym = $waiting_for{$next_sym};
+                $waiting_by_sym->{$waiting_end_pos} //= [];
+                my $waiting_list = $waiting_by_sym->{$waiting_end_pos};
+                push( $waiting_list->@*, $item );
             }
         }
 
@@ -110,12 +121,18 @@ class Chalk::EarleyChart {
     }
 
     method items_waiting_for($symbol, $pos) {
-        return $waiting_for{$symbol}{$pos}->@* if exists($waiting_for{$symbol}{$pos});
+        my $by_symbol = $waiting_for{$symbol};
+        if ($by_symbol && exists($by_symbol->{$pos})) {
+            return $by_symbol->{$pos}->@*;
+        }
         return;
     }
 
     method leo_items_waiting_for($symbol, $pos) {
-        return $leo_waiting_for{$symbol}{$pos}->@* if exists($leo_waiting_for{$symbol}{$pos});
+        my $by_symbol = $leo_waiting_for{$symbol};
+        if ($by_symbol && exists($by_symbol->{$pos})) {
+            return $by_symbol->{$pos}->@*;
+        }
         return;
     }
 
@@ -181,11 +198,18 @@ class Chalk::Parser {
     method parse_string($input) {
         $input_string = $input;  # Store for semantic actions
         # Apply preprocessors in sequence
-        for my $preprocessor_class (@$preprocess) {
+        for my $preprocessor_class ($preprocess->@*) {
             next unless defined $preprocessor_class;
 
             # Load the preprocessor module
-            (my $file = $preprocessor_class) =~ s|::|/|g;
+            my $file = $preprocessor_class;
+            my $search = '::';
+            my $replace = '/';
+            my $pos = index($file, $search);
+            while ($pos >= 0) {
+                substr($file, $pos, length($search), $replace);
+                $pos = index($file, $search, $pos + length($replace));
+            }
             require "$file.pm";
 
             # Apply preprocessing
@@ -247,40 +271,45 @@ class Chalk::Parser {
     method process_position_string( $pos, $chart, $input_string ) {
         my @agenda = $chart->items_ending_at($pos);
 
-        while ( my $item = shift(@agenda) ) {
+        my $item;
+        while ( $item = shift(@agenda) ) {
             my $element = $chart->get_element($item);
             next unless defined($element);
 
             if ( $item->complete ) {
                 $self->complete( $item, $element, $chart, \@agenda );
             }
-            elsif ( defined( my $next_sym = $item->next_symbol ) ) {
-                if ( $grammar->is_nonterminal($next_sym) ) {
-                    $self->predict( $item, $next_sym, $chart, \@agenda );
-                }
-                else {
-                    # Try to match terminal with lexeme support
-                    my $pattern = $item->rule->terminal_to_regex($next_sym);
-                    pos($input_string) = $pos;
-                    if ( $input_string =~ /\G($pattern)/gc ) {
-                        my $match_length = length($1);
-                        $self->scan( $item, $element, $chart, $pos,
-                            $match_length );
+            else {
+                my $next_sym = $item->next_symbol;
+                if (defined($next_sym)) {
+                    if ($grammar->is_nonterminal($next_sym) ) {
+                        $self->predict( $item, $next_sym, $chart, \@agenda );
                     }
+                    else {
+                        # Try to match terminal with lexeme support
+                        my $pattern = $item->rule->terminal_to_regex($next_sym);
+                        pos($input_string) = $pos;
+                        my $match_pattern = qr/\G($pattern)/;
+                        if ( $input_string =~ $match_pattern ) {
+                            my $match_length = length($1);
+                            $self->scan( $item, $element, $chart, $pos,
+                                $match_length );
+                        }
 
-                    # Aycock-Horspool optimization for nullable terminals:
-                    # If the terminal can match empty string, also advance dot
-                    if (ref($next_sym) eq 'Regexp' && "" =~ $next_sym) {
-                        my $advanced_item = Chalk::EarleyItem->new(
-                            start_pos => $item->start_pos,
-                            rule      => $item->rule,
-                            dot_pos   => $item->dot_pos + 1,
-                            end_pos   => $item->end_pos
-                        );
+                        # Aycock-Horspool optimization for nullable terminals:
+                        # If the terminal can match empty string, also advance dot
+                        if (ref($next_sym) eq 'Regexp' && "" =~ $next_sym) {
+                            my $advanced_item = Chalk::EarleyItem->new(
+                                start_pos => $item->start_pos,
+                                rule      => $item->rule,
+                                dot_pos   => $item->dot_pos + 1,
+                                end_pos   => $item->end_pos
+                            );
 
-                        unless ( $chart->has_item($advanced_item) ) {
-                            $chart->add_element( $advanced_item, $element );
-                            push( @agenda, $advanced_item );
+                            unless ( $chart->has_item($advanced_item) ) {
+                                $chart->add_element( $advanced_item, $element );
+                                push( @agenda, $advanced_item );
+                            }
                         }
                     }
                 }
@@ -366,7 +395,7 @@ class Chalk::Parser {
             next unless $waiting_element;
             my $combined_element = $waiting_element * $completed_element;
             $chart->add_element( $leo, $combined_element );
-            push( @$agenda, $leo );
+            push( $agenda->@*, $leo );
             return;    # Skip normal completion
         }
 
@@ -389,7 +418,7 @@ class Chalk::Parser {
             # Only add if not already in chart
             unless ( $chart->has_item($new_item) ) {
                 $chart->add_element( $new_item, $combined_element );
-                push( @$agenda, $new_item );
+                push( $agenda->@*, $new_item );
             }
         }
 
@@ -418,7 +447,7 @@ class Chalk::Parser {
             # Only add if not already in chart
             unless ( $chart->has_item($new_item) ) {
                 $chart->add_element( $new_item, $combined_element );
-                push( @$agenda, $new_item );
+                push( $agenda->@*, $new_item );
             }
         }
     }
@@ -443,7 +472,7 @@ class Chalk::Parser {
             unless ( $chart->has_item($predicted_item) ) {
                 my $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos);
                 $chart->add_element( $predicted_item, $rule_element );
-                push( @$agenda, $predicted_item );
+                push( $agenda->@*, $predicted_item );
             }
         }
 
@@ -462,7 +491,7 @@ class Chalk::Parser {
                 my $current_element = $chart->get_element($item);
                 if ($current_element) {
                     $chart->add_element( $advanced_item, $current_element );
-                    push( @$agenda, $advanced_item );
+                    push( $agenda->@*, $advanced_item );
                 }
             }
         }

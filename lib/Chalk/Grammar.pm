@@ -8,11 +8,6 @@ class Chalk::GrammarRule {
 
     # Supports both exact token matching and lexeme/regex patterns for terminals
     # Use parse() for pre-tokenized input, parse_string() for lexeme matching
-    #
-    # TODO: Consider matrix-based Earley parsing optimization
-    # See: https://medium.com/@celine.y.lee/fast-earley-parsing-2216fb0909a3
-    # Matrix operations could optimize prediction/completion phases while
-    # lexemes handle terminal matching independently
     use overload '""' => 'to_string';
 
     state $next_id = 0;    # auto-incrementing rule ID
@@ -29,7 +24,7 @@ class Chalk::GrammarRule {
         return $nullable if defined($nullable);    # memoize nullable
 
         # Empty production is nullable
-        return $nullable = 1 if @$rhs == 0;
+        return $nullable = 1 if $rhs->@* == 0;
 
         # All symbols in RHS must be nullable
         return $nullable = 1 if all {
@@ -37,11 +32,13 @@ class Chalk::GrammarRule {
 
             # Terminals (no rules) - check if nullable
             unless (@rules) {
+
                 # For regex terminals, test if they match empty string
-                if (ref($_) eq 'Regexp') {
+                if ( ref($_) eq 'Regexp' ) {
                     return "" =~ $_;
                 }
-                # String terminals are not nullable (empty string would be in grammar as [])
+
+    # String terminals are not nullable (empty string would be in grammar as [])
                 return 0;
             }
 
@@ -51,12 +48,12 @@ class Chalk::GrammarRule {
             # Check if this symbol is nullable via any of its rules
             $seen->{$_} = 1;
             return 0 unless any { $_->is_nullable( $grammar, $seen ) } @rules;
-        } @$rhs;
+        } $rhs->@*;
 
         return $nullable = 0;
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         return "($id) $lhs -> " . join( ' ', $rhs->@* );
     }
 
@@ -73,64 +70,90 @@ class Chalk::GrammarRule {
     # Default semantic action: return children as array (for AST construction)
     # Subclasses can override this method to provide custom semantic actions
     method evaluate($context) {
-        return [map { $_->extract } $context->children->@*];
+        return [ map { $_->extract } $context->children->@* ];
     }
 }
 
 class Chalk::Grammar {
+    use Chalk::Grammar::BNF;
+    use Chalk::Parser;
+    use Chalk::Semiring::Semantic;
+
     field $rules        :param :reader;
     field $start_symbol :param :reader;
     field %nullable_cache;
-    field %rules_waiting_for;  # Pre-computed: which rules can wait for which symbols
+    field
+      %rules_waiting_for; # Pre-computed: which rules can wait for which symbols
 
     ADJUST {
-        for my $s ( keys(%$rules) ) {
+        for my $s ( keys( $rules->%* ) ) {
             $self->is_nullable($s);
         }
 
         # Pre-compute which rules can wait for which symbols
         # For each rule A -> α B β, rule A can wait for symbol B
-        for my $lhs (keys %$rules) {
-            for my $rule (@{$rules->{$lhs}}) {
+        for my $lhs ( keys( $rules->%* ) ) {
+            for my $rule ( $rules->{$lhs}->@* ) {
                 my @rhs = $rule->rhs->@*;
-                for my $i (0 .. $#rhs) {
+                for my $i ( 0 .. $#rhs ) {
                     my $symbol = $rhs[$i];
+
                     # This rule can have its dot before $symbol
-                    push @{$rules_waiting_for{$symbol} //= []}, {
-                        rule => $rule,
-                        dot_pos => $i,
-                    };
+                    $rules_waiting_for{$symbol} //= [];
+                    push(
+                        $rules_waiting_for{$symbol}->@*,
+                        {
+                            rule    => $rule,
+                            dot_pos => $i,
+                        }
+                    );
                 }
             }
         }
     }
 
-    my sub new_rule( $lhs, $rhs, $probability = 1.0 ) {
-        $probability ||= 0.1;
-        return Chalk::GrammarRule->new(
-            lhs         => $lhs,
-            rhs         => $rhs,
-            probability => $probability
+   # Build a Grammar from BNF content with optional start symbol override
+   # Production code (app.pl) provides start_symbol; defaults to first nonterminal if not specified
+    sub build_from_bnf( $class, $bnf_content, $start_symbol = undef ) {
+
+        # Parse BNF using hand-coded BNF grammar with semantic actions
+        # This parser fully supports all BNF syntax including grammar rules,
+        # terminals, nonterminals, pattern definitions, and comments.
+        my $bnf         = Chalk::Grammar::BNF->new();
+        my $bnf_grammar = $bnf->grammar();
+
+        # Create environment with pattern table for storing %NAME% definitions
+        my %env = (
+            patterns => {}    # Pattern name => compiled regex
         );
-    }
 
-    my sub insert ( $items, @list ) {
-        return [ ( map { $_, @$items } @list[ 0 .. $#list - 1 ] ), $list[-1] ];
-    }
+        my $semiring = Chalk::Semiring::Semantic->new(
+            env     => \%env,
+            grammar => $bnf_grammar
+        );
 
-    sub build_grammar( $class, %args ) {
-        my $auto_insert = $args{auto_insert} // [];
-        my $rules_array = $args{rules} // [];
+        my $parser = Chalk::Parser->new(
+            grammar  => $bnf_grammar,
+            semiring => $semiring
+        );
 
-        my %rules = ();
-        for my $r (@$rules_array) {
-            my ( $lhs, $rhs ) = @$r;
-            if ( @$auto_insert && @$rhs > 1 ) {
-                $r->[1] = insert( $auto_insert, @$rhs );
-            }
-            push( @{ $rules{$lhs} //= [] }, new_rule(@$r) );
+        my $result = $parser->parse_string($bnf_content);
+
+        # Extract Grammar object from semantic result
+        my $grammar = $result ? $result->context->extract : undef;
+
+        return undef unless $grammar;
+
+     # If start symbol specified and different, create new Grammar with override
+        if ( defined($start_symbol) && $grammar->start_symbol ne $start_symbol )
+        {
+            return Chalk::Grammar->new(
+                rules        => $grammar->rules,
+                start_symbol => $start_symbol
+            );
         }
-        return Chalk::Grammar->new( rules => \%rules, start_symbol => $rules_array->[0]->[0] );
+
+        return $grammar;
     }
 
     method start_rule() { return $rules->{$start_symbol}->[0] }
@@ -164,12 +187,14 @@ class Chalk::Grammar {
     }
 
     method rules_waiting_for($symbol) {
+
         # Returns list of { rule, dot_pos } that can wait for this symbol
-        return $rules_waiting_for{$symbol}->@* if exists($rules_waiting_for{$symbol});
+        return $rules_waiting_for{$symbol}->@*
+          if exists( $rules_waiting_for{$symbol} );
         return;
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         my $grammar = '';
         $grammar .= "Grammar:\n";
         for my $nt ( sort( keys( $rules->%* ) ) ) {

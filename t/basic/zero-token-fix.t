@@ -10,12 +10,13 @@ use FindBin qw($RealBin);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
 subtest 'Zero token regression test' => sub {
     # This was the original failing case - '0' token would fail due to falsiness
-    my $grammar = Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['0'] ] ]);
+    my $grammar = Test::Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['0'] ] ]);
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('0');
@@ -28,7 +29,7 @@ subtest 'Zero token regression test' => sub {
 
 subtest 'Other falsy values still work' => sub {
     # Make sure we didn't break other falsy values
-    my $grammar = Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => [''] ] ]);
+    my $grammar = Test::Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => [''] ] ]);
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('');
@@ -37,7 +38,7 @@ subtest 'Other falsy values still work' => sub {
 
 subtest 'Compare with truthy values' => sub {
     # Sanity check that truthy values still work
-    my $grammar = Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['1'] ] ]);
+    my $grammar = Test::Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['1'] ] ]);
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
     my $result = $parser->parse_string('1');

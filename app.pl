@@ -44,13 +44,14 @@ if ( !caller ) {
     # Build grammar from BNF file
     use File::Basename qw(dirname);
     use File::Spec;
-    use Chalk::BNF;
+    use Chalk::Grammar;
 
     our $chalk_grammar;
 
     # Map grammar names to BNF files
     my %grammar_files = (
-        'Perl' => 'perl.bnf',
+        'Perl'  => 'perl.bnf',
+        'Chalk' => 'chalk.bnf',
     );
 
     if (exists $grammar_files{$grammar_module}) {
@@ -60,9 +61,9 @@ if ( !caller ) {
         my $content = do { local $/; <$fh> };
         close $fh;
 
-        # Perl grammar uses 'Program' as start symbol
-        my $start_symbol = $grammar_module eq 'Perl' ? 'Program' : undef;
-        $chalk_grammar = Chalk::BNF::build_chalk_grammar($content, $start_symbol);
+        # Both Perl and Chalk grammars use 'Program' as start symbol
+        my $start_symbol = ($grammar_module eq 'Perl' || $grammar_module eq 'Chalk') ? 'Program' : undef;
+        $chalk_grammar = Chalk::Grammar->build_from_bnf($content, $start_symbol);
     } else {
         # Try loading as a module
         my $full_module_name = $grammar_module;

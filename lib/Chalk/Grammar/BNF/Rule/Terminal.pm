@@ -1,4 +1,3 @@
-package Chalk::Grammar::BNF::Rule::Terminal;
 # ABOUTME: Semantic action for Terminal - extracts string value from quoted terminal
 # ABOUTME: Removes surrounding quotes and returns the terminal string
 
@@ -12,7 +11,8 @@ class Chalk::Grammar::BNF::Rule::Terminal :isa(Chalk::GrammarRule) {
         #           [1] = terminal content (string with possible escapes)
         #           [2] = "'" (quote)
 
-        my @children = map { $_->extract } $context->children->@*;
+        my $children = $context->children();
+        my @children = map { $_->extract() } $children->@*;
 
         # Extract the middle element (the actual terminal value)
         if (@children >= 3) {
@@ -32,4 +32,3 @@ class Chalk::Grammar::BNF::Rule::Terminal :isa(Chalk::GrammarRule) {
     }
 }
 
-1;

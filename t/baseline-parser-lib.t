@@ -8,7 +8,7 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../lib";
-use Chalk::BNF;
+use Chalk::Grammar::BNF;
 use FindBin qw($RealBin);
 use Chalk::Parser;
 use Chalk::Preprocessor::Heredoc;
@@ -16,11 +16,11 @@ use File::Find;
 use File::Spec;
 
 # Load grammar from BNF file
-my $bnf_file = File::Spec->catfile($RealBin, "..", "grammar", "perl.bnf");
+my $bnf_file = File::Spec->catfile($RealBin, "..", "grammar", "chalk.bnf");
 open my $grammar_fh, "<:utf8", $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$grammar_fh> };
 close $grammar_fh;
-my $chalk_grammar = Chalk::BNF::build_chalk_grammar($bnf_content, "Program");
+my $chalk_grammar = Chalk::Grammar->build_from_bnf($bnf_content, "Program");
 
 # Get all .pm files in lib/
 my @pm_files;
@@ -33,6 +33,9 @@ find(
 
 # Sort for consistent test ordering
 @pm_files = sort @pm_files;
+
+# Skip Chalk/BNF.pm - it's a thin wrapper scheduled for removal (see issue #69)
+@pm_files = grep { $_ !~ m{/Chalk/BNF\.pm$} } @pm_files;
 
 my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
 
@@ -68,8 +71,9 @@ foreach my $file (@pm_files) {
             pass "$rel_path parsed successfully";
             $passed++;
         } else {
-            # Track failure but don't fail the test - this is a baseline assessment
-            pass "$rel_path failed to parse (baseline)";
+            # Mark as TODO - we expect this to fail until grammar is complete
+            my $todo = todo "$rel_path parsing not yet supported";
+            ok 0, "$rel_path should parse";
             $failed++;
             push @failures, $rel_path;
         }

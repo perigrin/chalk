@@ -7,7 +7,7 @@ use warnings;
 use Test::More;
 
 use lib 'lib';
-use Chalk::BNF;
+use Chalk::Grammar::BNF;
 use Chalk::Grammar;
 
 # Helper to compare Grammar objects
@@ -55,8 +55,8 @@ sub grammars_equivalent {
 {
     my $bnf = "Foo -> 'bar'\n";
 
-    my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf);
-    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
+    my $old_grammar = Chalk::Grammar->build_from_bnf($bnf);
+    my $new_grammar = Chalk::Grammar->build_from_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Simple rule");
 }
@@ -69,8 +69,8 @@ Expr -> Expr '+' Term
 Term -> 'number'
 EOF
 
-    my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf, 'Expr');
-    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
+    my $old_grammar = Chalk::Grammar->build_from_bnf($bnf, 'Expr');
+    my $new_grammar = Chalk::Grammar->build_from_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Multiple rules");
 }
@@ -82,8 +82,8 @@ OptionalComma ->
 OptionalComma -> ','
 EOF
 
-    my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf, 'OptionalComma');
-    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
+    my $old_grammar = Chalk::Grammar->build_from_bnf($bnf, 'OptionalComma');
+    my $new_grammar = Chalk::Grammar->build_from_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Empty production");
 }
@@ -95,8 +95,8 @@ Rule -> 'foo' Bar 'baz'
 Bar -> 'x'
 EOF
 
-    my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf, 'Rule');
-    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
+    my $old_grammar = Chalk::Grammar->build_from_bnf($bnf, 'Rule');
+    my $new_grammar = Chalk::Grammar->build_from_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Mixed terminals/nonterminals");
 }
@@ -110,8 +110,8 @@ Foo -> 'bar'
 Baz -> 'qux'
 EOF
 
-    my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf);
-    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
+    my $old_grammar = Chalk::Grammar->build_from_bnf($bnf);
+    my $new_grammar = Chalk::Grammar->build_from_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Full-line comments");
 }
@@ -123,8 +123,8 @@ Foo -> 'bar'  # inline comment
 Baz -> 'qux'
 EOF
 
-    my $old_grammar = Chalk::BNF::build_chalk_grammar($bnf);
-    my $new_grammar = Chalk::BNF::parse_bnf($bnf);
+    my $old_grammar = Chalk::Grammar->build_from_bnf($bnf);
+    my $new_grammar = Chalk::Grammar->build_from_bnf($bnf);
 
     grammars_equivalent($old_grammar, $new_grammar, "Inline comments");
 }
@@ -135,8 +135,8 @@ EOF
     my $content = do { local $/; <$fh> };
     close $fh;
 
-    my $old_grammar = Chalk::BNF::build_chalk_grammar($content, 'Grammar');
-    my $new_grammar = Chalk::BNF::parse_bnf($content);
+    my $old_grammar = Chalk::Grammar->build_from_bnf($content, 'Grammar');
+    my $new_grammar = Chalk::Grammar->build_from_bnf($content);
 
     ok($old_grammar, "Old parser handles bnf.bnf");
     ok($new_grammar, "New parser handles bnf.bnf");

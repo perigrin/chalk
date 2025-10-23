@@ -10,6 +10,7 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use Chalk::Base;
 use Chalk::Semiring::Boolean;
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 
@@ -38,7 +39,7 @@ subtest 'Boolean semiring algebra' => sub {
 };
 
 subtest 'Boolean semiring with simple grammar' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => [qw(A B)] ],
         [ 'A' => ['a'] ],
@@ -60,7 +61,7 @@ subtest 'Boolean semiring with simple grammar' => sub {
 };
 
 subtest 'Boolean semiring with ambiguous grammar' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'E' => [qw(E + E)] ],
         [ 'E' => [qw(E * E)] ],
@@ -84,7 +85,7 @@ subtest 'Boolean semiring with ambiguous grammar' => sub {
 };
 
 subtest 'Boolean vs SPPF correctness comparison' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'E' => [qw(E + E)] ],
         [ 'E' => [qw(E * E)] ],
@@ -134,7 +135,7 @@ subtest 'Boolean vs SPPF correctness comparison' => sub {
 };
 
 subtest 'Boolean semiring init_element_from_rule' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         [],
         [ 'S' => ['a'] ],
     );

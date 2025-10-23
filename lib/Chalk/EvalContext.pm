@@ -1,4 +1,3 @@
-package Chalk::EvalContext;
 # ABOUTME: Comonad implementation for semantic evaluation contexts
 # ABOUTME: Provides extract, extend, duplicate operations for context-sensitive evaluation
 
@@ -36,7 +35,7 @@ class Chalk::EvalContext {
     # The function receives a context and returns a new focus value
     method extend($f) {
         my $new_focus = $f->($self);
-        my @new_children = map { $_->extend($f) } @$children;
+        my @new_children = map { $_->extend($f) } $children->@*;
 
         return Chalk::EvalContext->new(
             focus => $new_focus,
@@ -52,7 +51,7 @@ class Chalk::EvalContext {
     # Comonad operation: duplicate context
     # Returns a context whose focus is the original context
     method duplicate() {
-        my @dup_children = map { $_->duplicate } @$children;
+        my @dup_children = map { $_->duplicate } $children->@*;
 
         return Chalk::EvalContext->new(
             focus => $self,
@@ -67,15 +66,13 @@ class Chalk::EvalContext {
 
     # Convenience method: get extracted value of child at index
     method child($index) {
-        return undef unless $index < scalar(@$children);
+        return unless $index < scalar($children->@*);
         return $children->[$index]->extract;
     }
 
     # Convenience method: get child context at index
     method child_context($index) {
-        return undef unless $index < scalar(@$children);
+        return unless $index < scalar($children->@*);
         return $children->[$index];
     }
 }
-
-1;

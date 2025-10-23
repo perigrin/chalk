@@ -1,4 +1,3 @@
-package Chalk::Semiring::Semantic;
 # ABOUTME: Semantic semiring for building values during parsing with evaluation contexts
 # ABOUTME: Tracks contexts and enables semantic actions via EvalContext comonad
 
@@ -16,7 +15,7 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     method add( $other, $swap = undef ) {
         # For alternatives (choice), prefer non-zero value
         # If self has value 0 (is add_id), return other
-        if (defined($value) && $value =~ /^[0-9]+$/ && $value == 0) {
+        if ($value == 0) {
             return $other;
         }
 
@@ -70,7 +69,6 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     method equals( $other, $swap = undef ) {
         return 0 unless ref($other) eq ref($self);
         # Use refaddr for reference equality to avoid recursion
-        use Scalar::Util qw(refaddr);
         # For semantic semiring, we want elements to be considered non-equal
         # to add_id unless they are literally the same object
         return refaddr($self) == refaddr($other) ? 1 : 0;
@@ -81,7 +79,7 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
         return 1;
     }
 
-    method to_string(@) {
+    method to_string(@args) {
         # Return value (0 for add_id, 1 for others) for Parser's numeric comparisons
         return defined($value) ? "$value" : '1';
     }
@@ -155,4 +153,3 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     }
 }
 
-1;

@@ -5,11 +5,11 @@ use experimental qw(class builtin keyword_any keyword_all);
 
 class Chalk::Element {
     use overload
-      '+'      => 'add',
-      '*'      => 'multiply',
-      '""'     => 'to_string',
-      '=='     => 'equals',
-      fallback => 1;
+      '+'        => 'add',
+      '*'        => 'multiply',
+      '""'       => 'to_string',
+      '=='       => 'equals',
+      'fallback' => 1;
 
     method add( $other, $swap = undef )      { ... }
     method multiply( $other, $swap = undef ) { ... }

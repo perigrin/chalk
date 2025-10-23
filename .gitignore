@@ -59,3 +59,4 @@ chalk.packed
 cpanfile.snapshot
 docs/context-aware-future.md
 docs/guacamole.txt
+perltidy.ERR

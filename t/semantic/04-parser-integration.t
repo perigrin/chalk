@@ -7,13 +7,14 @@ use warnings;
 use Test::More;
 
 use lib 'lib';
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::Semantic;
 
 # Test that Parser works with Semantic semiring
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['a', 'b']],
         ]
@@ -88,7 +89,7 @@ use Chalk::Semiring::Semantic;
 
 # Test that default evaluate() is called
 {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             ['S' => ['x']],
         ]

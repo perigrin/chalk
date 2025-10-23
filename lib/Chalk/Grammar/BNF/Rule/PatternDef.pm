@@ -1,4 +1,3 @@
-package Chalk::Grammar::BNF::Rule::PatternDef;
 # ABOUTME: Semantic action for PatternDef - builds pattern definition rule
 # ABOUTME: Extracts pattern name and regex content (currently returns undef to skip)
 
@@ -11,7 +10,8 @@ class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
         # 1. PatternDef -> '%' NAME '%' WS '=' WS '/' REST_OF_LINE (8 children)
         # 2. PatternDef -> '%' NAME '%' WS '=' WS '//' REGEX '//' FLAGS (10 children)
 
-        my @children = @{$context->children};
+        my $children = $context->children();
+        my @children = $children->@*;
 
         # Extract pattern name (child 1)
         my $name_child = $children[1];
@@ -23,10 +23,11 @@ class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
             # Single-slash with rest-of-line (alternative 1)
             my $rest = $children[7]->focus;
 
-            # Parse rest using greedy match like old parser
-            if ($rest =~ /^(.+)\/([a-z]*)$/) {
-                $regex_content = $1;
-                $flags = $2 // '';
+            # Parse rest using index to find last /
+            my $last_slash = rindex($rest, '/');
+            if ($last_slash >= 0) {
+                $regex_content = substr($rest, 0, $last_slash);
+                $flags = substr($rest, $last_slash + 1) // '';
             } else {
                 die "Invalid single-slash pattern definition: /$rest\n";
             }
@@ -34,7 +35,12 @@ class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
             # Double-slash with explicit structure (alternative 2)
             # 9 children if flags empty, 10 if flags present
             $regex_content = $children[7]->focus;
-            $flags = (defined $children[9] ? $children[9]->focus : '') // '';
+            my $flags_child = $children[9];
+            $flags = '';
+            if (defined($flags_child)) {
+                $flags = $flags_child->focus;
+            }
+            $flags //= '';
         } else {
             # Debug: show what we got
             my $child_summary = join(", ", map {
@@ -57,8 +63,7 @@ class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
 
         # Return undef to signal this should be filtered from grammar rules
         # (pattern definitions are metadata, not grammar productions)
-        return undef;
+        return;
     }
 }
 
-1;

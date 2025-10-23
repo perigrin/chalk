@@ -8,13 +8,14 @@ use experimental qw(defer);
 defer { done_testing() }
 
 use lib "$RealBin/../../lib";
+use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::Boolean;
 use Chalk::Semiring::Viterbi;
 
 subtest 'Simple ambiguous grammar with ViterbiSemiring' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],
             [ 'E' => [qw(E * E)] ],
@@ -36,7 +37,7 @@ subtest 'Simple ambiguous grammar with ViterbiSemiring' => sub {
 };
 
 subtest 'Simple ambiguous grammar with BooleanSemiring' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],
             [ 'E' => [qw(E * E)] ],
@@ -57,7 +58,7 @@ subtest 'Simple ambiguous grammar with BooleanSemiring' => sub {
 };
 
 subtest 'More complex ambiguous expression' => sub {
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + E)] ],
             [ 'E' => [qw(E * E)] ],
@@ -98,7 +99,7 @@ subtest 'More complex ambiguous expression' => sub {
 
 subtest 'Verify existing working grammars still work' => sub {
     # Test a known working grammar from our existing tests
-    my $grammar = Chalk::Grammar->build_grammar(
+    my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
             [ 'E' => [qw(E + T)] ],
             [ 'E' => ['T'] ],
