@@ -8,11 +8,6 @@ class Chalk::GrammarRule {
 
     # Supports both exact token matching and lexeme/regex patterns for terminals
     # Use parse() for pre-tokenized input, parse_string() for lexeme matching
-    #
-    # TODO: Consider matrix-based Earley parsing optimization
-    # See: https://medium.com/@celine.y.lee/fast-earley-parsing-2216fb0909a3
-    # Matrix operations could optimize prediction/completion phases while
-    # lexemes handle terminal matching independently
     use overload '""' => 'to_string';
 
     state $next_id = 0;    # auto-incrementing rule ID
