@@ -542,6 +542,96 @@ class Chalk::IR::Builder {
         return $field_store;
     }
 
+    # Array operations (Issue #98 Phase 2)
+    method build_array_new_node() {
+        # Create ArrayNew node for creating an empty array
+        my $node_id = $self->next_node_id();
+        my $array_new = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ArrayNew',
+            inputs => [$current_control],
+            attributes => {}
+        );
+        $graph->add_node($array_new);
+        return $array_new;
+    }
+
+    method build_array_push_node($array_node, $value_node) {
+        # Create ArrayPush node for appending to array
+        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
+        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
+        my $attributes = {
+            array => $array_ref,
+            value => $value_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $array_push = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ArrayPush',
+            inputs => [$current_control, $array_node->id, $value_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($array_push);
+        return $array_push;
+    }
+
+    method build_array_get_node($array_node, $index_node) {
+        # Create ArrayGet node for accessing array element by index
+        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
+        my $index_ref = { op => 'NodeRef', node_id => $index_node->id };
+        my $attributes = {
+            array => $array_ref,
+            index => $index_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $array_get = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ArrayGet',
+            inputs => [$current_control, $array_node->id, $index_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($array_get);
+        return $array_get;
+    }
+
+    method build_array_set_node($array_node, $index_node, $value_node) {
+        # Create ArraySet node for setting array element by index
+        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
+        my $index_ref = { op => 'NodeRef', node_id => $index_node->id };
+        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
+        my $attributes = {
+            array => $array_ref,
+            index => $index_ref,
+            value => $value_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $array_set = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ArraySet',
+            inputs => [$current_control, $array_node->id, $index_node->id, $value_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($array_set);
+        return $array_set;
+    }
+
+    method build_array_length_node($array_node) {
+        # Create ArrayLength node for getting array size
+        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
+        my $attributes = {
+            array => $array_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $array_length = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ArrayLength',
+            inputs => [$current_control, $array_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($array_length);
+        return $array_length;
+    }
+
 }
 
 1;
