@@ -12,6 +12,7 @@ class Chalk::EvalContext {
     field $env :param :reader;          # Environment (symbol table)
     field $grammar :param :reader;      # Grammar reference
     field $rule :param :reader;         # Rule being evaluated
+    field $forest :param :reader = undef;  # Optional shared parse forest
 
     # Comonad operation: extract the focus value
     method extract() {
@@ -27,7 +28,8 @@ class Chalk::EvalContext {
             end_pos => $end_pos,
             env => $env,
             grammar => $grammar,
-            rule => $rule
+            rule => $rule,
+            forest => $forest
         );
     }
 
@@ -44,7 +46,8 @@ class Chalk::EvalContext {
             end_pos => $end_pos,
             env => $env,
             grammar => $grammar,
-            rule => $rule
+            rule => $rule,
+            forest => $forest
         );
     }
 
@@ -60,7 +63,8 @@ class Chalk::EvalContext {
             end_pos => $end_pos,
             env => $env,
             grammar => $grammar,
-            rule => $rule
+            rule => $rule,
+            forest => $forest
         );
     }
 
@@ -74,5 +78,33 @@ class Chalk::EvalContext {
     method child_context($index) {
         return unless $index < scalar($children->@*);
         return $children->[$index];
+    }
+
+    # Get SPPF alternatives for the current parse position
+    # Returns array of packed nodes representing different parses
+    method alternatives() {
+        return () unless defined($forest);
+
+        # Get the SPPF node corresponding to this context's parse span
+        my $key = sprintf("%s|%d|%d",
+            $rule ? $rule->lhs : "UNKNOWN",
+            $start_pos,
+            $end_pos
+        );
+
+        my $nodes = $forest->nodes();
+        my $node = $nodes->{$key};
+        return () unless $node;
+
+        return $node->packed_nodes();
+    }
+
+    # Get alternatives for a specific child position
+    # Useful for querying different parse alternatives of a child
+    method child_alternatives($index) {
+        return () unless $index < scalar($children->@*);
+        my $child = $children->[$index];
+        return $child->alternatives() if $child->can('alternatives');
+        return ();
     }
 }

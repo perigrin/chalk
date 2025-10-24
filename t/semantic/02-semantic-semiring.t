@@ -10,6 +10,7 @@ use Scalar::Util qw(refaddr);
 use lib 'lib';
 use Chalk::Semiring::Semantic;
 use Chalk::EvalContext;
+use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
 

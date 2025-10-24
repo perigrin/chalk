@@ -27,8 +27,27 @@ class Chalk::Grammar::BNF::Rule::GrammarRule :isa(Chalk::GrammarRule) {
         my $rhs = $children[4] // [];
         $rhs = [] unless ref($rhs) eq 'ARRAY';
 
-        # Return a Chalk::GrammarRule object directly
-        return Chalk::GrammarRule->new(
+        # Try to load custom semantic action class for this rule
+        # Determine grammar name from context (if available)
+        my $grammar_name = $context->env->{grammar_name} // '';
+        my $rule_class;
+
+        if ($grammar_name) {
+            # Try loading Chalk::Grammar::{Name}::Rule::{RuleName}
+            $rule_class = "Chalk::Grammar::${grammar_name}::Rule::${lhs}";
+
+            # Try to load the class
+            eval "require $rule_class; 1";
+            if ($@) {
+                # Class doesn't exist or failed to load, use base class
+                undef $rule_class;
+            }
+        }
+
+        # If custom class exists, use it; otherwise use base Chalk::GrammarRule
+        my $class = $rule_class // 'Chalk::GrammarRule';
+
+        return $class->new(
             lhs         => $lhs,
             rhs         => $rhs,
             probability => 1.0

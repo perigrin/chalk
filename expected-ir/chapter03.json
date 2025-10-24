@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "entry": "node_0",
+  "nodes": [
+    {
+      "id": "node_0",
+      "op": "Start",
+      "inputs": [],
+      "attributes": {
+        "function": "main"
+      }
+    },
+    {
+      "id": "node_1",
+      "op": "Store",
+      "inputs": ["node_0"],
+      "attributes": {
+        "name": "$x",
+        "value": {
+          "op": "Constant",
+          "value": 5,
+          "type": "Int"
+        }
+      }
+    },
+    {
+      "id": "node_2",
+      "op": "Load",
+      "inputs": ["node_0", "node_1"],
+      "attributes": {
+        "name": "$x",
+        "store_id": "node_1"
+      }
+    },
+    {
+      "id": "node_3",
+      "op": "Multiply",
+      "inputs": ["node_0", "node_2"],
+      "attributes": {
+        "left": {
+          "op": "NodeRef",
+          "node_id": "node_2"
+        },
+        "right": {
+          "op": "Constant",
+          "value": 2,
+          "type": "Int"
+        }
+      }
+    },
+    {
+      "id": "node_4",
+      "op": "Return",
+      "inputs": ["node_0", "node_3"],
+      "attributes": {}
+    }
+  ]
+}

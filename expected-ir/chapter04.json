@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "entry": "node_0",
+  "nodes": [
+    {
+      "id": "node_0",
+      "op": "Start",
+      "inputs": [],
+      "attributes": {
+        "function": "calculate",
+        "params": ["$arg"]
+      }
+    },
+    {
+      "id": "node_1",
+      "op": "Proj",
+      "inputs": ["node_0"],
+      "attributes": {
+        "index": 0,
+        "label": "$ctrl"
+      }
+    },
+    {
+      "id": "node_2",
+      "op": "Proj",
+      "inputs": ["node_0"],
+      "attributes": {
+        "index": 1,
+        "label": "$arg"
+      }
+    },
+    {
+      "id": "node_3",
+      "op": "Add",
+      "inputs": ["node_1", "node_2"],
+      "attributes": {
+        "left": {
+          "op": "NodeRef",
+          "node_id": "node_2"
+        },
+        "right": {
+          "op": "Constant",
+          "value": 10,
+          "type": "Int"
+        }
+      }
+    },
+    {
+      "id": "node_4",
+      "op": "Return",
+      "inputs": ["node_1", "node_3"],
+      "attributes": {}
+    }
+  ]
+}

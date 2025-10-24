@@ -10,6 +10,7 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use Chalk::Base;
 use Chalk::Semiring::Boolean;
+use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;

@@ -68,6 +68,7 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
 
 class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
     field $semirings :param :reader;
+    field $shared_context :param :reader = undef;
     field $mul_id :reader;
     field $add_id :reader;
 

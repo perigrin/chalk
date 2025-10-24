@@ -7,6 +7,7 @@ use warnings;
 use Test::More;
 
 use lib 'lib';
+use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;

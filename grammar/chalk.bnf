@@ -101,6 +101,8 @@ Statement -> UseStatement
 Statement -> VariableDeclaration
 Statement -> ReturnStatement
 Statement -> LoopControl
+Statement -> BreakStatement
+Statement -> ContinueStatement
 Statement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
 
 # Blocks (literal blocks and block-containing statements)
@@ -138,7 +140,11 @@ ReturnStatement -> 'return'
 ReturnStatement -> 'return' WS_OPT Expression
 ReturnStatement -> 'return' WS_OPT '(' WS_OPT ExpressionList WS_OPT ')'
 
-# Loop control
+# Break and Continue statements
+BreakStatement -> 'break' WS_OPT
+ContinueStatement -> 'continue' WS_OPT
+
+# Loop control (Perl-style last/next)
 LoopControl -> 'last'
 LoopControl -> 'next'
 
@@ -322,6 +328,9 @@ Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT 
 Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
 Primary -> 'exists' '(' WS_OPT Expression WS_OPT ')'  # exists() builtin
 Primary -> 'defined' '(' WS_OPT Expression WS_OPT ')'  # defined() builtin
+Primary -> 'keys' '(' WS_OPT Expression WS_OPT ')'  # keys() builtin
+Primary -> 'values' '(' WS_OPT Expression WS_OPT ')'  # values() builtin
+Primary -> 'scalar' '(' WS_OPT Expression WS_OPT ')'  # scalar() builtin
 Primary -> 'map' WS_OPT Block WS_OPT Expression  # map BLOCK LIST
 Primary -> 'grep' WS_OPT Block WS_OPT Expression  # grep BLOCK LIST
 Primary -> 'all' WS_OPT Block WS_OPT Expression  # all BLOCK LIST

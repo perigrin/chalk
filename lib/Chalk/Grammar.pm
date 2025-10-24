@@ -114,7 +114,7 @@ class Chalk::Grammar {
 
    # Build a Grammar from BNF content with optional start symbol override
    # Production code (app.pl) provides start_symbol; defaults to first nonterminal if not specified
-    sub build_from_bnf( $class, $bnf_content, $start_symbol = undef ) {
+    sub build_from_bnf( $class, $bnf_content, $start_symbol = undef, $grammar_name = undef ) {
 
         # Parse BNF using hand-coded BNF grammar with semantic actions
         # This parser fully supports all BNF syntax including grammar rules,
@@ -123,13 +123,22 @@ class Chalk::Grammar {
         my $bnf_grammar = $bnf->grammar();
 
         # Create environment with pattern table for storing %NAME% definitions
+        # grammar_name enables automatic loading of Chalk::Grammar::{Name}::Rule::* classes
         my %env = (
-            patterns => {}    # Pattern name => compiled regex
+            patterns     => {},           # Pattern name => compiled regex
+            grammar_name => $grammar_name # For loading custom semantic action classes
+        );
+
+        # Create shared context with parse forest for compositional semirings
+        use Chalk::ParseForest;
+        my %shared_context = (
+            forest => Chalk::ParseForest->new()
         );
 
         my $semiring = Chalk::Semiring::Semantic->new(
             env     => \%env,
-            grammar => $bnf_grammar
+            grammar => $bnf_grammar,
+            shared_context => \%shared_context
         );
 
         my $parser = Chalk::Parser->new(
