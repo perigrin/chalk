@@ -43,9 +43,8 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         # Complex assignments like "$i = $i - 1" work but may use incomplete parse
         # (SPPF creates both parses, semiring currently picks incomplete one - needs optimization pass)
 
-        # Track variables modified in loop for phi node generation
-        # Save scope state before loop (for future phi node implementation)
-        # my $scope_before_loop = $builder->scope;
+        # Begin systematic tracking of loop-carried dependencies
+        $builder->begin_loop_tracking();
 
         # Wire up body statements with IfTrue control
         # Track break and continue exits
@@ -86,6 +85,10 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         }
         # If no backedge controls, loop has no normal exit (only break)
 
+        # Generate phi nodes for all loop-modified variables
+        # This captures variables that changed during loop execution
+        my $loop_phis = $builder->generate_loop_phi_nodes($loop);
+
         # Build exit region: merge IfFalse (normal exit) + break paths
         my @exit_controls = ($if_false->id, @break_controls);
         my $exit_region;
@@ -96,12 +99,8 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         }
         $builder->set_control($exit_region->id);
 
-        # TODO: Create loop phi nodes for variables modified in loop
-        # Future implementation will:
-        #   1. Track which variables are modified within the loop body
-        #   2. For each modified variable, create a Loop Phi node at loop entry
-        #   3. Wire phi inputs: [loop_control, initial_value, loop_value]
-        #   4. Update scope to use phi nodes for those variables within loop
+        # End loop tracking
+        $builder->end_loop_tracking();
 
         return $exit_region;
     }
