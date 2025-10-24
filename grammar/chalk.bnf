@@ -101,6 +101,8 @@ Statement -> UseStatement
 Statement -> VariableDeclaration
 Statement -> ReturnStatement
 Statement -> LoopControl
+Statement -> BreakStatement
+Statement -> ContinueStatement
 Statement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
 
 # Blocks (literal blocks and block-containing statements)
@@ -138,7 +140,11 @@ ReturnStatement -> 'return'
 ReturnStatement -> 'return' WS_OPT Expression
 ReturnStatement -> 'return' WS_OPT '(' WS_OPT ExpressionList WS_OPT ')'
 
-# Loop control
+# Break and Continue statements
+BreakStatement -> 'break' WS_OPT
+ContinueStatement -> 'continue' WS_OPT
+
+# Loop control (Perl-style last/next)
 LoopControl -> 'last'
 LoopControl -> 'next'
 
