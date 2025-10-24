@@ -454,6 +454,93 @@ class Chalk::IR::Builder {
         return \%phis;
     }
 
+    # Class and object support nodes (Issue #98 Phase 1)
+
+    method build_classdef_node($class_name, $fields) {
+        # Create ClassDef node for class definition
+        my $attributes = {
+            name => $class_name,
+            fields => $fields,
+        };
+        my $node_id = $self->next_node_id();
+        my $classdef = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ClassDef',
+            inputs => [$current_control],
+            attributes => $attributes
+        );
+        $graph->add_node($classdef);
+        return $classdef;
+    }
+
+    method build_new_node($class_name, $field_values_hash) {
+        # Create New node for object instantiation
+        # $field_values_hash is a hashref mapping field names to node objects
+        my @input_nodes = ($current_control);
+        my %field_value_refs;
+
+        for my $field_name (sort keys %$field_values_hash) {
+            my $value_node = $field_values_hash->{$field_name};
+            push @input_nodes, $value_node->id;
+            $field_value_refs{$field_name} = {
+                op => 'NodeRef',
+                node_id => $value_node->id
+            };
+        }
+
+        my $attributes = {
+            class => $class_name,
+            field_values => \%field_value_refs
+        };
+        my $node_id = $self->next_node_id();
+        my $new_obj = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'New',
+            inputs => \@input_nodes,
+            attributes => $attributes
+        );
+        $graph->add_node($new_obj);
+        return $new_obj;
+    }
+
+    method build_field_access_node($object_node, $field_name) {
+        # Create FieldAccess node for reading a field
+        my $object_ref = { op => 'NodeRef', node_id => $object_node->id };
+        my $attributes = {
+            field => $field_name,
+            object => $object_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $field_access = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'FieldAccess',
+            inputs => [$current_control, $object_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($field_access);
+        return $field_access;
+    }
+
+    method build_field_store_node($object_node, $field_name, $value_node) {
+        # Create FieldStore node for writing to a field
+        my $object_ref = { op => 'NodeRef', node_id => $object_node->id };
+        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
+        my $attributes = {
+            field => $field_name,
+            object => $object_ref,
+            value => $value_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $field_store = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'FieldStore',
+            inputs => [$current_control, $object_node->id, $value_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($field_store);
+        return $field_store;
+    }
+
 }
 
 1;

@@ -18,6 +18,7 @@ class Chalk::IR::Validator {
         push @all_errors, $self->validate_dominance($graph);
         push @all_errors, $self->validate_phi_placement($graph);
         push @all_errors, $self->validate_loop_structure($graph);
+        push @all_errors, $self->validate_class_nodes($graph);
 
         my $success = scalar( @all_errors ) == 0 ? 1 : 0;
         return ($success, \@all_errors);
@@ -526,6 +527,133 @@ class Chalk::IR::Validator {
         }
 
         return 0;
+    }
+
+    # Validate class and object support nodes (Issue #98 Phase 1)
+    method validate_class_nodes($graph) {
+        my @errors = ();
+        my $nodes = $graph->nodes;
+
+        # Check each node that relates to class/object support
+        for my $node_id (keys( $nodes->%* )) {
+            my $node = $nodes->{$node_id};
+            my $op = $node->op;
+
+            # Validate ClassDef nodes
+            if ($op eq 'ClassDef') {
+                my $attrs = $node->attributes;
+
+                # ClassDef must have 'name' attribute
+                if (!exists($attrs->{name}) || !defined($attrs->{name})) {
+                    push @errors, "ClassDef node $node_id missing required 'name' attribute";
+                }
+
+                # ClassDef must have 'fields' attribute (even if empty)
+                if (!exists($attrs->{fields})) {
+                    push @errors, "ClassDef node $node_id missing required 'fields' attribute";
+                }
+                elsif (ref($attrs->{fields}) ne 'ARRAY') {
+                    push @errors, "ClassDef node $node_id 'fields' attribute must be an array";
+                }
+            }
+
+            # Validate New nodes
+            elsif ($op eq 'New') {
+                my $attrs = $node->attributes;
+
+                # New must have 'class' attribute
+                if (!exists($attrs->{class}) || !defined($attrs->{class})) {
+                    push @errors, "New node $node_id missing required 'class' attribute";
+                }
+
+                # New must have 'field_values' attribute
+                if (!exists($attrs->{field_values})) {
+                    push @errors, "New node $node_id missing required 'field_values' attribute";
+                }
+                elsif (ref($attrs->{field_values}) ne 'HASH') {
+                    push @errors, "New node $node_id 'field_values' attribute must be a hash";
+                }
+                else {
+                    # Validate each field value reference
+                    for my $field_name (keys %{$attrs->{field_values}}) {
+                        my $field_ref = $attrs->{field_values}{$field_name};
+                        if (ref($field_ref) ne 'HASH') {
+                            push @errors, "New node $node_id field '$field_name' value must be a NodeRef";
+                        }
+                        elsif (!exists($field_ref->{node_id})) {
+                            push @errors, "New node $node_id field '$field_name' NodeRef missing 'node_id'";
+                        }
+                        elsif (!exists($nodes->{$field_ref->{node_id}})) {
+                            push @errors, "New node $node_id field '$field_name' references non-existent node " . $field_ref->{node_id};
+                        }
+                    }
+                }
+            }
+
+            # Validate FieldAccess nodes
+            elsif ($op eq 'FieldAccess') {
+                my $attrs = $node->attributes;
+
+                # FieldAccess must have 'field' attribute
+                if (!exists($attrs->{field}) || !defined($attrs->{field})) {
+                    push @errors, "FieldAccess node $node_id missing required 'field' attribute";
+                }
+
+                # FieldAccess must have 'object' attribute
+                if (!exists($attrs->{object})) {
+                    push @errors, "FieldAccess node $node_id missing required 'object' attribute";
+                }
+                elsif (ref($attrs->{object}) ne 'HASH') {
+                    push @errors, "FieldAccess node $node_id 'object' attribute must be a NodeRef";
+                }
+                elsif (!exists($attrs->{object}{node_id})) {
+                    push @errors, "FieldAccess node $node_id 'object' NodeRef missing 'node_id'";
+                }
+                elsif (!exists($nodes->{$attrs->{object}{node_id}})) {
+                    push @errors, "FieldAccess node $node_id references non-existent object node " . $attrs->{object}{node_id};
+                }
+            }
+
+            # Validate FieldStore nodes
+            elsif ($op eq 'FieldStore') {
+                my $attrs = $node->attributes;
+
+                # FieldStore must have 'field' attribute
+                if (!exists($attrs->{field}) || !defined($attrs->{field})) {
+                    push @errors, "FieldStore node $node_id missing required 'field' attribute";
+                }
+
+                # FieldStore must have 'object' attribute
+                if (!exists($attrs->{object})) {
+                    push @errors, "FieldStore node $node_id missing required 'object' attribute";
+                }
+                elsif (ref($attrs->{object}) ne 'HASH') {
+                    push @errors, "FieldStore node $node_id 'object' attribute must be a NodeRef";
+                }
+                elsif (!exists($attrs->{object}{node_id})) {
+                    push @errors, "FieldStore node $node_id 'object' NodeRef missing 'node_id'";
+                }
+                elsif (!exists($nodes->{$attrs->{object}{node_id}})) {
+                    push @errors, "FieldStore node $node_id references non-existent object node " . $attrs->{object}{node_id};
+                }
+
+                # FieldStore must have 'value' attribute
+                if (!exists($attrs->{value})) {
+                    push @errors, "FieldStore node $node_id missing required 'value' attribute";
+                }
+                elsif (ref($attrs->{value}) ne 'HASH') {
+                    push @errors, "FieldStore node $node_id 'value' attribute must be a NodeRef";
+                }
+                elsif (!exists($attrs->{value}{node_id})) {
+                    push @errors, "FieldStore node $node_id 'value' NodeRef missing 'node_id'";
+                }
+                elsif (!exists($nodes->{$attrs->{value}{node_id}})) {
+                    push @errors, "FieldStore node $node_id references non-existent value node " . $attrs->{value}{node_id};
+                }
+            }
+        }
+
+        return @errors;
     }
 }
 
