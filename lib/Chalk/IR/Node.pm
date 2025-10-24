@@ -136,14 +136,31 @@ class Chalk::IR::Node {
         }
 
         # Load nodes can be optimized if they reference a Store with a constant value
+        # ONLY if there are no intervening stores that might alias
         if ($op eq 'Load') {
             my $store_id = $attributes->{store_id};
             if (defined($store_id)) {
                 my $store_node = $graph->get_node($store_id);
                 if (defined($store_node) && $store_node->op eq 'Store') {
                     my $value_ref = $store_node->attributes->{value};
-                    # If the stored value is a constant, fold the Load to that constant
+                    # If the stored value is a constant, check for intervening stores
                     if (_is_constant($value_ref)) {
+                        # Conservative aliasing check: Check if any of the Load's inputs
+                        # is a Store node that is NOT the store_id. If so, there's an
+                        # intervening store that might alias.
+                        for my $input_id ($inputs->@*) {
+                            next unless defined($input_id);
+                            next if $input_id eq $store_id;  # Skip the target store
+
+                            my $input_node = $graph->get_node($input_id);
+                            if (defined($input_node) && $input_node->op eq 'Store') {
+                                # Found an intervening Store - don't optimize (conservative)
+                                # This prevents incorrect optimization when stores might alias
+                                return $self;
+                            }
+                        }
+
+                        # Safe to optimize: No intervening Store nodes found
                         return Chalk::IR::Node->new(
                             id         => $id,
                             op         => 'Constant',
