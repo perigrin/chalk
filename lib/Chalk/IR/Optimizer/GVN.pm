@@ -1,11 +1,11 @@
-# ABOUTME: Global Value Numbering and other optimization passes for Sea of Nodes IR
+# ABOUTME: Global Value Numbering optimization pass for Sea of Nodes IR
 # ABOUTME: Implements GVN for common subexpression elimination and redundant computation removal
 
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
-class Chalk::IR::Optimizer {
+class Chalk::IR::Optimizer::GVN {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
     use Digest::MD5 qw(md5_hex);

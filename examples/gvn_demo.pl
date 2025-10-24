@@ -6,7 +6,7 @@ use v5.42;
 use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::IR::Graph;
-use Chalk::IR::Optimizer;
+use Chalk::IR::Optimizer::GVN;
 
 say "=== Global Value Numbering (GVN) Demo ===\n";
 
@@ -93,7 +93,7 @@ say "  Operations: 3 Add nodes (node_3, node_4, node_5)";
 say "  Note: node_3 and node_4 compute the same value (a+b)\n";
 
 # Run GVN optimization
-my $result = Chalk::IR::Optimizer->run_gvn($graph);
+my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
 my $optimized_graph = $result->{graph};
 my $metrics = $result->{metrics};
 
@@ -177,7 +177,7 @@ say "  Nodes: " . $graph2->node_count;
 say "  node_3: a + b";
 say "  node_4: b + a (commuted, but mathematically equivalent)\n";
 
-my $result2 = Chalk::IR::Optimizer->run_gvn($graph2);
+my $result2 = Chalk::IR::Optimizer::GVN->run_gvn($graph2);
 my $optimized_graph2 = $result2->{graph};
 my $metrics2 = $result2->{metrics};
 
@@ -273,7 +273,7 @@ say "Before optimization:";
 say "  Nodes: " . $graph3->node_count;
 say "  Common subexpression: a*b computed twice\n";
 
-my $result3 = Chalk::IR::Optimizer->run_gvn($graph3);
+my $result3 = Chalk::IR::Optimizer::GVN->run_gvn($graph3);
 my $optimized_graph3 = $result3->{graph};
 my $metrics3 = $result3->{metrics};
 

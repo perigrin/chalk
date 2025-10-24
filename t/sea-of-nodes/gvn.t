@@ -8,7 +8,7 @@ use Test::Deep;
 # Load required modules
 use_ok('Chalk::IR::Node');
 use_ok('Chalk::IR::Graph');
-use_ok('Chalk::IR::Optimizer');
+use_ok('Chalk::IR::Optimizer::GVN');
 
 # Test 1: Elimination of redundant arithmetic (x+y computed twice)
 subtest 'Eliminate redundant arithmetic' => sub {
@@ -90,7 +90,7 @@ subtest 'Eliminate redundant arithmetic' => sub {
     is($graph->node_count, 7, 'Graph has 7 nodes before GVN');
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $optimized = $result->{graph};
     my $metrics = $result->{metrics};
 
@@ -181,7 +181,7 @@ subtest 'Common subexpression elimination' => sub {
     is($graph->node_count, 7, 'Graph has 7 nodes before GVN');
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $optimized = $result->{graph};
     my $metrics = $result->{metrics};
 
@@ -253,7 +253,7 @@ subtest 'Commutativity in Add operations' => sub {
     $graph->add_node($return);
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $metrics = $result->{metrics};
 
     # Should recognize commutative equivalence
@@ -325,7 +325,7 @@ subtest 'Commutativity in Multiply operations' => sub {
     $graph->add_node($return);
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $metrics = $result->{metrics};
 
     ok($metrics->{nodes_eliminated} > 0,
@@ -371,7 +371,7 @@ subtest 'Different constants are not merged' => sub {
     $graph->add_node($return);
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $optimized = $result->{graph};
     my $metrics = $result->{metrics};
 
@@ -432,7 +432,7 @@ subtest 'Identical constants are merged' => sub {
     $graph->add_node($return);
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $metrics = $result->{metrics};
 
     ok($metrics->{nodes_eliminated} > 0, 'Duplicate constant eliminated');
@@ -488,14 +488,14 @@ subtest 'GVN is idempotent' => sub {
     $graph->add_node($return);
 
     # First GVN pass
-    my $result1 = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result1 = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $graph1 = $result1->{graph};
     my $metrics1 = $result1->{metrics};
 
     ok($metrics1->{nodes_eliminated} > 0, 'First pass eliminated nodes');
 
     # Second GVN pass
-    my $result2 = Chalk::IR::Optimizer->run_gvn($graph1);
+    my $result2 = Chalk::IR::Optimizer::GVN->run_gvn($graph1);
     my $metrics2 = $result2->{metrics};
 
     is($metrics2->{nodes_eliminated}, 0,
@@ -564,7 +564,7 @@ subtest 'Non-commutative operations respect order' => sub {
     $graph->add_node($return);
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $optimized = $result->{graph};
     my $metrics = $result->{metrics};
 
@@ -626,7 +626,7 @@ subtest 'Proj nodes respect index differences' => sub {
     $graph->add_node($return);
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $optimized = $result->{graph};
     my $metrics = $result->{metrics};
 
@@ -763,7 +763,7 @@ subtest 'Complex expression optimization' => sub {
     is($graph->node_count, 11, 'Graph has 11 nodes before GVN');
 
     # Run GVN
-    my $result = Chalk::IR::Optimizer->run_gvn($graph);
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     my $metrics = $result->{metrics};
 
     # Should eliminate: 3 duplicate (a+b), 1 duplicate (a+b)*(a+b) = 4 nodes
