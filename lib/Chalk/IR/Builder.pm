@@ -82,9 +82,7 @@ class Chalk::IR::Builder {
         my $prefix = substr($ref_type, 0, 15);
         my $is_node = ($prefix eq 'Chalk::IR::Node') ? 1 : 0;
         unless ($ref_type && $is_node) {
-            use Data::Dumper;
             warn "build_return_node received non-node: $ref_type\n";
-            warn "Value: " . Dumper($value_node);
             return undef;
         }
 

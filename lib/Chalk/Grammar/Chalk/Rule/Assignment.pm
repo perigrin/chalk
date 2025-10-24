@@ -3,7 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
-use Scalar::Util qw(blessed);
+use builtin qw(blessed);
 
 # IR Quality Heuristic: Pick best parse based on IR completeness
 # Prefer parses with more defined structure (more nodes in subtree)

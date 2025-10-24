@@ -5,8 +5,7 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use open qw(:std :utf8);
-use FindBin qw($RealBin);
-use lib "$RealBin/lib";
+use lib 'lib';
 
 use Chalk;
 
@@ -42,8 +41,6 @@ if ( !caller ) {
     @ARGV = @remaining_args;
 
     # Build grammar from BNF file
-    use File::Basename qw(dirname);
-    use File::Spec;
     use Chalk::Grammar;
 
     our $chalk_grammar;
@@ -56,7 +53,7 @@ if ( !caller ) {
 
     if (exists $grammar_files{$grammar_module}) {
         # Load from BNF file
-        my $bnf_file = File::Spec->catfile($RealBin, 'grammar', $grammar_files{$grammar_module});
+        my $bnf_file = "grammar/$grammar_files{$grammar_module}";
         open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
         my $content = do { local $/; <$fh> };
         close $fh;
