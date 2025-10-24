@@ -24,6 +24,27 @@ class Chalk::IR::Node {
         return defined($attr) && $attr->{op} eq 'Constant';
     }
 
+    # Helper: Check for integer overflow in arithmetic operations
+    # Returns true if operation would overflow, false otherwise
+    # Uses 64-bit signed integer bounds (common on modern systems)
+    sub _would_overflow($op, $left, $right) {
+        my $max_int = 9223372036854775807;   # 2^63 - 1
+        my $min_int = -9223372036854775808;  # -2^63
+
+        if ($op eq 'Add') {
+            return 1 if $left > 0 && $right > 0 && $left > $max_int - $right;
+            return 1 if $left < 0 && $right < 0 && $left < $min_int - $right;
+        }
+        elsif ($op eq 'Subtract') {
+            return 1 if $left > 0 && $right < 0 && $left > $max_int + $right;
+            return 1 if $left < 0 && $right > 0 && $left < $min_int + $right;
+        }
+        elsif ($op eq 'Multiply') {
+            return 1 if $left != 0 && abs($right) > abs($max_int / $left);
+        }
+        return 0;
+    }
+
     method peephole($graph) {
         # Peephole optimization for constant folding
         # Check if this is an arithmetic operation with constant operands
@@ -35,6 +56,10 @@ class Chalk::IR::Node {
             if (_is_constant($left) && _is_constant($right)) {
                 my $left_val  = $left->{value};
                 my $right_val = $right->{value};
+
+                # Skip optimization if it would overflow
+                return $self if _would_overflow($op, $left_val, $right_val);
+
                 my $result;
 
                 # Compute the result based on operation
@@ -209,7 +234,7 @@ class Chalk::IR::Node {
             if (defined($region_id)) {
                 my $region = $graph->get_node($region_id);
                 if (defined($region) && $region->op eq 'Region') {
-                    my @region_inputs = @{$region->inputs};
+                    my @region_inputs = $region->inputs->@*;
                     my $alternatives = $attributes->{alternatives} || [];
 
                     # Find live alternatives (where corresponding Region input is not ~Ctrl)
