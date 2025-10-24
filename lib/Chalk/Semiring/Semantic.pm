@@ -31,8 +31,21 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
             return $self;
         }
 
-        # For semantic values, prefer the alternative with more children
-        # (this handles ambiguous parses - we want the one that consumed more input)
+        # For semantic values, prefer the alternative that consumed more input
+        # (this handles ambiguous parses - longer parse is more complete)
+        # Use parse span (end_pos - start_pos) as primary ranking
+        my $self_span = $self->context->end_pos - $self->context->start_pos;
+        my $other_span = $other->context->end_pos - $other->context->start_pos;
+
+        if ($other_span > $self_span) {
+            return $other;  # Other consumed more input, prefer it
+        }
+        if ($self_span > $other_span) {
+            return $self;  # Self consumed more input, prefer it
+        }
+
+        # If spans are equal, prefer the alternative with more children
+        # (handles cases where both consumed same input but one has more structure)
         my $self_children = scalar(@{$self->context->children});
         my $other_children = scalar(@{$other->context->children});
 
@@ -56,7 +69,8 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
             end_pos => $other->context->end_pos,
             env => $self->context->env,
             grammar => $self->context->grammar,
-            rule => $self->context->rule
+            rule => $self->context->rule,
+            forest => $self->context->forest
         );
 
         return Chalk::Semiring::SemanticElement->new(
@@ -88,11 +102,18 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
 class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     field $env :param = {};
     field $grammar :param :reader;
+    field $shared_context :param :reader = undef;
+    field $forest :reader;
     field $mul_id :reader;
     field $add_id :reader;
     field $_add_id_is_zero :reader = 1;  # Flag to identify add_id
 
     ADJUST {
+        # Store reference to shared forest if provided
+        $forest = defined($shared_context) && exists($shared_context->{forest})
+            ? $shared_context->{forest}
+            : undef;
+
         # Create identity elements with empty contexts
         my $empty_ctx_mul = Chalk::EvalContext->new(
             focus => undef,
@@ -101,7 +122,8 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             end_pos => 0,
             env => $env,
             grammar => $grammar,
-            rule => undef
+            rule => undef,
+            forest => $forest
         );
 
         my $empty_ctx_add = Chalk::EvalContext->new(
@@ -111,7 +133,8 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             end_pos => 0,
             env => $env,
             grammar => $grammar,
-            rule => undef
+            rule => undef,
+            forest => $forest
         );
 
         $mul_id = Chalk::Semiring::SemanticElement->new(
@@ -133,7 +156,8 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             end_pos => $end_pos,
             env => $env,
             grammar => $grammar,
-            rule => $rule
+            rule => $rule,
+            forest => $forest
         );
 
         return Chalk::Semiring::SemanticElement->new(

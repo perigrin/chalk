@@ -129,9 +129,16 @@ class Chalk::Grammar {
             grammar_name => $grammar_name # For loading custom semantic action classes
         );
 
+        # Create shared context with parse forest for compositional semirings
+        use Chalk::ParseForest;
+        my %shared_context = (
+            forest => Chalk::ParseForest->new()
+        );
+
         my $semiring = Chalk::Semiring::Semantic->new(
             env     => \%env,
-            grammar => $bnf_grammar
+            grammar => $bnf_grammar,
+            shared_context => \%shared_context
         );
 
         my $parser = Chalk::Parser->new(
