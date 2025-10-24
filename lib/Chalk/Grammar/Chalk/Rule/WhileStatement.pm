@@ -40,8 +40,8 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
 
         # NOTE: Assignment and VariableDeclaration now use placeholder control pattern
         # Simple assignments like "$i = 5" work correctly in loops
-        # Complex assignments with arithmetic rhs like "$i = $i - 1" may have parser ambiguity issues
-        # TODO: Investigate grammar ambiguity for Assignment with complex rhs expressions
+        # Complex assignments like "$i = $i - 1" work but may use incomplete parse
+        # (SPPF creates both parses, semiring currently picks incomplete one - needs optimization pass)
 
         # Wire up body statements with IfTrue control
         my $current_ctrl = $if_true->id;

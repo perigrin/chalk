@@ -67,16 +67,13 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         # Validate we got an IR node for the value
         return $context->child(0) unless (blessed($rhs) && $rhs->can('id'));
 
-        # Sanity check: lhs and rhs should not be the exact same node
-        # This catches ambiguous parses where the parser is evaluating before rhs is fully built
-        # NOTE: This is a workaround for parser ambiguity with complex rhs expressions
-        # TODO: Investigate and fix grammar ambiguity for Assignment with arithmetic rhs
-        if (blessed($lhs) && $lhs->can('id') && $lhs->id eq $rhs->id) {
-            return undef;  # Skip this ambiguous parse
-        }
-
         # Create Store node with placeholder control
         # Parent rule (Block, ConditionalStatement, WhileStatement) will wire actual control
+        #
+        # NOTE: SPPF may create multiple parse trees for complex expressions like "$i = $i - 1"
+        # Both parses create Store nodes in the graph, semiring picks one for the parse tree.
+        # Currently semiring may pick incomplete parse (rhs=$i instead of rhs=$i-1).
+        # This is expected SPPF behavior - will need optimization pass to detect/fix later.
         return $builder->build_store_node($var_name, $rhs, '__CONTROL_PLACEHOLDER__');
     }
 }
