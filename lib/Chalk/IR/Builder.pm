@@ -1,7 +1,7 @@
 # ABOUTME: IR builder for transforming parsed Chalk code into Sea of Nodes IR
 # ABOUTME: Provides methods called by semantic actions to build IR nodes during parsing
 use 5.42.0;
-use experimental qw(class builtin keyword_any keyword_all);;
+use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
 class Chalk::IR::Builder {
