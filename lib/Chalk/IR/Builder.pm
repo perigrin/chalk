@@ -479,7 +479,8 @@ class Chalk::IR::Builder {
         my @input_nodes = ($current_control);
         my %field_value_refs;
 
-        for my $field_name (sort keys %$field_values_hash) {
+        # Build field references from hash
+        for my $field_name (sort( keys( $field_values_hash->%* ) )) {
             my $value_node = $field_values_hash->{$field_name};
             push @input_nodes, $value_node->id;
             $field_value_refs{$field_name} = {

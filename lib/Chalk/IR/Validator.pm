@@ -575,8 +575,9 @@ class Chalk::IR::Validator {
                 }
                 else {
                     # Validate each field value reference
-                    for my $field_name (keys %{$attrs->{field_values}}) {
-                        my $field_ref = $attrs->{field_values}{$field_name};
+                    my $field_values = $attrs->{field_values};
+                    for my $field_name (sort( keys( $field_values->%* ) )) {
+                        my $field_ref = $field_values->{$field_name};
                         if (ref($field_ref) ne 'HASH') {
                             push @errors, "New node $node_id field '$field_name' value must be a NodeRef";
                         }
@@ -606,11 +607,14 @@ class Chalk::IR::Validator {
                 elsif (ref($attrs->{object}) ne 'HASH') {
                     push @errors, "FieldAccess node $node_id 'object' attribute must be a NodeRef";
                 }
-                elsif (!exists($attrs->{object}{node_id})) {
-                    push @errors, "FieldAccess node $node_id 'object' NodeRef missing 'node_id'";
-                }
-                elsif (!exists($nodes->{$attrs->{object}{node_id}})) {
-                    push @errors, "FieldAccess node $node_id references non-existent object node " . $attrs->{object}{node_id};
+                else {
+                    my $object_ref = $attrs->{object};
+                    if (!exists($object_ref->{node_id})) {
+                        push @errors, "FieldAccess node $node_id 'object' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$object_ref->{node_id}})) {
+                        push @errors, "FieldAccess node $node_id references non-existent object node " . $object_ref->{node_id};
+                    }
                 }
             }
 
@@ -630,11 +634,14 @@ class Chalk::IR::Validator {
                 elsif (ref($attrs->{object}) ne 'HASH') {
                     push @errors, "FieldStore node $node_id 'object' attribute must be a NodeRef";
                 }
-                elsif (!exists($attrs->{object}{node_id})) {
-                    push @errors, "FieldStore node $node_id 'object' NodeRef missing 'node_id'";
-                }
-                elsif (!exists($nodes->{$attrs->{object}{node_id}})) {
-                    push @errors, "FieldStore node $node_id references non-existent object node " . $attrs->{object}{node_id};
+                else {
+                    my $object_ref = $attrs->{object};
+                    if (!exists($object_ref->{node_id})) {
+                        push @errors, "FieldStore node $node_id 'object' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$object_ref->{node_id}})) {
+                        push @errors, "FieldStore node $node_id references non-existent object node " . $object_ref->{node_id};
+                    }
                 }
 
                 # FieldStore must have 'value' attribute
@@ -644,11 +651,14 @@ class Chalk::IR::Validator {
                 elsif (ref($attrs->{value}) ne 'HASH') {
                     push @errors, "FieldStore node $node_id 'value' attribute must be a NodeRef";
                 }
-                elsif (!exists($attrs->{value}{node_id})) {
-                    push @errors, "FieldStore node $node_id 'value' NodeRef missing 'node_id'";
-                }
-                elsif (!exists($nodes->{$attrs->{value}{node_id}})) {
-                    push @errors, "FieldStore node $node_id references non-existent value node " . $attrs->{value}{node_id};
+                else {
+                    my $value_ref = $attrs->{value};
+                    if (!exists($value_ref->{node_id})) {
+                        push @errors, "FieldStore node $node_id 'value' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$value_ref->{node_id}})) {
+                        push @errors, "FieldStore node $node_id references non-existent value node " . $value_ref->{node_id};
+                    }
                 }
             }
         }
