@@ -9,15 +9,27 @@ class Chalk::IR::Graph {
 
     field $nodes :reader;
     field $entry :reader;
+    field $uses;  # Use-def map: node_id => [user_id1, user_id2, ...]
 
     ADJUST {
         $nodes = {};
         $entry = undef;
+        $uses  = {};
     }
 
     method add_node($node) {
         my $node_id = $node->id;
         $nodes->{$node_id} = $node;
+
+        # Initialize use list for this node (empty initially)
+        $uses->{$node_id} //= [];
+
+        # Update use-def chains: for each input, add this node as a user
+        for my $input_id ( $node->inputs->@* ) {
+            next unless defined $input_id;  # Skip undefined inputs
+            $uses->{$input_id} //= [];
+            push $uses->{$input_id}->@*, $node_id;
+        }
 
         # First node added becomes entry point
         $entry //= $node_id;
@@ -27,6 +39,10 @@ class Chalk::IR::Graph {
 
     method get_node($id) {
         return $nodes->{$id};
+    }
+
+    method get_uses($id) {
+        return $uses->{$id} // [];
     }
 
     method node_count() {
