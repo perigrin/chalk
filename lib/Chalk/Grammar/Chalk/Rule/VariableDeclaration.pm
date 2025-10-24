@@ -52,8 +52,9 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
         # Validate we got an IR node
         return undef unless (blessed($value) && $value->can('id'));
 
-        # Create Store node
-        return $builder->build_store_node($var_name, $value);
+        # Create Store node with placeholder control
+        # Parent rule (Block, ConditionalStatement, WhileStatement) will wire actual control
+        return $builder->build_store_node($var_name, $value, '__CONTROL_PLACEHOLDER__');
     }
 }
 

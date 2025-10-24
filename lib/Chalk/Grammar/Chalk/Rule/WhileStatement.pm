@@ -38,10 +38,10 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         my $body_block = $context->child(6);
         return undef unless (ref($body_block) eq 'HASH' && $body_block->{type} eq 'block');
 
-        # NOTE: Full loop support requires ALL statement types (Assignment, etc.)
-        # to use placeholder control pattern. Currently only Return uses placeholders.
-        # This implementation demonstrates loop structure but won't wire body statements
-        # correctly unless they use placeholders.
+        # NOTE: Assignment and VariableDeclaration now use placeholder control pattern
+        # Simple assignments like "$i = 5" work correctly in loops
+        # Complex assignments with arithmetic rhs like "$i = $i - 1" may have parser ambiguity issues
+        # TODO: Investigate grammar ambiguity for Assignment with complex rhs expressions
 
         # Wire up body statements with IfTrue control
         my $current_ctrl = $if_true->id;

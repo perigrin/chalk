@@ -157,11 +157,14 @@ class Chalk::IR::Builder {
     }
 
     # Create Store node (variable assignment)
-    method build_store_node($var_name, $value_node) {
+    method build_store_node($var_name, $value_node, $control = undef) {
+        # Use provided control, or current_control, or '__CONTROL_PLACEHOLDER__'
+        my $ctrl = $control // $current_control // '__CONTROL_PLACEHOLDER__';
+
         my $store = Chalk::IR::Node->new(
             id => $self->next_node_id(),
             op => 'Store',
-            inputs => [$current_control, $value_node->id],
+            inputs => [$ctrl, $value_node->id],
             attributes => {
                 name => $var_name,
                 value => { op => 'NodeRef', node_id => $value_node->id }
