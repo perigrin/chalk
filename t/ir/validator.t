@@ -369,18 +369,39 @@ subtest 'validate_phi_placement detects wrong number of inputs' => sub {
     );
     $graph->add_node($region);
 
+    # Create constant nodes to reference
+    my $const1 = Chalk::IR::Node->new(
+        id => 'const_1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 10, type => 'Int' }
+    );
+    $graph->add_node($const1);
+
+    my $const2 = Chalk::IR::Node->new(
+        id => 'const_2',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 20, type => 'Int' }
+    );
+    $graph->add_node($const2);
+
+    my $const3 = Chalk::IR::Node->new(
+        id => 'const_3',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 30, type => 'Int' }
+    );
+    $graph->add_node($const3);
+
     # Phi with wrong number of alternatives (3 instead of 2)
     my $phi = Chalk::IR::Node->new(
         id => 'node_2',
         op => 'Phi',
-        inputs => ['node_1'],
+        inputs => ['node_1', 'const_1', 'const_2', 'const_3'],  # 3 alternatives but Region has only 2 inputs!
         attributes => {
+            region_id => 'node_1',
             variable => '$x',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' },
-                { op => 'Constant', value => 20, type => 'Int' },
-                { op => 'Constant', value => 30, type => 'Int' }  # Extra!
-            ]
         }
     );
     $graph->add_node($phi);

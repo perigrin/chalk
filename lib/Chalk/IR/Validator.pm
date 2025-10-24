@@ -444,20 +444,11 @@ class Chalk::IR::Validator {
                     my $region_preds = $region_node->inputs;
                     my $expected_alternatives = scalar( $region_preds->@* );
 
-                    # Count phi alternatives - check both inputs array and attributes
-                    # Phi nodes can store alternatives in two ways:
-                    # 1. In inputs array (after control input): inputs => [ctrl, val1, val2, ...]
-                    # 2. In attributes: attributes => { alternatives => [...] }
+                    # Count phi alternatives from standardized inputs array
+                    # Phi nodes use inputs array: inputs => [ctrl, val1, val2, ...]
+                    # This is the standardized representation as per GitHub Issue #80
                     my $phi_inputs = $node->inputs;
                     my $actual_alternatives = scalar( $phi_inputs->@* ) - 1;  # Subtract control input
-
-                    # If alternatives not in inputs, check attributes
-                    if ($actual_alternatives == 0) {
-                        my $alt_attr = $node->attributes->{alternatives};
-                        if (defined($alt_attr) && ref($alt_attr) eq 'ARRAY') {
-                            $actual_alternatives = scalar( $alt_attr->@* );
-                        }
-                    }
 
                     if ($actual_alternatives != $expected_alternatives) {
                         push @errors, "Phi node $node_id in node $region_id expects $expected_alternatives value inputs ($expected_alternatives predecessors) but has $actual_alternatives";
