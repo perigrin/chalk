@@ -21,16 +21,23 @@ subtest 'Phi node without Region control' => sub {
     );
     $graph->add_node($start);
 
+    # Create constant node for the Phi alternative
+    my $const1 = Chalk::IR::Node->new(
+        id => 'const_1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 10, type => 'Int' }
+    );
+    $graph->add_node($const1);
+
     # Invalid: Phi directly connected to Start (not a Region)
     my $phi = Chalk::IR::Node->new(
         id => 'node_1',
         op => 'Phi',
-        inputs => ['node_0'],
+        inputs => ['node_0', 'const_1'],
         attributes => {
+            region_id => 'node_0',
             variable => '$x',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' }
-            ]
         }
     );
     $graph->add_node($phi);
@@ -72,18 +79,39 @@ subtest 'Phi node with excess alternatives' => sub {
     );
     $graph->add_node($region);
 
+    # Create constant nodes for the Phi alternatives
+    my $const1 = Chalk::IR::Node->new(
+        id => 'const_1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 10, type => 'Int' }
+    );
+    $graph->add_node($const1);
+
+    my $const2 = Chalk::IR::Node->new(
+        id => 'const_2',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 20, type => 'Int' }
+    );
+    $graph->add_node($const2);
+
+    my $const3 = Chalk::IR::Node->new(
+        id => 'const_3',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 30, type => 'Int' }
+    );
+    $graph->add_node($const3);
+
     # Invalid: Phi with 3 alternatives but Region has only 2 predecessors
     my $phi = Chalk::IR::Node->new(
         id => 'node_2',
         op => 'Phi',
-        inputs => ['node_1'],
+        inputs => ['node_1', 'const_1', 'const_2', 'const_3'],  # Extra!
         attributes => {
+            region_id => 'node_1',
             variable => '$x',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' },
-                { op => 'Constant', value => 20, type => 'Int' },
-                { op => 'Constant', value => 30, type => 'Int' }  # Extra!
-            ]
         }
     );
     $graph->add_node($phi);
@@ -125,18 +153,32 @@ subtest 'Phi node with insufficient alternatives' => sub {
     );
     $graph->add_node($region);
 
+    # Create constant nodes for the Phi alternatives
+    my $const1 = Chalk::IR::Node->new(
+        id => 'const_1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 10, type => 'Int' }
+    );
+    $graph->add_node($const1);
+
+    my $const2 = Chalk::IR::Node->new(
+        id => 'const_2',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 20, type => 'Int' }
+    );
+    $graph->add_node($const2);
+
     # Invalid: Phi with 2 alternatives but Region has 3 predecessors
+    # Missing third alternative!
     my $phi = Chalk::IR::Node->new(
         id => 'node_2',
         op => 'Phi',
-        inputs => ['node_1'],
+        inputs => ['node_1', 'const_1', 'const_2'],
         attributes => {
+            region_id => 'node_1',
             variable => '$result',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' },
-                { op => 'Constant', value => 20, type => 'Int' }
-                # Missing third alternative!
-            ]
         }
     );
     $graph->add_node($phi);
@@ -169,16 +211,23 @@ subtest 'Phi node references non-existent Region' => sub {
     );
     $graph->add_node($start);
 
+    # Create constant node for the Phi alternative
+    my $const1 = Chalk::IR::Node->new(
+        id => 'const_1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 10, type => 'Int' }
+    );
+    $graph->add_node($const1);
+
     # Invalid: Phi references node_999 which doesn't exist
     my $phi = Chalk::IR::Node->new(
         id => 'node_1',
         op => 'Phi',
-        inputs => ['node_999'],  # Non-existent!
+        inputs => ['node_999', 'const_1'],  # Non-existent!
         attributes => {
+            region_id => 'node_999',
             variable => '$x',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' }
-            ]
         }
     );
     $graph->add_node($phi);
@@ -218,9 +267,6 @@ subtest 'Phi node with empty inputs' => sub {
         inputs => [],  # No control input!
         attributes => {
             variable => '$x',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' }
-            ]
         }
     );
     $graph->add_node($phi);
@@ -262,17 +308,31 @@ subtest 'Valid phi node passes validation' => sub {
     );
     $graph->add_node($region);
 
+    # Create constant nodes for the Phi alternatives
+    my $const1 = Chalk::IR::Node->new(
+        id => 'const_1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 10, type => 'Int' }
+    );
+    $graph->add_node($const1);
+
+    my $const2 = Chalk::IR::Node->new(
+        id => 'const_2',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 20, type => 'Int' }
+    );
+    $graph->add_node($const2);
+
     # Valid: Phi with correct number of alternatives
     my $phi = Chalk::IR::Node->new(
         id => 'node_2',
         op => 'Phi',
-        inputs => ['node_1'],
+        inputs => ['node_1', 'const_1', 'const_2'],
         attributes => {
+            region_id => 'node_1',
             variable => '$x',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' },
-                { op => 'Constant', value => 20, type => 'Int' }
-            ]
         }
     );
     $graph->add_node($phi);
@@ -312,32 +372,60 @@ subtest 'Multiple phi nodes at same Region' => sub {
     );
     $graph->add_node($region);
 
+    # Create constant nodes for the first Phi ($x)
+    my $const_x1 = Chalk::IR::Node->new(
+        id => 'const_x1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 10, type => 'Int' }
+    );
+    $graph->add_node($const_x1);
+
+    my $const_x2 = Chalk::IR::Node->new(
+        id => 'const_x2',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 20, type => 'Int' }
+    );
+    $graph->add_node($const_x2);
+
     # First phi: $x
     my $phi_x = Chalk::IR::Node->new(
         id => 'node_2',
         op => 'Phi',
-        inputs => ['node_1'],
+        inputs => ['node_1', 'const_x1', 'const_x2'],
         attributes => {
+            region_id => 'node_1',
             variable => '$x',
-            alternatives => [
-                { op => 'Constant', value => 10, type => 'Int' },
-                { op => 'Constant', value => 20, type => 'Int' }
-            ]
         }
     );
     $graph->add_node($phi_x);
+
+    # Create constant nodes for the second Phi ($y)
+    my $const_y1 = Chalk::IR::Node->new(
+        id => 'const_y1',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 100, type => 'Int' }
+    );
+    $graph->add_node($const_y1);
+
+    my $const_y2 = Chalk::IR::Node->new(
+        id => 'const_y2',
+        op => 'Constant',
+        inputs => [],
+        attributes => { value => 200, type => 'Int' }
+    );
+    $graph->add_node($const_y2);
 
     # Second phi: $y (both valid)
     my $phi_y = Chalk::IR::Node->new(
         id => 'node_3',
         op => 'Phi',
-        inputs => ['node_1'],
+        inputs => ['node_1', 'const_y1', 'const_y2'],
         attributes => {
+            region_id => 'node_1',
             variable => '$y',
-            alternatives => [
-                { op => 'Constant', value => 100, type => 'Int' },
-                { op => 'Constant', value => 200, type => 'Int' }
-            ]
         }
     );
     $graph->add_node($phi_y);

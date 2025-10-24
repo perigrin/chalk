@@ -243,13 +243,9 @@ subtest 'Phi node simplification: single live input' => sub {
     my $phi = Chalk::IR::Node->new(
         id => 'node_5',
         op => 'Phi',
-        inputs => ['node_2', 'node_3', 'node_4'],
+        inputs => ['node_2', 'node_3', 'node_4'],  # Region control, then alternatives
         attributes => {
             region_id => 'node_2',
-            alternatives => [
-                { op => 'NodeRef', node_id => 'node_3' },  # value from live path
-                { op => 'NodeRef', node_id => 'node_4' }   # value from dead path
-            ]
         }
     );
     $graph->add_node($phi);
@@ -386,13 +382,9 @@ subtest 'Complete dead code elimination: if (1) with dead else branch' => sub {
     $graph->add_node(Chalk::IR::Node->new(
         id => 'node_9',
         op => 'Phi',
-        inputs => ['node_8', 'node_6', 'node_7'],
+        inputs => ['node_8', 'node_6', 'node_7'],  # Region control, then alternatives
         attributes => {
             region_id => 'node_8',
-            alternatives => [
-                { op => 'NodeRef', node_id => 'node_6' },  # 42 from true
-                { op => 'NodeRef', node_id => 'node_7' }   # 0 from false (dead)
-            ]
         }
     ));
 

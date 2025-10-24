@@ -235,7 +235,11 @@ class Chalk::IR::Node {
                 my $region = $graph->get_node($region_id);
                 if (defined($region) && $region->op eq 'Region') {
                     my @region_inputs = $region->inputs->@*;
-                    my $alternatives = $attributes->{alternatives} || [];
+
+                    # Get alternatives from inputs array (skip first element which is region control)
+                    # Standardized representation: inputs => [region_id, alt1, alt2, ...]
+                    my @phi_inputs = $inputs->@*;
+                    my @alternatives = @phi_inputs[1 .. $#phi_inputs];  # Skip region at index 0
 
                     # Find live alternatives (where corresponding Region input is not ~Ctrl)
                     my @live_values;
@@ -254,19 +258,17 @@ class Chalk::IR::Node {
                         }
 
                         # If control is live, keep this alternative
-                        if (!$is_dead && $i < scalar( $alternatives->@* )) {
-                            push @live_values, $alternatives->[$i];
+                        if (!$is_dead && $i < scalar( @alternatives )) {
+                            push @live_values, $alternatives[$i];
                         }
                     }
 
                     # If only one live value, replace Phi with that value
                     if (scalar( @live_values ) == 1) {
-                        my $value_ref = $live_values[0];
-                        if ($value_ref->{op} eq 'NodeRef') {
-                            my $value_node = $graph->get_node($value_ref->{node_id});
-                            if (defined($value_node)) {
-                                return $value_node;
-                            }
+                        my $value_id = $live_values[0];
+                        my $value_node = $graph->get_node($value_id);
+                        if (defined($value_node)) {
+                            return $value_node;
                         }
                     }
                 }

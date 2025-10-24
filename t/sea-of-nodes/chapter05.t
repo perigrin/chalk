@@ -287,13 +287,9 @@ subtest 'Phi node merges values from control paths' => sub {
     my $phi = Chalk::IR::Node->new(
         id => 'node_3',
         op => 'Phi',
-        inputs => ['node_0'],  # Control input from Region
+        inputs => ['node_0', 'node_1', 'node_2'],  # Region control, then alternatives
         attributes => {
             region_id => 'node_0',
-            alternatives => [
-                { op => 'NodeRef', node_id => 'node_1' },  # true branch value
-                { op => 'NodeRef', node_id => 'node_2' }   # false branch value
-            ]
         }
     );
     $graph->add_node($phi);
@@ -302,9 +298,9 @@ subtest 'Phi node merges values from control paths' => sub {
     my $phi_node = $graph->get_node('node_3');
     ok($phi_node, 'Phi node exists');
     is($phi_node->op, 'Phi', 'Node op is Phi');
-    cmp_deeply($phi_node->inputs, ['node_0'], 'Phi has Region as control input');
+    cmp_deeply($phi_node->inputs, ['node_0', 'node_1', 'node_2'], 'Phi has Region as control input plus two alternatives');
     is($phi_node->attributes->{region_id}, 'node_0', 'Phi references Region');
-    is(scalar($phi_node->attributes->{alternatives}->@*), 2, 'Phi has two alternatives');
+    is(scalar($phi_node->inputs->@*) - 1, 2, 'Phi has two alternatives (from inputs array)');
 };
 
 # Test complete if-then-else with phi node
@@ -412,13 +408,9 @@ subtest 'Complete if-then-else: classify($x) with phi merge' => sub {
     my $phi = Chalk::IR::Node->new(
         id => 'node_10',
         op => 'Phi',
-        inputs => ['node_9'],
+        inputs => ['node_9', 'node_8', 'node_3'],  # Region control, then alternatives
         attributes => {
             region_id => 'node_9',
-            alternatives => [
-                { op => 'NodeRef', node_id => 'node_8' },  # return 1 (true)
-                { op => 'NodeRef', node_id => 'node_3' }   # return 0 (false)
-            ]
         }
     );
     $graph->add_node($phi);
@@ -446,7 +438,7 @@ subtest 'Complete if-then-else: classify($x) with phi merge' => sub {
     my $phi_check = $graph->get_node('node_10');
     is($phi_check->op, 'Phi', 'Phi merges values');
     is($phi_check->attributes->{region_id}, 'node_9', 'Phi at Region');
-    is(scalar($phi_check->attributes->{alternatives}->@*), 2, 'Phi has two alternatives');
+    is(scalar($phi_check->inputs->@*) - 1, 2, 'Phi has two alternatives (from inputs array)');
 
     my $ret_check = $graph->get_node('node_11');
     cmp_deeply($ret_check->inputs, ['node_9', 'node_10'], 'Return uses Region control and Phi value');
@@ -536,10 +528,6 @@ subtest 'Validator confirms Chapter 5 IR correctness' => sub {
         inputs => ['node_9', 'node_8', 'node_3'],  # region, value from true branch, value from false branch
         attributes => {
             region_id => 'node_9',
-            alternatives => [
-                { op => 'NodeRef', node_id => 'node_8' },
-                { op => 'NodeRef', node_id => 'node_3' }
-            ]
         }
     ));
 
@@ -592,10 +580,9 @@ subtest 'JSON serialization with If/Region/Phi' => sub {
     $graph->add_node(Chalk::IR::Node->new(
         id => 'node_3',
         op => 'Phi',
-        inputs => ['node_2'],
+        inputs => ['node_2'],  # Region control with no alternatives (empty region)
         attributes => {
             region_id => 'node_2',
-            alternatives => []
         }
     ));
 
