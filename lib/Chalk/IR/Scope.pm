@@ -68,6 +68,28 @@ class Chalk::IR::Scope {
         }
         return \%all;
     }
+
+    method snapshot_bindings() {
+        # Create a deep copy of all current bindings for later comparison
+        my %snapshot = %{$self->all_bindings()};
+        return \%snapshot;
+    }
+
+    method find_modified_variables($snapshot) {
+        # Compare current bindings with snapshot to find modified variables
+        my @modified = ();
+        my $current = $self->all_bindings();
+        my @vars = keys %{$current};
+
+        for my $var (@vars) {
+            next unless exists $snapshot->{$var};
+            if ($current->{$var} ne $snapshot->{$var}) {
+                push @modified, $var;
+            }
+        }
+
+        return @modified;
+    }
 }
 
 1;

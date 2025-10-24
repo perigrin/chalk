@@ -13,6 +13,8 @@ class Chalk::IR::Builder {
     field $scope :reader;
     field $node_counter :reader = 0;
     field $current_control :reader;  # Current control flow node
+    field $loop_entry_scope;  # Snapshot of scope bindings at loop entry
+    field $loop_tracking_active = 0;  # Whether loop tracking is active
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
@@ -401,6 +403,59 @@ class Chalk::IR::Builder {
         $graph->add_node($call);
         return $call;
     }
+
+    # Loop-carried dependency tracking methods
+    method begin_loop_tracking() {
+        # Start tracking loop-carried dependencies
+        $loop_entry_scope = $scope->snapshot_bindings();
+        $loop_tracking_active = 1;
+        return;
+    }
+
+    method end_loop_tracking() {
+        # End tracking and clean up
+        $loop_entry_scope = undef;
+        $loop_tracking_active = 0;
+        return;
+    }
+
+    method is_tracking_loop() {
+        return $loop_tracking_active;
+    }
+
+    method loop_entry_scope() {
+        return $loop_entry_scope;
+    }
+
+    method generate_loop_phi_nodes($loop_node) {
+        # Generate phi nodes for all variables modified within the loop
+        return {} unless $loop_tracking_active;
+        return {} unless defined $loop_entry_scope;
+
+        # Capture current (loop-end) values before creating phis
+        my $loop_end_scope = $scope->snapshot_bindings();
+
+        # Find which variables were modified in the loop
+        my @modified_vars = $scope->find_modified_variables($loop_entry_scope);
+
+        # Generate a phi node for each modified variable
+        my %phis = ();
+        for my $var (@modified_vars) {
+            my $initial_value = $loop_entry_scope->{$var};
+            my $loop_value = $loop_end_scope->{$var};
+
+            # Create phi with initial value; backedge added later
+            my $phi = $self->build_loop_phi_node($loop_node, $initial_value, $loop_value);
+            $phis{$var} = $phi;
+
+            # Update scope to use phi node for this variable
+            # This ensures uses after the loop see the phi
+            $scope->define($var, $phi->id);
+        }
+
+        return \%phis;
+    }
+
 }
 
 1;
