@@ -16,7 +16,7 @@ class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
             return ($value);
         } elsif (ref($value) eq 'ARRAY') {
             # Recursively flatten array
-            for my $elem (@$value) {
+            for my $elem ($value->@*) {
                 push @results, _flatten_to_nodes($elem);
             }
         }

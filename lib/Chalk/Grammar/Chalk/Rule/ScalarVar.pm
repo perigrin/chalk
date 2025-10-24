@@ -16,7 +16,7 @@ class Chalk::Grammar::Chalk::Rule::ScalarVar :isa(Chalk::GrammarRule) {
         my $identifier;
         if (ref($identifier_node) eq 'ARRAY') {
             # Join array elements to get the identifier string
-            $identifier = join('', @$identifier_node);
+            $identifier = join('', $identifier_node->@*);
         } else {
             $identifier = $identifier_node;
         }

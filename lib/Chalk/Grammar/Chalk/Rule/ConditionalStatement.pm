@@ -49,7 +49,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
 
         # Wire up true branch statements with IfTrue control
         my $current_ctrl = $if_true->id;
-        for my $stmt (@{$true_block->{statements}}) {
+        for my $stmt ($true_block->{statements}->@*) {
             if ($stmt->inputs->[0] eq '__CONTROL_PLACEHOLDER__') {
                 $builder->set_node_control($stmt, $current_ctrl);
             }
@@ -61,12 +61,12 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $false_control;
         if (@children > 10) {
             my $next_keyword = $children[10]->extract;
-            if (defined $next_keyword && $next_keyword eq 'else') {
+            if (defined($next_keyword) && $next_keyword eq 'else') {
                 # Get else block and wire up with IfFalse control
                 my $else_block = $context->child(12);
                 if (ref($else_block) eq 'HASH' && $else_block->{type} eq 'block') {
                     $current_ctrl = $if_false->id;
-                    for my $stmt (@{$else_block->{statements}}) {
+                    for my $stmt ($else_block->{statements}->@*) {
                         if ($stmt->inputs->[0] eq '__CONTROL_PLACEHOLDER__') {
                             $builder->set_node_control($stmt, $current_ctrl);
                         }

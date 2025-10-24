@@ -8,17 +8,27 @@ use Scalar::Util qw(blessed);
 # IR Quality Heuristic: Pick best parse based on IR completeness
 # Prefer parses with more defined structure (more nodes in subtree)
 sub _pick_best_ir_value($candidates, $builder) {
-    return $candidates->[0] if @$candidates == 1;
+    return $candidates->[0] if $candidates->@* == 1;
 
     # Count IR nodes in the value subtree for each candidate
-    my @scored = map {
-        { value => $_, score => _count_ir_nodes($_, $builder->graph) }
-    } @$candidates;
+    # Build scored array manually to avoid map block with hash constructor
+    my @scored = ();
+    for my $cand ($candidates->@*) {
+        my $score = _count_ir_nodes($cand, $builder->graph);
+        my $entry = { value => $cand, score => $score };
+        push(@scored, $entry);
+    }
 
     # Sort by score descending (more nodes = more complete = better)
-    @scored = sort { $b->{score} <=> $a->{score} } @scored;
+    # Using manual sort to avoid sort block syntax
+    my $best = $scored[0];
+    for my $candidate (@scored) {
+        if ($candidate->{score} > $best->{score}) {
+            $best = $candidate;
+        }
+    }
 
-    return $scored[0]->{value};
+    return $best->{value};
 }
 
 # Recursively count nodes in IR subtree
@@ -36,14 +46,16 @@ sub _count_ir_nodes($node, $graph) {
     if ($op eq 'Add' || $op eq 'Subtract' || $op eq 'Multiply' || $op eq 'Divide' ||
         $op eq 'GT' || $op eq 'LT' || $op eq 'EQ' || $op eq 'NE' || $op eq 'LE' || $op eq 'GE') {
 
-        if (my $left = $node->attributes->{left}) {
+        my $left = $node->attributes->{left};
+        if ($left) {
             if ($left->{op} eq 'NodeRef') {
                 my $left_node = $graph->get_node($left->{node_id});
                 $count += _count_ir_nodes($left_node, $graph);
             }
         }
 
-        if (my $right = $node->attributes->{right}) {
+        my $right = $node->attributes->{right};
+        if ($right) {
             if ($right->{op} eq 'NodeRef') {
                 my $right_node = $graph->get_node($right->{node_id});
                 $count += _count_ir_nodes($right_node, $graph);
@@ -53,7 +65,8 @@ sub _count_ir_nodes($node, $graph) {
 
     # Store nodes have value children
     if ($op eq 'Store') {
-        if (my $value = $node->attributes->{value}) {
+        my $value = $node->attributes->{value};
+        if ($value) {
             if ($value->{op} eq 'NodeRef') {
                 my $value_node = $graph->get_node($value->{node_id});
                 $count += _count_ir_nodes($value_node, $graph);
@@ -78,7 +91,7 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         my $equals_index = -1;
         for my $i (0..$#children) {
             my $child = $children[$i]->extract;
-            if (defined $child && !ref($child) && $child eq '=') {
+            if (defined($child) && !ref($child) && $child eq '=') {
                 $has_assignment = 1;
                 $equals_index = $i;
                 last;
@@ -131,17 +144,18 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
             # Multiple parse alternatives exist - evaluate each and pick best
             # The "best" is the one with most complete IR structure
 
-            my @candidate_values;
+            my $candidate_values = [];
             for my $alt_ctx (@rhs_alternatives) {
                 # Extract semantic value from this alternative's context
                 my $alt_value = $alt_ctx->extract if $alt_ctx->can('extract');
                 next unless (blessed($alt_value) && $alt_value->can('id'));
-                push @candidate_values, $alt_value;
+                push($candidate_values->@*, $alt_value);
             }
 
             # If we got candidates, pick the best based on IR quality
-            if (@candidate_values > 0) {
-                $rhs = Chalk::Grammar::Chalk::Rule::Assignment::_pick_best_ir_value(\@candidate_values, $builder);
+            my $num_candidates = scalar($candidate_values->@*);
+            if ($num_candidates > 0) {
+                $rhs = _pick_best_ir_value($candidate_values, $builder);
             } else {
                 # Fallback to default if no valid candidates
                 $rhs = $context->child($rhs_index);

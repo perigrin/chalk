@@ -15,7 +15,7 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
         my $number_str = $context->child(0);
 
         # Determine type (Int vs Float)
-        my $type = ($number_str =~ /\./) ? 'Float' : 'Int';
+        my $type = (index($number_str, '.') != -1) ? 'Float' : 'Int';
         my $value = $number_str + 0;  # Convert to numeric
 
         # Build and return Constant IR node
