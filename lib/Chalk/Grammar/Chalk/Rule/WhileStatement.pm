@@ -53,7 +53,7 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         my @continue_controls;
         my $current_ctrl = $if_true->id;
 
-        for my $stmt (@{$body_block->{statements}}) {
+        for my $stmt ($body_block->{statements}->@*) {
             # Check if this is a break or continue metadata hash
             if (ref($stmt) eq 'HASH') {
                 if ($stmt->{type} eq 'break') {
