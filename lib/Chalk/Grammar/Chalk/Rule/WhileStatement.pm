@@ -3,7 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
-use Scalar::Util qw(blessed);
+use builtin qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
     method evaluate($context) {

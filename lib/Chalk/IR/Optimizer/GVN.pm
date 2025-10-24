@@ -8,8 +8,6 @@ use utf8;
 class Chalk::IR::Optimizer::GVN {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
-    use Digest::MD5 qw(md5_hex);
-    use Storable qw(freeze);
 
     # Run Global Value Numbering optimization pass
     # Returns: { graph => optimized_graph, metrics => { nodes_eliminated => N, redirections => {...} } }
