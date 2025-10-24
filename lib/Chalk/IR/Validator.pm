@@ -17,6 +17,7 @@ class Chalk::IR::Validator {
         push @all_errors, $self->validate_single_assignment($graph);
         push @all_errors, $self->validate_dominance($graph);
         push @all_errors, $self->validate_phi_placement($graph);
+        push @all_errors, $self->validate_loop_structure($graph);
 
         my $success = scalar( @all_errors ) == 0 ? 1 : 0;
         return ($success, \@all_errors);
@@ -461,6 +462,70 @@ class Chalk::IR::Validator {
         }
 
         return @errors;
+    }
+
+    # Validate Loop node structure and semantics
+    method validate_loop_structure($graph) {
+        my @errors = ();
+
+        my $nodes = $graph->nodes;
+
+        # Check each Loop node
+        for my $node_id (keys( $nodes->%* )) {
+            my $node = $nodes->{$node_id};
+            next unless $node->op eq 'Loop';
+
+            # Loop must have exactly 2 inputs: entry control + backedge
+            my $loop_inputs = $node->inputs;
+            my $num_inputs = scalar( $loop_inputs->@* );
+
+            if ($num_inputs < 1) {
+                push @errors, "Loop node $node_id has no entry control input";
+            }
+            elsif ($num_inputs == 1) {
+                # Loop with only entry, no backedge - might be under construction
+                # This is valid during IR building (lazy phi pattern)
+            }
+            elsif ($num_inputs == 2) {
+                # Valid: entry + backedge
+            }
+            elsif ($num_inputs > 2) {
+                push @errors, "Loop node $node_id has $num_inputs inputs, expected exactly 2 (entry + backedge)";
+            }
+
+            # Check for unreachable loops (no exit path)
+            # A loop should have an If node as successor that provides exit
+            if ($num_inputs == 2) {
+                my $has_exit = $self->_loop_has_exit($graph, $node_id);
+                unless ($has_exit) {
+                    # Note: Infinite loops are valid (e.g., while(1) { ... })
+                    # This is informational, not an error
+                    # push @errors, "Loop node $node_id may be infinite (no exit condition detected)";
+                }
+            }
+        }
+
+        return @errors;
+    }
+
+    # Helper: Check if loop has an exit path (If node with false branch)
+    method _loop_has_exit($graph, $loop_id) {
+        my $nodes = $graph->nodes;
+
+        # Look for If nodes that use the loop as control
+        for my $node_id (keys( $nodes->%* )) {
+            my $node = $nodes->{$node_id};
+            if ($node->op eq 'If') {
+                my $inputs = $node->inputs;
+                if (scalar( $inputs->@* ) > 0 && $inputs->[0] eq $loop_id) {
+                    # Found If node controlled by this loop
+                    # If has both true and false projections - exit exists
+                    return 1;
+                }
+            }
+        }
+
+        return 0;
     }
 }
 
