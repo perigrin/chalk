@@ -9,6 +9,28 @@ class Chalk::IR::Builder {
     use Chalk::IR::Graph;
     use Chalk::IR::Scope;
 
+    # Phase 1 polymorphic node classes
+    use Chalk::IR::Node::Base;
+    use Chalk::IR::Node::Constant;
+    use Chalk::IR::Node::Start;
+    use Chalk::IR::Node::Return;
+    use Chalk::IR::Node::Add;
+    use Chalk::IR::Node::Subtract;
+    use Chalk::IR::Node::Multiply;
+    use Chalk::IR::Node::Divide;
+    use Chalk::IR::Node::Negate;
+    use Chalk::IR::Node::GT;
+    use Chalk::IR::Node::LT;
+    use Chalk::IR::Node::EQ;
+    use Chalk::IR::Node::NE;
+    use Chalk::IR::Node::LE;
+    use Chalk::IR::Node::GE;
+    use Chalk::IR::Node::If;
+    use Chalk::IR::Node::Proj;
+    use Chalk::IR::Node::Region;
+    use Chalk::IR::Node::Phi;
+    use Chalk::IR::Node::Loop;
+
     field $graph :reader;
     field $scope :reader;
     field $node_counter :reader = 0;
@@ -38,12 +60,11 @@ class Chalk::IR::Builder {
         $params //= [];
         my $node_id = $self->next_node_id();
         my $empty_inputs = [];
-        my $attributes = { function => $function_name, params => $params };
-        my $start = Chalk::IR::Node->new(
+        my $start = Chalk::IR::Node::Start->new(
             id            => $node_id,
-            op            => 'Start',
             inputs        => $empty_inputs,
-            attributes    => $attributes,
+            function_name => $function_name,
+            params        => $params,
         );
         $graph->add_node($start);
         $self->set_control($start->id);
@@ -63,12 +84,11 @@ class Chalk::IR::Builder {
     # Create Constant node
     method build_constant_node($value, $type = 'Int') {
         my $node_id = $self->next_node_id();
-        my $attributes = { value => $value, type => $type };
-        my $constant = Chalk::IR::Node->new(
+        my $constant = Chalk::IR::Node::Constant->new(
             id            => $node_id,
-            op            => 'Constant',
             inputs        => [$current_control],
-            attributes    => $attributes,
+            value         => $value,
+            type          => $type,
         );
         $graph->add_node($constant);
         return $constant;
@@ -90,12 +110,11 @@ class Chalk::IR::Builder {
         my $ctrl = $control // $current_control // '__CONTROL_PLACEHOLDER__';
 
         my $node_id = $self->next_node_id();
-        my $empty_attrs = {};
-        my $return = Chalk::IR::Node->new(
+        my $return = Chalk::IR::Node::Return->new(
             id            => $node_id,
-            op            => 'Return',
             inputs        => [$ctrl, $value_node->id],
-            attributes    => $empty_attrs,
+            value_id      => $value_node->id,
+            control_id    => $ctrl,
         );
         $graph->add_node($return);
         return $return;
@@ -109,72 +128,48 @@ class Chalk::IR::Builder {
 
     # Create arithmetic operation nodes
     method build_add_node($left_node, $right_node) {
-        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-        my $attributes = {
-            left => $left_ref,
-            right => $right_ref
-        };
         my $node_id = $self->next_node_id();
-        my $add = Chalk::IR::Node->new(
+        my $add = Chalk::IR::Node::Add->new(
             id => $node_id,
-            op => 'Add',
             inputs => [$current_control, $left_node->id, $right_node->id],
-            attributes => $attributes,
+            left_id => $left_node->id,
+            right_id => $right_node->id,
         );
         $graph->add_node($add);
         return $add;
     }
 
     method build_multiply_node($left_node, $right_node) {
-        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-        my $attributes = {
-            left => $left_ref,
-            right => $right_ref
-        };
         my $node_id = $self->next_node_id();
-        my $mul = Chalk::IR::Node->new(
+        my $mul = Chalk::IR::Node::Multiply->new(
             id => $node_id,
-            op => 'Multiply',
             inputs => [$current_control, $left_node->id, $right_node->id],
-            attributes => $attributes,
+            left_id => $left_node->id,
+            right_id => $right_node->id,
         );
         $graph->add_node($mul);
         return $mul;
     }
 
     method build_sub_node($left_node, $right_node) {
-        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-        my $attributes = {
-            left => $left_ref,
-            right => $right_ref
-        };
         my $node_id = $self->next_node_id();
-        my $sub = Chalk::IR::Node->new(
+        my $sub = Chalk::IR::Node::Subtract->new(
             id => $node_id,
-            op => 'Sub',
             inputs => [$current_control, $left_node->id, $right_node->id],
-            attributes => $attributes,
+            left_id => $left_node->id,
+            right_id => $right_node->id,
         );
         $graph->add_node($sub);
         return $sub;
     }
 
     method build_divide_node($left_node, $right_node) {
-        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-        my $attributes = {
-            left => $left_ref,
-            right => $right_ref
-        };
         my $node_id = $self->next_node_id();
-        my $div = Chalk::IR::Node->new(
+        my $div = Chalk::IR::Node::Divide->new(
             id => $node_id,
-            op => 'Div',
             inputs => [$current_control, $left_node->id, $right_node->id],
-            attributes => $attributes,
+            left_id => $left_node->id,
+            right_id => $right_node->id,
         );
         $graph->add_node($div);
         return $div;
@@ -232,16 +227,12 @@ class Chalk::IR::Builder {
 
     # Create Proj node (projection from MultiNode like Start)
     method build_proj_node($source_node, $index, $label) {
-        my $attributes = {
-            index => $index,
-            label => $label
-        };
         my $node_id = $self->next_node_id();
-        my $proj = Chalk::IR::Node->new(
+        my $proj = Chalk::IR::Node::Proj->new(
             id            => $node_id,
-            op            => 'Proj',
             inputs        => [$source_node->id],
-            attributes    => $attributes,
+            index         => $index,
+            label         => $label,
         );
         $graph->add_node($proj);
         return $proj;
@@ -249,54 +240,36 @@ class Chalk::IR::Builder {
 
     # Comparison nodes
     method build_greater_node($left_node, $right_node) {
-        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-        my $attributes = {
-            left => $left_ref,
-            right => $right_ref
-        };
         my $node_id = $self->next_node_id();
-        my $cmp = Chalk::IR::Node->new(
+        my $cmp = Chalk::IR::Node::GT->new(
             id            => $node_id,
-            op            => 'Greater',
             inputs        => [$current_control, $left_node->id, $right_node->id],
-            attributes    => $attributes,
+            left_id       => $left_node->id,
+            right_id      => $right_node->id,
         );
         $graph->add_node($cmp);
         return $cmp;
     }
 
     method build_less_node($left_node, $right_node) {
-        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-        my $attributes = {
-            left => $left_ref,
-            right => $right_ref
-        };
         my $node_id = $self->next_node_id();
-        my $cmp = Chalk::IR::Node->new(
+        my $cmp = Chalk::IR::Node::LT->new(
             id            => $node_id,
-            op            => 'Less',
             inputs        => [$current_control, $left_node->id, $right_node->id],
-            attributes    => $attributes,
+            left_id       => $left_node->id,
+            right_id      => $right_node->id,
         );
         $graph->add_node($cmp);
         return $cmp;
     }
 
     method build_equal_node($left_node, $right_node) {
-        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-        my $attributes = {
-            left => $left_ref,
-            right => $right_ref
-        };
         my $node_id = $self->next_node_id();
-        my $cmp = Chalk::IR::Node->new(
+        my $cmp = Chalk::IR::Node::EQ->new(
             id            => $node_id,
-            op            => 'Equal',
             inputs        => [$current_control, $left_node->id, $right_node->id],
-            attributes    => $attributes,
+            left_id       => $left_node->id,
+            right_id      => $right_node->id,
         );
         $graph->add_node($cmp);
         return $cmp;
@@ -304,14 +277,11 @@ class Chalk::IR::Builder {
 
     # Control flow nodes
     method build_if_node($condition_node) {
-        my $condition_ref = { op => 'NodeRef', node_id => $condition_node->id };
-        my $attributes = { condition => $condition_ref };
         my $node_id = $self->next_node_id();
-        my $if_node = Chalk::IR::Node->new(
+        my $if_node = Chalk::IR::Node::If->new(
             id            => $node_id,
-            op            => 'If',
             inputs        => [$current_control, $condition_node->id],
-            attributes    => $attributes,
+            condition_id  => $condition_node->id,
         );
         $graph->add_node($if_node);
         return $if_node;
@@ -328,26 +298,21 @@ class Chalk::IR::Builder {
     }
 
     method build_region_node(@control_inputs) {
-        my $empty_attrs = {};
         my $node_id = $self->next_node_id();
-        my $region = Chalk::IR::Node->new(
+        my $region = Chalk::IR::Node::Region->new(
             id            => $node_id,
-            op            => 'Region',
             inputs        => \@control_inputs,
-            attributes    => $empty_attrs,
         );
         $graph->add_node($region);
         return $region;
     }
 
     method build_phi_node($region_node, @value_inputs) {
-        my $empty_attrs = {};
         my $node_id = $self->next_node_id();
-        my $phi = Chalk::IR::Node->new(
+        my $phi = Chalk::IR::Node::Phi->new(
             id            => $node_id,
-            op            => 'Phi',
             inputs        => [$region_node->id, @value_inputs],
-            attributes    => $empty_attrs,
+            region_id     => $region_node->id,
         );
         $graph->add_node($phi);
         return $phi;
@@ -356,13 +321,10 @@ class Chalk::IR::Builder {
     # Loop control flow nodes
     method build_loop_node($entry_control = undef) {
         my $ctrl = $entry_control // $current_control // '__CONTROL_PLACEHOLDER__';
-        my $empty_attrs = {};
         my $node_id = $self->next_node_id();
-        my $loop = Chalk::IR::Node->new(
+        my $loop = Chalk::IR::Node::Loop->new(
             id            => $node_id,
-            op            => 'Loop',
             inputs        => [$ctrl],  # Entry control; backedge added later
-            attributes    => $empty_attrs,
         );
         $graph->add_node($loop);
         return $loop;
@@ -374,13 +336,11 @@ class Chalk::IR::Builder {
         my @inputs = ($loop_node->id, $initial_value);
         push @inputs, $loop_value if defined $loop_value;
 
-        my $empty_attrs = {};
         my $node_id = $self->next_node_id();
-        my $phi = Chalk::IR::Node->new(
+        my $phi = Chalk::IR::Node::Phi->new(
             id            => $node_id,
-            op            => 'Phi',
             inputs        => \@inputs,
-            attributes    => $empty_attrs,
+            region_id     => $loop_node->id,
         );
         $graph->add_node($phi);
         return $phi;
