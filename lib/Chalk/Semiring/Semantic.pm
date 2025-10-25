@@ -148,7 +148,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         );
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $parent_derivation_id = undef) {
         my $ctx = Chalk::EvalContext->new(
             focus => undef,
             children => [],

@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
+use builtin qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) {
     method evaluate($context) {
@@ -50,11 +51,14 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
         my $value = $context->child($expr_index);
 
         # Validate we got an IR node
-        return undef unless (blessed($value) && $value->can('id'));
+        unless (blessed($value) && $value->can('id')) {
+            return undef;
+        }
 
         # Create Store node with placeholder control
         # Parent rule (Block, ConditionalStatement, WhileStatement) will wire actual control
-        return $builder->build_store_node($var_name, $value, '__CONTROL_PLACEHOLDER__');
+        my $store = $builder->build_store_node($var_name, $value, '__CONTROL_PLACEHOLDER__');
+        return $store;
     }
 }
 
