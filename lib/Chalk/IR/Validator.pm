@@ -19,6 +19,7 @@ class Chalk::IR::Validator {
         push @all_errors, $self->validate_phi_placement($graph);
         push @all_errors, $self->validate_loop_structure($graph);
         push @all_errors, $self->validate_class_nodes($graph);
+        push @all_errors, $self->validate_array_nodes($graph);
 
         my $success = scalar( @all_errors ) == 0 ? 1 : 0;
         return ($success, \@all_errors);
@@ -658,6 +659,182 @@ class Chalk::IR::Validator {
                     }
                     elsif (!exists($nodes->{$value_ref->{node_id}})) {
                         push @errors, "FieldStore node $node_id references non-existent value node " . $value_ref->{node_id};
+                    }
+                }
+            }
+        }
+
+        return @errors;
+    }
+
+    # Validate array operation nodes (Issue #98 Phase 2)
+    method validate_array_nodes($graph) {
+        my @errors = ();
+        my $nodes = $graph->nodes;
+
+        # Check each node that relates to array operations
+        for my $node_id (keys( $nodes->%* )) {
+            my $node = $nodes->{$node_id};
+            my $op = $node->op;
+
+            # Validate ArrayNew nodes
+            if ($op eq 'ArrayNew') {
+                # ArrayNew has no required attributes
+                # Just verify it exists and has the correct op
+            }
+
+            # Validate ArrayPush nodes
+            elsif ($op eq 'ArrayPush') {
+                my $attrs = $node->attributes;
+
+                # ArrayPush must have 'array' attribute
+                if (!exists($attrs->{array})) {
+                    push @errors, "ArrayPush node $node_id missing required 'array' attribute";
+                }
+                elsif (ref($attrs->{array}) ne 'HASH') {
+                    push @errors, "ArrayPush node $node_id 'array' attribute must be a NodeRef";
+                }
+                else {
+                    my $array_ref = $attrs->{array};
+                    if (!exists($array_ref->{node_id})) {
+                        push @errors, "ArrayPush node $node_id 'array' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$array_ref->{node_id}})) {
+                        push @errors, "ArrayPush node $node_id references non-existent array node " . $array_ref->{node_id};
+                    }
+                }
+
+                # ArrayPush must have 'value' attribute
+                if (!exists($attrs->{value})) {
+                    push @errors, "ArrayPush node $node_id missing required 'value' attribute";
+                }
+                elsif (ref($attrs->{value}) ne 'HASH') {
+                    push @errors, "ArrayPush node $node_id 'value' attribute must be a NodeRef";
+                }
+                else {
+                    my $value_ref = $attrs->{value};
+                    if (!exists($value_ref->{node_id})) {
+                        push @errors, "ArrayPush node $node_id 'value' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$value_ref->{node_id}})) {
+                        push @errors, "ArrayPush node $node_id references non-existent value node " . $value_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate ArrayGet nodes
+            elsif ($op eq 'ArrayGet') {
+                my $attrs = $node->attributes;
+
+                # ArrayGet must have 'array' attribute
+                if (!exists($attrs->{array})) {
+                    push @errors, "ArrayGet node $node_id missing required 'array' attribute";
+                }
+                elsif (ref($attrs->{array}) ne 'HASH') {
+                    push @errors, "ArrayGet node $node_id 'array' attribute must be a NodeRef";
+                }
+                else {
+                    my $array_ref = $attrs->{array};
+                    if (!exists($array_ref->{node_id})) {
+                        push @errors, "ArrayGet node $node_id 'array' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$array_ref->{node_id}})) {
+                        push @errors, "ArrayGet node $node_id references non-existent array node " . $array_ref->{node_id};
+                    }
+                }
+
+                # ArrayGet must have 'index' attribute
+                if (!exists($attrs->{index})) {
+                    push @errors, "ArrayGet node $node_id missing required 'index' attribute";
+                }
+                elsif (ref($attrs->{index}) ne 'HASH') {
+                    push @errors, "ArrayGet node $node_id 'index' attribute must be a NodeRef";
+                }
+                else {
+                    my $index_ref = $attrs->{index};
+                    if (!exists($index_ref->{node_id})) {
+                        push @errors, "ArrayGet node $node_id 'index' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$index_ref->{node_id}})) {
+                        push @errors, "ArrayGet node $node_id references non-existent index node " . $index_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate ArraySet nodes
+            elsif ($op eq 'ArraySet') {
+                my $attrs = $node->attributes;
+
+                # ArraySet must have 'array' attribute
+                if (!exists($attrs->{array})) {
+                    push @errors, "ArraySet node $node_id missing required 'array' attribute";
+                }
+                elsif (ref($attrs->{array}) ne 'HASH') {
+                    push @errors, "ArraySet node $node_id 'array' attribute must be a NodeRef";
+                }
+                else {
+                    my $array_ref = $attrs->{array};
+                    if (!exists($array_ref->{node_id})) {
+                        push @errors, "ArraySet node $node_id 'array' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$array_ref->{node_id}})) {
+                        push @errors, "ArraySet node $node_id references non-existent array node " . $array_ref->{node_id};
+                    }
+                }
+
+                # ArraySet must have 'index' attribute
+                if (!exists($attrs->{index})) {
+                    push @errors, "ArraySet node $node_id missing required 'index' attribute";
+                }
+                elsif (ref($attrs->{index}) ne 'HASH') {
+                    push @errors, "ArraySet node $node_id 'index' attribute must be a NodeRef";
+                }
+                else {
+                    my $index_ref = $attrs->{index};
+                    if (!exists($index_ref->{node_id})) {
+                        push @errors, "ArraySet node $node_id 'index' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$index_ref->{node_id}})) {
+                        push @errors, "ArraySet node $node_id references non-existent index node " . $index_ref->{node_id};
+                    }
+                }
+
+                # ArraySet must have 'value' attribute
+                if (!exists($attrs->{value})) {
+                    push @errors, "ArraySet node $node_id missing required 'value' attribute";
+                }
+                elsif (ref($attrs->{value}) ne 'HASH') {
+                    push @errors, "ArraySet node $node_id 'value' attribute must be a NodeRef";
+                }
+                else {
+                    my $value_ref = $attrs->{value};
+                    if (!exists($value_ref->{node_id})) {
+                        push @errors, "ArraySet node $node_id 'value' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$value_ref->{node_id}})) {
+                        push @errors, "ArraySet node $node_id references non-existent value node " . $value_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate ArrayLength nodes
+            elsif ($op eq 'ArrayLength') {
+                my $attrs = $node->attributes;
+
+                # ArrayLength must have 'array' attribute
+                if (!exists($attrs->{array})) {
+                    push @errors, "ArrayLength node $node_id missing required 'array' attribute";
+                }
+                elsif (ref($attrs->{array}) ne 'HASH') {
+                    push @errors, "ArrayLength node $node_id 'array' attribute must be a NodeRef";
+                }
+                else {
+                    my $array_ref = $attrs->{array};
+                    if (!exists($array_ref->{node_id})) {
+                        push @errors, "ArrayLength node $node_id 'array' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$array_ref->{node_id}})) {
+                        push @errors, "ArrayLength node $node_id references non-existent array node " . $array_ref->{node_id};
                     }
                 }
             }
