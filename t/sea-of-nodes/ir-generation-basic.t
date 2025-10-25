@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: Test basic IR generation for simple Chalk programs
-# ABOUTME: Verifies semantic actions build IR during parsing
+# ABOUTME: Test IR generation pipeline with GVN optimization for simple Chalk programs
+# ABOUTME: Verifies semantic actions build IR during parsing and GVN deduplicates intermediate nodes
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
@@ -14,6 +14,7 @@ use Test::More;
     use Chalk::Grammar;
     use Chalk::IR::Builder;
     use Chalk::IR::Validator;
+    use Chalk::IR::Optimizer::GVN;
     use Chalk::Semiring::Semantic;
 
     # Load Chalk grammar with semantic actions
@@ -48,46 +49,25 @@ use Test::More;
     my $result = $parser->parse_string($program);
     ok($result, 'Simple program parses successfully');
 
-    # Get the IR graph and prune to keep only the winning derivation
+    # Get the IR graph (nodes created during parsing)
     my $graph = $builder->graph;
     ok($graph, 'Builder has a graph');
 
-    # Debug: Check what derivation IDs are on nodes before pruning
+    # Debug: Check nodes before optimization
     my $nodes_before = $graph->nodes;
-    my %deriv_id_counts;
-    my $nodes_with_no_deriv = 0;
-    for my $node (values %$nodes_before) {
-        my $node_deriv_id = $node->derivation_id;
-        if (defined $node_deriv_id) {
-            $deriv_id_counts{$node_deriv_id}++;
-        } else {
-            $nodes_with_no_deriv++;
-        }
-    }
-    diag("Before pruning: " . scalar(keys %$nodes_before) . " total nodes");
-    diag("Nodes with no derivation_id: $nodes_with_no_deriv");
-    for my $deriv_id (sort keys %deriv_id_counts) {
-        diag("  $deriv_id: $deriv_id_counts{$deriv_id} nodes");
-    }
+    diag("Before GVN: " . scalar(keys %$nodes_before) . " total nodes");
 
-    # Choose the winning derivation: the one with the most nodes
-    # (represents the most complete parse)
-    my $winning_deriv_id = (sort { $deriv_id_counts{$b} <=> $deriv_id_counts{$a} } keys %deriv_id_counts)[0];
-    diag("Winning derivation ID (most nodes): " . (defined $winning_deriv_id ? $winning_deriv_id : 'undefined'));
+    # Run GVN to deduplicate nodes from intermediate parse completions
+    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+    $graph = $gvn_result->{graph};
+    my $metrics = $gvn_result->{metrics};
 
-    # Prune the graph to remove nodes from losing parse alternatives
-    if (defined $winning_deriv_id) {
-        $graph->prune_by_derivation_id($winning_deriv_id);
-
-        # Debug: Check after pruning
-        my $nodes_after = $graph->nodes;
-        diag("After pruning: " . scalar(keys %$nodes_after) . " nodes");
-        diag("Node types after pruning:");
-        for my $node (values %$nodes_after) {
-            diag("  " . $node->op . " (node " . $node->id . ")");
-        }
-    } else {
-        diag("WARNING: winning_deriv_id is undefined, skipping pruning");
+    # Debug: Check after GVN
+    my $nodes_after = $graph->nodes;
+    diag("After GVN: " . scalar(keys %$nodes_after) . " nodes (eliminated " . $metrics->{nodes_eliminated} . ")");
+    diag("Node types after GVN:");
+    for my $node (values %$nodes_after) {
+        diag("  " . $node->op . " (node " . $node->id . ")");
     }
 
     # Verify graph has some nodes (should have Start, Store for assignment, etc.)
@@ -107,7 +87,7 @@ use Test::More;
     my @store_nodes = grep { $_->op eq 'Store' } values %$nodes;
     ok(@store_nodes > 0, 'Graph contains Store node from assignment');
 
-    # Validate the IR
+    # Validate the IR (should pass after GVN deduplication)
     use Chalk::IR::Validator;
     my $validator = Chalk::IR::Validator->new();
     my ($valid, $errors) = $validator->validate_all($graph);
@@ -119,11 +99,7 @@ use Test::More;
         }
     }
 
-    # TODO: Fix control flow wiring to eliminate duplicate Start nodes and unreachable nodes
-    TODO: {
-        local $TODO = 'Control flow wiring needs refinement for proper CFG';
-        ok($valid, 'Generated IR passes validation');
-    }
+    ok($valid, 'Generated IR passes validation after GVN');
 }
 
 done_testing();

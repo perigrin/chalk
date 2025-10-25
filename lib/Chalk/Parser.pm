@@ -185,6 +185,7 @@ class Chalk::EarleyChart {
         }
 
         # Check if we found any valid parses
+        # Return unevaluated result - let caller decide whether to evaluate
         return $result == $semiring->add_id ? undef : $result;
     }
 }
@@ -338,42 +339,34 @@ class Chalk::Parser {
 
             my $ctx = $completed_element->context;
 
-            # Create evaluation context using the existing derivation ID from predict()
-            # All completions building up a single parse tree share the same derivation ID
-            my $eval_ctx = Chalk::EvalContext->new(
-                focus => $ctx->focus,
-                children => $ctx->children,
-                start_pos => $ctx->start_pos,
-                end_pos => $ctx->end_pos,
-                env => $ctx->env,
-                grammar => $ctx->grammar,
-                rule => $ctx->rule,
-                forest => $ctx->forest
-            );
+            # Evaluate the rule's semantic action if it has one
+            my $rule = $ctx->rule;
+            if ($rule && $rule->can('evaluate')) {
+                my $result = $rule->evaluate($ctx);
 
-            my $evaluated_value = $completed_item->rule->evaluate($eval_ctx);
+                # Set the focus to the evaluated result
+                # This maintains the result while preserving children for parent rules
+                $ctx = Chalk::EvalContext->new(
+                    focus => $result,
+                    children => $ctx->children,
+                    start_pos => $ctx->start_pos,
+                    end_pos => $ctx->end_pos,
+                    env => $ctx->env,
+                    grammar => $ctx->grammar,
+                    rule => $ctx->rule,
+                    forest => $ctx->forest
+                );
 
-            # Create new context with evaluated focus but preserve children
-            my $new_ctx = Chalk::EvalContext->new(
-                focus => $evaluated_value,
-                children => $eval_ctx->children,
-                start_pos => $eval_ctx->start_pos,
-                end_pos => $eval_ctx->end_pos,
-                env => $eval_ctx->env,
-                grammar => $eval_ctx->grammar,
-                rule => $eval_ctx->rule,
-                forest => $eval_ctx->forest
-            );
+                # Update the completed element with evaluated context
+                $completed_element = Chalk::Semiring::SemanticElement->new(
+                    value => 1,
+                    context => $ctx
+                );
 
-            # Update the completed element with evaluated context
-            $completed_element = Chalk::Semiring::SemanticElement->new(
-                value => 1,
-                context => $new_ctx
-            );
-
-            # Update the chart with evaluated element so parent rules can access the evaluated focus
-            # The element has both the evaluated focus AND the accumulated children
-            $chart->add_element($completed_item, $completed_element);
+                # Update the chart with evaluated element
+                # The element has both the evaluated focus AND the accumulated children
+                $chart->add_element($completed_item, $completed_element);
+            }
         }
 
         # Use indexed lookups to get items waiting for this symbol
