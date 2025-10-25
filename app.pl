@@ -15,6 +15,8 @@ if ( !caller ) {
     my $grammar_module = "Perl";  # default grammar module
     my $semiring_type = "SPPF";   # default semiring
     my $syntax_check_mode = 0;    # -c flag for syntax checking
+    my $compile_module_mode = 0;  # --compile-module flag
+    my $module_to_compile;        # module name for compilation
     my $preprocess = ['Chalk::Preprocessor::Heredoc'];  # default to Heredoc
     my @remaining_args;
 
@@ -30,6 +32,11 @@ if ( !caller ) {
             $syntax_check_mode = 1;
             $semiring_type = "Boolean";  # -c implies Boolean semiring
             $i++;
+        } elsif ($ARGV[$i] eq '--compile-module' && $i < $#ARGV) {
+            $compile_module_mode = 1;
+            $module_to_compile = $ARGV[$i + 1];
+            $grammar_module = "Chalk";  # Module compilation uses Chalk grammar
+            $i += 2;
         } elsif ($ARGV[$i] eq '--preprocess') {
             $preprocess = ['Chalk::Preprocessor::Heredoc'];  # Enable heredoc preprocessing
             $i++;
@@ -88,6 +95,81 @@ if ( !caller ) {
     # Verify grammar loaded
     if ( !defined($chalk_grammar) ) {
         die("Error: Grammar not loaded for '$grammar_module'!\n");
+    }
+
+    # Handle module compilation mode
+    if ($compile_module_mode) {
+        use Chalk::ImportResolver;
+        use Chalk::IR::Builder;
+
+        my $resolver = Chalk::ImportResolver->new();
+        my $builder = Chalk::IR::Builder->new();
+
+        # Resolve dependencies for the module
+        my $dependency_order = $resolver->resolve_dependencies($module_to_compile);
+
+        unless ($dependency_order && @$dependency_order) {
+            print("Error: No dependencies resolved for module '$module_to_compile'\n");
+            exit 1;
+        }
+
+        print("Module compilation order for $module_to_compile:\n");
+        for my $module (@$dependency_order) {
+            print("  $module\n");
+        }
+
+        # Create semiring for parsing
+        require Chalk::Semiring::SPPF;
+        my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
+
+        # Parse each module in dependency order
+        my $parser = Chalk::Parser->new(
+            grammar => $chalk_grammar,
+            semiring => $semiring,
+            preprocess => $preprocess
+        );
+
+        my $success_count = 0;
+        my $failure_count = 0;
+
+        for my $module (@$dependency_order) {
+            my $file_path = $resolver->module_to_path($module);
+
+            # Skip if file doesn't exist
+            unless (-f $file_path) {
+                print("Skipping $module (file not found: $file_path)\n");
+                next;
+            }
+
+            # Read the module file
+            open my $fh, '<', $file_path or do {
+                print("Error: Cannot open $file_path: $!\n");
+                $failure_count++;
+                next;
+            };
+            local $/;
+            my $content = <$fh>;
+            close $fh;
+
+            # Parse the module
+            print("Parsing $module ($file_path)... ");
+            my $result = $parser->parse_string($content);
+
+            if ($result) {
+                print("OK\n");
+                $success_count++;
+            } else {
+                print("FAILED\n");
+                $failure_count++;
+            }
+        }
+
+        print("\nModule compilation summary:\n");
+        print("  Success: $success_count\n");
+        print("  Failure: $failure_count\n");
+        print("  Total: " . ($success_count + $failure_count) . "\n");
+
+        exit($failure_count == 0 ? 0 : 1);
     }
 
     # Read input from STDIN or command line file
