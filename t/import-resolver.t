@@ -2,6 +2,7 @@
 # ABOUTME: Validates module name to path conversion, circular dependency detection, and recursive resolution
 
 use v5.42;
+use lib 'tools';
 use Test::More;
 use Test::Deep;
 

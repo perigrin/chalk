@@ -5,41 +5,32 @@ use 5.42.0;
 use experimental 'class';
 use Chalk::Grammar;
 
-# Known pragmas that are no-ops for Chalk (Chalk provides these by default)
-my %NO_OP_PRAGMAS = map { $_ => 1 } qw(
-    strict
-    warnings
-    utf8
-    experimental
-    feature
-);
-
-# Known external modules (not Chalk::* modules)
-my %EXTERNAL_MODULES = map { $_ => 1 } qw(
-    builtin
-    Carp
-    Data::Dumper
-    Scalar::Util
-    List::Util
-    Test::More
-    Test::Deep
-);
-
 # Categorize use statement into: version, pragma, module, or external
 sub _categorize_use_statement($module_name) {
     # Version check: use 5.42.0;
-    return 'version' if $module_name =~ /^\d+\.\d+/;
+    # Check if first char is digit (simple version detection)
+    my $first_char = substr($module_name, 0, 1);
+    if ($first_char ge '0' && $first_char le '9') {
+        return 'version';
+    }
 
     # Pragma: use experimental qw(...);
-    return 'pragma' if exists $NO_OP_PRAGMAS{$module_name};
+    # Known pragmas that are no-ops for Chalk (Chalk provides these by default)
+    if ($module_name eq 'strict' ||
+        $module_name eq 'warnings' ||
+        $module_name eq 'utf8' ||
+        $module_name eq 'experimental' ||
+        $module_name eq 'feature') {
+        return 'pragma';
+    }
 
     # Chalk module: use Chalk::IR::Node;
-    return 'module' if $module_name =~ /^Chalk::/;
+    # Check if module starts with 'Chalk::'
+    if (substr($module_name, 0, 7) eq 'Chalk::') {
+        return 'module';
+    }
 
-    # External module: use builtin qw(...);
-    return 'external' if exists $EXTERNAL_MODULES{$module_name};
-
-    # Default to external for unknown modules
+    # Everything else is external (builtin, Carp, etc.)
     return 'external';
 }
 
@@ -49,7 +40,9 @@ sub _extract_imports($context, $start_index) {
     my @imports = ();
 
     # Look for QuotedWordList child after the module name
-    for my $i ($start_index..$context->children->$#*) {
+    my $children = $context->children;
+    my @children_array = $children->@*;
+    for my $i ($start_index..$#children_array) {
         my $child = $context->child($i);
         next unless defined $child;
 
@@ -91,8 +84,8 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
         for my $i (0..$#children) {
             my $child = $children[$i]->extract;
 
-            # Skip 'use' keyword and whitespace
-            next if !defined($child) || $child eq 'use' || $child =~ /^\s+$/;
+            # Skip 'use' keyword and whitespace/empty values
+            next if !defined($child) || $child eq 'use' || $child eq '';
 
             # This should be the module name or version
             if (defined($child) && !ref($child)) {

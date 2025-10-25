@@ -6,6 +6,7 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use open qw(:std :utf8);
 use lib 'lib';
+use lib 'tools';
 
 use Chalk;
 

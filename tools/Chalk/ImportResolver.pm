@@ -21,13 +21,14 @@ class Chalk::ImportResolver {
 
     # Check if a module is currently being parsed (circular dependency)
     method is_circular($module_name) {
-        return exists $parsing->{$module_name};
+        return exists($parsing->{$module_name});
     }
 
     # Extract Chalk::* dependencies from a module file
     # Uses simple regex scanning per Issue #97 recommendation (Option B)
     method extract_dependencies($file_path) {
-        open(my $fh, '<', $file_path) or return [];
+        my $fh;
+        open($fh, '<', $file_path) or return [];
 
         my @dependencies = ();
         while (my $line = <$fh>) {
@@ -49,7 +50,7 @@ class Chalk::ImportResolver {
     # Returns array of module names in dependency order (dependencies first)
     method resolve_dependencies($module_name) {
         # Check cache first
-        return $cache->{$module_name} if exists $cache->{$module_name};
+        return $cache->{$module_name} if exists($cache->{$module_name});
 
         # Check for circular dependencies
         if ($self->is_circular($module_name)) {
