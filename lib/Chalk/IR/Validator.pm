@@ -22,6 +22,7 @@ class Chalk::IR::Validator {
         push @all_errors, $self->validate_array_nodes($graph);
         push @all_errors, $self->validate_hash_nodes($graph);
         push @all_errors, $self->validate_string_nodes($graph);
+        push @all_errors, $self->validate_module_nodes($graph);
 
         my $success = scalar( @all_errors ) == 0 ? 1 : 0;
         return ($success, \@all_errors);
@@ -1145,6 +1146,57 @@ class Chalk::IR::Validator {
                     elsif (!exists($nodes->{$length_ref->{node_id}})) {
                         push @errors, "StrSubstr node $node_id references non-existent length node " . $length_ref->{node_id};
                     }
+                }
+            }
+        }
+
+        return @errors;
+    }
+
+    # Validate module/use statement nodes (Issue #98 Phase 5)
+    method validate_module_nodes($graph) {
+        my @errors;
+        my $nodes = $graph->nodes;
+
+        for my $node_id (keys($nodes->%*)) {
+            my $node = $nodes->{$node_id};
+            my $op = $node->op;
+
+            # Validate UseStatement nodes
+            if ($op eq 'UseStatement') {
+                my $attrs = $node->attributes;
+
+                # Validate 'type' attribute
+                if (!exists($attrs->{type})) {
+                    push @errors, "UseStatement node $node_id missing 'type' attribute";
+                }
+                else {
+                    my $type = $attrs->{type};
+                    my %valid_types = (
+                        version => 1,
+                        pragma => 1,
+                        module => 1,
+                        external => 1
+                    );
+                    if (!exists($valid_types{$type})) {
+                        push @errors, "UseStatement node $node_id has invalid type '$type' (must be version, pragma, module, or external)";
+                    }
+                }
+
+                # Validate 'module' attribute
+                if (!exists($attrs->{module})) {
+                    push @errors, "UseStatement node $node_id missing 'module' attribute";
+                }
+                elsif (!defined($attrs->{module}) || $attrs->{module} eq '') {
+                    push @errors, "UseStatement node $node_id has empty or undefined 'module' attribute";
+                }
+
+                # Validate 'imports' attribute
+                if (!exists($attrs->{imports})) {
+                    push @errors, "UseStatement node $node_id missing 'imports' attribute";
+                }
+                elsif (ref($attrs->{imports}) ne 'ARRAY') {
+                    push @errors, "UseStatement node $node_id 'imports' attribute must be an array reference";
                 }
             }
         }

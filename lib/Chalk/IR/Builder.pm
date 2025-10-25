@@ -786,6 +786,33 @@ class Chalk::IR::Builder {
         return $str_substr;
     }
 
+    # Module system support (Issue #98 Phase 5)
+    method build_use_statement_node($type, $module, $imports) {
+        # Create UseStatement node for capturing use statement metadata
+        # $type: 'version', 'pragma', 'module', or 'external'
+        # $module: module name (e.g., '5.42.0', 'experimental', 'Chalk::IR::Node')
+        # $imports: arrayref of imported symbols (empty for full import)
+
+        my $graph = $self->graph;
+        my $current_control = $self->current_control;
+
+        my $attributes = {
+            type => $type,
+            module => $module,
+            imports => $imports
+        };
+
+        my $node_id = $self->next_node_id();
+        my $use_stmt = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'UseStatement',
+            inputs => [$current_control],
+            attributes => $attributes
+        );
+        $graph->add_node($use_stmt);
+        return $use_stmt;
+    }
+
 }
 
 1;
