@@ -107,7 +107,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     field $mul_id :reader;
     field $add_id :reader;
     field $_add_id_is_zero :reader = 1;  # Flag to identify add_id
-    field $derivation_counter = 0;  # Counter for unique derivation IDs
 
     ADJUST {
         # Store reference to shared forest if provided
@@ -149,28 +148,13 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         );
     }
 
-    method generate_unique_derivation_id() {
-        my $deriv_id = "deriv_$derivation_counter";
-        $derivation_counter++;
-        return $deriv_id;
-    }
-
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $parent_derivation_id = undef) {
-        # Generate unique derivation ID for this parse alternative, or inherit from parent
-        my $derivation_id = defined($parent_derivation_id)
-            ? $parent_derivation_id
-            : $self->generate_unique_derivation_id();
-
-        # Add derivation_id to env so semantic actions can access it
-        my %extended_env = %$env;
-        $extended_env{derivation_id} = $derivation_id;
-
         my $ctx = Chalk::EvalContext->new(
             focus => undef,
             children => [],
             start_pos => $start_pos,
             end_pos => $end_pos,
-            env => \%extended_env,
+            env => $env,
             grammar => $grammar,
             rule => $rule,
             forest => $forest

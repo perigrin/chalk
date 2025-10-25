@@ -13,7 +13,6 @@ class Chalk::IR::Builder {
     field $scope :reader;
     field $node_counter :reader = 0;
     field $current_control :reader;  # Current control flow node
-    field $current_derivation_id :reader;  # Current derivation ID for tagging nodes
     field $loop_entry_scope;  # Snapshot of scope bindings at loop entry
     field $loop_tracking_active = 0;  # Whether loop tracking is active
 
@@ -34,11 +33,6 @@ class Chalk::IR::Builder {
         $current_control = $ctrl;
     }
 
-    # Set current derivation ID for tagging nodes
-    method set_derivation_id($deriv_id) {
-        $current_derivation_id = $deriv_id;
-    }
-
     # Create Start node for a function/method
     method build_start_node($function_name = 'main', $params = undef) {
         $params //= [];
@@ -50,7 +44,6 @@ class Chalk::IR::Builder {
             op            => 'Start',
             inputs        => $empty_inputs,
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($start);
         $self->set_control($start->id);
@@ -76,7 +69,6 @@ class Chalk::IR::Builder {
             op            => 'Constant',
             inputs        => [$current_control],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($constant);
         return $constant;
@@ -104,7 +96,6 @@ class Chalk::IR::Builder {
             op            => 'Return',
             inputs        => [$ctrl, $value_node->id],
             attributes    => $empty_attrs,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($return);
         return $return;
@@ -130,7 +121,6 @@ class Chalk::IR::Builder {
             op => 'Add',
             inputs => [$current_control, $left_node->id, $right_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($add);
         return $add;
@@ -149,7 +139,6 @@ class Chalk::IR::Builder {
             op => 'Multiply',
             inputs => [$current_control, $left_node->id, $right_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($mul);
         return $mul;
@@ -168,7 +157,6 @@ class Chalk::IR::Builder {
             op => 'Sub',
             inputs => [$current_control, $left_node->id, $right_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($sub);
         return $sub;
@@ -187,7 +175,6 @@ class Chalk::IR::Builder {
             op => 'Div',
             inputs => [$current_control, $left_node->id, $right_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($div);
         return $div;
@@ -209,7 +196,6 @@ class Chalk::IR::Builder {
             op            => 'Store',
             inputs        => [$ctrl, $value_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($store);
         $scope->define($var_name, $store->id);
@@ -239,7 +225,6 @@ class Chalk::IR::Builder {
             op            => 'Load',
             inputs        => [$current_control, $node_id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($load);
         return $load;
@@ -257,7 +242,6 @@ class Chalk::IR::Builder {
             op            => 'Proj',
             inputs        => [$source_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($proj);
         return $proj;
@@ -277,7 +261,6 @@ class Chalk::IR::Builder {
             op            => 'Greater',
             inputs        => [$current_control, $left_node->id, $right_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($cmp);
         return $cmp;
@@ -296,7 +279,6 @@ class Chalk::IR::Builder {
             op            => 'Less',
             inputs        => [$current_control, $left_node->id, $right_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($cmp);
         return $cmp;
@@ -315,7 +297,6 @@ class Chalk::IR::Builder {
             op            => 'Equal',
             inputs        => [$current_control, $left_node->id, $right_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($cmp);
         return $cmp;
@@ -331,7 +312,6 @@ class Chalk::IR::Builder {
             op            => 'If',
             inputs        => [$current_control, $condition_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($if_node);
         return $if_node;
@@ -355,7 +335,6 @@ class Chalk::IR::Builder {
             op            => 'Region',
             inputs        => \@control_inputs,
             attributes    => $empty_attrs,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($region);
         return $region;
@@ -369,7 +348,6 @@ class Chalk::IR::Builder {
             op            => 'Phi',
             inputs        => [$region_node->id, @value_inputs],
             attributes    => $empty_attrs,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($phi);
         return $phi;
@@ -385,7 +363,6 @@ class Chalk::IR::Builder {
             op            => 'Loop',
             inputs        => [$ctrl],  # Entry control; backedge added later
             attributes    => $empty_attrs,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($loop);
         return $loop;
@@ -404,7 +381,6 @@ class Chalk::IR::Builder {
             op            => 'Phi',
             inputs        => \@inputs,
             attributes    => $empty_attrs,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($phi);
         return $phi;
@@ -421,7 +397,6 @@ class Chalk::IR::Builder {
             op            => 'Call',
             inputs        => [$current_control, $current_control, map { $_->id } @arg_nodes],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($call);
         return $call;
@@ -493,7 +468,6 @@ class Chalk::IR::Builder {
             op            => 'ClassDef',
             inputs        => [$current_control],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($classdef);
         return $classdef;
@@ -525,7 +499,6 @@ class Chalk::IR::Builder {
             op            => 'New',
             inputs        => \@input_nodes,
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($new_obj);
         return $new_obj;
@@ -544,7 +517,6 @@ class Chalk::IR::Builder {
             op            => 'FieldAccess',
             inputs        => [$current_control, $object_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($field_access);
         return $field_access;
@@ -565,7 +537,6 @@ class Chalk::IR::Builder {
             op            => 'FieldStore',
             inputs        => [$current_control, $object_node->id, $value_node->id],
             attributes    => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($field_store);
         return $field_store;
@@ -580,7 +551,6 @@ class Chalk::IR::Builder {
             op => 'ArrayNew',
             inputs => [$current_control],
             attributes => {},
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($array_new);
         return $array_new;
@@ -600,7 +570,6 @@ class Chalk::IR::Builder {
             op => 'ArrayPush',
             inputs => [$current_control, $array_node->id, $value_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($array_push);
         return $array_push;
@@ -620,7 +589,6 @@ class Chalk::IR::Builder {
             op => 'ArrayGet',
             inputs => [$current_control, $array_node->id, $index_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($array_get);
         return $array_get;
@@ -642,7 +610,6 @@ class Chalk::IR::Builder {
             op => 'ArraySet',
             inputs => [$current_control, $array_node->id, $index_node->id, $value_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($array_set);
         return $array_set;
@@ -660,7 +627,6 @@ class Chalk::IR::Builder {
             op => 'ArrayLength',
             inputs => [$current_control, $array_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($array_length);
         return $array_length;
@@ -675,7 +641,6 @@ class Chalk::IR::Builder {
             op => 'HashNew',
             inputs => [$current_control],
             attributes => {},
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($hash_new);
         return $hash_new;
@@ -697,7 +662,6 @@ class Chalk::IR::Builder {
             op => 'HashSet',
             inputs => [$current_control, $hash_node->id, $key_node->id, $value_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($hash_set);
         return $hash_set;
@@ -717,7 +681,6 @@ class Chalk::IR::Builder {
             op => 'HashGet',
             inputs => [$current_control, $hash_node->id, $key_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($hash_get);
         return $hash_get;
@@ -737,7 +700,6 @@ class Chalk::IR::Builder {
             op => 'HashExists',
             inputs => [$current_control, $hash_node->id, $key_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($hash_exists);
         return $hash_exists;
@@ -755,7 +717,6 @@ class Chalk::IR::Builder {
             op => 'HashKeys',
             inputs => [$current_control, $hash_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($hash_keys);
         return $hash_keys;
@@ -778,7 +739,6 @@ class Chalk::IR::Builder {
             op => 'StrConcat',
             inputs => [$current_control, $left_node->id, $right_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($str_concat);
         return $str_concat;
@@ -798,7 +758,6 @@ class Chalk::IR::Builder {
             op => 'StrLength',
             inputs => [$current_control, $string_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($str_length);
         return $str_length;
@@ -822,7 +781,6 @@ class Chalk::IR::Builder {
             op => 'StrSubstr',
             inputs => [$current_control, $string_node->id, $offset_node->id, $length_node->id],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($str_substr);
         return $str_substr;
@@ -850,7 +808,6 @@ class Chalk::IR::Builder {
             op => 'UseStatement',
             inputs => [$current_control],
             attributes => $attributes,
-            derivation_id => $current_derivation_id,
         );
         $graph->add_node($use_stmt);
         return $use_stmt;

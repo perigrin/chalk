@@ -34,10 +34,6 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
             return undef;
         }
 
-        # Set the builder's derivation ID from the context environment
-        my $deriv_id = $context->env->{derivation_id};
-        $builder->set_derivation_id($deriv_id) if defined $deriv_id;
-
         # Get the variable (child 2)
         my $var = $context->child(2);
 

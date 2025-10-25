@@ -9,7 +9,6 @@ class Chalk::IR::Node {
     field $op           :param :reader;
     field $inputs       :param :reader;
     field $attributes   :param :reader;
-    field $derivation_id :param :reader = undef;
 
     method to_hash() {
         return {
@@ -17,7 +16,6 @@ class Chalk::IR::Node {
             op           => $op,
             inputs       => $inputs,
             attributes   => $attributes,
-            derivation_id => $derivation_id,
         };
     }
 
@@ -89,7 +87,6 @@ class Chalk::IR::Node {
                         value => $result,
                         type  => 'Int',
                     },
-                    derivation_id => $derivation_id,
                 );
             }
         }
@@ -134,7 +131,6 @@ class Chalk::IR::Node {
                         value => $result,
                         type  => 'Int',
                     },
-                    derivation_id => $derivation_id,
                 );
             }
         }
@@ -173,7 +169,6 @@ class Chalk::IR::Node {
                                 value => $value_ref->{value},
                                 type  => $value_ref->{type},
                             },
-                            derivation_id => $derivation_id,
                         );
                     }
                 }
@@ -216,7 +211,6 @@ class Chalk::IR::Node {
                                     value => '~Ctrl',
                                     type  => 'Control',
                                 },
-                                derivation_id => $derivation_id,
                             );
                         }
                     }

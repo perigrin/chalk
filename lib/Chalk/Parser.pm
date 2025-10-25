@@ -478,18 +478,7 @@ class Chalk::Parser {
 
             # Only add if not already in chart
             unless ( $chart->has_item($predicted_item) ) {
-                # For Semantic semiring, get parent's derivation ID so children inherit it
-                my $rule_element;
-                if ($semiring isa Chalk::Semiring::Semantic) {
-                    my $parent_derivation_id = undef;
-                    my $parent_element = $chart->get_element($item);
-                    if ($parent_element && $parent_element->context) {
-                        $parent_derivation_id = $parent_element->context->env->{derivation_id};
-                    }
-                    $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos, $parent_derivation_id);
-                } else {
-                    $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos);
-                }
+                my $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos);
                 $chart->add_element( $predicted_item, $rule_element );
                 push( $agenda->@*, $predicted_item );
             }
