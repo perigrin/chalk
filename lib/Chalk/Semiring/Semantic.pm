@@ -155,9 +155,11 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         return $deriv_id;
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
-        # Generate unique derivation ID for this parse alternative
-        my $derivation_id = $self->generate_unique_derivation_id();
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $parent_derivation_id = undef) {
+        # Generate unique derivation ID for this parse alternative, or inherit from parent
+        my $derivation_id = defined($parent_derivation_id)
+            ? $parent_derivation_id
+            : $self->generate_unique_derivation_id();
 
         # Add derivation_id to env so semantic actions can access it
         my %extended_env = %$env;

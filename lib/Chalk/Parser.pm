@@ -323,11 +323,6 @@ class Chalk::Parser {
         return if $chart->has_completed($completed_item);
         $chart->mark_completed($completed_item);
 
-        # DEBUG: Track when Program completes
-        if ($completed_item->rule->lhs eq 'Program') {
-            warn "DEBUG Parser: complete() called for Program at pos " . $completed_item->start_pos . "-" . $completed_item->end_pos . "\n";
-        }
-
         my $lhs = $completed_item->rule->lhs;
 
         # For Semantic semiring, evaluate the completed rule
@@ -343,19 +338,14 @@ class Chalk::Parser {
 
             my $ctx = $completed_element->context;
 
-            # Generate a NEW derivation ID for THIS completion
-            # This is critical because multiple parse paths may complete the same rule
-            # at different positions, and we need unique IDs to distinguish their IR nodes
-            my %new_env = %{$ctx->env};
-            $new_env{derivation_id} = $semiring->generate_unique_derivation_id();
-
-            # Create evaluation context with the new derivation ID
+            # Create evaluation context using the existing derivation ID from predict()
+            # All completions building up a single parse tree share the same derivation ID
             my $eval_ctx = Chalk::EvalContext->new(
                 focus => $ctx->focus,
                 children => $ctx->children,
                 start_pos => $ctx->start_pos,
                 end_pos => $ctx->end_pos,
-                env => \%new_env,
+                env => $ctx->env,
                 grammar => $ctx->grammar,
                 rule => $ctx->rule,
                 forest => $ctx->forest
@@ -369,7 +359,7 @@ class Chalk::Parser {
                 children => $eval_ctx->children,
                 start_pos => $eval_ctx->start_pos,
                 end_pos => $eval_ctx->end_pos,
-                env => \%new_env,
+                env => $eval_ctx->env,
                 grammar => $eval_ctx->grammar,
                 rule => $eval_ctx->rule,
                 forest => $eval_ctx->forest
@@ -495,7 +485,18 @@ class Chalk::Parser {
 
             # Only add if not already in chart
             unless ( $chart->has_item($predicted_item) ) {
-                my $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos);
+                # For Semantic semiring, get parent's derivation ID so children inherit it
+                my $rule_element;
+                if ($semiring isa Chalk::Semiring::Semantic) {
+                    my $parent_derivation_id = undef;
+                    my $parent_element = $chart->get_element($item);
+                    if ($parent_element && $parent_element->context) {
+                        $parent_derivation_id = $parent_element->context->env->{derivation_id};
+                    }
+                    $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos, $parent_derivation_id);
+                } else {
+                    $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos);
+                }
                 $chart->add_element( $predicted_item, $rule_element );
                 push( $agenda->@*, $predicted_item );
             }

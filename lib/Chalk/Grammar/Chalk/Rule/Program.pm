@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
+use builtin qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
     method evaluate($context) {
@@ -11,7 +12,6 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
 
         # Set the builder's derivation ID from the context environment
         my $deriv_id = $context->env->{derivation_id};
-        warn "DEBUG: Program.evaluate() called with derivation_id=$deriv_id\n" if defined $deriv_id;
         $builder->set_derivation_id($deriv_id) if defined $deriv_id;
 
         # Create Start node (program entry point)
