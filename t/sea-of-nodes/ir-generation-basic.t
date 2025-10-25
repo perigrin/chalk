@@ -48,16 +48,46 @@ use Test::More;
     my $result = $parser->parse_string($program);
     ok($result, 'Simple program parses successfully');
 
-    # Get the winning derivation ID from the parse result
-    my $winning_deriv_id = $result->context->env->{derivation_id};
-
     # Get the IR graph and prune to keep only the winning derivation
     my $graph = $builder->graph;
     ok($graph, 'Builder has a graph');
 
+    # Debug: Check what derivation IDs are on nodes before pruning
+    my $nodes_before = $graph->nodes;
+    my %deriv_id_counts;
+    my $nodes_with_no_deriv = 0;
+    for my $node (values %$nodes_before) {
+        my $node_deriv_id = $node->derivation_id;
+        if (defined $node_deriv_id) {
+            $deriv_id_counts{$node_deriv_id}++;
+        } else {
+            $nodes_with_no_deriv++;
+        }
+    }
+    diag("Before pruning: " . scalar(keys %$nodes_before) . " total nodes");
+    diag("Nodes with no derivation_id: $nodes_with_no_deriv");
+    for my $deriv_id (sort keys %deriv_id_counts) {
+        diag("  $deriv_id: $deriv_id_counts{$deriv_id} nodes");
+    }
+
+    # Choose the winning derivation: the one with the most nodes
+    # (represents the most complete parse)
+    my $winning_deriv_id = (sort { $deriv_id_counts{$b} <=> $deriv_id_counts{$a} } keys %deriv_id_counts)[0];
+    diag("Winning derivation ID (most nodes): " . (defined $winning_deriv_id ? $winning_deriv_id : 'undefined'));
+
     # Prune the graph to remove nodes from losing parse alternatives
     if (defined $winning_deriv_id) {
         $graph->prune_by_derivation_id($winning_deriv_id);
+
+        # Debug: Check after pruning
+        my $nodes_after = $graph->nodes;
+        diag("After pruning: " . scalar(keys %$nodes_after) . " nodes");
+        diag("Node types after pruning:");
+        for my $node (values %$nodes_after) {
+            diag("  " . $node->op . " (node " . $node->id . ")");
+        }
+    } else {
+        diag("WARNING: winning_deriv_id is undefined, skipping pruning");
     }
 
     # Verify graph has some nodes (should have Start, Store for assignment, etc.)

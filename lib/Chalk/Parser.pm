@@ -323,6 +323,11 @@ class Chalk::Parser {
         return if $chart->has_completed($completed_item);
         $chart->mark_completed($completed_item);
 
+        # DEBUG: Track when Program completes
+        if ($completed_item->rule->lhs eq 'Program') {
+            warn "DEBUG Parser: complete() called for Program at pos " . $completed_item->start_pos . "-" . $completed_item->end_pos . "\n";
+        }
+
         my $lhs = $completed_item->rule->lhs;
 
         # For Semantic semiring, evaluate the completed rule
@@ -337,17 +342,37 @@ class Chalk::Parser {
             }
 
             my $ctx = $completed_element->context;
-            my $evaluated_value = $completed_item->rule->evaluate($ctx);
+
+            # Generate a NEW derivation ID for THIS completion
+            # This is critical because multiple parse paths may complete the same rule
+            # at different positions, and we need unique IDs to distinguish their IR nodes
+            my %new_env = %{$ctx->env};
+            $new_env{derivation_id} = $semiring->generate_unique_derivation_id();
+
+            # Create evaluation context with the new derivation ID
+            my $eval_ctx = Chalk::EvalContext->new(
+                focus => $ctx->focus,
+                children => $ctx->children,
+                start_pos => $ctx->start_pos,
+                end_pos => $ctx->end_pos,
+                env => \%new_env,
+                grammar => $ctx->grammar,
+                rule => $ctx->rule,
+                forest => $ctx->forest
+            );
+
+            my $evaluated_value = $completed_item->rule->evaluate($eval_ctx);
 
             # Create new context with evaluated focus but preserve children
             my $new_ctx = Chalk::EvalContext->new(
                 focus => $evaluated_value,
-                children => $ctx->children,
-                start_pos => $ctx->start_pos,
-                end_pos => $ctx->end_pos,
-                env => $ctx->env,
-                grammar => $ctx->grammar,
-                rule => $ctx->rule
+                children => $eval_ctx->children,
+                start_pos => $eval_ctx->start_pos,
+                end_pos => $eval_ctx->end_pos,
+                env => \%new_env,
+                grammar => $eval_ctx->grammar,
+                rule => $eval_ctx->rule,
+                forest => $eval_ctx->forest
             );
 
             # Update the completed element with evaluated context
