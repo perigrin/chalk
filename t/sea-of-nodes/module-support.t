@@ -188,4 +188,19 @@ subtest 'IR Builder methods for module support' => sub {
     ok($graph->get_node($use_external->id), 'External UseStatement in graph');
 };
 
+# Test UseStatement semantic action module loads correctly
+subtest 'UseStatement semantic action module' => sub {
+    use_ok('Chalk::Grammar::Chalk::Rule::UseStatement');
+
+    # The semantic action will be tested via t/self-hosting.t when Chalk parses itself.
+    # Chalk source files contain use statements like:
+    #   use 5.42.0;
+    #   use experimental 'class';
+    #   use builtin qw(blessed);
+    #   use Chalk::IR::Node;
+    #
+    # When the parser encounters these, it will automatically invoke the UseStatement
+    # semantic action to categorize them and build UseStatement IR nodes.
+};
+
 done_testing();
