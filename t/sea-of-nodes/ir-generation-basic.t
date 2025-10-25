@@ -48,9 +48,17 @@ use Test::More;
     my $result = $parser->parse_string($program);
     ok($result, 'Simple program parses successfully');
 
-    # Get the IR graph
+    # Get the winning derivation ID from the parse result
+    my $winning_deriv_id = $result->context->env->{derivation_id};
+
+    # Get the IR graph and prune to keep only the winning derivation
     my $graph = $builder->graph;
     ok($graph, 'Builder has a graph');
+
+    # Prune the graph to remove nodes from losing parse alternatives
+    if (defined $winning_deriv_id) {
+        $graph->prune_by_derivation_id($winning_deriv_id);
+    }
 
     # Verify graph has some nodes (should have Start, Store for assignment, etc.)
     my $node_count = $graph->node_count;

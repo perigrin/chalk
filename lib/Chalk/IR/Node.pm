@@ -5,17 +5,19 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
 class Chalk::IR::Node {
-    field $id         :param :reader;
-    field $op         :param :reader;
-    field $inputs     :param :reader;
-    field $attributes :param :reader;
+    field $id           :param :reader;
+    field $op           :param :reader;
+    field $inputs       :param :reader;
+    field $attributes   :param :reader;
+    field $derivation_id :param :reader = undef;
 
     method to_hash() {
         return {
-            id         => $id,
-            op         => $op,
-            inputs     => $inputs,
-            attributes => $attributes,
+            id           => $id,
+            op           => $op,
+            inputs       => $inputs,
+            attributes   => $attributes,
+            derivation_id => $derivation_id,
         };
     }
 
@@ -80,13 +82,14 @@ class Chalk::IR::Node {
 
                 # Return a new Constant node with the folded result
                 return Chalk::IR::Node->new(
-                    id         => $id,  # Reuse the same ID
-                    op         => 'Constant',
-                    inputs     => $inputs,
-                    attributes => {
+                    id            => $id,  # Reuse the same ID
+                    op            => 'Constant',
+                    inputs        => $inputs,
+                    attributes    => {
                         value => $result,
                         type  => 'Int',
-                    }
+                    },
+                    derivation_id => $derivation_id,
                 );
             }
         }
@@ -124,13 +127,14 @@ class Chalk::IR::Node {
 
                 # Return a new Constant node with the folded result (1 or 0)
                 return Chalk::IR::Node->new(
-                    id         => $id,  # Reuse the same ID
-                    op         => 'Constant',
-                    inputs     => $inputs,
-                    attributes => {
+                    id            => $id,  # Reuse the same ID
+                    op            => 'Constant',
+                    inputs        => $inputs,
+                    attributes    => {
                         value => $result,
                         type  => 'Int',
-                    }
+                    },
+                    derivation_id => $derivation_id,
                 );
             }
         }
@@ -162,13 +166,14 @@ class Chalk::IR::Node {
 
                         # Safe to optimize: No intervening Store nodes found
                         return Chalk::IR::Node->new(
-                            id         => $id,
-                            op         => 'Constant',
-                            inputs     => $inputs,
-                            attributes => {
+                            id            => $id,
+                            op            => 'Constant',
+                            inputs        => $inputs,
+                            attributes    => {
                                 value => $value_ref->{value},
                                 type  => $value_ref->{type},
-                            }
+                            },
+                            derivation_id => $derivation_id,
                         );
                     }
                 }
@@ -204,13 +209,14 @@ class Chalk::IR::Node {
                         } else {
                             # Dead branch: return ~Ctrl constant
                             return Chalk::IR::Node->new(
-                                id         => $id,
-                                op         => 'Constant',
-                                inputs     => [],
-                                attributes => {
+                                id            => $id,
+                                op            => 'Constant',
+                                inputs        => [],
+                                attributes    => {
                                     value => '~Ctrl',
                                     type  => 'Control',
-                                }
+                                },
+                                derivation_id => $derivation_id,
                             );
                         }
                     }
