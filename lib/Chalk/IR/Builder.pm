@@ -722,6 +722,70 @@ class Chalk::IR::Builder {
         return $hash_keys;
     }
 
+    # String operations (Issue #98 Phase 4)
+    method build_str_concat_node($left_node, $right_node) {
+        # Create StrConcat node for concatenating two strings
+        my $left_ref = { op => 'NodeRef', node_id => $left_node->id };
+        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
+
+        my $attributes = {
+            left => $left_ref,
+            right => $right_ref
+        };
+
+        my $node_id = $self->next_node_id();
+        my $str_concat = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'StrConcat',
+            inputs => [$current_control, $left_node->id, $right_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($str_concat);
+        return $str_concat;
+    }
+
+    method build_str_length_node($string_node) {
+        # Create StrLength node for getting string length
+        my $string_ref = { op => 'NodeRef', node_id => $string_node->id };
+
+        my $attributes = {
+            string => $string_ref
+        };
+
+        my $node_id = $self->next_node_id();
+        my $str_length = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'StrLength',
+            inputs => [$current_control, $string_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($str_length);
+        return $str_length;
+    }
+
+    method build_str_substr_node($string_node, $offset_node, $length_node) {
+        # Create StrSubstr node for extracting substring
+        my $string_ref = { op => 'NodeRef', node_id => $string_node->id };
+        my $offset_ref = { op => 'NodeRef', node_id => $offset_node->id };
+        my $length_ref = { op => 'NodeRef', node_id => $length_node->id };
+
+        my $attributes = {
+            string => $string_ref,
+            offset => $offset_ref,
+            length => $length_ref
+        };
+
+        my $node_id = $self->next_node_id();
+        my $str_substr = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'StrSubstr',
+            inputs => [$current_control, $string_node->id, $offset_node->id, $length_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($str_substr);
+        return $str_substr;
+    }
+
 }
 
 1;

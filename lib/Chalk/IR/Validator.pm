@@ -21,6 +21,7 @@ class Chalk::IR::Validator {
         push @all_errors, $self->validate_class_nodes($graph);
         push @all_errors, $self->validate_array_nodes($graph);
         push @all_errors, $self->validate_hash_nodes($graph);
+        push @all_errors, $self->validate_string_nodes($graph);
 
         my $success = scalar( @all_errors ) == 0 ? 1 : 0;
         return ($success, \@all_errors);
@@ -1012,6 +1013,137 @@ class Chalk::IR::Validator {
                     }
                     elsif (!exists($nodes->{$hash_ref->{node_id}})) {
                         push @errors, "HashKeys node $node_id references non-existent hash node " . $hash_ref->{node_id};
+                    }
+                }
+            }
+        }
+
+        return @errors;
+    }
+
+    # Validate string operation nodes (Issue #98 Phase 4)
+    method validate_string_nodes($graph) {
+        my @errors = ();
+        my $nodes = $graph->nodes;
+
+        # Check each node that relates to string operations
+        for my $node_id (sort( keys( $nodes->%* ) )) {
+            my $node = $nodes->{$node_id};
+            my $op = $node->op;
+
+            # Validate StrConcat nodes
+            if ($op eq 'StrConcat') {
+                my $attrs = $node->attributes;
+
+                # StrConcat must have 'left' attribute
+                if (!exists($attrs->{left})) {
+                    push @errors, "StrConcat node $node_id missing required 'left' attribute";
+                }
+                elsif (ref($attrs->{left}) ne 'HASH') {
+                    push @errors, "StrConcat node $node_id 'left' attribute must be a NodeRef";
+                }
+                else {
+                    my $left_ref = $attrs->{left};
+                    if (!exists($left_ref->{node_id})) {
+                        push @errors, "StrConcat node $node_id 'left' NodeRef missing node_id";
+                    }
+                    elsif (!exists($nodes->{$left_ref->{node_id}})) {
+                        push @errors, "StrConcat node $node_id references non-existent left node " . $left_ref->{node_id};
+                    }
+                }
+
+                # StrConcat must have 'right' attribute
+                if (!exists($attrs->{right})) {
+                    push @errors, "StrConcat node $node_id missing required 'right' attribute";
+                }
+                elsif (ref($attrs->{right}) ne 'HASH') {
+                    push @errors, "StrConcat node $node_id 'right' attribute must be a NodeRef";
+                }
+                else {
+                    my $right_ref = $attrs->{right};
+                    if (!exists($right_ref->{node_id})) {
+                        push @errors, "StrConcat node $node_id 'right' NodeRef missing node_id";
+                    }
+                    elsif (!exists($nodes->{$right_ref->{node_id}})) {
+                        push @errors, "StrConcat node $node_id references non-existent right node " . $right_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate StrLength nodes
+            elsif ($op eq 'StrLength') {
+                my $attrs = $node->attributes;
+
+                # StrLength must have 'string' attribute
+                if (!exists($attrs->{string})) {
+                    push @errors, "StrLength node $node_id missing required 'string' attribute";
+                }
+                elsif (ref($attrs->{string}) ne 'HASH') {
+                    push @errors, "StrLength node $node_id 'string' attribute must be a NodeRef";
+                }
+                else {
+                    my $string_ref = $attrs->{string};
+                    if (!exists($string_ref->{node_id})) {
+                        push @errors, "StrLength node $node_id 'string' NodeRef missing node_id";
+                    }
+                    elsif (!exists($nodes->{$string_ref->{node_id}})) {
+                        push @errors, "StrLength node $node_id references non-existent string node " . $string_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate StrSubstr nodes
+            elsif ($op eq 'StrSubstr') {
+                my $attrs = $node->attributes;
+
+                # StrSubstr must have 'string' attribute
+                if (!exists($attrs->{string})) {
+                    push @errors, "StrSubstr node $node_id missing required 'string' attribute";
+                }
+                elsif (ref($attrs->{string}) ne 'HASH') {
+                    push @errors, "StrSubstr node $node_id 'string' attribute must be a NodeRef";
+                }
+                else {
+                    my $string_ref = $attrs->{string};
+                    if (!exists($string_ref->{node_id})) {
+                        push @errors, "StrSubstr node $node_id 'string' NodeRef missing node_id";
+                    }
+                    elsif (!exists($nodes->{$string_ref->{node_id}})) {
+                        push @errors, "StrSubstr node $node_id references non-existent string node " . $string_ref->{node_id};
+                    }
+                }
+
+                # StrSubstr must have 'offset' attribute
+                if (!exists($attrs->{offset})) {
+                    push @errors, "StrSubstr node $node_id missing required 'offset' attribute";
+                }
+                elsif (ref($attrs->{offset}) ne 'HASH') {
+                    push @errors, "StrSubstr node $node_id 'offset' attribute must be a NodeRef";
+                }
+                else {
+                    my $offset_ref = $attrs->{offset};
+                    if (!exists($offset_ref->{node_id})) {
+                        push @errors, "StrSubstr node $node_id 'offset' NodeRef missing node_id";
+                    }
+                    elsif (!exists($nodes->{$offset_ref->{node_id}})) {
+                        push @errors, "StrSubstr node $node_id references non-existent offset node " . $offset_ref->{node_id};
+                    }
+                }
+
+                # StrSubstr must have 'length' attribute
+                if (!exists($attrs->{length})) {
+                    push @errors, "StrSubstr node $node_id missing required 'length' attribute";
+                }
+                elsif (ref($attrs->{length}) ne 'HASH') {
+                    push @errors, "StrSubstr node $node_id 'length' attribute must be a NodeRef";
+                }
+                else {
+                    my $length_ref = $attrs->{length};
+                    if (!exists($length_ref->{node_id})) {
+                        push @errors, "StrSubstr node $node_id 'length' NodeRef missing node_id";
+                    }
+                    elsif (!exists($nodes->{$length_ref->{node_id}})) {
+                        push @errors, "StrSubstr node $node_id references non-existent length node " . $length_ref->{node_id};
                     }
                 }
             }
