@@ -632,6 +632,96 @@ class Chalk::IR::Builder {
         return $array_length;
     }
 
+    # Hash operations (Issue #98 Phase 3)
+    method build_hash_new_node() {
+        # Create HashNew node for creating an empty hash
+        my $node_id = $self->next_node_id();
+        my $hash_new = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'HashNew',
+            inputs => [$current_control],
+            attributes => {}
+        );
+        $graph->add_node($hash_new);
+        return $hash_new;
+    }
+
+    method build_hash_set_node($hash_node, $key_node, $value_node) {
+        # Create HashSet node for setting a hash key/value pair
+        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
+        my $key_ref = { op => 'NodeRef', node_id => $key_node->id };
+        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
+        my $attributes = {
+            hash => $hash_ref,
+            key => $key_ref,
+            value => $value_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $hash_set = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'HashSet',
+            inputs => [$current_control, $hash_node->id, $key_node->id, $value_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($hash_set);
+        return $hash_set;
+    }
+
+    method build_hash_get_node($hash_node, $key_node) {
+        # Create HashGet node for accessing hash value by key
+        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
+        my $key_ref = { op => 'NodeRef', node_id => $key_node->id };
+        my $attributes = {
+            hash => $hash_ref,
+            key => $key_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $hash_get = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'HashGet',
+            inputs => [$current_control, $hash_node->id, $key_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($hash_get);
+        return $hash_get;
+    }
+
+    method build_hash_exists_node($hash_node, $key_node) {
+        # Create HashExists node for checking if key exists in hash
+        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
+        my $key_ref = { op => 'NodeRef', node_id => $key_node->id };
+        my $attributes = {
+            hash => $hash_ref,
+            key => $key_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $hash_exists = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'HashExists',
+            inputs => [$current_control, $hash_node->id, $key_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($hash_exists);
+        return $hash_exists;
+    }
+
+    method build_hash_keys_node($hash_node) {
+        # Create HashKeys node for getting all keys from hash
+        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
+        my $attributes = {
+            hash => $hash_ref
+        };
+        my $node_id = $self->next_node_id();
+        my $hash_keys = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'HashKeys',
+            inputs => [$current_control, $hash_node->id],
+            attributes => $attributes
+        );
+        $graph->add_node($hash_keys);
+        return $hash_keys;
+    }
+
 }
 
 1;

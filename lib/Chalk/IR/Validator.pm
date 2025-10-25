@@ -20,6 +20,7 @@ class Chalk::IR::Validator {
         push @all_errors, $self->validate_loop_structure($graph);
         push @all_errors, $self->validate_class_nodes($graph);
         push @all_errors, $self->validate_array_nodes($graph);
+        push @all_errors, $self->validate_hash_nodes($graph);
 
         my $success = scalar( @all_errors ) == 0 ? 1 : 0;
         return ($success, \@all_errors);
@@ -835,6 +836,182 @@ class Chalk::IR::Validator {
                     }
                     elsif (!exists($nodes->{$array_ref->{node_id}})) {
                         push @errors, "ArrayLength node $node_id references non-existent array node " . $array_ref->{node_id};
+                    }
+                }
+            }
+        }
+
+        return @errors;
+    }
+
+    # Validate hash operation nodes (Issue #98 Phase 3)
+    method validate_hash_nodes($graph) {
+        my @errors = ();
+        my $nodes = $graph->nodes;
+
+        # Check each node that relates to hash operations
+        for my $node_id (keys( $nodes->%* )) {
+            my $node = $nodes->{$node_id};
+            my $op = $node->op;
+
+            # Validate HashNew nodes
+            if ($op eq 'HashNew') {
+                # HashNew has no required attributes
+                # Just verify it exists and has the correct op
+            }
+
+            # Validate HashSet nodes
+            elsif ($op eq 'HashSet') {
+                my $attrs = $node->attributes;
+
+                # HashSet must have 'hash' attribute
+                if (!exists($attrs->{hash})) {
+                    push @errors, "HashSet node $node_id missing required 'hash' attribute";
+                }
+                elsif (ref($attrs->{hash}) ne 'HASH') {
+                    push @errors, "HashSet node $node_id 'hash' attribute must be a NodeRef";
+                }
+                else {
+                    my $hash_ref = $attrs->{hash};
+                    if (!exists($hash_ref->{node_id})) {
+                        push @errors, "HashSet node $node_id 'hash' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$hash_ref->{node_id}})) {
+                        push @errors, "HashSet node $node_id references non-existent hash node " . $hash_ref->{node_id};
+                    }
+                }
+
+                # HashSet must have 'key' attribute
+                if (!exists($attrs->{key})) {
+                    push @errors, "HashSet node $node_id missing required 'key' attribute";
+                }
+                elsif (ref($attrs->{key}) ne 'HASH') {
+                    push @errors, "HashSet node $node_id 'key' attribute must be a NodeRef";
+                }
+                else {
+                    my $key_ref = $attrs->{key};
+                    if (!exists($key_ref->{node_id})) {
+                        push @errors, "HashSet node $node_id 'key' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$key_ref->{node_id}})) {
+                        push @errors, "HashSet node $node_id references non-existent key node " . $key_ref->{node_id};
+                    }
+                }
+
+                # HashSet must have 'value' attribute
+                if (!exists($attrs->{value})) {
+                    push @errors, "HashSet node $node_id missing required 'value' attribute";
+                }
+                elsif (ref($attrs->{value}) ne 'HASH') {
+                    push @errors, "HashSet node $node_id 'value' attribute must be a NodeRef";
+                }
+                else {
+                    my $value_ref = $attrs->{value};
+                    if (!exists($value_ref->{node_id})) {
+                        push @errors, "HashSet node $node_id 'value' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$value_ref->{node_id}})) {
+                        push @errors, "HashSet node $node_id references non-existent value node " . $value_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate HashGet nodes
+            elsif ($op eq 'HashGet') {
+                my $attrs = $node->attributes;
+
+                # HashGet must have 'hash' attribute
+                if (!exists($attrs->{hash})) {
+                    push @errors, "HashGet node $node_id missing required 'hash' attribute";
+                }
+                elsif (ref($attrs->{hash}) ne 'HASH') {
+                    push @errors, "HashGet node $node_id 'hash' attribute must be a NodeRef";
+                }
+                else {
+                    my $hash_ref = $attrs->{hash};
+                    if (!exists($hash_ref->{node_id})) {
+                        push @errors, "HashGet node $node_id 'hash' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$hash_ref->{node_id}})) {
+                        push @errors, "HashGet node $node_id references non-existent hash node " . $hash_ref->{node_id};
+                    }
+                }
+
+                # HashGet must have 'key' attribute
+                if (!exists($attrs->{key})) {
+                    push @errors, "HashGet node $node_id missing required 'key' attribute";
+                }
+                elsif (ref($attrs->{key}) ne 'HASH') {
+                    push @errors, "HashGet node $node_id 'key' attribute must be a NodeRef";
+                }
+                else {
+                    my $key_ref = $attrs->{key};
+                    if (!exists($key_ref->{node_id})) {
+                        push @errors, "HashGet node $node_id 'key' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$key_ref->{node_id}})) {
+                        push @errors, "HashGet node $node_id references non-existent key node " . $key_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate HashExists nodes
+            elsif ($op eq 'HashExists') {
+                my $attrs = $node->attributes;
+
+                # HashExists must have 'hash' attribute
+                if (!exists($attrs->{hash})) {
+                    push @errors, "HashExists node $node_id missing required 'hash' attribute";
+                }
+                elsif (ref($attrs->{hash}) ne 'HASH') {
+                    push @errors, "HashExists node $node_id 'hash' attribute must be a NodeRef";
+                }
+                else {
+                    my $hash_ref = $attrs->{hash};
+                    if (!exists($hash_ref->{node_id})) {
+                        push @errors, "HashExists node $node_id 'hash' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$hash_ref->{node_id}})) {
+                        push @errors, "HashExists node $node_id references non-existent hash node " . $hash_ref->{node_id};
+                    }
+                }
+
+                # HashExists must have 'key' attribute
+                if (!exists($attrs->{key})) {
+                    push @errors, "HashExists node $node_id missing required 'key' attribute";
+                }
+                elsif (ref($attrs->{key}) ne 'HASH') {
+                    push @errors, "HashExists node $node_id 'key' attribute must be a NodeRef";
+                }
+                else {
+                    my $key_ref = $attrs->{key};
+                    if (!exists($key_ref->{node_id})) {
+                        push @errors, "HashExists node $node_id 'key' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$key_ref->{node_id}})) {
+                        push @errors, "HashExists node $node_id references non-existent key node " . $key_ref->{node_id};
+                    }
+                }
+            }
+
+            # Validate HashKeys nodes
+            elsif ($op eq 'HashKeys') {
+                my $attrs = $node->attributes;
+
+                # HashKeys must have 'hash' attribute
+                if (!exists($attrs->{hash})) {
+                    push @errors, "HashKeys node $node_id missing required 'hash' attribute";
+                }
+                elsif (ref($attrs->{hash}) ne 'HASH') {
+                    push @errors, "HashKeys node $node_id 'hash' attribute must be a NodeRef";
+                }
+                else {
+                    my $hash_ref = $attrs->{hash};
+                    if (!exists($hash_ref->{node_id})) {
+                        push @errors, "HashKeys node $node_id 'hash' NodeRef missing 'node_id'";
+                    }
+                    elsif (!exists($nodes->{$hash_ref->{node_id}})) {
+                        push @errors, "HashKeys node $node_id references non-existent hash node " . $hash_ref->{node_id};
                     }
                 }
             }
