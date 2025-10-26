@@ -38,6 +38,8 @@ class Chalk::Grammar::Chalk::Rule::Statement :isa(Chalk::GrammarRule) {
 
         # Save current control before building If structure
         my $entry_control = $builder->current_control;
+        die "Internal error: current_control is undefined during statement modifier evaluation"
+            unless defined($entry_control);
 
         # Build If node for the condition
         my $if_node = $builder->build_if_node($condition);
@@ -56,15 +58,20 @@ class Chalk::Grammar::Chalk::Rule::Statement :isa(Chalk::GrammarRule) {
         }
 
         # Wire the statement to the appropriate control branch
-        # The statement already has control wired (it was evaluated before this semantic action)
-        # But we need to replace its control input with our branch control
-        if ($stmt->inputs->[0] eq '__CONTROL_PLACEHOLDER__') {
-            $builder->set_node_control($stmt, $stmt_control);
-        } else {
-            # Statement already has control - we need to rewire it
-            # This happens because bottom-up parsing evaluates the statement first
-            $stmt->inputs->[0] = $stmt_control;
+        # Bottom-up parsing means the statement was evaluated before this semantic action,
+        # so its control is already wired. We need to rewire it to our branch control.
+        my $stmt_input = $stmt->inputs->[0];
+        die "Internal error: Statement node has no control input (expected either placeholder or control ID)"
+            unless defined($stmt_input);
+
+        # Verify bottom-up evaluation assumption: statement should have control wired
+        # (either placeholder or actual control ID)
+        unless ($stmt_input eq '__CONTROL_PLACEHOLDER__' || $stmt_input =~ /^\d+$/) {
+            die "Internal error: Unexpected statement control input format: '$stmt_input'";
         }
+
+        # Rewire statement to execute on the appropriate branch (always use the builder method)
+        $builder->set_node_control($stmt, $stmt_control);
 
         # After statement executes, its output becomes the merge input
         my $stmt_exit_control = $stmt->id;
