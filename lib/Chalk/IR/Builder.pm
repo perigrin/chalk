@@ -19,6 +19,7 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::Multiply;
     use Chalk::IR::Node::Divide;
     use Chalk::IR::Node::Negate;
+    use Chalk::IR::Node::Not;
     use Chalk::IR::Node::GT;
     use Chalk::IR::Node::LT;
     use Chalk::IR::Node::EQ;
@@ -309,6 +310,29 @@ class Chalk::IR::Builder {
         );
         $graph->add_node($cmp);
         return $cmp;
+    }
+
+    # Unary operation nodes
+    method build_not_node($operand_node) {
+        my $node_id = $self->next_node_id();
+        my $not = Chalk::IR::Node::Not->new(
+            id            => $node_id,
+            inputs        => [$current_control, $operand_node->id],
+            operand_id    => $operand_node->id,
+        );
+        $graph->add_node($not);
+        return $not;
+    }
+
+    method build_negate_node($operand_node) {
+        my $node_id = $self->next_node_id();
+        my $negate = Chalk::IR::Node::Negate->new(
+            id            => $node_id,
+            inputs        => [$current_control, $operand_node->id],
+            operand_id    => $operand_node->id,
+        );
+        $graph->add_node($negate);
+        return $negate;
     }
 
     # Control flow nodes
