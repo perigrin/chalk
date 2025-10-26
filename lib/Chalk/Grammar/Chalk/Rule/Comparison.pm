@@ -41,18 +41,12 @@ class Chalk::Grammar::Chalk::Rule::Comparison :isa(Chalk::GrammarRule) {
             return $builder->build_less_node($left, $right);
         } elsif ($operator eq '==' || $operator eq 'eq') {
             return $builder->build_equal_node($left, $right);
-        } elsif ($operator eq '>=') {
-            # >= is "not less than" but for simplicity, just use Greater for now
-            # TODO: Implement GreaterOrEqual
-            return $builder->build_greater_node($left, $right);
-        } elsif ($operator eq '<=') {
-            # <= is "not greater than"
-            # TODO: Implement LessOrEqual
-            return $builder->build_less_node($left, $right);
+        } elsif ($operator eq '>=' || $operator eq 'ge') {
+            return $builder->build_greater_or_equal_node($left, $right);
+        } elsif ($operator eq '<=' || $operator eq 'le') {
+            return $builder->build_less_or_equal_node($left, $right);
         } elsif ($operator eq '!=' || $operator eq 'ne') {
-            # != is "not equal"
-            # TODO: Implement NotEqual
-            return $builder->build_equal_node($left, $right);
+            return $builder->build_not_equal_node($left, $right);
         }
 
         return $context->child(0);
