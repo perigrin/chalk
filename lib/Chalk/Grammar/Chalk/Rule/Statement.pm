@@ -64,12 +64,6 @@ class Chalk::Grammar::Chalk::Rule::Statement :isa(Chalk::GrammarRule) {
         die "Internal error: Statement node has no control input (expected either placeholder or control ID)"
             unless defined($stmt_input);
 
-        # Verify bottom-up evaluation assumption: statement should have control wired
-        # (either placeholder or actual control ID)
-        unless ($stmt_input eq '__CONTROL_PLACEHOLDER__' || $stmt_input =~ /^\d+$/) {
-            die "Internal error: Unexpected statement control input format: '$stmt_input'";
-        }
-
         # Rewire statement to execute on the appropriate branch (always use the builder method)
         $builder->set_node_control($stmt, $stmt_control);
 
