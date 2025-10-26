@@ -24,6 +24,7 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::PreDecrement;
     use Chalk::IR::Node::PostIncrement;
     use Chalk::IR::Node::PostDecrement;
+    use Chalk::IR::Node::Reference;
     use Chalk::IR::Node::GT;
     use Chalk::IR::Node::LT;
     use Chalk::IR::Node::EQ;
@@ -381,6 +382,17 @@ class Chalk::IR::Builder {
         );
         $graph->add_node($post_dec);
         return $post_dec;
+    }
+
+    method build_reference_node($operand_node) {
+        my $node_id = $self->next_node_id();
+        my $reference = Chalk::IR::Node::Reference->new(
+            id            => $node_id,
+            inputs        => [$current_control, $operand_node->id],
+            operand_id    => $operand_node->id,
+        );
+        $graph->add_node($reference);
+        return $reference;
     }
 
     # Control flow nodes

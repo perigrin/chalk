@@ -1,5 +1,5 @@
 # ABOUTME: Semantic action for Unary - pass through child value or build unary operation
-# ABOUTME: Unary handles prefix operators like !, -, +, building appropriate IR nodes
+# ABOUTME: Unary handles prefix operators like !, -, +, \, building appropriate IR nodes
 
 use 5.42.0;
 use experimental 'class';
@@ -40,8 +40,10 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         } elsif ($operator eq '+') {
             # Unary + is a no-op, just pass through
             return $operand;
+        } elsif ($operator eq '\\') {
+            return $builder->build_reference_node($operand);
         }
-        # For other operators (~, \, ++, --), pass through for now
+        # For other operators (~), pass through for now
         # These will be implemented in future phases
 
         return $context->child(0);
