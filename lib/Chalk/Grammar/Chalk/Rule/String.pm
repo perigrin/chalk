@@ -17,8 +17,8 @@ class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
 
         # Strip surrounding quotes (both " and ')
         my $value = $string_with_quotes;
-        if ($value =~ /^["'](.*)["']$/s) {
-            $value = $1;
+        if (length($value) >= 2) {
+            $value = substr($value, 1, length($value) - 2);
         }
 
         # Build and return Constant IR node with type 'String'
