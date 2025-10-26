@@ -824,6 +824,29 @@ class Chalk::IR::Builder {
         return $str_concat;
     }
 
+    # Range operations (Issue #111)
+    method build_range_node($start_node, $end_node, $type = 'list') {
+        # Create Range node for generating a range between start and end values
+        my $start_ref = { op => 'NodeRef', node_id => $start_node->id };
+        my $end_ref = { op => 'NodeRef', node_id => $end_node->id };
+
+        my $attributes = {
+            start => $start_ref,
+            end => $end_ref,
+            type => $type,
+        };
+
+        my $node_id = $self->next_node_id();
+        my $range = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'Range',
+            inputs => [$current_control, $start_node->id, $end_node->id],
+            attributes => $attributes,
+        );
+        $graph->add_node($range);
+        return $range;
+    }
+
     method build_str_length_node($string_node) {
         # Create StrLength node for getting string length
         my $string_ref = { op => 'NodeRef', node_id => $string_node->id };
