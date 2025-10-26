@@ -25,7 +25,7 @@ class Chalk::Grammar::Chalk::Rule::ExprInc :isa(Chalk::GrammarRule) {
         return $context->child(0) unless $builder;
 
         # Determine if this is pre- or post-increment/decrement
-        if (defined $first_child && !ref($first_child) && ($first_child eq '++' || $first_child eq '--')) {
+        if (defined($first_child) && !ref($first_child) && ($first_child eq '++' || $first_child eq '--')) {
             # Pre-increment/decrement: operator at child(0), operand at child(2)
             my $operator = $first_child;
             my $operand = $context->child(2);
@@ -43,7 +43,7 @@ class Chalk::Grammar::Chalk::Rule::ExprInc :isa(Chalk::GrammarRule) {
             my $operand = $context->child(0);
             my $op_child = $children[2]->extract;
 
-            return $operand unless (defined $op_child && !ref($op_child) && ($op_child eq '++' || $op_child eq '--'));
+            return $operand unless (defined($op_child) && !ref($op_child) && ($op_child eq '++' || $op_child eq '--'));
             return $operand unless (blessed($operand) && $operand->can('id'));
 
             my $operator = $op_child;
