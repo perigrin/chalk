@@ -275,6 +275,42 @@ class Chalk::IR::Builder {
         return $cmp;
     }
 
+    method build_greater_or_equal_node($left_node, $right_node) {
+        my $node_id = $self->next_node_id();
+        my $cmp = Chalk::IR::Node::GE->new(
+            id            => $node_id,
+            inputs        => [$current_control, $left_node->id, $right_node->id],
+            left_id       => $left_node->id,
+            right_id      => $right_node->id,
+        );
+        $graph->add_node($cmp);
+        return $cmp;
+    }
+
+    method build_less_or_equal_node($left_node, $right_node) {
+        my $node_id = $self->next_node_id();
+        my $cmp = Chalk::IR::Node::LE->new(
+            id            => $node_id,
+            inputs        => [$current_control, $left_node->id, $right_node->id],
+            left_id       => $left_node->id,
+            right_id      => $right_node->id,
+        );
+        $graph->add_node($cmp);
+        return $cmp;
+    }
+
+    method build_not_equal_node($left_node, $right_node) {
+        my $node_id = $self->next_node_id();
+        my $cmp = Chalk::IR::Node::NE->new(
+            id            => $node_id,
+            inputs        => [$current_control, $left_node->id, $right_node->id],
+            left_id       => $left_node->id,
+            right_id      => $right_node->id,
+        );
+        $graph->add_node($cmp);
+        return $cmp;
+    }
+
     # Control flow nodes
     method build_if_node($condition_node) {
         my $node_id = $self->next_node_id();
