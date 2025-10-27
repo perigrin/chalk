@@ -6,6 +6,9 @@ use experimental qw(class);
 
 class Chalk::Type::Coercion {
     use Scalar::Util qw(looks_like_number refaddr);
+    use Chalk::Type::Exception;
+    use Chalk::Type::Num;
+    use Chalk::Type::Str;
 
     # Numeric coercion: to_num
     # Per spec: numbers stay, valid numeric strings parse, invalid to 0, refs to address
@@ -31,7 +34,13 @@ class Chalk::Type::Coercion {
             if (looks_like_number($value)) {
                 return $value + 0;  # Force numeric context
             }
-            # Invalid strings to 0
+            # Invalid strings to 0 (with warning about information loss)
+            warn Chalk::Type::Exception::information_loss_warning(
+                $source_type,
+                Chalk::Type::Num->new(),
+                $value,
+                "non-numeric string coerced to 0"
+            );
             return 0;
         }
 
@@ -41,7 +50,12 @@ class Chalk::Type::Coercion {
             return refaddr($value);
         }
 
-        die "Cannot coerce " . $source_type->name() . " to Num";
+        Chalk::Type::Exception::type_coercion_error(
+            $source_type,
+            Chalk::Type::Num->new(),
+            $value,
+            "numeric coercion"
+        )->throw();
     }
 
     # String coercion: to_str
@@ -70,7 +84,12 @@ class Chalk::Type::Coercion {
             return "$value";
         }
 
-        die "Cannot coerce " . $source_type->name() . " to Str";
+        Chalk::Type::Exception::type_coercion_error(
+            $source_type,
+            Chalk::Type::Str->new(),
+            $value,
+            "string coercion"
+        )->throw();
     }
 
     # Boolean coercion: to_bool

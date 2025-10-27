@@ -52,7 +52,7 @@ subtest 'List conversion to scalar sigil fails' => sub {
     };
 
     ok($@, 'List to Scalar conversion throws error');
-    like($@, qr/Cannot assign List to scalar variable/i,
+    like($@, qr/Cannot assign List to.*variable/i,
          'Error message is descriptive');
 };
 

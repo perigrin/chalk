@@ -6,6 +6,7 @@ use experimental qw(class);
 use Chalk::Type::Array;
 use Chalk::Type::Hash;
 use Chalk::Type::Any;
+use Chalk::Type::Exception;
 
 class Chalk::Type::List :isa(Chalk::Type) {
     # List represents ephemeral list values
@@ -39,7 +40,7 @@ class Chalk::Type::List :isa(Chalk::Type) {
         }
 
         # List cannot be assigned to scalar variable
-        die "Cannot assign List to scalar variable";
+        Chalk::Type::Exception::invalid_list_assignment_error($target_sigil)->throw();
     }
 }
 
