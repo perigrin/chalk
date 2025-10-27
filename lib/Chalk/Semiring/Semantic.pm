@@ -196,7 +196,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         return Chalk::Type::Any->new() unless defined($rule);
 
         my $lhs = $rule->lhs;
-        my @rhs = $rule->rhs->@*;
+        my @rhs = @{$rule->rhs};
 
         # Literal types - check RHS for terminal patterns
         if (@rhs == 1) {
@@ -211,7 +211,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         }
 
         # Variable types - infer from sigil in RHS
-        if ($lhs =~ /Variable$/) {
+        if ($lhs =~ qr/Variable$/) {
             # Scalar variable: $ identifier
             if (@rhs >= 1 && $rhs[0] eq '$') {
                 return Chalk::Type::Scalar->new();
@@ -234,7 +234,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         for my $i (0 .. $#rhs) {
             my $symbol = $rhs[$i];
             # Numeric operations
-            if ($symbol =~ /^[+\-*\/]$/ || $symbol eq '**') {
+            if ($symbol =~ qr/^[+\-*\/]$/ || $symbol eq '**') {
                 return Chalk::Type::Num->new();
             }
             # String concatenation
@@ -251,7 +251,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         return Chalk::Type::Int->new()    if $lhs eq 'Integer' || $lhs eq 'IntegerLiteral';
         return Chalk::Type::Num->new()    if $lhs eq 'Number' || $lhs eq 'NumberLiteral';
         return Chalk::Type::Str->new()    if $lhs eq 'String' || $lhs eq 'StringLiteral'
-                                          || $lhs =~ /Quoted/;
+                                          || $lhs =~ qr/Quoted/;
         return Chalk::Type::Array->new(element_type => Chalk::Type::Any->new())
                                        if $lhs eq 'ArrayLiteral' || $lhs eq 'List';
         return Chalk::Type::List->new()   if $lhs eq 'Range';

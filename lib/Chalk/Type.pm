@@ -12,7 +12,10 @@ class Chalk::Type {
         # Return the canonical name of this type
         # Subclasses override this
         my $class = ref($self) || $self;
-        $class =~ s/^Chalk::Type:://;
+        # Extract class name after Chalk::Type:: prefix
+        if ($class =~ qr/^Chalk::Type::(.+)$/) {
+            return $1;
+        }
         return $class;
     }
 
