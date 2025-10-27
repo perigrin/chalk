@@ -16,6 +16,16 @@ class Chalk::Type::Boolean :isa(Chalk::Type) {
                ref($other) eq 'Chalk::Type::Scalar' ||
                ref($other) eq 'Chalk::Type::Any';
     }
+
+    method round_trip_preserves($value) {
+        # All values (truthy or falsy) round-trip through boolean context
+        return 1;  # Boolean type contains all truthy/falsy values
+    }
+
+    method satisfies_contract($value) {
+        # Boolean values must be evaluable in boolean context
+        return 1;  # All Perl values have boolean context
+    }
 }
 
 1;

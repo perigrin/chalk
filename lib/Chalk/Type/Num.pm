@@ -19,6 +19,18 @@ class Chalk::Type::Num :isa(Chalk::Type) {
                ref($other) eq 'Chalk::Type::Scalar' ||
                ref($other) eq 'Chalk::Type::Any';
     }
+
+    method round_trip_preserves($value) {
+        # Num to Str to Num should be observationally equivalent
+        # Valid numbers round-trip through string conversion
+        return defined($value) && $value =~ qr/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+    }
+
+    method satisfies_contract($value) {
+        # Numbers must satisfy reflexivity: value equals itself
+        # This excludes NaN (NaN not-equals NaN)
+        return defined($value) && $value == $value;
+    }
 }
 
 1;

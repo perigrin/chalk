@@ -17,6 +17,16 @@ class Chalk::Type::Str :isa(Chalk::Type) {
                ref($other) eq 'Chalk::Type::Scalar' ||
                ref($other) eq 'Chalk::Type::Any';
     }
+
+    method round_trip_preserves($value) {
+        # All strings trivially round-trip
+        return defined($value);
+    }
+
+    method satisfies_contract($value) {
+        # Strings have no special contracts
+        return defined($value);
+    }
 }
 
 1;

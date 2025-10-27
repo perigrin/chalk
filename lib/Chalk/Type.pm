@@ -39,6 +39,28 @@ class Chalk::Type {
         # Two types are compatible if one is a subtype of the other
         return $self->is_subtype_of($other) || $other->is_subtype_of($self);
     }
+
+    method round_trip_preserves($value) {
+        # Check if value round-trips through type coercion without loss
+        # Default: always true (permissive)
+        # Subclasses override for stricter checks
+        return 1;
+    }
+
+    method satisfies_contract($value) {
+        # Check if value satisfies operational contracts for this type
+        # Default: always true (permissive)
+        # Subclasses override for specific contracts
+        return 1;
+    }
+
+    method check_membership($value) {
+        # Type membership requires BOTH:
+        # 1. Syntactic preservation (round-trip)
+        # 2. Semantic fulfillment (contracts)
+        return $self->round_trip_preserves($value) &&
+               $self->satisfies_contract($value);
+    }
 }
 
 1;

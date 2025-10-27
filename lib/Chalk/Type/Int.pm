@@ -20,6 +20,17 @@ class Chalk::Type::Int :isa(Chalk::Type) {
                ref($other) eq 'Chalk::Type::Scalar' ||
                ref($other) eq 'Chalk::Type::Any';
     }
+
+    method round_trip_preserves($value) {
+        # Int to Str to Int must preserve value
+        # Must be a whole number (no fractional part)
+        return defined($value) && $value =~ qr/^[+-]?\d+$/ && int($value) == $value;
+    }
+
+    method satisfies_contract($value) {
+        # Integers must satisfy reflexivity and be whole numbers
+        return defined($value) && $value == $value && int($value) == $value;
+    }
 }
 
 1;
