@@ -10,6 +10,19 @@ class Chalk::IR::OptimizerPipeline {
 
     field $optimizers :param :reader;
 
+    ADJUST {
+        # Validate that optimizers is an array reference
+        die "optimizers parameter must be an array reference"
+            unless ref($optimizers) eq 'ARRAY';
+
+        # Validate that each optimizer implements the apply() method
+        for my $i (0 .. $#{$optimizers}) {
+            my $optimizer = $optimizers->[$i];
+            die "Optimizer at index $i does not implement apply() method"
+                unless defined($optimizer) && $optimizer->can('apply');
+        }
+    }
+
     # Apply all optimizers in sequence to a graph
     # Returns the final optimized graph
     method apply($graph) {

@@ -177,4 +177,54 @@ subtest 'Pipeline construction' => sub {
     ok(defined($empty), 'Empty pipeline can be constructed');
 };
 
+# Test 6: Error handling - non-array ref parameter
+subtest 'Pipeline rejects non-array ref' => sub {
+    eval {
+        my $pipeline = Chalk::IR::OptimizerPipeline->new(optimizers => 'not an array');
+    };
+    like($@, qr/optimizers parameter must be an array reference/,
+        'Dies when optimizers is not an array ref');
+};
+
+# Test 7: Error handling - optimizer without apply() method
+subtest 'Pipeline rejects optimizer without apply() method' => sub {
+    # Create a mock object without apply() method
+    package MockOptimizer {
+        use v5.42;
+        use experimental qw(class);
+
+        class MockOptimizer {
+            method some_other_method() { return "test"; }
+        }
+    }
+
+    my $bad_optimizer = MockOptimizer->new();
+
+    eval {
+        my $pipeline = Chalk::IR::OptimizerPipeline->new(optimizers => [$bad_optimizer]);
+    };
+    like($@, qr/Optimizer at index 0 does not implement apply\(\) method/,
+        'Dies when optimizer does not implement apply()');
+};
+
+# Test 8: Error handling - undefined optimizer in array
+subtest 'Pipeline rejects undefined optimizer' => sub {
+    eval {
+        my $pipeline = Chalk::IR::OptimizerPipeline->new(optimizers => [undef]);
+    };
+    like($@, qr/Optimizer at index 0 does not implement apply\(\) method/,
+        'Dies when optimizer is undefined');
+};
+
+# Test 9: Error handling - mixed valid and invalid optimizers
+subtest 'Pipeline rejects when any optimizer is invalid' => sub {
+    my $gvn = Chalk::IR::Optimizer::GVN->new();
+
+    eval {
+        my $pipeline = Chalk::IR::OptimizerPipeline->new(optimizers => [$gvn, undef]);
+    };
+    like($@, qr/Optimizer at index 1 does not implement apply\(\) method/,
+        'Dies when second optimizer is undefined');
+};
+
 done_testing();

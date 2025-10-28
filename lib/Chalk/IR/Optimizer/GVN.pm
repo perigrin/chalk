@@ -11,6 +11,16 @@ class Chalk::IR::Optimizer::GVN {
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)
+    #
+    # Use this method when:
+    # - Running GVN as part of an optimization pipeline
+    # - You only need the optimized graph, not metrics
+    # - Chaining with other optimizers
+    #
+    # Use run_gvn() when:
+    # - You need optimization metrics (nodes eliminated, redirection counts)
+    # - Debugging or profiling optimization effectiveness
+    # - Analyzing GVN pass performance
     method apply($graph) {
         my $result = $self->run_gvn($graph);
         return $result->{graph};
@@ -18,6 +28,9 @@ class Chalk::IR::Optimizer::GVN {
 
     # Run Global Value Numbering optimization pass
     # Returns: { graph => optimized_graph, metrics => { nodes_eliminated => N, redirections => {...} } }
+    #
+    # This class method returns both the optimized graph and detailed metrics about the optimization.
+    # For pipeline usage without metrics, use the apply() instance method instead.
     sub run_gvn($class, $graph) {
         # Value number tracking: value_number => canonical_node_id
         my $value_to_node = {};
