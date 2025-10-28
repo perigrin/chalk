@@ -19,8 +19,8 @@ class Chalk::Type::List :isa(Chalk::Type) {
     method is_subtype_of($other) {
         # List <: List (reflexive)
         # List <: Any
-        return ref($other) eq 'Chalk::Type::List' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return blessed($other) eq 'Chalk::Type::List' ||
+               blessed($other) eq 'Chalk::Type::Any';
     }
 
     method convert_to_target($target_sigil) {
@@ -40,8 +40,7 @@ class Chalk::Type::List :isa(Chalk::Type) {
         }
 
         # List cannot be assigned to scalar variable
-        Chalk::Type::Exception::invalid_list_assignment_error($target_sigil)->throw();
+        my $exception = Chalk::Type::Exception->invalid_list_assignment_error($target_sigil);
+        $exception->throw();
     }
 }
-
-1;
