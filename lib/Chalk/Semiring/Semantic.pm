@@ -6,6 +6,14 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
 use Chalk::EvalContext;
+use Chalk::Type::Int;
+use Chalk::Type::Num;
+use Chalk::Type::Str;
+use Chalk::Type::Scalar;
+use Chalk::Type::Array;
+use Chalk::Type::Hash;
+use Chalk::Type::List;
+use Chalk::Type::Any;
 
 class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     field $value :param :reader;         # Computed semantic value
@@ -62,6 +70,7 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
         # This builds up the children list as we advance the dot through the rule
         my @new_children = (@{$self->context->children}, $other->context);
 
+        # Type propagation: keep the type from self's context (the rule being built)
         my $combined_ctx = Chalk::EvalContext->new(
             focus => undef,  # Not yet evaluated
             children => \@new_children,
@@ -70,7 +79,8 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
             env => $self->context->env,
             grammar => $self->context->grammar,
             rule => $self->context->rule,
-            forest => $self->context->forest
+            forest => $self->context->forest,
+            type => $self->context->type  # Propagate type from rule
         );
 
         return Chalk::Semiring::SemanticElement->new(
@@ -103,6 +113,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     field $env :param = {};
     field $grammar :param :reader;
     field $shared_context :param :reader = undef;
+    field $type_env :param :reader = {};  # Maps variable names to Chalk::Type objects
     field $forest :reader;
     field $mul_id :reader;
     field $add_id :reader;
@@ -149,6 +160,9 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $parent_derivation_id = undef) {
+        # Infer type from the rule
+        my $inferred_type = $self->infer_type_from_rule($rule);
+
         my $ctx = Chalk::EvalContext->new(
             focus => undef,
             children => [],
@@ -157,7 +171,8 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             env => $env,
             grammar => $grammar,
             rule => $rule,
-            forest => $forest
+            forest => $forest,
+            type => $inferred_type
         );
 
         return Chalk::Semiring::SemanticElement->new(
@@ -174,6 +189,75 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     method plus($x, $y) {
         # For backward compatibility if called directly
         return $x->add($y);
+    }
+
+    # Infer the type of an expression from its grammar rule
+    method infer_type_from_rule($rule) {
+        return Chalk::Type::Any->new() unless defined($rule);
+
+        my $lhs = $rule->lhs;
+        my @rhs = @{$rule->rhs};
+
+        # Literal types - check RHS for terminal patterns
+        if (@rhs == 1) {
+            my $terminal = $rhs[0];
+            # Integer literal
+            return Chalk::Type::Int->new() if $terminal eq '%INTEGER%';
+            # Float/Number literal
+            return Chalk::Type::Num->new() if $terminal eq '%FLOAT%' || $terminal eq '%VERSION%';
+            # String literals
+            return Chalk::Type::Str->new() if $terminal eq '%SINGLE_QUOTED_STRING%'
+                                           || $terminal eq '%DOUBLE_QUOTED_STRING%';
+        }
+
+        # Variable types - infer from sigil in RHS
+        if ($lhs =~ qr/Variable$/) {
+            # Scalar variable: $ identifier
+            if (@rhs >= 1 && $rhs[0] eq '$') {
+                return Chalk::Type::Scalar->new();
+            }
+            # Array variable: @ identifier
+            if (@rhs >= 1 && $rhs[0] eq '@') {
+                return Chalk::Type::Array->new(
+                    element_type => Chalk::Type::Any->new()
+                );
+            }
+            # Hash variable: % identifier
+            if (@rhs >= 1 && $rhs[0] eq '%') {
+                return Chalk::Type::Hash->new(
+                    value_type => Chalk::Type::Any->new()
+                );
+            }
+        }
+
+        # Operation types - check for operators in RHS
+        for my $i (0 .. $#rhs) {
+            my $symbol = $rhs[$i];
+            # Numeric operations
+            if ($symbol =~ qr/^[+\-*\/]$/ || $symbol eq '**') {
+                return Chalk::Type::Num->new();
+            }
+            # String concatenation
+            if ($symbol eq '.') {
+                return Chalk::Type::Str->new();
+            }
+            # Range operator
+            if ($symbol eq '..') {
+                return Chalk::Type::List->new();
+            }
+        }
+
+        # Type inference by LHS name
+        return Chalk::Type::Int->new()    if $lhs eq 'Integer' || $lhs eq 'IntegerLiteral';
+        return Chalk::Type::Num->new()    if $lhs eq 'Number' || $lhs eq 'NumberLiteral';
+        return Chalk::Type::Str->new()    if $lhs eq 'String' || $lhs eq 'StringLiteral'
+                                          || $lhs =~ qr/Quoted/;
+        return Chalk::Type::Array->new(element_type => Chalk::Type::Any->new())
+                                       if $lhs eq 'ArrayLiteral' || $lhs eq 'List';
+        return Chalk::Type::List->new()   if $lhs eq 'Range';
+
+        # Default to Any for unknown constructs
+        return Chalk::Type::Any->new();
     }
 }
 

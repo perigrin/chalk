@@ -13,6 +13,7 @@ class Chalk::EvalContext {
     field $grammar :param :reader;      # Grammar reference
     field $rule :param :reader;         # Rule being evaluated
     field $forest :param :reader = undef;  # Optional shared parse forest
+    field $type :param :reader = undef;    # Type of the expression (Chalk::Type)
 
     # Comonad operation: extract the focus value
     method extract() {
@@ -29,7 +30,8 @@ class Chalk::EvalContext {
             env => $env,
             grammar => $grammar,
             rule => $rule,
-            forest => $forest
+            forest => $forest,
+            type => $type
         );
     }
 
@@ -47,7 +49,8 @@ class Chalk::EvalContext {
             env => $env,
             grammar => $grammar,
             rule => $rule,
-            forest => $forest
+            forest => $forest,
+            type => $type
         );
     }
 
@@ -64,7 +67,8 @@ class Chalk::EvalContext {
             env => $env,
             grammar => $grammar,
             rule => $rule,
-            forest => $forest
+            forest => $forest,
+            type => $type
         );
     }
 
