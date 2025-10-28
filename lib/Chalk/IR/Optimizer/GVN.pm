@@ -9,6 +9,13 @@ class Chalk::IR::Optimizer::GVN {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
 
+    # Instance method for pipeline compatibility
+    # Returns optimized graph (not a hashref)
+    method apply($graph) {
+        my $result = $self->run_gvn($graph);
+        return $result->{graph};
+    }
+
     # Run Global Value Numbering optimization pass
     # Returns: { graph => optimized_graph, metrics => { nodes_eliminated => N, redirections => {...} } }
     sub run_gvn($class, $graph) {
