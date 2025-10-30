@@ -45,20 +45,15 @@ subtest 'Execute: my $x = 3 + 5; return $x * 2;' => sub {
     ok($graph, 'Builder has IR graph');
 
     my $nodes_before = scalar(keys %{$graph->nodes});
-    ok($nodes_before > 0, "Graph has nodes (got $nodes_before)");
+    ok($nodes_before > 0, "Graph has nodes before GVN (got $nodes_before)");
 
-    # Debug: Show all nodes
-    for my $node_id (sort keys %{$graph->nodes}) {
-        my $node = $graph->nodes->{$node_id};
-        my $class = ref($node);
-        my $op = $node->op;
-        my $inputs_str = join(',', @{$node->inputs});
-        diag(sprintf("  %-10s: %-30s op=%-10s inputs=[%s]",
-            $node_id, $class, $op, $inputs_str));
-    }
+    # Run GVN optimizer to deduplicate nodes (now preserves polymorphic types!)
+    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+    $graph = $gvn_result->{graph};
 
-    # Note: Skipping GVN for now - it converts polymorphic nodes to generic
-    # TODO: Fix GVN to preserve polymorphic node types (Issue #125)
+    my $nodes_after = scalar(keys %{$graph->nodes});
+    ok($nodes_after > 0, "Graph has nodes after GVN (got $nodes_after)");
+    diag("GVN: $nodes_before nodes -> $nodes_after nodes");
 
     # Step 6: Create interpreter
     my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
@@ -66,12 +61,6 @@ subtest 'Execute: my $x = 3 + 5; return $x * 2;' => sub {
 
     # Step 7: Execute the program
     my $result = $interpreter->execute();
-    diag("Result: " . (defined $result ? $result : 'undef'));
-
-    # Debug: Show return node
-    my $return_node = $interpreter->find_return();
-    diag("Return node: " . $return_node->id . ", op=" . $return_node->op);
-    diag("Return value_id: " . ($return_node->can('value_id') ? $return_node->value_id : 'N/A'));
 
     # Step 8: Verify result
     is($result, 16, 'Execution result: (3 + 5) * 2 = 16');
@@ -97,7 +86,8 @@ subtest 'Execute: return 42;' => sub {
     ok($parse_result, 'Program parses successfully');
 
     my $graph = $builder->graph;
-    # Note: Skipping GVN - it converts polymorphic nodes to generic (Issue #125)
+    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+    $graph = $gvn_result->{graph};
 
     my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
     my $result = $interpreter->execute();
@@ -125,7 +115,8 @@ subtest 'Execute: return 3 + 5;' => sub {
     ok($parse_result, 'Program parses successfully');
 
     my $graph = $builder->graph;
-    # Note: Skipping GVN - it converts polymorphic nodes to generic (Issue #125)
+    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+    $graph = $gvn_result->{graph};
 
     my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
     my $result = $interpreter->execute();
