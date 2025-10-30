@@ -42,12 +42,46 @@ class Chalk::IR::Interpreter {
 
     method find_return() {
         # Find the Return node in the graph
+        # Prefer explicit return statements (with __CONTROL_PLACEHOLDER__) over implicit returns
+        # When multiple explicit returns exist (from parser intermediate states),
+        # choose the one with the highest node ID (most recently created)
         my $nodes = $graph->nodes;
+
+        my @return_nodes;
         for my $node_id (keys %$nodes) {
             my $node = $nodes->{$node_id};
-            return $node if $node->op eq 'Return';
+            push @return_nodes, $node if $node->op eq 'Return';
         }
-        die "No Return node found in graph";
+
+        die "No Return node found in graph" unless @return_nodes;
+
+        # If only one Return, use it
+        return $return_nodes[0] if @return_nodes == 1;
+
+        # Multiple Returns - prefer explicit return statements
+        # (those with __CONTROL_PLACEHOLDER__ as control input)
+        my @explicit_returns;
+        for my $node (@return_nodes) {
+            my @inputs = $node->inputs->@*;
+            if (@inputs > 0 && defined($inputs[0]) && $inputs[0] eq '__CONTROL_PLACEHOLDER__') {
+                push @explicit_returns, $node;
+            }
+        }
+
+        # If we found explicit returns, use the one with highest ID (most recent)
+        if (@explicit_returns) {
+            my $best = $explicit_returns[0];
+            for my $node (@explicit_returns) {
+                # Extract numeric part from node_N
+                my ($id) = $node->id =~ /(\d+)$/;
+                my ($best_id) = $best->id =~ /(\d+)$/;
+                $best = $node if defined($id) && defined($best_id) && $id > $best_id;
+            }
+            return $best;
+        }
+
+        # Fallback: return first one (but this shouldn't happen in well-formed programs)
+        return $return_nodes[0];
     }
 }
 
