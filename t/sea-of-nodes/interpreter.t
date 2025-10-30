@@ -13,6 +13,12 @@ use_ok('Chalk::IR::Node::Multiply');
 use_ok('Chalk::IR::Node::Divide');
 use_ok('Chalk::IR::Node::Start');
 use_ok('Chalk::IR::Node::Return');
+use_ok('Chalk::IR::Node::GT');
+use_ok('Chalk::IR::Node::LT');
+use_ok('Chalk::IR::Node::EQ');
+use_ok('Chalk::IR::Node::NE');
+use_ok('Chalk::IR::Node::GE');
+use_ok('Chalk::IR::Node::LE');
 use_ok('Chalk::IR::Graph');
 use_ok('Chalk::IR::Interpreter');
 
@@ -78,6 +84,78 @@ subtest 'Arithmetic node execution' => sub {
     );
     my $div_result = $div->execute(\%values);
     cmp_ok($div_result, '==', 10/3, 'Divide node: 10 / 3');
+};
+
+# Test comparison operators
+subtest 'Comparison operators execution' => sub {
+    my %values = (
+        'node_left' => 10,
+        'node_right' => 3,
+    );
+
+    # Test GT: 10 > 3 = true (1)
+    my $gt = Chalk::IR::Node::GT->new(
+        id => 'node_gt',
+        inputs => ['node_ctrl', 'node_left', 'node_right'],
+        left_id => 'node_left',
+        right_id => 'node_right',
+    );
+    my $gt_result = $gt->execute(\%values);
+    is($gt_result, 1, 'GT: 10 > 3 = true');
+
+    # Test LT: 10 < 3 = false (0)
+    my $lt = Chalk::IR::Node::LT->new(
+        id => 'node_lt',
+        inputs => ['node_ctrl', 'node_left', 'node_right'],
+        left_id => 'node_left',
+        right_id => 'node_right',
+    );
+    my $lt_result = $lt->execute(\%values);
+    is($lt_result, 0, 'LT: 10 < 3 = false');
+
+    # Test EQ: 10 == 10 = true
+    $values{'node_right'} = 10;
+    my $eq = Chalk::IR::Node::EQ->new(
+        id => 'node_eq',
+        inputs => ['node_ctrl', 'node_left', 'node_right'],
+        left_id => 'node_left',
+        right_id => 'node_right',
+    );
+    my $eq_result = $eq->execute(\%values);
+    is($eq_result, 1, 'EQ: 10 == 10 = true');
+
+    # Test NE: 10 != 3 = true
+    $values{'node_right'} = 3;
+    my $ne = Chalk::IR::Node::NE->new(
+        id => 'node_ne',
+        inputs => ['node_ctrl', 'node_left', 'node_right'],
+        left_id => 'node_left',
+        right_id => 'node_right',
+    );
+    my $ne_result = $ne->execute(\%values);
+    is($ne_result, 1, 'NE: 10 != 3 = true');
+
+    # Test GE: 10 >= 10 = true
+    $values{'node_right'} = 10;
+    my $ge = Chalk::IR::Node::GE->new(
+        id => 'node_ge',
+        inputs => ['node_ctrl', 'node_left', 'node_right'],
+        left_id => 'node_left',
+        right_id => 'node_right',
+    );
+    my $ge_result = $ge->execute(\%values);
+    is($ge_result, 1, 'GE: 10 >= 10 = true');
+
+    # Test LE: 10 <= 3 = false
+    $values{'node_right'} = 3;
+    my $le = Chalk::IR::Node::LE->new(
+        id => 'node_le',
+        inputs => ['node_ctrl', 'node_left', 'node_right'],
+        left_id => 'node_left',
+        right_id => 'node_right',
+    );
+    my $le_result = $le->execute(\%values);
+    is($le_result, 0, 'LE: 10 <= 3 = false');
 };
 
 # Test Start node execution
