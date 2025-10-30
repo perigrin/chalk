@@ -89,7 +89,8 @@ class Chalk::IR::Node::Base {
         );
 
         # Add node-specific parameters from attributes
-        for my $key (keys %$attrs) {
+        my @attr_keys = keys $attrs->%*;
+        for my $key (@attr_keys) {
             $params{$key} = $attrs->{$key};
         }
 

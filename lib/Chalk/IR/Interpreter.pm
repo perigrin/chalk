@@ -20,13 +20,23 @@ class Chalk::IR::Interpreter {
             my $node_id = $node->id;
             my $op = $node->op;
 
-            # Execute node (dispatch based on signature)
+            # Dispatch based on node execute() signature
+            # Different node types take different arguments
+            my %heap_ops = ( Store => 1, Load => 1 );
+            my %value_ops = (
+                Add => 1, Subtract => 1, Multiply => 1, Divide => 1,
+                GT => 1, LT => 1, EQ => 1, NE => 1, GE => 1, LE => 1,
+                Negate => 1, If => 1, Proj => 1, Region => 1, Phi => 1, Return => 1
+            );
+            my %simple_ops = ( Start => 1, Constant => 1 );
+
+            # Execute node with appropriate arguments
             my $result;
-            if ($op eq 'Start' || $op eq 'Constant') {
+            if ($simple_ops{$op}) {
                 $result = $node->execute();
-            } elsif ($op =~ /^(Store|Load)$/) {
+            } elsif ($heap_ops{$op}) {
                 $result = $node->execute(\%values, \%heap);
-            } elsif ($op =~ /^(Add|Subtract|Multiply|Divide|GT|LT|EQ|NE|GE|LE|Negate|If|Proj|Region|Phi|Return)$/) {
+            } elsif ($value_ops{$op}) {
                 $result = $node->execute(\%values);
             } else {
                 die "Unknown op type: $op";
@@ -48,7 +58,8 @@ class Chalk::IR::Interpreter {
         my $nodes = $graph->nodes;
 
         my @return_nodes;
-        for my $node_id (keys %$nodes) {
+        my @node_ids = keys $nodes->%*;
+        for my $node_id (@node_ids) {
             my $node = $nodes->{$node_id};
             push @return_nodes, $node if $node->op eq 'Return';
         }
@@ -72,10 +83,15 @@ class Chalk::IR::Interpreter {
         if (@explicit_returns) {
             my $best = $explicit_returns[0];
             for my $node (@explicit_returns) {
-                # Extract numeric part from node_N
-                my ($id) = $node->id =~ /(\d+)$/;
-                my ($best_id) = $best->id =~ /(\d+)$/;
-                $best = $node if defined($id) && defined($best_id) && $id > $best_id;
+                # Extract numeric part from node_N format
+                # node_42 -> 42 (skip first 5 chars: "node_")
+                my $node_id_str = $node->id;
+                my $best_id_str = $best->id;
+
+                my $id = substr($node_id_str, 5);
+                my $best_id = substr($best_id_str, 5);
+
+                $best = $node if $id > $best_id;
             }
             return $best;
         }

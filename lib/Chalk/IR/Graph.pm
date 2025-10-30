@@ -46,7 +46,7 @@ class Chalk::IR::Graph {
     }
 
     method node_count() {
-        return scalar keys $nodes->%*;
+        return scalar keys %{$nodes};
     }
 
     method set_entry($new_entry) {
@@ -55,7 +55,7 @@ class Chalk::IR::Graph {
     }
 
     method to_json() {
-        my @node_list = map { $_->to_hash() } values $nodes->%*;
+        my @node_list = map { $_->to_hash() } values %{$nodes};
 
         return {
             version => '1.0',
@@ -120,7 +120,8 @@ class Chalk::IR::Graph {
 
         # Visit all nodes in the graph (not just from entry)
         # This ensures we get all nodes including those not reachable from entry
-        for my $node_id (keys %$nodes) {
+        my @node_ids = keys $nodes->%*;
+        for my $node_id (@node_ids) {
             $visit->($node_id);
         }
 

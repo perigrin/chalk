@@ -222,7 +222,7 @@ class Chalk::IR::Optimizer::GVN {
             }
             # Special case: any attribute ending in _id is a node reference
             # This handles: store_id, left_id, right_id, value_id, control_id, region_id, etc.
-            elsif ($key =~ /_id$/ && defined($value) && exists($redirections->{$value})) {
+            elsif (length($key) >= 3 && substr($key, -3) eq '_id' && defined($value) && exists($redirections->{$value})) {
                 $new_attrs{$key} = $redirections->{$value};
             }
             else {
