@@ -21,6 +21,10 @@ class Chalk::IR::Node::Constant :isa(Chalk::IR::Node::Base) {
             },
         };
     }
+
+    method execute() {
+        return $value;
+    }
 }
 
 1;

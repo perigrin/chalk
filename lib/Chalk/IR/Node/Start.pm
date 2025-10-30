@@ -21,6 +21,11 @@ class Chalk::IR::Node::Start :isa(Chalk::IR::Node::Base) {
             },
         };
     }
+
+    method execute() {
+        # Start node returns a control token (undef for now)
+        return undef;
+    }
 }
 
 1;
