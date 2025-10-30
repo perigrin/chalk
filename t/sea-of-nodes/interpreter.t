@@ -637,4 +637,233 @@ subtest 'Interpreter: (3 + 5) * 2' => sub {
     is($result, 16, 'Interpreter executes: (3 + 5) * 2 = 16');
 };
 
+# Integration test: Full if/else statement
+subtest 'Interpreter: if (x > 0) { 42 } else { -42 } with x=5' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Start node
+    my $start = Chalk::IR::Node::Start->new(
+        id => 'node_0',
+        inputs => [],
+        function_name => 'main',
+        params => [],
+    );
+    $graph->add_node($start);
+
+    # x = 5
+    my $x = Chalk::IR::Node::Constant->new(
+        id => 'node_1',
+        inputs => ['node_0'],
+        value => 5,
+        type => 'Int',
+    );
+    $graph->add_node($x);
+
+    # 0
+    my $zero = Chalk::IR::Node::Constant->new(
+        id => 'node_2',
+        inputs => ['node_0'],
+        value => 0,
+        type => 'Int',
+    );
+    $graph->add_node($zero);
+
+    # x > 0
+    my $gt = Chalk::IR::Node::GT->new(
+        id => 'node_3',
+        inputs => ['node_0', 'node_1', 'node_2'],
+        left_id => 'node_1',
+        right_id => 'node_2',
+    );
+    $graph->add_node($gt);
+
+    # If node
+    my $if = Chalk::IR::Node::If->new(
+        id => 'node_4',
+        inputs => ['node_0', 'node_3'],
+        condition_id => 'node_3',
+    );
+    $graph->add_node($if);
+
+    # Proj[0] - false branch
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'node_5',
+        inputs => ['node_4'],
+        index => 0,
+        label => 'IfFalse',
+    );
+    $graph->add_node($proj_false);
+
+    # Proj[1] - true branch
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'node_6',
+        inputs => ['node_4'],
+        index => 1,
+        label => 'IfTrue',
+    );
+    $graph->add_node($proj_true);
+
+    # 42 (true branch value)
+    my $val_true = Chalk::IR::Node::Constant->new(
+        id => 'node_7',
+        inputs => ['node_6'],
+        value => 42,
+        type => 'Int',
+    );
+    $graph->add_node($val_true);
+
+    # -42 (false branch value)
+    my $val_false = Chalk::IR::Node::Constant->new(
+        id => 'node_8',
+        inputs => ['node_5'],
+        value => -42,
+        type => 'Int',
+    );
+    $graph->add_node($val_false);
+
+    # Region merges both paths
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'node_9',
+        inputs => ['node_5', 'node_6'],  # false, true
+    );
+    $graph->add_node($region);
+
+    # Phi selects value based on active path
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'node_10',
+        inputs => ['node_9', 'node_8', 'node_7'],  # region, val_false, val_true
+        region_id => 'node_9',
+    );
+    $graph->add_node($phi);
+
+    # Return
+    my $return = Chalk::IR::Node::Return->new(
+        id => 'node_11',
+        inputs => ['node_0', 'node_10'],
+        value_id => 'node_10',
+        control_id => 'node_0',
+    );
+    $graph->add_node($return);
+
+    # Execute graph
+    my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
+    my $result = $interpreter->execute();
+
+    is($result, 42, 'if (5 > 0) returns 42 (true branch)');
+};
+
+subtest 'Interpreter: if (x > 0) { 42 } else { -42 } with x=-5' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Start node
+    my $start = Chalk::IR::Node::Start->new(
+        id => 'node_0',
+        inputs => [],
+        function_name => 'main',
+        params => [],
+    );
+    $graph->add_node($start);
+
+    # x = -5
+    my $x = Chalk::IR::Node::Constant->new(
+        id => 'node_1',
+        inputs => ['node_0'],
+        value => -5,
+        type => 'Int',
+    );
+    $graph->add_node($x);
+
+    # 0
+    my $zero = Chalk::IR::Node::Constant->new(
+        id => 'node_2',
+        inputs => ['node_0'],
+        value => 0,
+        type => 'Int',
+    );
+    $graph->add_node($zero);
+
+    # x > 0
+    my $gt = Chalk::IR::Node::GT->new(
+        id => 'node_3',
+        inputs => ['node_0', 'node_1', 'node_2'],
+        left_id => 'node_1',
+        right_id => 'node_2',
+    );
+    $graph->add_node($gt);
+
+    # If node
+    my $if = Chalk::IR::Node::If->new(
+        id => 'node_4',
+        inputs => ['node_0', 'node_3'],
+        condition_id => 'node_3',
+    );
+    $graph->add_node($if);
+
+    # Proj[0] - false branch
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'node_5',
+        inputs => ['node_4'],
+        index => 0,
+        label => 'IfFalse',
+    );
+    $graph->add_node($proj_false);
+
+    # Proj[1] - true branch
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'node_6',
+        inputs => ['node_4'],
+        index => 1,
+        label => 'IfTrue',
+    );
+    $graph->add_node($proj_true);
+
+    # 42 (true branch value)
+    my $val_true = Chalk::IR::Node::Constant->new(
+        id => 'node_7',
+        inputs => ['node_6'],
+        value => 42,
+        type => 'Int',
+    );
+    $graph->add_node($val_true);
+
+    # -42 (false branch value)
+    my $val_false = Chalk::IR::Node::Constant->new(
+        id => 'node_8',
+        inputs => ['node_5'],
+        value => -42,
+        type => 'Int',
+    );
+    $graph->add_node($val_false);
+
+    # Region merges both paths
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'node_9',
+        inputs => ['node_5', 'node_6'],  # false, true
+    );
+    $graph->add_node($region);
+
+    # Phi selects value based on active path
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'node_10',
+        inputs => ['node_9', 'node_8', 'node_7'],  # region, val_false, val_true
+        region_id => 'node_9',
+    );
+    $graph->add_node($phi);
+
+    # Return
+    my $return = Chalk::IR::Node::Return->new(
+        id => 'node_11',
+        inputs => ['node_0', 'node_10'],
+        value_id => 'node_10',
+        control_id => 'node_0',
+    );
+    $graph->add_node($return);
+
+    # Execute graph
+    my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
+    my $result = $interpreter->execute();
+
+    is($result, -42, 'if (-5 > 0) returns -42 (false branch)');
+};
+
 done_testing();
