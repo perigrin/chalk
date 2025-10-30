@@ -23,7 +23,7 @@ class Chalk::IR::Interpreter {
             my $result;
             if ($op eq 'Start' || $op eq 'Constant') {
                 $result = $node->execute();
-            } elsif ($op =~ /^(Add|Subtract|Multiply|Divide|GT|LT|EQ|NE|GE|LE|Return)$/) {
+            } elsif ($op =~ /^(Add|Subtract|Multiply|Divide|GT|LT|EQ|NE|GE|LE|Negate|If|Proj|Region|Phi|Return)$/) {
                 $result = $node->execute(\%values);
             } else {
                 die "Unknown op type: $op";

@@ -19,6 +19,12 @@ class Chalk::IR::Node::If :isa(Chalk::IR::Node::Base) {
             },
         };
     }
+
+    method execute($values) {
+        # If node returns the condition value (1 or 0)
+        # This tells Proj nodes which path is active
+        return $values->{$condition_id};
+    }
 }
 
 1;

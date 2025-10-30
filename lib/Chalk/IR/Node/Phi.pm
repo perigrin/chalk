@@ -19,6 +19,23 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
             },
         };
     }
+
+    method execute($values) {
+        # Phi selects value based on Region's active path
+        # inputs[0] = region_id
+        # inputs[1..n] = values for each path
+        my $active_path = $values->{$region_id};
+        my @inputs = $self->inputs->@*;
+
+        # Skip region input (index 0), select value at active_path + 1
+        my $value_index = $active_path + 1;
+        if ($value_index >= @inputs) {
+            die "Phi node: active path $active_path out of range";
+        }
+
+        my $value_id = $inputs[$value_index];
+        return $values->{$value_id};
+    }
 }
 
 1;

@@ -19,6 +19,11 @@ use_ok('Chalk::IR::Node::EQ');
 use_ok('Chalk::IR::Node::NE');
 use_ok('Chalk::IR::Node::GE');
 use_ok('Chalk::IR::Node::LE');
+use_ok('Chalk::IR::Node::Negate');
+use_ok('Chalk::IR::Node::If');
+use_ok('Chalk::IR::Node::Proj');
+use_ok('Chalk::IR::Node::Region');
+use_ok('Chalk::IR::Node::Phi');
 use_ok('Chalk::IR::Graph');
 use_ok('Chalk::IR::Interpreter');
 
@@ -156,6 +161,142 @@ subtest 'Comparison operators execution' => sub {
     );
     my $le_result = $le->execute(\%values);
     is($le_result, 0, 'LE: 10 <= 3 = false');
+};
+
+# Test unary operators
+subtest 'Unary operators execution' => sub {
+    # Test Negate: -(-5) = 5
+    my %values = ('node_operand' => -5);
+    my $negate = Chalk::IR::Node::Negate->new(
+        id => 'node_neg',
+        inputs => ['node_ctrl', 'node_operand'],
+        operand_id => 'node_operand',
+    );
+    my $result = $negate->execute(\%values);
+    is($result, 5, 'Negate: -(-5) = 5');
+
+    # Test Negate: -(42) = -42
+    $values{'node_operand'} = 42;
+    my $negate2 = Chalk::IR::Node::Negate->new(
+        id => 'node_neg2',
+        inputs => ['node_ctrl', 'node_operand'],
+        operand_id => 'node_operand',
+    );
+    my $result2 = $negate2->execute(\%values);
+    is($result2, -42, 'Negate: -(42) = -42');
+};
+
+# Test control flow nodes
+subtest 'Control flow: If node execution' => sub {
+    # If node returns the condition value
+    my %values = ('node_cond' => 1);
+    my $if = Chalk::IR::Node::If->new(
+        id => 'node_if',
+        inputs => ['node_ctrl', 'node_cond'],
+        condition_id => 'node_cond',
+    );
+    my $result = $if->execute(\%values);
+    is($result, 1, 'If node returns condition value (true)');
+
+    # Test with false condition
+    $values{'node_cond'} = 0;
+    my $if2 = Chalk::IR::Node::If->new(
+        id => 'node_if2',
+        inputs => ['node_ctrl', 'node_cond'],
+        condition_id => 'node_cond',
+    );
+    my $result2 = $if2->execute(\%values);
+    is($result2, 0, 'If node returns condition value (false)');
+};
+
+subtest 'Control flow: Proj node execution' => sub {
+    # Proj extracts control path based on If result and its index
+    # Index 0 = false branch, Index 1 = true branch
+
+    # Test true branch (index 1)
+    my %values = ('node_if' => 1);
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'node_proj_true',
+        inputs => ['node_if'],
+        index => 1,
+        label => 'IfTrue',
+    );
+    my $result = $proj_true->execute(\%values);
+    is($result, 1, 'Proj[1] active when If=true');
+
+    # Test false branch (index 0)
+    $values{'node_if'} = 0;
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'node_proj_false',
+        inputs => ['node_if'],
+        index => 0,
+        label => 'IfFalse',
+    );
+    my $result2 = $proj_false->execute(\%values);
+    is($result2, 1, 'Proj[0] active when If=false');
+
+    # Test inactive branch
+    $values{'node_if'} = 1;
+    my $proj_false2 = Chalk::IR::Node::Proj->new(
+        id => 'node_proj_false2',
+        inputs => ['node_if'],
+        index => 0,
+        label => 'IfFalse',
+    );
+    my $result3 = $proj_false2->execute(\%values);
+    is($result3, 0, 'Proj[0] inactive when If=true');
+};
+
+subtest 'Control flow: Region node execution' => sub {
+    # Region merges control from multiple paths
+    my %values = (
+        'node_proj_true' => 1,
+        'node_proj_false' => 0,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'node_region',
+        inputs => ['node_proj_false', 'node_proj_true'],
+    );
+    my $result = $region->execute(\%values);
+    # Region returns index of active path (1 in this case - true path)
+    is($result, 1, 'Region returns active path index');
+
+    # Test with false path active
+    $values{'node_proj_true'} = 0;
+    $values{'node_proj_false'} = 1;
+    my $region2 = Chalk::IR::Node::Region->new(
+        id => 'node_region2',
+        inputs => ['node_proj_false', 'node_proj_true'],
+    );
+    my $result2 = $region2->execute(\%values);
+    is($result2, 0, 'Region returns active path index (false path)');
+};
+
+subtest 'Control flow: Phi node execution' => sub {
+    # Phi selects value based on Region's active path
+    # inputs: [region_id, value_for_path_0, value_for_path_1, ...]
+    my %values = (
+        'node_region' => 1,  # Path 1 is active (true branch)
+        'node_val_false' => -42,
+        'node_val_true' => 42,
+    );
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'node_phi',
+        inputs => ['node_region', 'node_val_false', 'node_val_true'],
+        region_id => 'node_region',
+    );
+    my $result = $phi->execute(\%values);
+    is($result, 42, 'Phi selects true-branch value when path=1');
+
+    # Test with false path active
+    $values{'node_region'} = 0;
+    my $phi2 = Chalk::IR::Node::Phi->new(
+        id => 'node_phi2',
+        inputs => ['node_region', 'node_val_false', 'node_val_true'],
+        region_id => 'node_region',
+    );
+    my $result2 = $phi2->execute(\%values);
+    is($result2, -42, 'Phi selects false-branch value when path=0');
 };
 
 # Test Start node execution
