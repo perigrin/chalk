@@ -114,4 +114,142 @@ subtest 'Return node execution' => sub {
     is($result, 42, 'Return node returns its value');
 };
 
+# Test graph linearization
+subtest 'Simple graph linearization' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Create a simple graph: Start -> Constant -> Return
+    my $start = Chalk::IR::Node::Start->new(
+        id => 'node_0',
+        inputs => [],
+        function_name => 'main',
+        params => [],
+    );
+    $graph->add_node($start);
+
+    my $constant = Chalk::IR::Node::Constant->new(
+        id => 'node_1',
+        inputs => ['node_0'],
+        value => 42,
+        type => 'Int',
+    );
+    $graph->add_node($constant);
+
+    my $return = Chalk::IR::Node::Return->new(
+        id => 'node_2',
+        inputs => ['node_0', 'node_1'],
+        value_id => 'node_1',
+        control_id => 'node_0',
+    );
+    $graph->add_node($return);
+
+    # Linearize the graph
+    my @schedule = $graph->linearize();
+
+    # Verify we have all 3 nodes
+    is(scalar(@schedule), 3, 'Linearization includes all 3 nodes');
+
+    # Verify order: Start must come before Constant and Return
+    my %positions;
+    for my $i (0..$#schedule) {
+        $positions{$schedule[$i]->id} = $i;
+    }
+
+    ok($positions{'node_0'} < $positions{'node_1'}, 'Start before Constant');
+    ok($positions{'node_0'} < $positions{'node_2'}, 'Start before Return');
+    ok($positions{'node_1'} < $positions{'node_2'}, 'Constant before Return');
+};
+
+# Test graph linearization with data dependencies
+subtest 'Graph linearization with arithmetic: (3 + 5) * 2' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Start node
+    my $start = Chalk::IR::Node::Start->new(
+        id => 'node_0',
+        inputs => [],
+        function_name => 'main',
+        params => [],
+    );
+    $graph->add_node($start);
+
+    # Constants: 3, 5, 2
+    my $const3 = Chalk::IR::Node::Constant->new(
+        id => 'node_1',
+        inputs => ['node_0'],
+        value => 3,
+        type => 'Int',
+    );
+    $graph->add_node($const3);
+
+    my $const5 = Chalk::IR::Node::Constant->new(
+        id => 'node_2',
+        inputs => ['node_0'],
+        value => 5,
+        type => 'Int',
+    );
+    $graph->add_node($const5);
+
+    # Add: 3 + 5
+    my $add = Chalk::IR::Node::Add->new(
+        id => 'node_3',
+        inputs => ['node_0', 'node_1', 'node_2'],
+        left_id => 'node_1',
+        right_id => 'node_2',
+    );
+    $graph->add_node($add);
+
+    my $const2 = Chalk::IR::Node::Constant->new(
+        id => 'node_4',
+        inputs => ['node_0'],
+        value => 2,
+        type => 'Int',
+    );
+    $graph->add_node($const2);
+
+    # Multiply: (3 + 5) * 2
+    my $mul = Chalk::IR::Node::Multiply->new(
+        id => 'node_5',
+        inputs => ['node_0', 'node_3', 'node_4'],
+        left_id => 'node_3',
+        right_id => 'node_4',
+    );
+    $graph->add_node($mul);
+
+    # Return
+    my $return = Chalk::IR::Node::Return->new(
+        id => 'node_6',
+        inputs => ['node_0', 'node_5'],
+        value_id => 'node_5',
+        control_id => 'node_0',
+    );
+    $graph->add_node($return);
+
+    # Linearize the graph
+    my @schedule = $graph->linearize();
+
+    # Verify we have all 7 nodes
+    is(scalar(@schedule), 7, 'Linearization includes all 7 nodes');
+
+    # Build position map
+    my %positions;
+    for my $i (0..$#schedule) {
+        $positions{$schedule[$i]->id} = $i;
+    }
+
+    # Verify Start is first
+    is($positions{'node_0'}, 0, 'Start is first');
+
+    # Verify constants before Add
+    ok($positions{'node_1'} < $positions{'node_3'}, 'Constant(3) before Add');
+    ok($positions{'node_2'} < $positions{'node_3'}, 'Constant(5) before Add');
+
+    # Verify Add and Constant(2) before Multiply
+    ok($positions{'node_3'} < $positions{'node_5'}, 'Add before Multiply');
+    ok($positions{'node_4'} < $positions{'node_5'}, 'Constant(2) before Multiply');
+
+    # Verify Multiply before Return
+    ok($positions{'node_5'} < $positions{'node_6'}, 'Multiply before Return');
+};
+
 done_testing();

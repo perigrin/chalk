@@ -83,6 +83,49 @@ class Chalk::IR::Graph {
 
         return $graph;
     }
+
+    # Linearize graph using topological sort
+    # Returns array of nodes in execution order
+    method linearize() {
+        my @result;
+        my %visited;
+        my %in_progress;
+
+        # Depth-first search for topological sort
+        my $visit;
+        $visit = sub {
+            my ($node_id) = @_;
+            return if $visited{$node_id};
+
+            # Detect cycles
+            die "Cycle detected at node $node_id" if $in_progress{$node_id};
+            $in_progress{$node_id} = 1;
+
+            my $node = $nodes->{$node_id};
+            if ($node) {
+                # Visit all dependencies (inputs) first
+                for my $input_id ($node->inputs->@*) {
+                    next unless defined $input_id;
+                    next if $input_id eq '__CONTROL_PLACEHOLDER__';
+                    $visit->($input_id);
+                }
+            }
+
+            delete $in_progress{$node_id};
+            $visited{$node_id} = 1;
+
+            # Add node after all its dependencies
+            push @result, $node if $node;
+        };
+
+        # Visit all nodes in the graph (not just from entry)
+        # This ensures we get all nodes including those not reachable from entry
+        for my $node_id (keys %$nodes) {
+            $visit->($node_id);
+        }
+
+        return @result;
+    }
 }
 
 1;
