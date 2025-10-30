@@ -1,5 +1,5 @@
-# ABOUTME: Semantic action for Assignment - builds Store nodes for variable assignments
-# ABOUTME: Assignment handles simple assignment (=) with placeholder control pattern
+# ABOUTME: Semantic action for Assignment - binds variables to IR nodes using SSA
+# ABOUTME: Assignment handles simple assignment (=) with direct data flow
 
 use 5.42.0;
 use experimental 'class';
@@ -63,16 +63,7 @@ sub _count_ir_nodes($node, $graph) {
         }
     }
 
-    # Store nodes have value children
-    if ($op eq 'Store') {
-        my $value = $node->attributes->{value};
-        if ($value) {
-            if ($value->{op} eq 'NodeRef') {
-                my $value_node = $graph->get_node($value->{node_id});
-                $count += _count_ir_nodes($value_node, $graph);
-            }
-        }
-    }
+    # Note: Store nodes removed in SSA refactor - variables are direct data flow
 
     return $count;
 }
@@ -108,25 +99,17 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         my $lhs = $context->child(0);
 
         # Extract variable name from lhs
-        # Three possible cases:
+        # Two possible cases:
         # 1. Variable metadata hash (from ScalarVar before Primary processes it)
-        # 2. Load node (from regular variables after Primary)
-        # 3. Proj node (from parameters - build_load_node returns Proj directly for params)
+        # 2. Proj node (function parameters)
+        # Note: With SSA-style variables, we no longer create Load nodes
         my $var_name;
         if (ref($lhs) eq 'HASH' && $lhs->{type} eq 'scalar_var') {
             # Case 1: Variable metadata
             $var_name = $lhs->{name};
-        } elsif (blessed($lhs) && $lhs->can('op')) {
-            if ($lhs->op eq 'Load') {
-                # Case 2: Load node from regular variable
-                $var_name = $lhs->attributes->{name};
-            } elsif ($lhs->op eq 'Proj') {
-                # Case 3: Proj node from parameter
-                $var_name = $lhs->attributes->{label};
-            } else {
-                # Unsupported node type for assignment target
-                return $context->child(0);
-            }
+        } elsif (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
+            # Case 2: Proj node from parameter
+            $var_name = $lhs->label;  # Use label field, not attributes
         } else {
             # Can't handle this lhs type for assignment
             return $context->child(0);
@@ -168,9 +151,9 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         # Validate we got an IR node for the value
         return $context->child(0) unless (blessed($rhs) && $rhs->can('id'));
 
-        # Create Store node with placeholder control
-        # Parent rule (Block, ConditionalStatement, WhileStatement) will wire actual control
-        return $builder->build_store_node($var_name, $rhs, '__CONTROL_PLACEHOLDER__');
+        # Bind variable to value node using SSA (no Store node needed)
+        # Variables are direct data flow edges in the IR graph
+        return $builder->build_store_node($var_name, $rhs);
     }
 }
 

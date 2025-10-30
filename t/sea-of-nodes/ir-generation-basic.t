@@ -82,10 +82,11 @@ use Test::More;
     ok($start_node, 'Can retrieve start node');
     is($start_node->op, 'Start', 'Entry node is a Start node');
 
-    # Verify graph has at least one Store node (from the assignment)
+    # Verify graph uses SSA-style variables (no Store nodes for local variables)
+    # Variables should be direct data flow edges, not memory operations
     my $nodes = $graph->nodes;
     my @store_nodes = grep { $_->op eq 'Store' } values %$nodes;
-    ok(@store_nodes > 0, 'Graph contains Store node from assignment');
+    is(scalar(@store_nodes), 0, 'Graph uses SSA-style variables (no Store nodes for locals)');
 
     # Validate the IR (should pass after GVN deduplication)
     use Chalk::IR::Validator;

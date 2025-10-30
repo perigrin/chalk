@@ -183,52 +183,22 @@ class Chalk::IR::Builder {
 
     # Create Store node (variable assignment)
     method build_store_node($var_name, $value_node, $control = undef) {
-        # Use provided control, or current_control, or '__CONTROL_PLACEHOLDER__'
-        my $ctrl = $control // $current_control // '__CONTROL_PLACEHOLDER__';
-
-        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
-        my $attributes = {
-            name => $var_name,
-            value => $value_ref
-        };
-        my $node_id = $self->next_node_id();
-        my $store = Chalk::IR::Node->new(
-            id            => $node_id,
-            op            => 'Store',
-            inputs        => [$ctrl, $value_node->id],
-            attributes    => $attributes,
-        );
-        $graph->add_node($store);
-        $scope->define($var_name, $store->id);
-        return $store;
+        # SSA-style variable binding: just define variable to point to value node
+        # No Store node needed for local variables - they're pure SSA values
+        $scope->define($var_name, $value_node->id);
+        return $value_node;
     }
 
-    # Create Load node (variable read)
+    # Load node (variable read)
     method build_load_node($var_name) {
+        # SSA-style variable lookup: just return the node the variable points to
+        # No Load node needed for local variables - direct data flow
         my $node_id = $scope->lookup($var_name);
         return undef unless $node_id;
 
-        # Check if this is a Proj node (parameter) - if so, return it directly
+        # Return the node from the graph
         my $node = $graph->nodes->{$node_id};
-        if ($node && $node->op eq 'Proj') {
-            # Parameter: return the Proj node directly
-            return $node;
-        }
-
-        # Regular variable: create Load node from Store
-        my $attributes = {
-            name => $var_name,
-            store_id => $node_id
-        };
-        my $load_id = $self->next_node_id();
-        my $load = Chalk::IR::Node->new(
-            id            => $load_id,
-            op            => 'Load',
-            inputs        => [$current_control, $node_id],
-            attributes    => $attributes,
-        );
-        $graph->add_node($load);
-        return $load;
+        return $node;
     }
 
     # Create Proj node (projection from MultiNode like Start)

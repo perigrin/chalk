@@ -23,6 +23,13 @@ class Chalk::IR::Node::Base {
         };
     }
 
+    # Attributes accessor for compatibility with GVN optimizer
+    # Returns the attributes hash from to_hash()
+    method attributes() {
+        my $hash = $self->to_hash();
+        return $hash->{attributes} // {};
+    }
+
     # Placeholder for optimization - subclasses can override
     method peephole($graph) {
         return $self;

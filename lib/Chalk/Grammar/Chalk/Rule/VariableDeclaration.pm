@@ -1,4 +1,4 @@
-# ABOUTME: Semantic action for VariableDeclaration - creates Store IR nodes for variable assignments
+# ABOUTME: Semantic action for VariableDeclaration - binds variables to IR nodes using SSA
 # ABOUTME: VariableDeclaration handles my/our/state variable declarations with initialization
 
 use 5.42.0;
@@ -55,10 +55,10 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
             return undef;
         }
 
-        # Create Store node with placeholder control
-        # Parent rule (Block, ConditionalStatement, WhileStatement) will wire actual control
-        my $store = $builder->build_store_node($var_name, $value, '__CONTROL_PLACEHOLDER__');
-        return $store;
+        # Bind variable to value node using SSA (no Store node needed)
+        # Variables are direct data flow edges in the IR graph
+        my $result = $builder->build_store_node($var_name, $value);
+        return $result;
     }
 }
 
