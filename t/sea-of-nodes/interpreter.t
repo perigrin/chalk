@@ -24,6 +24,8 @@ use_ok('Chalk::IR::Node::If');
 use_ok('Chalk::IR::Node::Proj');
 use_ok('Chalk::IR::Node::Region');
 use_ok('Chalk::IR::Node::Phi');
+use_ok('Chalk::IR::Node::Store');
+use_ok('Chalk::IR::Node::Load');
 use_ok('Chalk::IR::Graph');
 use_ok('Chalk::IR::Interpreter');
 
@@ -864,6 +866,114 @@ subtest 'Interpreter: if (x > 0) { 42 } else { -42 } with x=-5' => sub {
     my $result = $interpreter->execute();
 
     is($result, -42, 'if (-5 > 0) returns -42 (false branch)');
+};
+
+# Test memory operations: Store node
+subtest 'Memory operations: Store node execution' => sub {
+    # Values map with memory state, address, and value already computed
+    my %values = (
+        'mem_0' => 1,        # Initial memory state (token)
+        'addr_1' => 100,     # Address constant
+        'val_42' => 42,      # Value to store
+    );
+
+    # Create a Store node
+    my $store = Chalk::IR::Node::Store->new(
+        id => 'store_1',
+        inputs => ['mem_0', 'addr_1', 'val_42'],  # memory_in, address, value
+    );
+
+    # Store should execute and return memory state token
+    # Actual storage happens in interpreter's heap
+    my %heap;
+    my $result = $store->execute(\%values, \%heap);
+
+    is($result, 1, 'Store returns memory state token');
+    is($heap{100}, 42, 'Store writes value 42 to address 100 in heap');
+};
+
+# Test memory operations: Load node
+subtest 'Memory operations: Load node execution' => sub {
+    # Values map with memory state and address
+    my %values = (
+        'mem_1' => 1,        # Memory state after store
+        'addr_1' => 100,     # Address constant
+    );
+
+    # Heap already has a value stored
+    my %heap = (100 => 42);
+
+    # Create a Load node
+    my $load = Chalk::IR::Node::Load->new(
+        id => 'load_1',
+        inputs => ['mem_1', 'addr_1'],  # memory_in, address
+    );
+
+    # Load should return the value from heap
+    my $result = $load->execute(\%values, \%heap);
+
+    is($result, 42, 'Load returns value 42 from address 100');
+};
+
+# Test memory operations: Store then Load sequence
+subtest 'Interpreter: Store value, then Load it back' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Start node (provides initial memory state)
+    my $start = Chalk::IR::Node::Start->new(
+        id => 'node_0',
+        inputs => [],
+        function_name => 'test_memory',
+        params => [],
+    );
+    $graph->add_node($start);
+
+    # Address constant: 100
+    my $addr = Chalk::IR::Node::Constant->new(
+        id => 'node_1',
+        inputs => ['node_0'],
+        value => 100,
+        type => 'Int',
+    );
+    $graph->add_node($addr);
+
+    # Value constant: 42
+    my $val = Chalk::IR::Node::Constant->new(
+        id => 'node_2',
+        inputs => ['node_0'],
+        value => 42,
+        type => 'Int',
+    );
+    $graph->add_node($val);
+
+    # Store: mem[100] = 42
+    my $store = Chalk::IR::Node::Store->new(
+        id => 'node_3',
+        inputs => ['node_0', 'node_1', 'node_2'],  # memory, address, value
+    );
+    $graph->add_node($store);
+
+    # Load: read mem[100]
+    my $load = Chalk::IR::Node::Load->new(
+        id => 'node_4',
+        inputs => ['node_3', 'node_1'],  # memory_from_store, address
+    );
+    $graph->add_node($load);
+
+    # Return loaded value
+    my $return = Chalk::IR::Node::Return->new(
+        id => 'node_5',
+        inputs => ['node_0', 'node_4'],
+        value_id => 'node_4',
+        control_id => 'node_0',
+    );
+    $graph->add_node($return);
+
+    # Execute graph
+    my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
+    my $result = $interpreter->execute();
+
+    is($result, 42, 'Store 42 at address 100, Load returns 42');
 };
 
 done_testing();

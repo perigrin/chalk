@@ -11,18 +11,21 @@ class Chalk::IR::Interpreter {
         # 1. Linearize graph to get execution order
         my @schedule = $graph->linearize();
 
-        # 2. Initialize value map
+        # 2. Initialize value map and heap
         my %values;
+        my %heap;
 
         # 3. Execute nodes in order
         for my $node (@schedule) {
             my $node_id = $node->id;
             my $op = $node->op;
 
-            # Execute node (some nodes need values map, some don't)
+            # Execute node (dispatch based on signature)
             my $result;
             if ($op eq 'Start' || $op eq 'Constant') {
                 $result = $node->execute();
+            } elsif ($op =~ /^(Store|Load)$/) {
+                $result = $node->execute(\%values, \%heap);
             } elsif ($op =~ /^(Add|Subtract|Multiply|Divide|GT|LT|EQ|NE|GE|LE|Negate|If|Proj|Region|Phi|Return)$/) {
                 $result = $node->execute(\%values);
             } else {
