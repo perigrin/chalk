@@ -34,7 +34,7 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         my @statements;
         if ($stmt_list_ctx) {
             my $stmt_list = $stmt_list_ctx->focus;
-            @statements = ref($stmt_list) eq 'ARRAY' ? @$stmt_list : ();
+            @statements = ref($stmt_list) eq 'ARRAY' ? $stmt_list->@* : ();
         }
 
         my $current_control = $start->id;

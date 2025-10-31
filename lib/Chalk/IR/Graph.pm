@@ -140,7 +140,7 @@ class Chalk::IR::Graph {
 
         while (@queue) {
             my $node_id = shift @queue;
-            next if exists $reachable{$node_id};
+            next if exists($reachable{$node_id});
 
             $reachable{$node_id} = 1;
 
@@ -150,7 +150,7 @@ class Chalk::IR::Graph {
                 for my $input_id ($node->inputs->@*) {
                     next unless defined $input_id;
                     next if $input_id eq '__CONTROL_PLACEHOLDER__';
-                    push @queue, $input_id unless exists $reachable{$input_id};
+                    push @queue, $input_id unless exists($reachable{$input_id});
                 }
             }
         }
@@ -158,19 +158,19 @@ class Chalk::IR::Graph {
         # Remove all unreachable nodes
         my @all_node_ids = keys %{$nodes};
         for my $node_id (@all_node_ids) {
-            if (!exists $reachable{$node_id}) {
+            if (!exists($reachable{$node_id})) {
                 delete $nodes->{$node_id};
                 delete $uses->{$node_id};
 
                 # Also remove from other nodes' use lists
-                for my $use_list (values %{$uses}) {
+                for my $use_list (values(%{$uses})) {
                     @$use_list = grep { $_ ne $node_id } @$use_list;
                 }
             }
         }
 
         # Update entry point if it was pruned
-        if (!exists $nodes->{$entry}) {
+        if (!exists($nodes->{$entry})) {
             $entry = $root_node_id;
         }
 
