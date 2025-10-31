@@ -4,6 +4,7 @@
 use v5.42;
 use Test::More;
 use File::Temp;
+use lib 'lib';
 
 # Load required modules
 use_ok('Chalk::Parser');
@@ -44,6 +45,18 @@ sub execute_chalk {
 
     # Get the IR graph
     my $graph = $builder->graph;
+
+    # Prune graph to only include nodes from the winning parse
+    # The parse result's focus points to the winning Return node
+    if ($parse_result->can('context')) {
+        my $ctx = $parse_result->context;
+        if ($ctx->can('focus')) {
+            my $winning_node = $ctx->focus;
+            if ($winning_node && $winning_node->can('id')) {
+                $graph->prune_to_reachable($winning_node->id);
+            }
+        }
+    }
 
     # Run GVN optimizer
     my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -150,6 +163,29 @@ subtest 'Operator precedence' => sub {
     test_against_perl('return 3 + 5 * 2;', 'Multiplication before addition (precedence)');
     test_against_perl('return 10 / 2 + 3;', 'Division then addition');
     test_against_perl('return 20 - 10 - 5;', 'Left-to-right subtraction');
+};
+
+# Test 9: Logical operators - Not operator (passing tests)
+subtest 'Logical: Not operator (basic functionality)' => sub {
+    test_against_perl('return !0;', 'Not false (0) returns true');
+    test_against_perl('my $x = 0; return !$x;', 'Not false variable returns true');
+};
+
+subtest 'TODO: Not operator returning false' => sub {
+    TODO: {
+        local $TODO = 'Semantic difference: Chalk returns 0 for false, Perl returns empty string';
+        test_against_perl('return !1;', 'Not true (1)');
+        test_against_perl('return !5;', 'Not truthy value');
+        test_against_perl('my $x = 10; return !$x;', 'Not true variable');
+    }
+};
+
+subtest 'TODO: Not operator with comparison expressions' => sub {
+    TODO: {
+        local $TODO = 'Comparison operators need full integration to return proper IR nodes';
+        test_against_perl('return !(5 > 10);', 'Not false comparison');
+        test_against_perl('return !(10 > 5);', 'Not true comparison');
+    }
 };
 
 # TODO tests: Document discovered issues that need fixing

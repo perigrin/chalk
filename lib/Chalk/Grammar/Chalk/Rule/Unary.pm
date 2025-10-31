@@ -7,14 +7,15 @@ use Scalar::Util 'blessed';
 
 class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        # ExprUnary -> ExprPower (pass-through)
-        # ExprUnary -> OpUnary WS_OPT ExprUnary (unary operation)
+        # Unary -> Postfix (pass-through)
+        # Unary -> '!' WS_OPT Unary (unary operation)
         #   Where OpUnary can be: !, -, +, ~, \
+        # NOTE: WS_OPT is collapsed when empty, so child count varies
 
         my @children = $context->children->@*;
 
         if (@children == 1) {
-            # First alternative: just pass through ExprPower
+            # First alternative: just pass through Postfix
             return $context->child(0);
         }
 
@@ -26,8 +27,8 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         my $builder = $context->env->{ir_builder};
         return $context->child(0) unless $builder;
 
-        # Get operand (child 2, after WS_OPT at child 1)
-        my $operand = $context->child(2);
+        # Get operand at child 1 (WS_OPT is collapsed/absent when empty)
+        my $operand = $context->child(1);
 
         # Validate that we got an IR node
         return $operand unless (blessed($operand) && $operand->can('id'));

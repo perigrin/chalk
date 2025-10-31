@@ -12,6 +12,7 @@ use Chalk::IR::Node::Subtract;
 use Chalk::IR::Node::Multiply;
 use Chalk::IR::Node::Divide;
 use Chalk::IR::Node::Negate;
+use Chalk::IR::Node::Not;
 use Chalk::IR::Node::GT;
 use Chalk::IR::Node::LT;
 use Chalk::IR::Node::EQ;
@@ -25,6 +26,8 @@ use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Store;
 use Chalk::IR::Node::Load;
+use Chalk::IR::Node::Loop;
+use Chalk::IR::Node::Reference;
 
 class Chalk::IR::Node {
     field $id           :param :reader;
@@ -58,6 +61,7 @@ class Chalk::IR::Node {
             Multiply => 'Chalk::IR::Node::Multiply',
             Divide   => 'Chalk::IR::Node::Divide',
             Negate   => 'Chalk::IR::Node::Negate',
+            Not      => 'Chalk::IR::Node::Not',
             GT       => 'Chalk::IR::Node::GT',
             LT       => 'Chalk::IR::Node::LT',
             EQ       => 'Chalk::IR::Node::EQ',
@@ -69,8 +73,10 @@ class Chalk::IR::Node {
             Phi      => 'Chalk::IR::Node::Phi',
             Proj     => 'Chalk::IR::Node::Proj',
             Return   => 'Chalk::IR::Node::Return',
-            Store    => 'Chalk::IR::Node::Store',
-            Load     => 'Chalk::IR::Node::Load',
+            Store     => 'Chalk::IR::Node::Store',
+            Load      => 'Chalk::IR::Node::Load',
+            Loop      => 'Chalk::IR::Node::Loop',
+            Reference => 'Chalk::IR::Node::Reference',
         );
 
         my $node_class = $op_to_class{$op};

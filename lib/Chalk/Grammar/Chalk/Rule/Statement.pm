@@ -21,7 +21,10 @@ class Chalk::Grammar::Chalk::Rule::Statement :isa(Chalk::GrammarRule) {
         return undef unless $builder;
 
         # Check if this is the postfix modifier form (has 5 children)
-        return undef unless @children == 5;
+        if (@children != 5) {
+            # Not a postfix modifier - pass through the statement child
+            return $context->child(0);
+        }
 
         # Get the statement (child 0)
         my $stmt = $context->child(0);
