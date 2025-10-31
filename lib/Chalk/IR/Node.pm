@@ -4,6 +4,28 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
+# Preload all polymorphic node classes for from_hash() factory
+use Chalk::IR::Node::Start;
+use Chalk::IR::Node::Constant;
+use Chalk::IR::Node::Add;
+use Chalk::IR::Node::Subtract;
+use Chalk::IR::Node::Multiply;
+use Chalk::IR::Node::Divide;
+use Chalk::IR::Node::Negate;
+use Chalk::IR::Node::GT;
+use Chalk::IR::Node::LT;
+use Chalk::IR::Node::EQ;
+use Chalk::IR::Node::NE;
+use Chalk::IR::Node::GE;
+use Chalk::IR::Node::LE;
+use Chalk::IR::Node::If;
+use Chalk::IR::Node::Region;
+use Chalk::IR::Node::Phi;
+use Chalk::IR::Node::Proj;
+use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Store;
+use Chalk::IR::Node::Load;
+
 class Chalk::IR::Node {
     field $id           :param :reader;
     field $op           :param :reader;
@@ -62,14 +84,7 @@ class Chalk::IR::Node {
             );
         }
 
-        # Load the class at runtime (avoids circular dependency with compile-time use)
-        {
-            my $file = $node_class;
-            $file =~ s{::}{/}g;
-            $file .= '.pm';
-            require $file;
-        }
-
+        # All classes are preloaded at compile-time, no runtime loading needed
         # Extract constructor parameters from attributes
         my %params = (
             id     => $id,
