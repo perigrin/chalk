@@ -184,7 +184,7 @@ class Chalk::IR::Builder {
     # Create Store node (variable assignment)
     method build_store_node($var_name, $value_node, $control = undef) {
         # SSA-style variable binding: just define variable to point to value node
-        # No Store node needed for local variables - they're pure SSA values
+        # No Store node needed for lexically scoped variables - they're pure SSA values
         $scope->define($var_name, $value_node->id);
         return $value_node;
     }
@@ -192,7 +192,7 @@ class Chalk::IR::Builder {
     # Load node (variable read)
     method build_load_node($var_name) {
         # SSA-style variable lookup: just return the node the variable points to
-        # No Load node needed for local variables - direct data flow
+        # No Load node needed for lexically scoped variables - direct data flow
         my $node_id = $scope->lookup($var_name);
         return undef unless $node_id;
 

@@ -1,5 +1,5 @@
 # ABOUTME: Load node for heap memory read operations - currently unused by Builder
-# ABOUTME: Reserved for future heap-allocated data (arrays, hashes, objects); local variables use SSA-style data flow
+# ABOUTME: Reserved for future heap-allocated data (arrays, hashes, objects); lexically scoped variables use SSA-style data flow
 use 5.42.0;
 use experimental qw(class);
 use utf8;
