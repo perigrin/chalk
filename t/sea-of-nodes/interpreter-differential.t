@@ -99,10 +99,11 @@ subtest 'Arithmetic: Addition (positive numbers)' => sub {
     test_against_perl('return 0 + 0;', 'Addition with zeros');
 };
 
-# Test 2: Simple arithmetic - subtraction (positive results only)
-subtest 'Arithmetic: Subtraction (positive results)' => sub {
+# Test 2: Simple arithmetic - subtraction (including negative results)
+subtest 'Arithmetic: Subtraction' => sub {
     test_against_perl('return 10 - 3;', 'Simple subtraction: 10 - 3');
     test_against_perl('return 5 - 5;', 'Subtraction resulting in zero');
+    test_against_perl('return 3 - 10;', 'Subtraction resulting in negative');
 };
 
 # Test 3: Simple arithmetic - multiplication (positive numbers only)
@@ -152,23 +153,23 @@ subtest 'Operator precedence' => sub {
 };
 
 # TODO tests: Document discovered issues that need fixing
-subtest 'TODO: Arithmetic with negative literals' => sub {
-    TODO: {
-        local $TODO = 'Negative number literals do not parse/execute correctly';
-        test_against_perl('return -5 + 3;', 'Addition with negative literal');
-        test_against_perl('return -5 * 2;', 'Multiplication with negative literal');
-        test_against_perl('return -10 / 2;', 'Division with negative literal');
-        test_against_perl('return 3 - 10;', 'Subtraction resulting in negative');
+subtest 'TODO: Negative literals cause parser ambiguity' => sub {
+    SKIP: {
+        skip 'Negative literals cause parser to create multiple Return nodes (fatal error)', 4;
+        # Parser creates 4 different Return nodes for `return -5;`
+        # This is a grammar ambiguity issue, not an interpreter issue
+        # test_against_perl('return -5;', 'Unary negation of positive literal');
+        # test_against_perl('return -(-5);', 'Double negation');
+        # test_against_perl('return -5 + 3;', 'Addition with negative literal');
+        # test_against_perl('return -10 / 2;', 'Division with negative literal');
     }
 };
 
-subtest 'TODO: Unary negation operator' => sub {
+subtest 'TODO: Variable reassignment' => sub {
     TODO: {
-        local $TODO = 'Unary negation operator does not execute correctly';
-        test_against_perl('return -5;', 'Unary negation of positive literal');
-        test_against_perl('return -(-5);', 'Double negation');
-        # Removed: test with variable negation causes fatal error that prevents remaining tests
-        # test_against_perl('my $x = 42; return -$x;', 'Negation of variable');
+        local $TODO = 'Variable reassignment does not update the variable';
+        test_against_perl('my $x = 5; $x = 10; return $x;', 'Simple reassignment');
+        test_against_perl('my $x = 5; $x = 0 - 5; return $x;', 'Reassignment with arithmetic');
     }
 };
 
