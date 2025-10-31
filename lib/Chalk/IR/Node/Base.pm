@@ -89,7 +89,9 @@ class Chalk::IR::Node::Base {
         );
 
         # Add node-specific parameters from attributes
-        my @attr_keys = keys $attrs->%*;
+        # Parser compat: split postfix deref and keys into separate statements
+        my %attrs_hash = $attrs->%*;
+        my @attr_keys = keys %attrs_hash;
         for my $key (@attr_keys) {
             $params{$key} = $attrs->{$key};
         }
