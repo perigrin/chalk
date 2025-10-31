@@ -137,6 +137,20 @@ subtest 'Variables: Arithmetic (positive numbers)' => sub {
     test_against_perl('my $x = 20; return $x / 4;', 'Variable division');
 };
 
+# Test 7: Control flow (limited - see TODO section for issues)
+subtest 'Control Flow: Simple if without else' => sub {
+    test_against_perl('my $x = 0; my $result = 0; if ($x > 0) { $result = 10; } return $result;',
+        'If with false condition, no assignment (skips branch)');
+    # Note: if with true condition fails - assignment in branch doesn't work correctly
+};
+
+# Test 8: Operator precedence (without parentheses for now)
+subtest 'Operator precedence' => sub {
+    test_against_perl('return 3 + 5 * 2;', 'Multiplication before addition (precedence)');
+    test_against_perl('return 10 / 2 + 3;', 'Division then addition');
+    test_against_perl('return 20 - 10 - 5;', 'Left-to-right subtraction');
+};
+
 # TODO tests: Document discovered issues that need fixing
 subtest 'TODO: Arithmetic with negative literals' => sub {
     TODO: {
@@ -170,15 +184,21 @@ subtest 'TODO: Comparison operators returning false' => sub {
     }
 };
 
-subtest 'TODO: Control flow with if/else' => sub {
+subtest 'TODO: Control flow issues' => sub {
+    TODO: {
+        local $TODO = 'Assignment in if branch with true condition does not execute correctly';
+        test_against_perl('my $x = 5; my $result = 0; if ($x > 0) { $result = 10; } return $result;',
+            'If with true condition, assign in branch');
+    }
+
     SKIP: {
         skip 'IR construction for if/else creates malformed graph with multiple Return nodes (fatal error)', 4;
         # Error: "Malformed IR graph: found multiple Return nodes but none have __CONTROL_PLACEHOLDER__"
         # These tests would cause process exit, so skipped for now:
-        # test_against_perl('if (1) { return 42; } else { return -42; }', 'If with literal true condition');
-        # test_against_perl('if (0) { return 42; } else { return -42; }', 'If with literal false condition');
-        # test_against_perl('my $x = 5; if ($x > 0) { return 42; } else { return -42; }', 'If with variable comparison (true)');
-        # test_against_perl('my $x = -5; if ($x > 0) { return 42; } else { return -42; }', 'If with variable comparison (false)');
+        # test_against_perl('my $x = 5; my $result; if ($x > 0) { $result = 10; } else { $result = 20; } return $result;', 'If-else with true condition');
+        # test_against_perl('my $x = 0; my $result; if ($x > 0) { $result = 10; } else { $result = 20; } return $result;', 'If-else with false condition');
+        # test_against_perl('if (1) { return 42; } else { return -42; }', 'If with literal true condition, return in branches');
+        # test_against_perl('if (0) { return 42; } else { return -42; }', 'If with literal false condition, return in branches');
     }
 };
 
