@@ -84,6 +84,49 @@ class Chalk::IR::Graph {
         return $graph;
     }
 
+    # Export IR graph to Mermaid diagram format for visualization
+    method to_mermaid() {
+        my @lines = ('graph TD');
+
+        # Return minimal graph if empty
+        return join("\n", @lines) if scalar(keys %{$nodes}) == 0;
+
+        # Generate node declarations with labels
+        for my $node_id (sort keys %{$nodes}) {
+            my $node = $nodes->{$node_id};
+            my $op = $node->op();
+            my $label = $op;
+
+            # Add attributes to label for important node types
+            my $attrs = $node->to_hash()->{attributes} // {};
+            if ($op eq 'Constant' && exists $attrs->{value}) {
+                $label .= ": $attrs->{value}";
+            }
+
+            # Sanitize node_id for Mermaid (replace hyphens with underscores)
+            my $safe_id = $node_id;
+            $safe_id =~ s/-/_/g;
+
+            push @lines, "    $safe_id" . "[$label]";
+        }
+
+        # Generate edges from node inputs
+        for my $node_id (sort keys %{$nodes}) {
+            my $node = $nodes->{$node_id};
+            my $safe_target = $node_id;
+            $safe_target =~ s/-/_/g;
+
+            for my $input_id ($node->inputs()->@*) {
+                next unless defined $input_id;
+                my $safe_source = $input_id;
+                $safe_source =~ s/-/_/g;
+                push @lines, "    $safe_source --> $safe_target";
+            }
+        }
+
+        return join("\n", @lines);
+    }
+
     # Linearize graph using topological sort
     # Returns array of nodes in execution order
     method linearize() {
