@@ -1,5 +1,5 @@
-# ABOUTME: Store node in the IR graph
-# ABOUTME: Represents memory write operation storing a value at an address in the heap
+# ABOUTME: Store node for heap memory write operations - currently unused by Builder
+# ABOUTME: Reserved for future heap-allocated data (arrays, hashes, objects); local variables use SSA-style data flow
 use 5.42.0;
 use experimental qw(class);
 use utf8;
