@@ -124,4 +124,92 @@ subtest 'Execute: return 3 + 5;' => sub {
     is($result, 8, 'Execution result: 3 + 5 = 8');
 };
 
+# Test 4: More complex computation with multiple variables
+subtest 'Execute: Complex multi-variable computation' => sub {
+    my $builder = Chalk::IR::Builder->new();
+
+    my $semiring = Chalk::Semiring::Semantic->new(
+        grammar => $grammar,
+        env => { ir_builder => $builder }
+    );
+
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => $semiring,
+        preprocess => ['Chalk::Preprocessor::Heredoc']
+    );
+
+    # Compute: (a + b) * (c - d) where a=10, b=5, c=8, d=3
+    # Expected: (10 + 5) * (8 - 3) = 15 * 5 = 75
+    my $code = q{
+        my $a = 10;
+        my $b = 5;
+        my $c = 8;
+        my $d = 3;
+        my $sum = $a + $b;
+        my $diff = $c - $d;
+        my $result = $sum * $diff;
+        return $result;
+    };
+
+    my $parse_result = $parser->parse_string($code);
+    ok($parse_result, 'Complex program parses successfully');
+
+    my $graph = $builder->graph;
+    my $nodes_before = scalar(keys %{$graph->nodes});
+    ok($nodes_before > 0, "Graph has nodes before GVN (got $nodes_before)");
+
+    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+    $graph = $gvn_result->{graph};
+
+    my $nodes_after = scalar(keys %{$graph->nodes});
+    ok($nodes_after > 0, "Graph has nodes after GVN (got $nodes_after)");
+    diag("GVN: $nodes_before nodes -> $nodes_after nodes");
+
+    my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
+    my $result = $interpreter->execute();
+
+    is($result, 75, 'Execution result: (10+5) * (8-3) = 75');
+};
+
+# Test 5: Nested arithmetic operations
+subtest 'Execute: Nested arithmetic with intermediate results' => sub {
+    my $builder = Chalk::IR::Builder->new();
+
+    my $semiring = Chalk::Semiring::Semantic->new(
+        grammar => $grammar,
+        env => { ir_builder => $builder }
+    );
+
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => $semiring,
+        preprocess => ['Chalk::Preprocessor::Heredoc']
+    );
+
+    # Compute: ((x * 2) + (y * 3)) - z where x=4, y=5, z=7
+    # Expected: ((4*2) + (5*3)) - 7 = (8 + 15) - 7 = 23 - 7 = 16
+    my $code = q{
+        my $x = 4;
+        my $y = 5;
+        my $z = 7;
+        my $x2 = $x * 2;
+        my $y3 = $y * 3;
+        my $sum = $x2 + $y3;
+        return $sum - $z;
+    };
+
+    my $parse_result = $parser->parse_string($code);
+    ok($parse_result, 'Nested arithmetic program parses successfully');
+
+    my $graph = $builder->graph;
+    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+    $graph = $gvn_result->{graph};
+
+    my $interpreter = Chalk::IR::Interpreter->new(graph => $graph);
+    my $result = $interpreter->execute();
+
+    is($result, 16, 'Execution result: ((4*2)+(5*3))-7 = 16');
+};
+
 done_testing();
