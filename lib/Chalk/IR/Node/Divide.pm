@@ -21,6 +21,12 @@ class Chalk::IR::Node::Divide :isa(Chalk::IR::Node::Base) {
             },
         };
     }
+
+    method execute($values) {
+        my $left_val = $values->{$left_id};
+        my $right_val = $values->{$right_id};
+        return $left_val / $right_val;
+    }
 }
 
 1;

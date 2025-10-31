@@ -771,4 +771,113 @@ subtest 'Complex expression optimization' => sub {
        "GVN eliminated multiple redundant subexpressions (eliminated: $metrics->{nodes_eliminated})");
 };
 
+# Test: GVN preserves polymorphic node types
+subtest 'GVN preserves polymorphic node types' => sub {
+    use Chalk::IR::Node::Constant;
+    use Chalk::IR::Node::Add;
+    use Chalk::IR::Node::Multiply;
+    use Chalk::IR::Node::Start;
+    use Chalk::IR::Node::Return;
+
+    my $graph = Chalk::IR::Graph->new();
+
+    # Build graph with polymorphic nodes: (3 + 5) + (3 + 5)
+    my $start = Chalk::IR::Node::Start->new(
+        id => 'node_0',
+        inputs => [],
+        function_name => 'test',
+        params => [],
+    );
+    $graph->add_node($start);
+
+    my $const3 = Chalk::IR::Node::Constant->new(
+        id => 'node_1',
+        inputs => ['node_0'],
+        value => 3,
+        type => 'Int',
+    );
+    $graph->add_node($const3);
+
+    my $const5 = Chalk::IR::Node::Constant->new(
+        id => 'node_2',
+        inputs => ['node_0'],
+        value => 5,
+        type => 'Int',
+    );
+    $graph->add_node($const5);
+
+    # First Add: 3 + 5
+    my $add1 = Chalk::IR::Node::Add->new(
+        id => 'node_3',
+        inputs => ['node_0', 'node_1', 'node_2'],
+        left_id => 'node_1',
+        right_id => 'node_2',
+    );
+    $graph->add_node($add1);
+
+    # Second Add: 3 + 5 (duplicate)
+    my $add2 = Chalk::IR::Node::Add->new(
+        id => 'node_4',
+        inputs => ['node_0', 'node_1', 'node_2'],
+        left_id => 'node_1',
+        right_id => 'node_2',
+    );
+    $graph->add_node($add2);
+
+    # Multiply: (3+5) * (3+5)
+    my $multiply = Chalk::IR::Node::Multiply->new(
+        id => 'node_5',
+        inputs => ['node_0', 'node_3', 'node_4'],
+        left_id => 'node_3',
+        right_id => 'node_4',
+    );
+    $graph->add_node($multiply);
+
+    # Return
+    my $return = Chalk::IR::Node::Return->new(
+        id => 'node_6',
+        inputs => ['node_0', 'node_5'],
+        value_id => 'node_5',
+        control_id => 'node_0',
+    );
+    $graph->add_node($return);
+
+    $graph->set_entry('node_0');
+
+    # Verify nodes are polymorphic before GVN
+    is(ref($graph->nodes->{'node_3'}), 'Chalk::IR::Node::Add', 'Add node is polymorphic before GVN');
+    is(ref($graph->nodes->{'node_5'}), 'Chalk::IR::Node::Multiply', 'Multiply node is polymorphic before GVN');
+
+    # Run GVN
+    my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+    my $new_graph = $result->{graph};
+    my $metrics = $result->{metrics};
+
+    # Should eliminate one Add node (node_4)
+    is($metrics->{nodes_eliminated}, 1, 'GVN eliminated duplicate Add');
+
+    # Verify nodes are STILL polymorphic after GVN (this is the key test!)
+    my @add_nodes = grep { $_->op eq 'Add' } values %{$new_graph->nodes};
+    is(scalar(@add_nodes), 1, 'One Add node remains');
+    is(ref($add_nodes[0]), 'Chalk::IR::Node::Add',
+       'Add node is STILL polymorphic after GVN (not Chalk::IR::Node)');
+
+    my @multiply_nodes = grep { $_->op eq 'Multiply' } values %{$new_graph->nodes};
+    is(scalar(@multiply_nodes), 1, 'One Multiply node remains');
+    is(ref($multiply_nodes[0]), 'Chalk::IR::Node::Multiply',
+       'Multiply node is STILL polymorphic after GVN (not Chalk::IR::Node)');
+
+    # Verify the Multiply node has correct redirected inputs
+    my $mult = $multiply_nodes[0];
+    my $remaining_add = $add_nodes[0];
+
+    # The multiply should now point to the canonical Add node (both inputs)
+    is($mult->left_id, $remaining_add->id, 'Multiply left_id redirected correctly');
+    is($mult->right_id, $remaining_add->id, 'Multiply right_id redirected correctly');
+
+    # Verify nodes have execute() methods
+    ok($add_nodes[0]->can('execute'), 'Polymorphic Add has execute() method');
+    ok($multiply_nodes[0]->can('execute'), 'Polymorphic Multiply has execute() method');
+};
+
 done_testing();

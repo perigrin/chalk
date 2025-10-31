@@ -46,7 +46,7 @@ class Chalk::IR::Graph {
     }
 
     method node_count() {
-        return scalar keys $nodes->%*;
+        return scalar keys %{$nodes};
     }
 
     method set_entry($new_entry) {
@@ -55,7 +55,7 @@ class Chalk::IR::Graph {
     }
 
     method to_json() {
-        my @node_list = map { $_->to_hash() } values $nodes->%*;
+        my @node_list = map { $_->to_hash() } values %{$nodes};
 
         return {
             version => '1.0',
@@ -82,6 +82,51 @@ class Chalk::IR::Graph {
         $graph->set_entry( $json->{entry} );
 
         return $graph;
+    }
+
+    # Linearize graph using topological sort
+    # Returns array of nodes in execution order
+    method linearize() {
+        my @result;
+        my %visited;
+        my %in_progress;
+
+        # Depth-first search for topological sort
+        my $visit;
+        $visit = sub {
+            my ($node_id) = @_;
+            return if $visited{$node_id};
+
+            # Detect cycles
+            die "Cycle detected at node $node_id" if $in_progress{$node_id};
+            $in_progress{$node_id} = 1;
+
+            my $node = $nodes->{$node_id};
+            if ($node) {
+                # Visit all dependencies (inputs) first
+                for my $input_id ($node->inputs->@*) {
+                    next unless defined $input_id;
+                    next if $input_id eq '__CONTROL_PLACEHOLDER__';
+                    $visit->($input_id);
+                }
+            }
+
+            delete $in_progress{$node_id};
+            $visited{$node_id} = 1;
+
+            # Add node after all its dependencies
+            push @result, $node if $node;
+        };
+
+        # Visit all nodes in the graph (not just from entry)
+        # This ensures we get all nodes including those not reachable from entry
+        # Parser compat: keys() requires parentheses around argument
+        my @node_ids = keys($nodes->%*);
+        for my $node_id (@node_ids) {
+            $visit->($node_id);
+        }
+
+        return @result;
     }
 }
 

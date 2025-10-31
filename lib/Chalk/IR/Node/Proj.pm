@@ -21,6 +21,17 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
             },
         };
     }
+
+    method execute($values) {
+        # Proj extracts a control path from If node
+        # Returns 1 if this path is active, 0 otherwise
+        # Index 0 = false branch, Index 1 = true branch
+        my $source_id = $self->inputs->[0];
+        my $if_result = $values->{$source_id};
+
+        # Check if this projection matches the active path
+        return ($if_result == $index) ? 1 : 0;
+    }
 }
 
 1;

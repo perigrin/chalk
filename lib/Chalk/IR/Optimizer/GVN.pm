@@ -85,13 +85,14 @@ class Chalk::IR::Optimizer::GVN {
                 $redirections
             );
 
-            # Create new node with redirected inputs
-            my $new_node = Chalk::IR::Node->new(
+            # Reconstruct node preserving polymorphic type
+            # Use from_hash() factory to create correct node class
+            my $new_node = Chalk::IR::Node->from_hash({
                 id         => $node_id,
                 op         => $old_node->op,
                 inputs     => \@new_inputs,
                 attributes => $new_attributes,
-            );
+            });
 
             $new_graph->add_node($new_node);
             $copied{$node_id} = 1;
@@ -218,12 +219,9 @@ class Chalk::IR::Optimizer::GVN {
                     $new_attrs{$key} = $value;
                 }
             }
-            # Special case: store_id attribute (used in Load nodes)
-            elsif ($key eq 'store_id' && defined($value) && exists($redirections->{$value})) {
-                $new_attrs{$key} = $redirections->{$value};
-            }
-            # Special case: region_id attribute (used in Phi nodes)
-            elsif ($key eq 'region_id' && defined($value) && exists($redirections->{$value})) {
+            # Special case: any attribute ending in _id is a node reference
+            # This handles: store_id, left_id, right_id, value_id, control_id, region_id, etc.
+            elsif (length($key) >= 3 && substr($key, -3) eq '_id' && defined($value) && exists($redirections->{$value})) {
                 $new_attrs{$key} = $redirections->{$value};
             }
             else {
