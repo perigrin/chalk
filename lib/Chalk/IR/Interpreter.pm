@@ -58,9 +58,8 @@ class Chalk::IR::Interpreter {
         my $nodes = $graph->nodes;
 
         my @return_nodes;
-        # Parser compat: split postfix deref and keys into separate statements
-        my %nodes_hash = $nodes->%*;
-        my @node_ids = keys %nodes_hash;
+        # Parser compat: keys() requires parentheses around argument
+        my @node_ids = keys($nodes->%*);
         for my $node_id (@node_ids) {
             my $node = $nodes->{$node_id};
             push @return_nodes, $node if $node->op eq 'Return';

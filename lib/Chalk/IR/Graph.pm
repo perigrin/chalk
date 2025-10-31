@@ -120,9 +120,8 @@ class Chalk::IR::Graph {
 
         # Visit all nodes in the graph (not just from entry)
         # This ensures we get all nodes including those not reachable from entry
-        # Parser compat: split postfix deref and keys into separate statements
-        my %nodes_hash = $nodes->%*;
-        my @node_ids = keys %nodes_hash;
+        # Parser compat: keys() requires parentheses around argument
+        my @node_ids = keys($nodes->%*);
         for my $node_id (@node_ids) {
             $visit->($node_id);
         }
