@@ -14,30 +14,55 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         my $start = $builder->build_start_node('main');
         $builder->set_control($start->id);
 
-        # Get all statements from children
+        # Get statements from StatementList child
+        # Program -> WS_OPT StatementList WS_OPT
+        # StatementList should be at child(1), but if WS_OPT is collapsed, might be child(0)
         my @children = $context->children->@*;
+        my $stmt_list_ctx;
+
+        # Find the StatementList child (it will have an array or node as focus)
+        for my $child_ctx (@children) {
+            next unless $child_ctx && $child_ctx->can('focus');
+            my $focus = $child_ctx->focus;
+            # StatementList returns an arrayref of statements
+            if (ref($focus) eq 'ARRAY') {
+                $stmt_list_ctx = $child_ctx;
+                last;
+            }
+        }
+
+        my @statements;
+        if ($stmt_list_ctx) {
+            my $stmt_list = $stmt_list_ctx->focus;
+            @statements = ref($stmt_list) eq 'ARRAY' ? $stmt_list->@* : ();
+        }
+
         my $current_control = $start->id;
 
         # Wire up all statements with control flow
-        for my $child (@children) {
-            next unless blessed($child) && $child->can('inputs');
+        for my $stmt (@statements) {
+            next unless blessed($stmt) && $stmt->can('inputs');
 
             # Check if this statement needs control wiring
-            if ($child->inputs->[0] && $child->inputs->[0] eq '__CONTROL_PLACEHOLDER__') {
-                $builder->set_node_control($child, $current_control);
+            if ($stmt->inputs->[0] && $stmt->inputs->[0] eq '__CONTROL_PLACEHOLDER__') {
+                $builder->set_node_control($stmt, $current_control);
             }
 
             # Update control for next statement
-            $current_control = $child->id;
+            $current_control = $stmt->id;
         }
 
-        # Create Return node (program exit point)
-        # For now, programs return undef (void)
-        my $undef_value = $builder->build_constant_node(undef);
-        my $return = $builder->build_return_node($undef_value, $current_control);
-
-        # Return the entire program as a block
-        return $return;
+        # Check if last statement is a Return
+        # If so, use it; otherwise create a default Return(undef)
+        if (@statements && $statements[-1]->op eq 'Return') {
+            # Last statement is already a Return - use it
+            return $statements[-1];
+        } else {
+            # No Return found - create default Return(undef)
+            my $undef_value = $builder->build_constant_node(undef);
+            my $return = $builder->build_return_node($undef_value, $current_control);
+            return $return;
+        }
     }
 }
 

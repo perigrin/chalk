@@ -128,6 +128,54 @@ class Chalk::IR::Graph {
 
         return @result;
     }
+
+    # Prune graph to only include nodes reachable from a given root node
+    # This removes alternative parse trees after parser selects the winning parse
+    method prune_to_reachable($root_node_id) {
+        return unless defined $root_node_id;
+
+        # Mark all nodes reachable from root by traversing backwards through inputs
+        my %reachable = ();
+        my @queue = ($root_node_id);
+
+        while (@queue) {
+            my $node_id = shift @queue;
+            next if exists($reachable{$node_id});
+
+            $reachable{$node_id} = 1;
+
+            # Add all input nodes to queue
+            my $node = $nodes->{$node_id};
+            if ($node && $node->can('inputs')) {
+                for my $input_id ($node->inputs->@*) {
+                    next unless defined $input_id;
+                    next if $input_id eq '__CONTROL_PLACEHOLDER__';
+                    push @queue, $input_id unless exists($reachable{$input_id});
+                }
+            }
+        }
+
+        # Remove all unreachable nodes
+        my @all_node_ids = keys %{$nodes};
+        for my $node_id (@all_node_ids) {
+            if (!exists($reachable{$node_id})) {
+                delete $nodes->{$node_id};
+                delete $uses->{$node_id};
+
+                # Also remove from other nodes' use lists
+                for my $use_list (values(%{$uses})) {
+                    @$use_list = grep { $_ ne $node_id } @$use_list;
+                }
+            }
+        }
+
+        # Update entry point if it was pruned
+        if (!exists($nodes->{$entry})) {
+            $entry = $root_node_id;
+        }
+
+        return;
+    }
 }
 
 1;
