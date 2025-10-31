@@ -87,8 +87,7 @@ class Chalk::IR::Optimizer::GVN {
 
             # Reconstruct node preserving polymorphic type
             # Use from_hash() factory to create correct node class
-            use Chalk::IR::Node::Base;
-            my $new_node = Chalk::IR::Node::Base->from_hash({
+            my $new_node = Chalk::IR::Node->from_hash({
                 id         => $node_id,
                 op         => $old_node->op,
                 inputs     => \@new_inputs,
