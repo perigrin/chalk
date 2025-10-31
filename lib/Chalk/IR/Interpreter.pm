@@ -97,8 +97,13 @@ class Chalk::IR::Interpreter {
             return $best;
         }
 
-        # Fallback: return first one (but this shouldn't happen in well-formed programs)
-        return $return_nodes[0];
+        # Multiple Return nodes but none are explicit - this indicates malformed IR
+        my @return_ids = map { $_->id } @return_nodes;
+        my $ids_str = join(', ', @return_ids);
+        die "Malformed IR graph: found multiple Return nodes ($ids_str) " .
+            "but none have __CONTROL_PLACEHOLDER__ control input. " .
+            "This indicates incorrect IR construction - each Return must be " .
+            "properly linked to control flow.";
     }
 }
 
