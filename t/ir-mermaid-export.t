@@ -4,10 +4,11 @@
 use 5.42.0;
 use utf8;
 use lib 'lib';
+use lib 'tools';
 use Test::More tests => 8;
 use Chalk::IR::Graph;
 use Chalk::IR::Node;
-use Chalk::Util::MermaidExporter;
+use MermaidExporter;
 
 # Test 1: Simple constant graph
 {
@@ -38,7 +39,7 @@ use Chalk::Util::MermaidExporter;
     $graph->add_node($const);
     $graph->add_node($return);
 
-    my $mermaid = Chalk::Util::MermaidExporter->export($graph);
+    my $mermaid = MermaidExporter->export($graph);
 
     ok(defined($mermaid), 'MermaidExporter->export() returns a value');
     like($mermaid, qr/graph/, 'output contains graph declaration');
@@ -84,7 +85,7 @@ use Chalk::Util::MermaidExporter;
     $graph->add_node($c2);
     $graph->add_node($add);
 
-    my $mermaid = Chalk::Util::MermaidExporter->export($graph);
+    my $mermaid = MermaidExporter->export($graph);
 
     like($mermaid, qr/node_11.*-->.*node_13/, 'output shows edge from constant to add');
     like($mermaid, qr/node_12.*-->.*node_13/, 'output shows edge from constant to add');
@@ -93,7 +94,7 @@ use Chalk::Util::MermaidExporter;
 # Test 3: Empty graph
 {
     my $graph = Chalk::IR::Graph->new();
-    my $mermaid = Chalk::Util::MermaidExporter->export($graph);
+    my $mermaid = MermaidExporter->export($graph);
 
     ok(defined($mermaid), 'empty graph returns valid Mermaid output');
 }

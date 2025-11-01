@@ -1,10 +1,10 @@
 # ABOUTME: Visitor pattern exporter for converting IR graphs to Mermaid diagram format
-# ABOUTME: Provides to_mermaid() method to generate visualization-ready Mermaid syntax from Sea of Nodes IR
+# ABOUTME: Provides export() method to generate visualization-ready Mermaid syntax from Sea of Nodes IR
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
-class Chalk::Util::MermaidExporter {
+class MermaidExporter {
 
     # Export IR graph to Mermaid diagram format for visualization
     # Takes a Chalk::IR::Graph object and returns Mermaid syntax string
