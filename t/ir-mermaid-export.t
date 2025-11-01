@@ -1,12 +1,13 @@
 #!/usr/bin/env perl
 # ABOUTME: Test IR graph export to Mermaid diagram format
-# ABOUTME: Verify to_mermaid() method produces valid Mermaid syntax for visualization
+# ABOUTME: Verify MermaidExporter produces valid Mermaid syntax for visualization
 use 5.42.0;
 use utf8;
 use lib 'lib';
 use Test::More tests => 8;
 use Chalk::IR::Graph;
 use Chalk::IR::Node;
+use Chalk::Util::MermaidExporter;
 
 # Test 1: Simple constant graph
 {
@@ -37,9 +38,9 @@ use Chalk::IR::Node;
     $graph->add_node($const);
     $graph->add_node($return);
 
-    my $mermaid = $graph->to_mermaid();
+    my $mermaid = Chalk::Util::MermaidExporter->export($graph);
 
-    ok(defined($mermaid), 'to_mermaid() returns a value');
+    ok(defined($mermaid), 'MermaidExporter->export() returns a value');
     like($mermaid, qr/graph/, 'output contains graph declaration');
     like($mermaid, qr/node_1.*Start/, 'output contains Start node');
     like($mermaid, qr/node_2.*Constant.*42/, 'output contains Constant with value');
@@ -83,7 +84,7 @@ use Chalk::IR::Node;
     $graph->add_node($c2);
     $graph->add_node($add);
 
-    my $mermaid = $graph->to_mermaid();
+    my $mermaid = Chalk::Util::MermaidExporter->export($graph);
 
     like($mermaid, qr/node_11.*-->.*node_13/, 'output shows edge from constant to add');
     like($mermaid, qr/node_12.*-->.*node_13/, 'output shows edge from constant to add');
@@ -92,7 +93,7 @@ use Chalk::IR::Node;
 # Test 3: Empty graph
 {
     my $graph = Chalk::IR::Graph->new();
-    my $mermaid = $graph->to_mermaid();
+    my $mermaid = Chalk::Util::MermaidExporter->export($graph);
 
     ok(defined($mermaid), 'empty graph returns valid Mermaid output');
 }
