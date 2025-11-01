@@ -42,5 +42,3 @@ class Chalk::IR::Reference {
         return Chalk::IR::Heap->heap_write($heap, $addr, $new_value);
     }
 }
-
-1;

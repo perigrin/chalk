@@ -8,6 +8,9 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
     use Chalk::IR::Scope;
+    use Chalk::IR::Context;
+    use Chalk::IR::Heap;
+    use Chalk::IR::Reference;
 
     # Phase 1 polymorphic node classes
     use Chalk::IR::Node::Base;
@@ -39,6 +42,8 @@ class Chalk::IR::Builder {
 
     field $graph :reader;
     field $scope :reader;
+    field $context :reader;  # Context-as-closure for variable memory
+    field $heap :reader;     # Heap-as-closure for value storage
     field $node_counter :reader = 0;
     field $current_control :reader;  # Current control flow node
     field $loop_entry_scope;  # Snapshot of scope bindings at loop entry
@@ -47,6 +52,8 @@ class Chalk::IR::Builder {
     ADJUST {
         $graph = Chalk::IR::Graph->new();
         $scope = Chalk::IR::Scope->new();
+        $context = Chalk::IR::Context->empty_context();
+        $heap = Chalk::IR::Heap->empty_heap();
     }
 
     # Generate unique node ID
@@ -183,17 +190,25 @@ class Chalk::IR::Builder {
 
     # Create Store node (variable assignment)
     method build_store_node($var_name, $value_node, $control = undef) {
-        # SSA-style variable binding: just define variable to point to value node
-        # No Store node needed for lexically scoped variables - they're pure SSA values
+        # Use Reference->ref_new to allocate node ID on heap and bind in context
+        # This integrates Context+Heap memory model for variable storage
+        ($context, $heap) = Chalk::IR::Reference->ref_new($context, $heap, $var_name, $value_node->id);
+
+        # Also maintain backward compatibility with Scope for now
         $scope->define($var_name, $value_node->id);
+
         return $value_node;
     }
 
     # Load node (variable read)
     method build_load_node($var_name) {
-        # SSA-style variable lookup: just return the node the variable points to
-        # No Load node needed for lexically scoped variables - direct data flow
-        my $node_id = $scope->lookup($var_name);
+        # Use Reference->ref_read to retrieve node ID from context+heap
+        # This integrates Context+Heap memory model for variable retrieval
+        my $node_id = Chalk::IR::Reference->ref_read($context, $heap, $var_name);
+
+        # Fallback to Scope for backward compatibility
+        $node_id = $scope->lookup($var_name) unless defined $node_id;
+
         return undef unless $node_id;
 
         # Return the node from the graph

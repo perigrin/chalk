@@ -25,5 +25,3 @@ class Chalk::IR::Context {
         return "${namespace}:${name}";
     }
 }
-
-1;

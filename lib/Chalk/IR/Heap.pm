@@ -47,5 +47,3 @@ class Chalk::IR::Heap {
         };
     }
 }
-
-1;
