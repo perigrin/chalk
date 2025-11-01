@@ -19,6 +19,11 @@ class Chalk::IR::Context {
             return $parent->($lookup_label);
         };
     }
+
+    # Creates a namespaced label to prevent collisions (e.g., "var:x", "temp:t1")
+    sub make_label($class, $namespace, $name) {
+        return "${namespace}:${name}";
+    }
 }
 
 1;

@@ -4,7 +4,7 @@
 use 5.42.0;
 use utf8;
 use lib 'lib';
-use Test::More tests => 13;
+use Test::More tests => 20;
 use Chalk::IR::Context;
 
 # Test 1: empty_context returns a closure
@@ -56,4 +56,36 @@ use Chalk::IR::Context;
     is($ctx->('str'), 'hello', 'context stores strings');
     is($ctx->('num'), 3.14, 'context stores numbers');
     is_deeply($ctx->('ref'), { key => 'value' }, 'context stores references');
+}
+
+# Test 6: namespaced labels prevent collisions
+{
+    my $empty = Chalk::IR::Context->empty_context();
+
+    # Create labels with namespace helper
+    my $var_x_label = Chalk::IR::Context->make_label('var', 'x');
+    my $temp_x_label = Chalk::IR::Context->make_label('temp', 'x');
+
+    # Add bindings with different namespaces but same name
+    my $ctx = Chalk::IR::Context->extend_context($empty, $var_x_label, 100);
+    $ctx = Chalk::IR::Context->extend_context($ctx, $temp_x_label, 200);
+
+    # Verify namespace isolation
+    is($ctx->($var_x_label), 100, 'var:x has correct value');
+    is($ctx->($temp_x_label), 200, 'temp:x has correct value');
+    is($ctx->('var:x'), 100, 'direct namespace lookup works');
+    is($ctx->('temp:x'), 200, 'direct namespace lookup works');
+
+    # Verify they are different labels
+    isnt($ctx->($var_x_label), $ctx->($temp_x_label), 'namespaced labels are isolated');
+}
+
+# Test 7: mixing namespaced and non-namespaced labels
+{
+    my $empty = Chalk::IR::Context->empty_context();
+    my $ctx = Chalk::IR::Context->extend_context($empty, 'x', 1);
+    $ctx = Chalk::IR::Context->extend_context($ctx, 'var:x', 2);
+
+    is($ctx->('x'), 1, 'non-namespaced label preserved');
+    is($ctx->('var:x'), 2, 'namespaced label coexists');
 }
