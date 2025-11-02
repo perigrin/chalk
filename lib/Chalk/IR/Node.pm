@@ -24,8 +24,6 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Return;
-use Chalk::IR::Node::Store;
-use Chalk::IR::Node::Load;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Reference;
 
@@ -73,8 +71,6 @@ class Chalk::IR::Node {
             Phi      => 'Chalk::IR::Node::Phi',
             Proj     => 'Chalk::IR::Node::Proj',
             Return   => 'Chalk::IR::Node::Return',
-            Store     => 'Chalk::IR::Node::Store',
-            Load      => 'Chalk::IR::Node::Load',
             Loop      => 'Chalk::IR::Node::Loop',
             Reference => 'Chalk::IR::Node::Reference',
         );

@@ -6,7 +6,6 @@ use utf8;
 use lib 'lib';
 use Test::More tests => 9;
 use Chalk::IR::Builder;
-use Chalk::IR::Reference;
 
 # Test 1: build_load_node retrieves stored variable
 {

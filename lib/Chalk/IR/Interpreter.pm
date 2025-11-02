@@ -5,17 +5,14 @@ use experimental qw(class);
 use utf8;
 
 use Chalk::IR::Context;
-use Chalk::IR::Heap;
 
 class Chalk::IR::Interpreter {
     field $graph :param :reader;
     field $context :reader;
-    field $heap :reader;
 
     ADJUST {
-        # Initialize context and heap as empty closures
+        # Initialize context as empty closure
         $context = Chalk::IR::Context->empty_context();
-        $heap = Chalk::IR::Heap->empty_heap();
     }
 
     method execute() {
@@ -29,7 +26,6 @@ class Chalk::IR::Interpreter {
 
             # Dispatch based on node execute() signature
             # Different node types take different arguments
-            my %heap_ops = ( Store => 1, Load => 1 );
             my %value_ops = (
                 Add => 1, Subtract => 1, Multiply => 1, Divide => 1,
                 GT => 1, LT => 1, EQ => 1, NE => 1, GE => 1, LE => 1,
@@ -41,9 +37,6 @@ class Chalk::IR::Interpreter {
             my $result;
             if ($simple_ops{$op}) {
                 $result = $node->execute();
-            } elsif ($heap_ops{$op}) {
-                # Pass context and heap closures to heap operations
-                ($result, $context, $heap) = $node->execute($context, $heap);
             } elsif ($value_ops{$op}) {
                 $result = $node->execute($context);
             } else {

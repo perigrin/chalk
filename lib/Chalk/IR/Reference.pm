@@ -5,7 +5,6 @@ use experimental qw(class);
 use utf8;
 
 use Chalk::IR::Context;
-use Chalk::IR::Heap;
 
 class Chalk::IR::Reference {
     # Creates new reference: allocates on heap, binds address in context

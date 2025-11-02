@@ -8,7 +8,6 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
     use Chalk::IR::Context;
-    use Chalk::IR::Heap;
 
     # Phase 1 polymorphic node classes
     use Chalk::IR::Node::Base;
@@ -40,7 +39,6 @@ class Chalk::IR::Builder {
 
     field $graph :reader;
     field $context :reader;  # Context-as-closure for variable memory
-    field $heap :reader;     # Heap-as-closure for value storage
     field $node_counter :reader = 0;
     field $current_control :reader;  # Current control flow node
     field $loop_depth = 0;   # Current loop nesting depth for label namespacing
@@ -48,7 +46,6 @@ class Chalk::IR::Builder {
     ADJUST {
         $graph = Chalk::IR::Graph->new();
         $context = Chalk::IR::Context->empty_context();
-        $heap = Chalk::IR::Heap->empty_heap();
     }
 
     # Generate unique node ID

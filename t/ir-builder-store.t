@@ -6,7 +6,6 @@ use utf8;
 use lib 'lib';
 use Test::More tests => 12;
 use Chalk::IR::Builder;
-use Chalk::IR::Reference;
 
 # Test 1: build_store_node updates Builder's context
 {
