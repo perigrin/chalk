@@ -22,11 +22,7 @@ class Chalk::IR::Interpreter {
         # 1. Linearize graph to get execution order
         my @schedule = $graph->linearize();
 
-        # 2. Initialize value map and heap
-        my %values;
-        my %heap;
-
-        # 3. Execute nodes in order
+        # 2. Execute nodes in order using context threading
         for my $node (@schedule) {
             my $node_id = $node->id;
             my $op = $node->op;
@@ -46,23 +42,21 @@ class Chalk::IR::Interpreter {
             if ($simple_ops{$op}) {
                 $result = $node->execute();
             } elsif ($heap_ops{$op}) {
-                # Pass context, heap closures, and values hash to heap operations
-                ($result, $context, $heap) = $node->execute($context, $heap, \%values);
+                # Pass context and heap closures to heap operations
+                ($result, $context, $heap) = $node->execute($context, $heap);
             } elsif ($value_ops{$op}) {
-                $result = $node->execute(\%values);
+                $result = $node->execute($context);
             } else {
                 die "Unknown op type: $op";
             }
-
-            $values{$node_id} = $result;
 
             # Store result in context with node: namespace
             $context = Chalk::IR::Context->extend_context($context, "node:$node_id", $result);
         }
 
-        # 4. Find Return node and extract its value
+        # 3. Find Return node and extract its value from context
         my $return_node = $self->find_return();
-        return $values{$return_node->id};
+        return $context->("node:" . $return_node->id);
     }
 
     method find_return() {

@@ -20,8 +20,8 @@ class Chalk::IR::Node::Not :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values) {
-        my $operand_val = $values->{$operand_id};
+    method execute($context) {
+        my $operand_val = $context->("node:$operand_id");
         # Perl 5.42.0 returns boolean objects, but for now return 1/0
         # TODO: Update to return proper boolean when boolean IR nodes are implemented
         return $operand_val ? 0 : 1;

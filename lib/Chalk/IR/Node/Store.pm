@@ -18,15 +18,15 @@ class Chalk::IR::Node::Store :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($context, $heap, $values) {
+    method execute($context, $heap) {
         # Store writes value to heap at address using Heap abstraction
         # inputs[0] = memory_in (dependency token)
         # inputs[1] = address node
         # inputs[2] = value node
         my @inputs = $self->inputs->@*;
 
-        my $address = $values->{$inputs[1]};
-        my $value = $values->{$inputs[2]};
+        my $address = $context->("node:$inputs[1]");
+        my $value = $context->("node:$inputs[2]");
 
         # Check if address exists; if not, allocate it
         my $existing = Chalk::IR::Heap->heap_read($heap, $address);

@@ -18,13 +18,13 @@ class Chalk::IR::Node::Load :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($context, $heap, $values) {
+    method execute($context, $heap) {
         # Load reads value from heap at address using Heap abstraction
         # inputs[0] = memory_in (dependency token from prior Store)
         # inputs[1] = address node
         my @inputs = $self->inputs->@*;
 
-        my $address = $values->{$inputs[1]};
+        my $address = $context->("node:$inputs[1]");
 
         # Read from heap using Heap->heap_read
         my $value = Chalk::IR::Heap->heap_read($heap, $address);
