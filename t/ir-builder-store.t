@@ -19,17 +19,17 @@ use Chalk::IR::Builder;
     ok(defined($node_id), 'context has binding for stored variable');
 }
 
-# Test 2: build_store_node stores node ID in context
+# Test 2: build_store_node stores node object in context
 {
     my $builder = Chalk::IR::Builder->new();
     my $constant = $builder->build_constant_node(100);
 
     $builder->build_store_node('x', $constant);
 
-    # After store, can read node ID from context with lexical: label
-    my $stored_node_id = $builder->context->('lexical:x');
-    ok(defined($stored_node_id), 'context contains stored node ID');
-    is($stored_node_id, $constant->id, 'context stores correct node ID');
+    # After store, can read node object from context with lexical: label
+    my $stored_node = $builder->context->('lexical:x');
+    ok(defined($stored_node), 'context contains stored node object');
+    is($stored_node->id, $constant->id, 'context stores correct node object');
 }
 
 # Test 3: Multiple stores create independent bindings
@@ -43,13 +43,13 @@ use Chalk::IR::Builder;
     $builder->build_store_node('y', $const2);
     $builder->build_store_node('z', $const3);
 
-    my $x_id = $builder->context->('lexical:x');
-    my $y_id = $builder->context->('lexical:y');
-    my $z_id = $builder->context->('lexical:z');
+    my $x_node = $builder->context->('lexical:x');
+    my $y_node = $builder->context->('lexical:y');
+    my $z_node = $builder->context->('lexical:z');
 
-    is($x_id, $const1->id, 'x stores correct node ID');
-    is($y_id, $const2->id, 'y stores correct node ID');
-    is($z_id, $const3->id, 'z stores correct node ID');
+    is($x_node->id, $const1->id, 'x stores correct node object');
+    is($y_node->id, $const2->id, 'y stores correct node object');
+    is($z_node->id, $const3->id, 'z stores correct node object');
 }
 
 # Test 4: Store updates existing variable (rebinding)
@@ -59,12 +59,12 @@ use Chalk::IR::Builder;
     my $const2 = $builder->build_constant_node('second');
 
     $builder->build_store_node('x', $const1);
-    my $initial_id = $builder->context->('lexical:x');
-    is($initial_id, $const1->id, 'initial store works');
+    my $initial_node = $builder->context->('lexical:x');
+    is($initial_node->id, $const1->id, 'initial store works');
 
     $builder->build_store_node('x', $const2);
-    my $updated_id = $builder->context->('lexical:x');
-    is($updated_id, $const2->id, 'rebinding updates to new node ID');
+    my $updated_node = $builder->context->('lexical:x');
+    is($updated_node->id, $const2->id, 'rebinding updates to new node object');
 }
 
 # Test 5: Store preserves other variables when rebinding
@@ -78,11 +78,11 @@ use Chalk::IR::Builder;
     $builder->build_store_node('y', $const_y);
     $builder->build_store_node('x', $const_x2);  # Rebind x
 
-    my $x_id = $builder->context->('lexical:x');
-    my $y_id = $builder->context->('lexical:y');
+    my $x_node = $builder->context->('lexical:x');
+    my $y_node = $builder->context->('lexical:y');
 
-    is($x_id, $const_x2->id, 'x rebinding works');
-    is($y_id, $const_y->id, 'y unchanged after x rebinding');
+    is($x_node->id, $const_x2->id, 'x rebinding works');
+    is($y_node->id, $const_y->id, 'y unchanged after x rebinding');
 }
 
 # Test 6: build_store_node still returns value node (backward compatibility)

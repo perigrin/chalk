@@ -193,8 +193,9 @@ class Chalk::IR::Builder {
     method build_store_node($var_name, $value_node, $control = undef) {
         # Store variable using lexical: namespace in context
         # Inside loops, use loop depth in label: lexical:loop_0:$var
+        # Store the IR node object directly, not the node ID
         my $label = $self->make_variable_label($var_name);
-        $context = Chalk::IR::Context->extend_context($context, $label, $value_node->id);
+        $context = Chalk::IR::Context->extend_context($context, $label, $value_node);
 
         return $value_node;
     }
@@ -203,26 +204,24 @@ class Chalk::IR::Builder {
     method build_load_node($var_name) {
         # Retrieve variable using lexical: namespace from context
         # Try loop-scoped label first, then fall back to outer scope
-        my $node_id;
+        # Context now stores IR node objects directly, not node IDs
+        my $node;
 
         # Try current loop depth first (search from innermost to outermost)
         if ($loop_depth > 0) {
             my $depth = $loop_depth - 1;
             while ($depth >= 0) {
                 my $label = "lexical:loop_${depth}:$var_name";
-                $node_id = $context->($label);
-                last if defined $node_id;
+                $node = $context->($label);
+                last if defined $node;
                 $depth--;
             }
         }
 
         # Fall back to non-loop lexical scope
-        $node_id //= $context->("lexical:$var_name");
+        $node //= $context->("lexical:$var_name");
 
-        return undef unless $node_id;
-
-        # Return the node from the graph
-        my $node = $graph->nodes->{$node_id};
+        # Return the node directly from context (no graph lookup needed)
         return $node;
     }
 
