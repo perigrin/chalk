@@ -4,8 +4,19 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
+use Chalk::IR::Context;
+use Chalk::IR::Heap;
+
 class Chalk::IR::Interpreter {
     field $graph :param :reader;
+    field $context :reader;
+    field $heap :reader;
+
+    ADJUST {
+        # Initialize context and heap as empty closures
+        $context = Chalk::IR::Context->empty_context();
+        $heap = Chalk::IR::Heap->empty_heap();
+    }
 
     method execute() {
         # 1. Linearize graph to get execution order
@@ -43,6 +54,9 @@ class Chalk::IR::Interpreter {
             }
 
             $values{$node_id} = $result;
+
+            # Store result in context with node: namespace
+            $context = Chalk::IR::Context->extend_context($context, "node:$node_id", $result);
         }
 
         # 4. Find Return node and extract its value
