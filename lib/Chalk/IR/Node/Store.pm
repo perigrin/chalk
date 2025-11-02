@@ -32,14 +32,14 @@ class Chalk::IR::Node::Store :isa(Chalk::IR::Node::Base) {
         my $existing = Chalk::IR::Heap->heap_read($heap, $address);
         my $new_heap;
 
-        if (!defined $existing) {
+        if (not defined $existing) {
             # Address doesn't exist, allocate with value
             ($new_heap, my $allocated_addr) = Chalk::IR::Heap->heap_alloc($heap, $value);
             # Note: heap_alloc generates address, but we're using our own address
             # So we need to manually create the storage entry
             my $state = $heap->();
             my $new_storage = { %{$state->{storage}}, $address => $value };
-            $new_heap = sub {
+            $new_heap = sub () {
                 return { storage => $new_storage, next_addr => $state->{next_addr} };
             };
         } else {
@@ -51,5 +51,3 @@ class Chalk::IR::Node::Store :isa(Chalk::IR::Node::Base) {
         return (1, $context, $new_heap);
     }
 }
-
-1;

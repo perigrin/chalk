@@ -15,22 +15,22 @@ use Chalk::IR::Reference;
 
     $builder->build_store_node('x', $constant);
 
-    # After store, context should have binding for 'x'
-    my $addr = $builder->context->('x');
-    ok(defined($addr), 'context has binding for stored variable');
+    # After store, context should have binding for 'lexical:x'
+    my $node_id = $builder->context->('lexical:x');
+    ok(defined($node_id), 'context has binding for stored variable');
 }
 
-# Test 2: build_store_node updates Builder's heap
+# Test 2: build_store_node stores node ID in context
 {
     my $builder = Chalk::IR::Builder->new();
     my $constant = $builder->build_constant_node(100);
 
     $builder->build_store_node('x', $constant);
 
-    # After store, can read node ID from heap via context
-    my $stored_node_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'x');
-    ok(defined($stored_node_id), 'heap contains stored node ID');
-    is($stored_node_id, $constant->id, 'heap stores correct node ID');
+    # After store, can read node ID from context with lexical: label
+    my $stored_node_id = $builder->context->('lexical:x');
+    ok(defined($stored_node_id), 'context contains stored node ID');
+    is($stored_node_id, $constant->id, 'context stores correct node ID');
 }
 
 # Test 3: Multiple stores create independent bindings
@@ -44,9 +44,9 @@ use Chalk::IR::Reference;
     $builder->build_store_node('y', $const2);
     $builder->build_store_node('z', $const3);
 
-    my $x_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'x');
-    my $y_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'y');
-    my $z_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'z');
+    my $x_id = $builder->context->('lexical:x');
+    my $y_id = $builder->context->('lexical:y');
+    my $z_id = $builder->context->('lexical:z');
 
     is($x_id, $const1->id, 'x stores correct node ID');
     is($y_id, $const2->id, 'y stores correct node ID');
@@ -60,11 +60,11 @@ use Chalk::IR::Reference;
     my $const2 = $builder->build_constant_node('second');
 
     $builder->build_store_node('x', $const1);
-    my $initial_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'x');
+    my $initial_id = $builder->context->('lexical:x');
     is($initial_id, $const1->id, 'initial store works');
 
     $builder->build_store_node('x', $const2);
-    my $updated_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'x');
+    my $updated_id = $builder->context->('lexical:x');
     is($updated_id, $const2->id, 'rebinding updates to new node ID');
 }
 
@@ -79,8 +79,8 @@ use Chalk::IR::Reference;
     $builder->build_store_node('y', $const_y);
     $builder->build_store_node('x', $const_x2);  # Rebind x
 
-    my $x_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'x');
-    my $y_id = Chalk::IR::Reference->ref_read($builder->context, $builder->heap, 'y');
+    my $x_id = $builder->context->('lexical:x');
+    my $y_id = $builder->context->('lexical:y');
 
     is($x_id, $const_x2->id, 'x rebinding works');
     is($y_id, $const_y->id, 'y unchanged after x rebinding');

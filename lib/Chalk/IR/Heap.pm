@@ -7,7 +7,7 @@ use utf8;
 class Chalk::IR::Heap {
     # Returns empty heap closure (no allocated cells)
     sub empty_heap($class) {
-        return sub {
+        return sub () {
             return { storage => {}, next_addr => 0 };
         };
     }
@@ -20,7 +20,7 @@ class Chalk::IR::Heap {
         my $new_storage = { %{$state->{storage}}, $addr => $value };
         my $new_next = $state->{next_addr} + 1;
 
-        my $new_heap = sub {
+        my $new_heap = sub () {
             return { storage => $new_storage, next_addr => $new_next };
         };
 
@@ -38,11 +38,13 @@ class Chalk::IR::Heap {
         my $state = $heap->();
 
         # Only write if address exists
-        return $heap unless exists $state->{storage}->{$address};
+        if (not exists($state->{storage}->{$address})) {
+            return $heap;
+        }
 
         my $new_storage = { %{$state->{storage}}, $address => $value };
 
-        return sub {
+        return sub () {
             return { storage => $new_storage, next_addr => $state->{next_addr} };
         };
     }

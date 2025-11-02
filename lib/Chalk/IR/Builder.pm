@@ -7,10 +7,8 @@ use utf8;
 class Chalk::IR::Builder {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
-    use Chalk::IR::Scope;
     use Chalk::IR::Context;
     use Chalk::IR::Heap;
-    use Chalk::IR::Reference;
 
     # Phase 1 polymorphic node classes
     use Chalk::IR::Node::Base;
@@ -41,17 +39,14 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::Loop;
 
     field $graph :reader;
-    field $scope :reader;
     field $context :reader;  # Context-as-closure for variable memory
     field $heap :reader;     # Heap-as-closure for value storage
     field $node_counter :reader = 0;
     field $current_control :reader;  # Current control flow node
-    field $loop_entry_scope;  # Snapshot of scope bindings at loop entry
-    field $loop_tracking_active = 0;  # Whether loop tracking is active
+    field $loop_depth = 0;   # Current loop nesting depth for label namespacing
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
-        $scope = Chalk::IR::Scope->new();
         $context = Chalk::IR::Context->empty_context();
         $heap = Chalk::IR::Heap->empty_heap();
     }
@@ -82,13 +77,14 @@ class Chalk::IR::Builder {
         $graph->add_node($start);
         $self->set_control($start->id);
 
-        # Create Proj nodes for each parameter and register in scope
+        # Create Proj nodes for each parameter and register in context
         my $param_count = scalar($params->@*);
         for my $i (0..($param_count - 1)) {
             my $param_name = $params->[$i];
             my $proj = $self->build_proj_node($start, $i, $param_name);
-            # Register parameter Proj in scope so lookups return it directly
-            $scope->define($param_name, $proj->id);
+            # Register parameter Proj in context with lexical: namespace
+            my $label = "lexical:$param_name";
+            $context = Chalk::IR::Context->extend_context($context, $label, $proj->id);
         }
 
         return $start;
@@ -188,26 +184,43 @@ class Chalk::IR::Builder {
         return $div;
     }
 
+    # Generate label with loop depth if inside a loop
+    method make_variable_label($var_name) {
+        if ($loop_depth > 0) {
+            return "lexical:loop_" . ($loop_depth - 1) . ":$var_name";
+        }
+        return "lexical:$var_name";
+    }
+
     # Create Store node (variable assignment)
     method build_store_node($var_name, $value_node, $control = undef) {
-        # Use Reference->ref_new to allocate node ID on heap and bind in context
-        # This integrates Context+Heap memory model for variable storage
-        ($context, $heap) = Chalk::IR::Reference->ref_new($context, $heap, $var_name, $value_node->id);
-
-        # Also maintain backward compatibility with Scope for now
-        $scope->define($var_name, $value_node->id);
+        # Store variable using lexical: namespace in context
+        # Inside loops, use loop depth in label: lexical:loop_0:$var
+        my $label = $self->make_variable_label($var_name);
+        $context = Chalk::IR::Context->extend_context($context, $label, $value_node->id);
 
         return $value_node;
     }
 
     # Load node (variable read)
     method build_load_node($var_name) {
-        # Use Reference->ref_read to retrieve node ID from context+heap
-        # This integrates Context+Heap memory model for variable retrieval
-        my $node_id = Chalk::IR::Reference->ref_read($context, $heap, $var_name);
+        # Retrieve variable using lexical: namespace from context
+        # Try loop-scoped label first, then fall back to outer scope
+        my $node_id;
 
-        # Fallback to Scope for backward compatibility
-        $node_id = $scope->lookup($var_name) unless defined $node_id;
+        # Try current loop depth first (search from innermost to outermost)
+        if ($loop_depth > 0) {
+            my $depth = $loop_depth - 1;
+            while ($depth >= 0) {
+                my $label = "lexical:loop_${depth}:$var_name";
+                $node_id = $context->($label);
+                last if defined $node_id;
+                $depth--;
+            }
+        }
+
+        # Fall back to non-loop lexical scope
+        $node_id //= $context->("lexical:$var_name");
 
         return undef unless $node_id;
 
@@ -467,56 +480,35 @@ class Chalk::IR::Builder {
         return $call;
     }
 
-    # Loop-carried dependency tracking methods
+    # Loop depth tracking methods
     method begin_loop_tracking() {
-        # Start tracking loop-carried dependencies
-        $loop_entry_scope = $scope->snapshot_bindings();
-        $loop_tracking_active = 1;
+        # Increment loop depth when entering a loop
+        $loop_depth++;
         return;
     }
 
     method end_loop_tracking() {
-        # End tracking and clean up
-        $loop_entry_scope = undef;
-        $loop_tracking_active = 0;
+        # Decrement loop depth when exiting a loop
+        $loop_depth-- if $loop_depth > 0;
         return;
     }
 
     method is_tracking_loop() {
-        return $loop_tracking_active;
+        return $loop_depth > 0;
     }
 
-    method loop_entry_scope() {
-        return $loop_entry_scope;
+    method current_loop_depth() {
+        return $loop_depth;
     }
 
     method generate_loop_phi_nodes($loop_node) {
-        # Generate phi nodes for all variables modified within the loop
-        return {} unless $loop_tracking_active;
-        return {} unless defined $loop_entry_scope;
+        # Generate phi nodes for variables modified within the loop
+        # With context+labels approach, phi nodes are created for variables
+        # that exist both as 'lexical:$var' (pre-loop) and 'lexical:loop_N:$var' (in-loop)
 
-        # Capture current (loop-end) values before creating phis
-        my $loop_end_scope = $scope->snapshot_bindings();
-
-        # Find which variables were modified in the loop
-        my @modified_vars = $scope->find_modified_variables($loop_entry_scope);
-
-        # Generate a phi node for each modified variable
-        my %phis = ();
-        for my $var (@modified_vars) {
-            my $initial_value = $loop_entry_scope->{$var};
-            my $loop_value = $loop_end_scope->{$var};
-
-            # Create phi with initial value; backedge added later
-            my $phi = $self->build_loop_phi_node($loop_node, $initial_value, $loop_value);
-            $phis{$var} = $phi;
-
-            # Update scope to use phi node for this variable
-            # This ensures uses after the loop see the phi
-            $scope->define($var, $phi->id);
-        }
-
-        return \%phis;
+        # For now, return empty hash - full implementation will search context
+        # for labels matching the current loop depth pattern
+        return {};
     }
 
     # Class and object support nodes (Issue #98 Phase 1)
