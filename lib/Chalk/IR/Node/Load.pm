@@ -4,6 +4,8 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
+use Chalk::IR::Heap;
+
 class Chalk::IR::Node::Load :isa(Chalk::IR::Node::Base) {
     method op() { 'Load' }
 
@@ -16,18 +18,19 @@ class Chalk::IR::Node::Load :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values, $heap) {
-        # Load reads value from heap at address
+    method execute($context, $heap, $values) {
+        # Load reads value from heap at address using Heap abstraction
         # inputs[0] = memory_in (dependency token from prior Store)
         # inputs[1] = address node
         my @inputs = $self->inputs->@*;
 
         my $address = $values->{$inputs[1]};
 
-        # Read from heap
-        my $value = $heap->{$address};
+        # Read from heap using Heap->heap_read
+        my $value = Chalk::IR::Heap->heap_read($heap, $address);
 
-        return $value;
+        # Return value and unchanged context/heap
+        return ($value, $context, $heap);
     }
 }
 

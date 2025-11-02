@@ -46,7 +46,8 @@ class Chalk::IR::Interpreter {
             if ($simple_ops{$op}) {
                 $result = $node->execute();
             } elsif ($heap_ops{$op}) {
-                $result = $node->execute(\%values, \%heap);
+                # Pass context, heap closures, and values hash to heap operations
+                ($result, $context, $heap) = $node->execute($context, $heap, \%values);
             } elsif ($value_ops{$op}) {
                 $result = $node->execute(\%values);
             } else {
