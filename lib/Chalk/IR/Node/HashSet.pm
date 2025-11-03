@@ -33,13 +33,15 @@ class Chalk::IR::Node::HashSet :isa(Chalk::IR::Node::Base) {
         # Get key value
         my $key = $context->("node:$key_id");
 
-        # Create new context extending the old one with value node ID
-        # Store the node ID, not the value itself
+        # Get value node object from graph: namespace
+        my $value_node = $context->("graph:$value_id");
+
+        # Create new context extending the old one with value node object
         my $label = Chalk::IR::Context->make_key_label($key);
         my $new_hash_ctx = Chalk::IR::Context->extend_context(
             $old_hash_ctx,
             $label,
-            $value_id  # Store node ID for lazy evaluation
+            $value_node  # Store node object
         );
 
         # Return the new hash context (immutable + rebind)

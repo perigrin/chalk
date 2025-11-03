@@ -112,17 +112,17 @@ subtest 'Element reference to array element' => sub {
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(0),
-        $const_1->id
+        $const_1
     );
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(1),
-        $const_2->id
+        $const_2
     );
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(2),
-        $const_3->id
+        $const_3
     );
 
     my $array_node_id = $builder->next_node_id();
@@ -182,17 +182,17 @@ subtest 'Reference aliasing - two refs to same element' => sub {
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(0),
-        $const_1->id
+        $const_1
     );
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(1),
-        $const_2->id
+        $const_2
     );
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(2),
-        $const_3->id
+        $const_3
     );
 
     my $array_node_id = $builder->next_node_id();

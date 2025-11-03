@@ -33,10 +33,10 @@ class Chalk::IR::Node::ArrayGet :isa(Chalk::IR::Node::Base) {
 
         # Lookup in array context using index: namespace
         my $label = Chalk::IR::Context->make_index_label($index);
-        my $node_id = $array_ctx->($label);
+        my $element_node = $array_ctx->($label);
 
-        # Resolve the node ID to get the actual value
-        my $value = $context->("node:$node_id");
+        # Get the value from the node object
+        my $value = $context->("node:" . $element_node->id);
 
         return $value;
     }

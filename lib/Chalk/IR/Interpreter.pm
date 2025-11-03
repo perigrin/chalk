@@ -48,6 +48,9 @@ class Chalk::IR::Interpreter {
 
             # Store result in context with node: namespace
             $context = Chalk::IR::Context->extend_context($context, "node:$node_id", $result);
+
+            # Also store the node object itself in graph: namespace for ArraySet/HashSet
+            $context = Chalk::IR::Context->extend_context($context, "graph:$node_id", $node);
         }
 
         # 3. Find Return node and extract its value from context

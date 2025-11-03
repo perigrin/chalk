@@ -44,6 +44,7 @@ class Chalk::IR::Builder {
     field $node_counter :reader = 0;
     field $current_control :reader;  # Current control flow node
     field $loop_depth = 0;   # Current loop nesting depth for label namespacing
+    field $loop_modified_vars = [];  # Stack of sets tracking modified vars per loop depth
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
@@ -88,7 +89,7 @@ class Chalk::IR::Builder {
             my $proj = $self->build_proj_node($start, $i, $param_name);
             # Register parameter Proj in context with lexical: namespace
             my $label = "lexical:$param_name";
-            $context = Chalk::IR::Context->extend_context($context, $label, $proj->id);
+            $context = Chalk::IR::Context->extend_context($context, $label, $proj);
         }
 
         return $start;
@@ -203,6 +204,12 @@ class Chalk::IR::Builder {
         # Store the IR node object directly, not the node ID
         my $label = $self->make_variable_label($var_name);
         $context = Chalk::IR::Context->extend_context($context, $label, $value_node);
+
+        # Track this variable as modified if we're in a loop
+        if ($loop_depth > 0 && scalar($loop_modified_vars->@*) > 0) {
+            my $current_loop_vars = $loop_modified_vars->[-1];
+            $current_loop_vars->{$var_name} = 1;
+        }
 
         return $value_node;
     }
@@ -489,12 +496,18 @@ class Chalk::IR::Builder {
     method begin_loop_tracking() {
         # Increment loop depth when entering a loop
         $loop_depth++;
+        # Push a new set to track modified variables at this loop depth
+        push $loop_modified_vars->@*, {};
         return;
     }
 
     method end_loop_tracking() {
         # Decrement loop depth when exiting a loop
-        $loop_depth-- if $loop_depth > 0;
+        if ($loop_depth > 0) {
+            $loop_depth--;
+            # Pop the modified variables set for this loop
+            pop $loop_modified_vars->@* if scalar($loop_modified_vars->@*) > 0;
+        }
         return;
     }
 
@@ -511,9 +524,37 @@ class Chalk::IR::Builder {
         # With context+labels approach, phi nodes are created for variables
         # that exist both as 'lexical:$var' (pre-loop) and 'lexical:loop_N:$var' (in-loop)
 
-        # For now, return empty hash - full implementation will search context
-        # for labels matching the current loop depth pattern
-        return {};
+        my %phi_nodes;
+
+        # If we're not tracking a loop or have no modified vars, return empty
+        return \%phi_nodes unless scalar($loop_modified_vars->@*) > 0;
+
+        # Get the current loop's modified variables
+        my $modified_vars = $loop_modified_vars->[-1];
+
+        # For each modified variable, create a phi node
+        for my $var_name (keys %$modified_vars) {
+            # Get pre-loop value (lexical:$var)
+            my $pre_loop_label = "lexical:$var_name";
+            my $pre_loop_value = $context->($pre_loop_label);
+
+            # Get loop-modified value (lexical:loop_N:$var where N = current depth - 1)
+            my $loop_label = "lexical:loop_" . ($loop_depth - 1) . ":$var_name";
+            my $loop_value = $context->($loop_label);
+
+            # Only create phi if both values exist
+            if (defined $pre_loop_value && defined $loop_value) {
+                # Build phi node with: control (loop), initial value, loop value
+                my $phi = $self->build_loop_phi_node(
+                    $loop_node,
+                    (ref($pre_loop_value) ? $pre_loop_value->id : $pre_loop_value),
+                    (ref($loop_value) ? $loop_value->id : $loop_value)
+                );
+                $phi_nodes{$var_name} = $phi;
+            }
+        }
+
+        return \%phi_nodes;
     }
 
     # Class and object support nodes (Issue #98 Phase 1)

@@ -33,10 +33,10 @@ class Chalk::IR::Node::HashGet :isa(Chalk::IR::Node::Base) {
 
         # Lookup in hash context using key: namespace
         my $label = Chalk::IR::Context->make_key_label($key);
-        my $node_id = $hash_ctx->($label);
+        my $element_node = $hash_ctx->($label);
 
-        # Resolve the node ID to get the actual value
-        my $value = $context->("node:$node_id");
+        # Get the value from the node object
+        my $value = $context->("node:" . $element_node->id);
 
         return $value;
     }

@@ -29,23 +29,22 @@ subtest 'Array as context with index namespace' => sub {
     my $const_2 = $builder->build_constant_node(2);
     my $const_3 = $builder->build_constant_node(3);
 
-    # Build array context manually - store node IDs, not node objects
-    # At execution time, the interpreter will resolve these via "node:X" lookups
+    # Build array context manually - store node objects directly
     my $array_ctx = $empty_ctx;
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(0),
-        $const_1->id  # Store node ID
+        $const_1  # Store node object
     );
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(1),
-        $const_2->id  # Store node ID
+        $const_2  # Store node object
     );
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(2),
-        $const_3->id  # Store node ID
+        $const_3  # Store node object
     );
 
     # Create ArrayValue node wrapping the context
@@ -88,12 +87,12 @@ subtest 'Array mutation with context extension' => sub {
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(0),
-        $const_10->id  # Store node ID
+        $const_10  # Store node object
     );
     $array_ctx = Chalk::IR::Context->extend_context(
         $array_ctx,
         Chalk::IR::Context->make_index_label(1),
-        $const_20->id  # Store node ID
+        $const_20  # Store node object
     );
 
     my $array_node_id = $builder->next_node_id();
@@ -139,12 +138,12 @@ subtest 'Hash as context with key namespace' => sub {
     $hash_ctx = Chalk::IR::Context->extend_context(
         $hash_ctx,
         Chalk::IR::Context->make_key_label('a'),
-        $const_10->id  # Store node ID
+        $const_10  # Store node object
     );
     $hash_ctx = Chalk::IR::Context->extend_context(
         $hash_ctx,
         Chalk::IR::Context->make_key_label('b'),
-        $const_20->id  # Store node ID
+        $const_20  # Store node object
     );
 
     my $hash_node_id = $builder->next_node_id();

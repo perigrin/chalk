@@ -33,13 +33,15 @@ class Chalk::IR::Node::ArraySet :isa(Chalk::IR::Node::Base) {
         # Get index value
         my $index = $context->("node:$index_id");
 
-        # Create new context extending the old one with value node ID
-        # Store the node ID, not the value itself
+        # Get value node object from graph: namespace
+        my $value_node = $context->("graph:$value_id");
+
+        # Create new context extending the old one with value node object
         my $label = Chalk::IR::Context->make_index_label($index);
         my $new_array_ctx = Chalk::IR::Context->extend_context(
             $old_array_ctx,
             $label,
-            $value_id  # Store node ID for lazy evaluation
+            $value_node  # Store node object
         );
 
         # Return the new array context (immutable + rebind)
