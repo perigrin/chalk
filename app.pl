@@ -14,7 +14,7 @@ use Chalk;
 if ( !caller ) {
     # Parse command line options
     my $grammar_module = "Perl";  # default grammar module
-    my $semiring_type = "SPPF";   # default semiring
+    my $semiring_type = "Boolean";   # default semiring (matches Parser default)
     my $syntax_check_mode = 0;    # -c flag for syntax checking
     my $compile_module_mode = 0;  # --compile-module flag
     my $module_to_compile;        # module name for compilation
