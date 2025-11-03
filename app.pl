@@ -213,29 +213,13 @@ if ( !caller ) {
                 die("Error: Unknown semiring type '$semiring_type'. Use 'Boolean', 'Position', or 'SPPF'\n");
             }
         } elsif ($generate_ir) {
-            # Default: Generate IR using Composite(SPPF, Semantic) semiring
-            # This is the new default behavior (issue #112)
-            require Chalk::IR::Builder;
-            require Chalk::Semiring::SPPF;
-            require Chalk::Semiring::Semantic;
-            require Chalk::Semiring::Composite;
+            # Default: Generate IR using ChalkIR semiring
+            # This encapsulates Composite(SPPF, Semantic) configuration (issue #112)
+            require Chalk::Semiring::ChalkIR;
 
-            # Create IR Builder BEFORE parsing
-            $builder = Chalk::IR::Builder->new();
-
-            # Create SPPF semiring for parse forest
-            my $sppf_sr = Chalk::Semiring::SPPF->new();
-
-            # Create Semantic semiring with IR builder in environment
-            my $semantic_sr = Chalk::Semiring::Semantic->new(
-                grammar => $chalk_grammar,
-                env => { ir_builder => $builder }
-            );
-
-            # Composite semiring combines SPPF and Semantic
-            $semiring = Chalk::Semiring::Composite->new(
-                semirings => [$sppf_sr, $semantic_sr]
-            );
+            my $ir_semiring = Chalk::Semiring::ChalkIR->new(grammar => $chalk_grammar);
+            $semiring = $ir_semiring;
+            $builder = $ir_semiring->builder;
         } else {
             # No IR generation (e.g., -c flag) - use Boolean semiring for syntax check
             require Chalk::Semiring::Boolean;
