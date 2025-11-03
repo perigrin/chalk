@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: Test IR Builder variable storage using Reference->ref_new
-# ABOUTME: Verify build_store_node integrates with Context+Heap for variable bindings
+# ABOUTME: Test IR Builder variable storage using Context extension
+# ABOUTME: Verify build_store_node integrates with Context for variable bindings
 use 5.42.0;
 use utf8;
 use lib 'lib';

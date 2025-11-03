@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: Test IR Builder variable loading using Reference->ref_read
-# ABOUTME: Verify build_load_node integrates with Context+Heap for variable retrieval
+# ABOUTME: Test IR Builder variable loading using Context lookup
+# ABOUTME: Verify build_load_node integrates with Context for variable retrieval
 use 5.42.0;
 use utf8;
 use lib 'lib';
