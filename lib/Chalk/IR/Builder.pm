@@ -227,7 +227,7 @@ class Chalk::IR::Builder {
             while ($depth >= 0) {
                 my $label = "lexical:loop_${depth}:$var_name";
                 $node = $context->($label);
-                last if defined $node;
+                last if defined($node);
                 $depth--;
             }
         }
@@ -464,7 +464,7 @@ class Chalk::IR::Builder {
         # Loop phi starts with control and initial value
         # Loop value added later (lazy phi pattern)
         my @inputs = ($loop_node->id, $initial_value);
-        push @inputs, $loop_value if defined $loop_value;
+        push(@inputs, $loop_value) if defined($loop_value);
 
         my $node_id = $self->next_node_id();
         my $phi = Chalk::IR::Node::Phi->new(
@@ -533,7 +533,7 @@ class Chalk::IR::Builder {
         my $modified_vars = $loop_modified_vars->[-1];
 
         # For each modified variable, create a phi node
-        for my $var_name (keys %$modified_vars) {
+        for my $var_name (keys(%$modified_vars)) {
             # Get pre-loop value (lexical:$var)
             my $pre_loop_label = "lexical:$var_name";
             my $pre_loop_value = $context->($pre_loop_label);
@@ -543,7 +543,7 @@ class Chalk::IR::Builder {
             my $loop_value = $context->($loop_label);
 
             # Only create phi if both values exist
-            if (defined $pre_loop_value && defined $loop_value) {
+            if (defined($pre_loop_value) && defined($loop_value)) {
                 # Build phi node with: control (loop), initial value, loop value
                 my $phi = $self->build_loop_phi_node(
                     $loop_node,
@@ -585,7 +585,7 @@ class Chalk::IR::Builder {
         # Build field references from hash
         for my $field_name (sort( keys( $field_values_hash->%* ) )) {
             my $value_node = $field_values_hash->{$field_name};
-            push @input_nodes, $value_node->id;
+            push(@input_nodes, $value_node->id);
             $field_value_refs{$field_name} = {
                 op => 'NodeRef',
                 node_id => $value_node->id
@@ -920,7 +920,7 @@ class Chalk::IR::Builder {
         my $label = "lexical:$var_name";
         # Look up the target node (might be object or ID)
         my $target_node_or_id = $context->($label);
-        die "Cannot create reference to undefined variable $var_name" unless defined $target_node_or_id;
+        die "Cannot create reference to undefined variable $var_name" unless defined($target_node_or_id);
 
         # Get the node ID for the dependency
         my $target_node_id = ref($target_node_or_id) ? $target_node_or_id->id : $target_node_or_id;
