@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # ABOUTME: Test systematic loop-carried dependency tracking with phi nodes
-# ABOUTME: Validates Builder methods for tracking and generating loop phi nodes
+# ABOUTME: Validates Builder methods for tracking and generating loop phi nodes with Context model
 
 use 5.42.0;
 use Test2::V0;
@@ -11,87 +11,84 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use Chalk::IR::Builder;
 use Chalk::IR::Graph;
-use Chalk::IR::Scope;
+use Chalk::IR::Context;
 
-subtest 'Scope can snapshot bindings before loop' => sub {
+subtest 'Context stores variables with lexical namespace' => sub {
     my $builder = Chalk::IR::Builder->new();
-    my $scope = $builder->scope;
+    my $start = $builder->build_start_node();
 
-    # Define some variables
-    $scope->define('x', 'node_1');
-    $scope->define('y', 'node_2');
-    $scope->define('z', 'node_3');
+    # Store some variables
+    my $const_1 = $builder->build_constant_node(1);
+    my $const_2 = $builder->build_constant_node(2);
+    my $const_3 = $builder->build_constant_node(3);
 
-    # Take a snapshot
-    my $snapshot = $scope->snapshot_bindings();
+    $builder->build_store_node('x', $const_1);
+    $builder->build_store_node('y', $const_2);
+    $builder->build_store_node('z', $const_3);
 
-    ok $snapshot, 'Can create binding snapshot';
-    is ref($snapshot), 'HASH', 'Snapshot is a hashref';
-    is $snapshot->{x}, 'node_1', 'Snapshot captures x binding';
-    is $snapshot->{y}, 'node_2', 'Snapshot captures y binding';
-    is $snapshot->{z}, 'node_3', 'Snapshot captures z binding';
+    # Verify we can retrieve them
+    my $x = $builder->context->('lexical:x');
+    my $y = $builder->context->('lexical:y');
+    my $z = $builder->context->('lexical:z');
+
+    ok defined($x), 'Variable x stored in context';
+    ok defined($y), 'Variable y stored in context';
+    ok defined($z), 'Variable z stored in context';
+    is $x->id, $const_1->id, 'Variable x has correct value';
+    is $y->id, $const_2->id, 'Variable y has correct value';
+    is $z->id, $const_3->id, 'Variable z has correct value';
 };
 
-subtest 'Scope can detect modified variables' => sub {
+subtest 'Builder tracks modified variables in loops' => sub {
     my $builder = Chalk::IR::Builder->new();
-    my $scope = $builder->scope;
-
-    # Initial bindings
-    $scope->define('i', 'node_1');
-    $scope->define('limit', 'node_2');
-
-    my $snapshot = $scope->snapshot_bindings();
-
-    # Modify $i
-    $scope->define('i', 'node_3');
-
-    # Detect changes
-    my @modified = $scope->find_modified_variables($snapshot);
-
-    is scalar(@modified), 1, 'One variable modified';
-    is $modified[0], 'i', 'Variable i was modified';
-};
-
-subtest 'Builder tracks loop entry scope' => sub {
-    my $builder = Chalk::IR::Builder->new();
+    my $start = $builder->build_start_node();
 
     # Define variables before loop
-    $builder->scope->define('i', 'initial_i');
-    $builder->scope->define('sum', 'initial_sum');
+    my $const_1 = $builder->build_constant_node(1);
+    my $const_2 = $builder->build_constant_node(2);
+    $builder->build_store_node('i', $const_1);
+    $builder->build_store_node('limit', $const_2);
 
     # Start tracking loop
     $builder->begin_loop_tracking();
 
+    # Modify only $i inside the loop
+    my $const_3 = $builder->build_constant_node(3);
+    $builder->build_store_node('i', $const_3);
+
+    # Verify tracking is active
     ok $builder->is_tracking_loop(), 'Loop tracking active';
 
-    # Get snapshot
-    my $entry_scope = $builder->loop_entry_scope();
-    ok $entry_scope, 'Entry scope captured';
-    is $entry_scope->{i}, 'initial_i', 'Initial binding for i captured';
+    # Create loop and generate phis
+    my $loop = $builder->build_loop_node();
+    my $phis = $builder->generate_loop_phi_nodes($loop);
+
+    # Should have phi for modified variable i
+    ok exists($phis->{i}), 'Phi generated for modified variable i';
+    ok !exists($phis->{limit}), 'No phi for unmodified variable limit';
 };
 
-subtest 'Builder generates phi nodes for modified variables' => sub {
+subtest 'Builder generates phi nodes with correct structure' => sub {
     my $builder = Chalk::IR::Builder->new();
-    my $scope = $builder->scope;
+    my $start = $builder->build_start_node();
 
     # Setup: Define variables before loop
     my $const_0 = $builder->build_constant_node(0);
     my $const_1 = $builder->build_constant_node(1);
-    $scope->define('i', $const_0->id);
-    $scope->define('sum', $const_1->id);
+    $builder->build_store_node('i', $const_0);
+    $builder->build_store_node('sum', $const_1);
 
     # Start tracking loop
     $builder->begin_loop_tracking();
 
     # Create loop node
-    my $start = $builder->build_start_node();
     my $loop = $builder->build_loop_node();
 
     # Simulate modifications within loop body
     my $i_update = $builder->build_add_node($const_0, $const_1);
     my $sum_update = $builder->build_add_node($const_1, $const_0);
-    $scope->define('i', $i_update->id);
-    $scope->define('sum', $sum_update->id);
+    $builder->build_store_node('i', $i_update);
+    $builder->build_store_node('sum', $sum_update);
 
     # Generate phi nodes for modified variables
     my $phis = $builder->generate_loop_phi_nodes($loop);
@@ -107,29 +104,6 @@ subtest 'Builder generates phi nodes for modified variables' => sub {
     is $phi_i->inputs->[0], $loop->id, 'Phi control is loop node';
 };
 
-subtest 'Unmodified variables do not generate phis' => sub {
-    my $builder = Chalk::IR::Builder->new();
-    my $scope = $builder->scope;
-
-    # Setup
-    my $const_0 = $builder->build_constant_node(0);
-    my $const_10 = $builder->build_constant_node(10);
-    $scope->define('i', $const_0->id);
-    $scope->define('limit', $const_10->id);  # Not modified
-
-    $builder->begin_loop_tracking();
-    my $loop = $builder->build_loop_node();
-
-    # Only modify i
-    my $i_update = $builder->build_add_node($const_0, $const_0);
-    $scope->define('i', $i_update->id);
-
-    my $phis = $builder->generate_loop_phi_nodes($loop);
-
-    ok exists($phis->{i}), 'Phi for modified variable i';
-    ok !exists($phis->{limit}), 'No phi for unmodified variable limit';
-};
-
 subtest 'End loop tracking cleans up state' => sub {
     my $builder = Chalk::IR::Builder->new();
 
@@ -142,17 +116,17 @@ subtest 'End loop tracking cleans up state' => sub {
 
 subtest 'Builder creates phi with complete backedge' => sub {
     my $builder = Chalk::IR::Builder->new();
-    my $scope = $builder->scope;
+    my $start = $builder->build_start_node();
 
     my $const_0 = $builder->build_constant_node(0);
-    $scope->define('i', $const_0->id);
+    $builder->build_store_node('i', $const_0);
 
     $builder->begin_loop_tracking();
     my $loop = $builder->build_loop_node();
 
     # Modify variable
     my $i_update = $builder->build_constant_node(5);
-    $scope->define('i', $i_update->id);
+    $builder->build_store_node('i', $i_update);
 
     # Generate phi - automatically captures backedge
     my $phis = $builder->generate_loop_phi_nodes($loop);

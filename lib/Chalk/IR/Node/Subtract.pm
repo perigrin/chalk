@@ -22,9 +22,9 @@ class Chalk::IR::Node::Subtract :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values) {
-        my $left_val = $values->{$left_id};
-        my $right_val = $values->{$right_id};
+    method execute($context) {
+        my $left_val = $context->("node:$left_id");
+        my $right_val = $context->("node:$right_id");
         return $left_val - $right_val;
     }
 }

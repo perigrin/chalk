@@ -20,8 +20,8 @@ class Chalk::IR::Node::Negate :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values) {
-        my $operand_val = $values->{$operand_id};
+    method execute($context) {
+        my $operand_val = $context->("node:$operand_id");
         return -$operand_val;
     }
 }

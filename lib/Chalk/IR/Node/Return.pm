@@ -22,9 +22,9 @@ class Chalk::IR::Node::Return :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values) {
-        # Return node returns the value from the values map
-        return $values->{$value_id};
+    method execute($context) {
+        # Return node returns the value from the context
+        return $context->("node:$value_id");
     }
 }
 

@@ -7,7 +7,7 @@ use utf8;
 class Chalk::IR::Builder {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
-    use Chalk::IR::Scope;
+    use Chalk::IR::Context;
 
     # Phase 1 polymorphic node classes
     use Chalk::IR::Node::Base;
@@ -25,6 +25,8 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::PostIncrement;
     use Chalk::IR::Node::PostDecrement;
     use Chalk::IR::Node::Reference;
+    use Chalk::IR::Node::ScalarDeref;
+    use Chalk::IR::Node::VariableRead;
     use Chalk::IR::Node::GT;
     use Chalk::IR::Node::LT;
     use Chalk::IR::Node::EQ;
@@ -38,15 +40,15 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::Loop;
 
     field $graph :reader;
-    field $scope :reader;
+    field $context :reader;  # Context-as-closure for variable memory
     field $node_counter :reader = 0;
     field $current_control :reader;  # Current control flow node
-    field $loop_entry_scope;  # Snapshot of scope bindings at loop entry
-    field $loop_tracking_active = 0;  # Whether loop tracking is active
+    field $loop_depth = 0;   # Current loop nesting depth for label namespacing
+    field $loop_modified_vars = [];  # Stack of sets tracking modified vars per loop depth
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
-        $scope = Chalk::IR::Scope->new();
+        $context = Chalk::IR::Context->empty_context();
     }
 
     # Generate unique node ID
@@ -59,6 +61,11 @@ class Chalk::IR::Builder {
     # Set current control flow node
     method set_control($ctrl) {
         $current_control = $ctrl;
+    }
+
+    # Set context (for testing and manual context updates)
+    method set_context($ctx) {
+        $context = $ctx;
     }
 
     # Create Start node for a function/method
@@ -75,13 +82,14 @@ class Chalk::IR::Builder {
         $graph->add_node($start);
         $self->set_control($start->id);
 
-        # Create Proj nodes for each parameter and register in scope
+        # Create Proj nodes for each parameter and register in context
         my $param_count = scalar($params->@*);
         for my $i (0..($param_count - 1)) {
             my $param_name = $params->[$i];
             my $proj = $self->build_proj_node($start, $i, $param_name);
-            # Register parameter Proj in scope so lookups return it directly
-            $scope->define($param_name, $proj->id);
+            # Register parameter Proj in context with lexical: namespace
+            my $label = "lexical:$param_name";
+            $context = Chalk::IR::Context->extend_context($context, $label, $proj);
         }
 
         return $start;
@@ -181,23 +189,53 @@ class Chalk::IR::Builder {
         return $div;
     }
 
+    # Generate label with loop depth if inside a loop
+    method make_variable_label($var_name) {
+        if ($loop_depth > 0) {
+            return "lexical:loop_" . ($loop_depth - 1) . ":$var_name";
+        }
+        return "lexical:$var_name";
+    }
+
     # Create Store node (variable assignment)
     method build_store_node($var_name, $value_node, $control = undef) {
-        # SSA-style variable binding: just define variable to point to value node
-        # No Store node needed for lexically scoped variables - they're pure SSA values
-        $scope->define($var_name, $value_node->id);
+        # Store variable using lexical: namespace in context
+        # Inside loops, use loop depth in label: lexical:loop_0:$var
+        # Store the IR node object directly, not the node ID
+        my $label = $self->make_variable_label($var_name);
+        $context = Chalk::IR::Context->extend_context($context, $label, $value_node);
+
+        # Track this variable as modified if we're in a loop
+        if ($loop_depth > 0 && scalar($loop_modified_vars->@*) > 0) {
+            my $current_loop_vars = $loop_modified_vars->[-1];
+            $current_loop_vars->{$var_name} = 1;
+        }
+
         return $value_node;
     }
 
     # Load node (variable read)
     method build_load_node($var_name) {
-        # SSA-style variable lookup: just return the node the variable points to
-        # No Load node needed for lexically scoped variables - direct data flow
-        my $node_id = $scope->lookup($var_name);
-        return undef unless $node_id;
+        # Retrieve variable using lexical: namespace from context
+        # Try loop-scoped label first, then fall back to outer scope
+        # Context now stores IR node objects directly, not node IDs
+        my $node;
 
-        # Return the node from the graph
-        my $node = $graph->nodes->{$node_id};
+        # Try current loop depth first (search from innermost to outermost)
+        if ($loop_depth > 0) {
+            my $depth = $loop_depth - 1;
+            while ($depth >= 0) {
+                my $label = "lexical:loop_${depth}:$var_name";
+                $node = $context->($label);
+                last if defined($node);
+                $depth--;
+            }
+        }
+
+        # Fall back to non-loop lexical scope
+        $node //= $context->("lexical:$var_name");
+
+        # Return the node directly from context (no graph lookup needed)
         return $node;
     }
 
@@ -354,12 +392,14 @@ class Chalk::IR::Builder {
         return $post_dec;
     }
 
+    # OLD: This will be removed - use build_scalar_ref_node instead
     method build_reference_node($operand_node) {
         my $node_id = $self->next_node_id();
         my $reference = Chalk::IR::Node::Reference->new(
             id            => $node_id,
-            inputs        => [$current_control, $operand_node->id],
-            operand_id    => $operand_node->id,
+            inputs        => [$current_control],
+            target_context => $context,  # Current context
+            target_label   => 'UNKNOWN',  # This is deprecated
         );
         $graph->add_node($reference);
         return $reference;
@@ -424,7 +464,7 @@ class Chalk::IR::Builder {
         # Loop phi starts with control and initial value
         # Loop value added later (lazy phi pattern)
         my @inputs = ($loop_node->id, $initial_value);
-        push @inputs, $loop_value if defined $loop_value;
+        push(@inputs, $loop_value) if defined($loop_value);
 
         my $node_id = $self->next_node_id();
         my $phi = Chalk::IR::Node::Phi->new(
@@ -452,56 +492,69 @@ class Chalk::IR::Builder {
         return $call;
     }
 
-    # Loop-carried dependency tracking methods
+    # Loop depth tracking methods
     method begin_loop_tracking() {
-        # Start tracking loop-carried dependencies
-        $loop_entry_scope = $scope->snapshot_bindings();
-        $loop_tracking_active = 1;
+        # Increment loop depth when entering a loop
+        $loop_depth++;
+        # Push a new set to track modified variables at this loop depth
+        push $loop_modified_vars->@*, {};
         return;
     }
 
     method end_loop_tracking() {
-        # End tracking and clean up
-        $loop_entry_scope = undef;
-        $loop_tracking_active = 0;
+        # Decrement loop depth when exiting a loop
+        if ($loop_depth > 0) {
+            $loop_depth--;
+            # Pop the modified variables set for this loop
+            pop $loop_modified_vars->@* if scalar($loop_modified_vars->@*) > 0;
+        }
         return;
     }
 
     method is_tracking_loop() {
-        return $loop_tracking_active;
+        return $loop_depth > 0;
     }
 
-    method loop_entry_scope() {
-        return $loop_entry_scope;
+    method current_loop_depth() {
+        return $loop_depth;
     }
 
     method generate_loop_phi_nodes($loop_node) {
-        # Generate phi nodes for all variables modified within the loop
-        return {} unless $loop_tracking_active;
-        return {} unless defined $loop_entry_scope;
+        # Generate phi nodes for variables modified within the loop
+        # With context+labels approach, phi nodes are created for variables
+        # that exist both as 'lexical:$var' (pre-loop) and 'lexical:loop_N:$var' (in-loop)
 
-        # Capture current (loop-end) values before creating phis
-        my $loop_end_scope = $scope->snapshot_bindings();
+        my %phi_nodes;
 
-        # Find which variables were modified in the loop
-        my @modified_vars = $scope->find_modified_variables($loop_entry_scope);
+        # If we're not tracking a loop or have no modified vars, return empty
+        return \%phi_nodes unless scalar($loop_modified_vars->@*) > 0;
 
-        # Generate a phi node for each modified variable
-        my %phis = ();
-        for my $var (@modified_vars) {
-            my $initial_value = $loop_entry_scope->{$var};
-            my $loop_value = $loop_end_scope->{$var};
+        # Get the current loop's modified variables
+        my $modified_vars = $loop_modified_vars->[-1];
 
-            # Create phi with initial value; backedge added later
-            my $phi = $self->build_loop_phi_node($loop_node, $initial_value, $loop_value);
-            $phis{$var} = $phi;
+        # For each modified variable, create a phi node
+        for my $var_name (keys($modified_vars->%*)) {
+            # Get pre-loop value (lexical:$var)
+            my $pre_loop_label = "lexical:$var_name";
+            my $pre_loop_value = $context->($pre_loop_label);
 
-            # Update scope to use phi node for this variable
-            # This ensures uses after the loop see the phi
-            $scope->define($var, $phi->id);
+            # Get loop-modified value (lexical:loop_N:$var where N = current depth - 1)
+            my $loop_label = "lexical:loop_" . ($loop_depth - 1) . ":$var_name";
+            my $loop_value = $context->($loop_label);
+
+            # Only create phi if both values exist
+            if (defined($pre_loop_value) && defined($loop_value)) {
+                # Build phi node with: control (loop), initial value, loop value
+                my $phi = $self->build_loop_phi_node(
+                    $loop_node,
+                    (ref($pre_loop_value) ? $pre_loop_value->id : $pre_loop_value),
+                    (ref($loop_value) ? $loop_value->id : $loop_value)
+                );
+                $phi_nodes{$var_name} = $phi;
+            }
         }
 
-        return \%phis;
+        return \%phi_nodes;
     }
 
     # Class and object support nodes (Issue #98 Phase 1)
@@ -532,7 +585,7 @@ class Chalk::IR::Builder {
         # Build field references from hash
         for my $field_name (sort( keys( $field_values_hash->%* ) )) {
             my $value_node = $field_values_hash->{$field_name};
-            push @input_nodes, $value_node->id;
+            push(@input_nodes, $value_node->id);
             $field_value_refs{$field_name} = {
                 op => 'NodeRef',
                 node_id => $value_node->id
@@ -626,40 +679,27 @@ class Chalk::IR::Builder {
     }
 
     method build_array_get_node($array_node, $index_node) {
-        # Create ArrayGet node for accessing array element by index
-        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
-        my $index_ref = { op => 'NodeRef', node_id => $index_node->id };
-        my $attributes = {
-            array => $array_ref,
-            index => $index_ref
-        };
+        # Create ArrayGet node for accessing array element by index using context lookup
         my $node_id = $self->next_node_id();
-        my $array_get = Chalk::IR::Node->new(
+        my $array_get = Chalk::IR::Node::ArrayGet->new(
             id => $node_id,
-            op => 'ArrayGet',
             inputs => [$current_control, $array_node->id, $index_node->id],
-            attributes => $attributes,
+            array_id => $array_node->id,
+            index_id => $index_node->id,
         );
         $graph->add_node($array_get);
         return $array_get;
     }
 
     method build_array_set_node($array_node, $index_node, $value_node) {
-        # Create ArraySet node for setting array element by index
-        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
-        my $index_ref = { op => 'NodeRef', node_id => $index_node->id };
-        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
-        my $attributes = {
-            array => $array_ref,
-            index => $index_ref,
-            value => $value_ref
-        };
+        # Create ArraySet node for setting array element with context extension (immutable)
         my $node_id = $self->next_node_id();
-        my $array_set = Chalk::IR::Node->new(
+        my $array_set = Chalk::IR::Node::ArraySet->new(
             id => $node_id,
-            op => 'ArraySet',
             inputs => [$current_control, $array_node->id, $index_node->id, $value_node->id],
-            attributes => $attributes,
+            array_id => $array_node->id,
+            index_id => $index_node->id,
+            value_id => $value_node->id,
         );
         $graph->add_node($array_set);
         return $array_set;
@@ -697,40 +737,27 @@ class Chalk::IR::Builder {
     }
 
     method build_hash_set_node($hash_node, $key_node, $value_node) {
-        # Create HashSet node for setting a hash key/value pair
-        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
-        my $key_ref = { op => 'NodeRef', node_id => $key_node->id };
-        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
-        my $attributes = {
-            hash => $hash_ref,
-            key => $key_ref,
-            value => $value_ref
-        };
+        # Create HashSet node for setting hash value with context extension (immutable)
         my $node_id = $self->next_node_id();
-        my $hash_set = Chalk::IR::Node->new(
+        my $hash_set = Chalk::IR::Node::HashSet->new(
             id => $node_id,
-            op => 'HashSet',
             inputs => [$current_control, $hash_node->id, $key_node->id, $value_node->id],
-            attributes => $attributes,
+            hash_id => $hash_node->id,
+            key_id => $key_node->id,
+            value_id => $value_node->id,
         );
         $graph->add_node($hash_set);
         return $hash_set;
     }
 
     method build_hash_get_node($hash_node, $key_node) {
-        # Create HashGet node for accessing hash value by key
-        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
-        my $key_ref = { op => 'NodeRef', node_id => $key_node->id };
-        my $attributes = {
-            hash => $hash_ref,
-            key => $key_ref
-        };
+        # Create HashGet node for accessing hash value by key using context lookup
         my $node_id = $self->next_node_id();
-        my $hash_get = Chalk::IR::Node->new(
+        my $hash_get = Chalk::IR::Node::HashGet->new(
             id => $node_id,
-            op => 'HashGet',
             inputs => [$current_control, $hash_node->id, $key_node->id],
-            attributes => $attributes,
+            hash_id => $hash_node->id,
+            key_id => $key_node->id,
         );
         $graph->add_node($hash_get);
         return $hash_get;
@@ -884,6 +911,125 @@ class Chalk::IR::Builder {
         );
         $graph->add_node($use_stmt);
         return $use_stmt;
+    }
+
+    # Reference operations (Issue #130 Phase 4)
+
+    # Create reference to a scalar variable: \$x
+    method build_scalar_ref_node($var_name) {
+        my $label = "lexical:$var_name";
+        # Look up the target node (might be object or ID)
+        my $target_node_or_id = $context->($label);
+        die "Cannot create reference to undefined variable $var_name" unless defined($target_node_or_id);
+
+        # Get the node ID for the dependency
+        my $target_node_id = ref($target_node_or_id) ? $target_node_or_id->id : $target_node_or_id;
+
+        my $node_id = $self->next_node_id();
+        my $reference = Chalk::IR::Node::Reference->new(
+            id             => $node_id,
+            inputs         => [$current_control, $target_node_id],  # Add target as dependency
+            target_context => $context,
+            target_label   => $label,
+        );
+        $graph->add_node($reference);
+        return $reference;
+    }
+
+    # Create reference to array element: \$arr[1]
+    method build_element_ref_node($collection_name, $index_node) {
+        # Get the collection from context (might be object or ID)
+        my $collection_label = "lexical:$collection_name";
+        my $collection_node_or_id = $context->($collection_label);
+
+        # Get the collection node
+        my $collection_node;
+        if (ref($collection_node_or_id)) {
+            $collection_node = $collection_node_or_id;
+        } else {
+            $collection_node = $graph->get_node($collection_node_or_id);
+        }
+
+        # Get the array context from the collection node
+        my $array_ctx = $collection_node->array_context;
+
+        # Get the index value - need to evaluate it
+        # For now, assume it's a constant node
+        my $index_val = $index_node->value;
+
+        # Create the reference pointing to the array context with index: label
+        my $label = Chalk::IR::Context->make_index_label($index_val);
+        my $node_id = $self->next_node_id();
+        my $reference = Chalk::IR::Node::Reference->new(
+            id             => $node_id,
+            inputs         => [$current_control, $collection_node->id, $index_node->id],
+            target_context => $array_ctx,
+            target_label   => $label,
+        );
+        $graph->add_node($reference);
+        return $reference;
+    }
+
+    # Dereference a scalar reference: $$ref
+    method build_scalar_deref_node($ref_var_name) {
+        # Get the reference from context (might be object or ID)
+        my $ref_label = "lexical:$ref_var_name";
+        my $ref_node_or_id = $context->($ref_label);
+
+        # Get the node ID
+        my $ref_id = ref($ref_node_or_id) ? $ref_node_or_id->id : $ref_node_or_id;
+
+        # Create ScalarDeref node
+        my $node_id = $self->next_node_id();
+        my $deref = Chalk::IR::Node::ScalarDeref->new(
+            id      => $node_id,
+            inputs  => [$current_control, $ref_id],
+            ref_id  => $ref_id,
+        );
+        $graph->add_node($deref);
+        return $deref;
+    }
+
+    # Read variable from context: helper for tests
+    method build_variable_read_node($var_name) {
+        my $label = "lexical:$var_name";
+        my $node_id = $self->next_node_id();
+        my $var_read = Chalk::IR::Node::VariableRead->new(
+            id        => $node_id,
+            inputs    => [$current_control],
+            var_label => $label,
+        );
+        $graph->add_node($var_read);
+        return $var_read;
+    }
+
+    # Assign through a dereferenced reference: $$ref = value
+    method build_scalar_deref_assign_node($ref_var_name, $value_node) {
+        # Get the reference from context
+        my $ref_label = "lexical:$ref_var_name";
+        my $ref_node_or_id = $context->($ref_label);
+
+        # Might be node object or node ID depending on when it was stored
+        my $ref_node;
+        if (ref($ref_node_or_id)) {
+            $ref_node = $ref_node_or_id;
+        } else {
+            $ref_node = $graph->get_node($ref_node_or_id);
+        }
+
+        # Get the target label from the reference
+        my $target_label = $ref_node->target_label;
+
+        # Extend the BUILDER's current context with the new value (node object, not ID)
+        # This updates the variable that the reference points to
+        $context = Chalk::IR::Context->extend_context(
+            $context,
+            $target_label,
+            $value_node
+        );
+
+        # Return the value node for chaining
+        return $value_node;
     }
 
 }

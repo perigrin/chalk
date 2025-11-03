@@ -4,29 +4,35 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
+use Chalk::IR::Context;
+
 class Chalk::IR::Interpreter {
     field $graph :param :reader;
+    field $context :reader;
+
+    ADJUST {
+        # Initialize context as empty closure
+        $context = Chalk::IR::Context->empty_context();
+    }
 
     method execute() {
         # 1. Linearize graph to get execution order
         my @schedule = $graph->linearize();
 
-        # 2. Initialize value map and heap
-        my %values;
-        my %heap;
-
-        # 3. Execute nodes in order
+        # 2. Execute nodes in order using context threading
         for my $node (@schedule) {
             my $node_id = $node->id;
             my $op = $node->op;
 
             # Dispatch based on node execute() signature
             # Different node types take different arguments
-            my %heap_ops = ( Store => 1, Load => 1 );
             my %value_ops = (
                 Add => 1, Subtract => 1, Multiply => 1, Divide => 1,
                 GT => 1, LT => 1, EQ => 1, NE => 1, GE => 1, LE => 1,
-                Negate => 1, Not => 1, If => 1, Proj => 1, Region => 1, Phi => 1, Return => 1, Loop => 1, Reference => 1
+                Negate => 1, Not => 1, If => 1, Proj => 1, Region => 1, Phi => 1, Return => 1, Loop => 1, Reference => 1,
+                ArrayValue => 1, HashValue => 1,
+                ArrayGet => 1, ArraySet => 1, HashGet => 1, HashSet => 1,
+                ScalarDeref => 1, VariableRead => 1
             );
             my %simple_ops = ( Start => 1, Constant => 1 );
 
@@ -34,20 +40,22 @@ class Chalk::IR::Interpreter {
             my $result;
             if ($simple_ops{$op}) {
                 $result = $node->execute();
-            } elsif ($heap_ops{$op}) {
-                $result = $node->execute(\%values, \%heap);
             } elsif ($value_ops{$op}) {
-                $result = $node->execute(\%values);
+                $result = $node->execute($context);
             } else {
                 die "Unknown op type: $op";
             }
 
-            $values{$node_id} = $result;
+            # Store result in context with node: namespace
+            $context = Chalk::IR::Context->extend_context($context, "node:$node_id", $result);
+
+            # Also store the node object itself in graph: namespace for ArraySet/HashSet
+            $context = Chalk::IR::Context->extend_context($context, "graph:$node_id", $node);
         }
 
-        # 4. Find Return node and extract its value
+        # 3. Find Return node and extract its value from context
         my $return_node = $self->find_return();
-        return $values{$return_node->id};
+        return $context->("node:" . $return_node->id);
     }
 
     method find_return() {
