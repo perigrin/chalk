@@ -533,7 +533,7 @@ class Chalk::IR::Builder {
         my $modified_vars = $loop_modified_vars->[-1];
 
         # For each modified variable, create a phi node
-        for my $var_name (keys(%$modified_vars)) {
+        for my $var_name (keys($modified_vars->%*)) {
             # Get pre-loop value (lexical:$var)
             my $pre_loop_label = "lexical:$var_name";
             my $pre_loop_value = $context->($pre_loop_label);
