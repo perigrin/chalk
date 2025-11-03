@@ -14,7 +14,7 @@ use Chalk;
 if ( !caller ) {
     # Parse command line options
     my $grammar_module = "Perl";  # default grammar module
-    my $semiring_type = "Boolean";   # default semiring (matches Parser default)
+    my $semiring_type = "IR";        # default: generate IR (issue #112)
     my $syntax_check_mode = 0;    # -c flag for syntax checking
     my $compile_module_mode = 0;  # --compile-module flag
     my $module_to_compile;        # module name for compilation
@@ -365,9 +365,13 @@ if ( !caller ) {
     chomp($input) if defined($input);
 
     if ( defined($input) && length($input) > 0 ) {
-        # Create semiring based on type
+        # Create semiring and parser based on mode
         my $semiring;
-        if ($semiring_type eq "Boolean") {
+        my $builder;  # IR Builder (only used when generating IR)
+
+        # Check if we're in syntax-only mode (Boolean semiring)
+        if ($syntax_check_mode || $semiring_type eq "Boolean") {
+            # Syntax check only - use Boolean semiring (no IR generation)
             require Chalk::Semiring::Boolean;
             $semiring = Chalk::Semiring::Boolean->new();
         } elsif ($semiring_type eq "Position") {
@@ -377,7 +381,29 @@ if ( !caller ) {
             require Chalk::Semiring::SPPF;
             $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
         } else {
-            die("Error: Unknown semiring type '$semiring_type'. Use 'Boolean', 'Position', or 'SPPF'\n");
+            # Default: Generate IR using Composite(SPPF, Semantic) semiring
+            # This is the new default behavior (issue #112)
+            require Chalk::IR::Builder;
+            require Chalk::Semiring::SPPF;
+            require Chalk::Semiring::Semantic;
+            require Chalk::Semiring::Composite;
+
+            # Create IR Builder BEFORE parsing
+            $builder = Chalk::IR::Builder->new();
+
+            # Create SPPF semiring for parse forest
+            my $sppf_sr = Chalk::Semiring::SPPF->new();
+
+            # Create Semantic semiring with IR builder in environment
+            my $semantic_sr = Chalk::Semiring::Semantic->new(
+                grammar => $chalk_grammar,
+                env => { ir_builder => $builder }
+            );
+
+            # Composite semiring combines SPPF and Semantic
+            $semiring = Chalk::Semiring::Composite->new(
+                semirings => [$sppf_sr, $semantic_sr]
+            );
         }
 
         # Create parser with grammar and semiring
@@ -397,6 +423,12 @@ if ( !caller ) {
                 print("syntax OK\n") unless @ARGV;
             } else {
                 print("Parse successful: $result\n");
+                # IR graph is available in $builder->graph if IR was generated
+                if ($builder) {
+                    my $graph = $builder->graph;
+                    my $node_count = $graph->node_count;
+                    print("Generated IR with $node_count nodes\n");
+                }
             }
             exit 0;  # Success - like perl -c
         }
