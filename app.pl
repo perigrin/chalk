@@ -14,7 +14,8 @@ use Chalk;
 if ( !caller ) {
     # Parse command line options
     my $grammar_module = "Perl";  # default grammar module
-    my $semiring_type = "IR";        # default: generate IR (issue #112)
+    my $semiring_type;            # explicit semiring type (Boolean, Position, SPPF)
+    my $generate_ir = 1;          # default: generate IR (issue #112)
     my $syntax_check_mode = 0;    # -c flag for syntax checking
     my $compile_module_mode = 0;  # --compile-module flag
     my $module_to_compile;        # module name for compilation
@@ -31,7 +32,7 @@ if ( !caller ) {
             $i += 2; # skip both --semiring and the semiring type
         } elsif ($ARGV[$i] eq '-c') {
             $syntax_check_mode = 1;
-            $semiring_type = "Boolean";  # -c implies Boolean semiring
+            $generate_ir = 0;         # -c disables IR generation
             $i++;
         } elsif ($ARGV[$i] eq '--compile-module' && $i < $#ARGV) {
             $compile_module_mode = 1;
@@ -196,18 +197,22 @@ if ( !caller ) {
         my $semiring;
         my $builder;  # IR Builder (only used when generating IR)
 
-        # Check if we're in syntax-only mode (Boolean semiring)
-        if ($syntax_check_mode || $semiring_type eq "Boolean") {
-            # Syntax check only - use Boolean semiring (no IR generation)
-            require Chalk::Semiring::Boolean;
-            $semiring = Chalk::Semiring::Boolean->new();
-        } elsif ($semiring_type eq "Position") {
-            require Chalk::Semiring::Position;
-            $semiring = Chalk::Semiring::Position->new();
-        } elsif ($semiring_type eq "SPPF") {
-            require Chalk::Semiring::SPPF;
-            $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
-        } else {
+        # Choose semiring based on explicit type or IR generation mode
+        if ($semiring_type) {
+            # Explicit semiring type requested via --semiring flag
+            if ($semiring_type eq "Boolean") {
+                require Chalk::Semiring::Boolean;
+                $semiring = Chalk::Semiring::Boolean->new();
+            } elsif ($semiring_type eq "Position") {
+                require Chalk::Semiring::Position;
+                $semiring = Chalk::Semiring::Position->new();
+            } elsif ($semiring_type eq "SPPF") {
+                require Chalk::Semiring::SPPF;
+                $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
+            } else {
+                die("Error: Unknown semiring type '$semiring_type'. Use 'Boolean', 'Position', or 'SPPF'\n");
+            }
+        } elsif ($generate_ir) {
             # Default: Generate IR using Composite(SPPF, Semantic) semiring
             # This is the new default behavior (issue #112)
             require Chalk::IR::Builder;
@@ -231,6 +236,10 @@ if ( !caller ) {
             $semiring = Chalk::Semiring::Composite->new(
                 semirings => [$sppf_sr, $semantic_sr]
             );
+        } else {
+            # No IR generation (e.g., -c flag) - use Boolean semiring for syntax check
+            require Chalk::Semiring::Boolean;
+            $semiring = Chalk::Semiring::Boolean->new();
         }
 
         # Create parser with grammar and semiring
