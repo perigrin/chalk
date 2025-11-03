@@ -26,6 +26,12 @@ use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Reference;
+use Chalk::IR::Node::ArrayValue;
+use Chalk::IR::Node::HashValue;
+use Chalk::IR::Node::ArrayGet;
+use Chalk::IR::Node::ArraySet;
+use Chalk::IR::Node::HashGet;
+use Chalk::IR::Node::HashSet;
 
 class Chalk::IR::Node {
     field $id           :param :reader;
@@ -70,9 +76,15 @@ class Chalk::IR::Node {
             Region   => 'Chalk::IR::Node::Region',
             Phi      => 'Chalk::IR::Node::Phi',
             Proj     => 'Chalk::IR::Node::Proj',
-            Return   => 'Chalk::IR::Node::Return',
-            Loop      => 'Chalk::IR::Node::Loop',
-            Reference => 'Chalk::IR::Node::Reference',
+            Return     => 'Chalk::IR::Node::Return',
+            Loop       => 'Chalk::IR::Node::Loop',
+            Reference  => 'Chalk::IR::Node::Reference',
+            ArrayValue => 'Chalk::IR::Node::ArrayValue',
+            HashValue  => 'Chalk::IR::Node::HashValue',
+            ArrayGet   => 'Chalk::IR::Node::ArrayGet',
+            ArraySet   => 'Chalk::IR::Node::ArraySet',
+            HashGet    => 'Chalk::IR::Node::HashGet',
+            HashSet    => 'Chalk::IR::Node::HashSet',
         );
 
         my $node_class = $op_to_class{$op};

@@ -29,7 +29,9 @@ class Chalk::IR::Interpreter {
             my %value_ops = (
                 Add => 1, Subtract => 1, Multiply => 1, Divide => 1,
                 GT => 1, LT => 1, EQ => 1, NE => 1, GE => 1, LE => 1,
-                Negate => 1, Not => 1, If => 1, Proj => 1, Region => 1, Phi => 1, Return => 1, Loop => 1, Reference => 1
+                Negate => 1, Not => 1, If => 1, Proj => 1, Region => 1, Phi => 1, Return => 1, Loop => 1, Reference => 1,
+                ArrayValue => 1, HashValue => 1,
+                ArrayGet => 1, ArraySet => 1, HashGet => 1, HashSet => 1
             );
             my %simple_ops = ( Start => 1, Constant => 1 );
 

@@ -2,6 +2,7 @@
 # ABOUTME: Validates IR generation for array creation, indexing, push, and length operations
 
 use v5.42;
+use lib 'lib';
 use Test::More;
 use Test::Deep;
 

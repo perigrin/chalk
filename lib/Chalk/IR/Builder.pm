@@ -629,40 +629,27 @@ class Chalk::IR::Builder {
     }
 
     method build_array_get_node($array_node, $index_node) {
-        # Create ArrayGet node for accessing array element by index
-        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
-        my $index_ref = { op => 'NodeRef', node_id => $index_node->id };
-        my $attributes = {
-            array => $array_ref,
-            index => $index_ref
-        };
+        # Create ArrayGet node for accessing array element by index using context lookup
         my $node_id = $self->next_node_id();
-        my $array_get = Chalk::IR::Node->new(
+        my $array_get = Chalk::IR::Node::ArrayGet->new(
             id => $node_id,
-            op => 'ArrayGet',
             inputs => [$current_control, $array_node->id, $index_node->id],
-            attributes => $attributes,
+            array_id => $array_node->id,
+            index_id => $index_node->id,
         );
         $graph->add_node($array_get);
         return $array_get;
     }
 
     method build_array_set_node($array_node, $index_node, $value_node) {
-        # Create ArraySet node for setting array element by index
-        my $array_ref = { op => 'NodeRef', node_id => $array_node->id };
-        my $index_ref = { op => 'NodeRef', node_id => $index_node->id };
-        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
-        my $attributes = {
-            array => $array_ref,
-            index => $index_ref,
-            value => $value_ref
-        };
+        # Create ArraySet node for setting array element with context extension (immutable)
         my $node_id = $self->next_node_id();
-        my $array_set = Chalk::IR::Node->new(
+        my $array_set = Chalk::IR::Node::ArraySet->new(
             id => $node_id,
-            op => 'ArraySet',
             inputs => [$current_control, $array_node->id, $index_node->id, $value_node->id],
-            attributes => $attributes,
+            array_id => $array_node->id,
+            index_id => $index_node->id,
+            value_id => $value_node->id,
         );
         $graph->add_node($array_set);
         return $array_set;
@@ -700,40 +687,27 @@ class Chalk::IR::Builder {
     }
 
     method build_hash_set_node($hash_node, $key_node, $value_node) {
-        # Create HashSet node for setting a hash key/value pair
-        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
-        my $key_ref = { op => 'NodeRef', node_id => $key_node->id };
-        my $value_ref = { op => 'NodeRef', node_id => $value_node->id };
-        my $attributes = {
-            hash => $hash_ref,
-            key => $key_ref,
-            value => $value_ref
-        };
+        # Create HashSet node for setting hash value with context extension (immutable)
         my $node_id = $self->next_node_id();
-        my $hash_set = Chalk::IR::Node->new(
+        my $hash_set = Chalk::IR::Node::HashSet->new(
             id => $node_id,
-            op => 'HashSet',
             inputs => [$current_control, $hash_node->id, $key_node->id, $value_node->id],
-            attributes => $attributes,
+            hash_id => $hash_node->id,
+            key_id => $key_node->id,
+            value_id => $value_node->id,
         );
         $graph->add_node($hash_set);
         return $hash_set;
     }
 
     method build_hash_get_node($hash_node, $key_node) {
-        # Create HashGet node for accessing hash value by key
-        my $hash_ref = { op => 'NodeRef', node_id => $hash_node->id };
-        my $key_ref = { op => 'NodeRef', node_id => $key_node->id };
-        my $attributes = {
-            hash => $hash_ref,
-            key => $key_ref
-        };
+        # Create HashGet node for accessing hash value by key using context lookup
         my $node_id = $self->next_node_id();
-        my $hash_get = Chalk::IR::Node->new(
+        my $hash_get = Chalk::IR::Node::HashGet->new(
             id => $node_id,
-            op => 'HashGet',
             inputs => [$current_control, $hash_node->id, $key_node->id],
-            attributes => $attributes,
+            hash_id => $hash_node->id,
+            key_id => $key_node->id,
         );
         $graph->add_node($hash_get);
         return $hash_get;

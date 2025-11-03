@@ -24,4 +24,14 @@ class Chalk::IR::Context {
     sub make_label($class, $namespace, $name) {
         return "${namespace}:${name}";
     }
+
+    # Creates index label for array elements (e.g., "index:0", "index:1")
+    sub make_index_label($class, $index) {
+        return "index:${index}";
+    }
+
+    # Creates key label for hash elements (e.g., "key:foo", "key:bar")
+    sub make_key_label($class, $key) {
+        return "key:${key}";
+    }
 }
