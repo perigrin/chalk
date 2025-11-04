@@ -273,16 +273,15 @@ Comparison -> Comparison WS_OPT %STRING_COMPARE_OP% WS_OPT RegexMatch
 Comparison -> Comparison WS_OPT 'isa' WS_OPT QualifiedIdentifier
 
 # Regex match operators (left-associative)
-RegexMatch -> Range
-RegexMatch -> RegexMatch WS_OPT %REGEX_MATCH_OP% WS_OPT Range
+RegexMatch -> StringOp
+RegexMatch -> RegexMatch WS_OPT %REGEX_MATCH_OP% WS_OPT StringOp
 
-# Range operator (left-associative)
-Range -> Concatenation
-Range -> Range WS_OPT '..' WS_OPT Concatenation
-
-# String concatenation (left-associative)
-Concatenation -> ArithmeticOp
-Concatenation -> Concatenation WS_OPT '.' WS_OPT ArithmeticOp
+# String operators (left-associative)
+# Phase 4: Flattened from Range + Concatenation
+# Precedence handled by Precedence semiring
+StringOp -> ArithmeticOp
+StringOp -> StringOp WS_OPT '.' WS_OPT ArithmeticOp
+StringOp -> StringOp WS_OPT '..' WS_OPT ArithmeticOp
 
 # Arithmetic operators (left-associative)
 # Phase 4: Flattened from Additive + Multiplicative
