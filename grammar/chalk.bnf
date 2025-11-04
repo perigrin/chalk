@@ -338,6 +338,7 @@ Atom -> '...'  # Ellipsis / yada-yada operator
 # Function and method calls
 FunctionCall -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
 FunctionCall -> Identifier '(' WS_OPT ')'  # Function call with no args
+FunctionCall -> Identifier WS Expression  # Function call without parens: foo 1, 2
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
 
@@ -346,7 +347,6 @@ FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class meth
 # builtins (exists, defined, length, blessed, etc.) and generate specialized
 # IR nodes for better optimization, while falling back to FunctionCall for unknown cases.
 BuiltinOp -> FunctionCall
-BuiltinOp -> Identifier WS Expression  # Builtin without parens: return 1, defined $_
 
 # List operations (map, grep, all, any)
 ListOp -> 'map' WS_OPT Block WS_OPT Expression
