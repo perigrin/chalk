@@ -262,19 +262,18 @@ LogicalOr -> LogicalOr WS_OPT 'or' WS_OPT LogicalAnd
 LogicalOr -> LogicalOr WS_OPT '//' WS_OPT LogicalAnd
 
 # Logical AND operators (left-associative)
-LogicalAnd -> Comparison
-LogicalAnd -> LogicalAnd WS_OPT '&&' WS_OPT Comparison
-LogicalAnd -> LogicalAnd WS_OPT 'and' WS_OPT Comparison
+LogicalAnd -> ComparisonOp
+LogicalAnd -> LogicalAnd WS_OPT '&&' WS_OPT ComparisonOp
+LogicalAnd -> LogicalAnd WS_OPT 'and' WS_OPT ComparisonOp
 
-# Comparison operators (left-associative)
-Comparison -> RegexMatch
-Comparison -> Comparison WS_OPT %NUM_COMPARE_OP% WS_OPT RegexMatch
-Comparison -> Comparison WS_OPT %STRING_COMPARE_OP% WS_OPT RegexMatch
-Comparison -> Comparison WS_OPT 'isa' WS_OPT QualifiedIdentifier
-
-# Regex match operators (left-associative)
-RegexMatch -> StringOp
-RegexMatch -> RegexMatch WS_OPT %REGEX_MATCH_OP% WS_OPT StringOp
+# Comparison and regex match operators (left-associative)
+# Phase 4: Flattened from Comparison + RegexMatch
+# Precedence handled by Precedence semiring
+ComparisonOp -> StringOp
+ComparisonOp -> ComparisonOp WS_OPT %NUM_COMPARE_OP% WS_OPT StringOp
+ComparisonOp -> ComparisonOp WS_OPT %STRING_COMPARE_OP% WS_OPT StringOp
+ComparisonOp -> ComparisonOp WS_OPT 'isa' WS_OPT QualifiedIdentifier
+ComparisonOp -> ComparisonOp WS_OPT %REGEX_MATCH_OP% WS_OPT StringOp
 
 # String operators (left-associative)
 # Phase 4: Flattened from Range + Concatenation
