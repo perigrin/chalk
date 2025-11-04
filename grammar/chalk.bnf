@@ -252,19 +252,17 @@ Assignment -> Ternary WS_OPT '=' WS_OPT Assignment
 Assignment -> Ternary WS_OPT %ASSIGN_OP% WS_OPT Assignment
 
 # Ternary operator (right-associative)
-Ternary -> LogicalOr
-Ternary -> LogicalOr WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Ternary
+Ternary -> LogicalOp
+Ternary -> LogicalOp WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Ternary
 
-# Logical OR operators (left-associative)
-LogicalOr -> LogicalAnd
-LogicalOr -> LogicalOr WS_OPT '||' WS_OPT LogicalAnd
-LogicalOr -> LogicalOr WS_OPT 'or' WS_OPT LogicalAnd
-LogicalOr -> LogicalOr WS_OPT '//' WS_OPT LogicalAnd
-
-# Logical AND operators (left-associative)
-LogicalAnd -> ComparisonOp
-LogicalAnd -> LogicalAnd WS_OPT '&&' WS_OPT ComparisonOp
-LogicalAnd -> LogicalAnd WS_OPT 'and' WS_OPT ComparisonOp
+# Logical operators (left-associative)
+# Phase 4: Flattened from LogicalOr + LogicalAnd
+LogicalOp -> ComparisonOp
+LogicalOp -> LogicalOp WS_OPT '||' WS_OPT ComparisonOp
+LogicalOp -> LogicalOp WS_OPT 'or' WS_OPT ComparisonOp
+LogicalOp -> LogicalOp WS_OPT '//' WS_OPT ComparisonOp
+LogicalOp -> LogicalOp WS_OPT '&&' WS_OPT ComparisonOp
+LogicalOp -> LogicalOp WS_OPT 'and' WS_OPT ComparisonOp
 
 # Comparison and regex match operators (left-associative)
 # Phase 4: Flattened from Comparison + RegexMatch
