@@ -138,7 +138,37 @@ subtest 'Mixed precedence validation' => sub {
     ok $result, 'n+n*n parses successfully (correct precedence)';
 };
 
-subtest 'Precedence pruning - invalid nesting' => sub {
+subtest 'Extract operator from binary operation rule' => sub {
+    my @precedence_table = (
+        { assoc => 'left', ops => ['+', '-'] },
+        { assoc => 'left', ops => ['*', '/'] },
+    );
+
+    my $semiring = Chalk::Semiring::Precedence->new(
+        precedence_table => \@precedence_table
+    );
+
+    # Create a grammar rule for: E -> E + E
+    my $grammar = Test::Chalk::Grammar->build_grammar(
+        rules => [
+            [ 'E', [qw(E + E)] ],
+            [ 'E', ['n'] ],
+        ]
+    );
+
+    my $plus_rule = ($grammar->rules_for('E'))[0];
+
+    # When we create an element from a binary operation rule,
+    # it should extract and store the operator
+    my $elem = $semiring->init_element_from_rule($plus_rule, 0, 5);
+
+    # The element should identify this as a + operator
+    is $elem->operator, '+', 'Extracts + operator from rule';
+    is $elem->precedence_level, 0, 'Looks up precedence level for +';
+    is $elem->valid, 1, 'Element starts as valid';
+};
+
+subtest 'Multiply validates precedence - left associativity' => sub {
     my @precedence_table = (
         { assoc => 'left', ops => ['+', '-'] },       # Index 0 - High precedence
         { assoc => 'left', ops => ['||'] },           # Index 1 - Low precedence
@@ -148,61 +178,66 @@ subtest 'Precedence pruning - invalid nesting' => sub {
         precedence_table => \@precedence_table
     );
 
-    my $grammar = Test::Chalk::Grammar->build_grammar(
-        rules => [
-            [ 'E', [qw(E + E)] ],
-            [ 'E', [qw(E || E)] ],
-            [ 'E', ['n'] ],
-        ]
+    # Create elements representing operators
+    my $plus_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '+',
+        precedence_level => 0
     );
 
-    my $parser = Chalk::Parser->new(
-        grammar => $grammar,
-        semiring => $semiring
+    my $or_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '||',
+        precedence_level => 1
     );
 
-    # Test: (a || b) + c should be INVALID
-    # Lower precedence (||) cannot nest inside higher precedence (+)
-    # The precedence semiring should return add_id, pruning this parse path
+    # VALID: Higher precedence (+) can be nested inside lower precedence (||)
+    # Pattern: (a + b) || c
+    my $result1 = $or_elem->multiply($plus_elem);
+    is $result1->valid, 1, 'Higher precedence inside lower is valid';
 
-    # Note: Without precedence semiring, this would parse successfully
-    # With precedence semiring, it should fail (or at least not prefer this parse)
-
-    # This test documents the expected behavior
-    # For Phase 2, we're focusing on arithmetic operators
-    # This will be fully testable once we have the implementation
-
-    pass 'Placeholder test for future precedence pruning implementation';
+    # INVALID: Lower precedence (||) cannot be nested inside higher precedence (+)
+    # Pattern: (a || b) + c
+    my $result2 = $plus_elem->multiply($or_elem);
+    is $result2->valid, 0, 'Lower precedence inside higher is invalid';
 };
 
-subtest 'Left associativity - 10 - 5 - 2 = 3' => sub {
+subtest 'Multiply validates precedence - right associativity' => sub {
     my @precedence_table = (
-        { assoc => 'left', ops => ['+', '-'] },
+        { assoc => 'right', ops => ['**'] },          # Index 0 - Highest
+        { assoc => 'left',  ops => ['+'] },           # Index 1 - Lower
     );
 
     my $semiring = Chalk::Semiring::Precedence->new(
         precedence_table => \@precedence_table
     );
 
-    # Left associative: 10 - 5 - 2 should parse as (10 - 5) - 2 = 3
-    # Not as 10 - (5 - 2) = 7
-
-    # This test documents the expected behavior for left associativity
-    ok $semiring, 'Semiring created for left associativity test';
-};
-
-subtest 'Right associativity - 2 ** 3 ** 2 = 512' => sub {
-    my @precedence_table = (
-        { assoc => 'right', ops => ['**'] },
+    # Create elements
+    my $power_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '**',
+        precedence_level => 0
     );
 
-    my $semiring = Chalk::Semiring::Precedence->new(
-        precedence_table => \@precedence_table
+    my $plus_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '+',
+        precedence_level => 1
     );
 
-    # Right associative: 2 ** 3 ** 2 should parse as 2 ** (3 ** 2) = 2 ** 9 = 512
-    # Not as (2 ** 3) ** 2 = 8 ** 2 = 64
+    # VALID: Higher precedence (**) inside lower precedence (+)
+    # Pattern: (a ** b) + c
+    my $result1 = $plus_elem->multiply($power_elem);
+    is $result1->valid, 1, 'Higher precedence inside lower is valid';
 
-    # This test documents the expected behavior for right associativity
-    ok $semiring, 'Semiring created for right associativity test';
+    # INVALID: Lower precedence (+) inside higher precedence (**)
+    # Pattern: (a + b) ** c
+    my $result2 = $power_elem->multiply($plus_elem);
+    is $result2->valid, 0, 'Lower precedence inside higher is invalid';
+
+    # VALID: Same precedence for right-associative operator
+    # Pattern: a ** (b ** c) - right associativity allows this
+    # Note: This test currently just checks basic precedence, not associativity rules
+    my $result3 = $power_elem->multiply($power_elem);
+    is $result3->valid, 1, 'Same precedence is valid (basic check)';
 };

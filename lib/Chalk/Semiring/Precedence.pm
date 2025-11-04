@@ -21,9 +21,27 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     method multiply( $other, $swap = undef ) {
         # Boolean AND for sequence: both must succeed
         # If either is invalid, result is invalid
-        return Chalk::Semiring::PrecedenceElement->new(
-            valid => $valid && $other->valid
-        );
+        return Chalk::Semiring::PrecedenceElement->new(valid => 0) if !$valid || !$other->valid;
+
+        # Precedence validation: check if $other (right operand) has valid precedence
+        # relative to $self (left context/current operator)
+
+        # If either element has no operator info, allow it (non-operator elements)
+        return Chalk::Semiring::PrecedenceElement->new(valid => 1)
+            if !defined($operator) || !defined($other->operator);
+
+        # Both have operators - validate precedence
+        my $self_level = $precedence_level;
+        my $other_level = $other->precedence_level;
+
+        # Rule: Lower precedence (higher index) cannot nest inside higher precedence (lower index)
+        # If $other has lower precedence (higher index), it's invalid
+        if ($other_level > $self_level) {
+            return Chalk::Semiring::PrecedenceElement->new(valid => 0);
+        }
+
+        # Otherwise valid
+        return Chalk::Semiring::PrecedenceElement->new(valid => 1);
     }
 
     method equals( $other, $swap = undef ) {
@@ -68,12 +86,32 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
-        # All rules start as valid (1) - they exist and can be used
-        # Precedence validation happens during multiply()
+        # Extract operator from rule if it's a binary operation
+        # Pattern: E -> E OP E (3 elements in RHS)
+        # Operator is at index 1 (middle position)
+
+        my $rhs = $rule->rhs;
+        my $operator = undef;
+        my $prec_level = undef;
+
+        # Check if this looks like a binary operation rule
+        if ($rhs->@* == 3) {
+            my $candidate = $rhs->[1];  # Middle element
+
+            # Check if this candidate is in our precedence table
+            if (defined($candidate) && !ref($candidate)) {
+                my $op_info = $self->lookup_operator($candidate);
+                if ($op_info) {
+                    $operator = $candidate;
+                    $prec_level = $op_info->{level};
+                }
+            }
+        }
+
         return Chalk::Semiring::PrecedenceElement->new(
             valid => 1,
-            operator => undef,
-            precedence_level => undef
+            operator => $operator,
+            precedence_level => $prec_level
         );
     }
 
