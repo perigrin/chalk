@@ -341,7 +341,10 @@ FunctionCall -> Identifier '(' WS_OPT ')'  # Function call with no args
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
 
-# Built-in operators - delegates to FunctionCall, semantic action can specialize
+# Built-in operators - delegates to FunctionCall with optimization hook
+# This pass-through rule allows the BuiltinOp semantic action to detect known
+# builtins (exists, defined, length, blessed, etc.) and generate specialized
+# IR nodes for better optimization, while falling back to FunctionCall for unknown cases.
 BuiltinOp -> FunctionCall
 
 # List operations (map, grep, all, any)
@@ -429,6 +432,9 @@ Literal -> 'undef'
 EmptyList -> '(' WS_OPT ')'
 
 # Strings - only regular quoted strings
+# Note: Keep SingleQuotedString and DoubleQuotedString separate because they have
+# different optimization characteristics: single-quoted strings are literal,
+# double-quoted strings support interpolation and require runtime processing.
 String -> SingleQuotedString
 String -> DoubleQuotedString
 
