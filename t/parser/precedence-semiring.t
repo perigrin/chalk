@@ -241,3 +241,141 @@ subtest 'Multiply validates precedence - right associativity' => sub {
     my $result3 = $power_elem->multiply($power_elem);
     is $result3->valid, 1, 'Same precedence is valid (basic check)';
 };
+
+subtest 'Phase 5: nonassoc operators cannot chain' => sub {
+    my @precedence_table = (
+        { assoc => 'nonassoc', ops => ['++', '--'] },  # Index 0 - Non-associative
+        { assoc => 'left',     ops => ['+'] },          # Index 1
+    );
+
+    my $semiring = Chalk::Semiring::Precedence->new(
+        precedence_table => \@precedence_table
+    );
+
+    # Create elements
+    my $incr_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '++',
+        precedence_level => 0,
+        associativity => 'nonassoc'
+    );
+
+    my $plus_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '+',
+        precedence_level => 1,
+        associativity => 'left'
+    );
+
+    # INVALID: Cannot chain nonassoc operators
+    # Pattern: (a++) ++ - should be rejected
+    my $result1 = $incr_elem->multiply($incr_elem);
+    is $result1->valid, 0, 'nonassoc operators cannot chain with themselves';
+
+    # VALID: nonassoc can combine with different operators
+    # Pattern: (a++) + b
+    my $result2 = $plus_elem->multiply($incr_elem);
+    is $result2->valid, 1, 'nonassoc can combine with different operators';
+};
+
+subtest 'Phase 5: chained comparisons with directional validation' => sub {
+    my @precedence_table = (
+        { assoc => 'chained', ops => ['<', '<=', '>', '>='] },  # Index 0 - Chained comparisons
+        { assoc => 'left',    ops => ['+'] },                    # Index 1
+    );
+
+    my $semiring = Chalk::Semiring::Precedence->new(
+        precedence_table => \@precedence_table
+    );
+
+    # Create elements for ascending operators
+    my $lt_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '<',
+        precedence_level => 0,
+        associativity => 'chained'
+    );
+
+    my $le_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '<=',
+        precedence_level => 0,
+        associativity => 'chained'
+    );
+
+    # Create elements for descending operators
+    my $gt_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '>',
+        precedence_level => 0,
+        associativity => 'chained'
+    );
+
+    my $ge_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '>=',
+        precedence_level => 0,
+        associativity => 'chained'
+    );
+
+    # VALID: Chaining ascending operators
+    # Pattern: a < (b < c) - same direction
+    my $result1 = $lt_elem->multiply($lt_elem);
+    is $result1->valid, 1, 'chained: ascending < ascending is valid';
+
+    # VALID: Chaining mixed ascending operators
+    # Pattern: a < (b <= c) - both ascending
+    my $result2 = $lt_elem->multiply($le_elem);
+    is $result2->valid, 1, 'chained: ascending < ascending<= is valid';
+
+    # VALID: Chaining descending operators
+    # Pattern: a > (b > c) - same direction
+    my $result3 = $gt_elem->multiply($gt_elem);
+    is $result3->valid, 1, 'chained: descending > descending is valid';
+
+    # INVALID: Mixing ascending and descending
+    # Pattern: a < (b > c) - direction violation
+    my $result4 = $lt_elem->multiply($gt_elem);
+    is $result4->valid, 0, 'chained: ascending < descending is invalid (direction violation)';
+
+    # INVALID: Mixing descending and ascending
+    # Pattern: a > (b < c) - direction violation
+    my $result5 = $gt_elem->multiply($lt_elem);
+    is $result5->valid, 0, 'chained: descending > ascending is invalid (direction violation)';
+};
+
+subtest 'Phase 5: chain/na equality operators' => sub {
+    my @precedence_table = (
+        { assoc => 'chain/na', ops => ['==', '!=', 'eq', 'ne'] },  # Index 0 - Chain or nonassoc
+        { assoc => 'left',     ops => ['+'] },                      # Index 1
+    );
+
+    my $semiring = Chalk::Semiring::Precedence->new(
+        precedence_table => \@precedence_table
+    );
+
+    # Create elements
+    my $eq_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '==',
+        precedence_level => 0,
+        associativity => 'chain/na'
+    );
+
+    my $ne_elem = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '!=',
+        precedence_level => 0,
+        associativity => 'chain/na'
+    );
+
+    # VALID: Equality operators can chain in boolean context
+    # Pattern: a == (b == c) - chained equality
+    my $result1 = $eq_elem->multiply($eq_elem);
+    is $result1->valid, 1, 'chain/na: equality operators can chain';
+
+    # VALID: Can mix equality/inequality
+    # Pattern: a == (b != c)
+    my $result2 = $eq_elem->multiply($ne_elem);
+    is $result2->valid, 1, 'chain/na: can mix == and !=';
+};
