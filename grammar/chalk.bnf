@@ -281,18 +281,17 @@ Range -> Concatenation
 Range -> Range WS_OPT '..' WS_OPT Concatenation
 
 # String concatenation (left-associative)
-Concatenation -> Additive
-Concatenation -> Concatenation WS_OPT '.' WS_OPT Additive
+Concatenation -> ArithmeticOp
+Concatenation -> Concatenation WS_OPT '.' WS_OPT ArithmeticOp
 
-# Additive operators (left-associative)
-Additive -> Multiplicative
-Additive -> Additive WS_OPT '+' WS_OPT Multiplicative
-Additive -> Additive WS_OPT '-' WS_OPT Multiplicative
-
-# Multiplicative operators (left-associative)
-Multiplicative -> Unary
-Multiplicative -> Multiplicative WS_OPT '*' WS_OPT Unary
-Multiplicative -> Multiplicative WS_OPT '/' WS_OPT Unary
+# Arithmetic operators (left-associative)
+# Phase 4: Flattened from Additive + Multiplicative
+# Precedence handled by Precedence semiring
+ArithmeticOp -> Unary
+ArithmeticOp -> ArithmeticOp WS_OPT '+' WS_OPT Unary
+ArithmeticOp -> ArithmeticOp WS_OPT '-' WS_OPT Unary
+ArithmeticOp -> ArithmeticOp WS_OPT '*' WS_OPT Unary
+ArithmeticOp -> ArithmeticOp WS_OPT '/' WS_OPT Unary
 
 # Unary prefix operators (right-associative)
 Unary -> Postfix
