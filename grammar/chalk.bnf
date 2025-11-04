@@ -252,11 +252,15 @@ LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
 
 # Expression entry point - directly references all semantic groupings
 # Atomic values and base cases
-Expression -> Atom
+Expression -> Literal
+Expression -> Variable
+Expression -> Identifier  # Bareword (can be function name, method name, or string in context)
+Expression -> YaddaYadda
 Expression -> FunctionCall
 Expression -> BuiltinOp
 Expression -> ListOp
 Expression -> ReferenceConstructor
+# Expression -> PostfixDeref  # Postfix dereferencing: ->@* and ->%* (temporarily disabled - circular recursion)
 Expression -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
 Expression -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
 # Operators
@@ -329,11 +333,8 @@ ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Fat com
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Pairs with more
 ExpressionList ->
 
-# Atomic expressions - literals, variables, identifiers, yada-yada
-Atom -> Literal
-Atom -> Variable
-Atom -> Identifier  # Bareword (can be function name, method name, or string in context)
-Atom -> '...'  # Ellipsis / yada-yada operator
+# Yada-yada operator - placeholder that throws "Unimplemented" when evaluated
+YaddaYadda -> '...'
 
 # Function and method calls
 FunctionCall -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
@@ -341,6 +342,23 @@ FunctionCall -> Identifier '(' WS_OPT ')'  # Function call with no args
 FunctionCall -> Identifier WS Expression  # Function call without parens: foo 1, 2
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
+FunctionCall -> Variable '->' '(' WS_OPT ExpressionList WS_OPT ')'  # Coderef call: $coderef->($arg)
+FunctionCall -> Variable '->' '(' WS_OPT ')'  # Coderef call with no args
+FunctionCall -> MethodCall  # Delegate to instance method calls
+
+# Method calls - can be invoked on any expression that returns an object reference
+# Examples: $obj->method, ($a || $b)->foo, foo()->bar, $obj->m1->m2
+MethodCall -> Expression '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->method($args)
+MethodCall -> Expression '->' Identifier  # expr->method (without parens)
+
+# Postfix dereference operators - can apply to any expression returning a reference
+# Examples: $var->@*, $obj->method->@*, foo()->@*, ($x || $y)->@*, $var->@*->%*
+# Temporarily disabled - causes circular recursion with Expression -> PostfixDeref
+# PostfixDeref -> Expression '->' PostfixDerefOp
+
+# Deref operators: ->@* or ->%*
+# PostfixDerefOp -> '@' '*'  # Array deref
+# PostfixDerefOp -> '%' '*'  # Hash deref
 
 # Built-in operators - delegates to FunctionCall with optimization hook
 # This pass-through rule allows the BuiltinOp semantic action to detect known
@@ -385,13 +403,11 @@ Attribute -> ':isa' '(' QualifiedIdentifier ')'
 QualifiedIdentifier -> Identifier
 QualifiedIdentifier -> Identifier '::' QualifiedIdentifier
 
-# Variables
+# Variables (lvalues only - things that can be assigned to)
 Variable -> ScalarVar
 Variable -> ArrayVar
 Variable -> HashVar
 Variable -> ArraySize
-Variable -> Variable '->' '@' '*'  # Postfix array deref: $ref->@*
-Variable -> Variable '->' '%' '*'  # Postfix hash deref: $ref->%*
 
 ScalarVar -> '$' Identifier
 ScalarVar -> '$' %SPECIAL_IDENTIFIER%
@@ -413,13 +429,17 @@ Variable -> ArrayVar '[' Expression ']'               # @arr[0..5] (slice with r
 Variable -> Variable '->' '[' Expression ']'          # $ref->[0]
 Variable -> Variable '->' '{' Expression '}'          # $ref->{key}
 
-# Method calls (instance)
-Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'
-Variable -> Variable '->' Identifier
+# Postfix dereferencing on Variables - for patterns like $context->children->@*
+Variable -> Variable '->' '@' '*'                     # $var->@* (array postfix deref)
+Variable -> Variable '->' '%' '*'                     # $var->%* (hash postfix deref)
 
-# Subroutine reference calls: $coderef->($arg)
-Variable -> Variable '->' '(' WS_OPT ExpressionList WS_OPT ')'
-Variable -> Variable '->' '(' WS_OPT ')'  # Coderef call with no args
+# Method calls on Variables become Variables to allow further dereferencing
+# This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
+Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
+Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
+
+# Note: Coderef calls have been moved to FunctionCall
+# since they are pure invocations (rvalues), not chained operations
 
 # Literals
 Literal -> Number
