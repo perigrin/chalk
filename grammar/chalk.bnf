@@ -188,12 +188,12 @@ LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
 #
 # DESIGN: Flat grammar with semantic groupings, validated by precedence semiring
 #
-# Prior to Issue #144, this grammar used "precedence climbing" where operator
-# precedence was encoded through nested rule hierarchies (Assignment -> Ternary
-# -> LogicalOr -> ... -> Primary). This created 13 pass-through rules that were
+# Previously, this grammar used "precedence climbing" where operator precedence
+# was encoded through nested rule hierarchies (Assignment -> Ternary ->
+# LogicalOr -> ... -> Primary). This created 13 pass-through rules that were
 # pure parser overhead with no semantic value.
 #
-# CURRENT ARCHITECTURE (Issue #144):
+# CURRENT ARCHITECTURE:
 #
 # The grammar now provides a flat structure organized by SEMANTIC groupings:
 #   - Assignment (=, +=, -=, etc.)
