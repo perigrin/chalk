@@ -346,6 +346,7 @@ FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class meth
 # builtins (exists, defined, length, blessed, etc.) and generate specialized
 # IR nodes for better optimization, while falling back to FunctionCall for unknown cases.
 BuiltinOp -> FunctionCall
+BuiltinOp -> Identifier WS Expression  # Builtin without parens: return 1, defined $_
 
 # List operations (map, grep, all, any)
 ListOp -> 'map' WS_OPT Block WS_OPT Expression
