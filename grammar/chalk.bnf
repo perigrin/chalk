@@ -44,21 +44,15 @@
 # - HEREDOCs (per Standard Perl - cannot express in BNF)
 # - Old-style OO (Moose, Moo, bless) - use `class` instead
 #
-# OPERATOR PRECEDENCE (lowest to highest):
+# OPERATOR PRECEDENCE:
 #
-# Assignment (=, +=, -=, //=, etc.)
-# Ternary (?:)
-# Logical OR (||, or, //)
-# Logical AND (&&, and)
-# Comparison (==, !=, eq, ne, <, >, <=, >=, cmp, <=>)
-# Regex match (=~, !~)
-# Range (..)
-# Concatenation (.)
-# Additive (+, -)
-# Multiplicative (*, /, %)
-# Unary (!, not, -, +, ++, --, \)
-# Postfix (++, --)
-# Primary (literals, variables, calls, array/hash access)
+# Operator precedence is validated by the Chalk::Semiring::Precedence module,
+# not encoded in the grammar structure. The grammar provides a flat expression
+# structure organized by semantic groupings (Assignment, Ternary, LogicalOp,
+# ArithmeticOp, etc.), and the precedence semiring validates that operator
+# precedence relationships match Perl semantics during parsing.
+#
+# See lib/Chalk/Semiring/Precedence.pm for the precedence table.
 #
 # ============================================================================
 
@@ -188,60 +182,39 @@ SubroutineDeclaration -> 'sub' WS_OPT QualifiedIdentifier WS_OPT Block
 LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
 
 # ============================================================================
-# Expression precedence hierarchy (Generic -> Specific)
+# Expression Grammar - Flat Structure with Precedence Semiring Validation
 # ============================================================================
 #
-# PRECEDENCE CLIMBING PATTERN EXPLAINED:
+# DESIGN: Flat grammar with semantic groupings, validated by precedence semiring
 #
-# This grammar uses "precedence climbing" to encode operator precedence through
-# rule nesting. Lower precedence operators appear higher in the hierarchy
-# (closer to Expression), higher precedence operators appear deeper (closer
-# to Primary).
+# Prior to Issue #144, this grammar used "precedence climbing" where operator
+# precedence was encoded through nested rule hierarchies (Assignment -> Ternary
+# -> LogicalOr -> ... -> Primary). This created 13 pass-through rules that were
+# pure parser overhead with no semantic value.
 #
-# HOW FALLTHROUGH RULES WORK:
+# CURRENT ARCHITECTURE (Issue #144):
 #
-# Each precedence level has TWO types of rules:
-#   1. FALLTHROUGH: Delegates to next higher precedence level
-#      Example: Assignment -> Ternary
-#      Meaning: "If there's no '=' operator, parse at Ternary precedence"
+# The grammar now provides a flat structure organized by SEMANTIC groupings:
+#   - Assignment (=, +=, -=, etc.)
+#   - Ternary (?:)
+#   - LogicalOp (||, &&, or, and, //)
+#   - ComparisonOp (==, !=, eq, ne, <, >, isa, =~, !~)
+#   - ConcatenationOp (.)
+#   - RangeOp (..)
+#   - ArithmeticOp (+, -, *, /)
+#   - Unary (!, not, -, +, ++, --, \)
+#   - Postfix (++, --)
 #
-#   2. OPERATOR: Matches the actual operator for this level
-#      Example: Assignment -> Ternary '=' Assignment
-#      Meaning: "Parse left operand as Ternary, then '=', then right operand"
+# Operator precedence is validated by the Chalk::Semiring::Precedence module
+# during parsing, not encoded in grammar structure.
 #
-# IMPORTANT: Rule names indicate PRECEDENCE LEVEL, not result type!
+# BENEFITS:
+#   - 13 fewer grammar rules (reduced overhead)
+#   - Precedence errors generate specific, actionable error messages
+#   - Precedence table is centralized and easier to maintain
+#   - Semantic groupings enable polymorphic dispatch in IR generation
 #
-# "Assignment -> Ternary" does NOT mean "parse a Ternary operator"
-# It means "parse at the Ternary precedence level (or anything higher precedence)"
-#
-# PARSE EXAMPLES:
-#
-# Example 1: $x = 0
-#   Expression -> Assignment -> Ternary '=' Assignment
-#                   ↓                       ↓
-#              (delegates through          (delegates through
-#               entire chain to            entire chain to
-#               Primary -> Variable)       Primary -> Literal)
-#   Result: Assignment node with Variable($x) and Literal(0) as children
-#
-# Example 2: $x || $y
-#   Expression -> Assignment -> Ternary -> LogicalOr '||' LogicalAnd
-#                   ↓           ↓          ↓                ↓
-#              (fallthrough) (fallthrough) (Variable)      (Variable)
-#   Result: LogicalOr node (NOT Ternary, NOT Assignment)
-#
-# Example 3: $a = $b ? 1 : 0
-#   Expression -> Assignment -> Ternary '=' Assignment
-#                   ↓                       ↓
-#              (fallthrough to Var)    Ternary '?' Expression ':' Ternary
-#                                         ↓            ↓            ↓
-#                                      (Var $b)     (Lit 1)      (Lit 0)
-#   Result: Assignment node containing Ternary node
-#
-# The Earley parser correctly distinguishes these because it matches complete
-# rules - the '=' or '?' terminals must actually be present in the input.
-#
-# Organized from lowest precedence (top) to highest (bottom)
+# See lib/Chalk/Semiring/Precedence.pm for the precedence validation logic.
 
 # ============================================================================
 # EXPRESSION GRAMMAR - Flattened with Semantic Groupings
