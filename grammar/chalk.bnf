@@ -12,8 +12,9 @@
 #
 # 2. **Static Parseability**
 #    All constructs must be statically parseable without runtime information.
-#    This excludes symbolic references, eval STRING, most special variables,
-#    and other dynamic features that complicate static analysis.
+#    This excludes symbolic references, eval (both STRING and BLOCK forms),
+#    most special variables, and other dynamic features that complicate
+#    static analysis.
 #
 # 3. **Alignment with Standard Perl**
 #    Where beneficial for static parsing, we adopt restrictions from the
@@ -21,7 +22,7 @@
 #    - All hash keys must be quoted (no bareword auto-quoting)
 #    - No HEREDOCs (cannot be expressed in BNF)
 #    - No indirect object notation (ambiguous syntax)
-#    - Function calls must use parentheses
+#    - Function calls may omit parentheses in unambiguous contexts
 #
 # 4. **Compilation Target**
 #    Grammar designed to enable compilation to intermediate representations
@@ -35,7 +36,7 @@
 # KEY EXCLUSIONS:
 #
 # - `package` declarations (use `class` instead)
-# - eval STRING (eval BLOCK may be acceptable)
+# - eval (both STRING and BLOCK forms - no runtime code evaluation)
 # - Symbolic references: $$var, &{$code}, *{$glob}
 # - Typeglobs and formats
 # - Most special variables (except $1, $2, @-, etc.)
@@ -44,21 +45,15 @@
 # - HEREDOCs (per Standard Perl - cannot express in BNF)
 # - Old-style OO (Moose, Moo, bless) - use `class` instead
 #
-# OPERATOR PRECEDENCE (lowest to highest):
+# OPERATOR PRECEDENCE:
 #
-# Assignment (=, +=, -=, //=, etc.)
-# Ternary (?:)
-# Logical OR (||, or, //)
-# Logical AND (&&, and)
-# Comparison (==, !=, eq, ne, <, >, <=, >=, cmp, <=>)
-# Regex match (=~, !~)
-# Range (..)
-# Concatenation (.)
-# Additive (+, -)
-# Multiplicative (*, /, %)
-# Unary (!, not, -, +, ++, --, \)
-# Postfix (++, --)
-# Primary (literals, variables, calls, array/hash access)
+# Operator precedence is validated by the Chalk::Semiring::Precedence module,
+# not encoded in the grammar structure. The grammar provides a flat expression
+# structure organized by semantic groupings (Assignment, Ternary, LogicalOp,
+# ArithmeticOp, etc.), and the precedence semiring validates that operator
+# precedence relationships match Perl semantics during parsing.
+#
+# See lib/Chalk/Semiring/Precedence.pm for the precedence table.
 #
 # ============================================================================
 
@@ -188,124 +183,118 @@ SubroutineDeclaration -> 'sub' WS_OPT QualifiedIdentifier WS_OPT Block
 LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
 
 # ============================================================================
-# Expression precedence hierarchy (Generic -> Specific)
+# Expression Grammar - Flat Structure with Precedence Semiring Validation
 # ============================================================================
 #
-# PRECEDENCE CLIMBING PATTERN EXPLAINED:
+# DESIGN: Flat grammar with semantic groupings, validated by precedence semiring
 #
-# This grammar uses "precedence climbing" to encode operator precedence through
-# rule nesting. Lower precedence operators appear higher in the hierarchy
-# (closer to Expression), higher precedence operators appear deeper (closer
-# to Primary).
+# Previously, this grammar used "precedence climbing" where operator precedence
+# was encoded through nested rule hierarchies (Assignment -> Ternary ->
+# LogicalOr -> ... -> Primary). This created 13 pass-through rules that were
+# pure parser overhead with no semantic value.
 #
-# HOW FALLTHROUGH RULES WORK:
+# CURRENT ARCHITECTURE:
 #
-# Each precedence level has TWO types of rules:
-#   1. FALLTHROUGH: Delegates to next higher precedence level
-#      Example: Assignment -> Ternary
-#      Meaning: "If there's no '=' operator, parse at Ternary precedence"
+# The grammar now provides a flat structure organized by SEMANTIC groupings:
+#   - Assignment (=, +=, -=, etc.)
+#   - Ternary (?:)
+#   - LogicalOp (||, &&, or, and, //)
+#   - ComparisonOp (==, !=, eq, ne, <, >, isa, =~, !~)
+#   - ConcatenationOp (.)
+#   - RangeOp (..)
+#   - ArithmeticOp (+, -, *, /)
+#   - Unary (!, not, -, +, ++, --, \)
+#   - Postfix (++, --)
 #
-#   2. OPERATOR: Matches the actual operator for this level
-#      Example: Assignment -> Ternary '=' Assignment
-#      Meaning: "Parse left operand as Ternary, then '=', then right operand"
+# Operator precedence is validated by the Chalk::Semiring::Precedence module
+# during parsing, not encoded in grammar structure.
 #
-# IMPORTANT: Rule names indicate PRECEDENCE LEVEL, not result type!
+# BENEFITS:
+#   - 13 fewer grammar rules (reduced overhead)
+#   - Precedence errors generate specific, actionable error messages
+#   - Precedence table is centralized and easier to maintain
+#   - Semantic groupings enable polymorphic dispatch in IR generation
 #
-# "Assignment -> Ternary" does NOT mean "parse a Ternary operator"
-# It means "parse at the Ternary precedence level (or anything higher precedence)"
-#
-# PARSE EXAMPLES:
-#
-# Example 1: $x = 0
-#   Expression -> Assignment -> Ternary '=' Assignment
-#                   ↓                       ↓
-#              (delegates through          (delegates through
-#               entire chain to            entire chain to
-#               Primary -> Variable)       Primary -> Literal)
-#   Result: Assignment node with Variable($x) and Literal(0) as children
-#
-# Example 2: $x || $y
-#   Expression -> Assignment -> Ternary -> LogicalOr '||' LogicalAnd
-#                   ↓           ↓          ↓                ↓
-#              (fallthrough) (fallthrough) (Variable)      (Variable)
-#   Result: LogicalOr node (NOT Ternary, NOT Assignment)
-#
-# Example 3: $a = $b ? 1 : 0
-#   Expression -> Assignment -> Ternary '=' Assignment
-#                   ↓                       ↓
-#              (fallthrough to Var)    Ternary '?' Expression ':' Ternary
-#                                         ↓            ↓            ↓
-#                                      (Var $b)     (Lit 1)      (Lit 0)
-#   Result: Assignment node containing Ternary node
-#
-# The Earley parser correctly distinguishes these because it matches complete
-# rules - the '=' or '?' terminals must actually be present in the input.
-#
-# Organized from lowest precedence (top) to highest (bottom)
+# See lib/Chalk/Semiring/Precedence.pm for the precedence validation logic.
 
-# Expression is the entry point (delegates to Assignment)
+# ============================================================================
+# EXPRESSION GRAMMAR - Flattened with Semantic Groupings
+# ============================================================================
+# All operator precedence validated by Precedence semiring
+# Precedence ladder eliminated - Expression directly references all semantic groups
+# Semantic groupings preserved for polymorphic dispatch in semantic actions
+
+# Expression entry point - directly references all semantic groupings
+# Atomic values and base cases
+Expression -> Literal
+Expression -> Variable
+Expression -> Identifier  # Bareword (can be function name, method name, or string in context)
+Expression -> YaddaYadda
+Expression -> FunctionCall
+Expression -> BuiltinOp
+Expression -> ListOp
+Expression -> ReferenceConstructor
+# Expression -> PostfixDeref  # Postfix dereferencing: ->@* and ->%* (temporarily disabled - circular recursion)
+Expression -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
+Expression -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
+# Operators
 Expression -> Assignment
+Expression -> Ternary
+Expression -> LogicalOp
+Expression -> ComparisonOp
+Expression -> ConcatenationOp
+Expression -> RangeOp
+Expression -> ArithmeticOp
+Expression -> Unary
+Expression -> Postfix
 
-# Assignment operators (lowest precedence, right-associative)
-Assignment -> Ternary
-Assignment -> Ternary WS_OPT '=' WS_OPT Assignment
-Assignment -> Ternary WS_OPT %ASSIGN_OP% WS_OPT Assignment
+# Assignment operators (right-associative)
+Assignment -> Expression WS_OPT '=' WS_OPT Expression
+Assignment -> Expression WS_OPT %ASSIGN_OP% WS_OPT Expression
 
 # Ternary operator (right-associative)
-Ternary -> LogicalOr
-Ternary -> LogicalOr WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Ternary
+Ternary -> Expression WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Expression
 
-# Logical OR operators (left-associative)
-LogicalOr -> LogicalAnd
-LogicalOr -> LogicalOr WS_OPT '||' WS_OPT LogicalAnd
-LogicalOr -> LogicalOr WS_OPT 'or' WS_OPT LogicalAnd
-LogicalOr -> LogicalOr WS_OPT '//' WS_OPT LogicalAnd
+# Logical operators (left-associative)
+# Phase 4: Flattened from LogicalOr + LogicalAnd
+LogicalOp -> Expression WS_OPT '||' WS_OPT Expression
+LogicalOp -> Expression WS_OPT 'or' WS_OPT Expression
+LogicalOp -> Expression WS_OPT '//' WS_OPT Expression
+LogicalOp -> Expression WS_OPT '&&' WS_OPT Expression
+LogicalOp -> Expression WS_OPT 'and' WS_OPT Expression
 
-# Logical AND operators (left-associative)
-LogicalAnd -> Comparison
-LogicalAnd -> LogicalAnd WS_OPT '&&' WS_OPT Comparison
-LogicalAnd -> LogicalAnd WS_OPT 'and' WS_OPT Comparison
+# Comparison and regex match operators (left-associative)
+# Phase 4: Flattened from Comparison + RegexMatch
+# Precedence handled by Precedence semiring
+ComparisonOp -> Expression WS_OPT %NUM_COMPARE_OP% WS_OPT Expression
+ComparisonOp -> Expression WS_OPT %STRING_COMPARE_OP% WS_OPT Expression
+ComparisonOp -> Expression WS_OPT 'isa' WS_OPT QualifiedIdentifier
+ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT Expression
 
-# Comparison operators (left-associative)
-Comparison -> RegexMatch
-Comparison -> Comparison WS_OPT %NUM_COMPARE_OP% WS_OPT RegexMatch
-Comparison -> Comparison WS_OPT %STRING_COMPARE_OP% WS_OPT RegexMatch
-Comparison -> Comparison WS_OPT 'isa' WS_OPT QualifiedIdentifier
+# String concatenation operator (left-associative)
+ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
 
-# Regex match operators (left-associative)
-RegexMatch -> Range
-RegexMatch -> RegexMatch WS_OPT %REGEX_MATCH_OP% WS_OPT Range
+# Range operator (non-associative, also flip-flop in scalar context)
+RangeOp -> Expression WS_OPT '..' WS_OPT Expression
 
-# Range operator (left-associative)
-Range -> Concatenation
-Range -> Range WS_OPT '..' WS_OPT Concatenation
-
-# String concatenation (left-associative)
-Concatenation -> Additive
-Concatenation -> Concatenation WS_OPT '.' WS_OPT Additive
-
-# Additive operators (left-associative)
-Additive -> Multiplicative
-Additive -> Additive WS_OPT '+' WS_OPT Multiplicative
-Additive -> Additive WS_OPT '-' WS_OPT Multiplicative
-
-# Multiplicative operators (left-associative)
-Multiplicative -> Unary
-Multiplicative -> Multiplicative WS_OPT '*' WS_OPT Unary
-Multiplicative -> Multiplicative WS_OPT '/' WS_OPT Unary
+# Arithmetic operators (left-associative)
+# Phase 4: Flattened from Additive + Multiplicative
+# Precedence handled by Precedence semiring
+ArithmeticOp -> Expression WS_OPT '+' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT '-' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT '*' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT '/' WS_OPT Expression
 
 # Unary prefix operators (right-associative)
-Unary -> Postfix
-Unary -> '!' WS_OPT Unary
-Unary -> 'not' WS_OPT Unary
-Unary -> '-' WS_OPT Unary
-Unary -> '+' WS_OPT Unary
-Unary -> '++' WS_OPT Unary
-Unary -> '--' WS_OPT Unary
-Unary -> '\\' WS_OPT Unary  # Reference operator: \$var, \@array, \%hash
+Unary -> '!' WS_OPT Expression
+Unary -> 'not' WS_OPT Expression
+Unary -> '-' WS_OPT Expression
+Unary -> '+' WS_OPT Expression
+Unary -> '++' WS_OPT Expression
+Unary -> '--' WS_OPT Expression
+Unary -> '\\' WS_OPT Expression  # Reference operator: \$var, \@array, \%hash
 
 # Postfix operators
-Postfix -> Primary
 Postfix -> Variable '++'
 Postfix -> Variable '--'
 
@@ -318,36 +307,58 @@ ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Fat com
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Pairs with more
 ExpressionList ->
 
-# Primary expressions (highest precedence)
-Primary -> Literal
-Primary -> Variable
-Primary -> Identifier  # Bareword (can be function name, method name, or string in context)
-Primary -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
-Primary -> Identifier '(' WS_OPT ')'  # Function call with no args
-Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
-Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
-Primary -> 'exists' '(' WS_OPT Expression WS_OPT ')'  # exists() builtin
-Primary -> 'defined' '(' WS_OPT Expression WS_OPT ')'  # defined() builtin
-Primary -> 'keys' '(' WS_OPT Expression WS_OPT ')'  # keys() builtin
-Primary -> 'values' '(' WS_OPT Expression WS_OPT ')'  # values() builtin
-Primary -> 'scalar' '(' WS_OPT Expression WS_OPT ')'  # scalar() builtin
-Primary -> 'map' WS_OPT Block WS_OPT Expression  # map BLOCK LIST
-Primary -> 'grep' WS_OPT Block WS_OPT Expression  # grep BLOCK LIST
-Primary -> 'all' WS_OPT Block WS_OPT Expression  # all BLOCK LIST
-Primary -> 'any' WS_OPT Block WS_OPT Expression  # any BLOCK LIST
-Primary -> '[' WS_OPT ExpressionList WS_OPT ']'  # Array constructor
-Primary -> '[' WS_OPT ']'  # Empty array
-Primary -> '{' WS_OPT ExpressionList WS_OPT '}'  # Hash constructor
-Primary -> '{' WS_OPT '}'  # Empty hash
-Primary -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
-Primary -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
-Primary -> '...'  # Ellipsis / yada-yada operator
+# Yada-yada operator - placeholder that throws "Unimplemented" when evaluated
+YaddaYadda -> '...'
+
+# Function and method calls
+FunctionCall -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
+FunctionCall -> Identifier '(' WS_OPT ')'  # Function call with no args
+FunctionCall -> Identifier WS Expression  # Function call without parens: foo 1, 2
+FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
+FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
+FunctionCall -> Variable '->' '(' WS_OPT ExpressionList WS_OPT ')'  # Coderef call: $coderef->($arg)
+FunctionCall -> Variable '->' '(' WS_OPT ')'  # Coderef call with no args
+FunctionCall -> MethodCall  # Delegate to instance method calls
+
+# Method calls - can be invoked on any expression that returns an object reference
+# Examples: $obj->method, ($a || $b)->foo, foo()->bar, $obj->m1->m2
+MethodCall -> Expression '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->method($args)
+MethodCall -> Expression '->' Identifier  # expr->method (without parens)
+
+# Postfix dereference operators - can apply to any expression returning a reference
+# Examples: $var->@*, $obj->method->@*, foo()->@*, ($x || $y)->@*, $var->@*->%*
+# Temporarily disabled - causes circular recursion with Expression -> PostfixDeref
+# PostfixDeref -> Expression '->' PostfixDerefOp
+
+# Deref operators: ->@* or ->%*
+# PostfixDerefOp -> '@' '*'  # Array deref
+# PostfixDerefOp -> '%' '*'  # Hash deref
+
+# Built-in operators - delegates to FunctionCall with optimization hook
+# This pass-through rule allows the BuiltinOp semantic action to detect known
+# builtins (exists, defined, length, blessed, etc.) and generate specialized
+# IR nodes for better optimization, while falling back to FunctionCall for unknown cases.
+BuiltinOp -> FunctionCall
+
+# List operations (map, grep, all, any)
+ListOp -> 'map' WS_OPT Block WS_OPT Expression
+ListOp -> 'grep' WS_OPT Block WS_OPT Expression
+ListOp -> 'all' WS_OPT Block WS_OPT Expression
+ListOp -> 'any' WS_OPT Block WS_OPT Expression
+
+# Reference constructors (arrays and hashes)
+ReferenceConstructor -> '[' WS_OPT ExpressionList WS_OPT ']'  # Array constructor
+ReferenceConstructor -> '[' WS_OPT ']'  # Empty array
+ReferenceConstructor -> '{' WS_OPT ExpressionList WS_OPT '}'  # Hash constructor
+ReferenceConstructor -> '{' WS_OPT '}'  # Empty hash
 
 # ============================================================================
 # HELPER RULES AND TERMINALS (Most specific)
 # ============================================================================
 
 # Parameter lists (for method/sub signatures)
+ParameterList -> Variable
+ParameterList -> Variable WS_OPT ',' WS_OPT ParameterList
 ParameterList -> Assignment
 ParameterList -> Assignment WS_OPT ',' WS_OPT ParameterList
 ParameterList ->  # Empty parameter list
@@ -366,13 +377,11 @@ Attribute -> ':isa' '(' QualifiedIdentifier ')'
 QualifiedIdentifier -> Identifier
 QualifiedIdentifier -> Identifier '::' QualifiedIdentifier
 
-# Variables
+# Variables (lvalues only - things that can be assigned to)
 Variable -> ScalarVar
 Variable -> ArrayVar
 Variable -> HashVar
 Variable -> ArraySize
-Variable -> Variable '->' '@' '*'  # Postfix array deref: $ref->@*
-Variable -> Variable '->' '%' '*'  # Postfix hash deref: $ref->%*
 
 ScalarVar -> '$' Identifier
 ScalarVar -> '$' %SPECIAL_IDENTIFIER%
@@ -394,13 +403,17 @@ Variable -> ArrayVar '[' Expression ']'               # @arr[0..5] (slice with r
 Variable -> Variable '->' '[' Expression ']'          # $ref->[0]
 Variable -> Variable '->' '{' Expression '}'          # $ref->{key}
 
-# Method calls (instance)
-Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'
-Variable -> Variable '->' Identifier
+# Postfix dereferencing on Variables - for patterns like $context->children->@*
+Variable -> Variable '->' '@' '*'                     # $var->@* (array postfix deref)
+Variable -> Variable '->' '%' '*'                     # $var->%* (hash postfix deref)
 
-# Subroutine reference calls: $coderef->($arg)
-Variable -> Variable '->' '(' WS_OPT ExpressionList WS_OPT ')'
-Variable -> Variable '->' '(' WS_OPT ')'  # Coderef call with no args
+# Method calls on Variables become Variables to allow further dereferencing
+# This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
+Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
+Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
+
+# Note: Coderef calls have been moved to FunctionCall
+# since they are pure invocations (rvalues), not chained operations
 
 # Literals
 Literal -> Number
@@ -414,6 +427,9 @@ Literal -> 'undef'
 EmptyList -> '(' WS_OPT ')'
 
 # Strings - only regular quoted strings
+# Note: Keep SingleQuotedString and DoubleQuotedString separate because they have
+# different optimization characteristics: single-quoted strings are literal,
+# double-quoted strings support interpolation and require runtime processing.
 String -> SingleQuotedString
 String -> DoubleQuotedString
 

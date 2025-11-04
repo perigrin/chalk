@@ -1,14 +1,16 @@
-# ABOUTME: Semantic action for Multiplicative - pass through child value or build multiplication/division
-# ABOUTME: Multiplicative handles * and / operators, building Multiply/Div IR nodes
+# ABOUTME: Semantic action for ArithmeticOp - flattened arithmetic operators
+# ABOUTME: Handles +, -, *, / operators with precedence validated by Precedence semiring
 
 use 5.42.0;
 use experimental 'class';
 
-class Chalk::Grammar::Chalk::Rule::Multiplicative :isa(Chalk::GrammarRule) {
+class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        # Multiplicative -> Unary (pass-through)
-        # Multiplicative -> Multiplicative WS_OPT '*' WS_OPT Unary
-        # Multiplicative -> Multiplicative WS_OPT '/' WS_OPT Unary
+        # ArithmeticOp -> Unary (pass-through)
+        # ArithmeticOp -> ArithmeticOp WS_OPT '+' WS_OPT Unary
+        # ArithmeticOp -> ArithmeticOp WS_OPT '-' WS_OPT Unary
+        # ArithmeticOp -> ArithmeticOp WS_OPT '*' WS_OPT Unary
+        # ArithmeticOp -> ArithmeticOp WS_OPT '/' WS_OPT Unary
 
         # Count children to determine which alternative matched
         my @children = $context->children->@*;
@@ -19,13 +21,13 @@ class Chalk::Grammar::Chalk::Rule::Multiplicative :isa(Chalk::GrammarRule) {
         }
 
         # For binary operation: check child(2) for the operator
-        # Grammar is: Multiplicative WS_OPT OP WS_OPT Unary
+        # Grammar is: ArithmeticOp WS_OPT OP WS_OPT Unary
         # So operator is at index 2
         my $op_child = $children[2]->extract;
         return $context->child(0) unless defined $op_child && !ref($op_child);
 
         my $operator = $op_child;
-        return $context->child(0) unless ($operator eq '*' || $operator eq '/');
+        return $context->child(0) unless ($operator eq '+' || $operator eq '-' || $operator eq '*' || $operator eq '/');
 
         my $builder = $context->env->{ir_builder};
         return $context->child(0) unless $builder;
@@ -38,7 +40,12 @@ class Chalk::Grammar::Chalk::Rule::Multiplicative :isa(Chalk::GrammarRule) {
         return $left unless (blessed($left) && $left->can('id'));
         return $left unless (blessed($right) && $right->can('id'));
 
-        if ($operator eq '*') {
+        # Build appropriate IR node based on operator
+        if ($operator eq '+') {
+            return $builder->build_add_node($left, $right);
+        } elsif ($operator eq '-') {
+            return $builder->build_sub_node($left, $right);
+        } elsif ($operator eq '*') {
             return $builder->build_multiply_node($left, $right);
         } elsif ($operator eq '/') {
             return $builder->build_divide_node($left, $right);

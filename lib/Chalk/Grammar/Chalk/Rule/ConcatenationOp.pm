@@ -1,26 +1,18 @@
-# ABOUTME: Semantic action for Concatenation - pass through child value or build string concatenation
-# ABOUTME: Concatenation handles '.' operator, building StrConcat IR nodes
+# ABOUTME: Semantic action for ConcatenationOp - string concatenation operator
+# ABOUTME: Handles '.' (concatenation) with precedence validated by Precedence semiring
 
 use 5.42.0;
 use experimental 'class';
 use builtin qw(blessed);
 
-class Chalk::Grammar::Chalk::Rule::Concatenation :isa(Chalk::GrammarRule) {
+class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        # Concatenation -> Additive (pass-through)
-        # Concatenation -> Concatenation WS_OPT '.' WS_OPT Additive
-
-        # Count children to determine which alternative matched
-        my @children = $context->children->@*;
-
-        if (@children == 1) {
-            # First alternative: just pass through Additive
-            return $context->child(0);
-        }
+        # ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
 
         # For binary operation: check child(2) for the operator
-        # Grammar is: Concatenation WS_OPT '.' WS_OPT Additive
+        # Grammar is: Expression WS_OPT '.' WS_OPT Expression
         # So operator is at index 2
+        my @children = $context->children->@*;
         my $op_child = $children[2]->extract;
         return $context->child(0) unless defined $op_child && !ref($op_child);
 
@@ -38,6 +30,7 @@ class Chalk::Grammar::Chalk::Rule::Concatenation :isa(Chalk::GrammarRule) {
         return $left unless (blessed($left) && $left->can('id'));
         return $left unless (blessed($right) && $right->can('id'));
 
+        # Build string concatenation IR node
         return $builder->build_str_concat_node($left, $right);
     }
 }

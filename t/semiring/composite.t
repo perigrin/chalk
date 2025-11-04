@@ -203,6 +203,98 @@ subtest 'Composite operator overloading' => sub {
     ok $add, 'Operator + works';
 };
 
+subtest 'Short-circuit on add_id in multiply' => sub {
+    use Chalk::Semiring::Precedence;
+
+    # Create a precedence table
+    my @precedence_table = (
+        { assoc => 'left', ops => ['+'] },    # Index 0 - High precedence
+        { assoc => 'left', ops => ['||'] },   # Index 1 - Low precedence
+    );
+
+    my $bool_sr = Chalk::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Semiring::Precedence->new(precedence_table => \@precedence_table);
+
+    my $composite = Chalk::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr]
+    );
+
+    # Create elements: one with valid precedence, one with invalid
+    my $bool_true = Chalk::Semiring::BooleanElement->new(value => 1);
+    my $prec_invalid = Chalk::Semiring::PrecedenceElement->new(
+        valid => 0,  # Invalid precedence - this is add_id
+        operator => '||',
+        precedence_level => 1
+    );
+
+    my $elem1 = Chalk::Semiring::CompositeElement->new(
+        elements => [$bool_true, $prec_invalid],
+        parent_semiring => $composite
+    );
+
+    my $bool_true2 = Chalk::Semiring::BooleanElement->new(value => 1);
+    my $prec_valid = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '+',
+        precedence_level => 0
+    );
+
+    my $elem2 = Chalk::Semiring::CompositeElement->new(
+        elements => [$bool_true2, $prec_valid],
+        parent_semiring => $composite
+    );
+
+    # When we multiply, the Precedence semiring returns add_id (invalid)
+    # The Composite should short-circuit and return its add_id
+    my $result = $elem1->multiply($elem2);
+
+    # Check if result equals composite add_id
+    # This will FAIL initially because current implementation doesn't short-circuit
+    my $expected_invalid = $composite->add_id;
+    ok $result->equals($expected_invalid), 'Short-circuits to add_id when any child is invalid';
+};
+
+subtest 'No short-circuit when all children valid in multiply' => sub {
+    use Chalk::Semiring::Precedence;
+
+    my @precedence_table = (
+        { assoc => 'left', ops => ['+'] },
+    );
+
+    my $bool_sr = Chalk::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Semiring::Precedence->new(precedence_table => \@precedence_table);
+
+    my $composite = Chalk::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr]
+    );
+
+    # Both elements valid
+    my $bool_true1 = Chalk::Semiring::BooleanElement->new(value => 1);
+    my $prec_valid1 = Chalk::Semiring::PrecedenceElement->new(valid => 1);
+    my $elem1 = Chalk::Semiring::CompositeElement->new(
+        elements => [$bool_true1, $prec_valid1],
+        parent_semiring => $composite
+    );
+
+    my $bool_true2 = Chalk::Semiring::BooleanElement->new(value => 1);
+    my $prec_valid2 = Chalk::Semiring::PrecedenceElement->new(valid => 1);
+    my $elem2 = Chalk::Semiring::CompositeElement->new(
+        elements => [$bool_true2, $prec_valid2],
+        parent_semiring => $composite
+    );
+
+    # Should not short-circuit - all valid
+    my $result = $elem1->multiply($elem2);
+
+    # Result should NOT equal add_id
+    my $add_id = $composite->add_id;
+    ok !$result->equals($add_id), 'Does not short-circuit when all children valid';
+
+    # Result should have valid elements
+    ok $result->elements->[0]->value, 'Boolean element still valid';
+    ok $result->elements->[1]->valid, 'Precedence element still valid';
+};
+
 # Mock rule class for testing
 package MockRule {
     sub lhs { shift->{lhs} }

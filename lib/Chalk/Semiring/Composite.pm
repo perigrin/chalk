@@ -7,28 +7,49 @@ use Chalk::Base;
 
 class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     field $elements :param :reader;
+    field $parent_semiring :param :reader = undef;  # Reference to parent Composite semiring
 
     method add( $other, $swap = undef ) {
         # Delegate addition to each child element
+        # Short-circuit if any child returns add_id
         my @results;
         for my $i (0..$#$elements) {
-            push @results, $elements->[$i]->add($other->elements->[$i]);
+            my $result = $elements->[$i]->add($other->elements->[$i]);
+            push @results, $result;
+
+            # Short-circuit check: if result equals child's add_id, return composite's add_id
+            if ($parent_semiring && defined($parent_semiring->child_add_ids->[$i])) {
+                if ($result->equals($parent_semiring->child_add_ids->[$i])) {
+                    return $parent_semiring->add_id;
+                }
+            }
         }
 
         return Chalk::Semiring::CompositeElement->new(
-            elements => \@results
+            elements => \@results,
+            parent_semiring => $parent_semiring
         );
     }
 
     method multiply( $other, $swap = undef ) {
         # Delegate multiplication to each child element
+        # Short-circuit if any child returns add_id
         my @results;
         for my $i (0..$#$elements) {
-            push @results, $elements->[$i]->multiply($other->elements->[$i]);
+            my $result = $elements->[$i]->multiply($other->elements->[$i]);
+            push @results, $result;
+
+            # Short-circuit check: if result equals child's add_id, return composite's add_id
+            if ($parent_semiring && defined($parent_semiring->child_add_ids->[$i])) {
+                if ($result->equals($parent_semiring->child_add_ids->[$i])) {
+                    return $parent_semiring->add_id;
+                }
+            }
         }
 
         return Chalk::Semiring::CompositeElement->new(
-            elements => \@results
+            elements => \@results,
+            parent_semiring => $parent_semiring
         );
     }
 
@@ -71,18 +92,24 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
     field $shared_context :param :reader = undef;
     field $mul_id :reader;
     field $add_id :reader;
+    field $child_add_ids :reader;  # Store child add_ids for short-circuit checks
 
     ADJUST {
         # Create composite identity elements from child semirings
         my @mul_ids = map { $_->mul_id } $semirings->@*;
         $mul_id = Chalk::Semiring::CompositeElement->new(
-            elements => \@mul_ids
+            elements => \@mul_ids,
+            parent_semiring => $self
         );
 
         my @add_ids = map { $_->add_id } $semirings->@*;
         $add_id = Chalk::Semiring::CompositeElement->new(
-            elements => \@add_ids
+            elements => \@add_ids,
+            parent_semiring => $self
         );
+
+        # Store child add_ids for short-circuit comparison
+        $child_add_ids = \@add_ids;
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
@@ -93,7 +120,8 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
         }
 
         return Chalk::Semiring::CompositeElement->new(
-            elements => \@elements
+            elements => \@elements,
+            parent_semiring => $self
         );
     }
 

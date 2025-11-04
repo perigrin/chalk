@@ -48,12 +48,26 @@ parses_ok(q{
     }
 }, 'subroutine with parameters');
 
+# Subroutine with single parameter (no default)
+parses_ok(q{
+    sub double($x) {
+        return $x * 2;
+    }
+}, 'subroutine with single parameter');
+
 # Subroutine with optional parameters
 parses_ok(q{
     sub greet($name = 'World') {
         return "Hello, $name";
     }
 }, 'subroutine with default parameter');
+
+# Mix of required and optional parameters
+parses_ok(q{
+    sub create_user($username, $email = undef) {
+        return [$username, $email];
+    }
+}, 'subroutine with mixed parameters');
 
 # Lexical subroutine
 parses_ok(q{

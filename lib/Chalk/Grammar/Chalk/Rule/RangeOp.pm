@@ -1,26 +1,18 @@
-# ABOUTME: Semantic action for Range - pass through child value or build range operation
-# ABOUTME: Range handles '..' operator, building Range IR nodes
+# ABOUTME: Semantic action for RangeOp - range and flip-flop operator
+# ABOUTME: Handles '..' (range in list context, flip-flop in scalar context) with precedence validated by Precedence semiring
 
 use 5.42.0;
 use experimental 'class';
 use builtin qw(blessed);
 
-class Chalk::Grammar::Chalk::Rule::Range :isa(Chalk::GrammarRule) {
+class Chalk::Grammar::Chalk::Rule::RangeOp :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        # Range -> Concatenation (pass-through)
-        # Range -> Range WS_OPT '..' WS_OPT Concatenation
-
-        # Count children to determine which alternative matched
-        my @children = $context->children->@*;
-
-        if (@children == 1) {
-            # First alternative: just pass through Concatenation
-            return $context->child(0);
-        }
+        # RangeOp -> Expression WS_OPT '..' WS_OPT Expression
 
         # For binary operation: check child(2) for the operator
-        # Grammar is: Range WS_OPT '..' WS_OPT Concatenation
+        # Grammar is: Expression WS_OPT '..' WS_OPT Expression
         # So operator is at index 2
+        my @children = $context->children->@*;
         my $op_child = $children[2]->extract;
         return $context->child(0) unless defined $op_child && !ref($op_child);
 
@@ -38,6 +30,9 @@ class Chalk::Grammar::Chalk::Rule::Range :isa(Chalk::GrammarRule) {
         return $left unless (blessed($left) && $left->can('id'));
         return $left unless (blessed($right) && $right->can('id'));
 
+        # Build range IR node
+        # Note: In Perl, .. is a range operator in list context and
+        # a flip-flop operator in scalar/boolean context
         return $builder->build_range_node($left, $right);
     }
 }
