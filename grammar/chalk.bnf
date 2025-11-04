@@ -243,64 +243,80 @@ LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
 #
 # Organized from lowest precedence (top) to highest (bottom)
 
-# Expression is the entry point (delegates to Assignment)
-Expression -> Assignment
+# ============================================================================
+# EXPRESSION GRAMMAR - Flattened with Semantic Groupings
+# ============================================================================
+# All operator precedence validated by Precedence semiring
+# Precedence ladder eliminated - Expression directly references all semantic groups
+# Semantic groupings preserved for polymorphic dispatch in semantic actions
 
-# Assignment operators (lowest precedence, right-associative)
-Assignment -> Ternary
-Assignment -> Ternary WS_OPT '=' WS_OPT Assignment
-Assignment -> Ternary WS_OPT %ASSIGN_OP% WS_OPT Assignment
+# Expression entry point - directly references all semantic groupings
+# Atomic values and base cases
+Expression -> Atom
+Expression -> FunctionCall
+Expression -> BuiltinOp
+Expression -> ListOp
+Expression -> ReferenceConstructor
+Expression -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
+Expression -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
+# Operators
+Expression -> Assignment
+Expression -> Ternary
+Expression -> LogicalOp
+Expression -> ComparisonOp
+Expression -> ConcatenationOp
+Expression -> RangeOp
+Expression -> ArithmeticOp
+Expression -> Unary
+Expression -> Postfix
+
+# Assignment operators (right-associative)
+Assignment -> Expression WS_OPT '=' WS_OPT Expression
+Assignment -> Expression WS_OPT %ASSIGN_OP% WS_OPT Expression
 
 # Ternary operator (right-associative)
-Ternary -> LogicalOp
-Ternary -> LogicalOp WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Ternary
+Ternary -> Expression WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Expression
 
 # Logical operators (left-associative)
 # Phase 4: Flattened from LogicalOr + LogicalAnd
-LogicalOp -> ComparisonOp
-LogicalOp -> LogicalOp WS_OPT '||' WS_OPT ComparisonOp
-LogicalOp -> LogicalOp WS_OPT 'or' WS_OPT ComparisonOp
-LogicalOp -> LogicalOp WS_OPT '//' WS_OPT ComparisonOp
-LogicalOp -> LogicalOp WS_OPT '&&' WS_OPT ComparisonOp
-LogicalOp -> LogicalOp WS_OPT 'and' WS_OPT ComparisonOp
+LogicalOp -> Expression WS_OPT '||' WS_OPT Expression
+LogicalOp -> Expression WS_OPT 'or' WS_OPT Expression
+LogicalOp -> Expression WS_OPT '//' WS_OPT Expression
+LogicalOp -> Expression WS_OPT '&&' WS_OPT Expression
+LogicalOp -> Expression WS_OPT 'and' WS_OPT Expression
 
 # Comparison and regex match operators (left-associative)
 # Phase 4: Flattened from Comparison + RegexMatch
 # Precedence handled by Precedence semiring
-ComparisonOp -> StringOp
-ComparisonOp -> ComparisonOp WS_OPT %NUM_COMPARE_OP% WS_OPT StringOp
-ComparisonOp -> ComparisonOp WS_OPT %STRING_COMPARE_OP% WS_OPT StringOp
-ComparisonOp -> ComparisonOp WS_OPT 'isa' WS_OPT QualifiedIdentifier
-ComparisonOp -> ComparisonOp WS_OPT %REGEX_MATCH_OP% WS_OPT StringOp
+ComparisonOp -> Expression WS_OPT %NUM_COMPARE_OP% WS_OPT Expression
+ComparisonOp -> Expression WS_OPT %STRING_COMPARE_OP% WS_OPT Expression
+ComparisonOp -> Expression WS_OPT 'isa' WS_OPT QualifiedIdentifier
+ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT Expression
 
-# String operators (left-associative)
-# Phase 4: Flattened from Range + Concatenation
-# Precedence handled by Precedence semiring
-StringOp -> ArithmeticOp
-StringOp -> StringOp WS_OPT '.' WS_OPT ArithmeticOp
-StringOp -> StringOp WS_OPT '..' WS_OPT ArithmeticOp
+# String concatenation operator (left-associative)
+ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
+
+# Range operator (non-associative, also flip-flop in scalar context)
+RangeOp -> Expression WS_OPT '..' WS_OPT Expression
 
 # Arithmetic operators (left-associative)
 # Phase 4: Flattened from Additive + Multiplicative
 # Precedence handled by Precedence semiring
-ArithmeticOp -> Unary
-ArithmeticOp -> ArithmeticOp WS_OPT '+' WS_OPT Unary
-ArithmeticOp -> ArithmeticOp WS_OPT '-' WS_OPT Unary
-ArithmeticOp -> ArithmeticOp WS_OPT '*' WS_OPT Unary
-ArithmeticOp -> ArithmeticOp WS_OPT '/' WS_OPT Unary
+ArithmeticOp -> Expression WS_OPT '+' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT '-' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT '*' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT '/' WS_OPT Expression
 
 # Unary prefix operators (right-associative)
-Unary -> Postfix
-Unary -> '!' WS_OPT Unary
-Unary -> 'not' WS_OPT Unary
-Unary -> '-' WS_OPT Unary
-Unary -> '+' WS_OPT Unary
-Unary -> '++' WS_OPT Unary
-Unary -> '--' WS_OPT Unary
-Unary -> '\\' WS_OPT Unary  # Reference operator: \$var, \@array, \%hash
+Unary -> '!' WS_OPT Expression
+Unary -> 'not' WS_OPT Expression
+Unary -> '-' WS_OPT Expression
+Unary -> '+' WS_OPT Expression
+Unary -> '++' WS_OPT Expression
+Unary -> '--' WS_OPT Expression
+Unary -> '\\' WS_OPT Expression  # Reference operator: \$var, \@array, \%hash
 
 # Postfix operators
-Postfix -> Primary
 Postfix -> Variable '++'
 Postfix -> Variable '--'
 
@@ -313,36 +329,40 @@ ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Fat com
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Pairs with more
 ExpressionList ->
 
-# Primary expressions (highest precedence)
-Primary -> Literal
-Primary -> Variable
-Primary -> Identifier  # Bareword (can be function name, method name, or string in context)
-Primary -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
-Primary -> Identifier '(' WS_OPT ')'  # Function call with no args
-Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
-Primary -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
-Primary -> 'exists' '(' WS_OPT Expression WS_OPT ')'  # exists() builtin
-Primary -> 'defined' '(' WS_OPT Expression WS_OPT ')'  # defined() builtin
-Primary -> 'keys' '(' WS_OPT Expression WS_OPT ')'  # keys() builtin
-Primary -> 'values' '(' WS_OPT Expression WS_OPT ')'  # values() builtin
-Primary -> 'scalar' '(' WS_OPT Expression WS_OPT ')'  # scalar() builtin
-Primary -> 'map' WS_OPT Block WS_OPT Expression  # map BLOCK LIST
-Primary -> 'grep' WS_OPT Block WS_OPT Expression  # grep BLOCK LIST
-Primary -> 'all' WS_OPT Block WS_OPT Expression  # all BLOCK LIST
-Primary -> 'any' WS_OPT Block WS_OPT Expression  # any BLOCK LIST
-Primary -> '[' WS_OPT ExpressionList WS_OPT ']'  # Array constructor
-Primary -> '[' WS_OPT ']'  # Empty array
-Primary -> '{' WS_OPT ExpressionList WS_OPT '}'  # Hash constructor
-Primary -> '{' WS_OPT '}'  # Empty hash
-Primary -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
-Primary -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
-Primary -> '...'  # Ellipsis / yada-yada operator
+# Atomic expressions - literals, variables, identifiers, yada-yada
+Atom -> Literal
+Atom -> Variable
+Atom -> Identifier  # Bareword (can be function name, method name, or string in context)
+Atom -> '...'  # Ellipsis / yada-yada operator
+
+# Function and method calls
+FunctionCall -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
+FunctionCall -> Identifier '(' WS_OPT ')'  # Function call with no args
+FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
+FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
+
+# Built-in operators - delegates to FunctionCall, semantic action can specialize
+BuiltinOp -> FunctionCall
+
+# List operations (map, grep, all, any)
+ListOp -> 'map' WS_OPT Block WS_OPT Expression
+ListOp -> 'grep' WS_OPT Block WS_OPT Expression
+ListOp -> 'all' WS_OPT Block WS_OPT Expression
+ListOp -> 'any' WS_OPT Block WS_OPT Expression
+
+# Reference constructors (arrays and hashes)
+ReferenceConstructor -> '[' WS_OPT ExpressionList WS_OPT ']'  # Array constructor
+ReferenceConstructor -> '[' WS_OPT ']'  # Empty array
+ReferenceConstructor -> '{' WS_OPT ExpressionList WS_OPT '}'  # Hash constructor
+ReferenceConstructor -> '{' WS_OPT '}'  # Empty hash
 
 # ============================================================================
 # HELPER RULES AND TERMINALS (Most specific)
 # ============================================================================
 
 # Parameter lists (for method/sub signatures)
+ParameterList -> Variable
+ParameterList -> Variable WS_OPT ',' WS_OPT ParameterList
 ParameterList -> Assignment
 ParameterList -> Assignment WS_OPT ',' WS_OPT ParameterList
 ParameterList ->  # Empty parameter list

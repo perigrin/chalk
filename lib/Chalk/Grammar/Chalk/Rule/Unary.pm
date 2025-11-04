@@ -1,25 +1,36 @@
-# ABOUTME: Semantic action for Unary - pass through child value or build unary operation
-# ABOUTME: Unary handles prefix operators like !, -, +, \, building appropriate IR nodes
+# ABOUTME: Semantic action for Unary - handles both prefix and postfix unary operators
+# ABOUTME: Phase 4: Flattened from Unary + Postfix - handles prefix (!, -, +, \, ++, --) and postfix (++, --)
 
 use 5.42.0;
 use experimental 'class';
-use Scalar::Util 'blessed';
+use builtin qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        # Unary -> Postfix (pass-through)
-        # Unary -> '!' WS_OPT Unary (unary operation)
-        #   Where OpUnary can be: !, -, +, ~, \
-        # NOTE: WS_OPT is collapsed when empty, so child count varies
+        # Unary -> Primary (pass-through)
+        # Unary -> '!' WS_OPT Unary (prefix operators)
+        # Unary -> Variable '++' (postfix increment)
+        # Unary -> Variable '--' (postfix decrement)
 
         my @children = $context->children->@*;
 
         if (@children == 1) {
-            # First alternative: just pass through Postfix
+            # First alternative: just pass through Primary
             return $context->child(0);
         }
 
-        # For unary operation: check child(0) for the operator
+        # Check if this is a postfix operator (Variable ++)
+        # Postfix pattern: child(0) is Variable, child(1) is operator
+        if (@children == 2) {
+            my $last_child = $children[-1]->extract;
+            if (defined($last_child) && !ref($last_child) && ($last_child eq '++' || $last_child eq '--')) {
+                # This is postfix: Variable '++' or Variable '--'
+                # TODO: Implement postfix increment/decrement when IR nodes available
+                return $context->child(0);
+            }
+        }
+
+        # Otherwise, this is a prefix operator: check child(0) for the operator
         my $op_child = $children[0]->extract;
         return $context->child(0) unless defined $op_child && !ref($op_child);
 
@@ -43,9 +54,11 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
             return $operand;
         } elsif ($operator eq '\\') {
             return $builder->build_reference_node($operand);
+        } elsif ($operator eq '++' || $operator eq '--') {
+            # Prefix ++/--
+            # TODO: Implement prefix increment/decrement when IR nodes available
+            return $operand;
         }
-        # For other operators (~), pass through for now
-        # These will be implemented in future phases
 
         return $context->child(0);
     }
