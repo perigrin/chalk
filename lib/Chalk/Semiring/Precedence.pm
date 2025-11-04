@@ -85,8 +85,11 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     # Helper: Determine comparison operator direction
     sub _operator_direction {
         my ($op) = @_;
-        return 'asc' if $op =~ /^(<|<=|lt|le)$/;
-        return 'desc' if $op =~ /^(>|>=|gt|ge)$/;
+        # Use hash lookup to avoid < and > in regex patterns (confuses Chalk parser)
+        my %ascending = ('<' => 1, '<=' => 1, 'lt' => 1, 'le' => 1);
+        my %descending = ('>' => 1, '>=' => 1, 'gt' => 1, 'ge' => 1);
+        return 'asc' if exists $ascending{$op};
+        return 'desc' if exists $descending{$op};
         return undef;  # No direction (e.g., ==, !=)
     }
 
