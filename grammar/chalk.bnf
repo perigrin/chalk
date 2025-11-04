@@ -12,8 +12,9 @@
 #
 # 2. **Static Parseability**
 #    All constructs must be statically parseable without runtime information.
-#    This excludes symbolic references, eval STRING, most special variables,
-#    and other dynamic features that complicate static analysis.
+#    This excludes symbolic references, eval (both STRING and BLOCK forms),
+#    most special variables, and other dynamic features that complicate
+#    static analysis.
 #
 # 3. **Alignment with Standard Perl**
 #    Where beneficial for static parsing, we adopt restrictions from the
@@ -21,7 +22,7 @@
 #    - All hash keys must be quoted (no bareword auto-quoting)
 #    - No HEREDOCs (cannot be expressed in BNF)
 #    - No indirect object notation (ambiguous syntax)
-#    - Function calls must use parentheses
+#    - Function calls may omit parentheses in unambiguous contexts
 #
 # 4. **Compilation Target**
 #    Grammar designed to enable compilation to intermediate representations
@@ -35,7 +36,7 @@
 # KEY EXCLUSIONS:
 #
 # - `package` declarations (use `class` instead)
-# - eval STRING (eval BLOCK may be acceptable)
+# - eval (both STRING and BLOCK forms - no runtime code evaluation)
 # - Symbolic references: $$var, &{$code}, *{$glob}
 # - Typeglobs and formats
 # - Most special variables (except $1, $2, @-, etc.)

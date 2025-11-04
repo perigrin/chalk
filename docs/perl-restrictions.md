@@ -2,6 +2,24 @@
 
 This document lists features of Perl that are intentionally restricted or modified in Chalk due to architectural decisions.
 
+## Function Call Syntax
+
+**Flexibility:** Function and method calls in Chalk may omit parentheses in unambiguous contexts.
+
+**What works:**
+```perl
+foo(1, 2);           # Traditional with parentheses
+foo 1, 2;            # Without parentheses (list context clear)
+$obj->method($arg);  # Method with parentheses
+$obj->method;        # Method without parentheses
+```
+
+**Rationale:** While Standard Perl requires parentheses for all function calls to eliminate parsing ambiguity, Chalk's grammar can statically parse certain parenthesis-free forms. This is supported through the grammar rules:
+- `FunctionCall -> Identifier WS Expression` (line 315)
+- `MethodCall -> Expression '->' Identifier` (line 325)
+
+The precedence semiring validates that these constructs don't create ambiguity with operators.
+
 ## References and Mutation
 
 **Restriction:** References in Chalk are immutable aliases, not mutable pointers.
