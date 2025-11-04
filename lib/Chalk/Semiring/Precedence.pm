@@ -69,7 +69,7 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     ADJUST {
         # Build operator index for fast lookup
         my %index;
-        for my $i (0 .. $#{$precedence_table}) {
+        for my $i (0 .. $precedence_table->@* - 1) {
             my $entry = $precedence_table->[$i];
             for my $op ($entry->{ops}->@*) {
                 $index{$op} = {
