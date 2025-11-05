@@ -55,11 +55,12 @@ class Chalk::Error::CompilationError {
         my $line_num_width = length($end_line);
 
         # Show source lines
-        for my $i (0 .. $#{$source_lines}) {
+        my @lines = $source_lines->@*;
+        for my $i (0 .. $#lines) {
             my $line_num = $i + 1;
             next if $line_num < $start_line - 1 || $line_num > $end_line + 1;
 
-            my $line = $source_lines->[$i];
+            my $line = $lines[$i];
             my $padded_num = sprintf("%${line_num_width}d", $line_num);
 
             if ($line_num >= $start_line && $line_num <= $end_line) {
@@ -102,7 +103,8 @@ class Chalk::Error::CompilationError {
     # Stringify to message for simple error display
     method as_string($other = undef, $swap = undef) {
         if ($source_info) {
-            return sprintf("%s at %s", $message, $source_info->to_string());
+            my $location = $source_info->to_string();
+            return sprintf("%s at %s", $message, $location);
         }
         return $message;
     }

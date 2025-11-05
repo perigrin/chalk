@@ -167,8 +167,8 @@ class Chalk::IR::Builder {
     method build_add_node($left_node, $right_node, $source_info = undef) {
         die "build_add_node: left_node is undefined" unless defined($left_node);
         die "build_add_node: right_node is undefined" unless defined($right_node);
-        die "build_add_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ /^Chalk::IR::Node/;
-        die "build_add_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ /^Chalk::IR::Node/;
+        die "build_add_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
+        die "build_add_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
 
         my $node_id = $self->next_node_id();
         my $add = Chalk::IR::Node::Add->new(

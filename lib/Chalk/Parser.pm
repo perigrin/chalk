@@ -276,7 +276,7 @@ class Chalk::Parser {
             }
 
             # Extract source lines around failure position
-            my @lines = split(/\n/, $input, -1);
+            my @lines = split(qr/\n/, $input, -1);
             my $context_lines = 2;  # Show 2 lines before and after
             my $start_line = $line_num - $context_lines - 1;
             $start_line = 0 if $start_line < 0;

@@ -106,9 +106,10 @@ class Chalk::IR::Optimizer::GVN {
             }
 
             if ($had_redirections) {
+                my $num_eliminated = scalar(keys $redirections->%*);
                 $new_node->record_transform('optimization', 'GVN',
                     context => "inputs redirected due to CSE (node $node_id kept, " .
-                               scalar(keys %{$redirections}) . " nodes eliminated)"
+                               $num_eliminated . " nodes eliminated)"
                 );
             }
 
