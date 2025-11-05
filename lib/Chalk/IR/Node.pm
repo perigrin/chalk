@@ -38,6 +38,7 @@ class Chalk::IR::Node {
     field $op           :param :reader;
     field $inputs       :param :reader;
     field $attributes   :param :reader;
+    field $source_info  :param :reader = undef;
 
     method to_hash() {
         return {
@@ -45,7 +46,13 @@ class Chalk::IR::Node {
             op           => $op,
             inputs       => $inputs,
             attributes   => $attributes,
+            source_info  => $source_info,
         };
+    }
+
+    # Get formatted source location string for error messages
+    method source_location() {
+        return $source_info ? $source_info->to_string() : undef;
     }
 
     # Factory method: create polymorphic node from hash representation
@@ -104,6 +111,11 @@ class Chalk::IR::Node {
             id     => $id,
             inputs => $inputs,
         );
+
+        # Add source_info if present
+        if ($hash->{source_info}) {
+            $params{source_info} = $hash->{source_info};
+        }
 
         # Add attributes as constructor parameters
         # Parser compat: keys() requires parentheses around argument
