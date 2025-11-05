@@ -5,8 +5,9 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Base {
-    field $id      :param :reader;
-    field $inputs  :param :reader;
+    field $id          :param :reader;
+    field $inputs      :param :reader;
+    field $source_info :param :reader = undef;
 
     # Abstract method - subclasses must implement
     method op() {

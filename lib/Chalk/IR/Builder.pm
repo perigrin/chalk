@@ -96,13 +96,16 @@ class Chalk::IR::Builder {
     }
 
     # Create Constant node
-    method build_constant_node($value, $type = 'Int') {
+    method build_constant_node($value, $type = 'Int', $source_info = undef) {
+        die "build_constant_node: value is undefined" unless defined($value);
+
         my $node_id = $self->next_node_id();
         my $constant = Chalk::IR::Node::Constant->new(
             id            => $node_id,
             inputs        => [$current_control],
             value         => $value,
             type          => $type,
+            source_info   => $source_info,
         );
         $graph->add_node($constant);
         return $constant;
@@ -110,14 +113,15 @@ class Chalk::IR::Builder {
 
     # Create Return node
     # If $control is undef, uses current_control. Otherwise uses provided control.
-    method build_return_node($value_node, $control = undef) {
-        # Debug: check what we received
+    method build_return_node($value_node, $control = undef, $source_info = undef) {
+        die "build_return_node: value_node is undefined" unless defined($value_node);
+
+        # Check that value_node is an IR node object
         my $ref_type = ref($value_node) || 'SCALAR';
         my $prefix = substr($ref_type, 0, 15);
         my $is_node = ($prefix eq 'Chalk::IR::Node') ? 1 : 0;
         unless ($ref_type && $is_node) {
-            warn "build_return_node received non-node: $ref_type\n";
-            return undef;
+            die "build_return_node: value_node is not an IR node object (got $ref_type)";
         }
 
         # Use provided control, or current_control, or '__CONTROL_PLACEHOLDER__'
@@ -129,6 +133,7 @@ class Chalk::IR::Builder {
             inputs        => [$ctrl, $value_node->id],
             value_id      => $value_node->id,
             control_id    => $ctrl,
+            source_info   => $source_info,
         );
         $graph->add_node($return);
         return $return;
@@ -141,13 +146,19 @@ class Chalk::IR::Builder {
     }
 
     # Create arithmetic operation nodes
-    method build_add_node($left_node, $right_node) {
+    method build_add_node($left_node, $right_node, $source_info = undef) {
+        die "build_add_node: left_node is undefined" unless defined($left_node);
+        die "build_add_node: right_node is undefined" unless defined($right_node);
+        die "build_add_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ /^Chalk::IR::Node/;
+        die "build_add_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ /^Chalk::IR::Node/;
+
         my $node_id = $self->next_node_id();
         my $add = Chalk::IR::Node::Add->new(
             id => $node_id,
             inputs => [$current_control, $left_node->id, $right_node->id],
             left_id => $left_node->id,
             right_id => $right_node->id,
+            source_info => $source_info,
         );
         $graph->add_node($add);
         return $add;
