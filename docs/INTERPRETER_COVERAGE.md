@@ -75,63 +75,101 @@ These nodes have `execute()` methods but lack comprehensive differential tests:
   - ✅ Tested in `t/sea-of-nodes/interpreter.t`
   - ❌ No differential tests yet
 
-#### Memory Operations
-- **Load** - Load from memory
+#### Context-Based Variable Access
+- **VariableRead** - Read variable from lexical context
   - ✅ Has `execute()` method
-  - ✅ Tested in `t/sea-of-nodes/interpreter.t`
-  - ❌ No differential tests yet (would need variable assignment support)
-- **Store** - Store to memory
-  - ✅ Has `execute()` method
-  - ✅ Tested in `t/sea-of-nodes/interpreter.t`
-  - ❌ No differential tests yet (would need variable assignment support)
+  - ✅ Works with context-as-closure memory model
+  - ❌ No differential tests yet (blocked by variable reassignment bug)
+  - 📝 Note: Chalk uses pure context model - no Store/Load IR nodes exist
+
+#### Array/Hash Operations
+- **ArrayValue, HashValue** - Collection construction
+  - ✅ Have `execute()` methods
+  - ✅ Collections are contexts with index:/key: namespaces
+- **ArrayGet, ArraySet, HashGet, HashSet** - Collection access
+  - ✅ Have `execute()` methods
+  - ⚠️ Limited testing
 
 #### Infrastructure
 - **Start** - Function entry point
   - ✅ Has `execute()` method
   - ✅ Tested implicitly (all tests use this)
 
-### ❌ Not Yet Implemented (7 nodes)
+### ❌ Not Yet Implemented (4 nodes)
 
-These nodes exist but don't have `execute()` methods yet:
+These nodes exist but don't have `execute()` methods OR semantic actions:
+
+#### Increment/Decrement (Grammar Rules Exist, Semantic Actions TODO)
+- **PreIncrement** - Pre-increment (++$x)
+  - ✅ Grammar rule: `Unary -> '++' WS_OPT Unary`
+  - ❌ Semantic action not implemented (see `Rule::Unary.pm`)
+  - ❌ No `execute()` method
+  - 📝 Blocked by: variable reassignment bug (needs context extension)
+- **PostIncrement** - Post-increment ($x++)
+  - ✅ Grammar rule: `Postfix -> Variable '++'`
+  - ❌ Semantic action not implemented (see `Rule::Postfix.pm` line 10-11)
+  - ❌ No `execute()` method
+  - 📝 Blocked by: variable reassignment bug
+- **PreDecrement** - Pre-decrement (--$x)
+  - ✅ Grammar rule: `Unary -> '--' WS_OPT Unary`
+  - ❌ Semantic action not implemented
+  - ❌ No `execute()` method
+  - 📝 Blocked by: variable reassignment bug
+- **PostDecrement** - Post-decrement ($x--)
+  - ✅ Grammar rule: `Postfix -> Variable '--'`
+  - ❌ Semantic action not implemented (see `Rule::Postfix.pm` line 12)
+  - ❌ No `execute()` method
+  - 📝 Blocked by: variable reassignment bug
+
+### ✅ Previously Listed as Missing But Actually Implemented
 
 #### Logical Operations
 - **Not** - Logical NOT operator (!)
-  - ❌ No `execute()` method
-  - 📝 Future work: requires logical operator support
-
-#### Increment/Decrement
-- **PreIncrement** - Pre-increment (++$x)
-  - ❌ No `execute()` method
-  - 📝 Future work: requires lvalue support
-- **PostIncrement** - Post-increment ($x++)
-  - ❌ No `execute()` method
-  - 📝 Future work: requires lvalue support
-- **PreDecrement** - Pre-decrement (--$x)
-  - ❌ No `execute()` method
-  - 📝 Future work: requires lvalue support
-- **PostDecrement** - Post-decrement ($x--)
-  - ❌ No `execute()` method
-  - 📝 Future work: requires lvalue support
+  - ✅ Has `execute()` method
+  - ✅ Semantic action implemented in `Rule::Unary.pm`
+  - ⚠️ Needs differential testing
 
 #### Control Flow
 - **Loop** - Loop construct
-  - ❌ No `execute()` method
-  - 📝 Future work: requires loop support
+  - ✅ Has `execute()` method
+  - ⚠️ Needs testing with actual loop constructs
 
-#### Memory
+#### Memory/References
 - **Reference** - Reference creation (\$x)
-  - ❌ No `execute()` method
-  - 📝 Future work: requires reference support
+  - ✅ Has `execute()` method
+  - ✅ Semantic action implemented in `Rule::Unary.pm`
+  - ✅ Uses `(context, label)` pair model
+  - ✅ Tested in `t/sea-of-nodes/references.t`
+- **ScalarDeref** - Dereference ($$ref)
+  - ✅ Has `execute()` method
+  - ✅ Tested in `t/sea-of-nodes/references.t`
 
-## Test Coverage Summary
+## Test Coverage Summary (CORRECTED)
 
 ```
-Total IR Node Types:           28 (excluding Base)
-With execute() methods:        20 (71%)
-Differential test coverage:    12 (43%)
-TODO/Partial coverage:          8 (29%)
-Not yet implemented:            7 (25%)
+Total IR Node Types:           34 (excluding Base)
+With execute() methods:        30 (88%)
+Differential test coverage:    12 (35%)
+Implemented but undertested:   18 (53%)
+Not yet implemented:            4 (12%)
+  - PreIncrement, PostIncrement
+  - PreDecrement, PostDecrement
+  (Note: Grammar rules exist, just need semantic actions + execute())
 ```
+
+### Memory Model Note
+
+Chalk uses a **pure context-as-closure memory model**. There are NO Store/Load IR nodes. Variable assignment is handled via:
+
+```perl
+# In IR Builder:
+$context = Chalk::IR::Context->extend_context($context, "lexical:$x", $value_node);
+
+# In Interpreter:
+$node = $context->("lexical:$x");  # Direct context lookup
+```
+
+**Context handling** (list vs scalar) is managed by the **Type system** via `Chalk::Type::List->convert_to_target($sigil)`, not by separate IR nodes.
 
 ## Known Issues Documented in TODO Tests
 
@@ -145,14 +183,15 @@ Not yet implemented:            7 (25%)
 ### Phase 2: Complete Basic Operator Coverage
 - [ ] Fix negative literal parsing/execution
 - [ ] Add differential tests for control flow (after IR construction fix)
-- [ ] Add differential tests for memory operations (Load/Store with variables)
+- [ ] Fix variable reassignment in context model (BLOCKER)
+- [ ] Add differential tests for variable operations (reads after reassignment)
 - [ ] Document comparison operator false value behavior decision
 
 ### Phase 3: Implement Missing Operators
-- [ ] Implement `Not` execute() method
-- [ ] Implement increment/decrement execute() methods
-- [ ] Implement `Loop` execute() method
-- [ ] Implement `Reference` execute() method
+- [ ] Implement semantic actions for ++/-- in `Rule::Unary.pm` and `Rule::Postfix.pm`
+- [ ] Implement PreIncrement/PostIncrement/PreDecrement/PostDecrement execute() methods
+- [ ] Add builder methods: `build_pre_increment_node()`, etc.
+- [ ] Add differential tests for increment/decrement
 
 ### Phase 4: Advanced Coverage
 - [ ] Modulo operator (%)

@@ -105,9 +105,9 @@ $x = 10;        # Should update $x
 return $x;      # Returns 5 instead of 10
 ```
 
-This is a genuine bug in the IR construction or interpreter, not an acceptable semantic difference.
+This is a genuine bug in the context-based memory model, not an acceptable semantic difference.
 
-**Root cause**: Likely related to how Store nodes are being created or how Load nodes resolve to the correct memory state.
+**Root cause**: Context extension via `extend_context($context, "lexical:$x", $value_node)` creates proper shadowing, but the interpreter's context lookup or the builder's context threading may not be propagating the updated context correctly through the IR graph. Since Chalk uses a pure context-as-closure model (no Store/Load IR nodes), variable reassignment is implemented by extending the context with the same label, which should shadow the previous binding.
 
 ## Negative Literals
 

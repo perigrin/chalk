@@ -115,32 +115,18 @@ class Chalk::IR::Validator {
     }
 
     # Validate SSA single assignment property
+    # NOTE: Chalk uses pure context-as-closure for variable memory.
+    # Variables are not represented as Store/Load IR nodes, but as
+    # context extensions via extend_context($ctx, "lexical:$var", $value).
+    # SSA properties are enforced at IR construction time in the Builder,
+    # not validated post-hoc here. This method is kept for future
+    # context-based validation if needed.
     method validate_single_assignment($graph) {
         my @errors = ();
-        my %assignments = ();  # variable_name => [node_ids]
 
-        my $nodes = $graph->nodes;
-
-        # Collect all Store nodes (variable assignments)
-        for my $node_id (keys( $nodes->%* )) {
-            my $node = $nodes->{$node_id};
-            if ($node->op eq 'Store') {
-                my $var_name = $node->attributes->{variable};
-                if (defined($var_name)) {
-                    $assignments{$var_name} //= [];
-                    push $assignments{$var_name}->@*, $node_id;
-                }
-            }
-        }
-
-        # Check for multiple assignments to same variable
-        for my $var_name (keys( %assignments )) {
-            my $assign_list = $assignments{$var_name};
-            if (scalar( $assign_list->@* ) > 1) {
-                my $node_list = join(', ', $assign_list->@*);
-                push @errors, "SSA violation: Variable $var_name is assigned more than once (in nodes: $node_list)";
-            }
-        }
+        # Context model: No Store nodes exist in IR.
+        # Variable assignments are context extensions in Builder.
+        # SSA is enforced by context shadowing semantics.
 
         return @errors;
     }
@@ -333,47 +319,19 @@ class Chalk::IR::Validator {
     }
 
     # Validate dominance property: definitions dominate uses
+    # NOTE: Chalk uses pure context-as-closure for variable memory.
+    # There are no Load/Store IR nodes. Variables are accessed via:
+    #   - Builder: $node = $builder->build_load_node($var) returns node from context
+    #   - Interpreter: $value = $context->("lexical:$var") looks up in context
+    # Dominance is inherently maintained by context threading through the IR graph.
+    # This method is kept for future dominance validation of other node types if needed.
     method validate_dominance($graph) {
         my @errors = ();
 
-        my $dom_tree = $self->compute_dominance_tree($graph);
-        my $nodes = $graph->nodes;
-
-        # Check each Load node: its Store must exist and be valid
-        for my $node_id (keys( $nodes->%* )) {
-            my $node = $nodes->{$node_id};
-            if ($node->op eq 'Load') {
-                my $var_name = $node->attributes->{variable};
-                my $store_id = $node->attributes->{store_id};
-
-                if (defined($store_id)) {
-                    if (defined($var_name)) {
-                        # Check if store exists
-                        if (not(exists($nodes->{$store_id}))) {
-                            push @errors, "Dominance violation: Load of $var_name in $node_id references non-existent Store $store_id";
-                            next;
-                        }
-
-                        my $store_node = $nodes->{$store_id};
-                        if ($store_node->op ne 'Store') {
-                            push @errors, "Dominance violation: Load of $var_name in $node_id references $store_id which is not a Store node";
-                            next;
-                        }
-
-                        # For graphs with control flow (Region nodes), check strict dominance
-                        # For linear graphs (Chapters 1-4), the store_id reference is sufficient
-                        my $has_control_flow = $self->_has_control_flow($graph);
-
-                        if ($has_control_flow) {
-                            my $is_dominated = $self->_dominates($dom_tree, $store_id, $node_id);
-                            if (not($is_dominated)) {
-                                push @errors, "Dominance violation: Load of $var_name in $node_id is not dominated by its Store in $store_id";
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        # Context model: No Load/Store nodes exist in IR.
+        # Variable dominance is ensured by context threading in Builder.
+        # Future: Could validate that VariableRead nodes have their variables
+        # defined in reachable context (but this is checked at build time).
 
         return @errors;
     }
