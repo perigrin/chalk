@@ -57,6 +57,12 @@ class Chalk::IR::Node {
         return $source_info ? $source_info->to_string() : undef;
     }
 
+    # NOTE: This method is legacy/unused code kept for backward compatibility
+    # All polymorphic node subclasses inherit from Node::Base which has the real
+    # record_transform() implementation. This class (Node) is only used as a
+    # factory via from_hash() and its record_transform() is never called.
+    # See Node::Base::record_transform() for the active implementation.
+    #
     # Record a transformation and return a new node with updated chain
     method record_transform(%args) {
         my $operation   = $args{operation}   // die "operation required";

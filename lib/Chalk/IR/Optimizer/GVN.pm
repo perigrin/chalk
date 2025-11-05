@@ -85,14 +85,32 @@ class Chalk::IR::Optimizer::GVN {
                 $redirections
             );
 
-            # Reconstruct node preserving polymorphic type
+            # Reconstruct node preserving polymorphic type, source_info, and transform_chain
             # Use from_hash() factory to create correct node class
             my $new_node = Chalk::IR::Node->from_hash({
-                id         => $node_id,
-                op         => $old_node->op,
-                inputs     => \@new_inputs,
-                attributes => $new_attributes,
+                id              => $node_id,
+                op              => $old_node->op,
+                inputs          => \@new_inputs,
+                attributes      => $new_attributes,
+                source_info     => $old_node->source_info,
+                transform_chain => $old_node->transform_chain,
             });
+
+            # Record GVN optimization if node's inputs were redirected
+            my $had_redirections = 0;
+            for my $input_id ($old_node->inputs->@*) {
+                if (defined($input_id) && exists($redirections->{$input_id})) {
+                    $had_redirections = 1;
+                    last;
+                }
+            }
+
+            if ($had_redirections) {
+                $new_node->record_transform('optimization', 'GVN',
+                    context => "inputs redirected due to CSE (node $node_id kept, " .
+                               scalar(keys %{$redirections}) . " nodes eliminated)"
+                );
+            }
 
             $new_graph->add_node($new_node);
             $copied{$node_id} = 1;

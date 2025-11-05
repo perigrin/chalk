@@ -41,7 +41,19 @@ class Chalk::IR::Node::Base {
 
     # Record a transformation that created or modified this node
     method record_transform($operation, $name, %opts) {
-        my $source_node_id = $opts{source_node} ? $opts{source_node}->id : undef;
+        # Validate required parameters
+        die "record_transform: operation parameter required and must be non-empty"
+            unless defined($operation) && length($operation);
+        die "record_transform: name parameter required and must be non-empty"
+            unless defined($name) && length($name);
+
+        # Validate source_node if provided
+        my $source_node_id;
+        if (my $sn = $opts{source_node}) {
+            die "record_transform: source_node must be an IR node object with id() method"
+                unless ref($sn) && $sn->can('id');
+            $source_node_id = $sn->id;
+        }
 
         my $record = Chalk::IR::TransformRecord->new(
             operation      => $operation,
