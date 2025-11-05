@@ -34,25 +34,77 @@ use Chalk::IR::Node::HashGet;
 use Chalk::IR::Node::HashSet;
 
 class Chalk::IR::Node {
-    field $id           :param :reader;
-    field $op           :param :reader;
-    field $inputs       :param :reader;
-    field $attributes   :param :reader;
-    field $source_info  :param :reader = undef;
+    field $id             :param :reader;
+    field $op             :param :reader;
+    field $inputs         :param :reader;
+    field $attributes     :param :reader;
+    field $source_info    :param :reader = undef;
+    field $transform_chain :param :reader = undef;
 
     method to_hash() {
         return {
-            id           => $id,
-            op           => $op,
-            inputs       => $inputs,
-            attributes   => $attributes,
-            source_info  => $source_info,
+            id              => $id,
+            op              => $op,
+            inputs          => $inputs,
+            attributes      => $attributes,
+            source_info     => $source_info,
+            transform_chain => $transform_chain,
         };
     }
 
     # Get formatted source location string for error messages
     method source_location() {
         return $source_info ? $source_info->to_string() : undef;
+    }
+
+    # Record a transformation and return a new node with updated chain
+    method record_transform(%args) {
+        my $operation   = $args{operation}   // die "operation required";
+        my $rule_name   = $args{rule_name}   // undef;
+        my $description = $args{description} // undef;
+
+        # Create transform record
+        my $transform = {
+            operation      => $operation,
+            rule_name      => $rule_name,
+            description    => $description,
+            timestamp      => time(),
+            source_node_id => $id,
+        };
+
+        # Build new chain: copy existing + new transform
+        my $new_chain = $transform_chain ? [$transform_chain->@*] : [];
+        push $new_chain->@*, $transform;
+
+        # Return new node with updated chain (immutable pattern)
+        return ref($self)->new(
+            id              => $id,
+            op              => $op,
+            inputs          => $inputs,
+            attributes      => $attributes,
+            source_info     => $source_info,
+            transform_chain => $new_chain,
+        );
+    }
+
+    # Get formatted transformation history for debugging
+    method transform_history() {
+        return undef unless $transform_chain && $transform_chain->@*;
+
+        my @lines;
+        for my $transform ($transform_chain->@*) {
+            my $line = sprintf(
+                "%s: %s",
+                $transform->{operation},
+                $transform->{rule_name} // 'unknown'
+            );
+            if ($transform->{description}) {
+                $line .= " - $transform->{description}";
+            }
+            push @lines, $line;
+        }
+
+        return join("\n", @lines);
     }
 
     # Factory method: create polymorphic node from hash representation
@@ -115,6 +167,11 @@ class Chalk::IR::Node {
         # Add source_info if present
         if ($hash->{source_info}) {
             $params{source_info} = $hash->{source_info};
+        }
+
+        # Add transform_chain if present
+        if ($hash->{transform_chain}) {
+            $params{transform_chain} = $hash->{transform_chain};
         }
 
         # Add attributes as constructor parameters
