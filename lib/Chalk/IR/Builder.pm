@@ -80,6 +80,12 @@ class Chalk::IR::Builder {
             params        => $params,
         );
         $graph->add_node($start);
+
+        # Record transformation
+        $start->record_transform('ir_construction', 'Builder::build_start_node',
+            context => "function=$function_name"
+        );
+
         $self->set_control($start->id);
 
         # Create Proj nodes for each parameter and register in context
@@ -108,6 +114,12 @@ class Chalk::IR::Builder {
             source_info   => $source_info,
         );
         $graph->add_node($constant);
+
+        # Record transformation
+        $constant->record_transform('ir_construction', 'Builder::build_constant_node',
+            context => "value=$value, type=$type"
+        );
+
         return $constant;
     }
 
@@ -136,6 +148,12 @@ class Chalk::IR::Builder {
             source_info   => $source_info,
         );
         $graph->add_node($return);
+
+        # Record transformation
+        $return->record_transform('ir_construction', 'Builder::build_return_node',
+            context => "value_id=" . $value_node->id
+        );
+
         return $return;
     }
 
@@ -161,6 +179,12 @@ class Chalk::IR::Builder {
             source_info => $source_info,
         );
         $graph->add_node($add);
+
+        # Record transformation
+        $add->record_transform('ir_construction', 'Builder::build_add_node',
+            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        );
+
         return $add;
     }
 
@@ -173,6 +197,12 @@ class Chalk::IR::Builder {
             right_id => $right_node->id,
         );
         $graph->add_node($mul);
+
+        # Record transformation
+        $mul->record_transform('ir_construction', 'Builder::build_multiply_node',
+            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        );
+
         return $mul;
     }
 
@@ -185,6 +215,12 @@ class Chalk::IR::Builder {
             right_id => $right_node->id,
         );
         $graph->add_node($sub);
+
+        # Record transformation
+        $sub->record_transform('ir_construction', 'Builder::build_sub_node',
+            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        );
+
         return $sub;
     }
 
@@ -197,6 +233,12 @@ class Chalk::IR::Builder {
             right_id => $right_node->id,
         );
         $graph->add_node($div);
+
+        # Record transformation
+        $div->record_transform('ir_construction', 'Builder::build_divide_node',
+            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        );
+
         return $div;
     }
 
