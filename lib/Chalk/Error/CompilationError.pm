@@ -32,9 +32,9 @@ class Chalk::Error::CompilationError {
         }
 
         # Add hints if available
-        if ($hints && @$hints) {
+        if ($hints && $hints->@*) {
             push @lines, "";
-            for my $hint (@$hints) {
+            for my $hint ($hints->@*) {
                 push @lines, "  hint: $hint";
             }
         }
