@@ -58,6 +58,7 @@ class Chalk::LeoItem {
 
     method complete()    { 1 }
     method next_symbol() { }
+    method dot_pos()     { scalar($rule->rhs) }  # LeoItems are always complete
 
     method key(@args) {
         return "LEO:$symbol|$start_pos|$end_pos";
@@ -260,10 +261,75 @@ class Chalk::Parser {
 
         # Show where parsing actually stopped if it failed
         if ( !$result && $last_active_pos < $input_length ) {
+            # Calculate line and column of failure position
+            my $line_num = 1;
+            my $col = 0;
+            my $line_start = 0;
+            for my $i (0 .. $last_active_pos - 1) {
+                if (substr($input, $i, 1) eq "\n") {
+                    $line_num++;
+                    $line_start = $i + 1;
+                    $col = 0;
+                } else {
+                    $col++;
+                }
+            }
+
+            # Extract source lines around failure position
+            my @lines = split(/\n/, $input, -1);
+            my $context_lines = 2;  # Show 2 lines before and after
+            my $start_line = $line_num - $context_lines - 1;
+            $start_line = 0 if $start_line < 0;
+            my $end_line = $line_num + $context_lines - 1;
+            $end_line = $#lines if $end_line > $#lines;
+
+            # Build context display with line numbers
+            my $context = "";
+            for my $i ($start_line .. $end_line) {
+                my $display_line = $i + 1;
+                if ($i == $line_num - 1) {
+                    # Error line with >>> marker
+                    $context .= sprintf(">>> %4d | %s\n", $display_line, $lines[$i]);
+                } else {
+                    # Normal context line with 4-space prefix
+                    $context .= sprintf("    %4d | %s\n", $display_line, $lines[$i]);
+                }
+                if ($i == $line_num - 1) {
+                    # Add caret line pointing to failure position
+                    # Account for: ">>> " (4) + "1234" (4) + " | " (3) = 11 chars before source text
+                    $context .= sprintf("           %s^\n", " " x $col);
+                }
+            }
+
+            # Extract expected tokens from chart items at failure position
+            my @items = $chart->items_ending_at($last_active_pos);
+            my %expected_tokens;
+            for my $item (@items) {
+                my $rule = $item->rule;
+                my $dot_pos = $item->dot_pos;
+                my @rhs = $rule->rhs;
+
+                # If dot is not at end, next symbol is expected
+                if ($dot_pos < scalar(@rhs)) {
+                    my $next_symbol = $rhs[$dot_pos];
+                    # Convert array ref to string representation
+                    if (ref($next_symbol) eq 'ARRAY') {
+                        $expected_tokens{join('|', @$next_symbol)} = 1;
+                    } else {
+                        $expected_tokens{$next_symbol} = 1;
+                    }
+                }
+            }
+            my @expected = sort keys %expected_tokens;
+
             warn(
 "🔍 PARSING STOPPED: Reached position $last_active_pos of $input_length ("
                   . sprintf( "%.1f", 100 * $last_active_pos / $input_length )
-                  . "%)\n" );
+                  . "%)\n"
+                  . "📍 Source context:\n"
+                  . $context
+                  . "🔎 Expected tokens: " . (@expected ? join(", ", @expected) : "(none)") . "\n"
+            );
         }
 
         return $result;
