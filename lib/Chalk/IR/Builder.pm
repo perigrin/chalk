@@ -351,6 +351,19 @@ class Chalk::IR::Builder {
         my $label = $self->make_variable_label($var_name);
         $context = Chalk::IR::Context->extend_context($context, $label, $value_node);
 
+        # Auto-sync validator and type_inference with updated context
+        # This ensures subsequent validation operations see the newly stored variable
+        $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
+        $validator = Chalk::IR::ValidationContext->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
+
         # Track this variable as modified if we're in a loop
         if ($loop_depth > 0 && scalar($loop_modified_vars->@*) > 0) {
             my $current_loop_vars = $loop_modified_vars->[-1];

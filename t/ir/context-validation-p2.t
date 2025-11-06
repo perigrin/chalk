@@ -42,8 +42,6 @@ use Chalk::Error::CompilationError;
     # Define variable before loop
     my $initial = $builder->build_constant_node(0);
     $builder->build_store_node('counter', $initial);
-    # Ensure validator sees the updated context
-    $builder->set_context($builder->context);
 
     $builder->begin_loop_tracking();
 
@@ -90,8 +88,6 @@ use Chalk::Error::CompilationError;
     # Define a variable
     my $value = $builder->build_constant_node(42);
     $builder->build_store_node('target', $value);
-    # Ensure validator sees the updated context
-    $builder->set_context($builder->context);
 
     my $source_info = Chalk::IR::SourceInfo->new(
         file_path => 'test.chalk',
@@ -195,8 +191,6 @@ use Chalk::Error::CompilationError;
     my $sum_init = $builder->build_constant_node(0);
     $builder->build_store_node('i', $i_init);
     $builder->build_store_node('sum', $sum_init);
-    # Ensure validator sees the updated context
-    $builder->set_context($builder->context);
 
     $builder->begin_loop_tracking();
 
@@ -275,8 +269,6 @@ use Chalk::Error::CompilationError;
     # Define variable outside loop
     my $initial = $builder->build_constant_node(0);
     $builder->build_store_node('total', $initial);
-    # Ensure validator sees the updated context
-    $builder->set_context($builder->context);
 
     # Create reference to it
     my $source_info = Chalk::IR::SourceInfo->new(

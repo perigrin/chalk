@@ -9,11 +9,20 @@ class Chalk::IR::TypeInference {
     field $graph        :param :reader = undef;
     field $type_lattice :param :reader;  # Grammar-specific type system
 
+    # Maximum recursion depth to prevent stack overflow on circular dependencies
+    use constant MAX_TYPE_RECURSION_DEPTH => 50;
+
     # Infer the type of a value produced by an IR node
     # Returns Chalk::Grammar::Chalk::Type::* object or undef
-    method infer_type($node) {
+    method infer_type($node, $depth = 0) {
         return undef unless defined $node;
         return undef unless ref($node);
+
+        # Prevent infinite recursion on circular dependencies
+        if ($depth > MAX_TYPE_RECURSION_DEPTH) {
+            warn "Type inference exceeded maximum recursion depth ($depth) - possible circular dependency";
+            return undef;
+        }
 
         my $op = $node->op;
 
@@ -25,12 +34,12 @@ class Chalk::IR::TypeInference {
 
         # Variable reads - look up in context if possible
         if ($op eq 'VariableRead') {
-            return $self->_infer_type_from_variable_read($node);
+            return $self->_infer_type_from_variable_read($node, $depth);
         }
 
         # Phi nodes - check all inputs (pick first for now)
         if ($op eq 'Phi') {
-            return $self->_infer_type_from_phi($node);
+            return $self->_infer_type_from_phi($node, $depth);
         }
 
         # Unknown type
@@ -65,23 +74,29 @@ class Chalk::IR::TypeInference {
     }
 
     # Helper: Infer type from variable read node
-    method _infer_type_from_variable_read($node) {
+    method _infer_type_from_variable_read($node, $depth = 0) {
         return undef unless defined $context;
+
+        # Prevent infinite recursion
+        return undef if $depth > MAX_TYPE_RECURSION_DEPTH;
 
         my $var_label = $node->attributes->{var_label};
         return undef unless defined $var_label;
 
         my $var_node = $context->($var_label);
         return undef unless defined $var_node;
-        return undef if $var_node == $node;  # Avoid infinite recursion
+        return undef if $var_node == $node;  # Avoid direct self-reference
 
         # Recursively infer type from the stored node
-        return $self->infer_type($var_node);
+        return $self->infer_type($var_node, $depth + 1);
     }
 
     # Helper: Infer type from phi node
-    method _infer_type_from_phi($node) {
+    method _infer_type_from_phi($node, $depth = 0) {
         return undef unless defined $graph;
+
+        # Prevent infinite recursion
+        return undef if $depth > MAX_TYPE_RECURSION_DEPTH;
 
         my $inputs = $node->inputs;
         return undef unless $inputs && scalar(@$inputs) > 1;
@@ -91,7 +106,7 @@ class Chalk::IR::TypeInference {
         return undef unless defined $first_val_id;
 
         my $first_node = $graph->get_node($first_val_id);
-        return $self->infer_type($first_node);
+        return $self->infer_type($first_node, $depth + 1);
     }
 }
 
