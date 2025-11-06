@@ -273,16 +273,13 @@ class Chalk::IR::ValidationContext {
     method validate_loop_variable_phi($var_name, $loop_depth, $source_info = undef) {
         return unless $loop_depth > 0;
 
-        # Check if variable was modified in the loop
-        # Look for both pre-loop and in-loop versions
+        # When storing to a variable inside a loop, check if it was defined before the loop
+        # If not, it creates an undefined initial phi value which is likely a bug
         my $pre_loop_label = "lexical:$var_name";
-        my $loop_label = "lexical:loop_" . ($loop_depth - 1) . ":$var_name";
-
         my $pre_loop_value = $context->($pre_loop_label);
-        my $loop_value = $context->($loop_label);
 
-        # If variable is modified in loop but doesn't have both versions, warn
-        if (defined $loop_value && !defined $pre_loop_value) {
+        # If variable isn't defined before loop, warn
+        if (!defined $pre_loop_value) {
             die Chalk::Error::CompilationError->new(
                 message => "Variable '\$$var_name' modified in loop but not defined before loop",
                 source_info => $source_info,

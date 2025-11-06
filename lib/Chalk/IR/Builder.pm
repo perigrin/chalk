@@ -83,6 +83,18 @@ class Chalk::IR::Builder {
     # Set context (for testing and manual context updates)
     method set_context($ctx) {
         $context = $ctx;
+        # Recreate validator and type_inference with new context
+        # This ensures they see updated function definitions, etc.
+        $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
+        $validator = Chalk::IR::ValidationContext->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
     }
 
     # Create Start node for a function/method
@@ -99,8 +111,10 @@ class Chalk::IR::Builder {
         $graph->add_node($start);
 
         # Record transformation
-        $start->record_transform('ir_construction', 'Builder::build_start_node',
-            context => "function=$function_name"
+        $start->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_start_node',
+            description => "function=$function_name"
         );
 
         $self->set_control($start->id);
@@ -133,8 +147,10 @@ class Chalk::IR::Builder {
         $graph->add_node($constant);
 
         # Record transformation
-        $constant->record_transform('ir_construction', 'Builder::build_constant_node',
-            context => "value=$value, type=$type"
+        $constant->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_constant_node',
+            description => "value=$value, type=$type"
         );
 
         return $constant;
@@ -167,8 +183,10 @@ class Chalk::IR::Builder {
         $graph->add_node($return);
 
         # Record transformation
-        $return->record_transform('ir_construction', 'Builder::build_return_node',
-            context => "value_id=" . $value_node->id
+        $return->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_return_node',
+            description => "value_id=" . $value_node->id
         );
 
         return $return;
@@ -208,8 +226,10 @@ class Chalk::IR::Builder {
         $graph->add_node($add);
 
         # Record transformation
-        $add->record_transform('ir_construction', 'Builder::build_add_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $add->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_add_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $add;
@@ -242,8 +262,10 @@ class Chalk::IR::Builder {
         $graph->add_node($mul);
 
         # Record transformation
-        $mul->record_transform('ir_construction', 'Builder::build_multiply_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $mul->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_multiply_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $mul;
@@ -276,8 +298,10 @@ class Chalk::IR::Builder {
         $graph->add_node($sub);
 
         # Record transformation
-        $sub->record_transform('ir_construction', 'Builder::build_sub_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $sub->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_sub_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $sub;
@@ -310,8 +334,10 @@ class Chalk::IR::Builder {
         $graph->add_node($div);
 
         # Record transformation
-        $div->record_transform('ir_construction', 'Builder::build_divide_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $div->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_divide_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $div;
@@ -337,6 +363,9 @@ class Chalk::IR::Builder {
         # Store the IR node object directly, not the node ID
         my $label = $self->make_variable_label($var_name);
         $context = Chalk::IR::Context->extend_context($context, $label, $value_node);
+
+        # Note: We don't call set_context here to avoid recreating validator repeatedly
+        # Tests that need fresh context in validator should call set_context explicitly
 
         # Track this variable as modified if we're in a loop
         if ($loop_depth > 0 && scalar($loop_modified_vars->@*) > 0) {
@@ -389,8 +418,10 @@ class Chalk::IR::Builder {
         $graph->add_node($proj);
 
         # Record transformation
-        $proj->record_transform('ir_construction', 'Builder::build_proj_node',
-            context => "source_id=" . $source_node->id . ", index=$index, label=$label"
+        $proj->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_proj_node',
+            description => "source_id=" . $source_node->id . ", index=$index, label=$label"
         );
 
         return $proj;
@@ -408,8 +439,10 @@ class Chalk::IR::Builder {
         $graph->add_node($cmp);
 
         # Record transformation
-        $cmp->record_transform('ir_construction', 'Builder::build_greater_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $cmp->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_greater_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $cmp;
@@ -426,8 +459,10 @@ class Chalk::IR::Builder {
         $graph->add_node($cmp);
 
         # Record transformation
-        $cmp->record_transform('ir_construction', 'Builder::build_less_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $cmp->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_less_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $cmp;
@@ -444,8 +479,10 @@ class Chalk::IR::Builder {
         $graph->add_node($cmp);
 
         # Record transformation
-        $cmp->record_transform('ir_construction', 'Builder::build_equal_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $cmp->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_equal_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $cmp;
@@ -462,8 +499,10 @@ class Chalk::IR::Builder {
         $graph->add_node($cmp);
 
         # Record transformation
-        $cmp->record_transform('ir_construction', 'Builder::build_greater_or_equal_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $cmp->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_greater_or_equal_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $cmp;
@@ -480,8 +519,10 @@ class Chalk::IR::Builder {
         $graph->add_node($cmp);
 
         # Record transformation
-        $cmp->record_transform('ir_construction', 'Builder::build_less_or_equal_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $cmp->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_less_or_equal_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $cmp;
@@ -498,8 +539,10 @@ class Chalk::IR::Builder {
         $graph->add_node($cmp);
 
         # Record transformation
-        $cmp->record_transform('ir_construction', 'Builder::build_not_equal_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $cmp->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_not_equal_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $cmp;
@@ -516,8 +559,10 @@ class Chalk::IR::Builder {
         $graph->add_node($not);
 
         # Record transformation
-        $not->record_transform('ir_construction', 'Builder::build_not_node',
-            context => "operand_id=" . $operand_node->id
+        $not->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_not_node',
+            description => "operand_id=" . $operand_node->id
         );
 
         return $not;
@@ -533,8 +578,10 @@ class Chalk::IR::Builder {
         $graph->add_node($negate);
 
         # Record transformation
-        $negate->record_transform('ir_construction', 'Builder::build_negate_node',
-            context => "operand_id=" . $operand_node->id
+        $negate->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_negate_node',
+            description => "operand_id=" . $operand_node->id
         );
 
         return $negate;
@@ -550,8 +597,10 @@ class Chalk::IR::Builder {
         $graph->add_node($pre_inc);
 
         # Record transformation
-        $pre_inc->record_transform('ir_construction', 'Builder::build_pre_increment_node',
-            context => "operand_id=" . $operand_node->id
+        $pre_inc->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_pre_increment_node',
+            description => "operand_id=" . $operand_node->id
         );
 
         return $pre_inc;
@@ -567,8 +616,10 @@ class Chalk::IR::Builder {
         $graph->add_node($pre_dec);
 
         # Record transformation
-        $pre_dec->record_transform('ir_construction', 'Builder::build_pre_decrement_node',
-            context => "operand_id=" . $operand_node->id
+        $pre_dec->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_pre_decrement_node',
+            description => "operand_id=" . $operand_node->id
         );
 
         return $pre_dec;
@@ -584,8 +635,10 @@ class Chalk::IR::Builder {
         $graph->add_node($post_inc);
 
         # Record transformation
-        $post_inc->record_transform('ir_construction', 'Builder::build_post_increment_node',
-            context => "operand_id=" . $operand_node->id
+        $post_inc->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_post_increment_node',
+            description => "operand_id=" . $operand_node->id
         );
 
         return $post_inc;
@@ -601,8 +654,10 @@ class Chalk::IR::Builder {
         $graph->add_node($post_dec);
 
         # Record transformation
-        $post_dec->record_transform('ir_construction', 'Builder::build_post_decrement_node',
-            context => "operand_id=" . $operand_node->id
+        $post_dec->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_post_decrement_node',
+            description => "operand_id=" . $operand_node->id
         );
 
         return $post_dec;
@@ -620,8 +675,10 @@ class Chalk::IR::Builder {
         $graph->add_node($reference);
 
         # Record transformation
-        $reference->record_transform('ir_construction', 'Builder::build_reference_node',
-            context => "label=UNKNOWN (deprecated)"
+        $reference->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_reference_node',
+            description => "label=UNKNOWN (deprecated)"
         );
 
         return $reference;
@@ -638,8 +695,10 @@ class Chalk::IR::Builder {
         $graph->add_node($if_node);
 
         # Record transformation
-        $if_node->record_transform('ir_construction', 'Builder::build_if_node',
-            context => "condition_id=" . $condition_node->id
+        $if_node->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_if_node',
+            description => "condition_id=" . $condition_node->id
         );
 
         return $if_node;
@@ -670,8 +729,10 @@ class Chalk::IR::Builder {
         $graph->add_node($region);
 
         # Record transformation
-        $region->record_transform('ir_construction', 'Builder::build_region_node',
-            context => "inputs=" . join(", ", @control_inputs)
+        $region->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_region_node',
+            description => "inputs=" . join(", ", @control_inputs)
         );
 
         return $region;
@@ -687,8 +748,10 @@ class Chalk::IR::Builder {
         $graph->add_node($phi);
 
         # Record transformation
-        $phi->record_transform('ir_construction', 'Builder::build_phi_node',
-            context => "region_id=" . $region_node->id . ", value_inputs=" . join(", ", @value_inputs)
+        $phi->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_phi_node',
+            description => "region_id=" . $region_node->id . ", value_inputs=" . join(", ", @value_inputs)
         );
 
         return $phi;
@@ -705,8 +768,10 @@ class Chalk::IR::Builder {
         $graph->add_node($loop);
 
         # Record transformation
-        $loop->record_transform('ir_construction', 'Builder::build_loop_node',
-            context => "entry_control=$ctrl"
+        $loop->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_loop_node',
+            description => "entry_control=$ctrl"
         );
 
         return $loop;
@@ -728,8 +793,10 @@ class Chalk::IR::Builder {
 
         # Record transformation
         my $loop_val_str = defined($loop_value) ? $loop_value : "undef";
-        $phi->record_transform('ir_construction', 'Builder::build_loop_phi_node',
-            context => "loop_id=" . $loop_node->id . ", initial=$initial_value, loop=$loop_val_str"
+        $phi->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_loop_phi_node',
+            description => "loop_id=" . $loop_node->id . ", initial=$initial_value, loop=$loop_val_str"
         );
 
         return $phi;
@@ -758,8 +825,10 @@ class Chalk::IR::Builder {
 
         # Record transformation
         my $arg_ids = join(", ", map { $_->id } @arg_nodes);
-        $call->record_transform('ir_construction', 'Builder::build_call_node',
-            context => "function=$function_name, args=[$arg_ids]"
+        $call->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_call_node',
+            description => "function=$function_name, args=[$arg_ids]"
         );
 
         return $call;
@@ -849,8 +918,10 @@ class Chalk::IR::Builder {
 
         # Record transformation
         my $field_names = join(", ", $fields->@*);
-        $classdef->record_transform('ir_construction', 'Builder::build_classdef_node',
-            context => "class=$class_name, fields=[$field_names]"
+        $classdef->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_classdef_node',
+            description => "class=$class_name, fields=[$field_names]"
         );
 
         return $classdef;
@@ -887,8 +958,10 @@ class Chalk::IR::Builder {
 
         # Record transformation
         my $field_names = join(", ", sort(keys($field_values_hash->%*)));
-        $new_obj->record_transform('ir_construction', 'Builder::build_new_node',
-            context => "class=$class_name, fields=[$field_names]"
+        $new_obj->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_new_node',
+            description => "class=$class_name, fields=[$field_names]"
         );
 
         return $new_obj;
@@ -920,8 +993,10 @@ class Chalk::IR::Builder {
         $graph->add_node($field_access);
 
         # Record transformation
-        $field_access->record_transform('ir_construction', 'Builder::build_field_access_node',
-            context => "object_id=" . $object_node->id . ", field=$field_name"
+        $field_access->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_field_access_node',
+            description => "object_id=" . $object_node->id . ", field=$field_name"
         );
 
         return $field_access;
@@ -946,8 +1021,10 @@ class Chalk::IR::Builder {
         $graph->add_node($field_store);
 
         # Record transformation
-        $field_store->record_transform('ir_construction', 'Builder::build_field_store_node',
-            context => "object_id=" . $object_node->id . ", field=$field_name, value_id=" . $value_node->id
+        $field_store->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_field_store_node',
+            description => "object_id=" . $object_node->id . ", field=$field_name, value_id=" . $value_node->id
         );
 
         return $field_store;
@@ -966,8 +1043,10 @@ class Chalk::IR::Builder {
         $graph->add_node($array_new);
 
         # Record transformation
-        $array_new->record_transform('ir_construction', 'Builder::build_array_new_node',
-            context => "empty_array"
+        $array_new->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_array_new_node',
+            description => "empty_array"
         );
 
         return $array_new;
@@ -991,8 +1070,10 @@ class Chalk::IR::Builder {
         $graph->add_node($array_push);
 
         # Record transformation
-        $array_push->record_transform('ir_construction', 'Builder::build_array_push_node',
-            context => "array_id=" . $array_node->id . ", value_id=" . $value_node->id
+        $array_push->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_array_push_node',
+            description => "array_id=" . $array_node->id . ", value_id=" . $value_node->id
         );
 
         return $array_push;
@@ -1010,8 +1091,10 @@ class Chalk::IR::Builder {
         $graph->add_node($array_get);
 
         # Record transformation
-        $array_get->record_transform('ir_construction', 'Builder::build_array_get_node',
-            context => "array_id=" . $array_node->id . ", index_id=" . $index_node->id
+        $array_get->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_array_get_node',
+            description => "array_id=" . $array_node->id . ", index_id=" . $index_node->id
         );
 
         return $array_get;
@@ -1030,8 +1113,10 @@ class Chalk::IR::Builder {
         $graph->add_node($array_set);
 
         # Record transformation
-        $array_set->record_transform('ir_construction', 'Builder::build_array_set_node',
-            context => "array_id=" . $array_node->id . ", index_id=" . $index_node->id . ", value_id=" . $value_node->id
+        $array_set->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_array_set_node',
+            description => "array_id=" . $array_node->id . ", index_id=" . $index_node->id . ", value_id=" . $value_node->id
         );
 
         return $array_set;
@@ -1053,8 +1138,10 @@ class Chalk::IR::Builder {
         $graph->add_node($array_length);
 
         # Record transformation
-        $array_length->record_transform('ir_construction', 'Builder::build_array_length_node',
-            context => "array_id=" . $array_node->id
+        $array_length->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_array_length_node',
+            description => "array_id=" . $array_node->id
         );
 
         return $array_length;
@@ -1073,8 +1160,10 @@ class Chalk::IR::Builder {
         $graph->add_node($hash_new);
 
         # Record transformation
-        $hash_new->record_transform('ir_construction', 'Builder::build_hash_new_node',
-            context => "empty_hash"
+        $hash_new->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_hash_new_node',
+            description => "empty_hash"
         );
 
         return $hash_new;
@@ -1093,8 +1182,10 @@ class Chalk::IR::Builder {
         $graph->add_node($hash_set);
 
         # Record transformation
-        $hash_set->record_transform('ir_construction', 'Builder::build_hash_set_node',
-            context => "hash_id=" . $hash_node->id . ", key_id=" . $key_node->id . ", value_id=" . $value_node->id
+        $hash_set->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_hash_set_node',
+            description => "hash_id=" . $hash_node->id . ", key_id=" . $key_node->id . ", value_id=" . $value_node->id
         );
 
         return $hash_set;
@@ -1112,8 +1203,10 @@ class Chalk::IR::Builder {
         $graph->add_node($hash_get);
 
         # Record transformation
-        $hash_get->record_transform('ir_construction', 'Builder::build_hash_get_node',
-            context => "hash_id=" . $hash_node->id . ", key_id=" . $key_node->id
+        $hash_get->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_hash_get_node',
+            description => "hash_id=" . $hash_node->id . ", key_id=" . $key_node->id
         );
 
         return $hash_get;
@@ -1137,8 +1230,10 @@ class Chalk::IR::Builder {
         $graph->add_node($hash_exists);
 
         # Record transformation
-        $hash_exists->record_transform('ir_construction', 'Builder::build_hash_exists_node',
-            context => "hash_id=" . $hash_node->id . ", key_id=" . $key_node->id
+        $hash_exists->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_hash_exists_node',
+            description => "hash_id=" . $hash_node->id . ", key_id=" . $key_node->id
         );
 
         return $hash_exists;
@@ -1160,8 +1255,10 @@ class Chalk::IR::Builder {
         $graph->add_node($hash_keys);
 
         # Record transformation
-        $hash_keys->record_transform('ir_construction', 'Builder::build_hash_keys_node',
-            context => "hash_id=" . $hash_node->id
+        $hash_keys->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_hash_keys_node',
+            description => "hash_id=" . $hash_node->id
         );
 
         return $hash_keys;
@@ -1188,8 +1285,10 @@ class Chalk::IR::Builder {
         $graph->add_node($str_concat);
 
         # Record transformation
-        $str_concat->record_transform('ir_construction', 'Builder::build_str_concat_node',
-            context => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
+        $str_concat->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_str_concat_node',
+            description => "left_id=" . $left_node->id . ", right_id=" . $right_node->id
         );
 
         return $str_concat;
@@ -1217,8 +1316,10 @@ class Chalk::IR::Builder {
         $graph->add_node($range);
 
         # Record transformation
-        $range->record_transform('ir_construction', 'Builder::build_range_node',
-            context => "start_id=" . $start_node->id . ", end_id=" . $end_node->id . ", type=$type"
+        $range->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_range_node',
+            description => "start_id=" . $start_node->id . ", end_id=" . $end_node->id . ", type=$type"
         );
 
         return $range;
@@ -1242,8 +1343,10 @@ class Chalk::IR::Builder {
         $graph->add_node($str_length);
 
         # Record transformation
-        $str_length->record_transform('ir_construction', 'Builder::build_str_length_node',
-            context => "string_id=" . $string_node->id
+        $str_length->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_str_length_node',
+            description => "string_id=" . $string_node->id
         );
 
         return $str_length;
@@ -1271,8 +1374,10 @@ class Chalk::IR::Builder {
         $graph->add_node($str_substr);
 
         # Record transformation
-        $str_substr->record_transform('ir_construction', 'Builder::build_str_substr_node',
-            context => "string_id=" . $string_node->id . ", offset_id=" . $offset_node->id . ", length_id=" . $length_node->id
+        $str_substr->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_str_substr_node',
+            description => "string_id=" . $string_node->id . ", offset_id=" . $offset_node->id . ", length_id=" . $length_node->id
         );
 
         return $str_substr;
@@ -1305,8 +1410,10 @@ class Chalk::IR::Builder {
 
         # Record transformation
         my $import_list = join(", ", $imports->@*);
-        $use_stmt->record_transform('ir_construction', 'Builder::build_use_statement_node',
-            context => "type=$type, module=$module, imports=[$import_list]"
+        $use_stmt->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_use_statement_node',
+            description => "type=$type, module=$module, imports=[$import_list]"
         );
 
         return $use_stmt;
@@ -1342,8 +1449,10 @@ class Chalk::IR::Builder {
         $graph->add_node($reference);
 
         # Record transformation
-        $reference->record_transform('ir_construction', 'Builder::build_scalar_ref_node',
-            context => "var=$var_name, target_id=$target_node_id"
+        $reference->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_scalar_ref_node',
+            description => "var=$var_name, target_id=$target_node_id"
         );
 
         return $reference;
@@ -1382,8 +1491,10 @@ class Chalk::IR::Builder {
         $graph->add_node($reference);
 
         # Record transformation
-        $reference->record_transform('ir_construction', 'Builder::build_element_ref_node',
-            context => "collection=$collection_name, index_id=" . $index_node->id . ", index_val=$index_val"
+        $reference->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_element_ref_node',
+            description => "collection=$collection_name, index_id=" . $index_node->id . ", index_val=$index_val"
         );
 
         return $reference;
@@ -1408,8 +1519,10 @@ class Chalk::IR::Builder {
         $graph->add_node($deref);
 
         # Record transformation
-        $deref->record_transform('ir_construction', 'Builder::build_scalar_deref_node',
-            context => "var=$ref_var_name, ref_id=$ref_id"
+        $deref->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_scalar_deref_node',
+            description => "var=$ref_var_name, ref_id=$ref_id"
         );
 
         return $deref;
@@ -1427,8 +1540,10 @@ class Chalk::IR::Builder {
         $graph->add_node($var_read);
 
         # Record transformation
-        $var_read->record_transform('ir_construction', 'Builder::build_variable_read_node',
-            context => "var=$var_name"
+        $var_read->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_variable_read_node',
+            description => "var=$var_name"
         );
 
         return $var_read;

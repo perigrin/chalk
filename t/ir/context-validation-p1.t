@@ -195,7 +195,7 @@ use Chalk::Error::CompilationError;
     };
 
     like($@, qr/expects 1 argument, got 2/, 'Detects too many arguments');
-    like($@, qr/too many.*1.*argument/i, 'Hints about excess arguments');
+    like($@, qr/You have 1 too many argument/i, 'Hints about excess arguments');
 }
 
 # Test 9: Function call arity validation - correct arity
