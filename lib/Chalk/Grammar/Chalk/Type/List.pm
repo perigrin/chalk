@@ -3,10 +3,10 @@
 
 use 5.042;
 use experimental qw(class);
-use Chalk::Type::Array;
-use Chalk::Type::Hash;
-use Chalk::Type::Any;
-use Chalk::Type::Exception;
+use Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Type::Hash;
+use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::Grammar::Chalk::Type::Exception;
 
 class Chalk::Grammar::Chalk::Type::List :isa(Chalk::Grammar::Chalk::Type) {
     # List represents ephemeral list values
@@ -29,18 +29,18 @@ class Chalk::Grammar::Chalk::Type::List :isa(Chalk::Grammar::Chalk::Type) {
 
         if ($target_sigil eq '@') {
             # List to Array conversion
-            my $elem_type = $element_type // Chalk::Type::Any->new();
-            return Chalk::Type::Array->new(element_type => $elem_type);
+            my $elem_type = $element_type // Chalk::Grammar::Chalk::Type::Any->new();
+            return Chalk::Grammar::Chalk::Type::Array->new(element_type => $elem_type);
         }
 
         if ($target_sigil eq '%') {
             # List to Hash conversion
-            my $val_type = $element_type // Chalk::Type::Any->new();
-            return Chalk::Type::Hash->new(value_type => $val_type);
+            my $val_type = $element_type // Chalk::Grammar::Chalk::Type::Any->new();
+            return Chalk::Grammar::Chalk::Type::Hash->new(value_type => $val_type);
         }
 
         # List cannot be assigned to scalar variable
-        my $exception = Chalk::Type::Exception->invalid_list_assignment_error($target_sigil);
+        my $exception = Chalk::Grammar::Chalk::Type::Exception->invalid_list_assignment_error($target_sigil);
         $exception->throw();
     }
 }

@@ -6,18 +6,18 @@ use utf8;
 
 class Chalk::Grammar::Chalk::TypeLattice {
     use Chalk::Grammar::Chalk::Type;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Scalar;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Hash;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::List;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Boolean;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Undef;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Ref;
-    use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Object;
+    use Chalk::Grammar::Chalk::Type::Int;
+    use Chalk::Grammar::Chalk::Type::Num;
+    use Chalk::Grammar::Chalk::Type::Str;
+    use Chalk::Grammar::Chalk::Type::Scalar;
+    use Chalk::Grammar::Chalk::Type::Array;
+    use Chalk::Grammar::Chalk::Type::Hash;
+    use Chalk::Grammar::Chalk::Type::List;
+    use Chalk::Grammar::Chalk::Type::Any;
+    use Chalk::Grammar::Chalk::Type::Boolean;
+    use Chalk::Grammar::Chalk::Type::Undef;
+    use Chalk::Grammar::Chalk::Type::Ref;
+    use Chalk::Grammar::Chalk::Type::Object;
 
     # Type inference: Infer type object from IR node operation
     method infer_type_from_operation($op, $node = undef) {
