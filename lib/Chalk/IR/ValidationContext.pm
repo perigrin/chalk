@@ -250,6 +250,80 @@ class Chalk::IR::ValidationContext {
         return $best_match;
     }
 
+    # Validate loop variable has associated Phi node
+    # Checks that loop-modified variables have proper Phi nodes created
+    method validate_loop_variable_phi($var_name, $loop_depth, $source_info = undef) {
+        return unless $loop_depth > 0;
+
+        # Check if variable was modified in the loop
+        # Look for both pre-loop and in-loop versions
+        my $pre_loop_label = "lexical:$var_name";
+        my $loop_label = "lexical:loop_" . ($loop_depth - 1) . ":$var_name";
+
+        my $pre_loop_value = $context->($pre_loop_label);
+        my $loop_value = $context->($loop_label);
+
+        # If variable is modified in loop but doesn't have both versions, warn
+        if (defined $loop_value && !defined $pre_loop_value) {
+            die Chalk::Error::CompilationError->new(
+                message => "Variable '\$$var_name' modified in loop but not defined before loop",
+                source_info => $source_info,
+                hints => [
+                    "Declare the variable with 'my \$$var_name = ...' before the loop",
+                    "Loop-modified variables need initial values"
+                ],
+            );
+        }
+
+        return 1;
+    }
+
+    # Validate scope boundaries - variables from inner scopes don't leak
+    method validate_scope_boundary($var_name, $expected_scope, $source_info = undef) {
+        # This is a placeholder for future scope validation
+        # Could check that variables don't cross function boundaries inappropriately
+        # For now, the context-as-closure model handles scoping naturally
+
+        return 1;
+    }
+
+    # Validate reference target exists and is valid
+    method validate_reference_target($target_label, $source_info = undef) {
+        return unless defined($target_label);
+
+        # Look up the target in context
+        my $target = $context->($target_label);
+
+        unless (defined $target) {
+            # Extract variable name from label (e.g., "lexical:foo" -> "foo")
+            my $var_name = $target_label;
+            $var_name =~ s/^.*://;  # Remove namespace prefix
+
+            die Chalk::Error::CompilationError->new(
+                message => "Cannot create reference to undefined target '\$$var_name'",
+                source_info => $source_info,
+                hints => [
+                    "Declare the variable with 'my \$$var_name = ...' first",
+                    "References can only point to existing variables"
+                ],
+            );
+        }
+
+        # Validate target is an IR node
+        unless (ref($target) && ref($target) =~ /^Chalk::IR::Node/) {
+            die Chalk::Error::CompilationError->new(
+                message => "Reference target is not a valid IR node",
+                source_info => $source_info,
+                hints => [
+                    "This is an internal IR construction error",
+                    "Reference targets must be IR nodes"
+                ],
+            );
+        }
+
+        return $target;
+    }
+
     # Helper: List all variables available in current context
     method list_available_variables() {
         my @vars;

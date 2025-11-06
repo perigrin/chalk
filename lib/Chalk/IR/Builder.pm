@@ -326,7 +326,16 @@ class Chalk::IR::Builder {
     }
 
     # Create Store node (variable assignment)
-    method build_store_node($var_name, $value_node, $control = undef) {
+    method build_store_node($var_name, $value_node, $control = undef, $source_info = undef) {
+        # Validate loop variable has proper initial value if we're in a loop
+        if (defined $source_info && $loop_depth > 0) {
+            my $validator = Chalk::IR::ValidationContext->new(
+                context => $context,
+                graph => $graph
+            );
+            $validator->validate_loop_variable_phi($var_name, $loop_depth, $source_info);
+        }
+
         # Store variable using lexical: namespace in context
         # Inside loops, use loop depth in label: lexical:loop_0:$var
         # Store the IR node object directly, not the node ID
@@ -654,11 +663,21 @@ class Chalk::IR::Builder {
         return $if_false;
     }
 
-    method build_region_node(@control_inputs) {
+    method build_region_node($source_info = undef, @control_inputs) {
+        # Validate control flow merge if source_info provided
+        if (defined $source_info) {
+            my $validator = Chalk::IR::ValidationContext->new(
+                context => $context,
+                graph => $graph
+            );
+            $validator->validate_control_merge(\@control_inputs, $source_info);
+        }
+
         my $node_id = $self->next_node_id();
         my $region = Chalk::IR::Node::Region->new(
             id            => $node_id,
             inputs        => \@control_inputs,
+            source_info   => $source_info,
         );
         $graph->add_node($region);
 
@@ -1316,11 +1335,22 @@ class Chalk::IR::Builder {
     # Reference operations (Issue #130 Phase 4)
 
     # Create reference to a scalar variable: \$x
-    method build_scalar_ref_node($var_name) {
+    method build_scalar_ref_node($var_name, $source_info = undef) {
         my $label = "lexical:$var_name";
-        # Look up the target node (might be object or ID)
-        my $target_node_or_id = $context->($label);
-        die "Cannot create reference to undefined variable $var_name" unless defined($target_node_or_id);
+
+        # Validate reference target if source_info provided
+        my $target_node_or_id;
+        if (defined $source_info) {
+            my $validator = Chalk::IR::ValidationContext->new(
+                context => $context,
+                graph => $graph
+            );
+            $target_node_or_id = $validator->validate_reference_target($label, $source_info);
+        } else {
+            # Look up the target node (might be object or ID)
+            $target_node_or_id = $context->($label);
+            die "Cannot create reference to undefined variable $var_name" unless defined($target_node_or_id);
+        }
 
         # Get the node ID for the dependency
         my $target_node_id = ref($target_node_or_id) ? $target_node_or_id->id : $target_node_or_id;
@@ -1331,6 +1361,7 @@ class Chalk::IR::Builder {
             inputs         => [$current_control, $target_node_id],  # Add target as dependency
             target_context => $context,
             target_label   => $label,
+            source_info    => $source_info,
         );
         $graph->add_node($reference);
 
