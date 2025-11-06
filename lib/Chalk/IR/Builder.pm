@@ -9,6 +9,7 @@ class Chalk::IR::Builder {
     use Chalk::IR::Graph;
     use Chalk::IR::Context;
     use Chalk::IR::ValidationContext;
+    use Chalk::IR::TypeInference;
 
     # Phase 1 polymorphic node classes
     use Chalk::IR::Node::Base;
@@ -46,10 +47,15 @@ class Chalk::IR::Builder {
     field $current_control :reader;  # Current control flow node
     field $loop_depth = 0;   # Current loop nesting depth for label namespacing
     field $loop_modified_vars = [];  # Stack of sets tracking modified vars per loop depth
+    field $type_inference :reader;   # Type inference instance
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
         $context = Chalk::IR::Context->empty_context();
+        $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph
+        );
     }
 
     # Generate unique node ID
@@ -173,8 +179,8 @@ class Chalk::IR::Builder {
 
         # Type validation if source_info provided
         if (defined $source_info) {
-            my $left_type = $self->_infer_type_from_node($left_node);
-            my $right_type = $self->_infer_type_from_node($right_node);
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
                 my $validator = Chalk::IR::ValidationContext->new(
@@ -211,8 +217,8 @@ class Chalk::IR::Builder {
 
         # Type validation if source_info provided
         if (defined $source_info) {
-            my $left_type = $self->_infer_type_from_node($left_node);
-            my $right_type = $self->_infer_type_from_node($right_node);
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
                 my $validator = Chalk::IR::ValidationContext->new(
@@ -249,8 +255,8 @@ class Chalk::IR::Builder {
 
         # Type validation if source_info provided
         if (defined $source_info) {
-            my $left_type = $self->_infer_type_from_node($left_node);
-            my $right_type = $self->_infer_type_from_node($right_node);
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
                 my $validator = Chalk::IR::ValidationContext->new(
@@ -287,8 +293,8 @@ class Chalk::IR::Builder {
 
         # Type validation if source_info provided
         if (defined $source_info) {
-            my $left_type = $self->_infer_type_from_node($left_node);
-            my $right_type = $self->_infer_type_from_node($right_node);
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
                 my $validator = Chalk::IR::ValidationContext->new(
@@ -913,7 +919,7 @@ class Chalk::IR::Builder {
     method build_field_access_node($object_node, $field_name, $source_info = undef) {
         # Validate field exists in class if source_info provided
         if (defined $source_info) {
-            my $class_name = $self->_infer_class_from_node($object_node);
+            my $class_name = $type_inference->infer_class($object_node);
             if (defined $class_name) {
                 my $validator = Chalk::IR::ValidationContext->new(
                     context => $context,
@@ -1487,102 +1493,6 @@ class Chalk::IR::Builder {
         return $value_node;
     }
 
-    # Type inference helpers for validation
-
-    # Infer the type of a value produced by an IR node
-    # Returns type string: 'Int', 'Str', 'Array', 'Hash', 'Object:ClassName', 'Bool', 'Num', or undef
-    method _infer_type_from_node($node) {
-        return undef unless defined $node;
-        return undef unless ref($node);
-
-        my $op = $node->op;
-
-        # Constants have explicit types
-        if ($op eq 'Constant') {
-            my $type = $node->attributes->{type};
-            return $type if defined $type;
-            return 'Int';  # Default for constants
-        }
-
-        # Collection types
-        return 'Array' if $op eq 'ArrayValue';
-        return 'Hash' if $op eq 'HashValue';
-
-        # Object construction
-        if ($op eq 'New') {
-            my $class = $node->attributes->{class};
-            return "Object:$class" if defined $class;
-        }
-
-        # Arithmetic operations return numbers
-        return 'Num' if $op =~ /^(Add|Subtract|Multiply|Divide|Negate)$/;
-
-        # Comparison operations return boolean
-        return 'Bool' if $op =~ /^(GT|LT|EQ|NE|GE|LE)$/;
-
-        # Logical operations
-        return 'Bool' if $op =~ /^(And|Or|Not)$/;
-
-        # String operations
-        return 'Str' if $op eq 'Concat';
-
-        # Array/Hash access - type depends on what's stored
-        # We'd need to trace through context to know for sure
-        if ($op =~ /^(ArrayGet|HashGet)$/) {
-            # Could be anything - would need context analysis
-            return undef;
-        }
-
-        # Variable reads - look up in context if possible
-        if ($op eq 'VariableRead') {
-            my $var_label = $node->attributes->{var_label};
-            if (defined $var_label) {
-                my $var_node = $context->($var_label);
-                if (defined $var_node && $var_node != $node) {
-                    # Recursively infer type from the stored node
-                    return $self->_infer_type_from_node($var_node);
-                }
-            }
-        }
-
-        # Phi nodes - would need to check all inputs (pick first for now)
-        if ($op eq 'Phi') {
-            my $inputs = $node->inputs;
-            if ($inputs && scalar(@$inputs) > 1) {
-                # First input is control, second is first value
-                my $first_val_id = $inputs->[1];
-                if (defined $first_val_id) {
-                    my $first_node = $graph->get_node($first_val_id);
-                    return $self->_infer_type_from_node($first_node);
-                }
-            }
-        }
-
-        # Unknown type
-        return undef;
-    }
-
-    # Infer the class name of an object node
-    # Returns class name string or undef
-    method _infer_class_from_node($node) {
-        return undef unless defined $node;
-        return undef unless ref($node);
-
-        # Direct object construction
-        if ($node->op eq 'New') {
-            return $node->attributes->{class};
-        }
-
-        # Try to infer from type
-        my $type = $self->_infer_type_from_node($node);
-        if (defined $type && $type =~ /^Object:(.+)$/) {
-            return $1;
-        }
-
-        # Could trace through variable assignments, but that's complex
-        # For now, return undef if we can't determine statically
-        return undef;
-    }
 }
 
 1;

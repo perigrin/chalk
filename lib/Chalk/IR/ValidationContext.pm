@@ -6,27 +6,39 @@ use utf8;
 
 class Chalk::IR::ValidationContext {
     use Chalk::Error::CompilationError;
+    use Chalk::IR::TypeInference;
 
-    # Try to load Levenshtein module, but don't fail if unavailable
-    BEGIN {
-        eval {
-            require Text::LevenshteinXS;
-            Text::LevenshteinXS->import('distance');
-        };
-        if ($@) {
-            # Fallback: simple distance function if module unavailable
-            *distance = sub {
-                my ($s1, $s2) = @_;
-                # Simple check: exact match or substring match
-                return 0 if $s1 eq $s2;
-                return 1 if index($s1, $s2) >= 0 || index($s2, $s1) >= 0;
-                return 999;  # Very different
-            };
+    # Simple string distance function for "did you mean?" suggestions
+    # No external dependencies - uses basic string matching
+    sub distance {
+        my ($s1, $s2) = @_;
+        # Exact match
+        return 0 if $s1 eq $s2;
+        # Substring match
+        return 1 if index($s1, $s2) >= 0 || index($s2, $s1) >= 0;
+        # Check for common prefix
+        my $common_len = 0;
+        my $min_len = length($s1) < length($s2) ? length($s1) : length($s2);
+        for my $i (0..$min_len-1) {
+            last if substr($s1, $i, 1) ne substr($s2, $i, 1);
+            $common_len++;
         }
+        return 2 if $common_len >= $min_len / 2;
+        # Very different
+        return 999;
     }
 
     field $context :param :reader;
     field $graph   :param :reader;
+    field $type_inference :reader;
+
+    ADJUST {
+        # Initialize type inference with context and graph
+        $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph
+        );
+    }
 
     # Validate that a variable is defined in the context
     # Returns the node if found, dies with CompilationError if not
