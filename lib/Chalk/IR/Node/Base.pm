@@ -47,7 +47,7 @@ class Chalk::IR::Node::Base {
 
         my ($operation, $name, %opts);
 
-        if (@args >= 2 && !ref($args[0]) && !ref($args[1]) && $args[0] !~ /^(operation|rule_name|description|context|source_node)$/) {
+        if (@args >= 2 && !ref($args[0]) && !ref($args[1]) && $args[0] !~ qr/^(operation|rule_name|description|context|source_node)$/) {
             # Positional style: first two args are scalars, not named params
             ($operation, $name, %opts) = @args;
         } else {

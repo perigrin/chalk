@@ -42,22 +42,22 @@ class Chalk::Grammar::Chalk::TypeLattice {
 
         # Arithmetic operations return Num
         return Chalk::Grammar::Chalk::Type::Num->new()
-            if $op =~ /^(Add|Subtract|Multiply|Divide|Negate)$/;
+            if $op =~ qr/^(Add|Subtract|Multiply|Divide|Negate)$/;
 
         # Comparison operations return Boolean
         return Chalk::Grammar::Chalk::Type::Boolean->new()
-            if $op =~ /^(GT|LT|EQ|NE|GE|LE)$/;
+            if $op =~ qr/^(GT|LT|EQ|NE|GE|LE)$/;
 
         # Logical operations return Boolean
         return Chalk::Grammar::Chalk::Type::Boolean->new()
-            if $op =~ /^(And|Or|Not)$/;
+            if $op =~ qr/^(And|Or|Not)$/;
 
         # String operations return Str
         return Chalk::Grammar::Chalk::Type::Str->new() if $op eq 'Concat';
 
         # Array/Hash access - unknown type
         return Chalk::Grammar::Chalk::Type::Any->new()
-            if $op =~ /^(ArrayGet|HashGet)$/;
+            if $op =~ qr/^(ArrayGet|HashGet)$/;
 
         # Unknown - return Any
         return Chalk::Grammar::Chalk::Type::Any->new();
@@ -81,7 +81,7 @@ class Chalk::Grammar::Chalk::TypeLattice {
     # Check if operation is valid for given types
     method validate_operation($op, $left_type, $right_type) {
         # Arithmetic operations require numeric types
-        if ($op =~ /^(Add|Subtract|Multiply|Divide)$/) {
+        if ($op =~ qr/^(Add|Subtract|Multiply|Divide)$/) {
             return $self->_check_numeric_operation($left_type, $right_type);
         }
 
@@ -91,7 +91,7 @@ class Chalk::Grammar::Chalk::TypeLattice {
         }
 
         # Comparison operations accept compatible types
-        if ($op =~ /^(GT|LT|EQ|NE|GE|LE)$/) {
+        if ($op =~ qr/^(GT|LT|EQ|NE|GE|LE)$/) {
             return $self->_check_comparison_operation($left_type, $right_type);
         }
 
@@ -164,7 +164,7 @@ class Chalk::Grammar::Chalk::TypeLattice {
         return Chalk::Grammar::Chalk::Type::Boolean->new() if $name eq 'Bool' || $name eq 'Boolean';
         return Chalk::Grammar::Chalk::Type::Undef->new() if $name eq 'Undef';
         return Chalk::Grammar::Chalk::Type::Any->new() if $name eq 'Any';
-        return Chalk::Grammar::Chalk::Type::Object->new() if $name =~ /^Object/;
+        return Chalk::Grammar::Chalk::Type::Object->new() if $name =~ qr/^Object/;
 
         # Unknown type defaults to Any
         return Chalk::Grammar::Chalk::Type::Any->new();

@@ -201,11 +201,11 @@ class Chalk::IR::Builder {
         die "build_add_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
 
         # Type validation if source_info provided
-        if (defined $source_info) {
+        if (defined($source_info)) {
             my $left_type = $type_inference->infer_type($left_node);
             my $right_type = $type_inference->infer_type($right_node);
 
-            if (defined $left_type || defined $right_type) {
+            if (defined($left_type) || defined($right_type)) {
                 $validator->validate_type_operation('Add', $left_type, $right_type, $source_info);
             }
         }
@@ -235,11 +235,11 @@ class Chalk::IR::Builder {
         die "build_multiply_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
 
         # Type validation if source_info provided
-        if (defined $source_info) {
+        if (defined($source_info)) {
             my $left_type = $type_inference->infer_type($left_node);
             my $right_type = $type_inference->infer_type($right_node);
 
-            if (defined $left_type || defined $right_type) {
+            if (defined($left_type) || defined($right_type)) {
                 $validator->validate_type_operation('Multiply', $left_type, $right_type, $source_info);
             }
         }
@@ -269,11 +269,11 @@ class Chalk::IR::Builder {
         die "build_sub_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
 
         # Type validation if source_info provided
-        if (defined $source_info) {
+        if (defined($source_info)) {
             my $left_type = $type_inference->infer_type($left_node);
             my $right_type = $type_inference->infer_type($right_node);
 
-            if (defined $left_type || defined $right_type) {
+            if (defined($left_type) || defined($right_type)) {
                 $validator->validate_type_operation('Subtract', $left_type, $right_type, $source_info);
             }
         }
@@ -303,11 +303,11 @@ class Chalk::IR::Builder {
         die "build_divide_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
 
         # Type validation if source_info provided
-        if (defined $source_info) {
+        if (defined($source_info)) {
             my $left_type = $type_inference->infer_type($left_node);
             my $right_type = $type_inference->infer_type($right_node);
 
-            if (defined $left_type || defined $right_type) {
+            if (defined($left_type) || defined($right_type)) {
                 $validator->validate_type_operation('Divide', $left_type, $right_type, $source_info);
             }
         }
@@ -341,7 +341,7 @@ class Chalk::IR::Builder {
     # Create Store node (variable assignment)
     method build_store_node($var_name, $value_node, $control = undef, $source_info = undef) {
         # Validate loop variable has proper initial value if we're in a loop
-        if (defined $source_info && $loop_depth > 0) {
+        if (defined($source_info) && $loop_depth > 0) {
             $validator->validate_loop_variable_phi($var_name, $loop_depth, $source_info);
         }
 
@@ -395,7 +395,7 @@ class Chalk::IR::Builder {
         $node //= $context->("lexical:$var_name");
 
         # Validate that variable exists if source_info provided
-        if (defined $source_info && !defined $node) {
+        if (defined($source_info) && !defined($node)) {
             $node = $validator->validate_variable_defined($var_name, $source_info);
         }
 
@@ -683,7 +683,7 @@ class Chalk::IR::Builder {
 
     method build_region_node($source_info = undef, @control_inputs) {
         # Validate control flow merge if source_info provided
-        if (defined $source_info) {
+        if (defined($source_info)) {
             $validator->validate_control_merge(\@control_inputs, $source_info);
         }
 
@@ -764,7 +764,7 @@ class Chalk::IR::Builder {
     # Function call nodes
     method build_call_node($function_name, $source_info = undef, @arg_nodes) {
         # Validate arity if source_info provided
-        if (defined $source_info) {
+        if (defined($source_info)) {
             my $arg_count = scalar(@arg_nodes);
             $validator->validate_call_arity($function_name, $arg_count, $source_info);
         }
@@ -926,9 +926,9 @@ class Chalk::IR::Builder {
 
     method build_field_access_node($object_node, $field_name, $source_info = undef) {
         # Validate field exists in class if source_info provided
-        if (defined $source_info) {
+        if (defined($source_info)) {
             my $class_name = $type_inference->infer_class($object_node);
-            if (defined $class_name) {
+            if (defined($class_name)) {
                 $validator->validate_class_field($class_name, $field_name, $source_info);
             }
         }
@@ -1352,7 +1352,7 @@ class Chalk::IR::Builder {
 
         # Validate reference target if source_info provided
         my $target_node_or_id;
-        if (defined $source_info) {
+        if (defined($source_info)) {
             $target_node_or_id = $validator->validate_reference_target($label, $source_info);
         } else {
             # Look up the target node (might be object or ID)
@@ -1499,7 +1499,7 @@ class Chalk::IR::Builder {
     # Used by tests and validation logic
     method _infer_type_from_node($node) {
         my $type = $type_inference->infer_type($node);
-        return undef unless defined $type;
+        return undef unless defined($type);
         return $type->name();
     }
 

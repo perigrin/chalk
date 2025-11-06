@@ -313,7 +313,7 @@ YaddaYadda -> '...'
 # Function and method calls
 FunctionCall -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
 FunctionCall -> Identifier '(' WS_OPT ')'  # Function call with no args
-FunctionCall -> Identifier WS Expression  # Function call without parens: foo 1, 2
+FunctionCall -> Identifier WS_ELEMENT Expression  # Function call without parens: foo 1, 2
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
 FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
 FunctionCall -> Variable '->' '(' WS_OPT ExpressionList WS_OPT ')'  # Coderef call: $coderef->($arg)

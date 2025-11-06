@@ -48,7 +48,7 @@ class Chalk::IR::ValidationContext {
         my $label = "lexical:$var_name";
         my $node = $context->($label);
 
-        unless (defined $node) {
+        unless (defined($node)) {
             # Try to find similar variable names for "did you mean?" suggestions
             my $similar = $self->find_similar_variables($var_name);
 
@@ -81,7 +81,7 @@ class Chalk::IR::ValidationContext {
         my $right_type_name = ref($right_type) ? $right_type->name() : $right_type;
 
         # Arithmetic operations don't work on arrays/hashes
-        if ($op =~ /^(Add|Subtract|Multiply|Divide)$/) {
+        if ($op =~ qr/^(Add|Subtract|Multiply|Divide)$/) {
             if ($left_type_name eq 'Array') {
                 die Chalk::Error::CompilationError->new(
                     message => "Cannot use '$op' operator on array",
@@ -138,7 +138,7 @@ class Chalk::IR::ValidationContext {
             next unless defined($ctrl_id);
 
             my $ctrl_node = $graph->get_node($ctrl_id);
-            unless (defined $ctrl_node) {
+            unless (defined($ctrl_node)) {
                 die Chalk::Error::CompilationError->new(
                     message => "Region references undefined control node '$ctrl_id'",
                     source_info => $source_info,
@@ -173,7 +173,7 @@ class Chalk::IR::ValidationContext {
         my $class_label = "class:$class_name";
         my $class_def = $context->($class_label);
 
-        if (defined $class_def) {
+        if (defined($class_def)) {
             # Extract field names from class definition
             my @valid_fields;
             if (ref($class_def) eq 'HASH' && exists($class_def->{fields})) {
@@ -212,7 +212,7 @@ class Chalk::IR::ValidationContext {
         my $func_label = "function:$function_name";
         my $func_def = $context->($func_label);
 
-        if (defined $func_def) {
+        if (defined($func_def)) {
             # Extract arity from function definition
             my $expected_arity;
 
@@ -279,7 +279,7 @@ class Chalk::IR::ValidationContext {
         my $pre_loop_value = $context->($pre_loop_label);
 
         # If variable isn't defined before loop, warn
-        if (!defined $pre_loop_value) {
+        if (!defined($pre_loop_value)) {
             die Chalk::Error::CompilationError->new(
                 message => "Variable '\$$var_name' modified in loop but not defined before loop",
                 source_info => $source_info,
@@ -309,7 +309,7 @@ class Chalk::IR::ValidationContext {
         # Look up the target in context
         my $target = $context->($target_label);
 
-        unless (defined $target) {
+        unless (defined($target)) {
             # Extract variable name from label (e.g., "lexical:foo" -> "foo")
             my $var_name = $target_label;
             $var_name =~ s/^.*://;  # Remove namespace prefix
@@ -325,7 +325,7 @@ class Chalk::IR::ValidationContext {
         }
 
         # Validate target is an IR node
-        unless (ref($target) && ref($target) =~ /^Chalk::IR::Node/) {
+        unless (ref($target) && ref($target) =~ qr/^Chalk::IR::Node/) {
             die Chalk::Error::CompilationError->new(
                 message => "Reference target is not a valid IR node",
                 source_info => $source_info,

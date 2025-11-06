@@ -110,9 +110,9 @@ class Chalk::Error::CompilationError {
         }
 
         # Add hints if available
-        if ($hints && @$hints) {
+        if ($hints && $hints->@*) {
             $result .= "\n";
-            for my $hint (@$hints) {
+            for my $hint ($hints->@*) {
                 $result .= "\nhint: $hint";
             }
         }
