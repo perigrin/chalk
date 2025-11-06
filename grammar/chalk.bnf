@@ -323,6 +323,7 @@ FunctionCall -> MethodCall  # Delegate to instance method calls
 # Method calls - can be invoked on any expression that returns an object reference
 # Examples: $obj->method, ($a || $b)->foo, foo()->bar, $obj->m1->m2
 MethodCall -> Expression '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->method($args)
+MethodCall -> Expression '->' Identifier '(' WS_OPT ')'  # expr->method() (empty parens)
 MethodCall -> Expression '->' Identifier  # expr->method (without parens)
 
 # Postfix dereference operators - can apply to any expression returning a reference

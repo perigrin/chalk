@@ -99,7 +99,7 @@ class Chalk::IR::TypeInference {
         return undef if $depth > MAX_TYPE_RECURSION_DEPTH;
 
         my $inputs = $node->inputs;
-        return undef unless $inputs && scalar(@$inputs) > 1;
+        return undef unless $inputs && scalar($inputs->@*) > 1;
 
         # First input is control, second is first value
         my $first_val_id = $inputs->[1];
