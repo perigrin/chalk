@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Array :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Array :isa(Chalk::Grammar::Chalk::Type) {
     # Array represents array values
     # Array <: List <: Any
     # Parameterized by element_type
@@ -15,9 +15,9 @@ class Chalk::Type::Array :isa(Chalk::Type) {
         # Array <: Array (reflexive)
         # Array <: List
         # Array <: Any (transitive)
-        return ref($other) eq 'Chalk::Type::Array' ||
-               ref($other) eq 'Chalk::Type::List' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Array' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::List' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 }
 

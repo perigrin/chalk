@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Boolean :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Boolean :isa(Chalk::Grammar::Chalk::Type) {
     # Boolean represents all truthy and falsy values
     # Boolean <: Scalar <: Any
 
@@ -12,9 +12,9 @@ class Chalk::Type::Boolean :isa(Chalk::Type) {
         # Boolean <: Boolean (reflexive)
         # Boolean <: Scalar
         # Boolean <: Any
-        return ref($other) eq 'Chalk::Type::Boolean' ||
-               ref($other) eq 'Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Boolean' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 
     method round_trip_preserves($value) {

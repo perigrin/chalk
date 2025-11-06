@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Coercion {
+class Chalk::Grammar::Chalk::Type::Coercion {
     use Scalar::Util qw(looks_like_number refaddr);
     use Chalk::Type::Exception;
     use Chalk::Type::Num;
@@ -14,7 +14,7 @@ class Chalk::Type::Coercion {
     # Per spec: numbers stay, valid numeric strings parse, invalid to 0, refs to address
     method to_num($value, $source_type) {
         # Undef coerces to 0
-        if (blessed($source_type) eq 'Chalk::Type::Undef') {
+        if (blessed($source_type) eq 'Chalk::Grammar::Chalk::Type::Undef') {
             return 0;
         }
 
@@ -23,13 +23,13 @@ class Chalk::Type::Coercion {
         # Numbers remain unchanged (Int <: Num via is_subtype_of, not Perl isa)
         # Check by type name since our type hierarchy uses is_subtype_of not Perl inheritance
         my $type_name = blessed($source_type);
-        if ($type_name eq 'Chalk::Type::Int' ||
-            $type_name eq 'Chalk::Type::Num') {
+        if ($type_name eq 'Chalk::Grammar::Chalk::Type::Int' ||
+            $type_name eq 'Chalk::Grammar::Chalk::Type::Num') {
             return $value;
         }
 
         # Strings coerce to numbers (but not Num types, which we handled above)
-        if (blessed($source_type) eq 'Chalk::Type::Str') {
+        if (blessed($source_type) eq 'Chalk::Grammar::Chalk::Type::Str') {
             # Valid numeric strings parse
             if (looks_like_number($value)) {
                 return $value + 0;  # Force numeric context
@@ -59,7 +59,7 @@ class Chalk::Type::Coercion {
     # Per spec: strings stay, numbers stringify, refs show type+address, undef to empty
     method to_str($value, $source_type) {
         # Undef coerces to empty string
-        if (blessed($source_type) eq 'Chalk::Type::Undef') {
+        if (blessed($source_type) eq 'Chalk::Grammar::Chalk::Type::Undef') {
             return "";
         }
 
@@ -68,9 +68,9 @@ class Chalk::Type::Coercion {
         # Strings, Nums, and Ints all stringify
         # Since Num <: Str in our lattice, all these can be stringified
         my $type_name = blessed($source_type);
-        if ($type_name eq 'Chalk::Type::Str' ||
-            $type_name eq 'Chalk::Type::Num' ||
-            $type_name eq 'Chalk::Type::Int') {
+        if ($type_name eq 'Chalk::Grammar::Chalk::Type::Str' ||
+            $type_name eq 'Chalk::Grammar::Chalk::Type::Num' ||
+            $type_name eq 'Chalk::Grammar::Chalk::Type::Int') {
             return "$value";  # Stringify to ensure string context
         }
 

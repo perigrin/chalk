@@ -1,63 +1,34 @@
-# ABOUTME: Type inference for IR nodes in dynamic language context
-# ABOUTME: Provides static type analysis without external dependencies
+# ABOUTME: Type inference for IR nodes using grammar-specific type lattice
+# ABOUTME: Provides static type analysis by delegating to language-specific TypeLattice
 use 5.42.0;
 use experimental qw(class);
 use utf8;
 
 class Chalk::IR::TypeInference {
-    field $context :param :reader = undef;
-    field $graph   :param :reader = undef;
+    field $context      :param :reader = undef;
+    field $graph        :param :reader = undef;
+    field $type_lattice :param :reader;  # Grammar-specific type system
 
     # Infer the type of a value produced by an IR node
-    # Returns type string: 'Int', 'Str', 'Array', 'Hash', 'Object:ClassName', 'Bool', 'Num', or undef
+    # Returns Chalk::Grammar::Chalk::Type::* object or undef
     method infer_type($node) {
         return undef unless defined $node;
         return undef unless ref($node);
 
         my $op = $node->op;
 
-        # Constants have explicit types
-        if ($op eq 'Constant') {
-            my $type = $node->attributes->{type};
-            return $type if defined $type;
-            return 'Int';  # Default for constants
-        }
+        # Delegate to type lattice for operation-specific inference
+        my $type = $type_lattice->infer_type_from_operation($op, $node);
+        return $type if defined $type;
 
-        # Collection types
-        return 'Array' if $op eq 'ArrayValue';
-        return 'Hash' if $op eq 'HashValue';
-
-        # Object construction
-        if ($op eq 'New') {
-            my $class = $node->attributes->{class};
-            return "Object:$class" if defined $class;
-        }
-
-        # Arithmetic operations return numbers
-        return 'Num' if $op =~ /^(Add|Subtract|Multiply|Divide|Negate)$/;
-
-        # Comparison operations return boolean
-        return 'Bool' if $op =~ /^(GT|LT|EQ|NE|GE|LE)$/;
-
-        # Logical operations
-        return 'Bool' if $op =~ /^(And|Or|Not)$/;
-
-        # String operations
-        return 'Str' if $op eq 'Concat';
-
-        # Array/Hash access - type depends on what's stored
-        # We'd need to trace through context to know for sure
-        if ($op =~ /^(ArrayGet|HashGet)$/) {
-            # Could be anything - would need context analysis
-            return undef;
-        }
+        # Special cases that need context/graph analysis
 
         # Variable reads - look up in context if possible
         if ($op eq 'VariableRead') {
             return $self->_infer_type_from_variable_read($node);
         }
 
-        # Phi nodes - would need to check all inputs (pick first for now)
+        # Phi nodes - check all inputs (pick first for now)
         if ($op eq 'Phi') {
             return $self->_infer_type_from_phi($node);
         }
@@ -77,10 +48,15 @@ class Chalk::IR::TypeInference {
             return $node->attributes->{class};
         }
 
-        # Try to infer from type
+        # Try to infer from type - check if it's an Object type
         my $type = $self->infer_type($node);
-        if (defined $type && $type =~ /^Object:(.+)$/) {
-            return $1;
+        if (defined $type) {
+            # Check if this is an Object type (Chalk::Grammar::Chalk::Type::Object)
+            my $type_name = $type_lattice->type_name($type);
+            if ($type_name eq 'Object') {
+                # Try to get class from node attributes
+                return $node->attributes->{class} if defined $node->attributes;
+            }
         }
 
         # Could trace through variable assignments, but that's complex

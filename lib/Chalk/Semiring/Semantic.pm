@@ -6,14 +6,14 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
 use Chalk::EvalContext;
-use Chalk::Type::Int;
-use Chalk::Type::Num;
-use Chalk::Type::Str;
-use Chalk::Type::Scalar;
-use Chalk::Type::Array;
-use Chalk::Type::Hash;
-use Chalk::Type::List;
-use Chalk::Type::Any;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::Scalar;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::Hash;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::List;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any;
 
 class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     field $value :param :reader;         # Computed semantic value
@@ -193,7 +193,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
 
     # Infer the type of an expression from its grammar rule
     method infer_type_from_rule($rule) {
-        return Chalk::Type::Any->new() unless defined($rule);
+        return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any->new() unless defined($rule);
 
         my $lhs = $rule->lhs;
         my @rhs = @{$rule->rhs};
@@ -202,11 +202,11 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         if (@rhs == 1) {
             my $terminal = $rhs[0];
             # Integer literal
-            return Chalk::Type::Int->new() if $terminal eq '%INTEGER%';
+            return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int->new() if $terminal eq '%INTEGER%';
             # Float/Number literal
-            return Chalk::Type::Num->new() if $terminal eq '%FLOAT%' || $terminal eq '%VERSION%';
+            return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num->new() if $terminal eq '%FLOAT%' || $terminal eq '%VERSION%';
             # String literals
-            return Chalk::Type::Str->new() if $terminal eq '%SINGLE_QUOTED_STRING%'
+            return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str->new() if $terminal eq '%SINGLE_QUOTED_STRING%'
                                            || $terminal eq '%DOUBLE_QUOTED_STRING%';
         }
 
@@ -214,18 +214,18 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         if ($lhs =~ qr/Variable$/) {
             # Scalar variable: $ identifier
             if (@rhs >= 1 && $rhs[0] eq '$') {
-                return Chalk::Type::Scalar->new();
+                return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Scalar->new();
             }
             # Array variable: @ identifier
             if (@rhs >= 1 && $rhs[0] eq '@') {
-                return Chalk::Type::Array->new(
-                    element_type => Chalk::Type::Any->new()
+                return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array->new(
+                    element_type => Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any->new()
                 );
             }
             # Hash variable: % identifier
             if (@rhs >= 1 && $rhs[0] eq '%') {
-                return Chalk::Type::Hash->new(
-                    value_type => Chalk::Type::Any->new()
+                return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Hash->new(
+                    value_type => Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any->new()
                 );
             }
         }
@@ -235,29 +235,29 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             my $symbol = $rhs[$i];
             # Numeric operations
             if ($symbol =~ qr/^[+\-*\/]$/ || $symbol eq '**') {
-                return Chalk::Type::Num->new();
+                return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num->new();
             }
             # String concatenation
             if ($symbol eq '.') {
-                return Chalk::Type::Str->new();
+                return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str->new();
             }
             # Range operator
             if ($symbol eq '..') {
-                return Chalk::Type::List->new();
+                return Chalk::Grammar::Chalk::Grammar::Chalk::Type::List->new();
             }
         }
 
         # Type inference by LHS name
-        return Chalk::Type::Int->new()    if $lhs eq 'Integer' || $lhs eq 'IntegerLiteral';
-        return Chalk::Type::Num->new()    if $lhs eq 'Number' || $lhs eq 'NumberLiteral';
-        return Chalk::Type::Str->new()    if $lhs eq 'String' || $lhs eq 'StringLiteral'
+        return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int->new()    if $lhs eq 'Integer' || $lhs eq 'IntegerLiteral';
+        return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num->new()    if $lhs eq 'Number' || $lhs eq 'NumberLiteral';
+        return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str->new()    if $lhs eq 'String' || $lhs eq 'StringLiteral'
                                           || $lhs =~ qr/Quoted/;
-        return Chalk::Type::Array->new(element_type => Chalk::Type::Any->new())
+        return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any->new())
                                        if $lhs eq 'ArrayLiteral' || $lhs eq 'List';
-        return Chalk::Type::List->new()   if $lhs eq 'Range';
+        return Chalk::Grammar::Chalk::Grammar::Chalk::Type::List->new()   if $lhs eq 'Range';
 
         # Default to Any for unknown constructs
-        return Chalk::Type::Any->new();
+        return Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any->new();
     }
 }
 

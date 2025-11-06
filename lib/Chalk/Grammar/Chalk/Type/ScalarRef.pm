@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::ScalarRef :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::ScalarRef :isa(Chalk::Grammar::Chalk::Type) {
     # ScalarRef represents scalar references
     # ScalarRef <: Ref <: Scalar <: Any
 
@@ -13,10 +13,10 @@ class Chalk::Type::ScalarRef :isa(Chalk::Type) {
         # ScalarRef <: Ref
         # ScalarRef <: Scalar (transitive)
         # ScalarRef <: Any (transitive)
-        return ref($other) eq 'Chalk::Type::ScalarRef' ||
-               ref($other) eq 'Chalk::Type::Ref' ||
-               ref($other) eq 'Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::ScalarRef' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Ref' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 }
 

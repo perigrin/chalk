@@ -8,7 +8,7 @@ use Chalk::Type::Hash;
 use Chalk::Type::Any;
 use Chalk::Type::Exception;
 
-class Chalk::Type::List :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::List :isa(Chalk::Grammar::Chalk::Type) {
     # List represents ephemeral list values
     # Exists only during list-context evaluation
     # List <: Any
@@ -19,8 +19,8 @@ class Chalk::Type::List :isa(Chalk::Type) {
     method is_subtype_of($other) {
         # List <: List (reflexive)
         # List <: Any
-        return blessed($other) eq 'Chalk::Type::List' ||
-               blessed($other) eq 'Chalk::Type::Any';
+        return blessed($other) eq 'Chalk::Grammar::Chalk::Type::List' ||
+               blessed($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 
     method convert_to_target($target_sigil) {

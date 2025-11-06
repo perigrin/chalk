@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::None :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::None :isa(Chalk::Grammar::Chalk::Type) {
     # None is the bottom type in the type lattice
     # None is a subtype of all types
 

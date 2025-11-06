@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Any :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Any :isa(Chalk::Grammar::Chalk::Type) {
     # Any is the top type in the type lattice
     # All types are subtypes of Any
 
@@ -14,7 +14,7 @@ class Chalk::Type::Any :isa(Chalk::Type) {
 
     method is_subtype_of($other) {
         # Any is only a subtype of itself
-        return ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 }
 

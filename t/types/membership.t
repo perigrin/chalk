@@ -7,18 +7,18 @@ use experimental qw(class);
 use Test::More;
 use lib 'lib';
 
-use Chalk::Type::Num;
-use Chalk::Type::Int;
-use Chalk::Type::Str;
-use Chalk::Type::Boolean;
-use Chalk::Type::Undef;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Boolean;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Undef;
 
 subtest 'Type membership requires both criteria' => sub {
     # Type membership needs BOTH:
     # 1. Syntactic preservation (round-trip)
     # 2. Semantic fulfillment (contracts)
 
-    my $num_type = Chalk::Type::Num->new();
+    my $num_type = Chalk::Grammar::Chalk::Type::Num->new();
 
     # Normal numbers satisfy both
     ok($num_type->check_membership(42),
@@ -28,7 +28,7 @@ subtest 'Type membership requires both criteria' => sub {
 };
 
 subtest 'NaN edge case - fails semantic contract' => sub {
-    my $num_type = Chalk::Type::Num->new();
+    my $num_type = Chalk::Grammar::Chalk::Type::Num->new();
 
     # "NaN" might pass syntactic preservation (round-trip)
     # but MUST fail semantic fulfillment (NaN not-equal NaN violates reflexivity)
@@ -37,7 +37,7 @@ subtest 'NaN edge case - fails semantic contract' => sub {
 };
 
 subtest 'Round-trip preservation for Num type' => sub {
-    my $num_type = Chalk::Type::Num->new();
+    my $num_type = Chalk::Grammar::Chalk::Type::Num->new();
 
     # Num to Str to Num should be observationally equivalent
     ok($num_type->round_trip_preserves(42),
@@ -49,7 +49,7 @@ subtest 'Round-trip preservation for Num type' => sub {
 };
 
 subtest 'Semantic contracts for Num type' => sub {
-    my $num_type = Chalk::Type::Num->new();
+    my $num_type = Chalk::Grammar::Chalk::Type::Num->new();
 
     # Numbers must satisfy reflexivity: $x == $x
     ok($num_type->satisfies_contract(42),
@@ -65,7 +65,7 @@ subtest 'Semantic contracts for Num type' => sub {
 };
 
 subtest 'Int membership is stricter than Num' => sub {
-    my $int_type = Chalk::Type::Int->new();
+    my $int_type = Chalk::Grammar::Chalk::Type::Int->new();
 
     # Integers must be whole numbers
     ok($int_type->check_membership(42),
@@ -83,7 +83,7 @@ subtest 'Int membership is stricter than Num' => sub {
 };
 
 subtest 'String membership is permissive' => sub {
-    my $str_type = Chalk::Type::Str->new();
+    my $str_type = Chalk::Grammar::Chalk::Type::Str->new();
 
     # All strings are valid
     ok($str_type->check_membership("hello"),
@@ -99,7 +99,7 @@ subtest 'String membership is permissive' => sub {
 };
 
 subtest 'Boolean membership vs primitive bool' => sub {
-    my $bool_type = Chalk::Type::Boolean->new();
+    my $bool_type = Chalk::Grammar::Chalk::Type::Boolean->new();
 
     # Boolean type contains all truthy/falsy values
     ok($bool_type->check_membership(1),
@@ -117,7 +117,7 @@ subtest 'Boolean membership vs primitive bool' => sub {
 };
 
 subtest 'Undef membership' => sub {
-    my $undef_type = Chalk::Type::Undef->new();
+    my $undef_type = Chalk::Grammar::Chalk::Type::Undef->new();
 
     # Only undef is a valid Undef
     ok($undef_type->check_membership(undef),

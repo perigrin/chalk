@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Code :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Code :isa(Chalk::Grammar::Chalk::Type) {
     # Code represents code/subroutine values
     # Code <: Any (direct subtype, not through Scalar)
     # Note: Code is NOT a subtype of Scalar
@@ -12,8 +12,8 @@ class Chalk::Type::Code :isa(Chalk::Type) {
     method is_subtype_of($other) {
         # Code <: Code (reflexive)
         # Code <: Any
-        return ref($other) eq 'Chalk::Type::Code' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Code' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 }
 

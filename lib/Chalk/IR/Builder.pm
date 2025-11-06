@@ -10,6 +10,7 @@ class Chalk::IR::Builder {
     use Chalk::IR::Context;
     use Chalk::IR::ValidationContext;
     use Chalk::IR::TypeInference;
+    use Chalk::Grammar::Chalk::TypeLattice;
 
     # Phase 1 polymorphic node classes
     use Chalk::IR::Node::Base;
@@ -48,13 +49,16 @@ class Chalk::IR::Builder {
     field $loop_depth = 0;   # Current loop nesting depth for label namespacing
     field $loop_modified_vars = [];  # Stack of sets tracking modified vars per loop depth
     field $type_inference :reader;   # Type inference instance
+    field $type_lattice :reader;     # Grammar-specific type system
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
         $context = Chalk::IR::Context->empty_context();
+        $type_lattice = Chalk::Grammar::Chalk::TypeLattice->new();
         $type_inference = Chalk::IR::TypeInference->new(
             context => $context,
-            graph => $graph
+            graph => $graph,
+            type_lattice => $type_lattice
         );
     }
 
