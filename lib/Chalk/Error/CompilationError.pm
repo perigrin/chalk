@@ -102,11 +102,22 @@ class Chalk::Error::CompilationError {
 
     # Stringify to message for simple error display
     method as_string($other = undef, $swap = undef) {
+        my $result = $message;
+
         if ($source_info) {
             my $location = $source_info->to_string();
-            return sprintf("%s at %s", $message, $location);
+            $result = sprintf("%s at %s", $message, $location);
         }
-        return $message;
+
+        # Add hints if available
+        if ($hints && $hints->@*) {
+            $result .= "\n";
+            for my $hint ($hints->@*) {
+                $result .= "\nhint: $hint";
+            }
+        }
+
+        return $result;
     }
 }
 

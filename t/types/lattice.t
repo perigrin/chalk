@@ -11,11 +11,11 @@ use lib 'lib';
 # Based on: https://gist.github.com/perigrin/c4780a7511ba1421e49a4a8b385aaa3d
 
 subtest 'Universal types' => sub {
-    use_ok('Chalk::Type::Any');
-    use_ok('Chalk::Type::None');
+    use_ok('Chalk::Grammar::Chalk::Type::Any');
+    use_ok('Chalk::Grammar::Chalk::Type::None');
 
-    my $any = Chalk::Type::Any->new();
-    my $none = Chalk::Type::None->new();
+    my $any = Chalk::Grammar::Chalk::Type::Any->new();
+    my $none = Chalk::Grammar::Chalk::Type::None->new();
 
     # Any is top type - all types are subtypes of Any
     isa_ok($any, 'Chalk::Type');
@@ -28,20 +28,20 @@ subtest 'Universal types' => sub {
 };
 
 subtest 'Scalar hierarchy' => sub {
-    use_ok('Chalk::Type::Scalar');
-    use_ok('Chalk::Type::Undef');
-    use_ok('Chalk::Type::Boolean');
-    use_ok('Chalk::Type::Str');
-    use_ok('Chalk::Type::Num');
-    use_ok('Chalk::Type::Int');
+    use_ok('Chalk::Grammar::Chalk::Type::Scalar');
+    use_ok('Chalk::Grammar::Chalk::Type::Undef');
+    use_ok('Chalk::Grammar::Chalk::Type::Boolean');
+    use_ok('Chalk::Grammar::Chalk::Type::Str');
+    use_ok('Chalk::Grammar::Chalk::Type::Num');
+    use_ok('Chalk::Grammar::Chalk::Type::Int');
 
-    my $scalar = Chalk::Type::Scalar->new();
-    my $undef = Chalk::Type::Undef->new();
-    my $boolean = Chalk::Type::Boolean->new();
-    my $str = Chalk::Type::Str->new();
-    my $num = Chalk::Type::Num->new();
-    my $int = Chalk::Type::Int->new();
-    my $any = Chalk::Type::Any->new();
+    my $scalar = Chalk::Grammar::Chalk::Type::Scalar->new();
+    my $undef = Chalk::Grammar::Chalk::Type::Undef->new();
+    my $boolean = Chalk::Grammar::Chalk::Type::Boolean->new();
+    my $str = Chalk::Grammar::Chalk::Type::Str->new();
+    my $num = Chalk::Grammar::Chalk::Type::Num->new();
+    my $int = Chalk::Grammar::Chalk::Type::Int->new();
+    my $any = Chalk::Grammar::Chalk::Type::Any->new();
 
     # Primary Scalar Chain: Int <: Num <: Str <: Scalar <: Any
     ok($int->is_subtype_of($num), 'Int <: Num');
@@ -67,21 +67,21 @@ subtest 'Scalar hierarchy' => sub {
 };
 
 subtest 'Reference hierarchy' => sub {
-    use_ok('Chalk::Type::Ref');
-    use_ok('Chalk::Type::Object');
-    use_ok('Chalk::Type::ScalarRef');
-    use_ok('Chalk::Type::ArrayRef');
-    use_ok('Chalk::Type::HashRef');
-    use_ok('Chalk::Type::CodeRef');
+    use_ok('Chalk::Grammar::Chalk::Type::Ref');
+    use_ok('Chalk::Grammar::Chalk::Type::Object');
+    use_ok('Chalk::Grammar::Chalk::Type::ScalarRef');
+    use_ok('Chalk::Grammar::Chalk::Type::ArrayRef');
+    use_ok('Chalk::Grammar::Chalk::Type::HashRef');
+    use_ok('Chalk::Grammar::Chalk::Type::CodeRef');
 
-    my $ref = Chalk::Type::Ref->new();
-    my $object = Chalk::Type::Object->new();
-    my $scalarref = Chalk::Type::ScalarRef->new();
-    my $arrayref = Chalk::Type::ArrayRef->new();
-    my $hashref = Chalk::Type::HashRef->new();
-    my $coderef = Chalk::Type::CodeRef->new();
-    my $scalar = Chalk::Type::Scalar->new();
-    my $any = Chalk::Type::Any->new();
+    my $ref = Chalk::Grammar::Chalk::Type::Ref->new();
+    my $object = Chalk::Grammar::Chalk::Type::Object->new();
+    my $scalarref = Chalk::Grammar::Chalk::Type::ScalarRef->new();
+    my $arrayref = Chalk::Grammar::Chalk::Type::ArrayRef->new();
+    my $hashref = Chalk::Grammar::Chalk::Type::HashRef->new();
+    my $coderef = Chalk::Grammar::Chalk::Type::CodeRef->new();
+    my $scalar = Chalk::Grammar::Chalk::Type::Scalar->new();
+    my $any = Chalk::Grammar::Chalk::Type::Any->new();
 
     # All Refs are Scalars: Ref <: Scalar
     ok($ref->is_subtype_of($scalar), 'Ref <: Scalar');
@@ -100,14 +100,14 @@ subtest 'Reference hierarchy' => sub {
 };
 
 subtest 'List hierarchy' => sub {
-    use_ok('Chalk::Type::List');
-    use_ok('Chalk::Type::Array');
-    use_ok('Chalk::Type::Hash');
+    use_ok('Chalk::Grammar::Chalk::Type::List');
+    use_ok('Chalk::Grammar::Chalk::Type::Array');
+    use_ok('Chalk::Grammar::Chalk::Type::Hash');
 
-    my $list = Chalk::Type::List->new();
-    my $array = Chalk::Type::Array->new(element_type => Chalk::Type::Any->new());
-    my $hash = Chalk::Type::Hash->new(value_type => Chalk::Type::Any->new());
-    my $any = Chalk::Type::Any->new();
+    my $list = Chalk::Grammar::Chalk::Type::List->new();
+    my $array = Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Type::Any->new());
+    my $hash = Chalk::Grammar::Chalk::Type::Hash->new(value_type => Chalk::Grammar::Chalk::Type::Any->new());
+    my $any = Chalk::Grammar::Chalk::Type::Any->new();
 
     # Array and Hash are subtypes of List (ephemeral type)
     ok($array->is_subtype_of($list), 'Array <: List');
@@ -120,47 +120,47 @@ subtest 'List hierarchy' => sub {
 };
 
 subtest 'Code type' => sub {
-    use_ok('Chalk::Type::Code');
+    use_ok('Chalk::Grammar::Chalk::Type::Code');
 
-    my $code = Chalk::Type::Code->new();
-    my $any = Chalk::Type::Any->new();
+    my $code = Chalk::Grammar::Chalk::Type::Code->new();
+    my $any = Chalk::Grammar::Chalk::Type::Any->new();
 
     # Code is direct subtype of Any (not Scalar)
     ok($code->is_subtype_of($any), 'Code <: Any');
-    ok(!$code->is_subtype_of(Chalk::Type::Scalar->new()), 'NOT: Code <: Scalar');
+    ok(!$code->is_subtype_of(Chalk::Grammar::Chalk::Type::Scalar->new()), 'NOT: Code <: Scalar');
 };
 
 subtest 'Type names' => sub {
     # Each type should have a canonical name
-    is(Chalk::Type::Any->new()->name(), 'Any', 'Any type name');
-    is(Chalk::Type::None->new()->name(), 'None', 'None type name');
-    is(Chalk::Type::Scalar->new()->name(), 'Scalar', 'Scalar type name');
-    is(Chalk::Type::Int->new()->name(), 'Int', 'Int type name');
-    is(Chalk::Type::Num->new()->name(), 'Num', 'Num type name');
-    is(Chalk::Type::Str->new()->name(), 'Str', 'Str type name');
-    is(Chalk::Type::Boolean->new()->name(), 'Boolean', 'Boolean type name');
-    is(Chalk::Type::Undef->new()->name(), 'Undef', 'Undef type name');
-    is(Chalk::Type::Ref->new()->name(), 'Ref', 'Ref type name');
-    is(Chalk::Type::List->new()->name(), 'List', 'List type name');
-    is(Chalk::Type::Code->new()->name(), 'Code', 'Code type name');
+    is(Chalk::Grammar::Chalk::Type::Any->new()->name(), 'Any', 'Any type name');
+    is(Chalk::Grammar::Chalk::Type::None->new()->name(), 'None', 'None type name');
+    is(Chalk::Grammar::Chalk::Type::Scalar->new()->name(), 'Scalar', 'Scalar type name');
+    is(Chalk::Grammar::Chalk::Type::Int->new()->name(), 'Int', 'Int type name');
+    is(Chalk::Grammar::Chalk::Type::Num->new()->name(), 'Num', 'Num type name');
+    is(Chalk::Grammar::Chalk::Type::Str->new()->name(), 'Str', 'Str type name');
+    is(Chalk::Grammar::Chalk::Type::Boolean->new()->name(), 'Boolean', 'Boolean type name');
+    is(Chalk::Grammar::Chalk::Type::Undef->new()->name(), 'Undef', 'Undef type name');
+    is(Chalk::Grammar::Chalk::Type::Ref->new()->name(), 'Ref', 'Ref type name');
+    is(Chalk::Grammar::Chalk::Type::List->new()->name(), 'List', 'List type name');
+    is(Chalk::Grammar::Chalk::Type::Code->new()->name(), 'Code', 'Code type name');
 };
 
 subtest 'Parameterized types' => sub {
     # Array and Hash have type parameters
-    my $int_array = Chalk::Type::Array->new(
-        element_type => Chalk::Type::Int->new()
+    my $int_array = Chalk::Grammar::Chalk::Type::Array->new(
+        element_type => Chalk::Grammar::Chalk::Type::Int->new()
     );
-    my $str_array = Chalk::Type::Array->new(
-        element_type => Chalk::Type::Str->new()
+    my $str_array = Chalk::Grammar::Chalk::Type::Array->new(
+        element_type => Chalk::Grammar::Chalk::Type::Str->new()
     );
 
-    ok($int_array->element_type()->isa('Chalk::Type::Int'), 'Array[Int] has Int element type');
-    ok($str_array->element_type()->isa('Chalk::Type::Str'), 'Array[Str] has Str element type');
+    ok($int_array->element_type()->isa('Chalk::Grammar::Chalk::Type::Int'), 'Array[Int] has Int element type');
+    ok($str_array->element_type()->isa('Chalk::Grammar::Chalk::Type::Str'), 'Array[Str] has Str element type');
 
-    my $int_hash = Chalk::Type::Hash->new(
-        value_type => Chalk::Type::Int->new()
+    my $int_hash = Chalk::Grammar::Chalk::Type::Hash->new(
+        value_type => Chalk::Grammar::Chalk::Type::Int->new()
     );
-    ok($int_hash->value_type()->isa('Chalk::Type::Int'), 'Hash[Int] has Int value type');
+    ok($int_hash->value_type()->isa('Chalk::Grammar::Chalk::Type::Int'), 'Hash[Int] has Int value type');
 };
 
 done_testing();

@@ -8,6 +8,9 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node;
     use Chalk::IR::Graph;
     use Chalk::IR::Context;
+    use Chalk::IR::ValidationContext;
+    use Chalk::IR::TypeInference;
+    use Chalk::Grammar::Chalk::TypeLattice;
 
     # Phase 1 polymorphic node classes
     use Chalk::IR::Node::Base;
@@ -45,10 +48,24 @@ class Chalk::IR::Builder {
     field $current_control :reader;  # Current control flow node
     field $loop_depth = 0;   # Current loop nesting depth for label namespacing
     field $loop_modified_vars = [];  # Stack of sets tracking modified vars per loop depth
+    field $type_inference :reader;   # Type inference instance
+    field $type_lattice :reader;     # Grammar-specific type system
+    field $validator :reader;        # Validation context instance
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
         $context = Chalk::IR::Context->empty_context();
+        $type_lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+        $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
+        $validator = Chalk::IR::ValidationContext->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
     }
 
     # Generate unique node ID
@@ -66,6 +83,19 @@ class Chalk::IR::Builder {
     # Set context (for testing and manual context updates)
     method set_context($ctx) {
         $context = $ctx;
+
+        # Recreate validator and type_inference with new context
+        # This ensures they see updated function signatures, class definitions, and variables
+        $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
+        $validator = Chalk::IR::ValidationContext->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
     }
 
     # Create Start node for a function/method
@@ -170,6 +200,16 @@ class Chalk::IR::Builder {
         die "build_add_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
         die "build_add_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
 
+        # Type validation if source_info provided
+        if (defined($source_info)) {
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
+
+            if (defined($left_type) || defined($right_type)) {
+                $validator->validate_type_operation('Add', $left_type, $right_type, $source_info);
+            }
+        }
+
         my $node_id = $self->next_node_id();
         my $add = Chalk::IR::Node::Add->new(
             id => $node_id,
@@ -188,13 +228,29 @@ class Chalk::IR::Builder {
         return $add;
     }
 
-    method build_multiply_node($left_node, $right_node) {
+    method build_multiply_node($left_node, $right_node, $source_info = undef) {
+        die "build_multiply_node: left_node is undefined" unless defined($left_node);
+        die "build_multiply_node: right_node is undefined" unless defined($right_node);
+        die "build_multiply_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
+        die "build_multiply_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
+
+        # Type validation if source_info provided
+        if (defined($source_info)) {
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
+
+            if (defined($left_type) || defined($right_type)) {
+                $validator->validate_type_operation('Multiply', $left_type, $right_type, $source_info);
+            }
+        }
+
         my $node_id = $self->next_node_id();
         my $mul = Chalk::IR::Node::Multiply->new(
             id => $node_id,
             inputs => [$current_control, $left_node->id, $right_node->id],
             left_id => $left_node->id,
             right_id => $right_node->id,
+            source_info => $source_info,
         );
         $graph->add_node($mul);
 
@@ -206,13 +262,29 @@ class Chalk::IR::Builder {
         return $mul;
     }
 
-    method build_sub_node($left_node, $right_node) {
+    method build_sub_node($left_node, $right_node, $source_info = undef) {
+        die "build_sub_node: left_node is undefined" unless defined($left_node);
+        die "build_sub_node: right_node is undefined" unless defined($right_node);
+        die "build_sub_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
+        die "build_sub_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
+
+        # Type validation if source_info provided
+        if (defined($source_info)) {
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
+
+            if (defined($left_type) || defined($right_type)) {
+                $validator->validate_type_operation('Subtract', $left_type, $right_type, $source_info);
+            }
+        }
+
         my $node_id = $self->next_node_id();
         my $sub = Chalk::IR::Node::Subtract->new(
             id => $node_id,
             inputs => [$current_control, $left_node->id, $right_node->id],
             left_id => $left_node->id,
             right_id => $right_node->id,
+            source_info => $source_info,
         );
         $graph->add_node($sub);
 
@@ -224,13 +296,29 @@ class Chalk::IR::Builder {
         return $sub;
     }
 
-    method build_divide_node($left_node, $right_node) {
+    method build_divide_node($left_node, $right_node, $source_info = undef) {
+        die "build_divide_node: left_node is undefined" unless defined($left_node);
+        die "build_divide_node: right_node is undefined" unless defined($right_node);
+        die "build_divide_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
+        die "build_divide_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
+
+        # Type validation if source_info provided
+        if (defined($source_info)) {
+            my $left_type = $type_inference->infer_type($left_node);
+            my $right_type = $type_inference->infer_type($right_node);
+
+            if (defined($left_type) || defined($right_type)) {
+                $validator->validate_type_operation('Divide', $left_type, $right_type, $source_info);
+            }
+        }
+
         my $node_id = $self->next_node_id();
         my $div = Chalk::IR::Node::Divide->new(
             id => $node_id,
             inputs => [$current_control, $left_node->id, $right_node->id],
             left_id => $left_node->id,
             right_id => $right_node->id,
+            source_info => $source_info,
         );
         $graph->add_node($div);
 
@@ -251,12 +339,30 @@ class Chalk::IR::Builder {
     }
 
     # Create Store node (variable assignment)
-    method build_store_node($var_name, $value_node, $control = undef) {
+    method build_store_node($var_name, $value_node, $control = undef, $source_info = undef) {
+        # Validate loop variable has proper initial value if we're in a loop
+        if (defined($source_info) && $loop_depth > 0) {
+            $validator->validate_loop_variable_phi($var_name, $loop_depth, $source_info);
+        }
+
         # Store variable using lexical: namespace in context
         # Inside loops, use loop depth in label: lexical:loop_0:$var
         # Store the IR node object directly, not the node ID
         my $label = $self->make_variable_label($var_name);
         $context = Chalk::IR::Context->extend_context($context, $label, $value_node);
+
+        # Auto-sync validator and type_inference with updated context
+        # This ensures subsequent validation operations see the newly stored variable
+        $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
+        $validator = Chalk::IR::ValidationContext->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
 
         # Track this variable as modified if we're in a loop
         if ($loop_depth > 0 && scalar($loop_modified_vars->@*) > 0) {
@@ -268,7 +374,7 @@ class Chalk::IR::Builder {
     }
 
     # Load node (variable read)
-    method build_load_node($var_name) {
+    method build_load_node($var_name, $source_info = undef) {
         # Retrieve variable using lexical: namespace from context
         # Try loop-scoped label first, then fall back to outer scope
         # Context now stores IR node objects directly, not node IDs
@@ -287,6 +393,11 @@ class Chalk::IR::Builder {
 
         # Fall back to non-loop lexical scope
         $node //= $context->("lexical:$var_name");
+
+        # Validate that variable exists if source_info provided
+        if (defined($source_info) && !defined($node)) {
+            $node = $validator->validate_variable_defined($var_name, $source_info);
+        }
 
         # Return the node directly from context (no graph lookup needed)
         return $node;
@@ -570,11 +681,17 @@ class Chalk::IR::Builder {
         return $if_false;
     }
 
-    method build_region_node(@control_inputs) {
+    method build_region_node($source_info = undef, @control_inputs) {
+        # Validate control flow merge if source_info provided
+        if (defined($source_info)) {
+            $validator->validate_control_merge(\@control_inputs, $source_info);
+        }
+
         my $node_id = $self->next_node_id();
         my $region = Chalk::IR::Node::Region->new(
             id            => $node_id,
             inputs        => \@control_inputs,
+            source_info   => $source_info,
         );
         $graph->add_node($region);
 
@@ -645,7 +762,13 @@ class Chalk::IR::Builder {
     }
 
     # Function call nodes
-    method build_call_node($function_name, @arg_nodes) {
+    method build_call_node($function_name, $source_info = undef, @arg_nodes) {
+        # Validate arity if source_info provided
+        if (defined($source_info)) {
+            my $arg_count = scalar(@arg_nodes);
+            $validator->validate_call_arity($function_name, $arg_count, $source_info);
+        }
+
         # Call: control, memory, arguments...
         # For now, use current_control for both control and memory
         my $attributes = { function => $function_name };
@@ -655,13 +778,16 @@ class Chalk::IR::Builder {
             op            => 'Call',
             inputs        => [$current_control, $current_control, map { $_->id } @arg_nodes],
             attributes    => $attributes,
+            source_info   => $source_info,
         );
         $graph->add_node($call);
 
         # Record transformation
         my $arg_ids = join(", ", map { $_->id } @arg_nodes);
-        $call->record_transform('ir_construction', 'Builder::build_call_node',
-            context => "function=$function_name, args=[$arg_ids]"
+        $call->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_call_node',
+            description => "function=$function_name, args=[$arg_ids]"
         );
 
         return $call;
@@ -789,14 +915,24 @@ class Chalk::IR::Builder {
 
         # Record transformation
         my $field_names = join(", ", sort(keys($field_values_hash->%*)));
-        $new_obj->record_transform('ir_construction', 'Builder::build_new_node',
-            context => "class=$class_name, fields=[$field_names]"
+        $new_obj->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_new_node',
+            description => "class=$class_name, fields=[$field_names]"
         );
 
         return $new_obj;
     }
 
-    method build_field_access_node($object_node, $field_name) {
+    method build_field_access_node($object_node, $field_name, $source_info = undef) {
+        # Validate field exists in class if source_info provided
+        if (defined($source_info)) {
+            my $class_name = $type_inference->infer_class($object_node);
+            if (defined($class_name)) {
+                $validator->validate_class_field($class_name, $field_name, $source_info);
+            }
+        }
+
         # Create FieldAccess node for reading a field
         my $object_ref = { op => 'NodeRef', node_id => $object_node->id };
         my $attributes = {
@@ -809,12 +945,15 @@ class Chalk::IR::Builder {
             op            => 'FieldAccess',
             inputs        => [$current_control, $object_node->id],
             attributes    => $attributes,
+            source_info   => $source_info,
         );
         $graph->add_node($field_access);
 
         # Record transformation
-        $field_access->record_transform('ir_construction', 'Builder::build_field_access_node',
-            context => "object_id=" . $object_node->id . ", field=$field_name"
+        $field_access->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_field_access_node',
+            description => "object_id=" . $object_node->id . ", field=$field_name"
         );
 
         return $field_access;
@@ -1208,11 +1347,18 @@ class Chalk::IR::Builder {
     # Reference operations (Issue #130 Phase 4)
 
     # Create reference to a scalar variable: \$x
-    method build_scalar_ref_node($var_name) {
+    method build_scalar_ref_node($var_name, $source_info = undef) {
         my $label = "lexical:$var_name";
-        # Look up the target node (might be object or ID)
-        my $target_node_or_id = $context->($label);
-        die "Cannot create reference to undefined variable $var_name" unless defined($target_node_or_id);
+
+        # Validate reference target if source_info provided
+        my $target_node_or_id;
+        if (defined($source_info)) {
+            $target_node_or_id = $validator->validate_reference_target($label, $source_info);
+        } else {
+            # Look up the target node (might be object or ID)
+            $target_node_or_id = $context->($label);
+            die "Cannot create reference to undefined variable $var_name" unless defined($target_node_or_id);
+        }
 
         # Get the node ID for the dependency
         my $target_node_id = ref($target_node_or_id) ? $target_node_or_id->id : $target_node_or_id;
@@ -1223,6 +1369,7 @@ class Chalk::IR::Builder {
             inputs         => [$current_control, $target_node_id],  # Add target as dependency
             target_context => $context,
             target_label   => $label,
+            source_info    => $source_info,
         );
         $graph->add_node($reference);
 
@@ -1346,6 +1493,50 @@ class Chalk::IR::Builder {
 
         # Return the value node for chaining
         return $value_node;
+    }
+
+    # Helper method for type inference - returns type name as string
+    # Used by tests and validation logic
+    method _infer_type_from_node($node) {
+        my $type = $type_inference->infer_type($node);
+        return undef unless defined($type);
+        return $type->name();
+    }
+
+    # Create array value node (simplified version for testing)
+    # Takes array ref of initial values
+    method build_array_value_node($values = []) {
+        my $node_id = $self->next_node_id();
+        my $node = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ArrayValue',
+            inputs => [$current_control],
+            attributes => { values => $values },
+        );
+        $graph->add_node($node);
+        $node->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_array_value_node'
+        );
+        return $node;
+    }
+
+    # Create hash value node (simplified version for testing)
+    # Takes hash ref of initial key-value pairs
+    method build_hash_value_node($pairs = {}) {
+        my $node_id = $self->next_node_id();
+        my $node = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'HashValue',
+            inputs => [$current_control],
+            attributes => { pairs => $pairs },
+        );
+        $graph->add_node($node);
+        $node->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_hash_value_node'
+        );
+        return $node;
     }
 
 }

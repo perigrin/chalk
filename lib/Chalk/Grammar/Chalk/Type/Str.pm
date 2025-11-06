@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Str :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Str :isa(Chalk::Grammar::Chalk::Type) {
     # Str represents string values
     # Str <: Scalar <: Any
     # Note: Num <: Str because numbers round-trip through string conversion
@@ -13,9 +13,9 @@ class Chalk::Type::Str :isa(Chalk::Type) {
         # Str <: Str (reflexive)
         # Str <: Scalar
         # Str <: Any
-        return ref($other) eq 'Chalk::Type::Str' ||
-               ref($other) eq 'Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Str' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 
     method round_trip_preserves($value) {

@@ -4,15 +4,15 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Scalar :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Scalar :isa(Chalk::Grammar::Chalk::Type) {
     # Scalar is the base type for all scalar values
     # Scalar <: Any
 
     method is_subtype_of($other) {
         # Scalar <: Scalar (reflexive)
         # Scalar <: Any
-        return ref($other) eq 'Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 }
 

@@ -40,7 +40,25 @@ class Chalk::IR::Node::Base {
     }
 
     # Record a transformation that created or modified this node
-    method record_transform($operation, $name, %opts) {
+    method record_transform(@args) {
+        # Support both calling styles for backward compatibility:
+        # 1. Positional: record_transform($operation, $name, context => $desc)
+        # 2. Named:      record_transform(operation => $op, rule_name => $name, description => $desc)
+
+        my ($operation, $name, %opts);
+
+        if (@args >= 2 && !ref($args[0]) && !ref($args[1]) && $args[0] !~ qr/^(operation|rule_name|description|context|source_node)$/) {
+            # Positional style: first two args are scalars, not named params
+            ($operation, $name, %opts) = @args;
+        } else {
+            # Named parameter style
+            %opts = @args;
+            $operation = $opts{operation};
+            $name = $opts{rule_name} // $opts{name};  # Accept both 'rule_name' and 'name'
+            # Accept both 'description' and 'context' for the description field
+            $opts{context} //= $opts{description};
+        }
+
         # Validate required parameters
         die "record_transform: operation parameter required and must be non-empty"
             unless defined($operation) && length($operation);
@@ -64,7 +82,7 @@ class Chalk::IR::Node::Base {
             context        => $opts{context},
         );
 
-        push @$transform_chain, $record;
+        push $transform_chain->@*, $record;
         return $record;
     }
 
@@ -75,7 +93,7 @@ class Chalk::IR::Node::Base {
 
     # Get debug string showing transformation history
     method debug_transform_chain() {
-        return "No transformations recorded" unless @$transform_chain;
+        return "No transformations recorded" unless $transform_chain->@*;
 
         my @lines = ("Transformation history for node $id:");
         for my $i (0 .. $#$transform_chain) {

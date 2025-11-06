@@ -5,221 +5,221 @@ use 5.042;
 use experimental qw(class);
 
 class Chalk::Builtins {
-    use Chalk::Type::Any;
-    use Chalk::Type::Int;
-    use Chalk::Type::Num;
-    use Chalk::Type::Str;
-    use Chalk::Type::Boolean;
-    use Chalk::Type::Array;
-    use Chalk::Type::Hash;
-    use Chalk::Type::Scalar;
-    use Chalk::Type::Undef;
-    use Chalk::Type::List;
+    use Chalk::Grammar::Chalk::Type::Any;
+    use Chalk::Grammar::Chalk::Type::Int;
+    use Chalk::Grammar::Chalk::Type::Num;
+    use Chalk::Grammar::Chalk::Type::Str;
+    use Chalk::Grammar::Chalk::Type::Boolean;
+    use Chalk::Grammar::Chalk::Type::Array;
+    use Chalk::Grammar::Chalk::Type::Hash;
+    use Chalk::Grammar::Chalk::Type::Scalar;
+    use Chalk::Grammar::Chalk::Type::Undef;
+    use Chalk::Grammar::Chalk::Type::List;
 
     # Built-in function signatures
     # Format: 'function_name' => { params => [...], returns => Type }
     our %BUILTIN_SIGNATURES = (
         # String functions
         'length' => {
-            params => [Chalk::Type::Str->new()],
-            returns => Chalk::Type::Int->new(),
+            params => [Chalk::Grammar::Chalk::Type::Str->new()],
+            returns => Chalk::Grammar::Chalk::Type::Int->new(),
             description => 'Returns length of string',
         },
         'substr' => {
             params => [
-                Chalk::Type::Str->new(),
-                Chalk::Type::Int->new(),
-                Chalk::Type::Int->new(),  # optional length
+                Chalk::Grammar::Chalk::Type::Str->new(),
+                Chalk::Grammar::Chalk::Type::Int->new(),
+                Chalk::Grammar::Chalk::Type::Int->new(),  # optional length
             ],
-            returns => Chalk::Type::Str->new(),
+            returns => Chalk::Grammar::Chalk::Type::Str->new(),
             description => 'Extracts substring',
         },
         'uc' => {
-            params => [Chalk::Type::Str->new()],
-            returns => Chalk::Type::Str->new(),
+            params => [Chalk::Grammar::Chalk::Type::Str->new()],
+            returns => Chalk::Grammar::Chalk::Type::Str->new(),
             description => 'Uppercase string',
         },
         'lc' => {
-            params => [Chalk::Type::Str->new()],
-            returns => Chalk::Type::Str->new(),
+            params => [Chalk::Grammar::Chalk::Type::Str->new()],
+            returns => Chalk::Grammar::Chalk::Type::Str->new(),
             description => 'Lowercase string',
         },
         'chomp' => {
-            params => [Chalk::Type::Str->new()],
-            returns => Chalk::Type::Int->new(),
+            params => [Chalk::Grammar::Chalk::Type::Str->new()],
+            returns => Chalk::Grammar::Chalk::Type::Int->new(),
             description => 'Remove trailing newline',
         },
         'chop' => {
-            params => [Chalk::Type::Str->new()],
-            returns => Chalk::Type::Str->new(),
+            params => [Chalk::Grammar::Chalk::Type::Str->new()],
+            returns => Chalk::Grammar::Chalk::Type::Str->new(),
             description => 'Remove last character',
         },
 
         # Array functions
         'push' => {
             params => [
-                Chalk::Type::Array->new(element_type => Chalk::Type::Any->new()),
-                Chalk::Type::Any->new(),
+                Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Any->new(),
             ],
-            returns => Chalk::Type::Int->new(),
+            returns => Chalk::Grammar::Chalk::Type::Int->new(),
             description => 'Push elements onto array, returns new size',
         },
         'pop' => {
             params => [
-                Chalk::Type::Array->new(element_type => Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Type::Any->new()),
             ],
-            returns => Chalk::Type::Scalar->new(),
+            returns => Chalk::Grammar::Chalk::Type::Scalar->new(),
             description => 'Pop element from array',
         },
         'shift' => {
             params => [
-                Chalk::Type::Array->new(element_type => Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Type::Any->new()),
             ],
-            returns => Chalk::Type::Scalar->new(),
+            returns => Chalk::Grammar::Chalk::Type::Scalar->new(),
             description => 'Shift element from array start',
         },
         'unshift' => {
             params => [
-                Chalk::Type::Array->new(element_type => Chalk::Type::Any->new()),
-                Chalk::Type::Any->new(),
+                Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Any->new(),
             ],
-            returns => Chalk::Type::Int->new(),
+            returns => Chalk::Grammar::Chalk::Type::Int->new(),
             description => 'Unshift elements onto array, returns new size',
         },
         'splice' => {
             params => [
-                Chalk::Type::Array->new(element_type => Chalk::Type::Any->new()),
-                Chalk::Type::Int->new(),
-                Chalk::Type::Int->new(),  # optional length
+                Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Int->new(),
+                Chalk::Grammar::Chalk::Type::Int->new(),  # optional length
             ],
-            returns => Chalk::Type::List->new(),
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Remove and return array elements',
         },
 
         # Hash functions
         'keys' => {
             params => [
-                Chalk::Type::Hash->new(value_type => Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Hash->new(value_type => Chalk::Grammar::Chalk::Type::Any->new()),
             ],
-            returns => Chalk::Type::List->new(),
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Return list of hash keys',
         },
         'values' => {
             params => [
-                Chalk::Type::Hash->new(value_type => Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Hash->new(value_type => Chalk::Grammar::Chalk::Type::Any->new()),
             ],
-            returns => Chalk::Type::List->new(),
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Return list of hash values',
         },
         'exists' => {
             params => [
-                Chalk::Type::Hash->new(value_type => Chalk::Type::Any->new()),
-                Chalk::Type::Str->new(),
+                Chalk::Grammar::Chalk::Type::Hash->new(value_type => Chalk::Grammar::Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Str->new(),
             ],
-            returns => Chalk::Type::Boolean->new(),
+            returns => Chalk::Grammar::Chalk::Type::Boolean->new(),
             description => 'Check if hash key exists',
         },
         'delete' => {
             params => [
-                Chalk::Type::Hash->new(value_type => Chalk::Type::Any->new()),
-                Chalk::Type::Str->new(),
+                Chalk::Grammar::Chalk::Type::Hash->new(value_type => Chalk::Grammar::Chalk::Type::Any->new()),
+                Chalk::Grammar::Chalk::Type::Str->new(),
             ],
-            returns => Chalk::Type::Scalar->new(),
+            returns => Chalk::Grammar::Chalk::Type::Scalar->new(),
             description => 'Delete hash key, return value',
         },
 
         # Type checking functions
         'defined' => {
-            params => [Chalk::Type::Any->new()],
-            returns => Chalk::Type::Boolean->new(),
+            params => [Chalk::Grammar::Chalk::Type::Any->new()],
+            returns => Chalk::Grammar::Chalk::Type::Boolean->new(),
             description => 'Check if value is defined',
         },
         'ref' => {
-            params => [Chalk::Type::Any->new()],
-            returns => Chalk::Type::Str->new(),
+            params => [Chalk::Grammar::Chalk::Type::Any->new()],
+            returns => Chalk::Grammar::Chalk::Type::Str->new(),
             description => 'Return reference type name',
         },
 
         # Numeric functions
         'abs' => {
-            params => [Chalk::Type::Num->new()],
-            returns => Chalk::Type::Num->new(),
+            params => [Chalk::Grammar::Chalk::Type::Num->new()],
+            returns => Chalk::Grammar::Chalk::Type::Num->new(),
             description => 'Absolute value',
         },
         'int' => {
-            params => [Chalk::Type::Num->new()],
-            returns => Chalk::Type::Int->new(),
+            params => [Chalk::Grammar::Chalk::Type::Num->new()],
+            returns => Chalk::Grammar::Chalk::Type::Int->new(),
             description => 'Truncate to integer',
         },
         'sqrt' => {
-            params => [Chalk::Type::Num->new()],
-            returns => Chalk::Type::Num->new(),
+            params => [Chalk::Grammar::Chalk::Type::Num->new()],
+            returns => Chalk::Grammar::Chalk::Type::Num->new(),
             description => 'Square root',
         },
         'sin' => {
-            params => [Chalk::Type::Num->new()],
-            returns => Chalk::Type::Num->new(),
+            params => [Chalk::Grammar::Chalk::Type::Num->new()],
+            returns => Chalk::Grammar::Chalk::Type::Num->new(),
             description => 'Sine function',
         },
         'cos' => {
-            params => [Chalk::Type::Num->new()],
-            returns => Chalk::Type::Num->new(),
+            params => [Chalk::Grammar::Chalk::Type::Num->new()],
+            returns => Chalk::Grammar::Chalk::Type::Num->new(),
             description => 'Cosine function',
         },
 
         # I/O functions
         'print' => {
-            params => [Chalk::Type::Any->new()],
-            returns => Chalk::Type::Boolean->new(),
+            params => [Chalk::Grammar::Chalk::Type::Any->new()],
+            returns => Chalk::Grammar::Chalk::Type::Boolean->new(),
             description => 'Print to output',
         },
         'say' => {
-            params => [Chalk::Type::Any->new()],
-            returns => Chalk::Type::Boolean->new(),
+            params => [Chalk::Grammar::Chalk::Type::Any->new()],
+            returns => Chalk::Grammar::Chalk::Type::Boolean->new(),
             description => 'Print with newline',
         },
 
         # List functions
         'join' => {
             params => [
-                Chalk::Type::Str->new(),
-                Chalk::Type::List->new(),
+                Chalk::Grammar::Chalk::Type::Str->new(),
+                Chalk::Grammar::Chalk::Type::List->new(),
             ],
-            returns => Chalk::Type::Str->new(),
+            returns => Chalk::Grammar::Chalk::Type::Str->new(),
             description => 'Join list elements into string',
         },
         'split' => {
             params => [
-                Chalk::Type::Str->new(),  # pattern
-                Chalk::Type::Str->new(),  # string
+                Chalk::Grammar::Chalk::Type::Str->new(),  # pattern
+                Chalk::Grammar::Chalk::Type::Str->new(),  # string
             ],
-            returns => Chalk::Type::List->new(),
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Split string into list',
         },
         'sort' => {
-            params => [Chalk::Type::List->new()],
-            returns => Chalk::Type::List->new(),
+            params => [Chalk::Grammar::Chalk::Type::List->new()],
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Sort list elements',
         },
         'reverse' => {
-            params => [Chalk::Type::List->new()],
-            returns => Chalk::Type::List->new(),
+            params => [Chalk::Grammar::Chalk::Type::List->new()],
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Reverse list elements',
         },
         'grep' => {
             params => [
-                Chalk::Type::Any->new(),  # block or pattern
-                Chalk::Type::List->new(),
+                Chalk::Grammar::Chalk::Type::Any->new(),  # block or pattern
+                Chalk::Grammar::Chalk::Type::List->new(),
             ],
-            returns => Chalk::Type::List->new(),
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Filter list elements',
         },
         'map' => {
             params => [
-                Chalk::Type::Any->new(),  # block
-                Chalk::Type::List->new(),
+                Chalk::Grammar::Chalk::Type::Any->new(),  # block
+                Chalk::Grammar::Chalk::Type::List->new(),
             ],
-            returns => Chalk::Type::List->new(),
+            returns => Chalk::Grammar::Chalk::Type::List->new(),
             description => 'Transform list elements',
         },
     );

@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Hash :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Hash :isa(Chalk::Grammar::Chalk::Type) {
     # Hash represents hash values
     # Hash <: List <: Any
     # Parameterized by value_type
@@ -15,9 +15,9 @@ class Chalk::Type::Hash :isa(Chalk::Type) {
         # Hash <: Hash (reflexive)
         # Hash <: List
         # Hash <: Any (transitive)
-        return ref($other) eq 'Chalk::Type::Hash' ||
-               ref($other) eq 'Chalk::Type::List' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Hash' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::List' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 }
 

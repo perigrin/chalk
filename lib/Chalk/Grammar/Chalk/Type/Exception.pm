@@ -66,7 +66,7 @@ sub membership_failure_error($type, $value, $reason = undef) {
     );
 }
 
-class Chalk::Type::Exception {
+class Chalk::Grammar::Chalk::Type::Exception {
     field $message :param :reader;
     field $source_type :param :reader = undef;
     field $target_type :param :reader = undef;

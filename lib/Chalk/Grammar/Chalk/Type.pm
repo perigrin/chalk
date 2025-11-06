@@ -1,19 +1,19 @@
-# ABOUTME: Base class for the Chalk type system implementing the latent type lattice
+# ABOUTME: Base class for the Chalk grammar type system implementing the latent type lattice
 # ABOUTME: Provides common type operations like subtyping, compatibility, and type names
 
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type {
-    # Base class for all types in the Chalk type system
+class Chalk::Grammar::Chalk::Type {
+    # Base class for all types in the Chalk grammar type system
     # Based on: https://gist.github.com/perigrin/c4780a7511ba1421e49a4a8b385aaa3d
 
     method name() {
         # Return the canonical name of this type
         # Subclasses override this
         my $class = ref($self) || $self;
-        # Extract class name after Chalk::Type:: prefix
-        if ($class =~ qr/^Chalk::Type::(.+)$/) {
+        # Extract class name after Chalk::Grammar::Chalk::Type:: prefix
+        if ($class =~ qr/^Chalk::Grammar::Chalk::Type::(.+)$/) {
             return $1;
         }
         return $class;

@@ -4,7 +4,7 @@
 use 5.042;
 use experimental qw(class);
 
-class Chalk::Type::Undef :isa(Chalk::Type) {
+class Chalk::Grammar::Chalk::Type::Undef :isa(Chalk::Grammar::Chalk::Type) {
     # Undef represents undefined values
     # Undef <: Scalar <: Any
 
@@ -12,9 +12,9 @@ class Chalk::Type::Undef :isa(Chalk::Type) {
         # Undef <: Undef (reflexive)
         # Undef <: Scalar
         # Undef <: Any
-        return ref($other) eq 'Chalk::Type::Undef' ||
-               ref($other) eq 'Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Type::Any';
+        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Undef' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
+               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
 
     method round_trip_preserves($value) {

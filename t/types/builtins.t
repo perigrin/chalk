@@ -8,11 +8,11 @@ use Test::More;
 use lib 'lib';
 
 use Chalk::Builtins;
-use Chalk::Type::Int;
-use Chalk::Type::Str;
-use Chalk::Type::Boolean;
-use Chalk::Type::Array;
-use Chalk::Type::List;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Boolean;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Grammar::Chalk::Type::List;
 
 subtest 'Builtins has signature for common functions' => sub {
     my $builtins = Chalk::Builtins->new();
@@ -29,15 +29,15 @@ subtest 'String function signatures' => sub {
 
     my $length_sig = $builtins->get_signature('length');
     ok(defined($length_sig), 'length has signature');
-    isa_ok($length_sig->{params}[0], 'Chalk::Type::Str',
+    isa_ok($length_sig->{params}[0], 'Chalk::Grammar::Chalk::Type::Str',
            'length takes Str param');
-    isa_ok($length_sig->{returns}, 'Chalk::Type::Int',
+    isa_ok($length_sig->{returns}, 'Chalk::Grammar::Chalk::Type::Int',
            'length returns Int');
 
     my $uc_sig = $builtins->get_signature('uc');
-    isa_ok($uc_sig->{params}[0], 'Chalk::Type::Str',
+    isa_ok($uc_sig->{params}[0], 'Chalk::Grammar::Chalk::Type::Str',
            'uc takes Str param');
-    isa_ok($uc_sig->{returns}, 'Chalk::Type::Str',
+    isa_ok($uc_sig->{returns}, 'Chalk::Grammar::Chalk::Type::Str',
            'uc returns Str');
 };
 
@@ -46,15 +46,15 @@ subtest 'Array function signatures' => sub {
 
     my $push_sig = $builtins->get_signature('push');
     ok(defined($push_sig), 'push has signature');
-    isa_ok($push_sig->{params}[0], 'Chalk::Type::Array',
+    isa_ok($push_sig->{params}[0], 'Chalk::Grammar::Chalk::Type::Array',
            'push takes Array param');
-    isa_ok($push_sig->{returns}, 'Chalk::Type::Int',
+    isa_ok($push_sig->{returns}, 'Chalk::Grammar::Chalk::Type::Int',
            'push returns Int');
 
     my $pop_sig = $builtins->get_signature('pop');
-    isa_ok($pop_sig->{params}[0], 'Chalk::Type::Array',
+    isa_ok($pop_sig->{params}[0], 'Chalk::Grammar::Chalk::Type::Array',
            'pop takes Array param');
-    isa_ok($pop_sig->{returns}, 'Chalk::Type::Scalar',
+    isa_ok($pop_sig->{returns}, 'Chalk::Grammar::Chalk::Type::Scalar',
            'pop returns Scalar');
 };
 
@@ -63,9 +63,9 @@ subtest 'Type checking function signatures' => sub {
 
     my $defined_sig = $builtins->get_signature('defined');
     ok(defined($defined_sig), 'defined has signature');
-    isa_ok($defined_sig->{params}[0], 'Chalk::Type::Any',
+    isa_ok($defined_sig->{params}[0], 'Chalk::Grammar::Chalk::Type::Any',
            'defined takes Any param');
-    isa_ok($defined_sig->{returns}, 'Chalk::Type::Boolean',
+    isa_ok($defined_sig->{returns}, 'Chalk::Grammar::Chalk::Type::Boolean',
            'defined returns Boolean');
 };
 
