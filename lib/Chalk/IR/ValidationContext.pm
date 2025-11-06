@@ -219,7 +219,7 @@ class Chalk::IR::ValidationContext {
             if (ref($func_def) eq 'HASH' && exists($func_def->{arity})) {
                 $expected_arity = $func_def->{arity};
             } elsif (ref($func_def) eq 'HASH' && exists($func_def->{params})) {
-                $expected_arity = scalar(@{$func_def->{params}});
+                $expected_arity = scalar($func_def->{params}->@*);
             } elsif (ref($func_def) && $func_def->can('arity')) {
                 $expected_arity = $func_def->arity;
             } else {
