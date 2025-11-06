@@ -27,9 +27,13 @@ class Chalk::Grammar::Chalk::TypeLattice {
             return Chalk::Grammar::Chalk::Type::Int->new();  # Default
         }
 
-        # Collection types
-        return Chalk::Grammar::Chalk::Type::Array->new() if $op eq 'ArrayValue';
-        return Chalk::Grammar::Chalk::Type::Hash->new() if $op eq 'HashValue';
+        # Collection types (with default Any element/value types)
+        return Chalk::Grammar::Chalk::Type::Array->new(
+            element_type => Chalk::Grammar::Chalk::Type::Any->new()
+        ) if $op eq 'ArrayValue';
+        return Chalk::Grammar::Chalk::Type::Hash->new(
+            value_type => Chalk::Grammar::Chalk::Type::Any->new()
+        ) if $op eq 'HashValue';
 
         # Object construction
         if ($op eq 'New') {
@@ -150,8 +154,12 @@ class Chalk::Grammar::Chalk::TypeLattice {
         return Chalk::Grammar::Chalk::Type::Num->new() if $name eq 'Num';
         return Chalk::Grammar::Chalk::Type::Str->new() if $name eq 'Str';
         return Chalk::Grammar::Chalk::Type::Scalar->new() if $name eq 'Scalar';
-        return Chalk::Grammar::Chalk::Type::Array->new() if $name eq 'Array';
-        return Chalk::Grammar::Chalk::Type::Hash->new() if $name eq 'Hash';
+        return Chalk::Grammar::Chalk::Type::Array->new(
+            element_type => Chalk::Grammar::Chalk::Type::Any->new()
+        ) if $name eq 'Array';
+        return Chalk::Grammar::Chalk::Type::Hash->new(
+            value_type => Chalk::Grammar::Chalk::Type::Any->new()
+        ) if $name eq 'Hash';
         return Chalk::Grammar::Chalk::Type::List->new() if $name eq 'List';
         return Chalk::Grammar::Chalk::Type::Boolean->new() if $name eq 'Bool' || $name eq 'Boolean';
         return Chalk::Grammar::Chalk::Type::Undef->new() if $name eq 'Undef';

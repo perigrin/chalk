@@ -50,12 +50,18 @@ class Chalk::IR::Builder {
     field $loop_modified_vars = [];  # Stack of sets tracking modified vars per loop depth
     field $type_inference :reader;   # Type inference instance
     field $type_lattice :reader;     # Grammar-specific type system
+    field $validator :reader;        # Validation context instance
 
     ADJUST {
         $graph = Chalk::IR::Graph->new();
         $context = Chalk::IR::Context->empty_context();
         $type_lattice = Chalk::Grammar::Chalk::TypeLattice->new();
         $type_inference = Chalk::IR::TypeInference->new(
+            context => $context,
+            graph => $graph,
+            type_lattice => $type_lattice
+        );
+        $validator = Chalk::IR::ValidationContext->new(
             context => $context,
             graph => $graph,
             type_lattice => $type_lattice
@@ -187,10 +193,6 @@ class Chalk::IR::Builder {
             my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
-                my $validator = Chalk::IR::ValidationContext->new(
-                    context => $context,
-                    graph => $graph
-                );
                 $validator->validate_type_operation('Add', $left_type, $right_type, $source_info);
             }
         }
@@ -225,10 +227,6 @@ class Chalk::IR::Builder {
             my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
-                my $validator = Chalk::IR::ValidationContext->new(
-                    context => $context,
-                    graph => $graph
-                );
                 $validator->validate_type_operation('Multiply', $left_type, $right_type, $source_info);
             }
         }
@@ -263,10 +261,6 @@ class Chalk::IR::Builder {
             my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
-                my $validator = Chalk::IR::ValidationContext->new(
-                    context => $context,
-                    graph => $graph
-                );
                 $validator->validate_type_operation('Subtract', $left_type, $right_type, $source_info);
             }
         }
@@ -301,10 +295,6 @@ class Chalk::IR::Builder {
             my $right_type = $type_inference->infer_type($right_node);
 
             if (defined $left_type || defined $right_type) {
-                my $validator = Chalk::IR::ValidationContext->new(
-                    context => $context,
-                    graph => $graph
-                );
                 $validator->validate_type_operation('Divide', $left_type, $right_type, $source_info);
             }
         }
@@ -339,10 +329,6 @@ class Chalk::IR::Builder {
     method build_store_node($var_name, $value_node, $control = undef, $source_info = undef) {
         # Validate loop variable has proper initial value if we're in a loop
         if (defined $source_info && $loop_depth > 0) {
-            my $validator = Chalk::IR::ValidationContext->new(
-                context => $context,
-                graph => $graph
-            );
             $validator->validate_loop_variable_phi($var_name, $loop_depth, $source_info);
         }
 
@@ -384,10 +370,6 @@ class Chalk::IR::Builder {
 
         # Validate that variable exists if source_info provided
         if (defined $source_info && !defined $node) {
-            my $validator = Chalk::IR::ValidationContext->new(
-                context => $context,
-                graph => $graph
-            );
             $node = $validator->validate_variable_defined($var_name, $source_info);
         }
 
@@ -676,10 +658,6 @@ class Chalk::IR::Builder {
     method build_region_node($source_info = undef, @control_inputs) {
         # Validate control flow merge if source_info provided
         if (defined $source_info) {
-            my $validator = Chalk::IR::ValidationContext->new(
-                context => $context,
-                graph => $graph
-            );
             $validator->validate_control_merge(\@control_inputs, $source_info);
         }
 
@@ -762,10 +740,6 @@ class Chalk::IR::Builder {
         # Validate arity if source_info provided
         if (defined $source_info) {
             my $arg_count = scalar(@arg_nodes);
-            my $validator = Chalk::IR::ValidationContext->new(
-                context => $context,
-                graph => $graph
-            );
             $validator->validate_call_arity($function_name, $arg_count, $source_info);
         }
 
@@ -925,10 +899,6 @@ class Chalk::IR::Builder {
         if (defined $source_info) {
             my $class_name = $type_inference->infer_class($object_node);
             if (defined $class_name) {
-                my $validator = Chalk::IR::ValidationContext->new(
-                    context => $context,
-                    graph => $graph
-                );
                 $validator->validate_class_field($class_name, $field_name, $source_info);
             }
         }
@@ -1351,10 +1321,6 @@ class Chalk::IR::Builder {
         # Validate reference target if source_info provided
         my $target_node_or_id;
         if (defined $source_info) {
-            my $validator = Chalk::IR::ValidationContext->new(
-                context => $context,
-                graph => $graph
-            );
             $target_node_or_id = $validator->validate_reference_target($label, $source_info);
         } else {
             # Look up the target node (might be object or ID)
@@ -1495,6 +1461,50 @@ class Chalk::IR::Builder {
 
         # Return the value node for chaining
         return $value_node;
+    }
+
+    # Helper method for type inference - returns type name as string
+    # Used by tests and validation logic
+    method _infer_type_from_node($node) {
+        my $type = $type_inference->infer_type($node);
+        return undef unless defined $type;
+        return $type->name();
+    }
+
+    # Create array value node (simplified version for testing)
+    # Takes array ref of initial values
+    method build_array_value_node($values = []) {
+        my $node_id = $self->next_node_id();
+        my $node = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'ArrayValue',
+            inputs => [$current_control],
+            attributes => { values => $values },
+        );
+        $graph->add_node($node);
+        $node->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_array_value_node'
+        );
+        return $node;
+    }
+
+    # Create hash value node (simplified version for testing)
+    # Takes hash ref of initial key-value pairs
+    method build_hash_value_node($pairs = {}) {
+        my $node_id = $self->next_node_id();
+        my $node = Chalk::IR::Node->new(
+            id => $node_id,
+            op => 'HashValue',
+            inputs => [$current_control],
+            attributes => { pairs => $pairs },
+        );
+        $graph->add_node($node);
+        $node->record_transform(
+            operation => 'ir_construction',
+            rule_name => 'Builder::build_hash_value_node'
+        );
+        return $node;
     }
 
 }

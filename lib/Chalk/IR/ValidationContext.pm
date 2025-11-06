@@ -30,13 +30,15 @@ class Chalk::IR::ValidationContext {
 
     field $context :param :reader;
     field $graph   :param :reader;
+    field $type_lattice :param :reader;  # Grammar-specific type system
     field $type_inference :reader;
 
     ADJUST {
-        # Initialize type inference with context and graph
+        # Initialize type inference with context, graph, and type lattice
         $type_inference = Chalk::IR::TypeInference->new(
             context => $context,
-            graph => $graph
+            graph => $graph,
+            type_lattice => $type_lattice
         );
     }
 
@@ -74,9 +76,13 @@ class Chalk::IR::ValidationContext {
         # Skip validation if types are unknown
         return unless defined($left_type) && defined($right_type);
 
+        # Get type names from Type objects
+        my $left_type_name = ref($left_type) ? $left_type->name() : $left_type;
+        my $right_type_name = ref($right_type) ? $right_type->name() : $right_type;
+
         # Arithmetic operations don't work on arrays/hashes
         if ($op =~ /^(Add|Subtract|Multiply|Divide)$/) {
-            if ($left_type eq 'Array') {
+            if ($left_type_name eq 'Array') {
                 die Chalk::Error::CompilationError->new(
                     message => "Cannot use '$op' operator on array",
                     source_info => $source_info,
@@ -87,7 +93,7 @@ class Chalk::IR::ValidationContext {
                 );
             }
 
-            if ($right_type eq 'Array') {
+            if ($right_type_name eq 'Array') {
                 die Chalk::Error::CompilationError->new(
                     message => "Cannot use '$op' operator on array",
                     source_info => $source_info,
@@ -98,7 +104,7 @@ class Chalk::IR::ValidationContext {
                 );
             }
 
-            if ($left_type eq 'Hash') {
+            if ($left_type_name eq 'Hash') {
                 die Chalk::Error::CompilationError->new(
                     message => "Cannot use '$op' operator on hash",
                     source_info => $source_info,
@@ -108,7 +114,7 @@ class Chalk::IR::ValidationContext {
                 );
             }
 
-            if ($right_type eq 'Hash') {
+            if ($right_type_name eq 'Hash') {
                 die Chalk::Error::CompilationError->new(
                     message => "Cannot use '$op' operator on hash",
                     source_info => $source_info,
