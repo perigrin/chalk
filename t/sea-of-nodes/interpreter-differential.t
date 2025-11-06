@@ -201,12 +201,11 @@ subtest 'TODO: Negative literals cause parser ambiguity' => sub {
     }
 };
 
-subtest 'TODO: Variable reassignment' => sub {
-    TODO: {
-        local $TODO = 'Variable reassignment does not update the variable';
-        test_against_perl('my $x = 5; $x = 10; return $x;', 'Simple reassignment');
-        test_against_perl('my $x = 5; $x = 0 - 5; return $x;', 'Reassignment with arithmetic');
-    }
+subtest 'Variable reassignment' => sub {
+    test_against_perl('my $x = 5; $x = 10; return $x;', 'Simple reassignment');
+    test_against_perl('my $x = 5; $x = 0 - 5; return $x;', 'Reassignment with arithmetic');
+    test_against_perl('my $x = 5; my $y = 10; $x = $y; return $x;', 'Reassignment from another variable');
+    test_against_perl('my $x = 5; $x = 10; $x = 15; return $x;', 'Multiple reassignments');
 };
 
 subtest 'TODO: Comparison operators returning false' => sub {
