@@ -53,16 +53,14 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         }
 
         # Check if last statement is a Return
-        # If so, use it; otherwise create a default Return(true)
-        # Perl 5.42+ implicit return is true for statement-only blocks
-        if (@statements && $statements[-1]->op eq 'Return') {
+        # If so, use it; otherwise create a default Return(undef)
+        if (@statements && blessed($statements[-1]) && $statements[-1]->can('op') && $statements[-1]->op eq 'Return') {
             # Last statement is already a Return - use it
             return $statements[-1];
         } else {
-            # No Return found - create default Return(true)
-            # In Perl 5.42+, blocks with only statements implicitly return true
-            my $true_value = $builder->build_constant_node(1);
-            my $return = $builder->build_return_node($true_value, $current_control);
+            # No Return found - create default Return(undef)
+            my $undef_value = $builder->build_constant_node(undef);
+            my $return = $builder->build_return_node($undef_value, $current_control);
             return $return;
         }
     }

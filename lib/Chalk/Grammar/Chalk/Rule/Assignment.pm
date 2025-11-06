@@ -120,8 +120,17 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
             }
         }
 
+        # If BFS didn't find scalar_var, check if LHS evaluates to a Proj node (function parameter)
         unless (defined($var_name)) {
-            # Couldn't find scalar_var - not a valid assignment target
+            my $lhs = $context->child(0);
+            if (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
+                # Function parameter reassignment
+                $var_name = $lhs->label;
+            }
+        }
+
+        unless (defined($var_name)) {
+            # Couldn't find variable name - not a valid assignment target
             return $context->child(0);
         }
 
