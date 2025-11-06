@@ -297,7 +297,8 @@ class Chalk::Parser {
                 if ($i == $line_num - 1) {
                     # Add caret line pointing to failure position
                     # Account for: ">>> " (4) + "1234" (4) + " | " (3) = 11 chars before source text
-                    $context .= sprintf("           %s^\n", " " x $col);
+                    my $spaces = " " x $col;
+                    $context .= sprintf("           %s^\n", $spaces);
                 }
             }
 

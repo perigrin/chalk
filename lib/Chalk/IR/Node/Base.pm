@@ -70,7 +70,7 @@ class Chalk::IR::Node::Base {
 
     # Get all transformations for this node
     method get_transform_chain() {
-        return [@$transform_chain];  # Return copy to prevent modification
+        return [$transform_chain->@*];  # Return copy to prevent modification
     }
 
     # Get debug string showing transformation history

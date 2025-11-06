@@ -750,7 +750,7 @@ class Chalk::IR::Builder {
         $graph->add_node($classdef);
 
         # Record transformation
-        my $field_names = join(", ", @$fields);
+        my $field_names = join(", ", $fields->@*);
         $classdef->record_transform('ir_construction', 'Builder::build_classdef_node',
             context => "class=$class_name, fields=[$field_names]"
         );
@@ -788,7 +788,7 @@ class Chalk::IR::Builder {
         $graph->add_node($new_obj);
 
         # Record transformation
-        my $field_names = join(", ", sort keys %$field_values_hash);
+        my $field_names = join(", ", sort(keys($field_values_hash->%*)));
         $new_obj->record_transform('ir_construction', 'Builder::build_new_node',
             context => "class=$class_name, fields=[$field_names]"
         );
@@ -1197,7 +1197,7 @@ class Chalk::IR::Builder {
         $graph->add_node($use_stmt);
 
         # Record transformation
-        my $import_list = join(", ", @$imports);
+        my $import_list = join(", ", $imports->@*);
         $use_stmt->record_transform('ir_construction', 'Builder::build_use_statement_node',
             context => "type=$type, module=$module, imports=[$import_list]"
         );

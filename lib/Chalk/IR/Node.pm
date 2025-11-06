@@ -54,7 +54,8 @@ class Chalk::IR::Node {
 
     # Get formatted source location string for error messages
     method source_location() {
-        return ($source_info ? $source_info->to_string() : undef);
+        return undef unless $source_info;
+        return $source_info->to_string();
     }
 
     # NOTE: This method is legacy/unused code kept for backward compatibility
