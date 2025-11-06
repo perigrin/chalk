@@ -454,6 +454,7 @@ RegexPattern -> 'qr' '/' RegexContent '/' RegexFlags
 RegexSubstitution -> 's' '/' RegexContent '/' RegexContent '/' RegexFlags
 
 RegexContent -> %REGEX_CONTENT%
+RegexContent ->  # Empty regex content (for s/pattern// with no replacement)
 
 RegexFlags -> %REGEX_FLAGS%
 RegexFlags ->

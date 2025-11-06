@@ -311,8 +311,8 @@ class Chalk::IR::ValidationContext {
 
         unless (defined($target)) {
             # Extract variable name from label (e.g., "lexical:foo" -> "foo")
-            my @parts = split qr/:/, $target_label;
-            my $var_name = $parts[-1];
+            my $var_name = $target_label;
+            $var_name =~ s/^.*://;  # Remove namespace prefix
 
             die Chalk::Error::CompilationError->new(
                 message => "Cannot create reference to undefined target '\$$var_name'",
