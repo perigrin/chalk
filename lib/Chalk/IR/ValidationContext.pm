@@ -131,10 +131,10 @@ class Chalk::IR::ValidationContext {
     # Validate control flow merge points
     method validate_control_merge($incoming_controls, $source_info = undef) {
         return unless defined($incoming_controls);
-        return if scalar(@$incoming_controls) == 0;
+        return if scalar($incoming_controls->@*) == 0;
 
         # Check that all control inputs are valid nodes
-        for my $ctrl_id (@$incoming_controls) {
+        for my $ctrl_id ($incoming_controls->@*) {
             next unless defined($ctrl_id);
 
             my $ctrl_node = $graph->get_node($ctrl_id);
@@ -150,7 +150,7 @@ class Chalk::IR::ValidationContext {
             }
 
             # Start nodes shouldn't be merged with other control flow
-            if ($ctrl_node->op eq 'Start' && scalar(@$incoming_controls) > 1) {
+            if ($ctrl_node->op eq 'Start' && scalar($incoming_controls->@*) > 1) {
                 die Chalk::Error::CompilationError->new(
                     message => "Cannot merge Start node with other control flow",
                     source_info => $source_info,

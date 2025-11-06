@@ -82,7 +82,7 @@ class Chalk::IR::Node::Base {
             context        => $opts{context},
         );
 
-        push @$transform_chain, $record;
+        push $transform_chain->@*, $record;
         return $record;
     }
 
@@ -93,7 +93,7 @@ class Chalk::IR::Node::Base {
 
     # Get debug string showing transformation history
     method debug_transform_chain() {
-        return "No transformations recorded" unless @$transform_chain;
+        return "No transformations recorded" unless $transform_chain->@*;
 
         my @lines = ("Transformation history for node $id:");
         for my $i (0 .. $#$transform_chain) {
