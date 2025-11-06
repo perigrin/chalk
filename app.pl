@@ -13,7 +13,7 @@ use Chalk;
 # Main execution when run as script
 if ( !caller ) {
     # Parse command line options
-    my $grammar_module = "Perl";  # default grammar module
+    my $grammar_module = "Chalk";  # default grammar module
     my $semiring_type;            # explicit semiring type (Boolean, Position, SPPF)
     my $generate_ir = 1;          # default: generate IR (issue #112)
     my $syntax_check_mode = 0;    # -c flag for syntax checking

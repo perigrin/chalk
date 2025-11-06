@@ -5,8 +5,12 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Base {
-    field $id      :param :reader;
-    field $inputs  :param :reader;
+    use Chalk::IR::TransformRecord;
+
+    field $id             :param :reader;
+    field $inputs         :param :reader;
+    field $source_info    :param :reader = undef;
+    field $transform_chain :param :reader = [];
 
     # Abstract method - subclasses must implement
     method op() {
@@ -33,6 +37,53 @@ class Chalk::IR::Node::Base {
     # Placeholder for optimization - subclasses can override
     method peephole($graph) {
         return $self;
+    }
+
+    # Record a transformation that created or modified this node
+    method record_transform($operation, $name, %opts) {
+        # Validate required parameters
+        die "record_transform: operation parameter required and must be non-empty"
+            unless defined($operation) && length($operation);
+        die "record_transform: name parameter required and must be non-empty"
+            unless defined($name) && length($name);
+
+        # Validate source_node if provided
+        my $source_node_id;
+        my $sn = $opts{source_node};
+        if ($sn) {
+            die "record_transform: source_node must be an IR node object with id() method"
+                unless ref($sn) && $sn->can('id');
+            $source_node_id = $sn->id;
+        }
+
+        my $record = Chalk::IR::TransformRecord->new(
+            operation      => $operation,
+            name           => $name,
+            source_node_id => $source_node_id,
+            timestamp      => time(),
+            context        => $opts{context},
+        );
+
+        push @$transform_chain, $record;
+        return $record;
+    }
+
+    # Get all transformations for this node
+    method get_transform_chain() {
+        return [$transform_chain->@*];  # Return copy to prevent modification
+    }
+
+    # Get debug string showing transformation history
+    method debug_transform_chain() {
+        return "No transformations recorded" unless @$transform_chain;
+
+        my @lines = ("Transformation history for node $id:");
+        for my $i (0 .. $#$transform_chain) {
+            my $record = $transform_chain->[$i];
+            push @lines, "  [$i] " . $record->to_string();
+        }
+
+        return join("\n", @lines);
     }
 }
 
