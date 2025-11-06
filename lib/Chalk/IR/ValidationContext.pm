@@ -186,6 +186,50 @@ class Chalk::IR::ValidationContext {
         return 1;
     }
 
+    # Validate function call arity matches signature
+    method validate_call_arity($function_name, $arg_count, $source_info = undef) {
+        return unless defined($function_name);
+
+        # Look up function signature in context
+        my $func_label = "function:$function_name";
+        my $func_def = $context->($func_label);
+
+        if (defined $func_def) {
+            # Extract arity from function definition
+            my $expected_arity;
+
+            if (ref($func_def) eq 'HASH' && exists($func_def->{arity})) {
+                $expected_arity = $func_def->{arity};
+            } elsif (ref($func_def) eq 'HASH' && exists($func_def->{params})) {
+                $expected_arity = scalar(@{$func_def->{params}});
+            } elsif (ref($func_def) && $func_def->can('arity')) {
+                $expected_arity = $func_def->arity;
+            } else {
+                # Can't determine arity - skip validation
+                return 1;
+            }
+
+            # Check arity
+            if ($arg_count != $expected_arity) {
+                my $plural_expected = $expected_arity == 1 ? 'argument' : 'arguments';
+                my $plural_got = $arg_count == 1 ? 'argument' : 'arguments';
+
+                die Chalk::Error::CompilationError->new(
+                    message => "Function '$function_name' expects $expected_arity $plural_expected, got $arg_count",
+                    source_info => $source_info,
+                    hints => [
+                        "Check the function signature",
+                        $arg_count < $expected_arity
+                            ? "You're missing " . ($expected_arity - $arg_count) . " argument(s)"
+                            : "You have " . ($arg_count - $expected_arity) . " too many argument(s)"
+                    ],
+                );
+            }
+        }
+
+        return 1;
+    }
+
     # Helper: Find variables similar to the given name (for "did you mean?" suggestions)
     method find_similar_variables($var_name) {
         my @all_vars = $self->list_available_variables();

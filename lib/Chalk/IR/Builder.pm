@@ -203,13 +203,33 @@ class Chalk::IR::Builder {
         return $add;
     }
 
-    method build_multiply_node($left_node, $right_node) {
+    method build_multiply_node($left_node, $right_node, $source_info = undef) {
+        die "build_multiply_node: left_node is undefined" unless defined($left_node);
+        die "build_multiply_node: right_node is undefined" unless defined($right_node);
+        die "build_multiply_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
+        die "build_multiply_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
+
+        # Type validation if source_info provided
+        if (defined $source_info) {
+            my $left_type = $self->_infer_type_from_node($left_node);
+            my $right_type = $self->_infer_type_from_node($right_node);
+
+            if (defined $left_type || defined $right_type) {
+                my $validator = Chalk::IR::ValidationContext->new(
+                    context => $context,
+                    graph => $graph
+                );
+                $validator->validate_type_operation('Multiply', $left_type, $right_type, $source_info);
+            }
+        }
+
         my $node_id = $self->next_node_id();
         my $mul = Chalk::IR::Node::Multiply->new(
             id => $node_id,
             inputs => [$current_control, $left_node->id, $right_node->id],
             left_id => $left_node->id,
             right_id => $right_node->id,
+            source_info => $source_info,
         );
         $graph->add_node($mul);
 
@@ -221,13 +241,33 @@ class Chalk::IR::Builder {
         return $mul;
     }
 
-    method build_sub_node($left_node, $right_node) {
+    method build_sub_node($left_node, $right_node, $source_info = undef) {
+        die "build_sub_node: left_node is undefined" unless defined($left_node);
+        die "build_sub_node: right_node is undefined" unless defined($right_node);
+        die "build_sub_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
+        die "build_sub_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
+
+        # Type validation if source_info provided
+        if (defined $source_info) {
+            my $left_type = $self->_infer_type_from_node($left_node);
+            my $right_type = $self->_infer_type_from_node($right_node);
+
+            if (defined $left_type || defined $right_type) {
+                my $validator = Chalk::IR::ValidationContext->new(
+                    context => $context,
+                    graph => $graph
+                );
+                $validator->validate_type_operation('Subtract', $left_type, $right_type, $source_info);
+            }
+        }
+
         my $node_id = $self->next_node_id();
         my $sub = Chalk::IR::Node::Subtract->new(
             id => $node_id,
             inputs => [$current_control, $left_node->id, $right_node->id],
             left_id => $left_node->id,
             right_id => $right_node->id,
+            source_info => $source_info,
         );
         $graph->add_node($sub);
 
@@ -239,13 +279,33 @@ class Chalk::IR::Builder {
         return $sub;
     }
 
-    method build_divide_node($left_node, $right_node) {
+    method build_divide_node($left_node, $right_node, $source_info = undef) {
+        die "build_divide_node: left_node is undefined" unless defined($left_node);
+        die "build_divide_node: right_node is undefined" unless defined($right_node);
+        die "build_divide_node: left_node is not an IR node object" unless ref($left_node) && ref($left_node) =~ qr/^Chalk::IR::Node/;
+        die "build_divide_node: right_node is not an IR node object" unless ref($right_node) && ref($right_node) =~ qr/^Chalk::IR::Node/;
+
+        # Type validation if source_info provided
+        if (defined $source_info) {
+            my $left_type = $self->_infer_type_from_node($left_node);
+            my $right_type = $self->_infer_type_from_node($right_node);
+
+            if (defined $left_type || defined $right_type) {
+                my $validator = Chalk::IR::ValidationContext->new(
+                    context => $context,
+                    graph => $graph
+                );
+                $validator->validate_type_operation('Divide', $left_type, $right_type, $source_info);
+            }
+        }
+
         my $node_id = $self->next_node_id();
         my $div = Chalk::IR::Node::Divide->new(
             id => $node_id,
             inputs => [$current_control, $left_node->id, $right_node->id],
             left_id => $left_node->id,
             right_id => $right_node->id,
+            source_info => $source_info,
         );
         $graph->add_node($div);
 
@@ -669,7 +729,17 @@ class Chalk::IR::Builder {
     }
 
     # Function call nodes
-    method build_call_node($function_name, @arg_nodes) {
+    method build_call_node($function_name, $source_info = undef, @arg_nodes) {
+        # Validate arity if source_info provided
+        if (defined $source_info) {
+            my $arg_count = scalar(@arg_nodes);
+            my $validator = Chalk::IR::ValidationContext->new(
+                context => $context,
+                graph => $graph
+            );
+            $validator->validate_call_arity($function_name, $arg_count, $source_info);
+        }
+
         # Call: control, memory, arguments...
         # For now, use current_control for both control and memory
         my $attributes = { function => $function_name };
@@ -679,6 +749,7 @@ class Chalk::IR::Builder {
             op            => 'Call',
             inputs        => [$current_control, $current_control, map { $_->id } @arg_nodes],
             attributes    => $attributes,
+            source_info   => $source_info,
         );
         $graph->add_node($call);
 
@@ -820,7 +891,19 @@ class Chalk::IR::Builder {
         return $new_obj;
     }
 
-    method build_field_access_node($object_node, $field_name) {
+    method build_field_access_node($object_node, $field_name, $source_info = undef) {
+        # Validate field exists in class if source_info provided
+        if (defined $source_info) {
+            my $class_name = $self->_infer_class_from_node($object_node);
+            if (defined $class_name) {
+                my $validator = Chalk::IR::ValidationContext->new(
+                    context => $context,
+                    graph => $graph
+                );
+                $validator->validate_class_field($class_name, $field_name, $source_info);
+            }
+        }
+
         # Create FieldAccess node for reading a field
         my $object_ref = { op => 'NodeRef', node_id => $object_node->id };
         my $attributes = {
@@ -833,6 +916,7 @@ class Chalk::IR::Builder {
             op            => 'FieldAccess',
             inputs        => [$current_control, $object_node->id],
             attributes    => $attributes,
+            source_info   => $source_info,
         );
         $graph->add_node($field_access);
 
