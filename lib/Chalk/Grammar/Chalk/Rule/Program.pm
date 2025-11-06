@@ -54,7 +54,7 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
 
         # Check if last statement is a Return
         # If so, use it; otherwise create a default Return(undef)
-        if (@statements && $statements[-1]->op eq 'Return') {
+        if (@statements && blessed($statements[-1]) && $statements[-1]->can('op') && $statements[-1]->op eq 'Return') {
             # Last statement is already a Return - use it
             return $statements[-1];
         } else {

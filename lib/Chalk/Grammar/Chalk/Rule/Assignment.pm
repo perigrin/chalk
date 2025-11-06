@@ -95,23 +95,42 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         # We have an assignment: Ternary = Assignment
         return $context->child(0) unless $builder;
 
-        # Get left side (variable being assigned to)
-        my $lhs = $context->child(0);
-
-        # Extract variable name from lhs
-        # Two possible cases:
-        # 1. Variable metadata hash (from ScalarVar before Primary processes it)
-        # 2. Proj node (function parameters)
-        # Note: With SSA-style variables, we no longer create Load nodes
+        # Extract variable name from raw parse tree BEFORE semantic evaluation
+        # For reassignments like `$x = 10`, calling child(0) would evaluate Expression
+        # which converts the scalar_var metadata into an IR Load node, losing the name
         my $var_name;
-        if (ref($lhs) eq 'HASH' && $lhs->{type} eq 'scalar_var') {
-            # Case 1: Variable metadata
-            $var_name = $lhs->{name};
-        } elsif (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
-            # Case 2: Proj node from parameter
-            $var_name = $lhs->label;  # Use label field, not attributes
-        } else {
-            # Can't handle this lhs type for assignment
+        my $lhs_context = $context->children->[0];
+
+        # Breadth-first search through parse tree for scalar_var metadata
+        my @queue = ($lhs_context);
+        while (@queue && !defined($var_name)) {
+            my $ctx = shift @queue;
+            next unless defined($ctx);
+
+            if ($ctx->can('extract')) {
+                my $val = $ctx->extract;
+                if (ref($val) eq 'HASH' && $val->{type} eq 'scalar_var') {
+                    $var_name = $val->{name};
+                    last;
+                }
+            }
+
+            if ($ctx->can('children')) {
+                push @queue, $ctx->children->@*;
+            }
+        }
+
+        # If BFS didn't find scalar_var, check if LHS evaluates to a Proj node (function parameter)
+        unless (defined($var_name)) {
+            my $lhs = $context->child(0);
+            if (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
+                # Function parameter reassignment
+                $var_name = $lhs->label;
+            }
+        }
+
+        unless (defined($var_name)) {
+            # Couldn't find variable name - not a valid assignment target
             return $context->child(0);
         }
 

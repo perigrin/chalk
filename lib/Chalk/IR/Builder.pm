@@ -133,7 +133,8 @@ class Chalk::IR::Builder {
 
     # Create Constant node
     method build_constant_node($value, $type = 'Int', $source_info = undef) {
-        die "build_constant_node: value is undefined" unless defined($value);
+        # Allow undef for representing Perl's undef constant
+        # die "build_constant_node: value is undefined" unless defined($value);
 
         my $node_id = $self->next_node_id();
         my $constant = Chalk::IR::Node::Constant->new(
@@ -147,7 +148,7 @@ class Chalk::IR::Builder {
 
         # Record transformation
         $constant->record_transform('ir_construction', 'Builder::build_constant_node',
-            context => "value=$value, type=$type"
+            context => "value=" . (defined($value) ? $value : '<undef>') . ", type=$type"
         );
 
         return $constant;
