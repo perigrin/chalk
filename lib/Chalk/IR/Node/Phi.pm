@@ -20,11 +20,11 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values) {
+    method execute($context) {
         # Phi selects value based on Region's active path
         # inputs[0] = region_id
         # inputs[1..n] = values for each path
-        my $active_path = $values->{$region_id};
+        my $active_path = $context->("node:$region_id");
         my @inputs = $self->inputs->@*;
 
         # Skip region input (index 0), select value at active_path + 1
@@ -34,7 +34,7 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
         }
 
         my $value_id = $inputs[$value_index];
-        return $values->{$value_id};
+        return $context->("node:$value_id");
     }
 }
 
