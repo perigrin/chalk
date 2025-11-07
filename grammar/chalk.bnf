@@ -400,9 +400,17 @@ Variable -> ScalarVar '[' Expression ']'              # $arr[0]
 Variable -> ScalarVar '{' Expression '}'              # $hash{key}
 Variable -> ArrayVar '[' Expression ']'               # @arr[0..5] (slice with range expr)
 
+# Curly-brace dereferencing (for use in builtin functions like keys, values)
+Variable -> '%' '{' Expression '}'                    # %{$hashref} - hash dereference
+Variable -> '@' '{' Expression '}'                    # @{$arrayref} - array dereference
+
 # Arrow notation (method-style dereference)
 Variable -> Variable '->' '[' Expression ']'          # $ref->[0]
 Variable -> Variable '->' '{' Expression '}'          # $ref->{key}
+
+# Chained subscripts without arrows (Perl allows omitting arrows between subscripts)
+Variable -> Variable '[' Expression ']'               # $ref->[0][1] or $ref->[0]{key}
+Variable -> Variable '{' Expression '}'               # $ref->{key1}{key2} or $array->[0]{key}
 
 # Postfix dereferencing on Variables - for patterns like $context->children->@*
 Variable -> Variable '->' '@' '*'                     # $var->@* (array postfix deref)

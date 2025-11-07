@@ -16,21 +16,32 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values) {
+    method execute($context) {
         # Region merges control from multiple paths
         # Returns the index of the active path (which Proj returned 1)
+        # MUST validate that exactly ONE path is active
         my @inputs = $self->inputs->@*;
+        my @active_paths;
 
         for my $i (0..$#inputs) {
             my $input_id = $inputs[$i];
-            my $proj_result = $values->{$input_id};
-            if ($proj_result) {
-                return $i;  # Return index of active path
-            }
+            my $proj_result = $context->("node:$input_id");
+
+            # Proj nodes MUST return exactly 0 or 1, nothing else
+            die "Region node '" . $self->id . "': input $input_id returned invalid value: " .
+                (defined($proj_result) ? $proj_result : "undef")
+                unless defined($proj_result) && ($proj_result == 0 || $proj_result == 1);
+
+            push @active_paths, $i if $proj_result == 1;
         }
 
-        # No active path found - shouldn't happen in valid IR
-        die "Region node has no active input path";
+        # Exactly ONE path must be active
+        die "Region node '" . $self->id . "': no active input path"
+            if @active_paths == 0;
+        die "Region node '" . $self->id . "': multiple active paths: " . join(', ', @active_paths)
+            if @active_paths > 1;
+
+        return $active_paths[0];
     }
 }
 

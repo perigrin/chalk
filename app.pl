@@ -242,12 +242,37 @@ if ( !caller ) {
                 print("$ARGV[0] syntax OK\n") if @ARGV;
                 print("syntax OK\n") unless @ARGV;
             } else {
-                print("Parse successful: $result\n");
                 # IR graph is available in $builder->graph if IR was generated
                 if ($builder) {
                     my $graph = $builder->graph;
-                    my $node_count = $graph->node_count;
-                    print("Generated IR with $node_count nodes\n");
+
+                    # Prune to winning parse
+                    if ($result->can('context')) {
+                        my $ctx = $result->context;
+                        if ($ctx->can('focus')) {
+                            my $winning_node = $ctx->focus;
+                            if ($winning_node && $winning_node->can('id')) {
+                                $graph->prune_to_reachable($winning_node->id);
+                            }
+                        }
+                    }
+
+                    # Run GVN optimizer
+                    require Chalk::IR::Optimizer::GVN;
+                    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+                    $graph = $gvn_result->{graph};
+
+                    # Execute with CEK interpreter
+                    require Chalk::Interpreter::CEKDataflow;
+                    my $cek = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+                    my $execution_result = eval { $cek->execute() };
+                    if ($@) {
+                        print(STDERR "Execution error: $@\n");
+                        exit 1;
+                    }
+                    print($execution_result // '');
+                } else {
+                    print("Parse successful: $result\n");
                 }
             }
             exit 0;  # Success - like perl -c
