@@ -104,13 +104,16 @@ class Chalk::Interpreter::Environment {
     # Heap context operations (for arrays, hashes, objects)
     method lookup_heap($heap_id, $key) {
         my $ctx = $heap_ctxs->{$heap_id};
-        return undef unless defined $ctx;
+        die "lookup_heap: invalid heap_id '$heap_id' (not allocated)"
+            unless defined $ctx;
         return $ctx->($key);
     }
 
     method set_heap($heap_id, $key, $value) {
         # Mutating operation - updates this heap's context
-        my $old_ctx = $heap_ctxs->{$heap_id} // $EMPTY_CTX;
+        die "set_heap: invalid heap_id '$heap_id' (not allocated)"
+            unless exists $heap_ctxs->{$heap_id};
+        my $old_ctx = $heap_ctxs->{$heap_id};
         $heap_ctxs->{$heap_id} = $EXTEND_CTX->($old_ctx, $key, $value);
         $heap_bindings->{$heap_id}{$key} = $value;  # Track for snapshotting
         return;
@@ -155,6 +158,8 @@ class Chalk::Interpreter::Environment {
     method restore_from_snapshot($snapshot) {
         # Restore environment from a snapshot
         # Rebuilds contexts from the tracked bindings
+        # Performance Note: This performs a deep copy of all bindings, which
+        # may be expensive for large execution states (O(n) where n = total bindings).
         my $new_node_ctx = $REBUILD_CTX->($snapshot->{node_bindings});
         my $new_var_ctx = $REBUILD_CTX->($snapshot->{var_bindings});
 
@@ -278,16 +283,36 @@ Automatically initializes an empty context for this heap ID.
 
 =head3 lookup_heap($heap_id, $key)
 
-Lookup a value in the specified heap structure's context. Returns undef if not found.
+Lookup a value in the specified heap structure's context. Returns undef if the
+key is not found. Dies with an error message if the heap_id has not been allocated.
 
 =head3 set_heap($heap_id, $key, $value)
 
 Mutating operation. Updates the specified heap's context by extending it with a new binding.
+Dies with an error message if the heap_id has not been allocated.
 
 =head3 extend_heap($heap_id, $key, $value)
 
 Immutable operation. Returns a new Environment with the specified heap's context extended.
 The original environment is unchanged.
+
+=head2 Snapshot and Restore Operations
+
+=head3 snapshot()
+
+Creates a complete snapshot of environment state. Returns a hash reference
+containing all bindings from all contexts that can be used to restore this
+environment later.
+
+=head3 restore_from_snapshot($snapshot)
+
+Restores environment from a snapshot created by C<snapshot()>. Rebuilds all
+contexts from the tracked bindings.
+
+B<Performance Note:> This performs a deep copy of all bindings, which may be
+expensive for large execution states (O(n) where n = total bindings). For
+production use with large programs, consider implementing a copy-on-write
+optimization.
 
 =head1 CONTEXT ARCHITECTURE
 

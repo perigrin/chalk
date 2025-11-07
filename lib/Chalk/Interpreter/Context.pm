@@ -41,8 +41,8 @@ sub flatten_ctx ($ctx, $known_keys) {
 sub rebuild_ctx ($bindings_hash) {
     my $ctx = $empty_ctx;
 
-    # Extend context with each binding
-    foreach my $key (keys %$bindings_hash) {
+    # Extend context with each binding (sorted for deterministic order)
+    foreach my $key (sort keys %$bindings_hash) {
         $ctx = extend_ctx($ctx, $key, $bindings_hash->{$key});
     }
 
