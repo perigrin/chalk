@@ -13,12 +13,14 @@ my $EXTEND_CTX = \&extend_ctx;
 class Chalk::Interpreter::Environment {
     field $node_ctx :param = undef;
     field $var_ctx :param = undef;
-    # Future: heap contexts (arrays, hashes, objects)
+    field $next_heap_id :param = 1;  # Counter for heap ID allocation
+    field $heap_ctxs :param = undef; # Hash mapping heap_id => context
 
     ADJUST {
         # Initialize with empty contexts if not provided
         $node_ctx //= $EMPTY_CTX;
         $var_ctx //= $EMPTY_CTX;
+        $heap_ctxs //= {};  # Initialize heap contexts hash
     }
 
     # Node context operations (for IR node computation results)
@@ -37,7 +39,9 @@ class Chalk::Interpreter::Environment {
         my $new_node_ctx = $EXTEND_CTX->($node_ctx, $key, $value);
         return Chalk::Interpreter::Environment->new(
             node_ctx => $new_node_ctx,
-            var_ctx => $var_ctx
+            var_ctx => $var_ctx,
+            next_heap_id => $next_heap_id,
+            heap_ctxs => $heap_ctxs
         );
     }
 
@@ -57,7 +61,51 @@ class Chalk::Interpreter::Environment {
         my $new_var_ctx = $EXTEND_CTX->($var_ctx, $key, $value);
         return Chalk::Interpreter::Environment->new(
             node_ctx => $node_ctx,
-            var_ctx => $new_var_ctx
+            var_ctx => $new_var_ctx,
+            next_heap_id => $next_heap_id,
+            heap_ctxs => $heap_ctxs
+        );
+    }
+
+    # Heap ID allocation
+    method allocate_heap_id() {
+        # Returns a new unique heap ID and increments counter
+        my $id = $next_heap_id;
+        $next_heap_id++;
+
+        # Initialize empty context for this heap structure
+        $heap_ctxs->{$id} = $EMPTY_CTX;
+
+        return $id;
+    }
+
+    # Heap context operations (for arrays, hashes, objects)
+    method lookup_heap($heap_id, $key) {
+        my $ctx = $heap_ctxs->{$heap_id};
+        return undef unless defined $ctx;
+        return $ctx->($key);
+    }
+
+    method set_heap($heap_id, $key, $value) {
+        # Mutating operation - updates this heap's context
+        my $old_ctx = $heap_ctxs->{$heap_id} // $EMPTY_CTX;
+        $heap_ctxs->{$heap_id} = $EXTEND_CTX->($old_ctx, $key, $value);
+        return;
+    }
+
+    method extend_heap($heap_id, $key, $value) {
+        # Immutable operation - returns new environment
+        my $old_ctx = $heap_ctxs->{$heap_id} // $EMPTY_CTX;
+        my $new_ctx = $EXTEND_CTX->($old_ctx, $key, $value);
+
+        my $new_heap_ctxs = { %$heap_ctxs };  # Shallow copy
+        $new_heap_ctxs->{$heap_id} = $new_ctx;
+
+        return Chalk::Interpreter::Environment->new(
+            node_ctx => $node_ctx,
+            var_ctx => $var_ctx,
+            next_heap_id => $next_heap_id,
+            heap_ctxs => $new_heap_ctxs
         );
     }
 }
@@ -101,7 +149,7 @@ independent contexts:
 
 =item * Variable context: Lexical variable bindings
 
-=item * Heap contexts: Arrays, hashes, objects (future)
+=item * Heap contexts: Each array, hash, and object gets its own discrete context
 
 =back
 
@@ -151,6 +199,26 @@ Mutating operation. Updates the variable context by extending it with a new bind
 =head3 extend_variable($key, $value)
 
 Immutable operation. Returns a new Environment with extended variable context.
+The original environment is unchanged.
+
+=head2 Heap Operations
+
+=head3 allocate_heap_id()
+
+Allocates and returns a unique heap ID for a new heap structure (array, hash, or object).
+Automatically initializes an empty context for this heap ID.
+
+=head3 lookup_heap($heap_id, $key)
+
+Lookup a value in the specified heap structure's context. Returns undef if not found.
+
+=head3 set_heap($heap_id, $key, $value)
+
+Mutating operation. Updates the specified heap's context by extending it with a new binding.
+
+=head3 extend_heap($heap_id, $key, $value)
+
+Immutable operation. Returns a new Environment with the specified heap's context extended.
 The original environment is unchanged.
 
 =head1 CONTEXT ARCHITECTURE
