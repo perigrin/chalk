@@ -112,7 +112,7 @@ method execute() {
 
 #### IR::Interpreter: Functional Closure Threading
 
-Uses `Chalk::IR::Context` - immutable closure-based contexts:
+Uses `Chalk::IR::Context` - closure-based contexts:
 
 ```perl
 # Context is a closure that chains lookups
@@ -134,8 +134,8 @@ my $value = $context->("node:$node_id");
 - `graph:*` - Node objects themselves (for ArraySet/HashSet operations)
 
 **Properties**:
-- Immutable - each extension creates new closure
-- Functional - pure function semantics
+- Functional closure chains - each extension creates new closure
+- Pure function semantics - original context not modified
 - Single unified context for all state
 
 #### CEKDataflow: Discrete Environment Architecture
@@ -161,10 +161,14 @@ my $value = $environment->lookup_heap($heap_id, $key);
 ```
 
 **Properties**:
-- Mutable - operations update existing environment
+- Mutable - operations update existing environment in place
 - Separated concerns - node/variable/heap isolation
 - Efficient heap allocation - sequential ID assignment
-- Snapshot/restore support for debugging
+- Snapshot/restore support for time-travel debugging
+
+**Note on Immutability**: The Environment provides snapshot-based time-travel debugging,
+not pure functional immutability. Operations like `set_node()` mutate state for
+performance, while `snapshot()` captures immutable checkpoints for debugging.
 
 ### 2.3 Key Data Structures
 
@@ -364,7 +368,7 @@ From `docs/cek-phase5-findings.md`, comprehensive benchmarking compared full Cha
 
 **Expected**: CEKDataflow should be marginally faster due to:
 1. Early termination when Return executes
-2. Mutable environment updates vs immutable closure creation
+2. Mutable environment updates vs creating new closure chains
 3. No separate linearization pass
 
 **Actual Impact**: Likely sub-millisecond difference, swamped by compilation overhead in full pipeline benchmarks.
@@ -410,7 +414,7 @@ From `docs/cek-phase5-findings.md`, comprehensive benchmarking compared full Cha
 6. `t/interpreter/cek-array-operations.t` - Array operations
 7. `t/interpreter/cek-hash-operations.t` - Hash operations
 8. `t/interpreter/cek-object-operations.t` - Object operations
-9. `t/interpreter/cek-immutability.t` - Immutable environment ops
+9. `t/interpreter/cek-immutability.t` - Functional-style environment operations
 10. `t/interpreter/cek-snapshot.t` - Snapshot/restore functionality
 11. `t/interpreter/cek-stepping.t` - Step-by-step execution
 12. `t/interpreter/cek-execution-log.t` - Execution logging

@@ -16,7 +16,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
         };
     }
 
-    method execute($values) {
+    method execute($context) {
         # Loop merges control from entry and backedge paths
         # Works like Region: returns index of active path
         # inputs[0] = entry control
@@ -25,7 +25,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
 
         for my $i (0..$#inputs) {
             my $input_id = $inputs[$i];
-            my $ctrl_result = $values->{$input_id};
+            my $ctrl_result = $context->("node:$input_id");
             if ($ctrl_result) {
                 return $i;  # Return index of active path
             }
