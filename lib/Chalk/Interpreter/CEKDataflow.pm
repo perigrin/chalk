@@ -58,6 +58,9 @@ class Chalk::Interpreter::CEKDataflow {
                 if ($key =~ /^node:(.+)$/) {
                     return $environment->lookup_node($1);
                 }
+                elsif ($key eq 'env:') {
+                    return $environment;
+                }
                 return undef;
             };
 
