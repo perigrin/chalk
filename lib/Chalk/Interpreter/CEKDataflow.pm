@@ -45,23 +45,23 @@ class Chalk::Interpreter::CEKDataflow {
 
         # Build waiting map: tracks unmet dependencies for each node
         my %waiting;
-        foreach my $node_id (keys %$nodes) {
+        foreach my $node_id (keys $nodes->%*) {
             my $node = $nodes->{$node_id};
             my $inputs = $node->inputs;
 
-            if (@$inputs == 0) {
+            if ($inputs->@* == 0) {
                 # No dependencies, ready to execute immediately
-                push @$ready_queue, $node_id;
+                push $ready_queue->@*, $node_id;
             } else {
                 # Has dependencies, track them
-                $waiting{$node_id} = { map { $_ => 1 } @$inputs };
+                $waiting{$node_id} = { map { $_ => 1 } $inputs->@* };
             }
         }
 
         # Process nodes in dataflow order
         my $result;
-        while (@$ready_queue) {
-            my $node_id = shift @$ready_queue;
+        while ($ready_queue->@*) {
+            my $node_id = shift $ready_queue->@*;
             my $node = $nodes->{$node_id};
 
             # Create context closure for node execution
@@ -100,7 +100,7 @@ class Chalk::Interpreter::CEKDataflow {
 
                 # If all dependencies satisfied, add to ready queue
                 if (keys %{$waiting{$waiting_id}} == 0) {
-                    push @$ready_queue, $waiting_id;
+                    push $ready_queue->@*, $waiting_id;
                     delete $waiting{$waiting_id};
                 }
             }
@@ -115,10 +115,10 @@ class Chalk::Interpreter::CEKDataflow {
         # Captures environment + execution state (ready queue, computed, waiting)
         return {
             environment => $environment->snapshot(),
-            ready_queue => [ @$ready_queue ],
-            computed => { %$computed },
+            ready_queue => [ $ready_queue->@* ],
+            computed => { $computed->%* },
             waiting => {
-                map { $_ => { %{$waiting->{$_}} } } keys %$waiting
+                map { $_ => { %{$waiting->{$_}} } } keys $waiting->%*
             },
             kontinuation => $kontinuation,
         };
@@ -162,16 +162,16 @@ class Chalk::Interpreter::CEKDataflow {
         my $nodes = $graph->nodes;
 
         # Build waiting map: tracks unmet dependencies for each node
-        foreach my $node_id (keys %$nodes) {
+        foreach my $node_id (keys $nodes->%*) {
             my $node = $nodes->{$node_id};
             my $inputs = $node->inputs;
 
-            if (@$inputs == 0) {
+            if ($inputs->@* == 0) {
                 # No dependencies, ready to execute immediately
-                push @$ready_queue, $node_id;
+                push $ready_queue->@*, $node_id;
             } else {
                 # Has dependencies, track them
-                $waiting->{$node_id} = { map { $_ => 1 } @$inputs };
+                $waiting->{$node_id} = { map { $_ => 1 } $inputs->@* };
             }
         }
 
@@ -185,18 +185,18 @@ class Chalk::Interpreter::CEKDataflow {
         die "Must call initialize_stepping() first" unless $step_initialized;
 
         # Check if execution is complete
-        if (@$ready_queue == 0) {
+        if ($ready_queue->@* == 0) {
             return {
                 done => 1,
                 node_id => undef,
                 value => $result,
                 ready_queue_size => 0,
-                waiting_count => scalar(keys %$waiting),
+                waiting_count => scalar(keys $waiting->%*),
             };
         }
 
         # Get next node from ready queue
-        my $node_id = shift @$ready_queue;
+        my $node_id = shift $ready_queue->@*;
         my $nodes = $graph->nodes;
         my $node = $nodes->{$node_id};
 
@@ -232,13 +232,13 @@ class Chalk::Interpreter::CEKDataflow {
 
         # Update waiting nodes - check if any become ready
         my @newly_ready;
-        foreach my $waiting_id (keys %$waiting) {
+        foreach my $waiting_id (keys $waiting->%*) {
             # Remove this node from waiting list
             delete $waiting->{$waiting_id}{$node_id};
 
             # If all dependencies satisfied, add to ready queue
             if (keys %{$waiting->{$waiting_id}} == 0) {
-                push @$ready_queue, $waiting_id;
+                push $ready_queue->@*, $waiting_id;
                 push @newly_ready, $waiting_id;
                 delete $waiting->{$waiting_id};
             }
@@ -249,23 +249,23 @@ class Chalk::Interpreter::CEKDataflow {
             node_id => $node_id,
             node_op => $node->op,
             value => $value,
-            ready_queue_size => scalar(@$ready_queue),
-            waiting_count => scalar(keys %$waiting),
+            ready_queue_size => scalar($ready_queue->@*),
+            waiting_count => scalar(keys $waiting->%*),
             newly_ready => \@newly_ready,
         };
     }
 
     method is_stepping_complete() {
         # Check if step-by-step execution is complete
-        return @$ready_queue == 0 && scalar(keys %$waiting) == 0;
+        return $ready_queue->@* == 0 && scalar(keys $waiting->%*) == 0;
     }
 
     method get_step_state() {
         # Get current state for inspection
         return {
-            ready_queue => [ @$ready_queue ],
-            waiting => { map { $_ => { %{$waiting->{$_}} } } keys %$waiting },
-            computed => { %$computed },
+            ready_queue => [ $ready_queue->@* ],
+            waiting => { map { $_ => { %{$waiting->{$_}} } } keys $waiting->%* },
+            computed => { $computed->%* },
             result => $result,
         };
     }

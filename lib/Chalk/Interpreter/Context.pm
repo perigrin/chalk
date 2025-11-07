@@ -1,14 +1,13 @@
 # ABOUTME: CEK interpreter functional context implementation
 # ABOUTME: Provides immutable closure-based context management for interpreter
-package Chalk::Interpreter::Context;
 use 5.42.0;
 use utf8;
 use Exporter 'import';
 
-our @EXPORT_OK = qw(extend_ctx $empty_ctx flatten_ctx rebuild_ctx);
+our @EXPORT_OK = qw(extend_ctx empty_ctx flatten_ctx rebuild_ctx);
 
 # Empty context: returns undef for any key
-our $empty_ctx = sub ($key) { return undef; };
+sub empty_ctx { return sub ($key) { return undef; }; }
 
 # Extend context with a new binding
 # Returns a new closure that captures the parent context
@@ -28,7 +27,7 @@ sub flatten_ctx ($ctx, $known_keys) {
     my %bindings;
 
     # Extract all known keys from the context
-    foreach my $key (@$known_keys) {
+    foreach my $key ($known_keys->@*) {
         my $value = $ctx->($key);
         $bindings{$key} = $value if defined $value;
     }
@@ -39,10 +38,10 @@ sub flatten_ctx ($ctx, $known_keys) {
 # Rebuild a context closure from a flattened hash
 # This enables restoring from snapshots
 sub rebuild_ctx ($bindings_hash) {
-    my $ctx = $empty_ctx;
+    my $ctx = empty_ctx();
 
     # Extend context with each binding (sorted for deterministic order)
-    foreach my $key (sort keys %$bindings_hash) {
+    foreach my $key (sort keys $bindings_hash->%*) {
         $ctx = extend_ctx($ctx, $key, $bindings_hash->{$key});
     }
 
@@ -59,10 +58,10 @@ Chalk::Interpreter::Context - Functional context management for CEK interpreter
 
 =head1 SYNOPSIS
 
-    use Chalk::Interpreter::Context qw(extend_ctx $empty_ctx);
+    use Chalk::Interpreter::Context qw(extend_ctx empty_ctx);
 
     # Start with empty context
-    my $ctx = $empty_ctx;
+    my $ctx = empty_ctx();
 
     # Extend with bindings
     $ctx = extend_ctx($ctx, 'x', 42);
@@ -82,9 +81,9 @@ bindings.
 
 =head1 EXPORTS
 
-=head2 $empty_ctx
+=head2 empty_ctx()
 
-The base empty context that returns undef for any key.
+Returns the base empty context that returns undef for any key.
 
 =head2 extend_ctx($parent_ctx, $key, $value)
 

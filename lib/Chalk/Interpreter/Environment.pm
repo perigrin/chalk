@@ -4,10 +4,10 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-use Chalk::Interpreter::Context qw(extend_ctx $empty_ctx rebuild_ctx);
+use Chalk::Interpreter::Context qw(extend_ctx empty_ctx rebuild_ctx);
 
 # Capture context helpers for use inside class
-my $EMPTY_CTX = $empty_ctx;
+my $EMPTY_CTX = empty_ctx();
 my $EXTEND_CTX = \&extend_ctx;
 my $REBUILD_CTX = \&rebuild_ctx;
 
@@ -49,7 +49,7 @@ class Chalk::Interpreter::Environment {
     method extend_node($key, $value) {
         # Immutable operation - returns new environment
         my $new_node_ctx = $EXTEND_CTX->($node_ctx, $key, $value);
-        my $new_node_bindings = { %$node_bindings, $key => $value };
+        my $new_node_bindings = { $node_bindings->%*, $key => $value };
         return Chalk::Interpreter::Environment->new(
             node_ctx => $new_node_ctx,
             var_ctx => $var_ctx,
@@ -76,7 +76,7 @@ class Chalk::Interpreter::Environment {
     method extend_variable($key, $value) {
         # Immutable operation - returns new environment
         my $new_var_ctx = $EXTEND_CTX->($var_ctx, $key, $value);
-        my $new_var_bindings = { %$var_bindings, $key => $value };
+        my $new_var_bindings = { $var_bindings->%*, $key => $value };
         return Chalk::Interpreter::Environment->new(
             node_ctx => $node_ctx,
             var_ctx => $new_var_ctx,
@@ -124,11 +124,11 @@ class Chalk::Interpreter::Environment {
         my $old_ctx = $heap_ctxs->{$heap_id} // $EMPTY_CTX;
         my $new_ctx = $EXTEND_CTX->($old_ctx, $key, $value);
 
-        my $new_heap_ctxs = { %$heap_ctxs };  # Shallow copy
+        my $new_heap_ctxs = { $heap_ctxs->%* };  # Shallow copy
         $new_heap_ctxs->{$heap_id} = $new_ctx;
 
-        my $new_heap_bindings = { %$heap_bindings };
-        $new_heap_bindings->{$heap_id} = { %{$heap_bindings->{$heap_id} // {}}, $key => $value };
+        my $new_heap_bindings = { $heap_bindings->%* };
+        $new_heap_bindings->{$heap_id} = { ($heap_bindings->{$heap_id} // {})->%*, $key => $value };
 
         return Chalk::Interpreter::Environment->new(
             node_ctx => $node_ctx,
@@ -146,11 +146,11 @@ class Chalk::Interpreter::Environment {
         # Create a complete snapshot of environment state
         # Returns a hash ref that can be used to restore this environment
         return {
-            node_bindings => { %$node_bindings },
-            var_bindings => { %$var_bindings },
+            node_bindings => { $node_bindings->%* },
+            var_bindings => { $var_bindings->%* },
             next_heap_id => $next_heap_id,
             heap_bindings => {
-                map { $_ => { %{$heap_bindings->{$_}} } } keys %$heap_bindings
+                map { $_ => { $heap_bindings->{$_}->%* } } keys $heap_bindings->%*
             },
         };
     }

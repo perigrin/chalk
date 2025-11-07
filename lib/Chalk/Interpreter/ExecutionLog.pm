@@ -25,7 +25,7 @@ class Chalk::Interpreter::ExecutionLog {
             newly_ready => $step_report->{newly_ready} // [],
         };
 
-        push @$entries, $entry;
+        push $entries->@*, $entry;
         return;
     }
 
@@ -36,7 +36,7 @@ class Chalk::Interpreter::ExecutionLog {
         push @lines, "=== CEK Interpreter Execution Log ===";
         push @lines, "";
 
-        foreach my $entry (@$entries) {
+        foreach my $entry ($entries->@*) {
             my $step = $entry->{step};
             my $node_id = $entry->{node_id} // '(none)';
             my $op = $entry->{node_op} // 'N/A';
@@ -73,7 +73,7 @@ class Chalk::Interpreter::ExecutionLog {
         push @lines, "=== CEK Interpreter Detailed Execution Log ===";
         push @lines, "";
 
-        foreach my $entry (@$entries) {
+        foreach my $entry ($entries->@*) {
             my $step = $entry->{step};
             my $node_id = $entry->{node_id};
 
@@ -91,16 +91,16 @@ class Chalk::Interpreter::ExecutionLog {
 
             push @lines, sprintf("Step %d: Execute %s", $step, $node_id);
             push @lines, sprintf("  Operation: %s", $op);
-            push @lines, sprintf("  Inputs: [%s]", join(', ', @$inputs));
+            push @lines, sprintf("  Inputs: [%s]", join(', ', $inputs->@*));
             push @lines, sprintf("  Result: %s", $value);
 
             # Show attributes for specific node types
             my $node_hash = $node->to_hash();
             if (my $attrs = $node_hash->{attributes}) {
-                if (keys %$attrs) {
+                if (keys $attrs->%*) {
                     my @attr_strs = map {
                         sprintf("%s=%s", $_, $attrs->{$_} // 'undef')
-                    } sort keys %$attrs;
+                    } sort keys $attrs->%*;
                     push @lines, sprintf("  Attributes: %s", join(', ', @attr_strs));
                 }
             }
@@ -127,7 +127,7 @@ class Chalk::Interpreter::ExecutionLog {
 
     method format_summary() {
         # Format a brief summary
-        my $total_steps = scalar(@$entries);
+        my $total_steps = scalar($entries->@*);
         my $final_entry = $entries->[-1];
 
         my @lines;
@@ -143,7 +143,7 @@ class Chalk::Interpreter::ExecutionLog {
 
         # Count node types executed
         my %op_counts;
-        foreach my $entry (@$entries) {
+        foreach my $entry ($entries->@*) {
             if (my $op = $entry->{node_op}) {
                 $op_counts{$op}++;
             }
@@ -161,12 +161,12 @@ class Chalk::Interpreter::ExecutionLog {
     }
 
     method get_step_count() {
-        return scalar(@$entries);
+        return scalar($entries->@*);
     }
 
     method get_entry($step_number) {
         # Get a specific log entry (0-indexed)
-        return undef if $step_number < 0 || $step_number >= @$entries;
+        return undef if $step_number < 0 || $step_number >= $entries->@*;
         return $entries->[$step_number];
     }
 }
