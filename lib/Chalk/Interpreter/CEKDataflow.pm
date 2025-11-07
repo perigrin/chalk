@@ -4,6 +4,8 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
+use Chalk::Interpreter::Environment;
+
 class Chalk::Interpreter::CEKDataflow {
     field $graph :param :reader;
 
@@ -21,9 +23,76 @@ class Chalk::Interpreter::CEKDataflow {
     }
 
     method execute() {
-        # Dataflow execution with ready queue scheduling
-        # Will be implemented with core operations
-        die "execute() not yet implemented - awaiting Environment class and operations";
+        # Initialize CEK components
+        $environment = Chalk::Interpreter::Environment->new();
+
+        # Get all nodes from the graph
+        my $nodes = $graph->nodes;
+
+        # Track which nodes have been computed
+        my %computed;
+
+        # Build waiting map: tracks unmet dependencies for each node
+        my %waiting;
+        foreach my $node_id (keys %$nodes) {
+            my $node = $nodes->{$node_id};
+            my $inputs = $node->inputs;
+
+            if (@$inputs == 0) {
+                # No dependencies, ready to execute immediately
+                push @$ready_queue, $node_id;
+            } else {
+                # Has dependencies, track them
+                $waiting{$node_id} = { map { $_ => 1 } @$inputs };
+            }
+        }
+
+        # Process nodes in dataflow order
+        my $result;
+        while (@$ready_queue) {
+            my $node_id = shift @$ready_queue;
+            my $node = $nodes->{$node_id};
+
+            # Create context closure for node execution
+            my $context = sub ($key) {
+                if ($key =~ /^node:(.+)$/) {
+                    return $environment->lookup_node($1);
+                }
+                return undef;
+            };
+
+            # Execute node - Start and Constant don't take context parameter
+            my $value;
+            if ($node->op eq 'Start' || $node->op eq 'Constant') {
+                $value = $node->execute();
+            } else {
+                $value = $node->execute($context);
+            }
+
+            # Store result in environment
+            $environment->set_node($node_id, $value);
+            $computed{$node_id} = 1;
+
+            # Check if this was the Return node (terminal)
+            if ($node->op eq 'Return') {
+                $result = $value;
+                last;
+            }
+
+            # Update waiting nodes - check if any become ready
+            foreach my $waiting_id (keys %waiting) {
+                # Remove this node from waiting list
+                delete $waiting{$waiting_id}{$node_id};
+
+                # If all dependencies satisfied, add to ready queue
+                if (keys %{$waiting{$waiting_id}} == 0) {
+                    push @$ready_queue, $waiting_id;
+                    delete $waiting{$waiting_id};
+                }
+            }
+        }
+
+        return $result;
     }
 }
 
