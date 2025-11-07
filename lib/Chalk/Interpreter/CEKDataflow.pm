@@ -60,6 +60,7 @@ class Chalk::Interpreter::CEKDataflow {
 
         # Process nodes in dataflow order
         my $result;
+        my $found_return = 0;
         while ($ready_queue->@*) {
             my $node_id = shift $ready_queue->@*;
             my $node = $nodes->{$node_id};
@@ -91,6 +92,7 @@ class Chalk::Interpreter::CEKDataflow {
             # Check if this was the Return node (terminal)
             if ($node->op eq 'Return') {
                 $result = $value;
+                $found_return = 1;
                 last;
             }
 
@@ -106,6 +108,10 @@ class Chalk::Interpreter::CEKDataflow {
                 }
             }
         }
+
+        # Validate that execution found a Return node
+        die "CEKDataflow: No Return node found in IR graph - execution completed without result"
+            unless $found_return;
 
         return $result;
     }
