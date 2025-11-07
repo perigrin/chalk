@@ -4,7 +4,7 @@
 use 5.42.0;
 use utf8;
 use lib 'lib';
-use Test::More tests => 10;
+use Test::More tests => 13;
 use Chalk::IR::Graph;
 use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Constant;
@@ -279,4 +279,60 @@ use Chalk::Interpreter::CEKDataflow;
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
     is($result, 107, 'If/else with computation: (7 > 5) ? 7+100 : 200 returns 107');
+}
+
+# Test Region node validation: reject invalid Proj return value
+{
+    my $graph = Chalk::IR::Graph->new();
+    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    # Create a constant that will be used as a fake Proj result (invalid value)
+    my $invalid = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 2, type => 'int');
+    my $region = Chalk::IR::Node::Region->new(id => 'node_2', inputs => ['node_1']);
+    my $ret = Chalk::IR::Node::Return->new(id => 'node_3', inputs => ['node_0', 'node_2'], value_id => 'node_2', control_id => 'node_0');
+
+    $graph->add_node($start);
+    $graph->add_node($invalid);
+    $graph->add_node($region);
+    $graph->add_node($ret);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    eval { $interp->execute(); };
+    like($@, qr/Region node.*returned invalid value: 2/, 'Region rejects Proj returning invalid value (2)');
+}
+
+# Test Region node validation: reject multiple active paths
+# We need to create a custom mock graph for this since normal If/Proj can't create this state
+{
+    # This test requires manually constructing an invalid IR graph where two Proj nodes return 1
+    # We'll use a custom context that simulates this invalid state
+    use Chalk::Interpreter::CEKDataflow;
+
+    my $region = Chalk::IR::Node::Region->new(id => 'test_region', inputs => ['proj_0', 'proj_1']);
+
+    # Create a mock context that returns 1 for both proj nodes
+    my $mock_context = sub {
+        my ($key) = @_;
+        return 1 if $key eq 'node:proj_0';
+        return 1 if $key eq 'node:proj_1';
+        return 0;
+    };
+
+    eval { $region->execute($mock_context); };
+    like($@, qr/Region node.*multiple active paths/, 'Region rejects multiple active paths');
+}
+
+# Test Region node validation: reject no active paths (all Proj return 0)
+{
+    my $region = Chalk::IR::Node::Region->new(id => 'test_region', inputs => ['proj_0', 'proj_1']);
+
+    # Create a mock context that returns 0 for both proj nodes
+    my $mock_context = sub {
+        my ($key) = @_;
+        return 0 if $key eq 'node:proj_0';
+        return 0 if $key eq 'node:proj_1';
+        return 0;
+    };
+
+    eval { $region->execute($mock_context); };
+    like($@, qr/Region node.*no active input path/, 'Region rejects no active paths');
 }
