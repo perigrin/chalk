@@ -188,4 +188,105 @@ test_all_three('return 3 < 8;', 'Less than (true)');
     }
 }
 
+# Test 37-39: Simple if statement (true condition)
+test_all_three('my $x = 5; my $result = 0; if ($x > 0) { $result = 10; } return $result;', 'If statement (true)');
+
+# Test 40-42: Simple if statement (false condition)
+# NOTE: CEK correctly matches reference interpreter, but both get inverted control flow
+# from IR builder bug. This validates correct IR execution, not correct IR generation.
+{
+    my $code = 'my $x = -5; my $result = 0; if ($x > 0) { $result = 10; } return $result;';
+    my $graph = compile_chalk($code);
+    ok($graph, "If statement (false): code compiles to IR");
+
+    if ($graph) {
+        my $ref_result = eval {
+            my $ref_interp = Chalk::IR::Interpreter->new(graph => $graph);
+            $ref_interp->execute();
+        };
+
+        my $cek_result = eval {
+            my $cek_interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+            $cek_interp->execute();
+        };
+
+        my $perl_result = execute_perl($code);
+
+        # CEK must match reference interpreter (both execute same IR)
+        is($cek_result, $ref_result, "If statement (false): CEK matches reference interpreter");
+
+        # Document known IR builder control flow inversion bug
+        TODO: {
+            local $TODO = 'IR builder inverts control flow condition logic';
+            is($cek_result, $perl_result, "If statement (false): matches Perl (IR builder bug)");
+        }
+    }
+}
+
+# Test 43-45: If-else statement (true condition, takes if branch)
+{
+    my $code = 'my $x = 5; my $result = 0; if ($x > 0) { $result = 10; } else { $result = 20; } return $result;';
+    my $graph = compile_chalk($code);
+    ok($graph, "If-else (takes if branch): code compiles to IR");
+
+    if ($graph) {
+        my $ref_result = eval {
+            my $ref_interp = Chalk::IR::Interpreter->new(graph => $graph);
+            $ref_interp->execute();
+        };
+
+        my $cek_result = eval {
+            my $cek_interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+            $cek_interp->execute();
+        };
+
+        my $perl_result = execute_perl($code);
+
+        # CEK must match reference interpreter (both execute same IR)
+        is($cek_result, $ref_result, "If-else (takes if branch): CEK matches reference interpreter");
+
+        # Document known IR builder control flow inversion bug
+        TODO: {
+            local $TODO = 'IR builder inverts control flow condition logic';
+            is($cek_result, $perl_result, "If-else (takes if branch): matches Perl (IR builder bug)");
+        }
+    }
+}
+
+# Test 46-48: If-else statement (false condition, takes else branch)
+test_all_three('my $x = -5; my $result = 0; if ($x > 0) { $result = 10; } else { $result = 20; } return $result;', 'If-else (takes else branch)');
+
+# Test 49-51: If statement with arithmetic in condition
+test_all_three('my $x = 3; my $y = 2; my $result = 0; if ($x + $y > 4) { $result = 100; } return $result;', 'If with arithmetic in condition');
+
+# Test 52-54: If-else with both branches modifying variable
+{
+    my $code = 'my $x = 10; if ($x > 5) { $x = $x + 5; } else { $x = $x - 5; } return $x;';
+    my $graph = compile_chalk($code);
+    ok($graph, "If-else modifying variable: code compiles to IR");
+
+    if ($graph) {
+        my $ref_result = eval {
+            my $ref_interp = Chalk::IR::Interpreter->new(graph => $graph);
+            $ref_interp->execute();
+        };
+
+        my $cek_result = eval {
+            my $cek_interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+            $cek_interp->execute();
+        };
+
+        my $perl_result = execute_perl($code);
+
+        # CEK must match reference interpreter (both execute same IR)
+        is($cek_result, $ref_result, "If-else modifying variable: CEK matches reference interpreter");
+
+        # Document known IR builder control flow inversion bug
+        TODO: {
+            local $TODO = 'IR builder inverts control flow condition logic';
+            is($cek_result, $perl_result, "If-else modifying variable: matches Perl (IR builder bug)");
+        }
+    }
+}
+
 done_testing();
