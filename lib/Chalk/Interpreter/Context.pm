@@ -5,7 +5,7 @@ use 5.42.0;
 use utf8;
 use Exporter 'import';
 
-our @EXPORT_OK = qw(extend_ctx $empty_ctx);
+our @EXPORT_OK = qw(extend_ctx $empty_ctx flatten_ctx rebuild_ctx);
 
 # Empty context: returns undef for any key
 our $empty_ctx = sub ($key) { return undef; };
@@ -19,6 +19,34 @@ sub extend_ctx ($parent_ctx, $key, $value) {
         }
         return $parent_ctx->($lookup_key);
     };
+}
+
+# Flatten a context closure into a hash by extracting all bindings
+# This enables snapshotting of execution state
+# Note: Uses a heuristic approach - tries common keys and stores found values
+sub flatten_ctx ($ctx, $known_keys) {
+    my %bindings;
+
+    # Extract all known keys from the context
+    foreach my $key (@$known_keys) {
+        my $value = $ctx->($key);
+        $bindings{$key} = $value if defined $value;
+    }
+
+    return \%bindings;
+}
+
+# Rebuild a context closure from a flattened hash
+# This enables restoring from snapshots
+sub rebuild_ctx ($bindings_hash) {
+    my $ctx = $empty_ctx;
+
+    # Extend context with each binding
+    foreach my $key (keys %$bindings_hash) {
+        $ctx = extend_ctx($ctx, $key, $bindings_hash->{$key});
+    }
+
+    return $ctx;
 }
 
 1;

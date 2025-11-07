@@ -97,6 +97,46 @@ class Chalk::Interpreter::CEKDataflow {
 
         return $result;
     }
+
+    # Snapshot/restore functionality for Phase 4
+    method snapshot_execution_state($computed, $waiting) {
+        # Create a complete snapshot of execution state
+        # Captures environment + execution state (ready queue, computed, waiting)
+        return {
+            environment => $environment->snapshot(),
+            ready_queue => [ @$ready_queue ],
+            computed => { %$computed },
+            waiting => {
+                map { $_ => { %{$waiting->{$_}} } } keys %$waiting
+            },
+            kontinuation => $kontinuation,
+        };
+    }
+
+    method restore_from_snapshot($snapshot) {
+        # Restore execution state from a snapshot
+        # Returns the restored state as ($environment, $ready_queue, $computed, $waiting, $kontinuation)
+        my $restored_env = $environment->restore_from_snapshot($snapshot->{environment});
+
+        my $restored_ready_queue = [ @{$snapshot->{ready_queue}} ];
+
+        my $restored_computed = { %{$snapshot->{computed}} };
+
+        my $restored_waiting = {
+            map { $_ => { %{$snapshot->{waiting}{$_}} } }
+            keys %{$snapshot->{waiting}}
+        };
+
+        my $restored_kontinuation = $snapshot->{kontinuation};
+
+        return (
+            $restored_env,
+            $restored_ready_queue,
+            $restored_computed,
+            $restored_waiting,
+            $restored_kontinuation
+        );
+    }
 }
 
 1;
