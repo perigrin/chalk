@@ -97,10 +97,10 @@ class Chalk::Interpreter::CEKDataflow {
             # Update waiting nodes - check if any become ready
             foreach my $waiting_id (keys %waiting) {
                 # Remove this node from waiting list
-                delete $waiting{$waiting_id}{$node_id};
+                delete $waiting{$waiting_id}->{$node_id};
 
                 # If all dependencies satisfied, add to ready queue
-                if (keys %{$waiting{$waiting_id}} == 0) {
+                if (keys $waiting{$waiting_id}->%* == 0) {
                     push $ready_queue->@*, $waiting_id;
                     delete $waiting{$waiting_id};
                 }
@@ -119,7 +119,7 @@ class Chalk::Interpreter::CEKDataflow {
             ready_queue => [ $ready_queue->@* ],
             computed => { $computed->%* },
             waiting => {
-                map { $_ => { %{$waiting->{$_}} } } keys $waiting->%*
+                map { $_ => { $waiting->{$_}->%* } } keys $waiting->%*
             },
             kontinuation => $kontinuation,
         };
@@ -132,11 +132,11 @@ class Chalk::Interpreter::CEKDataflow {
 
         my $restored_ready_queue = [ @{$snapshot->{ready_queue}} ];
 
-        my $restored_computed = { %{$snapshot->{computed}} };
+        my $restored_computed = { $snapshot->{computed}->%* };
 
         my $restored_waiting = {
-            map { $_ => { %{$snapshot->{waiting}{$_}} } }
-            keys %{$snapshot->{waiting}}
+            map { $_ => { $snapshot->{waiting}->{$_}->%* } }
+            keys $snapshot->{waiting}->%*
         };
 
         my $restored_kontinuation = $snapshot->{kontinuation};
@@ -236,10 +236,10 @@ class Chalk::Interpreter::CEKDataflow {
         my @newly_ready;
         foreach my $waiting_id (keys $waiting->%*) {
             # Remove this node from waiting list
-            delete $waiting->{$waiting_id}{$node_id};
+            delete $waiting->{$waiting_id}->{$node_id};
 
             # If all dependencies satisfied, add to ready queue
-            if (keys %{$waiting->{$waiting_id}} == 0) {
+            if (keys $waiting->{$waiting_id}->%* == 0) {
                 push $ready_queue->@*, $waiting_id;
                 push @newly_ready, $waiting_id;
                 delete $waiting->{$waiting_id};
@@ -266,7 +266,7 @@ class Chalk::Interpreter::CEKDataflow {
         # Get current state for inspection
         return {
             ready_queue => [ $ready_queue->@* ],
-            waiting => { map { $_ => { %{$waiting->{$_}} } } keys $waiting->%* },
+            waiting => { map { $_ => { $waiting->{$_}->%* } } keys $waiting->%* },
             computed => { $computed->%* },
             result => $result,
         };
@@ -274,104 +274,3 @@ class Chalk::Interpreter::CEKDataflow {
 }
 
 1;
-
-__END__
-
-=head1 NAME
-
-Chalk::Interpreter::CEKDataflow - CEK machine with dataflow scheduling
-
-=head1 SYNOPSIS
-
-    use Chalk::Interpreter::CEKDataflow;
-    use Chalk::IR::Graph;
-
-    my $graph = Chalk::IR::Graph->new();
-    # ... build graph ...
-
-    my $interpreter = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
-    my $result = $interpreter->execute();
-
-=head1 DESCRIPTION
-
-This interpreter implements a CEK (Control-Environment-Kontinuation) machine
-with dataflow scheduling for executing Sea of Nodes IR graphs. It unifies three
-execution models:
-
-=over 4
-
-=item * CEK Machine: Explicit state (Control, Environment, Kontinuation)
-
-=item * Functional Context: Immutable closure-based state management
-
-=item * Dataflow Scheduling: Promise-style execution when dependencies resolve
-
-=back
-
-=head1 ARCHITECTURE
-
-=head2 Discrete Context Architecture
-
-The environment consists of discrete, independent contexts:
-
-=over 4
-
-=item * Node context: Computation results for each IR node
-
-=item * Variable context: Variable bindings (lexical scope)
-
-=item * Heap structures: Each array/hash/object is its own context
-
-=back
-
-This provides perfect isolation, actor model readiness, and natural distribution.
-
-=head2 Execution Model
-
-1. Initialize ready queue with nodes that have no dependencies
-2. While ready queue is not empty:
-   - Dequeue a ready node
-   - Execute the node operation
-   - Store result in environment
-   - Check dependent nodes; add ready ones to queue
-3. Return final result from Return node
-
-=head1 METHODS
-
-=head2 new(graph => $graph)
-
-Constructor. Takes a Sea of Nodes IR graph.
-
-=head2 execute()
-
-Execute the graph using CEK dataflow scheduling. Returns the final result.
-
-=head1 STATUS
-
-Phase 1 implementation in progress. Currently supports:
-
-=over 4
-
-=item * Basic object construction
-
-=item * CEK state initialization
-
-=back
-
-Not yet implemented:
-
-=over 4
-
-=item * Environment class integration
-
-=item * Core operations (Const, Add, Sub, Mul, Div)
-
-=item * Ready queue scheduling
-
-=item * Control flow (If, Region, Phi)
-
-=item * Heap operations
-
-=back
-
-=cut
