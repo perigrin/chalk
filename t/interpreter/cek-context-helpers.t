@@ -1,25 +1,26 @@
 #!/usr/bin/env perl
 # ABOUTME: Test CEK interpreter context helper functions
-# ABOUTME: Tests extend_ctx and $empty_ctx for functional context management
+# ABOUTME: Tests IR::Context methods for functional context management
 use 5.42.0;
 use utf8;
 use lib 'lib';
 use Test::More tests => 7;
-use Chalk::Interpreter::Context qw(extend_ctx $empty_ctx);
+use Chalk::IR::Context;
 
-# Test $empty_ctx is defined
-ok(defined $empty_ctx, '$empty_ctx is defined');
+# Test empty_context returns a coderef
+my $empty_ctx = Chalk::IR::Context->empty_context();
+ok(defined $empty_ctx, 'empty_context() is defined');
 
-# Test $empty_ctx is a coderef (closure)
-is(ref($empty_ctx), 'CODE', '$empty_ctx is a CODE reference');
+# Test empty_context is a coderef (closure)
+is(ref($empty_ctx), 'CODE', 'empty_context() is a CODE reference');
 
-# Test $empty_ctx returns undef for any key
-is($empty_ctx->('x'), undef, '$empty_ctx returns undef for key "x"');
-is($empty_ctx->('foo'), undef, '$empty_ctx returns undef for key "foo"');
+# Test empty_context returns undef for any key
+is($empty_ctx->('x'), undef, 'empty_context() returns undef for key "x"');
+is($empty_ctx->('foo'), undef, 'empty_context() returns undef for key "foo"');
 
-# Test extend_ctx returns a coderef
-my $ctx1 = extend_ctx($empty_ctx, 'x', 42);
-is(ref($ctx1), 'CODE', 'extend_ctx returns a CODE reference');
+# Test extend_context returns a coderef
+my $ctx1 = Chalk::IR::Context->extend_context($empty_ctx, 'x', 42);
+is(ref($ctx1), 'CODE', 'extend_context() returns a CODE reference');
 
 # Test extended context returns correct value for new key
 is($ctx1->('x'), 42, 'extended context returns value for "x"');

@@ -52,8 +52,8 @@ class Chalk::Interpreter::ExecutionLog {
                 $entry->{waiting_count});
 
             # Show newly ready nodes
-            if (@{$entry->{newly_ready}}) {
-                my $ready_list = join(', ', @{$entry->{newly_ready}});
+            if ($entry->{newly_ready}->@*) {
+                my $ready_list = join(', ', $entry->{newly_ready}->@*);
                 push @lines, "  Newly ready: $ready_list";
             }
 
@@ -112,9 +112,9 @@ class Chalk::Interpreter::ExecutionLog {
                 $entry->{waiting_count});
 
             # Show newly ready nodes
-            if (@{$entry->{newly_ready}}) {
+            if ($entry->{newly_ready}->@*) {
                 push @lines, sprintf("  Became ready: %s",
-                    join(', ', @{$entry->{newly_ready}}));
+                    join(', ', $entry->{newly_ready}->@*));
             }
 
             push @lines, "";

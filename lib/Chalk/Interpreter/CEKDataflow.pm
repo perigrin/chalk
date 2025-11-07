@@ -66,8 +66,9 @@ class Chalk::Interpreter::CEKDataflow {
 
             # Create context closure for node execution
             my $context = sub ($key) {
-                if ($key =~ /^node:(.+)$/) {
-                    return $environment->lookup_node($1);
+                if ($key =~ qr/^node:(.+)$/) {
+                    my $node_id = $1;
+                    return $environment->lookup_node($node_id);
                 }
                 elsif ($key eq 'env:') {
                     return $environment;
@@ -202,8 +203,9 @@ class Chalk::Interpreter::CEKDataflow {
 
         # Create context closure for node execution
         my $context = sub ($key) {
-            if ($key =~ /^node:(.+)$/) {
-                return $environment->lookup_node($1);
+            if ($key =~ qr/^node:(.+)$/) {
+                my $node_id = $1;
+                return $environment->lookup_node($node_id);
             }
             elsif ($key eq 'env:') {
                 return $environment;
