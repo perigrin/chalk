@@ -1,14 +1,14 @@
-# ABOUTME: Benchmark suite for CEK interpreter performance measurement
-# ABOUTME: Compares CEKDataflow vs reference IR::Interpreter across various program patterns
+# ABOUTME: Benchmark suite for Chalk compiler performance measurement
+# ABOUTME: Compares Chalk (via CEKDataflow) vs native Perl 5.42.0 execution across various program patterns
 use 5.42.0;
 use utf8;
 use lib 'lib';
 use Time::HiRes qw(time);
+use File::Temp;
 use Chalk::Parser;
 use Chalk::Grammar;
 use Chalk::Semiring::Semantic;
 use Chalk::IR::Builder;
-use Chalk::IR::Interpreter;
 use Chalk::IR::Optimizer::GVN;
 use Chalk::Interpreter::CEKDataflow;
 
@@ -17,6 +17,30 @@ open my $fh, '<:utf8', 'grammar/chalk.bnf' or die "Cannot open chalk.bnf: $!";
 my $bnf_content = do { local $/; <$fh> };
 close $fh;
 my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
+
+# Execute code via Perl 5.42.0
+sub execute_perl {
+    my ($code) = @_;
+
+    # Wrap code in a subroutine so 'return' works
+    my $wrapped_code = "use v5.42;\nsub main { $code }\nmy \$result = main();\nprint \$result;\n";
+
+    # Create temporary file
+    my $tmpfile = File::Temp->new(SUFFIX => '.pl');
+    print $tmpfile $wrapped_code;
+    close $tmpfile;
+
+    # Execute with Perl 5.42.0
+    my $output = `PLENV_VERSION=5.42.0 plenv exec perl $tmpfile 2>&1`;
+    chomp $output;
+
+    # Extract numeric return value if possible
+    if ($output =~ /^-?\d+(?:\.\d+)?$/) {
+        return 0 + $output;  # Convert to number
+    }
+
+    return $output;
+}
 
 # Compile Chalk code to IR graph
 sub compile_chalk {
@@ -72,78 +96,71 @@ sub benchmark_case {
     # Count nodes in graph
     my $node_count = scalar keys $graph->nodes->%*;
 
-    # Benchmark reference interpreter
-    my $ref_start = time();
+    # Benchmark native Perl 5.42.0
+    my $perl_start = time();
     for (1..$iterations) {
-        my $ref_interp = Chalk::IR::Interpreter->new(graph => $graph);
-        $ref_interp->execute();
+        execute_perl($code);
     }
-    my $ref_elapsed = time() - $ref_start;
-    my $ref_per_iter = $ref_elapsed / $iterations;
+    my $perl_elapsed = time() - $perl_start;
+    my $perl_per_iter = $perl_elapsed / $iterations;
 
-    # Benchmark CEK interpreter
+    # Benchmark Chalk via subprocess (using bin/chalk-exec.pl, same as Perl for fair comparison)
     my $cek_start = time();
     for (1..$iterations) {
-        my $cek_interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
-        $cek_interp->execute();
+        my $output = `PLENV_VERSION=5.42.0 plenv exec perl bin/chalk-exec.pl '$code' 2>&1`;
+        chomp $output;
     }
     my $cek_elapsed = time() - $cek_start;
     my $cek_per_iter = $cek_elapsed / $iterations;
 
-    # Calculate speedup (negative means CEK is slower)
-    my $speedup = $ref_per_iter / $cek_per_iter;
-    my $speedup_str = sprintf("%.2fx", $speedup);
-    if ($speedup < 1.0) {
-        $speedup_str = sprintf("%.2fx slower", 1.0 / $speedup);
-    } elsif ($speedup > 1.0) {
-        $speedup_str = sprintf("%.2fx faster", $speedup);
-    } else {
-        $speedup_str = "same";
-    }
+    # Calculate slowdown ratio (CEK vs Perl)
+    # Higher ratio means CEK is slower
+    my $ratio = $cek_per_iter / $perl_per_iter;
+    my $ratio_str = sprintf("%.2fx", $ratio);
 
-    printf("%-40s | Nodes: %3d | Ref: %8.6fs | CEK: %8.6fs | %s\n",
-        $name, $node_count, $ref_per_iter, $cek_per_iter, $speedup_str);
+    printf("%-40s | Nodes: %3d | Perl: %8.6fs | Chalk: %8.6fs | %s\n",
+        $name, $node_count, $perl_per_iter, $cek_per_iter, $ratio_str);
 
     return {
         name => $name,
         nodes => $node_count,
-        ref_time => $ref_per_iter,
+        perl_time => $perl_per_iter,
         cek_time => $cek_per_iter,
-        speedup => $speedup,
+        ratio => $ratio,
     };
 }
 
 # Test cases with varying complexity
 my @test_cases = (
     # Simple constant
-    ["Constant", 'return 42;', 10000],
+    ["Constant", 'return 42;', 1],
 
     # Arithmetic operations
-    ["Simple Addition", 'return 5 + 3;', 10000],
-    ["Complex Arithmetic", 'return (10 + 5) * (8 - 3);', 10000],
-    ["Chain Addition", 'return 1 + 2 + 3 + 4 + 5;', 10000],
+    ["Simple Addition", 'return 5 + 3;', 1],
+    ["Complex Arithmetic", 'return (10 + 5) * (8 - 3);', 1],
+    ["Chain Addition", 'return 1 + 2 + 3 + 4 + 5;', 1],
 
     # Variables
-    ["Single Variable", 'my $x = 42; return $x;', 10000],
-    ["Variable Arithmetic", 'my $x = 10; my $y = 5; return $x + $y;', 10000],
-    ["Reassignment", 'my $x = 5; $x = 10; return $x;', 10000],
-    ["Multiple Reassignments", 'my $x = 1; $x = 2; $x = 3; $x = 4; return $x;', 10000],
+    ["Single Variable", 'my $x = 42; return $x;', 1],
+    ["Variable Arithmetic", 'my $x = 10; my $y = 5; return $x + $y;', 1],
+    ["Reassignment", 'my $x = 5; $x = 10; return $x;', 1],
+    ["Multiple Reassignments", 'my $x = 1; $x = 2; $x = 3; $x = 4; return $x;', 1],
 
     # Comparisons
-    ["Simple Comparison", 'return 10 > 5;', 10000],
-    ["Variable Comparison", 'my $x = 10; my $y = 5; return $x > $y;', 10000],
+    ["Simple Comparison", 'return 10 > 5;', 1],
+    ["Variable Comparison", 'my $x = 10; my $y = 5; return $x > $y;', 1],
 
     # Control flow (note: IR builder has bugs, but we're testing performance)
-    ["If Statement", 'my $x = 5; my $r = 0; if ($x > 0) { $r = 10; } return $r;', 5000],
-    ["If-Else", 'my $x = 5; if ($x > 0) { return 10; } else { return 20; }', 5000],
-    ["Nested Variables in If", 'my $x = 10; if ($x > 5) { $x = $x + 5; } return $x;', 5000],
+    ["If Statement", 'my $x = 5; my $r = 0; if ($x > 0) { $r = 10; } return $r;', 1],
+    ["If-Else", 'my $x = 5; if ($x > 0) { return 10; } else { return 20; }', 1],
+    ["Nested Variables in If", 'my $x = 10; if ($x > 5) { $x = $x + 5; } return $x;', 1],
 );
 
 # Run benchmarks
 say "=" x 120;
-say "CEK Interpreter Performance Benchmark";
+say "Chalk Performance Benchmark (vs Native Perl 5.42.0)";
 say "=" x 120;
-printf("%-40s | %-9s | %-14s | %-14s | %s\n", "Test Case", "IR Nodes", "Ref Time", "CEK Time", "Speedup");
+printf("%-40s | %-9s | %-14s | %-14s | %s\n", "Test Case", "IR Nodes", "Perl Time", "Chalk Time", "Ratio");
 say "-" x 120;
 
 my @results;
@@ -157,28 +174,21 @@ say "=" x 120;
 
 # Summary statistics
 my $total_cases = scalar(@results);
-my $avg_speedup = 0;
-my $fastest_case = $results[0];
-my $slowest_case = $results[0];
+my $avg_ratio = 0;
+my $best_case = $results[0];    # Lowest ratio (closest to native)
+my $worst_case = $results[0];   # Highest ratio (furthest from native)
 
 foreach my $r (@results) {
-    $avg_speedup += $r->{speedup};
-    $fastest_case = $r if $r->{speedup} > $fastest_case->{speedup};
-    $slowest_case = $r if $r->{speedup} < $slowest_case->{speedup};
+    $avg_ratio += $r->{ratio};
+    $best_case = $r if $r->{ratio} < $best_case->{ratio};
+    $worst_case = $r if $r->{ratio} > $worst_case->{ratio};
 }
 
-$avg_speedup /= $total_cases if $total_cases > 0;
+$avg_ratio /= $total_cases if $total_cases > 0;
 
 say "\nSummary:";
 say sprintf("  Total test cases: %d", $total_cases);
-say sprintf("  Average speedup: %.2fx", $avg_speedup);
-say sprintf("  Fastest case: %s (%.2fx)", $fastest_case->{name}, $fastest_case->{speedup});
-say sprintf("  Slowest case: %s (%.2fx)", $slowest_case->{name}, $slowest_case->{speedup});
-
-if ($avg_speedup > 1.0) {
-    say sprintf("\n  CEK is %.2fx faster than reference interpreter on average", $avg_speedup);
-} elsif ($avg_speedup < 1.0) {
-    say sprintf("\n  CEK is %.2fx slower than reference interpreter on average", 1.0 / $avg_speedup);
-} else {
-    say "\n  CEK and reference interpreter have similar performance";
-}
+say sprintf("  Average overhead: %.2fx (Chalk is %.0f%% slower than native Perl)",
+    $avg_ratio, ($avg_ratio - 1.0) * 100);
+say sprintf("  Best case: %s (%.2fx)", $best_case->{name}, $best_case->{ratio});
+say sprintf("  Worst case: %s (%.2fx)", $worst_case->{name}, $worst_case->{ratio});
