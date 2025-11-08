@@ -171,9 +171,9 @@ sub count_node_types {
         my $node_count = scalar(keys %$nodes);
         ok($node_count > 0, "ChalkIR: graph has nodes for variable (found $node_count)");
 
-        my $counts = count_node_types($graph, 'Constant', 'Store', 'Load', 'Return');
+        my $counts = count_node_types($graph, 'Constant', 'Return');
         ok($counts->{Constant} > 0, "ChalkIR: graph contains Constant node for value");
-        ok($counts->{Store} > 0, "ChalkIR: graph contains Store node for variable");
+        # Store/Load nodes no longer used - we use closure-based context now
     }
 }
 
@@ -306,11 +306,9 @@ return $result;
 
             if ($ctx && $ctx->can('focus')) {
                 my $focus = $ctx->focus;
-                TODO: {
-                    local $TODO = 'ChalkIR may not set focus properly - investigating';
-                    ok(defined($focus), 'ChalkIR: focus is defined');
-                    ok($focus && $focus->can('id'), 'ChalkIR: focus has id method') if defined($focus);
-                }
+                # Focus tests - should now pass after polymorphism fix
+                ok(defined($focus), 'ChalkIR: focus is defined');
+                ok($focus && $focus->can('id'), 'ChalkIR: focus has id method') if defined($focus);
             }
         }
     }
