@@ -259,5 +259,37 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         # Default to Any for unknown constructs
         return Chalk::Grammar::Chalk::Type::Any->new();
     }
+
+    # Override base on_complete() to call semantic actions (evaluate())
+    # This maintains polymorphism - Parser calls this uniformly on all semirings
+    method on_complete($completed_item, $completed_element) {
+        my $ctx = $completed_element->context;
+
+        # Evaluate the rule's semantic action if it has one
+        my $rule = $ctx->rule;
+        if ($rule && $rule->can('evaluate')) {
+            my $result = $rule->evaluate($ctx);
+
+            # Set the focus to the evaluated result
+            $ctx = Chalk::EvalContext->new(
+                focus => $result,
+                children => $ctx->children,
+                start_pos => $ctx->start_pos,
+                end_pos => $ctx->end_pos,
+                env => $ctx->env,
+                grammar => $ctx->grammar,
+                rule => $ctx->rule,
+                forest => $ctx->forest
+            );
+
+            # Update the completed element with evaluated context
+            $completed_element = Chalk::Semiring::SemanticElement->new(
+                value => 1,
+                context => $ctx
+            );
+        }
+
+        return $completed_element;
+    }
 }
 

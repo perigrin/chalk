@@ -25,6 +25,7 @@ class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
         # For binary operation: check child(2) for the operator
         # Grammar is: LogicalOp WS_OPT OP WS_OPT ComparisonOp
         # So operator is at index 2
+        return $context->child(0) unless defined $children[2];
         my $op_child = $children[2]->extract;
         return $context->child(0) unless defined $op_child && !ref($op_child);
 

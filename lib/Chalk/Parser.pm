@@ -393,48 +393,21 @@ class Chalk::Parser {
 
         my $lhs = $completed_item->rule->lhs;
 
-        # For Semantic semiring, evaluate the completed rule
-        # NOTE: We evaluate and set the focus, but keep the children so they can
-        # be accessed by parent rules during their evaluation
-        if ($semiring isa Chalk::Semiring::Semantic) {
-            # IMPORTANT: Get the LATEST element from the chart, not the one passed in!
-            # The element passed in might be stale if multiply operations happened
-            my $latest_element = $chart->get_element($completed_item);
-            if ($latest_element) {
-                $completed_element = $latest_element;
-            }
-
-            my $ctx = $completed_element->context;
-
-            # Evaluate the rule's semantic action if it has one
-            my $rule = $ctx->rule;
-            if ($rule && $rule->can('evaluate')) {
-                my $result = $rule->evaluate($ctx);
-
-                # Set the focus to the evaluated result
-                # This maintains the result while preserving children for parent rules
-                $ctx = Chalk::EvalContext->new(
-                    focus => $result,
-                    children => $ctx->children,
-                    start_pos => $ctx->start_pos,
-                    end_pos => $ctx->end_pos,
-                    env => $ctx->env,
-                    grammar => $ctx->grammar,
-                    rule => $ctx->rule,
-                    forest => $ctx->forest
-                );
-
-                # Update the completed element with evaluated context
-                $completed_element = Chalk::Semiring::SemanticElement->new(
-                    value => 1,
-                    context => $ctx
-                );
-
-                # Update the chart with evaluated element
-                # The element has both the evaluated focus AND the accumulated children
-                $chart->add_element($completed_item, $completed_element);
-            }
+        # Get latest element from chart (handles updates from multiply operations)
+        my $latest_element = $chart->get_element($completed_item);
+        if ($latest_element) {
+            $completed_element = $latest_element;
         }
+
+        # Call semiring's on_complete() hook (polymorphic)
+        # This allows semirings to perform actions when a rule completes
+        # - Semantic: calls evaluate() on semantic actions and updates context
+        # - Composite: delegates to all wrapped semirings
+        # - Others: NOOP (returns element unchanged)
+        $completed_element = $semiring->on_complete($completed_item, $completed_element);
+
+        # Update the chart with the (potentially modified) element
+        $chart->add_element($completed_item, $completed_element);
 
         # Use indexed lookups to get items waiting for this symbol
         # This avoids the expensive grep operations with isa checks

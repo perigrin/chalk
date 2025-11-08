@@ -10,7 +10,7 @@ use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
 
-class Chalk::Semiring::ChalkIR {
+class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
     field $builder :reader;
     field $composite :reader;
@@ -78,6 +78,11 @@ class Chalk::Semiring::ChalkIR {
     method multiply($x, $y) { $composite->multiply($x, $y) }
     method plus($x, $y) { $composite->plus($x, $y) }
     method semirings() { $composite->semirings }
+
+    # Delegate on_complete() to composite (which delegates to wrapped semirings)
+    method on_complete($completed_item, $completed_element) {
+        $composite->on_complete($completed_item, $completed_element)
+    }
 }
 
 1;

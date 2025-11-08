@@ -13,6 +13,7 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         # Grammar is: Expression WS_OPT '.' WS_OPT Expression
         # So operator is at index 2
         my @children = $context->children->@*;
+        return $context->child(0) unless defined $children[2];
         my $op_child = $children[2]->extract;
         return $context->child(0) unless defined $op_child && !ref($op_child);
 

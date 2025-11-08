@@ -30,12 +30,12 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # Find 'if' keyword position (should be at start)
         my $keyword_index = 0;
 
-        # Parse: if WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block
+        # Parse: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block
         # Actual children after parsing with semantic actions:
-        # Indices: 0     1     2   3        4     5     6
-        # child[3] is the Expression node, child[6] is the Block
+        # Indices: 0                  1      2   3      4          5      6   7      8
+        # child[0] is ConditionalKeyword, child[4] is Expression, child[8] is Block
 
-        my $condition = $context->child(3);  # Expression node
+        my $condition = $context->child(4);  # Expression node
         return undef unless (blessed($condition) && $condition->can('id'));
 
         # Build If node
@@ -44,7 +44,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $if_false = $builder->build_if_false_node($if_node);
 
         # Get true branch Block (returns metadata with statements)
-        my $true_block = $context->child(6);
+        my $true_block = $context->child(8);
         return undef unless (ref($true_block) eq 'HASH' && $true_block->{type} eq 'block');
 
         # Wire up true branch statements with IfTrue control

@@ -85,6 +85,38 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     method element_at($index) {
         return $elements->[$index];
     }
+
+    # Delegation methods: Forward context-related calls to semantic element (index 2)
+    # These methods are needed by semantic actions (e.g., ConditionalStatement.pm)
+    # that expect to work with EvalContext objects
+
+    method context() {
+        # Delegate to semantic element (elements[2] in ChalkIR architecture)
+        return $elements->[2]->can('context') ? $elements->[2]->context : undef;
+    }
+
+    method child($index) {
+        # Delegate to semantic element's context
+        my $ctx = $self->context;
+        return $ctx ? $ctx->child($index) : undef;
+    }
+
+    method children() {
+        # Delegate to semantic element's context
+        my $ctx = $self->context;
+        return $ctx ? $ctx->children : [];
+    }
+
+    method env() {
+        # Delegate to semantic element's context
+        my $ctx = $self->context;
+        return $ctx ? $ctx->env : {};
+    }
+
+    method extract() {
+        # Delegate to semantic element
+        return $elements->[2]->can('extract') ? $elements->[2]->extract : undef;
+    }
 }
 
 class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
@@ -133,6 +165,30 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
     method plus($x, $y) {
         # For backward compatibility if called directly
         return $x->add($y);
+    }
+
+    # Delegate on_complete() to all wrapped semirings
+    # This maintains polymorphism - each semiring can respond to rule completion
+    method on_complete($completed_item, $completed_element) {
+        # Extract elements from CompositeElement
+        my @elements = $completed_element->elements->@*;
+
+        # Call on_complete() on each wrapped semiring with its corresponding element
+        my @results;
+        for my $i (0..$#$semirings) {
+            my $semiring = $semirings->[$i];
+            my $element = $elements[$i];
+
+            # Delegate to child semiring (which may be NOOP or may do work)
+            my $result = $semiring->on_complete($completed_item, $element);
+            push @results, $result;
+        }
+
+        # Return new CompositeElement with updated elements
+        return Chalk::Semiring::CompositeElement->new(
+            elements => \@results,
+            parent_semiring => $self
+        );
     }
 }
 

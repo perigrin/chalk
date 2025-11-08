@@ -127,6 +127,24 @@ sub execute_perl {
     return $output;
 }
 
+# Helper: Check if IR graph contains specific node types
+sub has_node_types {
+    my ($graph, @types) = @_;
+
+    my $nodes = $graph->nodes;
+    my %results;
+
+    for my $type (@types) {
+        my $count = grep {
+            my $hash = $_->to_hash;
+            $hash->{op} eq $type
+        } values %$nodes;
+        $results{$type} = $count;
+    }
+
+    return \%results;
+}
+
 # Helper: Test CEK vs Perl execution
 sub test_cek_vs_perl {
     my ($code, $test_name) = @_;
@@ -241,6 +259,12 @@ test_cek_vs_perl('my $x = 5; my $result = 0; if ($x > 0) { $result = 10; } retur
     ok($graph, "If statement (false): code compiles to IR");
 
     if ($graph) {
+        # NEW: Test IR structure contains required control flow nodes
+        my $node_types = has_node_types($graph, 'If', 'Proj', 'Region');
+        ok($node_types->{If} > 0, "If statement (false): IR contains If node");
+        ok($node_types->{Proj} >= 2, "If statement (false): IR contains Proj nodes (true/false branches)");
+        ok($node_types->{Region} > 0, "If statement (false): IR contains Region node (merge point)");
+
         my $cek_result = eval {
             my $cek_interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
             $cek_interp->execute();
@@ -274,6 +298,12 @@ test_cek_vs_perl('my $x = 5; my $result = 0; if ($x > 0) { $result = 10; } retur
     ok($graph, "If-else (takes if branch): code compiles to IR");
 
     if ($graph) {
+        # NEW: Test IR structure contains required control flow nodes
+        my $node_types = has_node_types($graph, 'If', 'Proj', 'Region');
+        ok($node_types->{If} > 0, "If-else (takes if branch): IR contains If node");
+        ok($node_types->{Proj} >= 2, "If-else (takes if branch): IR contains Proj nodes (true/false branches)");
+        ok($node_types->{Region} > 0, "If-else (takes if branch): IR contains Region node (merge point)");
+
         my $cek_result = eval {
             my $cek_interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
             $cek_interp->execute();
@@ -313,6 +343,12 @@ test_cek_vs_perl('my $x = 3; my $y = 2; my $result = 0; if ($x + $y > 4) { $resu
     ok($graph, "If-else modifying variable: code compiles to IR");
 
     if ($graph) {
+        # NEW: Test IR structure contains required control flow nodes
+        my $node_types = has_node_types($graph, 'If', 'Proj', 'Region');
+        ok($node_types->{If} > 0, "If-else modifying variable: IR contains If node");
+        ok($node_types->{Proj} >= 2, "If-else modifying variable: IR contains Proj nodes (true/false branches)");
+        ok($node_types->{Region} > 0, "If-else modifying variable: IR contains Region node (merge point)");
+
         my $cek_result = eval {
             my $cek_interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
             $cek_interp->execute();

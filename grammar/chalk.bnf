@@ -120,9 +120,9 @@ ConditionalKeyword -> 'unless'
 
 # Conditional statements (block form)
 ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
-ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
-ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
-ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
 
 # While loops
 WhileStatement -> 'while' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block

@@ -20,6 +20,12 @@ class Chalk::Element {
 
 class Chalk::Semiring {
     method init_element_from_rule($rule) { ... }
+
+    # NOOP hook for semirings that need to perform actions when a rule completes parsing
+    # Override in subclasses as needed (e.g., Semantic uses this to call evaluate())
+    method on_complete($completed_item, $completed_element) {
+        return $completed_element;
+    }
 }
 
 1;
