@@ -3,7 +3,6 @@
 
 use 5.42.0;
 use experimental 'class';
-use builtin qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule) {
     method evaluate($context) {
