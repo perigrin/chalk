@@ -240,15 +240,10 @@ return $result;
         # CRITICAL TEST: Check for control flow nodes
         my $counts = count_node_types($graph, 'If', 'Proj', 'Region', 'GT', 'Constant', 'Store');
 
-        # These tests document the current state and should expose the empty graph issue
-        TODO: {
-            local $TODO = 'ChalkIR may have issues generating control flow nodes - investigating';
-            ok($counts->{If} > 0, "ChalkIR: graph contains If node for conditional");
-            ok($counts->{Proj} >= 2, "ChalkIR: graph contains Proj nodes for true/false branches");
-            ok($counts->{Region} > 0, "ChalkIR: graph contains Region node for merge point");
-        }
-
-        # These should pass even if control flow generation fails
+        # Control flow tests - should now pass after polymorphism fix
+        ok($counts->{If} > 0, "ChalkIR: graph contains If node for conditional");
+        ok($counts->{Proj} >= 2, "ChalkIR: graph contains Proj nodes for true/false branches");
+        ok($counts->{Region} > 0, "ChalkIR: graph contains Region node for merge point");
         ok($counts->{Constant} > 0, "ChalkIR: graph contains Constant nodes");
         ok($counts->{GT} > 0, "ChalkIR: graph contains GT node for condition");
     }
@@ -279,13 +274,11 @@ return $result;
 
         my $counts = count_node_types($graph, 'If', 'Proj', 'Region', 'Phi');
 
-        TODO: {
-            local $TODO = 'ChalkIR may have issues generating control flow nodes - investigating';
-            ok($counts->{If} > 0, "ChalkIR: if-else contains If node");
-            ok($counts->{Proj} >= 2, "ChalkIR: if-else contains Proj nodes");
-            ok($counts->{Region} > 0, "ChalkIR: if-else contains Region node");
-            ok($counts->{Phi} > 0, "ChalkIR: if-else contains Phi node for value merge");
-        }
+        # Control flow tests - should now pass after polymorphism fix
+        ok($counts->{If} > 0, "ChalkIR: if-else contains If node");
+        ok($counts->{Proj} >= 2, "ChalkIR: if-else contains Proj nodes");
+        ok($counts->{Region} > 0, "ChalkIR: if-else contains Region node");
+        ok($counts->{Phi} > 0, "ChalkIR: if-else contains Phi node for value merge");
     }
 }
 
