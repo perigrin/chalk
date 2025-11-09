@@ -49,8 +49,8 @@ class Chalk::IR::Builder {
     field $loop_depth = 0;    # Current loop nesting depth for label namespacing
     field $loop_modified_vars =
       [];    # Stack of sets tracking modified vars per loop depth
-    field $conditional_tracking_stack =
-      [];    # Stack for tracking variable modifications in conditional branches
+    field $branch_tracking_stack =
+      [];    # Unified stack for tracking variable modifications in branches (loops, conditionals)
     field $type_inference :reader;    # Type inference instance
     field $type_lattice   :reader;    # Grammar-specific type system
     field $validator      :reader;    # Validation context instance
@@ -426,13 +426,12 @@ class Chalk::IR::Builder {
             $current_loop_vars->{$var_name} = 1;
         }
 
-        # Track this variable as modified if we're in a conditional branch
-        if ( scalar($conditional_tracking_stack->@*) > 0 ) {
-            my $frame = $conditional_tracking_stack->[-1];
+        # Track this variable as modified if we're in a tracked branch (conditional/loop)
+        if ( scalar($branch_tracking_stack->@*) > 0 ) {
+            my $frame = $branch_tracking_stack->[-1];
             my $current_branch = $frame->{current_branch};
             if (defined($current_branch)) {
-                my $branch_key = $current_branch . '_branch';
-                $frame->{$branch_key}->{$var_name} = $value_node;
+                $frame->{branches}->{$current_branch}->{$var_name} = $value_node;
             }
         }
 
@@ -1792,25 +1791,27 @@ class Chalk::IR::Builder {
         return $node;
     }
 
-    # Conditional branch tracking for Phi node generation
-    # Similar to loop tracking but for if/else branches
+    # Unified branch tracking for Phi node generation
+    # Works for both conditionals (branches named 'true'/'false') and loops (branch named by depth)
 
-    method begin_conditional_tracking() {
-        # Start tracking variable modifications for conditional branches
-        # Pushes a new tracking frame: { true_branch => {}, false_branch => {}, context_snapshot => $context }
-        push $conditional_tracking_stack->@*, {
-            true_branch => {},
-            false_branch => {},
-            current_branch => undef,  # 'true' or 'false'
-            context_snapshot => $context,  # Save context before branches
+    method begin_branch_tracking(@branch_names) {
+        # Start tracking variable modifications across named branches
+        # @branch_names = ('true', 'false') for conditionals
+        # @branch_names = ('loop_0') for loops
+        my %branches = map { $_ => {} } @branch_names;
+
+        push $branch_tracking_stack->@*, {
+            branches => \%branches,           # Hash of branch_name => { var => node }
+            current_branch => undef,          # Which branch is currently active
+            context_snapshot => $context,     # Save context before branches
         };
         return;
     }
 
-    method set_conditional_branch($branch_name) {
-        # Set which branch we're currently evaluating ('true' or 'false')
-        return unless scalar($conditional_tracking_stack->@*) > 0;
-        my $frame = $conditional_tracking_stack->[-1];
+    method set_branch($branch_name) {
+        # Set which branch we're currently evaluating
+        return unless scalar($branch_tracking_stack->@*) > 0;
+        my $frame = $branch_tracking_stack->[-1];
         $frame->{current_branch} = $branch_name;
 
         # Restore context snapshot so each branch starts from same state
@@ -1818,37 +1819,45 @@ class Chalk::IR::Builder {
         return;
     }
 
-    method end_conditional_tracking() {
+    method end_branch_tracking() {
         # Stop tracking and return the tracking data
-        return unless scalar($conditional_tracking_stack->@*) > 0;
-        return pop $conditional_tracking_stack->@*;
+        return unless scalar($branch_tracking_stack->@*) > 0;
+        return pop $branch_tracking_stack->@*;
     }
 
-    method generate_conditional_phi_nodes($region_node, $tracking_data) {
-        # Generate Phi nodes for variables modified differently in true/false branches
+    method generate_phi_nodes($merge_node, $tracking_data, @branch_names) {
+        # Generate Phi nodes for variables modified across branches
+        # For conditionals: @branch_names = ('true', 'false')
+        # For loops: @branch_names = ('initial', 'loop')
         my %phi_nodes;
 
         return \%phi_nodes unless defined($tracking_data);
 
-        my $true_vars = $tracking_data->{true_branch};
-        my $false_vars = $tracking_data->{false_branch};
+        my $branches = $tracking_data->{branches};
 
-        # Find variables modified in both branches
-        my %all_vars = (%$true_vars, %$false_vars);
+        # Find all variables modified in any branch
+        my %all_vars;
+        for my $branch_name (@branch_names) {
+            my $branch_vars = $branches->{$branch_name} // {};
+            $all_vars{$_} = 1 for keys %$branch_vars;
+        }
 
         for my $var_name (keys %all_vars) {
-            my $true_value = $true_vars->{$var_name};
-            my $false_value = $false_vars->{$var_name};
+            # Collect values from each branch
+            my @values;
+            for my $branch_name (@branch_names) {
+                my $value = $branches->{$branch_name}->{$var_name};
+                push @values, $value if defined($value);
+            }
 
-            # Only create Phi if variable was modified in BOTH branches
-            # (if only modified in one branch, that branch's value stays in context)
-            next unless (defined($true_value) && defined($false_value));
+            # Only create Phi if variable was modified in multiple branches
+            next unless @values >= 2;
 
-            # Create Phi node: Phi(region, true_value, false_value)
-            my $phi = $self->build_phi_node($region_node, $true_value->id, $false_value->id);
+            # Create Phi node: Phi(merge_node, value1, value2, ...)
+            my @value_ids = map { $_->id } @values;
+            my $phi = $self->build_phi_node($merge_node, @value_ids);
 
             # Update context to bind variable to Phi node
-            # This ensures subsequent reads get the merged value
             $self->build_store_node($var_name, $phi);
 
             $phi_nodes{$var_name} = $phi;

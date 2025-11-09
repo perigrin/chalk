@@ -43,10 +43,10 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $if_false = $builder->build_if_false_node($if_node);
 
         # Start tracking variable modifications in branches
-        $builder->begin_conditional_tracking();
+        $builder->begin_branch_tracking('true', 'false');
 
         # Evaluate true branch with tracking
-        $builder->set_conditional_branch('true');
+        $builder->set_branch('true');
         my $true_block = $context->child(8);
         return undef unless (ref($true_block) eq 'HASH' && $true_block->{type} eq 'block');
 
@@ -67,7 +67,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             my $next_keyword = $children[10]->extract;
             if (defined($next_keyword) && $next_keyword eq 'else') {
                 # Evaluate false branch with tracking
-                $builder->set_conditional_branch('false');
+                $builder->set_branch('false');
 
                 # Get else block and wire up with IfFalse control
                 my $else_block = $context->child(12);
@@ -99,8 +99,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         $builder->set_control($region->id);
 
         # End tracking and generate Phi nodes for modified variables
-        my $tracking_data = $builder->end_conditional_tracking();
-        my $phi_nodes = $builder->generate_conditional_phi_nodes($region, $tracking_data);
+        my $tracking_data = $builder->end_branch_tracking();
+        my $phi_nodes = $builder->generate_phi_nodes($region, $tracking_data, 'true', 'false');
 
         # Return the Region node (represents the merge point)
         return $region;
