@@ -7,6 +7,7 @@ use utf8;
 use open qw(:std :utf8);
 use lib 'lib';
 use lib 'tools';
+use Scalar::Util qw(blessed);
 
 use Chalk;
 
@@ -251,7 +252,8 @@ if ( !caller ) {
                         my $ctx = $result->context;
                         if ($ctx->can('focus')) {
                             my $winning_node = $ctx->focus;
-                            if ($winning_node && $winning_node->can('id')) {
+                            # Check if winning_node is an object (not a terminal string value)
+                            if ($winning_node && blessed($winning_node) && $winning_node->can('id')) {
                                 $graph->prune_to_reachable($winning_node->id);
                             }
                         }

@@ -84,7 +84,7 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
         );
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
         my $lhs = $rule->lhs();
         my $symbol_node =
           $forest->get_or_create_symbol_node( $lhs, $start_pos, $end_pos );
@@ -203,8 +203,8 @@ class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
         $root_element = $mul_id;  # For compatibility
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
-        my $composite_elem = $composite->init_element_from_rule($rule, $start_pos, $end_pos);
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
+        my $composite_elem = $composite->init_element_from_rule($rule, $start_pos, $end_pos, $matched_value);
 
         return Chalk::Semiring::SPPFViterbiElement->new(
             composite => $composite_elem

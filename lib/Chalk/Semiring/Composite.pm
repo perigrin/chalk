@@ -144,11 +144,11 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
         $child_add_ids = \@add_ids;
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
         # Initialize element from each child semiring
         my @elements;
         for my $semiring ($semirings->@*) {
-            push @elements, $semiring->init_element_from_rule($rule, $start_pos, $end_pos);
+            push @elements, $semiring->init_element_from_rule($rule, $start_pos, $end_pos, $matched_value);
         }
 
         return Chalk::Semiring::CompositeElement->new(
@@ -181,6 +181,30 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
 
             # Delegate to child semiring (which may be NOOP or may do work)
             my $result = $semiring->on_complete($completed_item, $element);
+            push @results, $result;
+        }
+
+        # Return new CompositeElement with updated elements
+        return Chalk::Semiring::CompositeElement->new(
+            elements => \@results,
+            parent_semiring => $self
+        );
+    }
+
+    # Delegate on_scan() to all wrapped semirings
+    # This maintains polymorphism - each semiring can respond to terminal scanning
+    method on_scan($item, $element, $pos, $matched_value) {
+        # Extract elements from CompositeElement
+        my @elements = $element->elements->@*;
+
+        # Call on_scan() on each wrapped semiring with its corresponding element
+        my @results;
+        for my $i (0..$#$semirings) {
+            my $semiring = $semirings->[$i];
+            my $child_element = $elements[$i];
+
+            # Delegate to child semiring (which may handle terminals differently)
+            my $result = $semiring->on_scan($item, $child_element, $pos, $matched_value);
             push @results, $result;
         }
 

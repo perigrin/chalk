@@ -67,10 +67,15 @@ class Chalk::GrammarRule {
           ref($terminal) eq 'Regexp' ? $terminal : qr/\Q$terminal\E/;
     }
 
-    # Default semantic action: return children as array (for AST construction)
-    # Subclasses can override this method to provide custom semantic actions
+    # Default semantic action: die with clear error message
+    # All grammar rules that need semantic actions MUST override this method
+    # This prevents silent bugs from arrayrefs propagating through IR construction
     method evaluate($context) {
-        return [ map { $_->extract } $context->children->@* ];
+        my $rule = $context->rule;
+        my $rule_name = $rule ? $rule->lhs : 'unknown';
+        die "Rule '$rule_name' has no evaluate() method - all grammar rules used with semantic evaluation must implement evaluate().\n" .
+            "Either create lib/Chalk/Grammar/*/Rule/${rule_name}.pm with an evaluate() method,\n" .
+            "or if this rule should just pass through child(0), add a simple pass-through evaluate().\n";
     }
 }
 

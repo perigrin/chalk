@@ -72,8 +72,8 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     # Delegate semiring methods to composite
     method mul_id() { $composite->mul_id }
     method add_id() { $composite->add_id }
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
-        $composite->init_element_from_rule($rule, $start_pos, $end_pos)
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
+        $composite->init_element_from_rule($rule, $start_pos, $end_pos, $matched_value)
     }
     method multiply($x, $y) { $composite->multiply($x, $y) }
     method plus($x, $y) { $composite->plus($x, $y) }
@@ -82,6 +82,11 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     # Delegate on_complete() to composite (which delegates to wrapped semirings)
     method on_complete($completed_item, $completed_element) {
         $composite->on_complete($completed_item, $completed_element)
+    }
+
+    # Delegate on_scan() to composite (which delegates to wrapped semirings)
+    method on_scan($item, $element, $pos, $matched_value) {
+        $composite->on_scan($item, $element, $pos, $matched_value)
     }
 }
 

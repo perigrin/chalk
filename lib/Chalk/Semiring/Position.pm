@@ -52,7 +52,7 @@ class Chalk::Semiring::Position :isa(Chalk::Semiring) {
         end_pos   => 0
     );
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
         return Chalk::Semiring::PositionElement->new(
             start_pos => $start_pos,
             end_pos   => $end_pos

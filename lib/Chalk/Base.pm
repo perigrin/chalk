@@ -26,6 +26,19 @@ class Chalk::Semiring {
     method on_complete($completed_item, $completed_element) {
         return $completed_element;
     }
+
+    # NOOP hook for semirings that need to handle scanned terminal values
+    # Override in subclasses as needed (e.g., Semantic accumulates terminal values)
+    # Returns the element for the scanned item
+    method on_scan($item, $element, $pos, $matched_value) {
+        # Default: create new element from rule with updated positions
+        return $self->init_element_from_rule(
+            $item->rule,
+            $item->start_pos,
+            $pos + length($matched_value),
+            $matched_value
+        );
+    }
 }
 
 1;

@@ -16,48 +16,49 @@ use Chalk::Grammar::Chalk::Type::List;
 use Chalk::Grammar::Chalk::Type::Any;
 
 class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
-    field $value :param :reader;         # Computed semantic value
-    field $context :param :reader;       # Evaluation context
-    field $sppf_node :param = undef;     # Optional SPPF node
+    field $value :param :reader;        # Computed semantic value
+    field $context :param :reader;      # Evaluation context
+    field $sppf_node :param = undef;    # Optional SPPF node
 
     method add( $other, $swap = undef ) {
+
         # For alternatives (choice), prefer non-zero value
         # If self has value 0 (is add_id), return other
-        if ($value == 0) {
+        if ( $value == 0 ) {
             return $other;
         }
 
-        # Prefer elements with evaluated focus (defined) over unevaluated (undef)
-        # This handles the case where we update the chart after evaluation
-        my $self_focus = $self->context->focus;
+       # Prefer elements with evaluated focus (defined) over unevaluated (undef)
+       # This handles the case where we update the chart after evaluation
+        my $self_focus  = $self->context->focus;
         my $other_focus = $other->context->focus;
 
-        if (!defined($self_focus) && defined($other_focus)) {
+        if ( !defined($self_focus) && defined($other_focus) ) {
             return $other;
         }
-        if (defined($self_focus) && !defined($other_focus)) {
+        if ( defined($self_focus) && !defined($other_focus) ) {
             return $self;
         }
 
         # For semantic values, prefer the alternative that consumed more input
         # (this handles ambiguous parses - longer parse is more complete)
         # Use parse span (end_pos - start_pos) as primary ranking
-        my $self_span = $self->context->end_pos - $self->context->start_pos;
+        my $self_span  = $self->context->end_pos - $self->context->start_pos;
         my $other_span = $other->context->end_pos - $other->context->start_pos;
 
-        if ($other_span > $self_span) {
-            return $other;  # Other consumed more input, prefer it
+        if ( $other_span > $self_span ) {
+            return $other;    # Other consumed more input, prefer it
         }
-        if ($self_span > $other_span) {
-            return $self;  # Self consumed more input, prefer it
+        if ( $self_span > $other_span ) {
+            return $self;     # Self consumed more input, prefer it
         }
 
-        # If spans are equal, prefer the alternative with more children
-        # (handles cases where both consumed same input but one has more structure)
-        my $self_children = scalar(@{$self->context->children});
-        my $other_children = scalar(@{$other->context->children});
+     # If spans are equal, prefer the alternative with more children
+     # (handles cases where both consumed same input but one has more structure)
+        my $self_children  = scalar( @{ $self->context->children } );
+        my $other_children = scalar( @{ $other->context->children } );
 
-        if ($other_children > $self_children) {
+        if ( $other_children > $self_children ) {
             return $other;
         }
 
@@ -66,32 +67,34 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     }
 
     method multiply( $other, $swap = undef ) {
-        # For sequences, append other's context to self's children
-        # This builds up the children list as we advance the dot through the rule
-        my @new_children = (@{$self->context->children}, $other->context);
 
-        # Type propagation: keep the type from self's context (the rule being built)
+       # For sequences, append other's context to self's children
+       # This builds up the children list as we advance the dot through the rule
+        my @new_children = ( @{ $self->context->children }, $other->context );
+
+    # Type propagation: keep the type from self's context (the rule being built)
         my $combined_ctx = Chalk::EvalContext->new(
-            focus => undef,  # Not yet evaluated
-            children => \@new_children,
+            focus     => undef,                       # Not yet evaluated
+            children  => \@new_children,
             start_pos => $self->context->start_pos,
-            end_pos => $other->context->end_pos,
-            env => $self->context->env,
-            grammar => $self->context->grammar,
-            rule => $self->context->rule,
-            forest => $self->context->forest,
-            type => $self->context->type  # Propagate type from rule
+            end_pos   => $other->context->end_pos,
+            env       => $self->context->env,
+            grammar   => $self->context->grammar,
+            rule      => $self->context->rule,
+            forest    => $self->context->forest,
+            type      => $self->context->type         # Propagate type from rule
         );
 
         return Chalk::Semiring::SemanticElement->new(
-            value => 1,  # Success value
-            context => $combined_ctx,
+            value     => 1,                           # Success value
+            context   => $combined_ctx,
             sppf_node => $sppf_node
         );
     }
 
     method equals( $other, $swap = undef ) {
         return 0 unless ref($other) eq ref($self);
+
         # Use refaddr for reference equality to avoid recursion
         # For semantic semiring, we want elements to be considered non-equal
         # to add_id unless they are literally the same object
@@ -99,12 +102,14 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     }
 
     method score() {
+
         # Semantic semiring doesn't use numeric scores
         return 1;
     }
 
     method to_string(@args) {
-        # Return value (0 for add_id, 1 for others) for Parser's numeric comparisons
+
+    # Return value (0 for add_id, 1 for others) for Parser's numeric comparisons
         return defined($value) ? "$value" : '1';
     }
 }
@@ -113,148 +118,175 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     field $env :param = {};
     field $grammar :param :reader;
     field $shared_context :param :reader = undef;
-    field $type_env :param :reader = {};  # Maps variable names to Chalk::Type objects
+    field $type_env :param :reader =
+      {};    # Maps variable names to Chalk::Type objects
     field $forest :reader;
     field $mul_id :reader;
     field $add_id :reader;
-    field $_add_id_is_zero :reader = 1;  # Flag to identify add_id
+    field $_add_id_is_zero :reader = 1;    # Flag to identify add_id
 
     ADJUST {
         # Store reference to shared forest if provided
-        $forest = defined($shared_context) && exists($shared_context->{forest})
-            ? $shared_context->{forest}
-            : undef;
+        $forest =
+          defined($shared_context)
+          && exists( $shared_context->{forest} )
+          ? $shared_context->{forest}
+          : undef;
 
         # Create identity elements with empty contexts
         my $empty_ctx_mul = Chalk::EvalContext->new(
-            focus => undef,
-            children => [],
+            focus     => undef,
+            children  => [],
             start_pos => 0,
-            end_pos => 0,
-            env => $env,
-            grammar => $grammar,
-            rule => undef,
-            forest => $forest
+            end_pos   => 0,
+            env       => $env,
+            grammar   => $grammar,
+            rule      => undef,
+            forest    => $forest
         );
 
         my $empty_ctx_add = Chalk::EvalContext->new(
-            focus => undef,
-            children => [],
+            focus     => undef,
+            children  => [],
             start_pos => 0,
-            end_pos => 0,
-            env => $env,
-            grammar => $grammar,
-            rule => undef,
-            forest => $forest
+            end_pos   => 0,
+            env       => $env,
+            grammar   => $grammar,
+            rule      => undef,
+            forest    => $forest
         );
 
         $mul_id = Chalk::Semiring::SemanticElement->new(
-            value => 1,  # mul_id has value 1
+            value   => 1,               # mul_id has value 1
             context => $empty_ctx_mul
         );
 
         $add_id = Chalk::Semiring::SemanticElement->new(
-            value => 0,  # add_id has value 0 (failure/no parse)
+            value   => 0,               # add_id has value 0 (failure/no parse)
             context => $empty_ctx_add
         );
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $parent_derivation_id = undef) {
+    method init_element_from_rule(
+        $rule,
+        $start_pos            = 0,
+        $end_pos              = 0,
+        $parent_derivation_id = undef
+      )
+    {
         # Infer type from the rule
         my $inferred_type = $self->infer_type_from_rule($rule);
 
         my $ctx = Chalk::EvalContext->new(
-            focus => undef,
-            children => [],
+            focus     => undef,
+            children  => [],
             start_pos => $start_pos,
-            end_pos => $end_pos,
-            env => $env,
-            grammar => $grammar,
-            rule => $rule,
-            forest => $forest,
-            type => $inferred_type
+            end_pos   => $end_pos,
+            env       => $env,
+            grammar   => $grammar,
+            rule      => $rule,
+            forest    => $forest,
+            type      => $inferred_type
         );
 
         return Chalk::Semiring::SemanticElement->new(
-            value => 1,  # Success value (not add_id which is 0)
+            value   => 1,     # Success value (not add_id which is 0)
             context => $ctx
         );
     }
 
-    method multiply($x, $y) {
+    method multiply( $x, $y ) {
+
         # For backward compatibility if called directly
         return $x->multiply($y);
     }
 
-    method plus($x, $y) {
+    method plus( $x, $y ) {
+
         # For backward compatibility if called directly
         return $x->add($y);
     }
 
     # Infer the type of an expression from its grammar rule
+    # TODO put these into the Rule classes themselves
     method infer_type_from_rule($rule) {
         return Chalk::Grammar::Chalk::Type::Any->new() unless defined($rule);
 
         my $lhs = $rule->lhs;
-        my @rhs = @{$rule->rhs};
+        my @rhs = @{ $rule->rhs };
 
         # Literal types - check RHS for terminal patterns
-        if (@rhs == 1) {
+        if ( @rhs == 1 ) {
             my $terminal = $rhs[0];
+
             # Integer literal
-            return Chalk::Grammar::Chalk::Type::Int->new() if $terminal eq '%INTEGER%';
+            return Chalk::Grammar::Chalk::Type::Int->new()
+              if $terminal eq '%INTEGER%';
+
             # Float/Number literal
-            return Chalk::Grammar::Chalk::Type::Num->new() if $terminal eq '%FLOAT%' || $terminal eq '%VERSION%';
+            return Chalk::Grammar::Chalk::Type::Num->new()
+              if $terminal eq '%FLOAT%' || $terminal eq '%VERSION%';
+
             # String literals
-            return Chalk::Grammar::Chalk::Type::Str->new() if $terminal eq '%SINGLE_QUOTED_STRING%'
-                                           || $terminal eq '%DOUBLE_QUOTED_STRING%';
+            return Chalk::Grammar::Chalk::Type::Str->new()
+              if $terminal eq '%SINGLE_QUOTED_STRING%'
+              || $terminal eq '%DOUBLE_QUOTED_STRING%';
         }
 
         # Variable types - infer from sigil in RHS
-        if ($lhs =~ qr/Variable$/) {
+        if ( $lhs =~ qr/Variable$/ ) {
+
             # Scalar variable: $ identifier
-            if (@rhs >= 1 && $rhs[0] eq '$') {
+            if ( @rhs >= 1 && $rhs[0] eq '$' ) {
                 return Chalk::Grammar::Chalk::Type::Scalar->new();
             }
+
             # Array variable: @ identifier
-            if (@rhs >= 1 && $rhs[0] eq '@') {
+            if ( @rhs >= 1 && $rhs[0] eq '@' ) {
                 return Chalk::Grammar::Chalk::Type::Array->new(
-                    element_type => Chalk::Grammar::Chalk::Type::Any->new()
-                );
+                    element_type => Chalk::Grammar::Chalk::Type::Any->new() );
             }
+
             # Hash variable: % identifier
-            if (@rhs >= 1 && $rhs[0] eq '%') {
+            if ( @rhs >= 1 && $rhs[0] eq '%' ) {
                 return Chalk::Grammar::Chalk::Type::Hash->new(
-                    value_type => Chalk::Grammar::Chalk::Type::Any->new()
-                );
+                    value_type => Chalk::Grammar::Chalk::Type::Any->new() );
             }
         }
 
         # Operation types - check for operators in RHS
-        for my $i (0 .. $#rhs) {
+        for my $i ( 0 .. $#rhs ) {
             my $symbol = $rhs[$i];
+
             # Numeric operations
-            if ($symbol =~ qr/^[+\-*\/]$/ || $symbol eq '**') {
+            if ( $symbol =~ qr/^[+\-*\/]$/ || $symbol eq '**' ) {
                 return Chalk::Grammar::Chalk::Type::Num->new();
             }
+
             # String concatenation
-            if ($symbol eq '.') {
+            if ( $symbol eq '.' ) {
                 return Chalk::Grammar::Chalk::Type::Str->new();
             }
+
             # Range operator
-            if ($symbol eq '..') {
+            if ( $symbol eq '..' ) {
                 return Chalk::Grammar::Chalk::Type::List->new();
             }
         }
 
         # Type inference by LHS name
-        return Chalk::Grammar::Chalk::Type::Int->new()    if $lhs eq 'Integer' || $lhs eq 'IntegerLiteral';
-        return Chalk::Grammar::Chalk::Type::Num->new()    if $lhs eq 'Number' || $lhs eq 'NumberLiteral';
-        return Chalk::Grammar::Chalk::Type::Str->new()    if $lhs eq 'String' || $lhs eq 'StringLiteral'
-                                          || $lhs =~ qr/Quoted/;
-        return Chalk::Grammar::Chalk::Type::Array->new(element_type => Chalk::Grammar::Chalk::Type::Any->new())
-                                       if $lhs eq 'ArrayLiteral' || $lhs eq 'List';
-        return Chalk::Grammar::Chalk::Type::List->new()   if $lhs eq 'Range';
+        return Chalk::Grammar::Chalk::Type::Int->new()
+          if $lhs eq 'Integer' || $lhs eq 'IntegerLiteral';
+        return Chalk::Grammar::Chalk::Type::Num->new()
+          if $lhs eq 'Number' || $lhs eq 'NumberLiteral';
+        return Chalk::Grammar::Chalk::Type::Str->new()
+          if $lhs eq 'String'
+          || $lhs eq 'StringLiteral'
+          || $lhs =~ qr/Quoted/;
+        return Chalk::Grammar::Chalk::Type::Array->new(
+            element_type => Chalk::Grammar::Chalk::Type::Any->new() )
+          if $lhs eq 'ArrayLiteral' || $lhs eq 'List';
+        return Chalk::Grammar::Chalk::Type::List->new() if $lhs eq 'Range';
 
         # Default to Any for unknown constructs
         return Chalk::Grammar::Chalk::Type::Any->new();
@@ -262,34 +294,61 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
 
     # Override base on_complete() to call semantic actions (evaluate())
     # This maintains polymorphism - Parser calls this uniformly on all semirings
-    method on_complete($completed_item, $completed_element) {
+    method on_complete( $completed_item, $completed_element ) {
         my $ctx = $completed_element->context;
 
         # Evaluate the rule's semantic action if it has one
         my $rule = $ctx->rule;
-        if ($rule && $rule->can('evaluate')) {
+        if ( $rule && $rule->can('evaluate') ) {
             my $result = $rule->evaluate($ctx);
 
             # Set the focus to the evaluated result
             $ctx = Chalk::EvalContext->new(
-                focus => $result,
-                children => $ctx->children,
+                focus     => $result,
+                children  => $ctx->children,
                 start_pos => $ctx->start_pos,
-                end_pos => $ctx->end_pos,
-                env => $ctx->env,
-                grammar => $ctx->grammar,
-                rule => $ctx->rule,
-                forest => $ctx->forest
+                end_pos   => $ctx->end_pos,
+                env       => $ctx->env,
+                grammar   => $ctx->grammar,
+                rule      => $ctx->rule,
+                forest    => $ctx->forest
             );
 
             # Update the completed element with evaluated context
             $completed_element = Chalk::Semiring::SemanticElement->new(
-                value => 1,
+                value   => 1,
                 context => $ctx
             );
         }
 
         return $completed_element;
+    }
+
+    # Override base on_scan() to accumulate terminal values
+    # This maintains polymorphism - Parser calls this uniformly on all semirings
+    method on_scan( $item, $element, $pos, $matched_value ) {
+        my $match_length = length($matched_value);
+
+        # Create a terminal element with the matched value as focus
+        my $terminal_ctx = Chalk::EvalContext->new(
+            focus     => $matched_value,
+            children  => [],
+            start_pos => $pos,
+            end_pos   => $pos + $match_length,
+            env       => $element->context->env,
+            grammar   => $element->context->grammar,
+            rule      => $item->rule,
+            forest    => $element->context->forest,
+            type      => $element->context->type
+        );
+
+        my $terminal_element = Chalk::Semiring::SemanticElement->new(
+            value   => 1,
+            context => $terminal_ctx
+        );
+
+        # Multiply to accumulate terminal into children
+        return $element->multiply($terminal_element);
     }
 }
 

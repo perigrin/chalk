@@ -74,6 +74,7 @@
 %NUM_COMPARE_OP% = /==|!=|<=|>=|<=>|<|>/
 %REGEX_MATCH_OP% = /=~|!~/
 %ASSIGN_OP% = /\/\/=|\|\|=|\+=|-=|\.=/
+%ARITHMETIC_OP% = /[+\-*\/]/
 
 # ============================================================================
 # GRAMMAR RULES - Organized Generic → Specific
@@ -280,10 +281,7 @@ RangeOp -> Expression WS_OPT '..' WS_OPT Expression
 # Arithmetic operators (left-associative)
 # Phase 4: Flattened from Additive + Multiplicative
 # Precedence handled by Precedence semiring
-ArithmeticOp -> Expression WS_OPT '+' WS_OPT Expression
-ArithmeticOp -> Expression WS_OPT '-' WS_OPT Expression
-ArithmeticOp -> Expression WS_OPT '*' WS_OPT Expression
-ArithmeticOp -> Expression WS_OPT '/' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT %ARITHMETIC_OP% WS_OPT Expression
 
 # Unary prefix operators (right-associative)
 Unary -> '!' WS_OPT Expression
