@@ -45,9 +45,13 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # Start tracking variable modifications in branches
         $builder->begin_branch_tracking('true', 'false');
 
-        # Evaluate true branch with tracking
+        # Get true branch context WITHOUT evaluating yet
+        my $true_block_ctx = $context->child_context(8);
+        return undef unless $true_block_ctx;
+
+        # NOW evaluate true branch with tracking active
         $builder->set_branch('true');
-        my $true_block = $context->child(8);
+        my $true_block = $true_block_ctx->extract;
         return undef unless (ref($true_block) eq 'HASH' && $true_block->{type} eq 'block');
 
         # Wire up true branch statements with IfTrue control
@@ -66,11 +70,13 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         if (@children > 10) {
             my $next_keyword = $children[10]->extract;
             if (defined($next_keyword) && $next_keyword eq 'else') {
-                # Evaluate false branch with tracking
-                $builder->set_branch('false');
+                # Get false branch context WITHOUT evaluating yet
+                my $false_block_ctx = $context->child_context(12);
 
-                # Get else block and wire up with IfFalse control
-                my $else_block = $context->child(12);
+                # NOW evaluate false branch with tracking active
+                $builder->set_branch('false');
+                my $else_block = $false_block_ctx ? $false_block_ctx->extract : undef;
+
                 if (ref($else_block) eq 'HASH' && $else_block->{type} eq 'block') {
                     $current_ctrl = $if_false->id;
                     for my $stmt ($else_block->{statements}->@*) {
