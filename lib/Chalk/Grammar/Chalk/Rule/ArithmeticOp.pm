@@ -2,7 +2,7 @@
 # ABOUTME: Handles +, -, *, / operators with precedence validated by Precedence semiring
 
 use 5.42.0;
-use experimental qw(class keyword_any);
+use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
@@ -12,7 +12,7 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         # So operator is at index 2
         my $operator = $context->child(2);
         return $context->child(0) unless defined $operator && !ref($operator);
-        return $context->child(0) unless any { $operator eq $_ } qw(+ - * /);
+        return $context->child(0) unless $operator =~ qr/^[+\-*\/]$/;
 
         my $builder = $context->env->{ir_builder};
         return $context->child(0) unless $builder;
