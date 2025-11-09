@@ -18,21 +18,9 @@ class Chalk::EvalContext {
     field $type   :param :reader = undef; # Type of the expression (Chalk::Type)
 
     method to_string (@args) {
-        use DDP;
-        return &np(
-            {
-                focus     => $focus,
-                children  => $children,
-                start_pos => $start_pos,
-                end_pos   => $end_pos,
-                env       => $env,
-
-                # grammar   => $grammar,
-                rule   => $rule,
-                forest => $forest,
-                type   => $type
-            }
-        );
+        my $rule_name = $rule ? $rule->lhs : 'none';
+        my $type_name = $type ? ref($type) : 'none';
+        return "EvalContext[rule=$rule_name, type=$type_name, pos=$start_pos..$end_pos]";
     }
 
     # Comonad operation: extract the focus value

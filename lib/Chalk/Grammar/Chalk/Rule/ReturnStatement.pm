@@ -7,8 +7,6 @@ use experimental 'class';
 class Chalk::Grammar::Chalk::Rule::ReturnStatement :isa(Chalk::GrammarRule) {
 
     method evaluate($context) {
-        warn "Return Statement: " . $context->rule;
-
        # ReturnStatement can have multiple forms:
        # ReturnStatement -> 'return'
        # ReturnStatement -> 'return' WS_OPT Expression
@@ -26,10 +24,7 @@ class Chalk::Grammar::Chalk::Rule::ReturnStatement :isa(Chalk::GrammarRule) {
         # The control input will be '__CONTROL_PLACEHOLDER__'
         # Parent rule (Block, ConditionalStatement, etc) must wire up control
         unless ( $expr_node isa Chalk::IR::Node::Base ) {
-            use DDP;
-            use Carp qw(confess);
-            p $expr_node;
-            confess "unknown expression for return: $expr_node";
+            die "ReturnStatement received non-IR-node expression: " . ref($expr_node);
         }
 
         return $builder->build_return_node( $expr_node,
