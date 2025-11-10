@@ -4,6 +4,7 @@
 use 5.42.0;
 use utf8;
 use lib 'lib';
+use Test::More tests => 8;
 use Chalk::Grammar::BNF;
 use FindBin qw($RealBin);
 use Chalk::Parser;
@@ -18,37 +19,29 @@ my $chalk_grammar = Chalk::Grammar->build_from_bnf($bnf_content, "Program");
 
 my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
 
-print "1..8\n";
-
 # Test 1: Simple bare regex with semicolon
-my $result = $parser->parse_string('/^/;');
-print $result ? "ok 1 - bare regex with semicolon\n" : "not ok 1 - bare regex with semicolon\n";
+ok($parser->parse_string('/^/;'), 'bare regex with semicolon');
 
 # Test 2: Bare regex in && expression
-$result = $parser->parse_string('/^/ && 1;');
-print $result ? "ok 2 - bare regex in && expression\n" : "not ok 2 - bare regex in && expression\n";
+ok($parser->parse_string('/^/ && 1;'), 'bare regex in && expression');
 
 # Test 3: Bare regex after bare block
-$result = $parser->parse_string('{ } /^/;');
-print $result ? "ok 3 - bare regex after bare block\n" : "not ok 3 - bare regex after bare block\n";
+ok($parser->parse_string('{ } /^/;'), 'bare regex after bare block');
 
 # Test 4: Bare regex after if block
-$result = $parser->parse_string('if (1) { } /^/;');
-print $result ? "ok 4 - bare regex after if block\n" : "not ok 4 - bare regex after if block\n";
+ok($parser->parse_string('if (1) { } /^/;'), 'bare regex after if block');
 
 # Test 5: Bare regex after while block
-$result = $parser->parse_string('while (0) { } /^/;');
-print $result ? "ok 5 - bare regex after while block\n" : "not ok 5 - bare regex after while block\n";
+ok($parser->parse_string('while (0) { } /^/;'), 'bare regex after while block');
 
 # Test 6: The exact lex.t pattern (simplified)
-$result = $parser->parse_string('while (0) { print "x"; }
-/^/;');
-print $result ? "ok 6 - while block then newline then bare regex\n" : "not ok 6 - while block then newline then bare regex\n";
+ok($parser->parse_string('while (0) { print "x"; }
+/^/;'), 'while block then newline then bare regex');
 
 # Test 7: Ensure bare regex in if condition still works (regression test)
-$result = $parser->parse_string('if (/^/) { }');
-print $result ? "ok 7 - bare regex in if condition (regression)\n" : "not ok 7 - bare regex in if condition (regression)\n";
+ok($parser->parse_string('if (/^/) { }'), 'bare regex in if condition (regression)');
 
 # Test 8: Ensure explicit binding still works (regression test)
-$result = $parser->parse_string('$_ =~ /^/;');
-print $result ? "ok 8 - explicit binding (regression)\n" : "not ok 8 - explicit binding (regression)\n";
+ok($parser->parse_string('$_ =~ /^/;'), 'explicit binding (regression)');
+
+done_testing();
