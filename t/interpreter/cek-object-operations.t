@@ -1,3 +1,6 @@
+#!/usr/bin/env perl
+# ABOUTME: Tests CEK interpreter object operations including NewObject, FieldStore, and FieldLoad nodes
+# ABOUTME: Verifies heap allocation, field storage/retrieval, multi-field objects, and object isolation
 use 5.42.0;
 use Test::More tests => 8;
 use Chalk::IR::Graph;

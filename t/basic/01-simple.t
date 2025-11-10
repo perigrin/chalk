@@ -1,4 +1,6 @@
 #!/usr/bin/env perl
+# ABOUTME: Basic parser smoke test verifying minimal grammar and parsing functionality
+# ABOUTME: Tests that a single-rule grammar can be created and a simple string can be parsed
 use 5.42.0;
 use Test2::V0;
 use FindBin      qw($RealBin);

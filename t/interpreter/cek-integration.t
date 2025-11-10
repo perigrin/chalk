@@ -1,3 +1,6 @@
+#!/usr/bin/env perl
+# ABOUTME: Integration tests for CEK interpreter combining arithmetic, arrays, hashes, and stepping modes
+# ABOUTME: Verifies complex expressions work correctly and that execute() and step() modes produce identical results
 use 5.42.0;
 use Test::More tests => 8;
 use Chalk::IR::Graph;

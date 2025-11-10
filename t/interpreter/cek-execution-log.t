@@ -1,3 +1,6 @@
+#!/usr/bin/env perl
+# ABOUTME: Tests CEK interpreter execution logging and formatting capabilities
+# ABOUTME: Verifies log entry creation, step tracking, and multiple output formats (text, detailed, summary)
 use 5.42.0;
 use Test::More tests => 16;
 use Chalk::IR::Graph;

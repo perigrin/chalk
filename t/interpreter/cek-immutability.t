@@ -1,3 +1,6 @@
+#!/usr/bin/env perl
+# ABOUTME: Tests CEK interpreter environment immutability guarantees
+# ABOUTME: Verifies that extend_node, extend_variable, and extend_heap create new environments without mutating originals
 use 5.42.0;
 use Test::More tests => 13;
 use Chalk::Interpreter::Environment;

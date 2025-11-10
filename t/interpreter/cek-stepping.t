@@ -1,3 +1,6 @@
+#!/usr/bin/env perl
+# ABOUTME: Tests CEK interpreter step-by-step execution mode and state inspection
+# ABOUTME: Verifies initialization, stepping through computation, state queries, and equivalence with execute() mode
 use 5.42.0;
 use Test::More tests => 22;
 use Chalk::IR::Graph;

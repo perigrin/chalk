@@ -1,3 +1,6 @@
+#!/usr/bin/env perl
+# ABOUTME: Tests CEK interpreter array operations including NewArray, ArrayStore, and ArrayLoad nodes
+# ABOUTME: Verifies heap allocation, element storage/retrieval, multi-index arrays, and array isolation
 use 5.42.0;
 use Test::More tests => 8;
 use Chalk::IR::Graph;
