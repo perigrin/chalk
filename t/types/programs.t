@@ -1,6 +1,11 @@
 #!/usr/bin/env perl
 # ABOUTME: End-to-end integration tests for type checking with real Perl programs
 # ABOUTME: Tests type inference and checking through complete parse and IR generation
+#
+# NOTE: Type system modules (Chalk::Type::*) are not yet fully implemented.
+# Currently these tests only validate parsing succeeds. Once type system is
+# complete, these tests should be enhanced to validate actual type inference
+# results. See issue #135 for type system implementation status.
 
 use 5.042;
 use Test::More;
@@ -35,6 +40,9 @@ my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     my $result = eval { $parser->parse_string($code) };
 
     ok($result, 'Numeric operation parses successfully');
+    # TODO: Once type system is implemented, verify inferred types:
+    # - Parameters $x, $y should be inferred as Num
+    # - Return type should be Num (result of +)
 }
 
 # Test 2: String concatenation
@@ -48,6 +56,9 @@ my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     my $result = eval { $parser->parse_string($code) };
 
     ok($result, 'String concatenation parses successfully');
+    # TODO: Once type system is implemented, verify inferred types:
+    # - Parameter $name should be Str
+    # - Return type should be Str (result of .)
 }
 
 # Test 3: List to Array conversion

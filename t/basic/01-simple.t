@@ -18,8 +18,10 @@ my $grammar = Test::Chalk::Grammar->build_grammar(
         [ 'A' => [] ]
     ]
 );
-ok $grammar, $grammar;
+ok $grammar, 'Grammar created successfully';
 
 my $parser = Chalk::Parser->new( grammar => $grammar );
-$parser->parse_string('A');
+my $result = $parser->parse_string('A');
+ok $result, 'Parse simple string with minimal grammar';
+isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
 

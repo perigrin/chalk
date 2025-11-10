@@ -35,6 +35,10 @@ EOF
 
     my $result = $parser->parse_string($code);
     ok $result, 'Parse single-quoted heredoc';
+    isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
+
+    # Verify the code contains my declaration and assignment
+    like $code, qr/my\s+\$text/, 'Code contains variable declaration';
 };
 
 subtest 'Parse double-quoted heredoc with preprocessing' => sub {
@@ -51,6 +55,7 @@ EOF
 
     my $result = $parser->parse_string($code);
     ok $result, 'Parse double-quoted heredoc';
+    isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
 };
 
 subtest 'Parse indented heredoc with preprocessing' => sub {
@@ -68,6 +73,7 @@ EOF
 
     my $result = $parser->parse_string($code);
     ok $result, 'Parse indented heredoc';
+    isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
 };
 
 subtest 'Parse multiple heredocs with preprocessing' => sub {
@@ -86,6 +92,11 @@ EOF2
 
     my $result = $parser->parse_string($code);
     ok $result, 'Parse multiple heredocs';
+    isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
+
+    # Verify code contains both EOF markers
+    like $code, qr/EOF1/, 'Code contains first EOF marker';
+    like $code, qr/EOF2/, 'Code contains second EOF marker';
 };
 
 subtest 'Parse mixed code and heredoc' => sub {
@@ -103,6 +114,11 @@ my $y = $x + 10;};
 
     my $result = $parser->parse_string($code);
     ok $result, 'Parse mixed code with heredoc';
+    isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
+
+    # Verify all parts of the code are present
+    like $code, qr/\$x = 42/, 'Code contains first assignment';
+    like $code, qr/\$y = \$x \+ 10/, 'Code contains second assignment';
 };
 
 subtest 'Preprocessing disabled should not transform' => sub {
@@ -117,4 +133,8 @@ subtest 'Preprocessing disabled should not transform' => sub {
 
     my $result = $parser->parse_string($code);
     ok $result, 'Parse q{} without preprocessing';
+    isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
+
+    # Verify q{} syntax is in the code (not transformed to heredoc)
+    like $code, qr/q\{/, 'Code still contains q{} syntax (not transformed)';
 };
