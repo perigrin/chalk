@@ -70,7 +70,7 @@ if ( !caller ) {
 
         # Both Perl and Chalk grammars use 'Program' as start symbol
         my $start_symbol = ($grammar_module eq 'Perl' || $grammar_module eq 'Chalk') ? 'Program' : undef;
-        $chalk_grammar = Chalk::Grammar->build_from_bnf($content, $start_symbol);
+        $chalk_grammar = Chalk::Grammar->build_from_bnf($content, $start_symbol, $grammar_module);
     } else {
         # Try loading as a module
         my $full_module_name = $grammar_module;
