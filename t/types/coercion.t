@@ -7,14 +7,14 @@ use experimental qw(class);
 use Test::More;
 use lib 'lib';
 
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Coercion;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Boolean;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Undef;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Ref;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::ArrayRef;
+use Chalk::Grammar::Chalk::Type::Coercion;
+use Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::Num;
+use Chalk::Grammar::Chalk::Type::Str;
+use Chalk::Grammar::Chalk::Type::Boolean;
+use Chalk::Grammar::Chalk::Type::Undef;
+use Chalk::Grammar::Chalk::Type::Ref;
+use Chalk::Grammar::Chalk::Type::ArrayRef;
 
 subtest 'Numeric coercion (to_num) - identity cases' => sub {
     my $coercer = Chalk::Grammar::Chalk::Type::Coercion->new();

@@ -7,11 +7,11 @@ use experimental qw(class);
 use Test::More;
 use lib 'lib';
 
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Boolean;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Undef;
+use Chalk::Grammar::Chalk::Type::Num;
+use Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::Str;
+use Chalk::Grammar::Chalk::Type::Boolean;
+use Chalk::Grammar::Chalk::Type::Undef;
 
 subtest 'Type membership requires both criteria' => sub {
     # Type membership needs BOTH:
