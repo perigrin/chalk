@@ -4,6 +4,7 @@
 
 use v5.42;
 use Test::More;
+use lib 'lib';
 use Chalk::IR::Graph;
 use Chalk::IR::Node;
 use Chalk::IR::Validator;

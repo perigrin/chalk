@@ -4,6 +4,7 @@
 use v5.42;
 use Test::More;
 use Test::Deep;
+use lib 'lib';
 
 # Test that we can load the required modules
 use_ok('Chalk::IR::Node');
