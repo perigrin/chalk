@@ -58,7 +58,7 @@ class Chalk::LeoItem {
 
     method complete()    { 1 }
     method next_symbol() { }
-    method dot_pos()     { scalar($rule->rhs) }  # LeoItems are always complete
+    method dot_pos()     { scalar( $rule->rhs ) } # LeoItems are always complete
 
     method key(@args) {
         return "LEO:$symbol|$start_pos|$end_pos";
@@ -72,8 +72,10 @@ class Chalk::EarleyChart {
     field @by_end_pos;
     field %predicted;    # Track what we've predicted at each position
     field %completed;    # Track what we've completed
-    field %waiting_for;  # Index: waiting_for{symbol}{pos} = [items waiting for symbol at pos]
-    field %leo_waiting_for;  # Index: leo_waiting_for{symbol}{pos} = [Leo items waiting for symbol at pos]
+    field %waiting_for
+      ;    # Index: waiting_for{symbol}{pos} = [items waiting for symbol at pos]
+    field %leo_waiting_for
+      ; # Index: leo_waiting_for{symbol}{pos} = [Leo items waiting for symbol at pos]
 
     method add_item($earley_item) {
         $chart{ $earley_item->key } = $earley_item;
@@ -90,9 +92,10 @@ class Chalk::EarleyChart {
         push( $by_end_pos[$end_pos]->@*, $item );
 
         # Index by what they're waiting for
-        if ($item isa Chalk::LeoItem) {
+        if ( $item isa Chalk::LeoItem ) {
+
             # Leo items are indexed by their symbol and end position
-            my $symbol = $item->symbol;
+            my $symbol      = $item->symbol;
             my $leo_end_pos = $item->end_pos;
             $leo_waiting_for{$symbol} //= {};
             my $leo_by_symbol = $leo_waiting_for{$symbol};
@@ -100,7 +103,8 @@ class Chalk::EarleyChart {
             my $leo_list = $leo_by_symbol->{$leo_end_pos};
             push( $leo_list->@*, $item );
         }
-        elsif (!$item->complete) {
+        elsif ( !$item->complete ) {
+
             # Regular items indexed by next_symbol
             my $next_sym = $item->next_symbol;
             if ($next_sym) {
@@ -121,17 +125,17 @@ class Chalk::EarleyChart {
         return;
     }
 
-    method items_waiting_for($symbol, $pos) {
+    method items_waiting_for( $symbol, $pos ) {
         my $by_symbol = $waiting_for{$symbol};
-        if ($by_symbol && exists($by_symbol->{$pos})) {
+        if ( $by_symbol && exists( $by_symbol->{$pos} ) ) {
             return $by_symbol->{$pos}->@*;
         }
         return;
     }
 
-    method leo_items_waiting_for($symbol, $pos) {
+    method leo_items_waiting_for( $symbol, $pos ) {
         my $by_symbol = $leo_waiting_for{$symbol};
-        if ($by_symbol && exists($by_symbol->{$pos})) {
+        if ( $by_symbol && exists( $by_symbol->{$pos} ) ) {
             return $by_symbol->{$pos}->@*;
         }
         return;
@@ -179,7 +183,9 @@ class Chalk::EarleyChart {
                 # the grammar file itself (which has exponentially many parses).
                 # For other semirings (like Semantic), we need to accumulate ALL
                 # parses to get the correct result.
-                if ($semiring isa Chalk::Semiring::Boolean && $result != $semiring->add_id) {
+                if (   $semiring isa Chalk::Semiring::Boolean
+                    && $result != $semiring->add_id )
+                {
                     return $result;
                 }
             }
@@ -192,30 +198,30 @@ class Chalk::EarleyChart {
 }
 
 class Chalk::Parser {
-    field $semiring :param = Chalk::Semiring::Boolean->new();
-    field $grammar :param;
-    field $preprocess :param = [];  # Arrayref of preprocessor class names
-    field $input_string;  # Store input string for semantic actions
+    field $semiring   :param = Chalk::Semiring::Boolean->new();
+    field $grammar    :param;
+    field $preprocess :param = [];    # Arrayref of preprocessor class names
+    field $input_string;              # Store input string for semantic actions
 
     method parse_string($input) {
-        $input_string = $input;  # Store for semantic actions
-        # Apply preprocessors in sequence
-        for my $preprocessor_class ($preprocess->@*) {
+        $input_string = $input;       # Store for semantic actions
+                                      # Apply preprocessors in sequence
+        for my $preprocessor_class ( $preprocess->@* ) {
             next unless defined $preprocessor_class;
 
             # Load the preprocessor module
-            my $file = $preprocessor_class;
-            my $search = '::';
+            my $file    = $preprocessor_class;
+            my $search  = '::';
             my $replace = '/';
-            my $pos = index($file, $search);
-            while ($pos >= 0) {
-                substr($file, $pos, length($search), $replace);
-                $pos = index($file, $search, $pos + length($replace));
+            my $pos     = index( $file, $search );
+            while ( $pos >= 0 ) {
+                substr( $file, $pos, length($search), $replace );
+                $pos = index( $file, $search, $pos + length($replace) );
             }
             require "$file.pm";
 
             # Apply preprocessing
-            my $preprocessor = $preprocessor_class->new(input => $input);
+            my $preprocessor = $preprocessor_class->new( input => $input );
             $preprocessor->transform();
             $input = $preprocessor->output;
         }
@@ -232,7 +238,8 @@ class Chalk::Parser {
                 end_pos   => 0,
             );
 
-            my $start_element = $semiring->init_element_from_rule($rule, 0, 0);
+            my $start_element =
+              $semiring->init_element_from_rule( $rule, 0, 0 );
             $chart->add_element( $start_item, $start_element );
         }
 
@@ -261,44 +268,51 @@ class Chalk::Parser {
 
         # Show where parsing actually stopped if it failed
         if ( !$result && $last_active_pos < $input_length ) {
+
             # Calculate line and column of failure position
-            my $line_num = 1;
-            my $col = 0;
+            my $line_num   = 1;
+            my $col        = 0;
             my $line_start = 0;
-            for my $i (0 .. $last_active_pos - 1) {
-                if (substr($input, $i, 1) eq "\n") {
+            for my $i ( 0 .. $last_active_pos - 1 ) {
+                if ( substr( $input, $i, 1 ) eq "\n" ) {
                     $line_num++;
                     $line_start = $i + 1;
-                    $col = 0;
-                } else {
+                    $col        = 0;
+                }
+                else {
                     $col++;
                 }
             }
 
             # Extract source lines around failure position
-            my @lines = split(qr/\n/, $input, -1);
-            my $context_lines = 2;  # Show 2 lines before and after
-            my $start_line = $line_num - $context_lines - 1;
+            my @lines         = split( qr/\n/, $input, -1 );
+            my $context_lines = 2;    # Show 2 lines before and after
+            my $start_line    = $line_num - $context_lines - 1;
             $start_line = 0 if $start_line < 0;
             my $end_line = $line_num + $context_lines - 1;
             $end_line = $#lines if $end_line > $#lines;
 
             # Build context display with line numbers
             my $context = "";
-            for my $i ($start_line .. $end_line) {
+            for my $i ( $start_line .. $end_line ) {
                 my $display_line = $i + 1;
-                if ($i == $line_num - 1) {
+                if ( $i == $line_num - 1 ) {
+
                     # Error line with >>> marker
-                    $context .= sprintf(">>> %4d | %s\n", $display_line, $lines[$i]);
-                } else {
-                    # Normal context line with 4-space prefix
-                    $context .= sprintf("    %4d | %s\n", $display_line, $lines[$i]);
+                    $context .=
+                      sprintf( ">>> %4d | %s\n", $display_line, $lines[$i] );
                 }
-                if ($i == $line_num - 1) {
-                    # Add caret line pointing to failure position
-                    # Account for: ">>> " (4) + "1234" (4) + " | " (3) = 11 chars before source text
+                else {
+                    # Normal context line with 4-space prefix
+                    $context .=
+                      sprintf( "    %4d | %s\n", $display_line, $lines[$i] );
+                }
+                if ( $i == $line_num - 1 ) {
+
+# Add caret line pointing to failure position
+# Account for: ">>> " (4) + "1234" (4) + " | " (3) = 11 chars before source text
                     my $spaces = " " x $col;
-                    $context .= sprintf("           %s^\n", $spaces);
+                    $context .= sprintf( "           %s^\n", $spaces );
                 }
             }
 
@@ -306,17 +320,19 @@ class Chalk::Parser {
             my @items = $chart->items_ending_at($last_active_pos);
             my %expected_tokens;
             for my $item (@items) {
-                my $rule = $item->rule;
+                my $rule    = $item->rule;
                 my $dot_pos = $item->dot_pos;
-                my @rhs = $rule->rhs;
+                my @rhs     = $rule->rhs;
 
                 # If dot is not at end, next symbol is expected
-                if ($dot_pos < scalar(@rhs)) {
+                if ( $dot_pos < scalar(@rhs) ) {
                     my $next_symbol = $rhs[$dot_pos];
+
                     # Convert array ref to string representation
-                    if (ref($next_symbol) eq 'ARRAY') {
-                        $expected_tokens{join('|', @$next_symbol)} = 1;
-                    } else {
+                    if ( ref($next_symbol) eq 'ARRAY' ) {
+                        $expected_tokens{ join( '|', @$next_symbol ) } = 1;
+                    }
+                    else {
                         $expected_tokens{$next_symbol} = 1;
                     }
                 }
@@ -329,8 +345,9 @@ class Chalk::Parser {
                   . "%)\n"
                   . "📍 Source context:\n"
                   . $context
-                  . "🔎 Expected tokens: " . (@expected ? join(", ", @expected) : "(none)") . "\n"
-            );
+                  . "🔎 Expected tokens: "
+                  . ( @expected ? join( ", ", @expected ) : "(none)" )
+                  . "\n" );
         }
 
         return $result;
@@ -349,24 +366,21 @@ class Chalk::Parser {
             }
             else {
                 my $next_sym = $item->next_symbol;
-                if (defined($next_sym)) {
-                    if ($grammar->is_nonterminal($next_sym) ) {
+                if ( defined($next_sym) ) {
+                    if ( $grammar->is_nonterminal($next_sym) ) {
                         $self->predict( $item, $next_sym, $chart, \@agenda );
                     }
                     else {
                         # Try to match terminal with lexeme support
                         my $pattern = $item->rule->terminal_to_regex($next_sym);
                         pos($input_string) = $pos;
-                        my $match_pattern = qr/\G($pattern)/;
-                        if ( $input_string =~ $match_pattern ) {
-                            my $match_length = length($1);
-                            $self->scan( $item, $element, $chart, $pos,
-                                $match_length );
+                        if ( $input_string =~ qr/\G($pattern)/ ) {
+                            $self->scan( $item, $element, $chart, $pos, $1 );
                         }
 
-                        # Aycock-Horspool optimization for nullable terminals:
-                        # If the terminal can match empty string, also advance dot
-                        if (ref($next_sym) eq 'Regexp' && "" =~ $next_sym) {
+                      # Aycock-Horspool optimization for nullable terminals:
+                      # If the terminal can match empty string, also advance dot
+                        if ( ref($next_sym) eq 'Regexp' && "" =~ $next_sym ) {
                             my $advanced_item = Chalk::EarleyItem->new(
                                 start_pos => $item->start_pos,
                                 rule      => $item->rule,
@@ -393,53 +407,29 @@ class Chalk::Parser {
 
         my $lhs = $completed_item->rule->lhs;
 
-        # For Semantic semiring, evaluate the completed rule
-        # NOTE: We evaluate and set the focus, but keep the children so they can
-        # be accessed by parent rules during their evaluation
-        if ($semiring isa Chalk::Semiring::Semantic) {
-            # IMPORTANT: Get the LATEST element from the chart, not the one passed in!
-            # The element passed in might be stale if multiply operations happened
-            my $latest_element = $chart->get_element($completed_item);
-            if ($latest_element) {
-                $completed_element = $latest_element;
-            }
-
-            my $ctx = $completed_element->context;
-
-            # Evaluate the rule's semantic action if it has one
-            my $rule = $ctx->rule;
-            if ($rule && $rule->can('evaluate')) {
-                my $result = $rule->evaluate($ctx);
-
-                # Set the focus to the evaluated result
-                # This maintains the result while preserving children for parent rules
-                $ctx = Chalk::EvalContext->new(
-                    focus => $result,
-                    children => $ctx->children,
-                    start_pos => $ctx->start_pos,
-                    end_pos => $ctx->end_pos,
-                    env => $ctx->env,
-                    grammar => $ctx->grammar,
-                    rule => $ctx->rule,
-                    forest => $ctx->forest
-                );
-
-                # Update the completed element with evaluated context
-                $completed_element = Chalk::Semiring::SemanticElement->new(
-                    value => 1,
-                    context => $ctx
-                );
-
-                # Update the chart with evaluated element
-                # The element has both the evaluated focus AND the accumulated children
-                $chart->add_element($completed_item, $completed_element);
-            }
+      # Get latest element from chart (handles updates from multiply operations)
+        my $latest_element = $chart->get_element($completed_item);
+        if ($latest_element) {
+            $completed_element = $latest_element;
         }
+
+        # Call semiring's on_complete() hook (polymorphic)
+        # This allows semirings to perform actions when a rule completes
+        # - Semantic: calls evaluate() on semantic actions and updates context
+        # - Composite: delegates to all wrapped semirings
+        # - Others: NOOP (returns element unchanged)
+        $completed_element =
+          $semiring->on_complete( $completed_item, $completed_element );
+
+        # Update the chart with the (potentially modified) element
+        $chart->add_element( $completed_item, $completed_element );
 
         # Use indexed lookups to get items waiting for this symbol
         # This avoids the expensive grep operations with isa checks
-        my @waiting_for_lhs = $chart->items_waiting_for($lhs, $completed_item->start_pos);
-        my @leo_waiting = $chart->leo_items_waiting_for($lhs, $completed_item->start_pos);
+        my @waiting_for_lhs =
+          $chart->items_waiting_for( $lhs, $completed_item->start_pos );
+        my @leo_waiting =
+          $chart->leo_items_waiting_for( $lhs, $completed_item->start_pos );
 
   # Check for deterministic reduction (only if no Leo items waiting)
   # Leo items are only for deterministic right-recursive chains where:
@@ -545,7 +535,8 @@ class Chalk::Parser {
 
             # Only add if not already in chart
             unless ( $chart->has_item($predicted_item) ) {
-                my $rule_element = $semiring->init_element_from_rule($rule, $pos, $pos);
+                my $rule_element =
+                  $semiring->init_element_from_rule( $rule, $pos, $pos );
                 $chart->add_element( $predicted_item, $rule_element );
                 push( $agenda->@*, $predicted_item );
             }
@@ -572,7 +563,8 @@ class Chalk::Parser {
         }
     }
 
-    method scan( $item, $element, $chart, $pos, $match_length ) {
+    method scan( $item, $element, $chart, $pos, $matched_value ) {
+        my $match_length = length($matched_value);
         my $scanned_item = Chalk::EarleyItem->new(
             start_pos => $item->start_pos,
             rule      => $item->rule,
@@ -580,40 +572,11 @@ class Chalk::Parser {
             end_pos   => $pos + $match_length
         );
 
-        # For Semantic semiring, extract the matched terminal string value
-        # and multiply with current element to accumulate terminals in children
-        my $scanned_element;
-        if ($semiring isa Chalk::Semiring::Semantic) {
-            # Extract the matched terminal value from input string
-            my $matched_value = substr($input_string, $pos, $match_length);
-
-            # Create a context with the terminal value as focus
-            my $terminal_ctx = Chalk::EvalContext->new(
-                focus => $matched_value,
-                children => [],
-                start_pos => $pos,
-                end_pos => $pos + $match_length,
-                env => $semiring->grammar->start_symbol,  # Use grammar
-                grammar => $grammar,
-                rule => $item->rule
-            );
-
-            my $terminal_element = Chalk::Semiring::SemanticElement->new(
-                value => 1,
-                context => $terminal_ctx
-            );
-
-            # Multiply current element with terminal to accumulate in children
-            $scanned_element = $element * $terminal_element;
-        } else {
-            # All other semirings receive position updates during scan
-            # Semirings can choose to use or ignore positions based on their needs
-            $scanned_element = $semiring->init_element_from_rule(
-                $item->rule,
-                $scanned_item->start_pos,
-                $scanned_item->end_pos
-            );
-        }
+        # Call semiring's on_scan() hook (polymorphic)
+        # This allows semirings to handle scanned terminals appropriately:
+        # - Semantic: multiplies with terminal element to accumulate in children
+        # - Others: creates new element with updated positions
+        my $scanned_element = $semiring->on_scan( $item, $element, $pos, $matched_value );
 
         $chart->add_element( $scanned_item, $scanned_element );
     }

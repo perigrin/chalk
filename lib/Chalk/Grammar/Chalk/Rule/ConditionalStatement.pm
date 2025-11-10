@@ -3,10 +3,23 @@
 
 use 5.42.0;
 use experimental 'class';
-use builtin qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule) {
+    # Child index constants for ConditionalStatement grammar structure
+    # Grammar: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block [WS_OPT 'else' WS_OPT Block]
+    use constant {
+        CHILD_KEYWORD       => 0,   # 'if' keyword
+        CHILD_LPAREN        => 2,   # '(' terminal
+        CHILD_CONDITION     => 3,   # Expression node
+        CHILD_RPAREN        => 5,   # ')' terminal
+        CHILD_TRUE_BLOCK    => 7,   # Block for true branch
+        CHILD_ELSE_KEYWORD  => 9,   # 'else' keyword (if present)
+        CHILD_FALSE_BLOCK   => 11,  # Block for false/else branch (if present)
+    };
+
     method evaluate($context) {
+        warn "[DEBUG] ConditionalStatement.evaluate() called\n" if $ENV{CHALK_DEBUG_TRACKING};
+
         # ConditionalStatement has several alternatives:
         # 1. if (expr) block
         # 2. if (expr) block else block
@@ -21,8 +34,21 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # 3. Building Region to merge control paths
 
         my @children = $context->children->@*;
+
+        if ($ENV{CHALK_DEBUG_TRACKING}) {
+            warn "[DEBUG] ConditionalStatement: ", scalar(@children), " children\n";
+            for my $i (0..$#children) {
+                my $child = $context->child($i);
+                my $desc = defined($child) ? (blessed($child) ? ref($child) : (ref($child) || $child)) : 'undef';
+                warn "[DEBUG]   child[$i]: $desc\n";
+            }
+        }
+
         my $builder = $context->env->{ir_builder};
-        return undef unless $builder;
+        if (!$builder) {
+            warn "[DEBUG] ConditionalStatement: no builder, returning undef\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
 
         # Save current control
         my $entry_control = $builder->current_control;
@@ -30,22 +56,48 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # Find 'if' keyword position (should be at start)
         my $keyword_index = 0;
 
-        # Parse: if WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block
-        # Actual children after parsing with semantic actions:
-        # Indices: 0     1     2   3        4     5     6
-        # child[3] is the Expression node, child[6] is the Block
+        # Parse: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block
+        # Actual observed structure:
+        # child[0]: ConditionalKeyword ('if')
+        # child[1]: undef (WS_OPT)
+        # child[2]: '(' terminal
+        # child[3]: Expression IR node
+        # child[4]: undef (WS_OPT)
+        # child[5]: ')' terminal
+        # child[6]: undef (WS_OPT)
+        # child[7]: Block (HASH with statements)
 
-        my $condition = $context->child(3);  # Expression node
-        return undef unless (blessed($condition) && $condition->can('id'));
+        my $condition = $context->child(CHILD_CONDITION);
+        unless ($condition isa Chalk::IR::Node::Base) {
+            warn "[DEBUG] ConditionalStatement: condition not an IR node, returning undef. condition=", (defined $condition ? ref($condition) || $condition : 'undef'), "\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
+        warn "[DEBUG] ConditionalStatement: condition node id=", $condition->id, "\n" if $ENV{CHALK_DEBUG_TRACKING};
 
         # Build If node
         my $if_node = $builder->build_if_node($condition);
         my $if_true = $builder->build_if_true_node($if_node);
         my $if_false = $builder->build_if_false_node($if_node);
 
-        # Get true branch Block (returns metadata with statements)
-        my $true_block = $context->child(6);
-        return undef unless (ref($true_block) eq 'HASH' && $true_block->{type} eq 'block');
+        # Start tracking variable modifications in branches
+        # Guard ensures cleanup even if exception occurs during branch evaluation
+        my $tracking_guard = $builder->begin_branch_tracking('true', 'false');
+
+        # Get true branch context WITHOUT evaluating yet
+        my $true_block_ctx = $context->child_context(CHILD_TRUE_BLOCK);
+        if (!$true_block_ctx) {
+            warn "[DEBUG] ConditionalStatement: no true_block_ctx, returning undef\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
+
+        # NOW evaluate true branch with tracking active
+        $builder->set_branch('true');
+        my $true_block = $true_block_ctx->extract;
+        if (!(ref($true_block) eq 'HASH' && $true_block->{type} eq 'block')) {
+            warn "[DEBUG] ConditionalStatement: true_block not a block hash. ref=", ref($true_block), ", type=", (ref($true_block) eq 'HASH' ? ($true_block->{type} // 'undef') : 'N/A'), "\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
+        warn "[DEBUG] ConditionalStatement: true_block has ", scalar(@{$true_block->{statements}}), " statements\n" if $ENV{CHALK_DEBUG_TRACKING};
 
         # Wire up true branch statements with IfTrue control
         my $current_ctrl = $if_true->id;
@@ -55,15 +107,24 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             }
             $current_ctrl = $stmt->id;  # Next statement uses this as control
         }
-        my $true_control = $current_ctrl;
+        # Region always takes Proj nodes as inputs, not statement nodes
+        my $true_control = $if_true->id;
 
         # Check for else/elsif
+        # For if-else: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block WS_OPT 'else' WS_OPT Block
+        # child[7] is true block, child[8] is WS_OPT, child[9] is 'else', child[10] is WS_OPT, child[11] is else block
         my $false_control;
-        if (@children > 10) {
-            my $next_keyword = $children[10]->extract;
+
+        if (@children > CHILD_ELSE_KEYWORD) {
+            my $next_keyword = $children[CHILD_ELSE_KEYWORD]->extract;
             if (defined($next_keyword) && $next_keyword eq 'else') {
-                # Get else block and wire up with IfFalse control
-                my $else_block = $context->child(12);
+                # Get false branch context WITHOUT evaluating yet
+                my $false_block_ctx = $context->child_context(CHILD_FALSE_BLOCK);
+
+                # NOW evaluate false branch with tracking active
+                $builder->set_branch('false');
+                my $else_block = $false_block_ctx ? $false_block_ctx->extract : undef;
+
                 if (ref($else_block) eq 'HASH' && $else_block->{type} eq 'block') {
                     $current_ctrl = $if_false->id;
                     for my $stmt ($else_block->{statements}->@*) {
@@ -72,7 +133,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
                         }
                         $current_ctrl = $stmt->id;
                     }
-                    $false_control = $current_ctrl;
+                    # Region always takes Proj nodes as inputs, not statement nodes
+                    $false_control = $if_false->id;
                 } else {
                     $false_control = $if_false->id;
                 }
@@ -88,8 +150,16 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         }
 
         # Build Region to merge control paths
-        my $region = $builder->build_region_node($true_control, $false_control);
+        # build_region_node signature: ($source_info, @control_inputs)
+        # Pass undef for source_info, then the control inputs
+        my $region = $builder->build_region_node(undef, $true_control, $false_control);
         $builder->set_control($region->id);
+
+        # End tracking and generate Phi nodes for modified variables
+        my $tracking_data = $builder->end_branch_tracking();
+        $tracking_guard->dismiss();  # Successful completion - no cleanup needed
+
+        my $phi_nodes = $builder->generate_phi_nodes($region, $tracking_data, 'true', 'false');
 
         # Return the Region node (represents the merge point)
         return $region;

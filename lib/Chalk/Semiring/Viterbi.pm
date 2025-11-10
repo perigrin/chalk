@@ -49,8 +49,8 @@ class Chalk::Semiring::Viterbi :isa(Chalk::Semiring) {
         path  => []
     );
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0) {
-        # Viterbi semiring doesn't track positions
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
+        # Viterbi semiring doesn't track positions or matched_value
         return Chalk::Semiring::ViterbiElement->new(
             score => log($rule->probability),
             path  => [$rule]

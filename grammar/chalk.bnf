@@ -74,6 +74,7 @@
 %NUM_COMPARE_OP% = /==|!=|<=|>=|<=>|<|>/
 %REGEX_MATCH_OP% = /=~|!~/
 %ASSIGN_OP% = /\/\/=|\|\|=|\+=|-=|\.=/
+%ARITHMETIC_OP% = /[+\-*\/]/
 
 # ============================================================================
 # GRAMMAR RULES - Organized Generic → Specific
@@ -120,9 +121,9 @@ ConditionalKeyword -> 'unless'
 
 # Conditional statements (block form)
 ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
-ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
-ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
-ConditionalStatement -> 'if' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
 
 # While loops
 WhileStatement -> 'while' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
@@ -146,7 +147,7 @@ LoopControl -> 'next'
 # Declarations
 
 # Use statements
-UseStatement -> 'use' WS_OPT Number  # use 5.42.0
+UseStatement -> 'use' WS_OPT String  # use 5.42.0 (version string)
 UseStatement -> 'use' WS_OPT QualifiedIdentifier  # use Module
 UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT QuotedWordList  # use Module qw(...)
 UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT String  # use experimental 'class'
@@ -280,10 +281,7 @@ RangeOp -> Expression WS_OPT '..' WS_OPT Expression
 # Arithmetic operators (left-associative)
 # Phase 4: Flattened from Additive + Multiplicative
 # Precedence handled by Precedence semiring
-ArithmeticOp -> Expression WS_OPT '+' WS_OPT Expression
-ArithmeticOp -> Expression WS_OPT '-' WS_OPT Expression
-ArithmeticOp -> Expression WS_OPT '*' WS_OPT Expression
-ArithmeticOp -> Expression WS_OPT '/' WS_OPT Expression
+ArithmeticOp -> Expression WS_OPT %ARITHMETIC_OP% WS_OPT Expression
 
 # Unary prefix operators (right-associative)
 Unary -> '!' WS_OPT Expression
@@ -441,6 +439,7 @@ EmptyList -> '(' WS_OPT ')'
 # double-quoted strings support interpolation and require runtime processing.
 String -> SingleQuotedString
 String -> DoubleQuotedString
+String -> %VERSION%
 
 SingleQuotedString -> %SINGLE_QUOTED_STRING%
 DoubleQuotedString -> %DOUBLE_QUOTED_STRING%
@@ -467,8 +466,7 @@ RegexContent ->  # Empty regex content (for s/pattern// with no replacement)
 RegexFlags -> %REGEX_FLAGS%
 RegexFlags ->
 
-# Numbers and versions
-Number -> %VERSION%
+# Numbers
 Number -> %FLOAT%
 Number -> %INTEGER%
 
