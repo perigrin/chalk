@@ -6,6 +6,8 @@ use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule) {
     method evaluate($context) {
+        warn "[DEBUG] ConditionalStatement.evaluate() called\n" if $ENV{CHALK_DEBUG_TRACKING};
+
         # ConditionalStatement has several alternatives:
         # 1. if (expr) block
         # 2. if (expr) block else block
@@ -20,8 +22,21 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # 3. Building Region to merge control paths
 
         my @children = $context->children->@*;
+
+        if ($ENV{CHALK_DEBUG_TRACKING}) {
+            warn "[DEBUG] ConditionalStatement: ", scalar(@children), " children\n";
+            for my $i (0..$#children) {
+                my $child = $context->child($i);
+                my $desc = defined($child) ? (blessed($child) ? ref($child) : (ref($child) || $child)) : 'undef';
+                warn "[DEBUG]   child[$i]: $desc\n";
+            }
+        }
+
         my $builder = $context->env->{ir_builder};
-        return undef unless $builder;
+        if (!$builder) {
+            warn "[DEBUG] ConditionalStatement: no builder, returning undef\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
 
         # Save current control
         my $entry_control = $builder->current_control;
@@ -30,12 +45,22 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $keyword_index = 0;
 
         # Parse: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block
-        # Actual children after parsing with semantic actions:
-        # Indices: 0                  1      2   3      4          5      6   7      8
-        # child[0] is ConditionalKeyword, child[4] is Expression, child[8] is Block
+        # Actual observed structure:
+        # child[0]: ConditionalKeyword ('if')
+        # child[1]: undef (WS_OPT)
+        # child[2]: '(' terminal
+        # child[3]: Expression IR node
+        # child[4]: undef (WS_OPT)
+        # child[5]: ')' terminal
+        # child[6]: undef (WS_OPT)
+        # child[7]: Block (HASH with statements)
 
-        my $condition = $context->child(4);  # Expression node
-        return undef unless (blessed($condition) && $condition->can('id'));
+        my $condition = $context->child(3);  # Expression node at index 3
+        unless ($condition isa Chalk::IR::Node::Base) {
+            warn "[DEBUG] ConditionalStatement: condition not an IR node, returning undef. condition=", (defined $condition ? ref($condition) || $condition : 'undef'), "\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
+        warn "[DEBUG] ConditionalStatement: condition node id=", $condition->id, "\n" if $ENV{CHALK_DEBUG_TRACKING};
 
         # Build If node
         my $if_node = $builder->build_if_node($condition);
@@ -46,13 +71,20 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         $builder->begin_branch_tracking('true', 'false');
 
         # Get true branch context WITHOUT evaluating yet
-        my $true_block_ctx = $context->child_context(8);
-        return undef unless $true_block_ctx;
+        my $true_block_ctx = $context->child_context(7);
+        if (!$true_block_ctx) {
+            warn "[DEBUG] ConditionalStatement: no true_block_ctx, returning undef\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
 
         # NOW evaluate true branch with tracking active
         $builder->set_branch('true');
         my $true_block = $true_block_ctx->extract;
-        return undef unless (ref($true_block) eq 'HASH' && $true_block->{type} eq 'block');
+        if (!(ref($true_block) eq 'HASH' && $true_block->{type} eq 'block')) {
+            warn "[DEBUG] ConditionalStatement: true_block not a block hash. ref=", ref($true_block), ", type=", (ref($true_block) eq 'HASH' ? ($true_block->{type} // 'undef') : 'N/A'), "\n" if $ENV{CHALK_DEBUG_TRACKING};
+            return undef;
+        }
+        warn "[DEBUG] ConditionalStatement: true_block has ", scalar(@{$true_block->{statements}}), " statements\n" if $ENV{CHALK_DEBUG_TRACKING};
 
         # Wire up true branch statements with IfTrue control
         my $current_ctrl = $if_true->id;
@@ -65,13 +97,15 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $true_control = $current_ctrl;
 
         # Check for else/elsif
+        # For if-else: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block WS_OPT 'else' WS_OPT Block
+        # child[7] is true block, child[8] is WS_OPT, child[9] is 'else', child[10] is WS_OPT, child[11] is else block
         my $false_control;
 
-        if (@children > 10) {
-            my $next_keyword = $children[10]->extract;
+        if (@children > 9) {
+            my $next_keyword = $children[9]->extract;
             if (defined($next_keyword) && $next_keyword eq 'else') {
                 # Get false branch context WITHOUT evaluating yet
-                my $false_block_ctx = $context->child_context(12);
+                my $false_block_ctx = $context->child_context(11);
 
                 # NOW evaluate false branch with tracking active
                 $builder->set_branch('false');

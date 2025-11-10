@@ -102,7 +102,10 @@ sub compile_chalk {
 
     # Run GVN optimizer
     my $gvn_result = eval { Chalk::IR::Optimizer::GVN->run_gvn($graph) };
-    return undef if $@ || !$gvn_result;
+    if ( $@ || !$gvn_result ) {
+        diag "GVN error: $@";
+        return;
+    }
 
     return $gvn_result->{graph};
 }
