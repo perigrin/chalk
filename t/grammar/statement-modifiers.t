@@ -40,10 +40,10 @@ subtest 'while statement modifiers' => sub {
         ok($parser->parse_string($test), "Should parse: $test");
     }
 
-    # TODO: Print with string literal argument and statement modifier
+    # TODO #170: Print with string literal argument and statement modifier
     # This pattern doesn't appear in rs.t - future enhancement
     TODO: {
-        local $TODO = "print with string arg and statement modifier not yet supported";
+        local $TODO = "print with string arg and statement modifier not yet supported (#170)";
         ok($parser->parse_string("print 'hi' while \$x < 10"),
            "Should parse: print 'hi' while \$x < 10");
     }
@@ -64,9 +64,9 @@ subtest 'until statement modifiers' => sub {
         ok($parser->parse_string($test), "Should parse: $test");
     }
 
-    # TODO: Print with string literal argument and statement modifier
+    # TODO #170: Print with string literal argument and statement modifier
     TODO: {
-        local $TODO = "print with string arg and statement modifier not yet supported";
+        local $TODO = "print with string arg and statement modifier not yet supported (#170)";
         ok($parser->parse_string("print 'waiting' until \$ready"),
            "Should parse: print 'waiting' until \$ready");
     }
@@ -83,15 +83,15 @@ subtest 'for/foreach statement modifiers' => sub {
         ok($parser->parse_string($test), "Should parse: $test");
     }
 
-    # TODO: Range operators and compound assignment not fully supported yet
+    # TODO #171, #172: Range operators and compound assignment not fully supported yet
     TODO: {
-        local $TODO = "range operator in for modifier not yet supported";
+        local $TODO = "range operator in for modifier not yet supported (#171)";
         ok($parser->parse_string("print \$_ for 1..10"),
            "Should parse: print \$_ for 1..10");
     }
 
     TODO: {
-        local $TODO = "compound assignment with for modifier not yet supported";
+        local $TODO = "compound assignment with for modifier not yet supported (#172)";
         ok($parser->parse_string("\$sum += \$_ for \@numbers"),
            "Should parse: \$sum += \$_ for \@numbers");
     }

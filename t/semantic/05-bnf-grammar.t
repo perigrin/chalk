@@ -32,8 +32,9 @@ use Chalk::Parser;
     my $parser = Chalk::Parser->new(grammar => $grammar);
 
     my $result = $parser->parse_string("%PATTERN% = /test/\n");
+    # TODO #179
     TODO: {
-        local $TODO = "Edge case with empty flags - works with flags present";
+        local $TODO = "Edge case with empty flags - works with flags present (#179)";
         ok($result, 'Can parse pattern definition without flags');
     }
 }

@@ -41,8 +41,9 @@ my $parser = Chalk::Parser->new(
 
 # Test 3: SubNameExpr (package names)
 # Right-recursive: SubNameExpr -> Identifier WS_OPT PackageSeparator WS_OPT SubNameExpr
+# TODO #181
 TODO: {
-    local $TODO = 'Grammar does not fully support this package name syntax yet';
+    local $TODO = 'Grammar does not fully support this package name syntax yet (#181)';
     my $code = 'Foo::Bar::Baz::Quux::method();';
     my $result = eval { $parser->parse_string($code) };
     ok( $result, 'SubNameExpr: package name chain parses successfully' )

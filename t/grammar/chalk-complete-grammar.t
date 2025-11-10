@@ -196,7 +196,8 @@ subtest 'Overload declarations' => sub {
     );
     ok $result, 'Parse class with simple overload';
 
-    todo "multiple overload specs need lexeme support" => sub {
+    # TODO #175
+    todo "multiple overload specs need lexeme support (#175)" => sub {
         $result = $parser->parse_string(
             'classElement{useoverload\'+\'=>\'add\',Identifier=>1;}'
         );
@@ -236,7 +237,8 @@ subtest 'Complex expressions' => sub {
     ok $result, 'Parse method with constructor call';
     
     # Constructor with arguments
-    todo "constructor with named argument needs lexeme support" => sub {
+    # TODO #176
+    todo "constructor with named argument needs lexeme support (#176)" => sub {
         $result = $parser->parse_string(
             'classElement{methodmethod(){returnViterbiElement->new(Identifier=>$var);}}'
         );
@@ -254,7 +256,8 @@ subtest 'Field initialization' => sub {
     ok $result, 'Parse field with empty array reference';
 
     # Field with constructor initialization
-    todo "field with constructor initialization needs lexeme support" => sub {
+    # TODO #177
+    todo "field with constructor initialization needs lexeme support (#177)" => sub {
         $result = $parser->parse_string(
             'classElement{field$var=ViterbiElement->new(Identifier=>0);}'
         );
@@ -266,7 +269,8 @@ subtest 'Complete chalk class pattern' => sub {
     my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
     
     # Parse a complete class like ViterbiSemiring
-    todo "complete ViterbiElement-style class needs lexeme support" => sub {
+    # TODO #182
+    todo "complete ViterbiElement-style class needs lexeme support (#182)" => sub {
         my $result = $parser->parse_string(
             'classViterbiElement:isa(Element){useoverload\'+\'=>\'add\';field$var:param:reader;field$var=ViterbiElement->new(Identifier=>0);methodmethod($var=undef){returnViterbiElement->new();}}'
         );

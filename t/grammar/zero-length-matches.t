@@ -24,7 +24,8 @@ subtest 'Zero-length whitespace patterns' => sub {
     my $parser = Chalk::Parser->new(grammar => $grammar);
     
     # Test with no whitespace (zero-length matches at start and end)
-    todo "zero-length matches not yet supported" => sub {
+    # TODO #178 - Design decision needed
+    todo "zero-length matches not yet supported (#178)" => sub {
         my $result = $parser->parse_string('word');
         ok $result, 'Parse with zero-length whitespace matches';
     };
@@ -34,13 +35,15 @@ subtest 'Zero-length whitespace patterns' => sub {
     ok $result, 'Parse with actual whitespace';
     
     # Test with only leading whitespace
-    todo "zero-length matches not yet supported" => sub {
+    # TODO #178 - Design decision needed
+    todo "zero-length matches not yet supported (#178)" => sub {
         $result = $parser->parse_string(' word');
         ok $result, 'Parse with leading whitespace only';
     };
-    
+
     # Test with only trailing whitespace
-    todo "zero-length matches not yet supported" => sub {
+    # TODO #178 - Design decision needed
+    todo "zero-length matches not yet supported (#178)" => sub {
         $result = $parser->parse_string('word ');
         ok $result, 'Parse with trailing whitespace only';
     };

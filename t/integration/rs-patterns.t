@@ -59,10 +59,10 @@ subtest 'combined feature tests' => sub {
     ok($parser->parse_string('$x = $! or die'),
        'Should parse: $x = $! or die');
 
-    # TODO: Print with string literal argument and or/and operators
+    # TODO #180: Print with string literal argument and or/and operators
     # This is a known limitation - PrintExpr with args isn't in NonBrace expression context
     TODO: {
-        local $TODO = "print with string arg and or/and operators not yet supported";
+        local $TODO = "print with string arg and or/and operators not yet supported (#180)";
         ok($parser->parse_string('print "Error: $!" or die'),
            'Should parse: print "Error: $!" or die');
     }
