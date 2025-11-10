@@ -1830,9 +1830,9 @@ class Chalk::IR::Builder {
         my $data = pop $branch_tracking_stack->@*;
         if ($ENV{CHALK_DEBUG_TRACKING} && $data) {
             my $branches = $data->{branches};
-            for my $branch_name (keys %$branches) {
+            for my $branch_name (keys $branches->%*) {
                 my $vars = $branches->{$branch_name};
-                warn "[DEBUG]   branch $branch_name: ", scalar(keys %$vars), " vars modified\n";
+                warn "[DEBUG]   branch $branch_name: ", scalar(keys $vars->%*), " vars modified\n";
             }
         }
         return $data;
@@ -1853,7 +1853,7 @@ class Chalk::IR::Builder {
         my %all_vars;
         for my $branch_name (@branch_names) {
             my $branch_vars = $branches->{$branch_name} // {};
-            $all_vars{$_} = 1 for keys %$branch_vars;
+            $all_vars{$_} = 1 for keys $branch_vars->%*;
         }
 
         for my $var_name (keys %all_vars) {
