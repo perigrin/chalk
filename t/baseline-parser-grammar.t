@@ -54,11 +54,13 @@ foreach my $file (@bnf_files) {
         my $result = $parser->parse_string($source);
 
         if ($result) {
-            pass "$rel_path parsed successfully";
+            ok($result, "$rel_path parsed successfully");
             $passed++;
         } else {
-            # Track failure but don't fail the test - this is a baseline assessment
-            pass "$rel_path failed to parse (baseline)";
+            # Mark as TODO - expected to parse eventually but not yet implemented
+            todo "Parser does not yet support all BNF constructs in $rel_path" => sub {
+                ok($result, "$rel_path should parse");
+            };
             $failed++;
             push @failures, $rel_path;
         }

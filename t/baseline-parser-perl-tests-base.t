@@ -57,11 +57,13 @@ foreach my $filename (@t_files) {
         my $result = $parser->parse_string($preprocessed);
 
         if ($result) {
-            pass "$filename parsed successfully";
+            ok($result, "$filename parsed successfully");
             $passed++;
         } else {
-            # Track failure but don't fail the test - this is a baseline assessment
-            pass "$filename failed to parse (baseline)";
+            # Mark as TODO - expected to parse eventually but not yet implemented
+            todo "Parser does not yet support all Perl constructs in $filename" => sub {
+                ok($result, "$filename should parse");
+            };
             $failed++;
             push @failures, $filename;
         }
