@@ -10,7 +10,7 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
 
     method evaluate($context) {
 
-        # Number -> %INTEGER%  (or %FLOAT% or %VERSION%)
+        # Number -> %INTEGER% | %FLOAT%
         # Child [0] contains the matched number string
 
         my $builder = $context->env->{ir_builder};
