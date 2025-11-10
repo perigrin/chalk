@@ -94,7 +94,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             }
             $current_ctrl = $stmt->id;  # Next statement uses this as control
         }
-        my $true_control = $current_ctrl;
+        # Region always takes Proj nodes as inputs, not statement nodes
+        my $true_control = $if_true->id;
 
         # Check for else/elsif
         # For if-else: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block WS_OPT 'else' WS_OPT Block
@@ -119,7 +120,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
                         }
                         $current_ctrl = $stmt->id;
                     }
-                    $false_control = $current_ctrl;
+                    # Region always takes Proj nodes as inputs, not statement nodes
+                    $false_control = $if_false->id;
                 } else {
                     $false_control = $if_false->id;
                 }
@@ -135,7 +137,9 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         }
 
         # Build Region to merge control paths
-        my $region = $builder->build_region_node($true_control, $false_control);
+        # build_region_node signature: ($source_info, @control_inputs)
+        # Pass undef for source_info, then the control inputs
+        my $region = $builder->build_region_node(undef, $true_control, $false_control);
         $builder->set_control($region->id);
 
         # End tracking and generate Phi nodes for modified variables
