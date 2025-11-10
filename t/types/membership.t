@@ -61,7 +61,10 @@ subtest 'Semantic contracts for Num type' => sub {
     # Note: In Perl, "NaN" string is not IEEE NaN, but we test the concept
     my $nan_value = "NaN" + 0;  # This might create numeric 0, not IEEE NaN
     # Perl NaN handling is tricky, so we document the expected behavior
-    pass('NaN edge case documented - implementation-dependent in Perl');
+    #
+    # IEEE NaN behavior would require use of POSIX::NaN or similar
+    # For now, we document this as a known limitation
+    skip 'IEEE NaN handling is implementation-dependent in Perl - would need POSIX::NaN', 1;
 };
 
 subtest 'Int membership is stricter than Num' => sub {
@@ -111,9 +114,12 @@ subtest 'Boolean membership vs primitive bool' => sub {
     ok($bool_type->check_membership("hello"),
        '"hello" is in Boolean type (truthy)');
 
-    # Primitive boolean subset {true, false} is narrower
-    # This would be tested via is_primitive_bool() if we implement it
-    pass('Primitive boolean subset documented - Boolean type is broader');
+    # Primitive boolean subset {true, false} is narrower than Boolean type
+    # Testing this would require implementing is_primitive_bool() type guard
+    # which distinguishes primitive booleans from truthy/falsy values
+    #
+    # This is a design decision for the type system - document for future
+    skip 'Primitive boolean subset would need is_primitive_bool() type guard', 1;
 };
 
 subtest 'Undef membership' => sub {

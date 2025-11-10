@@ -24,9 +24,10 @@ my $parser = Chalk::Parser->new(
 );
 
 # Read the full file
+my $num_file = File::Spec->catfile($RealBin, '..', 'perl-num.t');
 my @lines;
 {
-    open my $fh, '<', 'perl-num.t' or die "Cannot open perl-num.t: $!";
+    open my $fh, '<', $num_file or die "Cannot open $num_file: $!";
     @lines = <$fh>;
     close $fh;
 }
@@ -66,13 +67,9 @@ for my $line_count (@test_sizes) {
             diag("Timeout occurred between " . ($test_sizes[-2] || 0) . " and $line_count lines");
             last;  # Stop testing larger sizes
         } elsif ($@) {
-            if ($elapsed >= 10) {
-                fail("First $line_count lines - took too long (${elapsed}s)");
-                diag("Parse failed but time is concerning");
-                diag("Error: $@");
-            } else {
-                pass("First $line_count lines - completed in ${elapsed}s");
-            }
+            fail("First $line_count lines - parse failed in ${elapsed}s");
+            diag("Error: $@");
+            diag("Note: Fast failure doesn't mean success - parse should work");
         } else {
             if ($elapsed >= 10) {
                 fail("First $line_count lines - parsed but took too long (${elapsed}s)");

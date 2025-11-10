@@ -46,12 +46,9 @@ if ($@ && $@ =~ /timeout/) {
     fail("minimal case - timed out after 10 seconds");
     diag("Pattern: two-line case with string interpolation and print ternary");
 } elsif ($@) {
-    if ($elapsed >= 5) {
-        fail("minimal case - took too long (${elapsed}s)");
-        diag("Error: $@");
-    } else {
-        pass("minimal case - completed in ${elapsed}s (parse may have failed)");
-    }
+    fail("minimal case - parse failed in ${elapsed}s");
+    diag("Error: $@");
+    diag("Note: Fast failure doesn't mean success - parse should work");
 } else {
     if ($elapsed >= 5) {
         fail("minimal case - parsed but took too long (${elapsed}s)");
@@ -80,12 +77,9 @@ if ($@ && $@ =~ /timeout/) {
     fail("10x repetition - timed out after 30 seconds");
     diag("This indicates exponential growth in parse time");
 } elsif ($@) {
-    if ($elapsed >= 10) {
-        fail("10x repetition - took too long (${elapsed}s)");
-        diag("Error: $@");
-    } else {
-        pass("10x repetition - completed in ${elapsed}s (parse may have failed)");
-    }
+    fail("10x repetition - parse failed in ${elapsed}s");
+    diag("Error: $@");
+    diag("Note: Fast failure doesn't mean success - parse should work");
 } else {
     if ($elapsed >= 10) {
         fail("10x repetition - parsed but took too long (${elapsed}s)");
