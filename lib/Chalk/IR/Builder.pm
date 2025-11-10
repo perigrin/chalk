@@ -431,6 +431,7 @@ class Chalk::IR::Builder {
             my $frame = $branch_tracking_stack->[-1];
             my $current_branch = $frame->{current_branch};
             if (defined($current_branch)) {
+                warn "[DEBUG] build_store_node: tracking $var_name in branch $current_branch, node_id=", $value_node->id, "\n" if $ENV{CHALK_DEBUG_TRACKING};
                 $frame->{branches}->{$current_branch}->{$var_name} = $value_node;
             }
         }
@@ -1798,6 +1799,7 @@ class Chalk::IR::Builder {
         # Start tracking variable modifications across named branches
         # @branch_names = ('true', 'false') for conditionals
         # @branch_names = ('loop_0') for loops
+        warn "[DEBUG] begin_branch_tracking: branches=[@branch_names]\n" if $ENV{CHALK_DEBUG_TRACKING};
         my %branches = map { $_ => {} } @branch_names;
 
         push $branch_tracking_stack->@*, {
@@ -1810,25 +1812,37 @@ class Chalk::IR::Builder {
 
     method set_branch($branch_name) {
         # Set which branch we're currently evaluating
+        warn "[DEBUG] set_branch: $branch_name\n" if $ENV{CHALK_DEBUG_TRACKING};
         return unless scalar($branch_tracking_stack->@*) > 0;
         my $frame = $branch_tracking_stack->[-1];
         $frame->{current_branch} = $branch_name;
 
         # Restore context snapshot so each branch starts from same state
+        warn "[DEBUG] set_branch: restoring context snapshot\n" if $ENV{CHALK_DEBUG_TRACKING};
         $context = $frame->{context_snapshot};
         return;
     }
 
     method end_branch_tracking() {
         # Stop tracking and return the tracking data
+        warn "[DEBUG] end_branch_tracking\n" if $ENV{CHALK_DEBUG_TRACKING};
         return unless scalar($branch_tracking_stack->@*) > 0;
-        return pop $branch_tracking_stack->@*;
+        my $data = pop $branch_tracking_stack->@*;
+        if ($ENV{CHALK_DEBUG_TRACKING} && $data) {
+            my $branches = $data->{branches};
+            for my $branch_name (keys %$branches) {
+                my $vars = $branches->{$branch_name};
+                warn "[DEBUG]   branch $branch_name: ", scalar(keys %$vars), " vars modified\n";
+            }
+        }
+        return $data;
     }
 
     method generate_phi_nodes($merge_node, $tracking_data, @branch_names) {
         # Generate Phi nodes for variables modified across branches
         # For conditionals: @branch_names = ('true', 'false')
         # For loops: @branch_names = ('initial', 'loop')
+        warn "[DEBUG] generate_phi_nodes: branches=[@branch_names]\n" if $ENV{CHALK_DEBUG_TRACKING};
         my %phi_nodes;
 
         return \%phi_nodes unless defined($tracking_data);
@@ -1855,6 +1869,7 @@ class Chalk::IR::Builder {
 
             # Create Phi node: Phi(merge_node, value1, value2, ...)
             my @value_ids = map { $_->id } @values;
+            warn "[DEBUG] generate_phi_nodes: creating Phi for $var_name with values [@value_ids]\n" if $ENV{CHALK_DEBUG_TRACKING};
             my $phi = $self->build_phi_node($merge_node, @value_ids);
 
             # Update context to bind variable to Phi node
