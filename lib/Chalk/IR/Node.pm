@@ -58,17 +58,26 @@ class Chalk::IR::Node {
         return $source_info->to_string();
     }
 
-    # NOTE: This method is legacy/unused code kept for backward compatibility
-    # All polymorphic node subclasses inherit from Node::Base which has the real
-    # record_transform() implementation. This class (Node) is only used as a
-    # factory via from_hash() and its record_transform() is never called.
-    # See Node::Base::record_transform() for the active implementation.
-    #
     # Record a transformation and return a new node with updated chain
-    method record_transform(%args) {
-        my $operation   = $args{operation}   // die "operation required";
-        my $rule_name   = $args{rule_name}   // undef;
-        my $description = $args{description} // undef;
+    # Support both calling styles for backward compatibility:
+    # 1. Positional: record_transform($operation, $name, context => $desc)
+    # 2. Named:      record_transform(operation => $op, rule_name => $name, description => $desc)
+    method record_transform(@args) {
+        my ($operation, $rule_name, %opts);
+
+        if (@args >= 2 && !ref($args[0]) && !ref($args[1]) && $args[0] !~ qr/^(operation|rule_name|description|context|source_node)$/) {
+            # Positional style: first two args are scalars, not named params
+            ($operation, $rule_name, %opts) = @args;
+        } else {
+            # Named parameter style
+            %opts = @args;
+            $operation = $opts{operation};
+            $rule_name = $opts{rule_name} // $opts{name};  # Accept both 'rule_name' and 'name'
+            # Accept both 'description' and 'context' for the description field
+            $opts{context} //= $opts{description};
+        }
+
+        my $description = $opts{context} // $opts{description} // undef;
 
         # Create transform record
         my $transform = {
