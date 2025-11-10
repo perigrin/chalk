@@ -136,14 +136,14 @@ From issue #66 description:
 ### Immediate Priorities
 1. **Run Full Test Suite**: Verify all tests pass with current changes
 2. **Sample Test Review**: Run representative tests from each category to identify patterns
-3. **TODO Audit**: Search for TODO/SKIP tests and verify they reference issues
-4. **Timeout Analysis**: Find tests with custom timeouts and verify appropriateness
+3. **Deep Audit**: Systematic review of each test file against checklist (quality first)
+4. **TODO Audit**: Search for TODO/SKIP tests and verify they reference issues
+5. **Timeout Analysis**: Find tests with custom timeouts and verify appropriateness
 
 ### Future Work
-1. **Deep Audit**: Systematic review of each test file against checklist
-2. **Coverage Analysis**: Identify gaps in test coverage
-3. **Test Cleanup**: Remove obsolete tests, fix silent failures
-4. **Documentation**: Update test documentation based on findings
+1. **Coverage Analysis**: Identify gaps in test coverage
+2. **Test Cleanup**: Remove obsolete tests, fix silent failures
+3. **Documentation**: Update test documentation based on findings
 
 ## Test Running Notes
 
