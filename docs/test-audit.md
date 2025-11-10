@@ -134,15 +134,15 @@ From issue #66 description:
 ## Next Steps
 
 ### Immediate Priorities
-1. **Sample Test Review**: Run representative tests from each category to identify patterns and relevance
-2. **Deep Audit**: Systematic review of each test file against checklist (quality first)
+1. **Deep Audit**: Systematic review of each test file against checklist (quality first)
    - Verify tests are still relevant to current architecture
    - Check correct assertions and no silent failures
    - Validate proper TODO/SKIP usage with issue references
-3. **Test Relevance Classification**: Mark tests as relevant/obsolete/needs-update based on audit
+2. **Test Relevance Classification**: Mark tests as relevant/obsolete/needs-update based on audit findings
+3. **Sample Test Review**: Run representative tests from relevant categories to verify behavior
 4. **TODO Audit**: Comprehensive search for TODO/SKIP tests and verify they reference issues
 5. **Timeout Analysis**: Find tests with custom timeouts and verify appropriateness
-6. **Run Relevant Test Suite**: After identifying relevant tests, verify they all pass
+6. **Run Relevant Test Suite**: After identifying and sampling relevant tests, verify they all pass
 
 ### Future Work
 1. **Coverage Analysis**: Identify gaps in test coverage
