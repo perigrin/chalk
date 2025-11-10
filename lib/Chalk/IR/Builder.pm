@@ -1800,6 +1800,17 @@ class Chalk::IR::Builder {
         # @branch_names = ('true', 'false') for conditionals
         # @branch_names = ('loop_0') for loops
         warn "[DEBUG] begin_branch_tracking: branches=[@branch_names]\n" if $ENV{CHALK_DEBUG_TRACKING};
+
+        # Validate we have at least one branch name
+        die "begin_branch_tracking() requires at least one branch name"
+            unless @branch_names > 0;
+
+        # Validate branch names are non-empty strings
+        for my $name (@branch_names) {
+            die "Branch names must be non-empty strings"
+                unless defined($name) && length($name) > 0;
+        }
+
         my %branches = map { $_ => {} } @branch_names;
 
         push $branch_tracking_stack->@*, {
@@ -1807,14 +1818,28 @@ class Chalk::IR::Builder {
             current_branch => undef,          # Which branch is currently active
             context_snapshot => $context,     # Save context before branches
         };
-        return;
+
+        # Return guard object for automatic cleanup on exception
+        return Chalk::IR::Builder::BranchTrackingGuard->new(builder => $self);
     }
 
     method set_branch($branch_name) {
         # Set which branch we're currently evaluating
         warn "[DEBUG] set_branch: $branch_name\n" if $ENV{CHALK_DEBUG_TRACKING};
-        return unless scalar($branch_tracking_stack->@*) > 0;
+
+        # Validate we have an active tracking frame
+        die "set_branch() called with no active branch tracking"
+            unless scalar($branch_tracking_stack->@*) > 0;
+
         my $frame = $branch_tracking_stack->[-1];
+
+        # Validate the branch name exists in the current tracking frame
+        unless (exists $frame->{branches}->{$branch_name}) {
+            my @valid_branches = keys $frame->{branches}->%*;
+            die "Invalid branch name '$branch_name'. Valid branches are: " .
+                join(', ', @valid_branches);
+        }
+
         $frame->{current_branch} = $branch_name;
 
         # Restore context snapshot so each branch starts from same state
@@ -1826,8 +1851,19 @@ class Chalk::IR::Builder {
     method end_branch_tracking() {
         # Stop tracking and return the tracking data
         warn "[DEBUG] end_branch_tracking\n" if $ENV{CHALK_DEBUG_TRACKING};
-        return unless scalar($branch_tracking_stack->@*) > 0;
+
+        # Validate we have an active tracking frame
+        die "end_branch_tracking() called with no active branch tracking"
+            unless scalar($branch_tracking_stack->@*) > 0;
+
         my $data = pop $branch_tracking_stack->@*;
+
+        # Validate the data structure
+        die "Branch tracking frame missing 'branches' key"
+            unless exists $data->{branches};
+        die "Branch tracking frame missing 'context_snapshot' key"
+            unless exists $data->{context_snapshot};
+
         if ($ENV{CHALK_DEBUG_TRACKING} && $data) {
             my $branches = $data->{branches};
             for my $branch_name (keys $branches->%*) {
@@ -1859,12 +1895,25 @@ class Chalk::IR::Builder {
         for my $var_name (keys %all_vars) {
             # Collect values from each branch
             my @values;
+            my $snapshot_ctx = $tracking_data->{context_snapshot};
+
             for my $branch_name (@branch_names) {
                 my $value = $branches->{$branch_name}->{$var_name};
-                push @values, $value if defined($value);
+                if (defined($value)) {
+                    # Branch modified the variable - use the new value
+                    push @values, $value;
+                } else {
+                    # Branch didn't modify variable - use pre-branch value from snapshot
+                    my $label = $self->make_variable_label($var_name);
+                    my $pre_value = $snapshot_ctx->($label);
+                    if (defined($pre_value)) {
+                        push @values, $pre_value;
+                    }
+                }
             }
 
-            # Only create Phi if variable was modified in multiple branches
+            # Create Phi if we have values from different code paths
+            # This includes cases where only one branch modified the variable
             next unless @values >= 2;
 
             # Create Phi node: Phi(merge_node, value1, value2, ...)
@@ -1881,6 +1930,29 @@ class Chalk::IR::Builder {
         return \%phi_nodes;
     }
 
+}
+
+# ABOUTME: Guard object for automatic cleanup of branch tracking frames
+# ABOUTME: Prevents memory leaks if exceptions occur during branch evaluation
+class Chalk::IR::Builder::BranchTrackingGuard {
+    field $builder :param;
+    field $active = 1;
+
+    method DESTROY() {
+        # Clean up leaked tracking frame if guard was not explicitly dismissed
+        if ($active && scalar($builder->{branch_tracking_stack}->@*) > 0) {
+            warn "[WARN] BranchTrackingGuard: cleaning up leaked tracking frame\n";
+            try {
+                $builder->end_branch_tracking();
+            } catch ($e) {
+                warn "[ERROR] BranchTrackingGuard: cleanup failed: $e\n";
+            }
+        }
+    }
+
+    method dismiss() {
+        $active = 0;
+    }
 }
 
 1;

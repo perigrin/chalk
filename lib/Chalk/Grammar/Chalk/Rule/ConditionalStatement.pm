@@ -5,6 +5,18 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule) {
+    # Child index constants for ConditionalStatement grammar structure
+    # Grammar: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block [WS_OPT 'else' WS_OPT Block]
+    use constant {
+        CHILD_KEYWORD       => 0,   # 'if' keyword
+        CHILD_LPAREN        => 2,   # '(' terminal
+        CHILD_CONDITION     => 3,   # Expression node
+        CHILD_RPAREN        => 5,   # ')' terminal
+        CHILD_TRUE_BLOCK    => 7,   # Block for true branch
+        CHILD_ELSE_KEYWORD  => 9,   # 'else' keyword (if present)
+        CHILD_FALSE_BLOCK   => 11,  # Block for false/else branch (if present)
+    };
+
     method evaluate($context) {
         warn "[DEBUG] ConditionalStatement.evaluate() called\n" if $ENV{CHALK_DEBUG_TRACKING};
 
@@ -55,7 +67,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # child[6]: undef (WS_OPT)
         # child[7]: Block (HASH with statements)
 
-        my $condition = $context->child(3);  # Expression node at index 3
+        my $condition = $context->child(CHILD_CONDITION);
         unless ($condition isa Chalk::IR::Node::Base) {
             warn "[DEBUG] ConditionalStatement: condition not an IR node, returning undef. condition=", (defined $condition ? ref($condition) || $condition : 'undef'), "\n" if $ENV{CHALK_DEBUG_TRACKING};
             return undef;
@@ -68,10 +80,11 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $if_false = $builder->build_if_false_node($if_node);
 
         # Start tracking variable modifications in branches
-        $builder->begin_branch_tracking('true', 'false');
+        # Guard ensures cleanup even if exception occurs during branch evaluation
+        my $tracking_guard = $builder->begin_branch_tracking('true', 'false');
 
         # Get true branch context WITHOUT evaluating yet
-        my $true_block_ctx = $context->child_context(7);
+        my $true_block_ctx = $context->child_context(CHILD_TRUE_BLOCK);
         if (!$true_block_ctx) {
             warn "[DEBUG] ConditionalStatement: no true_block_ctx, returning undef\n" if $ENV{CHALK_DEBUG_TRACKING};
             return undef;
@@ -102,11 +115,11 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # child[7] is true block, child[8] is WS_OPT, child[9] is 'else', child[10] is WS_OPT, child[11] is else block
         my $false_control;
 
-        if (@children > 9) {
-            my $next_keyword = $children[9]->extract;
+        if (@children > CHILD_ELSE_KEYWORD) {
+            my $next_keyword = $children[CHILD_ELSE_KEYWORD]->extract;
             if (defined($next_keyword) && $next_keyword eq 'else') {
                 # Get false branch context WITHOUT evaluating yet
-                my $false_block_ctx = $context->child_context(11);
+                my $false_block_ctx = $context->child_context(CHILD_FALSE_BLOCK);
 
                 # NOW evaluate false branch with tracking active
                 $builder->set_branch('false');
@@ -144,6 +157,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
 
         # End tracking and generate Phi nodes for modified variables
         my $tracking_data = $builder->end_branch_tracking();
+        $tracking_guard->dismiss();  # Successful completion - no cleanup needed
+
         my $phi_nodes = $builder->generate_phi_nodes($region, $tracking_data, 'true', 'false');
 
         # Return the Region node (represents the merge point)
