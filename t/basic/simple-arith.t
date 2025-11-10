@@ -22,7 +22,6 @@ my $grammar = Test::Chalk::Grammar->build_grammar(
 my $parser = Chalk::Parser->new(grammar => $grammar);
 
 my $result = $parser->parse_string('num');
-say "Single num result: " . (defined $result ? ref($result) . " - $result" : "undef");
 
 ok $result, "Parse single num";
 
@@ -36,6 +35,5 @@ $grammar = Test::Chalk::Grammar->build_grammar(
 
 $parser = Chalk::Parser->new(grammar => $grammar);
 $result = $parser->parse_string('num+num');
-say "Addition result: " . (defined $result ? ref($result) . " - $result" : "undef");
 
 ok $result, "Parse num + num";

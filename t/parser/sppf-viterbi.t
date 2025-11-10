@@ -40,8 +40,6 @@ subtest 'Basic SPPFViterbi functionality' => sub {
     # And SPPF properties
     ok $result->sppf_node, 'Has SPPF node';
     isa_ok $result->sppf_node, 'Chalk::Semiring::SPPFSymbolNode';
-    
-    print "SPPFViterbi result: $result\n";
 };
 
 subtest 'Compare with pure Viterbi' => sub {
@@ -73,12 +71,9 @@ subtest 'Compare with pure Viterbi' => sub {
     
     # Should have same scores (approximately)
     is $sppf_result->score, $viterbi_result->score, 'Same Viterbi scores';
-    
+
     # Should have same path lengths
     is scalar($sppf_result->path->@*), scalar($viterbi_result->path->@*), 'Same path lengths';
-    
-    print "SPPF Viterbi: " . $sppf_result->probability . "\n";
-    print "Pure Viterbi: " . $viterbi_result->probability . "\n";
 };
 
 subtest 'SPPF forest access' => sub {
@@ -108,11 +103,6 @@ subtest 'SPPF forest access' => sub {
     my $nodes_hash = $forest->nodes();
     my @nodes = values %$nodes_hash;
     ok @nodes > 0, 'Forest has symbol nodes';
-    
-    print "Forest has " . scalar(@nodes) . " symbol nodes\n";
-    for my $node (@nodes) {
-        print "  Node: $node\n";
-    }
 };
 
 subtest 'Simple non-ambiguous grammar' => sub {
