@@ -224,6 +224,8 @@ if ( !caller ) {
             $builder = $ir_semiring->builder;
         } else {
             # No IR generation (e.g., -c flag) - use Boolean semiring for syntax check
+            # TODO: Should use Precedence semiring to validate precedence constraints
+            # Requires loading precedence table (see issue #190)
             require Chalk::Semiring::Boolean;
             $semiring = Chalk::Semiring::Boolean->new();
         }
