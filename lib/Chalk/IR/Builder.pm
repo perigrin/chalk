@@ -137,9 +137,7 @@ class Chalk::IR::Builder {
 
     # Create Constant node
     method build_constant_node( $value, $type = 'Int', $source_info = undef ) {
-
-        # Allow undef for representing Perl's undef constant
-        # die "build_constant_node: value is undefined" unless defined($value);
+        # Allow undef for representing Perl's undef constant (needed for implicit returns)
 
         my $node_id  = $self->next_node_id();
         my $constant = Chalk::IR::Node::Constant->new(
