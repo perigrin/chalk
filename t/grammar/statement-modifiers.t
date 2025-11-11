@@ -40,13 +40,10 @@ subtest 'while statement modifiers' => sub {
         ok($parser->parse_string($test), "Should parse: $test");
     }
 
-    # TODO #170: Print with string literal argument and statement modifier
-    # This pattern doesn't appear in rs.t - future enhancement
-    TODO: {
-        local $TODO = "print with string arg and statement modifier not yet supported (#170)";
-        ok($parser->parse_string("print 'hi' while \$x < 10"),
-           "Should parse: print 'hi' while \$x < 10");
-    }
+    # Print with string literal argument and statement modifier
+    # Works via: Statement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
+    ok($parser->parse_string("print 'hi' while \$x < 10"),
+       "Should parse: print 'hi' while \$x < 10");
 };
 
 # Test until statement modifiers
@@ -64,12 +61,10 @@ subtest 'until statement modifiers' => sub {
         ok($parser->parse_string($test), "Should parse: $test");
     }
 
-    # TODO #170: Print with string literal argument and statement modifier
-    TODO: {
-        local $TODO = "print with string arg and statement modifier not yet supported (#170)";
-        ok($parser->parse_string("print 'waiting' until \$ready"),
-           "Should parse: print 'waiting' until \$ready");
-    }
+    # Print with string literal argument and statement modifier
+    # Works via: Statement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
+    ok($parser->parse_string("print 'waiting' until \$ready"),
+       "Should parse: print 'waiting' until \$ready");
 };
 
 # Test for statement modifiers
