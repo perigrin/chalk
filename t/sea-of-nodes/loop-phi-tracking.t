@@ -2,13 +2,13 @@
 # ABOUTME: Test systematic loop-carried dependency tracking with phi nodes
 # ABOUTME: Validates Builder methods for tracking and generating loop phi nodes with Context model
 
+use lib 'lib';
 use 5.42.0;
 use Test2::V0;
 use FindBin qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-use lib "$RealBin/../../lib";
 use Chalk::IR::Builder;
 use Chalk::IR::Graph;
 use Chalk::IR::Context;

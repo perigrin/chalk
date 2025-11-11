@@ -1,9 +1,11 @@
 # ABOUTME: Test for Sea of Nodes IR generation - Array support (Issue #98 Phase 2)
 # ABOUTME: Validates IR generation for array creation, indexing, push, and length operations
 
+use lib 'lib';
 use v5.42;
 use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules

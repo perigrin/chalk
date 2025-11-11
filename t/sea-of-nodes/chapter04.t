@@ -1,8 +1,11 @@
 # ABOUTME: Test for Sea of Nodes IR generation - Chapter 4: Method Parameters and Projection Nodes
 # ABOUTME: Validates Proj nodes, Start node as MultiNode, parameter passing, and $ctrl tracking
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules

@@ -2,14 +2,13 @@
 # ABOUTME: Test Sea of Nodes Chapter 10 - Memory Operations and Objects
 # ABOUTME: Validates Load/Store nodes, memory state, and object field access
 
+use lib 'lib';
 use 5.42.0;
 use Test2::V0;
 use FindBin qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-use lib "$RealBin/../../lib";
-use lib 't/lib';
 use Chalk::IR::Node;
 use Chalk::IR::Graph;
 

@@ -1,9 +1,10 @@
 # ABOUTME: Test that comparison operators (>=, <=, !=) use correct IR nodes
 # ABOUTME: Tests builder methods for GE, LE, NE nodes and semantic actions
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class);
-use Test::More;
 use lib 'lib';
+use Test::More;
 
 plan tests => 14;
 

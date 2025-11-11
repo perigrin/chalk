@@ -1,8 +1,11 @@
 # ABOUTME: Test for Sea of Nodes IR generation - Chapter 1: Return constant
 # ABOUTME: Validates that parsing 'return 42;' generates correct IR graph with Start, Constant, and Return nodes
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules

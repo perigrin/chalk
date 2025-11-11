@@ -1,8 +1,11 @@
 # ABOUTME: Test for use-def chains in Sea of Nodes IR
 # ABOUTME: Validates that nodes track which other nodes use their output (use-def chains)
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 use_ok('Chalk::IR::Node');

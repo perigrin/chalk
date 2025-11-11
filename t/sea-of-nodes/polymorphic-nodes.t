@@ -1,9 +1,10 @@
 # ABOUTME: Tests for polymorphic IR node class hierarchy
 # ABOUTME: Verifies that node subclasses properly implement the polymorphic interface
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class);
-use Test::More;
 use lib 'lib';
+use Test::More;
 
 # Test plan: We'll test the polymorphic node hierarchy incrementally
 # Starting with basic nodes: Constant, Start, Return

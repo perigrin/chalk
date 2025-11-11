@@ -1,9 +1,10 @@
 # ABOUTME: Tests for polymorphic comparison IR node subclasses
 # ABOUTME: Verifies GT, LT, EQ, NE, LE, GE comparison nodes
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class);
-use Test::More;
 use lib 'lib';
+use Test::More;
 
 plan tests => 20;
 

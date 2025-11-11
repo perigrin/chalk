@@ -1,8 +1,11 @@
 # ABOUTME: Test for Sea of Nodes IR generation - Hash support (Issue #98 Phase 3)
 # ABOUTME: Validates IR generation for hash creation, key access, assignment, keys, and exists operations
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules

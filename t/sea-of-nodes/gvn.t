@@ -1,8 +1,11 @@
 # ABOUTME: Test for Global Value Numbering (GVN) optimization pass
 # ABOUTME: Validates redundant computation elimination, common subexpression elimination, and value numbering correctness
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Load required modules
