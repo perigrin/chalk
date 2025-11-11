@@ -1,5 +1,6 @@
 # ABOUTME: Tests that {...} is correctly disambiguated as hash subscript vs hashref/block
 # ABOUTME: Critical regression test for the R variant context system in the grammar
+use lib 'lib';
 use 5.42.0;
 use Test2::V0;
 use Chalk::Parser;

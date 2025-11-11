@@ -1,5 +1,6 @@
 # ABOUTME: Minimal test case for lex.t position 13215 regression
 # ABOUTME: Tests parsing of complex nested brace expressions
+use lib 'lib';
 use 5.42.0;
 use Test2::V0;
 use Chalk::Parser;

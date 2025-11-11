@@ -1,5 +1,6 @@
 # ABOUTME: Tests for circular grammar allowing print/die/warn in expression context
 # ABOUTME: Verifies that valid Perl like 'print print 2' now parses correctly
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class builtin);
 use Test::More;

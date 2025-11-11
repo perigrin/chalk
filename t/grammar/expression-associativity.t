@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 # ABOUTME: Test that expression associativity is preserved after grammar simplification
 # ABOUTME: Validates left-associative and right-associative operators parse correctly
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class builtin);
 use Test::More;
