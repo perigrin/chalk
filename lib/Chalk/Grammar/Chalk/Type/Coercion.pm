@@ -37,7 +37,7 @@ class Chalk::Grammar::Chalk::Type::Coercion {
             # Invalid strings to 0 (with warning about information loss)
             my $target = Chalk::Grammar::Chalk::Type::Num->new();
             my $msg = "non-numeric string coerced to 0";
-            my $warning = Chalk::Grammar::Chalk::Type::Exception::information_loss_warning(
+            my $warning = Chalk::Grammar::Chalk::Type::Exception->information_loss_warning(
                 $source_type, $target, $value, $msg
             );
             warn $warning;
@@ -51,7 +51,7 @@ class Chalk::Grammar::Chalk::Type::Coercion {
         }
 
         my $target = Chalk::Grammar::Chalk::Type::Num->new();
-        my $exception = Chalk::Grammar::Chalk::Type::Exception::type_coercion_error($source_type, $target, $value, "numeric coercion");
+        my $exception = Chalk::Grammar::Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "numeric coercion");
         $exception->throw();
     }
 
@@ -82,7 +82,7 @@ class Chalk::Grammar::Chalk::Type::Coercion {
         }
 
         my $target = Chalk::Grammar::Chalk::Type::Str->new();
-        my $exception = Chalk::Grammar::Chalk::Type::Exception::type_coercion_error($source_type, $target, $value, "string coercion");
+        my $exception = Chalk::Grammar::Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "string coercion");
         $exception->throw();
     }
 
