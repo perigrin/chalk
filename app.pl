@@ -52,6 +52,7 @@ if ( !caller ) {
 
     # Build grammar from BNF file
     use Chalk::Grammar;
+    use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 
     our $chalk_grammar;
 

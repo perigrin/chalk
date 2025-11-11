@@ -2,6 +2,7 @@
 # ABOUTME: Tests CEK interpreter heap memory allocation and management
 # ABOUTME: Verifies unique heap ID generation, heap storage/lookup, and isolation between heap objects
 use 5.42.0;
+use lib 'lib';
 use Test::More tests => 12;
 use Chalk::Interpreter::Environment;
 

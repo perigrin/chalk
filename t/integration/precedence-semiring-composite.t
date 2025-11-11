@@ -12,6 +12,7 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use File::Spec;
 use Chalk::Grammar;
+use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 use Chalk::Parser;
 use Chalk::Semiring::SPPF;
 use Chalk::Semiring::Precedence;

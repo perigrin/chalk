@@ -2,6 +2,7 @@
 # ABOUTME: Tests CEK interpreter environment snapshot and restore functionality
 # ABOUTME: Verifies that node bindings, variable bindings, and heap state can be captured and restored
 use 5.42.0;
+use lib 'lib';
 use Test::More tests => 13;
 use Chalk::Interpreter::Environment;
 use Chalk::IR::Graph;
