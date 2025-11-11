@@ -10,7 +10,7 @@ use Chalk::Grammar;
 use Chalk::Semiring::ChalkIR;
 
 # Load Perl grammar from BNF
-my $bnf_file = 'grammar/perl.bnf';
+my $bnf_file = 'grammar/chalk.bnf';
 open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
 my $content = do { local $/; <$fh> };
 close $fh;

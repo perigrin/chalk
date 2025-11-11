@@ -15,10 +15,10 @@ subtest '-c option for syntax checking with Boolean semiring' => sub {
     print $fh "class Foo { }\n";
     close $fh;
 
-    my $output = `perl $app_pl -c -g Perl $filename 2>&1`;
+    my $output = `perl $app_pl -c -g Chalk $filename 2>&1`;
     my $exit_code = $? >> 8;
 
-    like $output, qr/syntax OK/i, '-c shows syntax OK for valid Perl';
+    like $output, qr/syntax OK/i, '-c shows syntax OK for valid Chalk';
     is $exit_code, 0, '-c exits with 0 for valid syntax';
 
     unlink $filename;
@@ -26,13 +26,13 @@ subtest '-c option for syntax checking with Boolean semiring' => sub {
 
 subtest '-c option rejects invalid syntax' => sub {
     my ($fh, $filename) = tempfile();
-    print $fh "class { }\n";  # Invalid - missing class name
+    print $fh "{ { {\n";  # Unmatched braces - invalid in both Perl and Chalk
     close $fh;
 
-    my $output = `perl $app_pl -c -g Perl $filename 2>&1`;
+    my $output = `perl $app_pl -c -g Chalk $filename 2>&1`;
     my $exit_code = $? >> 8;
 
-    like $output, qr/(syntax error|parse failed)/i, '-c shows error for invalid Perl';
+    like $output, qr/(syntax error|parse failed)/i, '-c shows error for invalid Chalk';
     is $exit_code, 1, '-c exits with 1 for invalid syntax';
 
     unlink $filename;
@@ -43,7 +43,7 @@ subtest '--semiring Boolean option' => sub {
     print $fh "class Foo { }\n";
     close $fh;
 
-    my $output = `perl $app_pl --semiring Boolean -g Perl $filename 2>&1`;
+    my $output = `perl $app_pl --semiring Boolean -g Chalk $filename 2>&1`;
     my $exit_code = $? >> 8;
 
     ok $output, '--semiring Boolean produces output';
@@ -57,7 +57,7 @@ subtest '--semiring SPPF option (default)' => sub {
     print $fh "class Foo { }\n";
     close $fh;
 
-    my $output = `perl $app_pl --semiring SPPF -g Perl $filename 2>&1`;
+    my $output = `perl $app_pl --semiring SPPF -g Chalk $filename 2>&1`;
     my $exit_code = $? >> 8;
 
     ok $output, '--semiring SPPF produces output';
@@ -71,10 +71,10 @@ subtest '-c is equivalent to --semiring Boolean' => sub {
     print $fh "class Foo { }\n";
     close $fh;
 
-    my $output_c = `perl $app_pl -c -g Perl $filename 2>&1`;
+    my $output_c = `perl $app_pl -c -g Chalk $filename 2>&1`;
     my $exit_c = $? >> 8;
 
-    my $output_bool = `perl $app_pl --semiring Boolean -g Perl $filename 2>&1`;
+    my $output_bool = `perl $app_pl --semiring Boolean -g Chalk $filename 2>&1`;
     my $exit_bool = $? >> 8;
 
     is $exit_c, $exit_bool, '-c and --semiring Boolean have same exit code';
