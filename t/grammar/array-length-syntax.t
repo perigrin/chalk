@@ -11,7 +11,7 @@ use Chalk::Parser;
 use File::Spec;
 
 # Load grammar from BNF file
-my $bnf_file = File::Spec->catfile($RealBin, '..', 'grammar', 'perl.bnf');
+my $bnf_file = File::Spec->catfile($RealBin, '..', '..', 'grammar', 'chalk.bnf');
 open my $grammar_fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$grammar_fh> };
 close $grammar_fh;
