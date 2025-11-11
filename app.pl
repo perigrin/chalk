@@ -223,11 +223,10 @@ if ( !caller ) {
             $semiring = $ir_semiring;
             $builder = $ir_semiring->builder;
         } else {
-            # No IR generation (e.g., -c flag) - use Boolean semiring for syntax check
-            # TODO: Should use Precedence semiring to validate precedence constraints
-            # Requires loading precedence table (see issue #190)
-            require Chalk::Semiring::Boolean;
-            $semiring = Chalk::Semiring::Boolean->new();
+            # No IR generation (e.g., -c flag) - use ChalkSyntax for syntax check
+            # ChalkSyntax = SPPF + Precedence (validates syntax and precedence)
+            require Chalk::Semiring::ChalkSyntax;
+            $semiring = Chalk::Semiring::ChalkSyntax->new(grammar => $chalk_grammar);
         }
 
         # Create parser with grammar and semiring
