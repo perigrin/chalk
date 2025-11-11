@@ -1,9 +1,10 @@
 # ABOUTME: Tests for polymorphic control flow IR node subclasses
 # ABOUTME: Verifies If, Proj, Region, Phi, and Loop control flow nodes
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class);
-use Test::More;
 use lib 'lib';
+use Test::More;
 
 plan tests => 20;
 

@@ -71,15 +71,17 @@ use Chalk::IR::Node::Constant;
     like($@, qr/node|invalid|type/i, 'Rejects non-node right operand');
 }
 
-# Test 6: Constant node with undefined value should die
+# Test 6: Constant node with undefined value is allowed (for implicit returns)
 {
     my $builder = Chalk::IR::Builder->new();
     my $start = $builder->build_start_node();
 
+    my $const;
     eval {
-        my $const = $builder->build_constant_node(undef);
+        $const = $builder->build_constant_node(undef);
     };
-    like($@, qr/value|undefined|undef/i, 'Rejects undefined constant value');
+    ok(!$@, 'Allows undefined constant value (needed for implicit returns)');
+    isa_ok($const, 'Chalk::IR::Node::Constant', 'Created undef constant node');
 }
 
 # Test 7: Return node with undefined value should die

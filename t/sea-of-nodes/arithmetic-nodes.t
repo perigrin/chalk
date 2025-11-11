@@ -1,9 +1,10 @@
 # ABOUTME: Tests for polymorphic arithmetic IR node subclasses
 # ABOUTME: Verifies Add, Subtract, Multiply, Divide, and Negate nodes
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class);
-use Test::More;
 use lib 'lib';
+use Test::More;
 
 plan tests => 20;
 

@@ -1,8 +1,11 @@
 # ABOUTME: Test for Sea of Nodes IR generation - String support (Issue #98 Phase 4)
 # ABOUTME: Validates IR generation for string concatenation, length, and substring operations
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules

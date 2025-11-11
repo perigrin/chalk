@@ -199,12 +199,14 @@ class Chalk::IR::Node {
 
         # Create polymorphic node with proper class
         my $node;
-        eval {
+        try {
             $node = $node_class->new(%params);
-        };
+        } catch ($e) {
+            $node = undef;
+        }
 
         # If construction fails, fall back to generic node
-        if ($@ || !$node) {
+        if (!$node) {
             return $class->new(
                 id         => $id,
                 op         => $op,

@@ -31,11 +31,15 @@ use Chalk::Semiring::Semantic;
         semiring => $semiring
     );
 
-    # Simple test - just verify it doesn't crash
+    # Test that parse returns a semantic element
     my $result = $parser->parse_string("ab");
 
     ok($result, 'Parser with Semantic semiring can parse');
     isa_ok($result, 'Chalk::Semiring::SemanticElement', 'Result is a SemanticElement');
+
+    # Verify the element has the expected structure
+    can_ok($result, 'extract');
+    ok(defined($result->extract), 'SemanticElement can extract value');
 }
 
 # Test with custom evaluation rule
@@ -86,6 +90,14 @@ use Chalk::Semiring::Semantic;
     my $result = $parser->parse_string("5+3");
 
     ok($result, 'Parser with custom evaluate rule can parse');
+    isa_ok($result, 'Chalk::Semiring::SemanticElement', 'Result is a SemanticElement');
+
+    # Verify the custom evaluation was called
+    my $extracted = $result->extract;
+    ok(defined($extracted), 'Custom evaluate produced a result');
+    # The custom rule should either return the sum (8) or an array structure
+    ok($extracted == 8 || ref($extracted) eq 'ARRAY',
+       'Custom evaluate returned expected type (number or array)');
 }
 
 # Test that default evaluate() is called
@@ -109,6 +121,11 @@ use Chalk::Semiring::Semantic;
     my $result = $parser->parse_string("x");
 
     ok($result, 'Parser with default evaluate can parse');
+    isa_ok($result, 'Chalk::Semiring::SemanticElement', 'Result is a SemanticElement');
+
+    # Verify default evaluation works
+    can_ok($result, 'extract');
+    ok(defined($result->extract), 'Default evaluate produced a result');
 }
 
 done_testing();

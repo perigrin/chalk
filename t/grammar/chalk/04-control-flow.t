@@ -34,6 +34,16 @@ sub parses_ok {
     ok($result, $name) or diag("Failed to parse: $code");
 }
 
+sub parse_fails {
+    my ($code, $name) = @_;
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => $semiring
+    );
+    my $result = $parser->parse_string($code);
+    ok(!$result, $name) or diag("Unexpectedly parsed: $code");
+}
+
 # If statements
 parses_ok(q{
     if ($x > 0) {
@@ -174,3 +184,16 @@ parses_ok(q{
         }
     }
 }, 'control flow in method');
+
+# Negative tests: malformed control flow that should NOT parse
+# TODO: Grammar currently too permissive - accepts invalid control flow syntax
+todo "Grammar needs stricter validation for control flow structures" => sub {
+    parse_fails(q{ if { $x; } }, 'invalid: if without condition');
+    parse_fails(q{ if ($x > 0) $x; else $y; }, 'invalid: if/else without braces');
+    parse_fails(q{ while { $x--; } }, 'invalid: while without condition');
+    parse_fails(q{ for ($x) { } }, 'invalid: for without loop variable');
+    parse_fails(q{ else { $x; } }, 'invalid: else without preceding if');
+    parse_fails(q{ elsif ($x) { $y; } }, 'invalid: elsif without preceding if');
+    parse_fails(q{ if ($x) { $y; } elsif { $z; } }, 'invalid: elsif without condition');
+    parse_fails(q{ return; }, 'invalid: return outside function context');
+};

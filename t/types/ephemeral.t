@@ -7,11 +7,11 @@ use experimental qw(class);
 use Test::More;
 use lib 'lib';
 
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::List;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Hash;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::List;
+use Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Type::Hash;
+use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::Grammar::Chalk::Type::Int;
 
 subtest 'List is ephemeral type' => sub {
     use_ok('Chalk::Grammar::Chalk::Type::List');
@@ -68,10 +68,14 @@ subtest 'List with parameterized element type converts properly' => sub {
 };
 
 subtest 'Range operator produces List type' => sub {
-    # This will be tested via semantic semiring
-    # Range: 1..10 produces List
-    # Assignment: my @arr = (1..10) converts List to Array
-    pass('Range operator type inference tested in semantic-type-tracking.t');
+    # Range operator type inference is tested comprehensively in:
+    # - t/types/semantic-type-tracking.t (via semantic semiring)
+    # - t/types/list-conversion.t (List -> Array conversion)
+    #
+    # This test would duplicate those tests, so we skip it here
+    SKIP: {
+        skip 'Range operator type inference tested in semantic-type-tracking.t', 1;
+    }
 };
 
 done_testing();

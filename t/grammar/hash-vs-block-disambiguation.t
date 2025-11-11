@@ -1,5 +1,6 @@
 # ABOUTME: Tests that {...} is correctly disambiguated as hash subscript vs hashref/block
 # ABOUTME: Critical regression test for the R variant context system in the grammar
+use lib 'lib';
 use 5.42.0;
 use Test2::V0;
 use Chalk::Parser;
@@ -8,7 +9,7 @@ use FindBin qw($RealBin);
 use File::Spec;
 
 # Load grammar from BNF file
-my $bnf_file = File::Spec->catfile($RealBin, "..", "..", "grammar", "perl.bnf");
+my $bnf_file = File::Spec->catfile($RealBin, "..", "..", "grammar", "chalk.bnf");
 open my $grammar_fh, "<:utf8", $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$grammar_fh> };
 close $grammar_fh;

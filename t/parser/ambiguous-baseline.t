@@ -32,9 +32,10 @@ subtest 'Simple ambiguous grammar with ViterbiSemiring' => sub {
     my $result = $parser->parse_string('n+n*n');
     ok $result, 'Viterbi parse ambiguous expression';
     isa_ok $result, 'Chalk::Semiring::ViterbiElement';
-    
-    print "Viterbi result: $result\n";
-    print "Path: " . join(", ", map { $_->to_string } $result->path->@*) . "\n";
+
+    # Verify Viterbi result has expected structure
+    can_ok $result, 'path';
+    ok scalar($result->path->@*) > 0, 'Viterbi path is non-empty';
 };
 
 subtest 'Simple ambiguous grammar with BooleanSemiring' => sub {
@@ -54,8 +55,6 @@ subtest 'Simple ambiguous grammar with BooleanSemiring' => sub {
     my $result = $parser->parse_string('n+n*n');
     ok $result, 'Boolean parse ambiguous expression';
     isa_ok $result, 'Chalk::Semiring::BooleanElement';
-    
-    print "Boolean result: $result\n";
 };
 
 subtest 'More complex ambiguous expression' => sub {
@@ -94,8 +93,6 @@ subtest 'More complex ambiguous expression' => sub {
     $bool_result = $bool_parser->parse_string('(n+n)*n');
     ok $bool_result, 'Boolean parse parenthesized expression';
     
-    print "Complex Viterbi result: $viterbi_result\n" if $viterbi_result;
-    print "Complex Boolean result: $bool_result\n" if $bool_result;
 };
 
 subtest 'Verify existing working grammars still work' => sub {
@@ -115,5 +112,4 @@ subtest 'Verify existing working grammars still work' => sub {
     
     my $result = $parser->parse_string('num+num+num');
     ok $result, 'Known working grammar still works';
-    print "Working grammar result: $result\n" if $result;
 };

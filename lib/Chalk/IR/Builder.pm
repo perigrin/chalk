@@ -49,7 +49,7 @@ class Chalk::IR::Builder {
     field $loop_depth = 0;    # Current loop nesting depth for label namespacing
     field $loop_modified_vars =
       [];    # Stack of sets tracking modified vars per loop depth
-    field $branch_tracking_stack =
+    field $branch_tracking_stack :reader =
       [];    # Unified stack for tracking variable modifications in branches (loops, conditionals)
     field $type_inference :reader;    # Type inference instance
     field $type_lattice   :reader;    # Grammar-specific type system
@@ -137,9 +137,7 @@ class Chalk::IR::Builder {
 
     # Create Constant node
     method build_constant_node( $value, $type = 'Int', $source_info = undef ) {
-
-        # Allow undef for representing Perl's undef constant
-        # die "build_constant_node: value is undefined" unless defined($value);
+        # Allow undef for representing Perl's undef constant (needed for implicit returns)
 
         my $node_id  = $self->next_node_id();
         my $constant = Chalk::IR::Node::Constant->new(
@@ -1940,7 +1938,7 @@ class Chalk::IR::Builder::BranchTrackingGuard {
 
     method DESTROY() {
         # Clean up leaked tracking frame if guard was not explicitly dismissed
-        if ($active && scalar($builder->{branch_tracking_stack}->@*) > 0) {
+        if ($active && scalar($builder->branch_tracking_stack->@*) > 0) {
             warn "[WARN] BranchTrackingGuard: cleaning up leaked tracking frame\n";
             try {
                 $builder->end_branch_tracking();

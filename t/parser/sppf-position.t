@@ -18,8 +18,9 @@ use Chalk::Parser;
 
 subtest 'SPPF terminal node position tracking' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => ['a'] ],
+        rules => [
+            [ 'S' => ['a'] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
@@ -34,13 +35,14 @@ subtest 'SPPF terminal node position tracking' => sub {
     my $sppf_node = $result->sppf_node;
     is $sppf_node->start_pos, 0, 'Terminal starts at position 0';
     is $sppf_node->end_pos, 1, 'Terminal ends at position 1';
-    is $sppf_node->to_string, 'S[0,1]', 'Terminal node shows correct span';
+    is $sppf_node->to_string, 'S[0(),1()]', 'Terminal node shows correct span';
 };
 
 subtest 'SPPF sequence node position tracking' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(a b)] ],
+        rules => [
+            [ 'S' => [qw(a b)] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
@@ -55,16 +57,17 @@ subtest 'SPPF sequence node position tracking' => sub {
     my $sppf_node = $result->sppf_node;
     is $sppf_node->start_pos, 0, 'Sequence starts at position 0';
     is $sppf_node->end_pos, 2, 'Sequence ends at position 2';
-    is $sppf_node->to_string, 'S[0,2]', 'Sequence node shows correct span [0,2]';
+    is $sppf_node->to_string, 'S[0(),2()]', 'Sequence node shows correct span [0,2]';
 };
 
 subtest 'SPPF nested sequence position tracking' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(A B C)] ],
-        [ 'A' => ['a'] ],
-        [ 'B' => ['b'] ],
-        [ 'C' => ['c'] ],
+        rules => [
+            [ 'S' => [qw(A B C)] ],
+            [ 'A' => ['a'] ],
+            [ 'B' => ['b'] ],
+            [ 'C' => ['c'] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
@@ -79,13 +82,14 @@ subtest 'SPPF nested sequence position tracking' => sub {
     my $sppf_node = $result->sppf_node;
     is $sppf_node->start_pos, 0, 'Root starts at position 0';
     is $sppf_node->end_pos, 3, 'Root ends at position 3';
-    like $sppf_node->to_string, qr/\[0,3\]/, 'Root node spans entire input [0,3]';
+    like $sppf_node->to_string, qr/\[0\(\),3\(\)\]/, 'Root node spans entire input [0,3]';
 };
 
 subtest 'SPPF complete parse validation' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(a b)] ],
+        rules => [
+            [ 'S' => [qw(a b)] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
@@ -107,10 +111,11 @@ subtest 'SPPF complete parse validation' => sub {
 
 subtest 'SPPF alternative node position consistency' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
@@ -133,8 +138,9 @@ subtest 'SPPF alternative node position consistency' => sub {
 
 subtest 'SPPF position tracking with longer input' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(a b c d)] ],
+        rules => [
+            [ 'S' => [qw(a b c d)] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
@@ -149,13 +155,14 @@ subtest 'SPPF position tracking with longer input' => sub {
     my $sppf_node = $result->sppf_node;
     is $sppf_node->start_pos, 0, 'Longer sequence starts at position 0';
     is $sppf_node->end_pos, 4, 'Longer sequence ends at position 4';
-    is $sppf_node->to_string, 'S[0,4]', 'Longer sequence shows correct span [0,4]';
+    is $sppf_node->to_string, 'S[0(),4()]', 'Longer sequence shows correct span [0,4]';
 };
 
 subtest 'SPPF empty input handling' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => ['ε'] ],  # Epsilon/empty production
+        rules => [
+            [ 'S' => ['ε'] ],  # Epsilon/empty production
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();
@@ -179,10 +186,11 @@ subtest 'SPPF empty input handling' => sub {
 
 subtest 'SPPF forest node retrieval with positions' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(A B)] ],
-        [ 'A' => ['a'] ],
-        [ 'B' => ['b'] ],
+        rules => [
+            [ 'S' => [qw(A B)] ],
+            [ 'A' => ['a'] ],
+            [ 'B' => ['b'] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::SPPFViterbiSemiring->new();

@@ -18,11 +18,11 @@ subtest 'Universal types' => sub {
     my $none = Chalk::Grammar::Chalk::Type::None->new();
 
     # Any is top type - all types are subtypes of Any
-    isa_ok($any, 'Chalk::Type');
+    isa_ok($any, 'Chalk::Grammar::Chalk::Type');
     ok($any->is_top(), 'Any is top type');
 
     # None is bottom type - is subtype of all types
-    isa_ok($none, 'Chalk::Type');
+    isa_ok($none, 'Chalk::Grammar::Chalk::Type');
     ok($none->is_bottom(), 'None is bottom type');
     ok($none->is_subtype_of($any), 'None <: Any');
 };

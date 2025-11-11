@@ -7,11 +7,11 @@ use experimental qw(class);
 use Test::More;
 use lib 'lib';
 
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::List;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Hash;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any;
+use Chalk::Grammar::Chalk::Type::List;
+use Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Type::Hash;
+use Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::Any;
 use Chalk::Semiring::Semantic;
 use Chalk::Grammar;
 

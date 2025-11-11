@@ -8,11 +8,11 @@ use Test::More;
 use lib 'lib';
 
 use Chalk::Builtins;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Boolean;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Array;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::List;
+use Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::Str;
+use Chalk::Grammar::Chalk::Type::Boolean;
+use Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Type::List;
 
 subtest 'Builtins has signature for common functions' => sub {
     my $builtins = Chalk::Builtins->new();

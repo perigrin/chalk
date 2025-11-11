@@ -1,17 +1,18 @@
 #!/usr/bin/env perl
 # ABOUTME: Test IR generation pipeline with GVN optimization for simple Chalk programs
 # ABOUTME: Verifies semantic actions build IR during parsing and GVN deduplicates intermediate nodes
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use lib 'lib';
-use lib 'tools';
 use Test::More;
 
 # Test that IR Builder can be used during parsing
 {
     use Chalk::Parser;
     use Chalk::Grammar;
+    use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
     use Chalk::IR::Builder;
     use Chalk::IR::Validator;
     use Chalk::IR::Optimizer::GVN;

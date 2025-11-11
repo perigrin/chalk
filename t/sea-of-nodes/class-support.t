@@ -1,8 +1,11 @@
 # ABOUTME: Test for Sea of Nodes IR generation - Class and object support (Issue #98 Phase 1)
 # ABOUTME: Validates IR generation for class definitions, object instantiation, and field access
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules

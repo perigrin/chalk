@@ -62,8 +62,9 @@ subtest 'Position semiring identity elements' => sub {
 
 subtest 'Position semiring with simple grammar - complete parse' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(a b)] ],
+        rules => [
+            [ 'S' => [qw(a b)] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::Position->new();
@@ -81,8 +82,9 @@ subtest 'Position semiring with simple grammar - complete parse' => sub {
 
 subtest 'Position semiring detects incomplete parse' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(a b c)] ],
+        rules => [
+            [ 'S' => [qw(a b c)] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::Position->new();

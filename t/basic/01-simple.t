@@ -1,4 +1,6 @@
 #!/usr/bin/env perl
+# ABOUTME: Basic parser smoke test verifying minimal grammar and parsing functionality
+# ABOUTME: Tests that a single-rule grammar can be created and a simple string can be parsed
 use 5.42.0;
 use Test2::V0;
 use FindBin      qw($RealBin);
@@ -16,8 +18,10 @@ my $grammar = Test::Chalk::Grammar->build_grammar(
         [ 'A' => [] ]
     ]
 );
-ok $grammar, $grammar;
+ok $grammar, 'Grammar created successfully';
 
 my $parser = Chalk::Parser->new( grammar => $grammar );
-$parser->parse_string('A');
+my $result = $parser->parse_string('');  # A => [] produces empty string
+ok $result, 'Parse empty string with minimal grammar';
+isa_ok $result, ['Chalk::Element'], 'Result is a semiring element';
 

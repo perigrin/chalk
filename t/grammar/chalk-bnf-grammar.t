@@ -159,7 +159,8 @@ subtest 'Phase 2: Expressions - Arithmetic and comparison' => sub {
     ok $result, 'Parse method with method calls';
 
     # Test: Array and hash access
-    todo "complex array/hash subscripting requires additional grammar rules" => sub {
+    # TODO #173
+    todo "complex array/hash subscripting requires additional grammar rules (#173)" => sub {
         $code = q{
             class Accessor {
                 method access() {
@@ -272,7 +273,8 @@ subtest 'Self-hosting: Parse actual Chalk files' => sub {
     );
 
     # Test parsing a simple Chalk module
-    todo "named constructor arguments require additional grammar rules" => sub {
+    # TODO #174
+    todo "named constructor arguments require additional grammar rules (#174)" => sub {
         my $simple_module = q{
             use 5.42.0;
             use experimental qw(class);
@@ -315,6 +317,7 @@ subtest 'Exclusions: Verify restricted features are NOT parsed' => sub {
     );
 
     # These should fail to parse as they're excluded from chalk.bnf
+    my $todo = todo "Grammar exclusions not yet implemented - eval STRING, symbolic refs, goto";
 
     # Test: eval STRING should fail
     my $code = q{

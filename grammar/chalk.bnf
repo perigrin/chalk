@@ -69,9 +69,9 @@
 %SINGLE_QUOTED_STRING% = /'(?:[^'\\]|\\.)*'/
 %DOUBLE_QUOTED_STRING% = /"(?:[^"\\]|\\.)*"/
 %REGEX_CONTENT% = /(?:[^\/\\]|\\.)+/
-%REGEX_FLAGS% = /[msixpodualn]*/
+%REGEX_FLAGS% = /[msixpodualngc]*/
 %STRING_COMPARE_OP% = /eq|ne|lt|gt|le|ge|cmp/
-%NUM_COMPARE_OP% = /==|!=|<=|>=|<=>|<|>/
+%NUM_COMPARE_OP% = /==|!=|<=>|<=|>=|<|>/
 %REGEX_MATCH_OP% = /=~|!~/
 %ASSIGN_OP% = /\/\/=|\|\|=|\+=|-=|\.=/
 %ARITHMETIC_OP% = /[+\-*\/]/
@@ -456,6 +456,7 @@ WordList -> Word WS_OPT WordList
 
 # Regex patterns
 RegexPattern -> 'qr' '/' RegexContent '/' RegexFlags
+RegexPattern -> 'm' '/' RegexContent '/' RegexFlags
 
 # Regex substitution
 RegexSubstitution -> 's' '/' RegexContent '/' RegexContent '/' RegexFlags

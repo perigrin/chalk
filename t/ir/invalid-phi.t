@@ -4,6 +4,7 @@
 use v5.42;
 use Test::More;
 use Test::Deep;
+use lib 'lib';
 
 use_ok('Chalk::IR::Node');
 use_ok('Chalk::IR::Graph');

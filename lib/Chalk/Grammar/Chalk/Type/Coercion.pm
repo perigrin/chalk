@@ -3,12 +3,13 @@
 
 use 5.042;
 use experimental qw(class);
+use Chalk::Grammar::Chalk::Type::Code;
 
-class Chalk::Grammar::Chalk::Type::Coercion {
-    use Scalar::Util qw(looks_like_number refaddr);
-    use Chalk::Type::Exception;
-    use Chalk::Type::Num;
-    use Chalk::Type::Str;
+class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Code) {
+    use Scalar::Util qw(looks_like_number refaddr blessed);
+    use Chalk::Grammar::Chalk::Type::Exception;
+    use Chalk::Grammar::Chalk::Type::Num;
+    use Chalk::Grammar::Chalk::Type::Str;
 
     # Numeric coercion: to_num
     # Per spec: numbers stay, valid numeric strings parse, invalid to 0, refs to address
@@ -35,9 +36,9 @@ class Chalk::Grammar::Chalk::Type::Coercion {
                 return $value + 0;  # Force numeric context
             }
             # Invalid strings to 0 (with warning about information loss)
-            my $target = Chalk::Type::Num->new();
+            my $target = Chalk::Grammar::Chalk::Type::Num->new();
             my $msg = "non-numeric string coerced to 0";
-            my $warning = Chalk::Type::Exception->information_loss_warning(
+            my $warning = Chalk::Grammar::Chalk::Type::Exception->information_loss_warning(
                 $source_type, $target, $value, $msg
             );
             warn $warning;
@@ -46,12 +47,12 @@ class Chalk::Grammar::Chalk::Type::Coercion {
 
         # References coerce to memory addresses
         # Check by type name prefix since our Ref types use is_subtype_of not Perl inheritance
-        if ($type_name =~ qr/^Chalk::Type::(?:Ref|.*Ref|Object)$/) {
+        if ($type_name =~ qr/^Chalk::Grammar::Chalk::Type::(?:Ref|.*Ref|Object)$/) {
             return refaddr($value);
         }
 
-        my $target = Chalk::Type::Num->new();
-        my $exception = Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "numeric coercion");
+        my $target = Chalk::Grammar::Chalk::Type::Num->new();
+        my $exception = Chalk::Grammar::Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "numeric coercion");
         $exception->throw();
     }
 
@@ -76,13 +77,13 @@ class Chalk::Grammar::Chalk::Type::Coercion {
 
         # References stringify to TYPE(0x...)
         # Check by type name prefix since our Ref types use is_subtype_of not Perl inheritance
-        if ($type_name =~ qr/^Chalk::Type::(?:Ref|.*Ref|Object)$/) {
+        if ($type_name =~ qr/^Chalk::Grammar::Chalk::Type::(?:Ref|.*Ref|Object)$/) {
             # Let Perl handle reference stringification
             return "$value";
         }
 
-        my $target = Chalk::Type::Str->new();
-        my $exception = Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "string coercion");
+        my $target = Chalk::Grammar::Chalk::Type::Str->new();
+        my $exception = Chalk::Grammar::Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "string coercion");
         $exception->throw();
     }
 
@@ -96,5 +97,13 @@ class Chalk::Grammar::Chalk::Type::Coercion {
         # In Perl, these are falsy: undef, 0, '', "0"
         # Everything else is truthy
         return $value ? 1 : 0;
+    }
+
+    method is_subtype_of($other) {
+        # Coercion <: Coercion (reflexive)
+        # Coercion <: Code <: Any
+        return $other isa Chalk::Grammar::Chalk::Type::Coercion ||
+               $other isa Chalk::Grammar::Chalk::Type::Code ||
+               $other isa Chalk::Grammar::Chalk::Type::Any;
     }
 }

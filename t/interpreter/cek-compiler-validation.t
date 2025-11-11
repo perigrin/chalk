@@ -48,10 +48,12 @@
 # CONCLUSION: CEK interpreter is working correctly. All TODO failures are IR Builder bugs.
 
 use 5.42.0;
+use lib 'lib';
 use Test::More;
 use File::Temp;
 use Chalk::Parser;
 use Chalk::Grammar;
+use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 use Chalk::Semiring::Semantic;
 use Chalk::IR::Builder;
 use Chalk::IR::Optimizer::GVN;

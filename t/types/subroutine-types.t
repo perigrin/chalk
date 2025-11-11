@@ -7,13 +7,13 @@ use experimental qw(class);
 use Test::More;
 use lib 'lib';
 
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::List;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Scalar;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Int;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Num;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Str;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Any;
-use Chalk::Grammar::Chalk::Grammar::Chalk::Type::Code;
+use Chalk::Grammar::Chalk::Type::List;
+use Chalk::Grammar::Chalk::Type::Scalar;
+use Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::Num;
+use Chalk::Grammar::Chalk::Type::Str;
+use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::Grammar::Chalk::Type::Code;
 
 subtest 'Code type exists' => sub {
     use_ok('Chalk::Grammar::Chalk::Type::Code');

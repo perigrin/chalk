@@ -1,6 +1,7 @@
 # ABOUTME: Integration test verifying all IR node types work with CEK interpreter
 # ABOUTME: Tests closure-based context API compatibility for implemented nodes
 use 5.42.0;
+use lib 'lib';
 use Test::More;
 use Chalk::IR::Builder;
 use Chalk::Interpreter::CEKDataflow;

@@ -1,4 +1,8 @@
+#!/usr/bin/env perl
+# ABOUTME: Tests CEK interpreter hash operations including NewHash, HashStore, and HashLoad nodes
+# ABOUTME: Verifies heap allocation, key-value storage/retrieval, multi-key hashes, and hash isolation
 use 5.42.0;
+use lib 'lib';
 use Test::More tests => 8;
 use Chalk::IR::Graph;
 use Chalk::IR::Node::Constant;

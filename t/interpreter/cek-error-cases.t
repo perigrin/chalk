@@ -1,6 +1,7 @@
 # ABOUTME: Comprehensive error case tests for CEK interpreter
 # ABOUTME: Tests invalid IR structures, heap operations, control flow, and stepping edge cases
 use 5.42.0;
+use lib 'lib';
 use Test::More;
 use Chalk::IR::Graph;
 use Chalk::IR::Node::Constant;

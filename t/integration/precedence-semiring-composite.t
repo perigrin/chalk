@@ -12,6 +12,7 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use File::Spec;
 use Chalk::Grammar;
+use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 use Chalk::Parser;
 use Chalk::Semiring::SPPF;
 use Chalk::Semiring::Precedence;
@@ -24,7 +25,7 @@ open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$fh> };
 close $fh;
 
-my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program');
+my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
 
 # Create Precedence semiring with arithmetic operators
 # Phase 2 implementation: focuses on basic arithmetic

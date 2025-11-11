@@ -26,22 +26,21 @@ my $grammar = Test::Chalk::Grammar->build_grammar(
     ]
 );
 
-say "Start rule: " . $grammar->start_rule;
+is $grammar->start_symbol, 'S', 'Start symbol is augmented S rule';
 
 my $parser = Chalk::Parser->new(grammar => $grammar);
 
-# Test the failing cases
+# Test the failing cases with proper assertions
 my @tests = (
-    [qw/num/],
-    [qw/( num )/],
-    [qw/( num + num )/],
-    [qw/num + num * num/],
+    { input => [qw/num/], desc => 'Parse single number' },
+    { input => [qw/( num )/], desc => 'Parse parenthesized number' },
+    { input => [qw/( num + num )/], desc => 'Parse parenthesized addition' },
+    { input => [qw/num + num * num/], desc => 'Parse expression with precedence' },
 );
 
 for my $test (@tests) {
-    my $input = join(' ', @$test);
-    my $result = $parser->parse_string(join('', @$test));
-    say "$input: " . (defined $result ? "SUCCESS" : "FAIL");
+    my $input_str = join('', $test->{input}->@*);
+    my $result = $parser->parse_string($input_str);
+    ok $result, $test->{desc} . ": $input_str";
+    isa_ok $result, ['Chalk::Element'], 'Result is a semiring element' if $result;
 }
-
-ok 1, "Test complete";

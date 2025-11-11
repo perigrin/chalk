@@ -1,8 +1,11 @@
 # ABOUTME: Test for Sea of Nodes IR generation - Chapter 5: If Statements with Phi Nodes
 # ABOUTME: Validates If, Region, Phi nodes, comparison operators, and control flow merging with validator
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules

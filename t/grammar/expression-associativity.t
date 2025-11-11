@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 # ABOUTME: Test that expression associativity is preserved after grammar simplification
 # ABOUTME: Validates left-associative and right-associative operators parse correctly
+use lib 'lib';
 use 5.42.0;
 use experimental qw(class builtin);
 use Test::More;
@@ -11,7 +12,7 @@ use Chalk::Semiring::Boolean;
 use File::Spec;
 
 # Load grammar from BNF file
-my $bnf_file = File::Spec->catfile($RealBin, "..", "..", "grammar", "perl.bnf");
+my $bnf_file = File::Spec->catfile($RealBin, "..", "..", "grammar", "chalk.bnf");
 open my $grammar_fh, "<:utf8", $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$grammar_fh> };
 close $grammar_fh;

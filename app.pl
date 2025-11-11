@@ -52,6 +52,7 @@ if ( !caller ) {
 
     # Build grammar from BNF file
     use Chalk::Grammar;
+    use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 
     our $chalk_grammar;
 
@@ -222,9 +223,10 @@ if ( !caller ) {
             $semiring = $ir_semiring;
             $builder = $ir_semiring->builder;
         } else {
-            # No IR generation (e.g., -c flag) - use Boolean semiring for syntax check
-            require Chalk::Semiring::Boolean;
-            $semiring = Chalk::Semiring::Boolean->new();
+            # No IR generation (e.g., -c flag) - use ChalkSyntax for syntax check
+            # ChalkSyntax = SPPF + Precedence (validates syntax and precedence)
+            require Chalk::Semiring::ChalkSyntax;
+            $semiring = Chalk::Semiring::ChalkSyntax->new(grammar => $chalk_grammar);
         }
 
         # Create parser with grammar and semiring

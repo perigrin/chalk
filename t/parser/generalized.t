@@ -22,17 +22,7 @@ my $grammar = Test::Chalk::Grammar->build_grammar(
     ]
 );
 
-say "Start symbol: " . $grammar->start_symbol;
-
 my $parser = Chalk::Parser->new(grammar => $grammar);
-
-# Test simple case that uses E -> T -> num
-my $result = $parser->parse_string('num');
-say "num: " . (defined $result ? "SUCCESS - $result" : "FAIL");
-
-# Test case that uses E -> E + T
-$result = $parser->parse_string('num+num');
-say "num + num: " . (defined $result ? "SUCCESS - $result" : "FAIL");
 
 ok defined($parser->parse_string('num')), "Parse simple num without artificial start rule";
 ok defined($parser->parse_string('num+num')), "Parse addition without artificial start rule";

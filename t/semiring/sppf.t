@@ -12,14 +12,14 @@ use Chalk::Base;
 use Chalk::Semiring::SPPF;
 
 subtest 'SPPF forest node classes exist' => sub {
-    ok Chalk::Semiring::SPPFForest->can('new'), 'SPPFForest class exists';
-    ok Chalk::Semiring::SPPFSymbolNode->can('new'), 'SPPFSymbolNode class exists';
-    ok Chalk::Semiring::SPPFPackedNode->can('new'), 'SPPFPackedNode class exists';
-    ok Chalk::Semiring::SPPFTerminalNode->can('new'), 'SPPFTerminalNode class exists';
+    ok Chalk::ParseForest->can('new'), 'SPPFForest class exists';
+    ok Chalk::ParseForest::SymbolNode->can('new'), 'SPPFSymbolNode class exists';
+    ok Chalk::ParseForest::PackedNode->can('new'), 'SPPFPackedNode class exists';
+    ok Chalk::ParseForest::TerminalNode->can('new'), 'SPPFTerminalNode class exists';
 };
 
 subtest 'SPPFElement basic properties' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
     my $node = $forest->get_or_create_symbol_node('S', 0, 5);
 
     my $elem = Chalk::Semiring::SPPFElement->new(
@@ -36,7 +36,7 @@ subtest 'SPPFElement basic properties' => sub {
 };
 
 subtest 'SPPFElement multiplication (sequence)' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
     my $node1 = $forest->get_or_create_symbol_node('A', 0, 2);
     my $node2 = $forest->get_or_create_symbol_node('B', 2, 5);
 
@@ -59,7 +59,7 @@ subtest 'SPPFElement multiplication (sequence)' => sub {
 };
 
 subtest 'SPPFElement addition (alternatives)' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
     my $node1 = $forest->get_or_create_symbol_node('E', 0, 5);
     my $node2 = $forest->get_or_create_symbol_node('E', 0, 5);
 
@@ -82,7 +82,7 @@ subtest 'SPPFElement addition (alternatives)' => sub {
 };
 
 subtest 'SPPFElement to_string' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
     my $node = $forest->get_or_create_symbol_node('S', 0, 5);
 
     my $elem = Chalk::Semiring::SPPFElement->new(
@@ -93,7 +93,7 @@ subtest 'SPPFElement to_string' => sub {
     my $str = $elem->to_string;
     ok $str, 'to_string produces output';
     like $str, qr/S/, 'Shows symbol';
-    like $str, qr/\[0,5\]/, 'Shows position span';
+    like $str, qr/\[0\(\),5\(\)\]/, 'Shows position span';
 };
 
 subtest 'SPPF semiring identity elements' => sub {
@@ -104,11 +104,11 @@ subtest 'SPPF semiring identity elements' => sub {
     ok $semiring->add_id, 'Has additive identity';
     ok $semiring->forest, 'Has forest';
 
-    isa_ok $semiring->forest, 'Chalk::Semiring::SPPFForest';
+    isa_ok $semiring->forest, ['Chalk::ParseForest'];
 };
 
 subtest 'SPPF forest node creation' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
 
     my $node1 = $forest->get_or_create_symbol_node('E', 0, 5);
     my $node2 = $forest->get_or_create_symbol_node('E', 0, 5);
@@ -121,7 +121,7 @@ subtest 'SPPF forest node creation' => sub {
 };
 
 subtest 'SPPF forest sequence node creation' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
 
     my $left = $forest->get_or_create_symbol_node('A', 0, 2);
     my $right = $forest->get_or_create_symbol_node('B', 2, 5);
@@ -138,7 +138,7 @@ subtest 'SPPF forest sequence node creation' => sub {
 };
 
 subtest 'SPPF forest alternative merging' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
 
     my $node1 = $forest->get_or_create_symbol_node('E', 0, 5);
     my $node2 = $forest->get_or_create_symbol_node('E', 0, 5);
@@ -147,7 +147,7 @@ subtest 'SPPF forest alternative merging' => sub {
     is $node1, $node2, 'Same span returns same node';
 
     # Add a packed node to create alternatives
-    my $packed1 = Chalk::Semiring::SPPFPackedNode->new(rule => undef);
+    my $packed1 = Chalk::ParseForest::PackedNode->new(rule => undef);
     my $child = $forest->get_or_create_symbol_node('A', 0, 5);
     $packed1->add_child($child);
     $node1->add_packed_node($packed1);
@@ -156,7 +156,7 @@ subtest 'SPPF forest alternative merging' => sub {
     is scalar(@packed_before), 1, 'Node has one packed node';
 
     # Add alternative
-    my $packed2 = Chalk::Semiring::SPPFPackedNode->new(rule => undef);
+    my $packed2 = Chalk::ParseForest::PackedNode->new(rule => undef);
     my $child2 = $forest->get_or_create_symbol_node('B', 0, 5);
     $packed2->add_child($child2);
     $node2->add_packed_node($packed2);
@@ -166,7 +166,7 @@ subtest 'SPPF forest alternative merging' => sub {
 };
 
 subtest 'SPPF semiring operator overloading' => sub {
-    my $forest = Chalk::Semiring::SPPFForest->new();
+    my $forest = Chalk::ParseForest->new();
     my $node1 = $forest->get_or_create_symbol_node('A', 0, 2);
     my $node2 = $forest->get_or_create_symbol_node('B', 2, 5);
 

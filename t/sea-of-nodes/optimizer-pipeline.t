@@ -1,8 +1,11 @@
 # ABOUTME: Test for OptimizerPipeline that composes multiple optimization passes
 # ABOUTME: Validates pipeline construction, pass composition, and correct ordering of optimizations
 
+use lib 'lib';
 use v5.42;
+use lib 'lib';
 use Test::More;
+use lib 'lib';
 use Test::Deep;
 
 # Load required modules
