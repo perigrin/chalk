@@ -12,6 +12,7 @@ use Test::More;
 {
     use Chalk::Parser;
     use Chalk::Grammar;
+    use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
     use Chalk::IR::Builder;
     use Chalk::IR::Validator;
     use Chalk::IR::Optimizer::GVN;

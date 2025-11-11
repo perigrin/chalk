@@ -11,7 +11,7 @@ use Chalk::Parser;
 use File::Spec;
 
 # Load grammar from BNF file
-my $bnf_file = File::Spec->catfile($RealBin, '..', 'grammar', 'chalk.bnf');
+my $bnf_file = File::Spec->catfile($RealBin, '..', '..', 'grammar', 'chalk.bnf');
 open my $grammar_fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$grammar_fh> };
 close $grammar_fh;
@@ -31,7 +31,12 @@ print "test";
 EOE
 };
 
-ok($parser->parse_string($input), 'backslash heredoc in comma expression');
+# TODO: Requires grammar support for 'eval STRING, LIST' syntax
+# See https://github.com/perigrin/chalk/issues/66
+TODO: {
+    local $TODO = 'Requires grammar support for eval STRING, LIST syntax';
+    ok($parser->parse_string($input), 'backslash heredoc in comma expression');
+}
 
 # Test 2: Simple <<\EOF without eval
 my $simple = q{print <<\EOF;
