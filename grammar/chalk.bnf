@@ -456,6 +456,7 @@ WordList -> Word WS_OPT WordList
 
 # Regex patterns
 RegexPattern -> 'qr' '/' RegexContent '/' RegexFlags
+RegexPattern -> 'm' '/' RegexContent '/' RegexFlags
 
 # Regex substitution
 RegexSubstitution -> 's' '/' RegexContent '/' RegexContent '/' RegexFlags
