@@ -69,7 +69,7 @@
 %SINGLE_QUOTED_STRING% = /'(?:[^'\\]|\\.)*'/
 %DOUBLE_QUOTED_STRING% = /"(?:[^"\\]|\\.)*"/
 %REGEX_CONTENT% = /(?:[^\/\\]|\\.)+/
-%REGEX_FLAGS% = /[msixpodualn]*/
+%REGEX_FLAGS% = /[msixpodualngc]*/
 %STRING_COMPARE_OP% = /eq|ne|lt|gt|le|ge|cmp/
 %NUM_COMPARE_OP% = /==|!=|<=>|<=|>=|<|>/
 %REGEX_MATCH_OP% = /=~|!~/
