@@ -19,7 +19,8 @@ class Chalk::Preprocessor::Heredoc {
         my %line_mapping;
         my $output_line_num = 0;
 
-        for my $i (0..$#lines) {
+        my $i = 0;
+        while ($i <= $#lines) {
             my $input_line_num = $i + 1;
             my $line = $lines[$i];
 
@@ -96,7 +97,7 @@ class Chalk::Preprocessor::Heredoc {
                     push @output_lines, $transformed;
                     $line_mapping{$output_line_num} = $input_line_num;
                     $output_line_num++;
-                    $i = $j - 1;  # Skip content lines
+                    $i = $j - 1;  # Skip content lines (will be incremented below)
                 } else {
                     # Couldn't find terminators, keep original
                     push @output_lines, $line;
@@ -109,6 +110,8 @@ class Chalk::Preprocessor::Heredoc {
                 $line_mapping{$output_line_num} = $input_line_num;
                 $output_line_num++;
             }
+
+            $i++;
         }
 
         $output = join("\n", @output_lines);
@@ -125,25 +128,19 @@ class Chalk::Preprocessor::Heredoc {
         # First, find positions of strings and comments to exclude
         my @excluded_ranges;
 
-        # Find single-quoted string ranges (but not heredoc markers like <<'EOF')
-        my $single_quote_pattern = qr/((?<!<)'(?:[^'\\]|\\.)*')/;
-        my $search_pos = 0;
-        while (substr($working_line, $search_pos) =~ $single_quote_pattern) {
-            my $match = $1;
-            my $match_start = $search_pos + $-[0];
-            my $match_end = $match_start + length($match);
-            $search_pos = $match_end;
-            push @excluded_ranges, [$match_start, $match_end];
-        }
+        # NOTE: We don't exclude single-quoted strings because the heredoc patterns
+        # are specific enough (<<'...') that they won't match inside regular strings.
+        # Excluding single-quoted strings causes false positives with multiple heredocs
+        # on the same line (e.g., the pattern matches ', <<' as a string).
+        # If we need to exclude single-quoted strings in the future, we need a more
+        # sophisticated approach that handles heredoc syntax properly.
 
         # Find double-quoted string ranges
-        my $double_quote_pattern = qr/("(?:[^"\\]|\\.)*")/;
-        $search_pos = 0;
-        while (substr($working_line, $search_pos) =~ $double_quote_pattern) {
-            my $match = $1;
-            my $match_start = $search_pos + $-[0];
-            my $match_end = $match_start + length($match);
-            $search_pos = $match_end;
+        # Similarly, use /g on full string for proper context
+        my $double_quote_pattern = qr/"(?:[^"\\]|\\.)*"/;
+        while ($working_line =~ /$double_quote_pattern/g) {
+            my $match_start = $-[0];
+            my $match_end = $+[0];
             push @excluded_ranges, [$match_start, $match_end];
         }
 
@@ -177,6 +174,7 @@ class Chalk::Preprocessor::Heredoc {
         my @markers;
 
         # Order matters - check quoted forms before bare forms
+        my $search_pos;  # Declare for use in heredoc pattern matching below
         my $hd_sq_indent_pat = qr/(<<~'([^']+)')/;
         $search_pos = 0;
         while (substr($working_line, $search_pos) =~ $hd_sq_indent_pat) {
