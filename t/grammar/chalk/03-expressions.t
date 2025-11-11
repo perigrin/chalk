@@ -34,6 +34,16 @@ sub parses_ok {
     ok($result, $name) or diag("Failed to parse: $code");
 }
 
+sub parse_fails {
+    my ($code, $name) = @_;
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => $semiring
+    );
+    my $result = $parser->parse_string($code);
+    ok(!$result, $name) or diag("Unexpectedly parsed: $code");
+}
+
 # Arithmetic operators
 parses_ok(q{ my $x = 1 + 2; }, 'addition');
 parses_ok(q{ my $x = 5 - 3; }, 'subtraction');
@@ -131,3 +141,20 @@ parses_ok(q{ my @arr = ($start..$end); }, 'range with variables');
 # Note: Regex match operators not yet in chalk.bnf
 # parses_ok(q{ my $x = $str =~ /pattern/; }, 'regex match');
 # parses_ok(q{ my $x = $str !~ /pattern/; }, 'regex not match');
+
+# Negative tests: malformed expressions that should NOT parse
+parse_fails(q{ my $x = 1 ++; }, 'invalid: double increment operator');
+parse_fails(q{ my $x = $ $y; }, 'invalid: double sigil');
+parse_fails(q{ my $x = $; }, 'invalid: incomplete variable');
+
+# TODO: Grammar currently too permissive - these should fail but don't
+todo "Grammar needs tighter validation for lvalue/operator syntax" => sub {
+    parse_fails(q{ (1 + 2) = $x; }, 'invalid: assignment to non-lvalue expression');
+    parse_fails(q{ my $x = 1 + + 2; }, 'invalid: two operators without operand');
+    parse_fails(q{ my $x = 1 2; }, 'invalid: missing operator between operands');
+};
+
+parse_fails(q{ my $x = (1 + 2; }, 'invalid: unmatched opening parenthesis');
+parse_fails(q{ my $x = 1 + 2); }, 'invalid: unmatched closing parenthesis');
+parse_fails(q{ my $x = + ; }, 'invalid: operator without operands');
+parse_fails(q{ my $x = $y <=> $z; }, 'invalid: spaceship operator not in grammar yet');
