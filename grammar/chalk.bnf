@@ -71,7 +71,7 @@
 %REGEX_CONTENT% = /(?:[^\/\\]|\\.)+/
 %REGEX_FLAGS% = /[msixpodualn]*/
 %STRING_COMPARE_OP% = /eq|ne|lt|gt|le|ge|cmp/
-%NUM_COMPARE_OP% = /==|!=|<=|>=|<=>|<|>/
+%NUM_COMPARE_OP% = /==|!=|<=>|<=|>=|<|>/
 %REGEX_MATCH_OP% = /=~|!~/
 %ASSIGN_OP% = /\/\/=|\|\|=|\+=|-=|\.=/
 %ARITHMETIC_OP% = /[+\-*\/]/
