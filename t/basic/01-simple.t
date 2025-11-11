@@ -21,7 +21,7 @@ my $grammar = Test::Chalk::Grammar->build_grammar(
 ok $grammar, 'Grammar created successfully';
 
 my $parser = Chalk::Parser->new( grammar => $grammar );
-my $result = $parser->parse_string('A');
-ok $result, 'Parse simple string with minimal grammar';
-isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element';
+my $result = $parser->parse_string('');  # A => [] produces empty string
+ok $result, 'Parse empty string with minimal grammar';
+isa_ok $result, ['Chalk::Element'], 'Result is a semiring element';
 

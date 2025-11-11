@@ -14,11 +14,15 @@ use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::Parser;
+use Chalk::Semiring::SPPF;
 
 subtest 'Zero token regression test' => sub {
     # This was the original failing case - '0' token would fail due to falsiness
     my $grammar = Test::Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['0'] ] ]);
-    my $parser = Chalk::Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => Chalk::Semiring::SPPFViterbiSemiring->new()
+    );
     
     my $result = $parser->parse_string('0');
     ok $result, "Parse '0' token succeeds";
@@ -40,7 +44,10 @@ subtest 'Other falsy values still work' => sub {
 subtest 'Compare with truthy values' => sub {
     # Sanity check that truthy values still work
     my $grammar = Test::Chalk::Grammar->build_grammar(rules => [ [ 'Rule' => ['1'] ] ]);
-    my $parser = Chalk::Parser->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => Chalk::Semiring::SPPFViterbiSemiring->new()
+    );
     
     my $result = $parser->parse_string('1');
     ok $result, "Parse '1' token succeeds";
