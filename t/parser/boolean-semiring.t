@@ -10,6 +10,7 @@ defer { done_testing() }
 use lib "$RealBin/../../lib";
 use Chalk::Base;
 use Chalk::Semiring::Boolean;
+use Chalk::Semiring::SPPF;
 use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
@@ -41,10 +42,11 @@ subtest 'Boolean semiring algebra' => sub {
 
 subtest 'Boolean semiring with simple grammar' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => [qw(A B)] ],
-        [ 'A' => ['a'] ],
-        [ 'B' => ['b'] ],
+        rules => [
+            [ 'S' => [qw(A B)] ],
+            [ 'A' => ['a'] ],
+            [ 'B' => ['b'] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::Boolean->new();
@@ -63,10 +65,11 @@ subtest 'Boolean semiring with simple grammar' => sub {
 
 subtest 'Boolean semiring with ambiguous grammar' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::Boolean->new();
@@ -87,10 +90,11 @@ subtest 'Boolean semiring with ambiguous grammar' => sub {
 
 subtest 'Boolean vs SPPF correctness comparison' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'E' => [qw(E + E)] ],
-        [ 'E' => [qw(E * E)] ],
-        [ 'E' => ['n'] ],
+        rules => [
+            [ 'E' => [qw(E + E)] ],
+            [ 'E' => [qw(E * E)] ],
+            [ 'E' => ['n'] ],
+        ]
     );
 
     my $bool_semiring = Chalk::Semiring::Boolean->new();
@@ -137,8 +141,9 @@ subtest 'Boolean vs SPPF correctness comparison' => sub {
 
 subtest 'Boolean semiring init_element_from_rule' => sub {
     my $grammar = Test::Chalk::Grammar->build_grammar(
-        [],
-        [ 'S' => ['a'] ],
+        rules => [
+            [ 'S' => ['a'] ],
+        ]
     );
 
     my $semiring = Chalk::Semiring::Boolean->new();

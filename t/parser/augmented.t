@@ -26,7 +26,7 @@ my $grammar = Test::Chalk::Grammar->build_grammar(
     ]
 );
 
-is $grammar->start_rule, 'S', 'Start rule is augmented S rule';
+is $grammar->start_symbol, 'S', 'Start symbol is augmented S rule';
 
 my $parser = Chalk::Parser->new(grammar => $grammar);
 
@@ -42,5 +42,5 @@ for my $test (@tests) {
     my $input_str = join('', $test->{input}->@*);
     my $result = $parser->parse_string($input_str);
     ok $result, $test->{desc} . ": $input_str";
-    isa_ok $result, 'Chalk::Semiring::Element', 'Result is a semiring element' if $result;
+    isa_ok $result, ['Chalk::Element'], 'Result is a semiring element' if $result;
 }

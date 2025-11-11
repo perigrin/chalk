@@ -39,7 +39,7 @@ subtest 'Basic SPPFViterbi functionality' => sub {
     
     # And SPPF properties
     ok $result->sppf_node, 'Has SPPF node';
-    isa_ok $result->sppf_node, 'Chalk::Semiring::SPPFSymbolNode';
+    isa_ok $result->sppf_node, ['Chalk::ParseForest::SymbolNode'];
 };
 
 subtest 'Compare with pure Viterbi' => sub {
@@ -97,7 +97,7 @@ subtest 'SPPF forest access' => sub {
     # Access the forest
     my $forest = $semiring->forest();
     ok $forest, 'Can access SPPF forest';
-    isa_ok $forest, 'Chalk::Semiring::SPPFForest';
+    isa_ok $forest, ['Chalk::ParseForest'];
     
     # Should have symbol nodes
     my $nodes_hash = $forest->nodes();
