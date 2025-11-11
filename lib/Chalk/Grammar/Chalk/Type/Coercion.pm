@@ -3,8 +3,9 @@
 
 use 5.042;
 use experimental qw(class);
+use Chalk::Grammar::Chalk::Type::Code;
 
-class Chalk::Grammar::Chalk::Type::Coercion {
+class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Code) {
     use Scalar::Util qw(looks_like_number refaddr blessed);
     use Chalk::Grammar::Chalk::Type::Exception;
     use Chalk::Grammar::Chalk::Type::Num;
@@ -96,5 +97,13 @@ class Chalk::Grammar::Chalk::Type::Coercion {
         # In Perl, these are falsy: undef, 0, '', "0"
         # Everything else is truthy
         return $value ? 1 : 0;
+    }
+
+    method is_subtype_of($other) {
+        # Coercion <: Coercion (reflexive)
+        # Coercion <: Code <: Any
+        return $other isa Chalk::Grammar::Chalk::Type::Coercion ||
+               $other isa Chalk::Grammar::Chalk::Type::Code ||
+               $other isa Chalk::Grammar::Chalk::Type::Any;
     }
 }

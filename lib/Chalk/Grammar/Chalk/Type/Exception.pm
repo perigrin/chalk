@@ -3,8 +3,9 @@
 
 use 5.042;
 use experimental qw(class);
+use Chalk::Grammar::Chalk::Type::Scalar;
 
-class Chalk::Grammar::Chalk::Type::Exception {
+class Chalk::Grammar::Chalk::Type::Exception :isa(Chalk::Grammar::Chalk::Type::Scalar) {
     field $message :param :reader;
     field $source_type :param :reader = undef;
     field $target_type :param :reader = undef;
@@ -99,6 +100,14 @@ class Chalk::Grammar::Chalk::Type::Exception {
 
     method throw() {
         die $self->as_string();
+    }
+
+    method is_subtype_of($other) {
+        # Exception <: Exception (reflexive)
+        # Exception <: Scalar <: Any
+        return $other isa Chalk::Grammar::Chalk::Type::Exception ||
+               $other isa Chalk::Grammar::Chalk::Type::Scalar ||
+               $other isa Chalk::Grammar::Chalk::Type::Any;
     }
 }
 
