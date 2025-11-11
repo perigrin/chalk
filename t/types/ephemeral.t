@@ -73,7 +73,9 @@ subtest 'Range operator produces List type' => sub {
     # - t/types/list-conversion.t (List -> Array conversion)
     #
     # This test would duplicate those tests, so we skip it here
-    skip 'Range operator type inference tested in semantic-type-tracking.t', 1;
+    SKIP: {
+        skip 'Range operator type inference tested in semantic-type-tracking.t', 1;
+    }
 };
 
 done_testing();

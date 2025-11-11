@@ -64,7 +64,9 @@ subtest 'Semantic contracts for Num type' => sub {
     #
     # IEEE NaN behavior would require use of POSIX::NaN or similar
     # For now, we document this as a known limitation
-    skip 'IEEE NaN handling is implementation-dependent in Perl - would need POSIX::NaN', 1;
+    SKIP: {
+        skip 'IEEE NaN handling is implementation-dependent in Perl - would need POSIX::NaN', 1;
+    }
 };
 
 subtest 'Int membership is stricter than Num' => sub {
@@ -119,7 +121,9 @@ subtest 'Boolean membership vs primitive bool' => sub {
     # which distinguishes primitive booleans from truthy/falsy values
     #
     # This is a design decision for the type system - document for future
-    skip 'Primitive boolean subset would need is_primitive_bool() type guard', 1;
+    SKIP: {
+        skip 'Primitive boolean subset would need is_primitive_bool() type guard', 1;
+    }
 };
 
 subtest 'Undef membership' => sub {

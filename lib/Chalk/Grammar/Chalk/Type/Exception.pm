@@ -1,6 +1,7 @@
 # ABOUTME: Exception class for type-related errors in the Chalk type system
 # ABOUTME: Provides detailed, user-friendly error messages for type mismatches and coercion failures
 
+package Chalk::Grammar::Chalk::Type::Exception;
 use 5.042;
 use experimental qw(class);
 
@@ -8,7 +9,7 @@ use experimental qw(class);
 
 sub type_coercion_error($source_type, $target_type, $value = undef, $context = undef) {
     my $msg = "Cannot coerce value from " . $source_type->name() . " to " . $target_type->name();
-    return Chalk::Type::Exception->new(
+    return Chalk::Grammar::Chalk::Type::Exception->new(
         message => $msg,
         source_type => $source_type,
         target_type => $target_type,
@@ -19,7 +20,7 @@ sub type_coercion_error($source_type, $target_type, $value = undef, $context = u
 
 sub type_mismatch_error($expected_type, $actual_type, $context = undef) {
     my $msg = "Type mismatch: expected " . $expected_type->name() . ", got " . $actual_type->name();
-    return Chalk::Type::Exception->new(
+    return Chalk::Grammar::Chalk::Type::Exception->new(
         message => $msg,
         source_type => $actual_type,
         target_type => $expected_type,
@@ -45,7 +46,7 @@ sub information_loss_warning($source_type, $target_type, $value, $context = unde
 
 sub invalid_list_assignment_error($target_sigil) {
     my $msg = "Cannot assign List to variable with sigil '$target_sigil'. " . "List can only be assigned to arrays (\@) or hashes (%)";
-    return Chalk::Type::Exception->new(
+    return Chalk::Grammar::Chalk::Type::Exception->new(
         message => $msg,
         context => "list assignment"
     );
@@ -58,7 +59,7 @@ sub membership_failure_error($type, $value, $reason = undef) {
         $msg .= ": $reason";
     }
 
-    return Chalk::Type::Exception->new(
+    return Chalk::Grammar::Chalk::Type::Exception->new(
         message => $msg,
         target_type => $type,
         value => $value,
