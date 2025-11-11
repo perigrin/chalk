@@ -4,7 +4,7 @@
 use 5.42.0;
 use utf8;
 use lib 'lib';
-use Test::More tests => 6;
+use Test::More;
 use Chalk::IR::Graph;
 use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Constant;
@@ -138,3 +138,146 @@ use Chalk::Interpreter::CEKDataflow;
     my $result = $interp->execute();
     is($result, 5, 'executes 20 / 4 = 5');
 }
+
+# Test negative numbers: -5 + 3 = -2
+{
+    my $graph = Chalk::IR::Graph->new();
+    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    my $c_neg5 = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => -5, type => 'int');
+    my $c3 = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 3, type => 'int');
+    my $add = Chalk::IR::Node::Add->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
+    my $ret = Chalk::IR::Node::Return->new(id => 'node_4', inputs => ['node_0', 'node_3'], value_id => 'node_3', control_id => 'node_0');
+
+    $graph->add_node($start);
+    $graph->add_node($c_neg5);
+    $graph->add_node($c3);
+    $graph->add_node($add);
+    $graph->add_node($ret);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my $result = $interp->execute();
+    is($result, -2, 'executes negative: -5 + 3 = -2');
+}
+
+# Test zero in addition: 0 + 5 = 5
+{
+    my $graph = Chalk::IR::Graph->new();
+    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    my $c0 = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 0, type => 'int');
+    my $c5 = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 5, type => 'int');
+    my $add = Chalk::IR::Node::Add->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
+    my $ret = Chalk::IR::Node::Return->new(id => 'node_4', inputs => ['node_0', 'node_3'], value_id => 'node_3', control_id => 'node_0');
+
+    $graph->add_node($start);
+    $graph->add_node($c0);
+    $graph->add_node($c5);
+    $graph->add_node($add);
+    $graph->add_node($ret);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my $result = $interp->execute();
+    is($result, 5, 'executes zero add: 0 + 5 = 5');
+}
+
+# Test zero in multiplication: 0 * 10 = 0
+{
+    my $graph = Chalk::IR::Graph->new();
+    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    my $c0 = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 0, type => 'int');
+    my $c10 = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 10, type => 'int');
+    my $mul = Chalk::IR::Node::Multiply->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
+    my $ret = Chalk::IR::Node::Return->new(id => 'node_4', inputs => ['node_0', 'node_3'], value_id => 'node_3', control_id => 'node_0');
+
+    $graph->add_node($start);
+    $graph->add_node($c0);
+    $graph->add_node($c10);
+    $graph->add_node($mul);
+    $graph->add_node($ret);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my $result = $interp->execute();
+    is($result, 0, 'executes zero multiply: 0 * 10 = 0');
+}
+
+# Test negative multiplication: -2 * 3 = -6
+{
+    my $graph = Chalk::IR::Graph->new();
+    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    my $c_neg2 = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => -2, type => 'int');
+    my $c3 = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 3, type => 'int');
+    my $mul = Chalk::IR::Node::Multiply->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
+    my $ret = Chalk::IR::Node::Return->new(id => 'node_4', inputs => ['node_0', 'node_3'], value_id => 'node_3', control_id => 'node_0');
+
+    $graph->add_node($start);
+    $graph->add_node($c_neg2);
+    $graph->add_node($c3);
+    $graph->add_node($mul);
+    $graph->add_node($ret);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my $result = $interp->execute();
+    is($result, -6, 'executes negative multiply: -2 * 3 = -6');
+}
+
+# Test division by zero (should fail gracefully)
+{
+    my $graph = Chalk::IR::Graph->new();
+    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    my $c10 = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 10, type => 'int');
+    my $c0 = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 0, type => 'int');
+
+    require Chalk::IR::Node::Divide;
+    my $div = Chalk::IR::Node::Divide->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
+    my $ret = Chalk::IR::Node::Return->new(id => 'node_4', inputs => ['node_0', 'node_3'], value_id => 'node_3', control_id => 'node_0');
+
+    $graph->add_node($start);
+    $graph->add_node($c10);
+    $graph->add_node($c0);
+    $graph->add_node($div);
+    $graph->add_node($ret);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+
+    # Division by zero should either die or return undef/inf depending on implementation
+    eval {
+        my $result = $interp->execute();
+        # If it returns a value, check for inf or undef
+        ok(!defined($result) || $result eq 'inf' || $result eq 'Inf', 'division by zero handled: 10 / 0');
+    };
+    if ($@) {
+        like($@, qr/division by zero|illegal division/i, 'division by zero throws error');
+    }
+}
+
+# Test deeper expression tree: ((2 + 3) * 4) - 10 = 10
+{
+    my $graph = Chalk::IR::Graph->new();
+    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    my $c2 = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 2, type => 'int');
+    my $c3 = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 3, type => 'int');
+    my $c4 = Chalk::IR::Node::Constant->new(id => 'node_3', inputs => [], value => 4, type => 'int');
+    my $c10 = Chalk::IR::Node::Constant->new(id => 'node_4', inputs => [], value => 10, type => 'int');
+
+    my $add = Chalk::IR::Node::Add->new(id => 'node_5', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
+    my $mul = Chalk::IR::Node::Multiply->new(id => 'node_6', inputs => ['node_5', 'node_3'], left_id => 'node_5', right_id => 'node_3');
+
+    require Chalk::IR::Node::Subtract;
+    my $sub = Chalk::IR::Node::Subtract->new(id => 'node_7', inputs => ['node_6', 'node_4'], left_id => 'node_6', right_id => 'node_4');
+    my $ret = Chalk::IR::Node::Return->new(id => 'node_8', inputs => ['node_0', 'node_7'], value_id => 'node_7', control_id => 'node_0');
+
+    $graph->add_node($start);
+    $graph->add_node($c2);
+    $graph->add_node($c3);
+    $graph->add_node($c4);
+    $graph->add_node($c10);
+    $graph->add_node($add);
+    $graph->add_node($mul);
+    $graph->add_node($sub);
+    $graph->add_node($ret);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my $result = $interp->execute();
+    is($result, 10, 'executes deep tree: ((2 + 3) * 4) - 10 = 10');
+}
+
+done_testing();

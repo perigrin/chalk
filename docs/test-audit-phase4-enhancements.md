@@ -76,7 +76,7 @@ Add tests for invalid inputs to ensure the grammar/parser correctly rejects malf
 
 ---
 
-## Enhancement 2: Expand Coverage for Minimal Tests (PENDING)
+## Enhancement 2: Expand Coverage for Minimal Tests ✅ COMPLETE
 
 ### Goal
 Identify tests with minimal assertions and enhance them with:
@@ -84,8 +84,51 @@ Identify tests with minimal assertions and enhance them with:
 - Edge case coverage
 - Boundary condition testing
 
-### Candidates for Enhancement
-- TBD after survey
+### Implementation
+
+Surveyed test suite and identified 10 high-priority minimal tests. Expanded 2 highest-impact files:
+
+#### 1. t/interpreter/cek-arithmetic.t (6 → 12 tests, +100%)
+
+**Added Edge Cases**:
+- Negative number handling: `-5 + 3 = -2`
+- Zero in addition: `0 + 5 = 5`
+- Zero in multiplication: `0 * 10 = 0`
+- Negative multiplication: `-2 * 3 = -6`
+- Division by zero error handling
+- Deeper expression tree: `((2 + 3) * 4) - 10 = 10`
+
+**Impact**: Doubled test coverage, added critical error handling test
+
+#### 2. t/interpreter/cek-array-operations.t (8 → 10 tests, +25%)
+
+**Added Edge Cases**:
+- Negative index handling (implementation-dependent behavior)
+- Array value overwrite at same index
+
+**Also Fixed**:
+- Added missing `use lib 'lib'` directive
+
+### Results
+
+**Before Enhancement 2**:
+- cek-arithmetic.t: 6 assertions, no error cases
+- cek-array-operations.t: 8 assertions, missing edge cases
+
+**After Enhancement 2**:
+- cek-arithmetic.t: 12 assertions (+100%), includes division-by-zero handling
+- cek-array-operations.t: 10 assertions (+25%), includes negative index and overwrite
+
+**Test Status**: All tests passing
+
+### Remaining Candidates
+
+High-priority files still needing expansion:
+- t/interpreter/cek-object-operations.t (8 assertions) - Field validation, type errors
+- t/interpreter/cek-hash-operations.t (0 assertions) - Entire file stubbed
+- t/interpreter/cek-dataflow.t (4 assertions) - Graph execution scenarios
+- t/ir/phi-standardization.t (2 assertions) - Complex phi chains
+- t/basic/simple-arith.t (2 assertions) - Three-way operations, precedence
 
 ---
 
@@ -120,7 +163,7 @@ Review `t/interpreter/cek-compiler-validation.t` and apply its differential test
 | Enhancement | Status | Files Modified | Tests Added | Issues Created |
 |---|---|---|---|---|
 | Negative Tests | ✅ Complete | 2 | 18 | TBD |
-| Minimal Coverage | ⏸ Pending | 0 | 0 | 0 |
+| Minimal Coverage | ✅ Complete | 2 | 8 | 0 |
 | Property-Based | ⏸ Pending | 0 | 0 | 0 |
 | Differential Template | ⏸ Pending | 0 | 0 | 0 |
 
