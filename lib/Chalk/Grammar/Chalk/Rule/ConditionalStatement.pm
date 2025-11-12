@@ -100,7 +100,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             }
 
             # After ')', the first Block rule is the true branch
-            if ($found_rparen && $child_ctx->rule && ref($child_ctx->rule) =~ m/::Block$/) {
+            if ($found_rparen && $child_ctx->rule && $child_ctx->rule->isa('Chalk::Grammar::Chalk::Rule::Block')) {
                 $true_block_ctx = $child_ctx;
                 last;
             }
@@ -158,7 +158,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             }
 
             # After 'else', the first Block rule is the false branch
-            if ($found_else && $child_ctx->rule && ref($child_ctx->rule) =~ m/::Block$/) {
+            if ($found_else && $child_ctx->rule && $child_ctx->rule->isa('Chalk::Grammar::Chalk::Rule::Block')) {
                 $false_block_ctx = $child_ctx;
                 last;
             }
