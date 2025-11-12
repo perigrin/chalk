@@ -103,7 +103,12 @@ class Chalk::IR::Builder {
     }
 
     # Variable management using Context (Chapter 3)
+    # DEPRECATED: Use Chalk::IR::Node::Scope instead
+    # These methods will be removed in a future version
     method define_variable($var_name, $node_id) {
+        warn "DEPRECATED: IR::Builder::define_variable() is deprecated, use Chalk::IR::Node::Scope->define() instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         # Store variable binding in context using "var:name" label
         my $label = Chalk::IR::Context->make_label('var', $var_name);
         $context = Chalk::IR::Context->extend_context($context, $label, $node_id);
@@ -111,6 +116,9 @@ class Chalk::IR::Builder {
     }
 
     method lookup_variable($var_name) {
+        warn "DEPRECATED: IR::Builder::lookup_variable() is deprecated, use Chalk::IR::Node::Scope->lookup() instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         # Look up variable from context using "var:name" label
         my $label = Chalk::IR::Context->make_label('var', $var_name);
         my $node_id = $context->($label);
@@ -410,12 +418,16 @@ class Chalk::IR::Builder {
     }
 
     # Create Store node (variable assignment)
+    # DEPRECATED: Use Chalk::IR::Node::Scope instead
+    # This method will be removed in a future version
     method build_store_node(
         $var_name, $value_node,
         $control = undef,
         $source_info = undef
       )
     {
+        warn "DEPRECATED: IR::Builder::build_store_node() is deprecated, use Chalk::IR::Node::Scope->define() instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
         # Validate loop variable has proper initial value if we're in a loop
         if ( defined($source_info) && $loop_depth > 0 ) {
             $validator->validate_loop_variable_phi( $var_name, $loop_depth,
@@ -462,7 +474,11 @@ class Chalk::IR::Builder {
     }
 
     # Load node (variable read)
+    # DEPRECATED: Use Chalk::IR::Node::Scope instead
+    # This method will be removed in a future version
     method build_load_node( $var_name, $source_info = undef ) {
+        warn "DEPRECATED: IR::Builder::build_load_node() is deprecated, use Chalk::IR::Node::Scope->lookup() instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
 
         # Retrieve variable using lexical: namespace from context
         # Try loop-scoped label first, then fall back to outer scope
