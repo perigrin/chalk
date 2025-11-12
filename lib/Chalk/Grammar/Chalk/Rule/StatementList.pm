@@ -19,12 +19,21 @@ class Chalk::Grammar::Chalk::Rule::StatementList :isa(Chalk::GrammarRule) {
         # Empty StatementList
         return [] if @children == 0;
 
+        # Handle edge case: single child that's already an evaluated StatementList array
+        # This occurs when Statement passes through an already-evaluated StatementList
+        # from a child grammar rule (observed in early-return control flow scenarios)
+        if (@children == 1) {
+            my $child_focus = $context->child(0);
+            if (ref($child_focus) eq 'ARRAY') {
+                return $child_focus;  # Already evaluated, pass it through
+            }
+        }
+
         # Get the first statement
         my $stmt = $context->child(0);
 
-        # Base case: single statement
-        if (@children <= 2) {
-            # StatementList -> Statement WS_OPT
+        # Base case: single statement (StatementList -> Statement WS_OPT)
+        if (@children == 2) {
             return blessed($stmt) && $stmt->can('id') ? [$stmt] : [];
         }
 
