@@ -18,8 +18,9 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
 
     method execute($context) {
         # Region merges control from multiple paths
-        # Returns the index of the active path (which Proj returned 1)
-        # MUST validate that exactly ONE path is active
+        # Per Sea of Nodes: "produces a merged control as an output"
+        # Returns 1 to indicate control flows here (not which path was taken)
+        # Phi nodes check Region's input Proj nodes to determine active path
         my @inputs = $self->inputs->@*;
         my @active_paths;
 
@@ -41,7 +42,8 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
         die "Region node '" . $self->id . "': multiple active paths: " . join(', ', @active_paths)
             if @active_paths > 1;
 
-        return $active_paths[0];
+        # Return merged control (1 = control is here)
+        return 1;
     }
 }
 

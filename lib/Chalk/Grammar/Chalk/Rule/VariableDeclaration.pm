@@ -54,10 +54,13 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
             return undef;
         }
 
-        # Bind variable to value node using SSA (no Store node needed)
-        # Variables are direct data flow edges in the IR graph
-        my $result = $builder->build_store_node($var_name, $value);
-        return $result;
+        # Bind variable to value node using SSA (Chapter 3)
+        # No Store node needed - variables map directly to IR nodes
+        my $scope = $context->env->{scope};
+        $scope->define($var_name, $value->id()) if $scope;
+
+        # Return the value node (declaration evaluates to its value)
+        return $value;
     }
 }
 

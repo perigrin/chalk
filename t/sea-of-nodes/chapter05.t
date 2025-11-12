@@ -11,13 +11,13 @@ use Test::Deep;
 # Test that we can load the IR modules
 use_ok('Chalk::IR::Node');
 use_ok('Chalk::IR::Graph');
-use_ok('Chalk::IR::Scope');
+use_ok('Chalk::IR::Node::Scope');
 use_ok('Chalk::IR::Validator');
 
 # Test If node with true/false branches
 subtest 'If node with control and condition' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node
     my $start = Chalk::IR::Node->new(
@@ -309,7 +309,7 @@ subtest 'Phi node merges values from control paths' => sub {
 # Test complete if-then-else with phi node
 subtest 'Complete if-then-else: classify($x) with phi merge' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node
     my $start = Chalk::IR::Node->new(

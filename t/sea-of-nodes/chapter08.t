@@ -11,7 +11,7 @@ defer { done_testing() }
 
 use Chalk::IR::Node;
 use Chalk::IR::Graph;
-use Chalk::IR::Scope;
+use Chalk::IR::Node::Scope;
 use Chalk::IR::Validator;
 
 subtest 'Break statement basic structure' => sub {

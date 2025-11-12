@@ -169,9 +169,26 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         # Validate we got an IR node for the value
         return $context->child(0) unless (blessed($rhs) && $rhs->can('id'));
 
-        # Bind variable to value node using SSA (no Store node needed)
-        # Variables are direct data flow edges in the IR graph
-        return $builder->build_store_node($var_name, $rhs);
+        # Bind variable to value node using SSA (Chapter 3)
+        # No Store node needed - variables map directly to IR nodes
+        my $scope = $context->env->{scope};
+        $scope->define($var_name, $rhs->id()) if $scope;
+
+        # Track this variable as modified if we're in a tracked branch (conditional/loop)
+        # This is required for Phi node generation in ConditionalStatement
+        if ( $builder->can('branch_tracking_stack') ) {
+            my $tracking_stack = $builder->branch_tracking_stack;
+            if ( scalar($tracking_stack->@*) > 0 ) {
+                my $frame = $tracking_stack->[-1];
+                my $current_branch = $frame->{current_branch};
+                if (defined($current_branch)) {
+                    warn "[DEBUG] Assignment: tracking $var_name in branch $current_branch, node_id=", $rhs->id, "\n" if $ENV{CHALK_DEBUG_TRACKING};
+                    $frame->{branches}->{$current_branch}->{$var_name} = $rhs;
+                }
+            }
+        }
+
+        return $rhs;
     }
 }
 

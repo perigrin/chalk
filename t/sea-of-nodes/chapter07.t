@@ -11,7 +11,7 @@ defer { done_testing() }
 
 use Chalk::IR::Node;
 use Chalk::IR::Graph;
-use Chalk::IR::Scope;
+use Chalk::IR::Node::Scope;
 use Chalk::IR::Validator;
 
 subtest 'Loop node creation' => sub {
@@ -148,7 +148,7 @@ subtest 'Simple while(true) infinite loop IR' => sub {
 
 subtest 'While loop with counter: while(i < 10) { i = i + 1; }' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     my $start = Chalk::IR::Node->new(
         id => 1,
@@ -317,7 +317,7 @@ subtest 'Loop phi constant folding' => sub {
 }  # End SKIP
 
 subtest 'Nested scopes with loop' => sub {
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Outer scope
     my $const_0 = Chalk::IR::Node->new(
@@ -352,7 +352,7 @@ subtest 'Nested scopes with loop' => sub {
 subtest 'Loop with multiple phis' => sub {
     # while (i < 10 && j < 5) { i++; j++; }
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     my $start = Chalk::IR::Node->new(
         id => 1,

@@ -56,6 +56,7 @@ use Chalk::Grammar;
 use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 use Chalk::Semiring::Semantic;
 use Chalk::IR::Builder;
+use Chalk::IR::Node::Scope;
 use Chalk::IR::Optimizer::GVN;
 use Chalk::Interpreter::CEKDataflow;
 
@@ -71,9 +72,10 @@ sub compile_chalk {
     my ($code) = @_;
 
     my $builder  = Chalk::IR::Builder->new();
+    my $scope    = Chalk::IR::Node::Scope->new();
     my $semiring = Chalk::Semiring::Semantic->new(
         grammar => $grammar,
-        env     => { ir_builder => $builder }
+        env     => { ir_builder => $builder, scope => $scope }
     );
 
     my $parser = Chalk::Parser->new(
@@ -425,6 +427,37 @@ test_cek_vs_perl(
             );
         }
     }
+}
+
+# Test: If-else with returns in both branches (true condition)
+# This tests Issue #155: ConditionalStatement must use last statement's control
+# output for Region inputs, not always the Proj nodes. When branches end with
+# Return, the Region should receive Return's control, not IfTrue/IfFalse Proj.
+TODO: {
+    local $TODO = 'Early return handling - statement sequencing issue with final returns';
+
+    test_cek_vs_perl(
+        'if (1) { return 42; } else { return -42; }',
+        'If-else with returns (true branch)'
+    );
+
+    # Test: If-else with returns in both branches (false condition)
+    test_cek_vs_perl(
+        'if (0) { return 42; } else { return -42; }',
+        'If-else with returns (false branch)'
+    );
+
+    # Test: Early return in if, fallthrough to return (takes early return)
+    test_cek_vs_perl(
+        'my $x = 5; if ($x > 0) { return 42; } return -42;',
+        'Early return in if (taken)'
+    );
+
+    # Test: Early return in if, fallthrough to return (falls through)
+    test_cek_vs_perl(
+        'my $x = -5; if ($x > 0) { return 42; } return -42;',
+        'Early return in if (not taken)'
+    );
 }
 
 done_testing();

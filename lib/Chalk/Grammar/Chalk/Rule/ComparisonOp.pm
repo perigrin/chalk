@@ -5,6 +5,13 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
+    # Grammar: ComparisonOp -> Expression WS_OPT %COMPARE_OP% WS_OPT Expression
+    # Child indices for binary comparison operations
+    use constant {
+        LEFT_EXPR  => 0,  # Left operand (Expression)
+        OPERATOR   => 2,  # Comparison operator
+        RIGHT_EXPR => 4,  # Right operand (Expression)
+    };
     method evaluate($context) {
         # ComparisonOp -> StringOp (pass-through)
         # ComparisonOp -> ComparisonOp WS_OPT %NUM_COMPARE_OP% WS_OPT StringOp
@@ -17,23 +24,21 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
 
         if (@children == 1) {
             # First alternative: just pass through StringOp
-            return $context->child(0);
+            return $context->child(LEFT_EXPR);
         }
 
-        # For binary operation: check child(2) for the operator
-        # Grammar is: ComparisonOp WS_OPT OP WS_OPT StringOp/QualifiedIdentifier
-        # So operator is at index 2
-        return $context->child(0) unless defined $children[2];
-        my $op_child = $children[2]->extract;
-        return $context->child(0) unless defined $op_child && !ref($op_child);
+        # For binary operation: check OPERATOR child for the operator
+        return $context->child(LEFT_EXPR) unless defined $children[OPERATOR];
+        my $op_child = $children[OPERATOR]->extract;
+        return $context->child(LEFT_EXPR) unless defined $op_child && !ref($op_child);
 
         my $operator = $op_child;
         my $builder = $context->env->{ir_builder};
-        return $context->child(0) unless $builder;
+        return $context->child(LEFT_EXPR) unless $builder;
 
-        # Get left (child 0) and right (child 4)
-        my $left = $context->child(0);
-        my $right = $context->child(4);
+        # Get left and right operands
+        my $left = $context->child(LEFT_EXPR);
+        my $right = $context->child(RIGHT_EXPR);
 
         # Validate that we got IR nodes
         return $left unless (blessed($left) && $left->can('id'));
@@ -61,7 +66,7 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
             return $left;
         }
 
-        return $context->child(0);
+        return $context->child(LEFT_EXPR);
     }
 }
 
