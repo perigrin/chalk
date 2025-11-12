@@ -9,7 +9,7 @@ use Test::Deep;
 # Test that we can load the IR modules
 use_ok('Chalk::IR::Node');
 use_ok('Chalk::IR::Graph');
-use_ok('Chalk::IR::Scope');
+use_ok('Chalk::IR::Node::Scope');
 use_ok('Chalk::IR::Validator');
 
 # SKIP: Peephole optimization not implemented yet - tests require ->peephole() method
@@ -19,7 +19,7 @@ SKIP: {
 # Test constant condition optimization: if (1) - always true
 subtest 'Constant true condition: if (1)' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node
     my $start = Chalk::IR::Node->new(

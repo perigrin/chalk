@@ -17,6 +17,7 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::Constant;
     use Chalk::IR::Node::Start;
     use Chalk::IR::Node::Return;
+    use Chalk::IR::Node::Stop;
     use Chalk::IR::Node::Add;
     use Chalk::IR::Node::Subtract;
     use Chalk::IR::Node::Multiply;
@@ -99,6 +100,24 @@ class Chalk::IR::Builder {
             graph        => $graph,
             type_lattice => $type_lattice
         );
+    }
+
+    # Variable management using Context (Chapter 3)
+    method define_variable($var_name, $node_id) {
+        # Store variable binding in context using "var:name" label
+        my $label = Chalk::IR::Context->make_label('var', $var_name);
+        $context = Chalk::IR::Context->extend_context($context, $label, $node_id);
+        return;
+    }
+
+    method lookup_variable($var_name) {
+        # Look up variable from context using "var:name" label
+        my $label = Chalk::IR::Context->make_label('var', $var_name);
+        my $node_id = $context->($label);
+        return unless defined($node_id);
+
+        # Return the actual IR node object, not just the ID
+        return $graph->get_node($node_id);
     }
 
     # Create Start node for a function/method
@@ -208,6 +227,11 @@ class Chalk::IR::Builder {
     method set_node_control( $node, $control_id ) {
         my $inputs = $node->inputs;
         $inputs->[0] = $control_id;    # Control is always first input
+
+        # Return nodes also have a separate control_id field that needs updating
+        if ($node->op eq 'Return') {
+            $node->set_control_id($control_id);
+        }
     }
 
     # Create arithmetic operation nodes
@@ -779,11 +803,13 @@ class Chalk::IR::Builder {
     }
 
     method build_if_true_node($if_node) {
+        # Proj index 0 = true branch
         my $if_true = $self->build_proj_node( $if_node, 0, 'IfTrue' );
         return $if_true;
     }
 
     method build_if_false_node($if_node) {
+        # Proj index 1 = false branch
         my $if_false = $self->build_proj_node( $if_node, 1, 'IfFalse' );
         return $if_false;
     }
@@ -831,6 +857,25 @@ class Chalk::IR::Builder {
               . join( ", ", @value_inputs ) );
 
         return $phi;
+    }
+
+    method build_stop_node( $source_info = undef, @return_inputs ) {
+        my $node_id = $self->next_node_id();
+        my $stop    = Chalk::IR::Node::Stop->new(
+            id          => $node_id,
+            inputs      => \@return_inputs,
+            source_info => $source_info,
+        );
+        $graph->add_node($stop);
+
+        # Record transformation
+        $stop->record_transform(
+            'ir_construction',
+            'Builder::build_stop_node',
+            context => "return_inputs=" . join( ", ", @return_inputs )
+        );
+
+        return $stop;
     }
 
     # Loop control flow nodes

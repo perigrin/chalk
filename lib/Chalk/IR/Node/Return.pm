@@ -10,6 +10,12 @@ class Chalk::IR::Node::Return :isa(Chalk::IR::Node::Base) {
 
     method op() { 'Return' }
 
+    # Writer method to update control_id after construction
+    # Needed for wiring control edges in if/else statements
+    method set_control_id($new_control_id) {
+        $control_id = $new_control_id;
+    }
+
     method to_hash() {
         return {
             id     => $self->id,
@@ -23,7 +29,16 @@ class Chalk::IR::Node::Return :isa(Chalk::IR::Node::Base) {
     }
 
     method execute($context) {
-        # Return node returns the value from the context
+        # Check if this Return's control path is active
+        # Control nodes return: Start (undef), Proj (0 or 1), Region (1)
+        # 0 = inactive path (only from Proj)
+        # 1 or undef = active path
+        my $control_active = $context->("node:$control_id");
+
+        # Skip execution if control is explicitly 0 (inactive Proj path)
+        return undef if (defined($control_active) && $control_active == 0);
+
+        # Return the value from the context
         return $context->("node:$value_id");
     }
 }

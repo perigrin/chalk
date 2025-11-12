@@ -1,29 +1,39 @@
-# ABOUTME: Scope management for Sea of Nodes IR variable tracking
-# ABOUTME: Maintains stack of symbol tables mapping variable names to IR nodes for SSA form
+# ABOUTME: ScopeNode for Sea of Nodes IR - maintains symbol tables for lexical scoping
+# ABOUTME: Utility node (not Data/Control) that keeps variable bindings alive through inputs
 use 5.42.0;
-use experimental qw(class builtin keyword_any keyword_all);
+use experimental qw(class builtin);
 use utf8;
+use Scalar::Util 'refaddr';
 
-class Chalk::IR::Scope {
-    use Chalk::IR::Node;
+class Chalk::IR::Node::Scope {
+    # Scope is a special utility node that doesn't inherit from Base
+    # It implements the same interface but isn't added to the graph
 
-    # Stack of scopes, each scope is a hashref mapping variable names to node IDs
+    field $id :reader;
+    field $inputs :reader;
     field $scope_stack :reader;
 
     ADJUST {
+        # Generate ID using object address (Scope nodes aren't in graph registry)
+        $id = 'scope_' . refaddr($self);
+        $inputs = [];
+
+        # Initialize scope stack
         $scope_stack = [];
         # Always start with a global scope
         $self->push_scope();
     }
 
+    method op() { 'Scope' }
+
     method push_scope() {
-        # Create new scope level
+        # Create new lexical scope level
         push $scope_stack->@*, {};
         return;
     }
 
     method pop_scope() {
-        # Exit current scope
+        # Exit current scope (but keep global scope)
         my $depth = scalar($scope_stack->@*);
         if ($depth > 1) {
             pop $scope_stack->@*;
@@ -35,6 +45,11 @@ class Chalk::IR::Scope {
         # Define a variable in the current (innermost) scope
         my $current_scope = $scope_stack->[-1];
         $current_scope->{$name} = $node_id;
+
+        # Add the node as an input to keep it alive (per Chapter 3)
+        # "nodes referenced by names become inputs to the ScopeNode"
+        push $inputs->@*, $node_id;
+
         return;
     }
 
@@ -69,26 +84,22 @@ class Chalk::IR::Scope {
         return \%all;
     }
 
-    method snapshot_bindings() {
-        # Create a deep copy of all current bindings for later comparison
-        my %snapshot = %{$self->all_bindings()};
-        return \%snapshot;
+    method to_hash() {
+        return {
+            id     => $self->id,
+            op     => 'Scope',
+            inputs => $self->inputs,
+            attributes => {
+                depth => $self->depth(),
+                bindings => $self->all_bindings(),
+            },
+        };
     }
 
-    method find_modified_variables($snapshot) {
-        # Compare current bindings with snapshot to find modified variables
-        my @modified = ();
-        my $current = $self->all_bindings();
-        my @vars = keys %{$current};
-
-        for my $var (@vars) {
-            next unless exists $snapshot->{$var};
-            if ($current->{$var} ne $snapshot->{$var}) {
-                push @modified, $var;
-            }
-        }
-
-        return @modified;
+    method execute() {
+        # Scope nodes don't execute in the interpreter
+        # They're parse-time utilities for tracking variable bindings
+        return $self;
     }
 }
 

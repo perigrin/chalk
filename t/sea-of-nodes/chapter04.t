@@ -11,12 +11,12 @@ use Test::Deep;
 # Test that we can load the IR modules
 use_ok('Chalk::IR::Node');
 use_ok('Chalk::IR::Graph');
-use_ok('Chalk::IR::Scope');
+use_ok('Chalk::IR::Node::Scope');
 
 # Test Start node as MultiNode with projections
 subtest 'Start node with control and arg projections' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Create Start node for method with one parameter
     my $start = Chalk::IR::Node->new(
@@ -86,7 +86,7 @@ subtest 'Start node with control and arg projections' => sub {
 # Test parameter usage in expressions
 subtest 'Parameter usage in arithmetic' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node
     my $start = Chalk::IR::Node->new(
@@ -159,7 +159,7 @@ subtest 'Parameter usage in arithmetic' => sub {
 # Test multiple parameters
 subtest 'Multiple parameters' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node with two parameters
     my $start = Chalk::IR::Node->new(
@@ -353,7 +353,7 @@ subtest 'JSON round-trip with parameters' => sub {
 # Test complete example: method calculate($arg) { return $arg + 10; }
 subtest 'Complete example: method calculate($arg) { return $arg + 10; }' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Scope->new();
+    my $scope = Chalk::IR::Node::Scope->new();
 
     # Create IR for method with parameter
     # Start node

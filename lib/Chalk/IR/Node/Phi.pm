@@ -21,20 +21,36 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
     }
 
     method execute($context) {
-        # Phi selects value based on Region's active path
-        # inputs[0] = region_id
-        # inputs[1..n] = values for each path
-        my $active_path = $context->("node:$region_id");
+        # Phi selects value based on which Region input path is active
+        # Per Sea of Nodes: "RegionNodes keep their control inputs in sync with PhiNodes"
+        # inputs[0] = region_id (not a data value)
+        # inputs[1..n] = data values corresponding to Region's control inputs
         my @inputs = $self->inputs->@*;
 
-        # Skip region input (index 0), select value at active_path + 1
-        my $value_index = $active_path + 1;
-        if ($value_index >= @inputs) {
-            die "Phi node: active path $active_path out of range";
+        # Get the Region node to check its Proj inputs
+        my $env = $context->("env:");
+        my $graph = $env->graph;
+        my $region_node = $graph->nodes->{$region_id};
+        my $region_inputs = $region_node->inputs;
+
+        # Find which Proj returned 1 (active path)
+        for my $i (0..$#$region_inputs) {
+            my $proj_id = $region_inputs->[$i];
+            my $proj_result = $context->("node:$proj_id");
+
+            if ($proj_result == 1) {
+                # This is the active path - select corresponding data value
+                # Phi inputs are offset by 1 (input[0] is region, input[1] is first value)
+                my $value_index = $i + 1;
+                if ($value_index >= @inputs) {
+                    die "Phi node: active path $i out of range";
+                }
+                my $value_id = $inputs[$value_index];
+                return $context->("node:$value_id");
+            }
         }
 
-        my $value_id = $inputs[$value_index];
-        return $context->("node:$value_id");
+        die "Phi node: no active path found in Region $region_id";
     }
 }
 

@@ -7,14 +7,16 @@ use experimental 'class';
 class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule) {
     # Child index constants for ConditionalStatement grammar structure
     # Grammar: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block [WS_OPT 'else' WS_OPT Block]
+    # NOTE: WS_OPT nodes may not be present in children array when empty
+    # Actual observed structure: [if, undef, '(', Expression, ')', undef, Block] for simple if
     use constant {
         CHILD_KEYWORD       => 0,   # 'if' keyword
         CHILD_LPAREN        => 2,   # '(' terminal
         CHILD_CONDITION     => 3,   # Expression node
-        CHILD_RPAREN        => 5,   # ')' terminal
-        CHILD_TRUE_BLOCK    => 7,   # Block for true branch
-        CHILD_ELSE_KEYWORD  => 9,   # 'else' keyword (if present)
-        CHILD_FALSE_BLOCK   => 11,  # Block for false/else branch (if present)
+        CHILD_RPAREN        => 4,   # ')' terminal
+        CHILD_TRUE_BLOCK    => 6,   # Block for true branch
+        CHILD_ELSE_KEYWORD  => 8,   # 'else' keyword (if present)
+        CHILD_FALSE_BLOCK   => 10,  # Block for false/else branch (if present)
     };
 
     method evaluate($context) {
@@ -101,12 +103,16 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
 
         # Wire up true branch statements with IfTrue control
         my $current_ctrl = $if_true->id;
+        my $true_last_stmt;
         for my $stmt ($true_block->{statements}->@*) {
             if ($stmt->inputs->[0] eq '__CONTROL_PLACEHOLDER__') {
                 $builder->set_node_control($stmt, $current_ctrl);
             }
             $current_ctrl = $stmt->id;  # Next statement uses this as control
+            $true_last_stmt = $stmt;
         }
+        # Check if true branch ends with return
+        my $true_ends_with_return = ($true_last_stmt && $true_last_stmt->op eq 'Return');
         # Region always takes Proj nodes as inputs, not statement nodes
         my $true_control = $if_true->id;
 
@@ -114,6 +120,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # For if-else: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block WS_OPT 'else' WS_OPT Block
         # child[7] is true block, child[8] is WS_OPT, child[9] is 'else', child[10] is WS_OPT, child[11] is else block
         my $false_control;
+        my $false_ends_with_return = 0;
+        my $false_last_stmt;
 
         if (@children > CHILD_ELSE_KEYWORD) {
             my $next_keyword = $children[CHILD_ELSE_KEYWORD]->extract;
@@ -132,7 +140,10 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
                             $builder->set_node_control($stmt, $current_ctrl);
                         }
                         $current_ctrl = $stmt->id;
+                        $false_last_stmt = $stmt;
                     }
+                    # Check if false branch ends with return
+                    $false_ends_with_return = ($false_last_stmt && $false_last_stmt->op eq 'Return');
                     # Region always takes Proj nodes as inputs, not statement nodes
                     $false_control = $if_false->id;
                 } else {
@@ -149,20 +160,36 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             $false_control = $if_false->id;
         }
 
-        # Build Region to merge control paths
-        # build_region_node signature: ($source_info, @control_inputs)
-        # Pass undef for source_info, then the control inputs
-        my $region = $builder->build_region_node(undef, $true_control, $false_control);
-        $builder->set_control($region->id);
+        # Build Region to merge control paths ONLY if not both branches terminate with return
+        # Per Sea of Nodes: "If both branches return, they bypass Region merging and feed into Stop"
+        my $region;
+        if ($true_ends_with_return && defined($false_control) && $false_ends_with_return) {
+            # Both branches terminate with return - create Stop node instead of Region
+            # Per Sea of Nodes chapter 5: "StopNodes only have ReturnNode inputs"
+            my $stop = $builder->build_stop_node(undef, $true_last_stmt->id, $false_last_stmt->id);
 
-        # End tracking and generate Phi nodes for modified variables
-        my $tracking_data = $builder->end_branch_tracking();
-        $tracking_guard->dismiss();  # Successful completion - no cleanup needed
+            # End tracking without generating phi nodes (no merge point)
+            my $tracking_data = $builder->end_branch_tracking();
+            $tracking_guard->dismiss();
 
-        my $phi_nodes = $builder->generate_phi_nodes($region, $tracking_data, 'true', 'false');
+            # Return the Stop node as the final node of this statement
+            return $stop;
+        } else {
+            # At least one branch continues - create Region
+            # build_region_node signature: ($source_info, @control_inputs)
+            # Pass undef for source_info, then the control inputs
+            $region = $builder->build_region_node(undef, $true_control, $false_control);
+            $builder->set_control($region->id);
 
-        # Return the Region node (represents the merge point)
-        return $region;
+            # End tracking and generate Phi nodes for modified variables
+            my $tracking_data = $builder->end_branch_tracking();
+            $tracking_guard->dismiss();  # Successful completion - no cleanup needed
+
+            my $phi_nodes = $builder->generate_phi_nodes($region, $tracking_data, 'true', 'false');
+
+            # Return the Region node (represents the merge point)
+            return $region;
+        }
     }
 }
 
