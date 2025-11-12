@@ -56,7 +56,8 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
 
         # Bind variable to value node using SSA (Chapter 3)
         # No Store node needed - variables map directly to IR nodes
-        $builder->define_variable($var_name, $value->id());
+        my $scope = $context->env->{scope};
+        $scope->define($var_name, $value->id()) if $scope;
 
         # Return the value node (declaration evaluates to its value)
         return $value;

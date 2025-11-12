@@ -56,6 +56,7 @@ use Chalk::Grammar;
 use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 use Chalk::Semiring::Semantic;
 use Chalk::IR::Builder;
+use Chalk::IR::Node::Scope;
 use Chalk::IR::Optimizer::GVN;
 use Chalk::Interpreter::CEKDataflow;
 
@@ -71,9 +72,10 @@ sub compile_chalk {
     my ($code) = @_;
 
     my $builder  = Chalk::IR::Builder->new();
+    my $scope    = Chalk::IR::Node::Scope->new();
     my $semiring = Chalk::Semiring::Semantic->new(
         grammar => $grammar,
-        env     => { ir_builder => $builder }
+        env     => { ir_builder => $builder, scope => $scope }
     );
 
     my $parser = Chalk::Parser->new(

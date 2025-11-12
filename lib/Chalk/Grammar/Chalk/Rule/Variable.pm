@@ -19,15 +19,20 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         # ScalarVar returns a hashref with { type => 'scalar_var', name => $identifier, sigil => '$' }
         if (ref($var_metadata) eq 'HASH' && $var_metadata->{type} eq 'scalar_var') {
             my $var_name = $var_metadata->{name};
+            my $scope = $context->env->{scope};
             my $builder = $context->env->{ir_builder};
 
-            # Look up the variable's IR node from the context (Chapter 3)
-            my $node_id = $builder->lookup_variable($var_name);
+            # Look up the variable's IR node from Scope (Chapter 3)
+            if ($scope) {
+                my $node_id = $scope->lookup($var_name);
+                if (defined($node_id)) {
+                    # Return the actual IR node object
+                    return $builder->graph->get_node($node_id);
+                }
+            }
 
-            # If found, return the IR node (variable reference)
-            # If not found, return metadata (for VariableDeclaration to extract name)
-            return $node_id if defined($node_id);
-            return $var_metadata;  # Not yet defined - return metadata for declaration
+            # Not yet defined - return metadata (for VariableDeclaration to extract name)
+            return $var_metadata;
         }
 
         # For other variable types, pass through the metadata for now

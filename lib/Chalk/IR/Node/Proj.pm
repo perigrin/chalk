@@ -31,9 +31,10 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
         my $if_result = $context->("node:$source_id");
 
         # Check if this projection matches the active path
-        # True condition (if_result=1) activates index 0
-        # False condition (if_result=0) activates index 1
-        return ($if_result != $index) ? 1 : 0;
+        # True condition (if_result=1) activates index 0 (IfTrue)
+        # False condition (if_result=0) activates index 1 (IfFalse)
+        # Return 0 when if_result matches index (inactive), 1 otherwise (active)
+        return ($if_result == $index) ? 0 : 1;
     }
 }
 
