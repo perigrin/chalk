@@ -85,18 +85,39 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # Guard ensures cleanup even if exception occurs during branch evaluation
         my $tracking_guard = $builder->begin_branch_tracking('true', 'false');
 
-        # Get true branch context WITHOUT evaluating yet
-        my $true_block_ctx = $context->child_context(CHILD_TRUE_BLOCK);
+        # CRITICAL FIX: WS_OPT nodes may be absent, so we can't use fixed indices.
+        # Search for the Block child after the ')' terminal.
+        my $true_block_ctx;
+        my $found_rparen = 0;
+        for my $i (0..$#children) {
+            my $child_ctx = $children[$i];
+            my $child_val = $child_ctx->extract;
+
+            # Mark when we've passed the ')'
+            if (defined($child_val) && !ref($child_val) && $child_val eq ')') {
+                $found_rparen = 1;
+                next;
+            }
+
+            # After ')', the first Block rule is the true branch
+            if ($found_rparen && $child_ctx->rule && ref($child_ctx->rule) =~ /::Block$/) {
+                $true_block_ctx = $child_ctx;
+                last;
+            }
+        }
+
         if (!$true_block_ctx) {
-            warn "[DEBUG] ConditionalStatement: no true_block_ctx, returning undef\n" if $ENV{CHALK_DEBUG_TRACKING};
+            warn "[DEBUG] ConditionalStatement: no true_block_ctx found\n" if $ENV{CHALK_DEBUG_TRACKING};
             return undef;
         }
 
         # NOW evaluate true branch with tracking active
         $builder->set_branch('true');
-        my $true_block = $true_block_ctx->extract;
+
+        # Must call evaluate() on the rule to get the block hash!
+        my $true_block_rule = $true_block_ctx->rule;
+        my $true_block = $true_block_rule ? $true_block_rule->evaluate($true_block_ctx) : $true_block_ctx->extract;
         if (!(ref($true_block) eq 'HASH' && $true_block->{type} eq 'block')) {
-            warn "[DEBUG] ConditionalStatement: true_block not a block hash. ref=", ref($true_block), ", type=", (ref($true_block) eq 'HASH' ? ($true_block->{type} // 'undef') : 'N/A'), "\n" if $ENV{CHALK_DEBUG_TRACKING};
             return undef;
         }
         warn "[DEBUG] ConditionalStatement: true_block has ", scalar(@{$true_block->{statements}}), " statements\n" if $ENV{CHALK_DEBUG_TRACKING};
@@ -123,15 +144,33 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $false_ends_with_return = 0;
         my $false_last_stmt;
 
-        if (@children > CHILD_ELSE_KEYWORD) {
-            my $next_keyword = $children[CHILD_ELSE_KEYWORD]->extract;
-            if (defined($next_keyword) && $next_keyword eq 'else') {
-                # Get false branch context WITHOUT evaluating yet
-                my $false_block_ctx = $context->child_context(CHILD_FALSE_BLOCK);
+        # Search for 'else' keyword and then the false branch Block
+        my $found_else = 0;
+        my $false_block_ctx;
+        for my $i (0..$#children) {
+            my $child_ctx = $children[$i];
+            my $child_val = $child_ctx->extract;
 
+            # Mark when we find 'else'
+            if (defined($child_val) && !ref($child_val) && $child_val eq 'else') {
+                $found_else = 1;
+                next;
+            }
+
+            # After 'else', the first Block rule is the false branch
+            if ($found_else && $child_ctx->rule && ref($child_ctx->rule) =~ /::Block$/) {
+                $false_block_ctx = $child_ctx;
+                last;
+            }
+        }
+
+        if ($false_block_ctx) {
                 # NOW evaluate false branch with tracking active
                 $builder->set_branch('false');
-                my $else_block = $false_block_ctx ? $false_block_ctx->extract : undef;
+
+                # Must call evaluate() on the rule to get the block hash!
+                my $false_block_rule = $false_block_ctx->rule;
+                my $else_block = $false_block_rule ? $false_block_rule->evaluate($false_block_ctx) : $false_block_ctx->extract;
 
                 if (ref($else_block) eq 'HASH' && $else_block->{type} eq 'block') {
                     $current_ctrl = $if_false->id;
@@ -149,13 +188,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
                 } else {
                     $false_control = $if_false->id;
                 }
-            }
-            else {
-                # No else - false path just falls through
-                $false_control = $if_false->id;
-            }
-        }
-        else {
+        } else {
             # No else branch - false path just falls through
             $false_control = $if_false->id;
         }
@@ -174,11 +207,41 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
 
             # Return the Stop node as the final node of this statement
             return $stop;
+        } elsif ($true_ends_with_return && !$false_block_ctx) {
+            # True branch returns, no else block - false path just falls through
+            # Create single-input Region from IfFalse only
+            $region = $builder->build_region_node(undef, $if_false->id);
+            $builder->set_control($region->id);
+
+            # End tracking without generating phi nodes (no merge, just fallthrough)
+            my $tracking_data = $builder->end_branch_tracking();
+            $tracking_guard->dismiss();
+
+            # Return the Region as this statement's result
+            return $region;
+        } elsif ($false_ends_with_return && !scalar(@{$true_block->{statements} // []})) {
+            # False branch returns, true branch is empty - true path just falls through
+            # Create single-input Region from IfTrue only
+            $region = $builder->build_region_node(undef, $if_true->id);
+            $builder->set_control($region->id);
+
+            # End tracking without generating phi nodes (no merge, just fallthrough)
+            my $tracking_data = $builder->end_branch_tracking();
+            $tracking_guard->dismiss();
+
+            # Return the Region as this statement's result
+            return $region;
         } else {
             # At least one branch continues - create Region
             # build_region_node signature: ($source_info, @control_inputs)
             # Pass undef for source_info, then the control inputs
-            $region = $builder->build_region_node(undef, $true_control, $false_control);
+            # CRITICAL: Only include control from branches that DON'T end with return
+            # Per Issue #155: branches ending with Return go to Stop, not Region
+            my @region_inputs;
+            push @region_inputs, $true_control unless $true_ends_with_return;
+            push @region_inputs, $false_control unless $false_ends_with_return;
+
+            $region = $builder->build_region_node(undef, @region_inputs);
             $builder->set_control($region->id);
 
             # End tracking and generate Phi nodes for modified variables
