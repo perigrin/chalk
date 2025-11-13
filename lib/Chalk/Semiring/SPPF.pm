@@ -9,36 +9,63 @@ use Chalk::Semiring::Viterbi;
 use Chalk::Semiring::Composite;
 
 # Pure SPPF Element - only tracks forest structure, no scoring
+# Lazy SPPF construction: accumulates children during multiply,
+# creates actual forest nodes only when rules complete in on_complete()
 class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
-    field $sppf_node :param :reader;
+    field $sppf_node :param :reader = undef;  # SPPF node (symbol or intermediate)
+    field $children :param :reader = [];       # Child elements for lazy construction
     field $forest    :param :reader;
+    field $rule      :param :reader = undef;   # Grammar rule this element is parsing
+    field $position  :param :reader = undef;   # Dot position in rule (how many RHS symbols processed)
+    field $start_pos :param :reader = undef;   # Track span even without node
+    field $end_pos   :param :reader = undef;
 
     method multiply( $other, $swap = undef ) {
-        # Create new combined SPPF node representing sequence
-        my $other_node = $other->sppf_node();
-        my $combined_node =
-          $forest->create_sequence_node( $sppf_node, $other_node );
+        # Scott's algorithm: create nodes during parsing with full rule context
+        # Key insight: each child should already have its own SPPF node
 
+        # Determine span of combined element
+        my $self_start = $start_pos // ($sppf_node ? $sppf_node->start_pos : 0);
+        my $self_end = $end_pos // ($sppf_node ? $sppf_node->end_pos : 0);
+        my $other_start = $other->start_pos // ($other->sppf_node ? $other->sppf_node->start_pos : 0);
+        my $other_end = $other->end_pos // ($other->sppf_node ? $other->sppf_node->end_pos : 0);
+
+        # If we have rule context, track position advancement
+        my $new_position = defined($position) ? $position + 1 : undef;
+
+        # For now, keep lazy construction but propagate rule context
+        # Children will be converted to packed nodes in on_complete()
         return Chalk::Semiring::SPPFElement->new(
-            sppf_node => $combined_node,
-            forest    => $forest
+            children  => [$self, $other],
+            forest    => $forest,
+            rule      => $rule,           # Propagate rule context
+            position  => $new_position,   # Track how many RHS symbols processed
+            start_pos => $self_start,
+            end_pos   => $other_end,
         );
     }
 
     method add( $other, $swap = undef ) {
-        my $self_start = $sppf_node->start_pos();
-        my $self_end = $sppf_node->end_pos();
-        my $other_node = $other->sppf_node();
-        my $other_start = $other_node->start_pos();
-        my $other_end = $other_node->end_pos();
+        # Get spans - use stored positions if no node yet
+        my $self_start = $start_pos // ($sppf_node ? $sppf_node->start_pos : 0);
+        my $self_end = $end_pos // ($sppf_node ? $sppf_node->end_pos : 0);
+        my $other_start = $other->start_pos // ($other->sppf_node ? $other->sppf_node->start_pos : 0);
+        my $other_end = $other->end_pos // ($other->sppf_node ? $other->sppf_node->end_pos : 0);
 
-        # Merge alternatives if they span the same range
+        # Merge alternatives if they span the same range AND both have nodes
         if ($self_start == $other_start && $self_end == $other_end) {
-            $forest->add_alternative( $sppf_node, $other_node );
+            if ($sppf_node && $other->sppf_node) {
+                $forest->add_alternative( $sppf_node, $other->sppf_node );
+
+                # Prefer elements with nodes over those without
+                # (nodes are created in on_complete, so they have proper LHS symbols)
+                return $self;  # Both have nodes, return self
+            }
+            # If only one has a node, prefer it
+            return $sppf_node ? $self : $other;
         }
 
         # Prefer element that went further (for consistency with composite pattern)
-        # This allows SPPF to work correctly when composed with scoring semirings
         return $self_end >= $other_end ? $self : $other;
     }
 
@@ -46,11 +73,18 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
         return 0 unless ref($other) eq ref($self);
         # Two SPPF elements are equal if they reference the same node
         my $other_node = $other->sppf_node();
+        # Handle cases where nodes might be undef (lazy construction)
+        return 0 unless defined($sppf_node) && defined($other_node);
         return refaddr($sppf_node) == refaddr($other_node);
     }
 
     method to_string(@args) {
-        return "SPPF:$sppf_node";
+        if ($sppf_node) {
+            return "SPPF:$sppf_node";
+        } else {
+            my $child_count = scalar(@{$children // []});
+            return "SPPF:lazy($child_count children)";
+        }
     }
 }
 
@@ -85,13 +119,87 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
+        # Create terminal/leaf node for matched input
+        # This is called when a terminal symbol is matched
         my $lhs = $rule->lhs();
         my $symbol_node =
           $forest->get_or_create_symbol_node( $lhs, $start_pos, $end_pos );
 
         return Chalk::Semiring::SPPFElement->new(
             sppf_node => $symbol_node,
-            forest    => $forest
+            forest    => $forest,
+            rule      => $rule,       # Track rule context from the start
+            position  => 0,           # Just started parsing this rule
+            start_pos => $start_pos,
+            end_pos   => $end_pos,
+        );
+    }
+
+    method on_complete($completed_item, $completed_element) {
+        # THIS is where we create actual SPPF nodes!
+        # We have the complete rule context including LHS symbol
+        my $lhs = $completed_item->rule->lhs;
+        my $start = $completed_item->start_pos;
+        my $end = $completed_item->end_pos;
+
+        # Check if the completed element already has the correct LHS node
+        if ($completed_element->sppf_node &&
+            $completed_element->sppf_node->symbol eq $lhs &&
+            $completed_element->sppf_node->start_pos == $start &&
+            $completed_element->sppf_node->end_pos == $end) {
+            # Already created (shouldn't happen with lazy construction, but be safe)
+            return $completed_element;
+        }
+
+        # Create LHS symbol node
+        my $lhs_node = $forest->get_or_create_symbol_node($lhs, $start, $end);
+
+        # Extract child nodes from accumulated children
+        # Key insight: recursively ensure all children have SPPF nodes
+        my @child_nodes = $self->_extract_child_nodes($completed_element, $completed_item->rule);
+
+        sub _extract_child_nodes {
+            my ($self, $element, $rule) = @_;
+            my @nodes;
+
+            my $elem_children = $element->children // [];
+            if (@$elem_children) {
+                # Element has children from multiply operations
+                for my $child (@$elem_children) {
+                    if ($child->sppf_node) {
+                        # Child already has a node (terminal or completed rule)
+                        push @nodes, $child->sppf_node;
+                    } else {
+                        # Child has no node - recursively process its children
+                        my @grandchild_nodes = $self->_extract_child_nodes($child, $rule);
+                        if (@grandchild_nodes) {
+                            # Create intermediate node for this child's sequence
+                            # For now, just flatten the grandchildren
+                            push @nodes, @grandchild_nodes;
+                        }
+                    }
+                }
+            } elsif ($element->sppf_node) {
+                # Element is a terminal or already-completed non-terminal
+                @nodes = ($element->sppf_node);
+            }
+            # Empty case: no children and no node = epsilon
+
+            return @nodes;
+        }
+
+        # Create packed node with children
+        my $packed = Chalk::ParseForest::PackedNode->new(rule => $completed_item->rule);
+        for my $child_node (@child_nodes) {
+            $packed->add_child($child_node);
+        }
+        $lhs_node->add_packed_node($packed);
+
+        return Chalk::Semiring::SPPFElement->new(
+            sppf_node => $lhs_node,
+            forest => $forest,
+            start_pos => $start,
+            end_pos => $end,
         );
     }
 }
@@ -145,8 +253,9 @@ class Chalk::Semiring::SPPFViterbiElement :isa(Chalk::Element) {
         my $score = $self->score();
         my $path = $self->path();
         my $node = $self->sppf_node();
+        my $node_str = $node ? "$node" : "lazy";
         return sprintf( '%.4f[%s] SPPF:%s',
-            exp($score), join( ',', $path->@* ), $node );
+            exp($score), join( ',', $path->@* ), $node_str );
     }
 
     # Backward compatibility helpers
@@ -208,6 +317,19 @@ class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
 
         return Chalk::Semiring::SPPFViterbiElement->new(
             composite => $composite_elem
+        );
+    }
+
+    method on_complete($completed_item, $completed_element) {
+        # Unwrap SPPFViterbiElement to get composite
+        my $composite_elem = $completed_element->composite();
+
+        # Delegate to composite semiring (which delegates to SPPF and Viterbi)
+        my $result_composite = $composite->on_complete($completed_item, $composite_elem);
+
+        # Wrap result back into SPPFViterbiElement
+        return Chalk::Semiring::SPPFViterbiElement->new(
+            composite => $result_composite
         );
     }
 }

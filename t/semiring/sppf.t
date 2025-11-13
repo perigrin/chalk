@@ -53,9 +53,11 @@ subtest 'SPPFElement multiplication (sequence)' => sub {
     my $result = $elem1->multiply($elem2);
 
     ok $result, 'Multiplication succeeds';
-    ok $result->sppf_node, 'Result has SPPF node';
-    is $result->sppf_node->start_pos, 0, 'Sequence starts at first position';
-    is $result->sppf_node->end_pos, 5, 'Sequence ends at last position';
+    # Lazy construction: multiply() doesn't create nodes immediately
+    # Nodes are created in on_complete() when rules finish
+    is scalar(@{$result->children}), 2, 'Result has 2 children';
+    is $result->start_pos, 0, 'Sequence starts at first position';
+    is $result->end_pos, 5, 'Sequence ends at last position';
 };
 
 subtest 'SPPFElement addition (alternatives)' => sub {
@@ -181,8 +183,11 @@ subtest 'SPPF semiring operator overloading' => sub {
     );
 
     my $mult = $elem1 * $elem2;
-    ok $mult->sppf_node, 'Operator * works';
+    ok $mult, 'Operator * works';
+    # Lazy construction: multiply doesn't create nodes immediately
+    is scalar(@{$mult->children}), 2, 'Multiply creates lazy element with children';
 
     my $add = $elem1 + $elem2;
-    ok $add->sppf_node, 'Operator + works';
+    ok $add, 'Operator + works';
+    ok $add->sppf_node, 'Add returns element with node (prefers first arg)';
 };
