@@ -10,61 +10,254 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     field $operator :param :reader = undef;  # Operator symbol (if known)
     field $precedence_level :param :reader = undef;  # Index in precedence table
     field $associativity :param :reader = undef;  # Associativity type: left, right, nonassoc, chained, chain/na
+    field $forest :param :reader = undef;  # Reference to SPPF forest for examining parse structure (optional)
+    field $sppf_node :param :reader = undef;  # SPPF node for this element's parse
+    field $start_pos :param :reader = undef;  # Parse span start
+    field $end_pos :param :reader = undef;    # Parse span end
 
     method add( $other, $swap = undef ) {
-        # Boolean OR for choice: either can succeed
-        # If self is invalid (add_id, value 0), return other
-        # Otherwise prefer valid over invalid
+        # Choose between alternative parses based on precedence validation
+        # $self and $other represent two different parse alternatives
+        # Return the one with valid precedence, or add_id if neither is valid
+
+        # If self is already invalid (add_id), return other
         return $other if !$valid;
-        return $self;
+
+        # If other is invalid, return self
+        return $self if !$other->valid;
+
+        # Both marked as valid initially - need to validate their SPPF structures
+        # If we don't have SPPF nodes, can't validate - use simple preference
+        my $self_has_sppf = $sppf_node && defined($start_pos) && defined($end_pos);
+        my $other_has_sppf = $other->sppf_node && defined($other->start_pos) && defined($other->end_pos);
+
+        return $self unless $self_has_sppf || $other_has_sppf;
+
+        # Validate each alternative's precedence structure
+        my $self_valid = $self->_validate_element_precedence();
+        my $other_valid = $other->_validate_element_precedence();
+
+        # Return based on validation results
+        if ($self_valid && !$other_valid) {
+            return $self;
+        } elsif ($other_valid && !$self_valid) {
+            return $other;
+        } elsif ($self_valid && $other_valid) {
+            # Both valid - prefer the one with SPPF (has precedence info)
+            # If only one has SPPF, prefer that one
+            if ($self_has_sppf && !$other_has_sppf) {
+                return $self;
+            } elsif ($other_has_sppf && !$self_has_sppf) {
+                return $other;
+            } else {
+                # Both have SPPF or neither - prefer self (first alternative)
+                return $self;
+            }
+        } else {
+            # Neither valid - return add_id to mark parse as invalid
+            return Chalk::Semiring::PrecedenceElement->new(valid => 0, forest => $forest);
+        }
+    }
+
+    # Validate this element's SPPF structure for precedence correctness
+    method _validate_element_precedence() {
+        # If no SPPF node, assume valid (can't validate what we don't have)
+        return 1 unless $sppf_node;
+
+        # Get all packed alternatives for this SPPF node
+        my @packed_nodes = $sppf_node->packed_nodes;
+        return 1 unless @packed_nodes;  # No alternatives = valid
+
+        # Check if ANY packed alternative has valid precedence
+        # (The SPPF may have multiple alternatives, we just need one valid one)
+        for my $packed (@packed_nodes) {
+            if ($self->_validate_packed_node_precedence($packed)) {
+                return 1;  # Found at least one valid alternative
+            }
+        }
+
+        return 0;  # No valid alternatives found
+    }
+
+    # Helper: Validate precedence of a packed node alternative
+    method _validate_packed_node_precedence($packed) {
+        my $rule = $packed->rule;
+        return 1 unless $rule;  # Non-rule nodes are always valid
+
+        # Only validate ArithmeticOp rules
+        return 1 unless $rule->lhs eq 'ArithmeticOp';
+
+        # Get operator and children from packed node
+        my @children = $packed->children;
+        return 1 unless @children;  # No children = valid
+
+        # Extract operator from rule RHS (Pattern: E WS_OPT OP WS_OPT E or E OP E)
+        my $rhs = $rule->rhs;
+        my $operator;
+        for my $symbol (@$rhs) {
+            if (defined($symbol) && !ref($symbol) && $symbol =~ qr/^[+\-*\/]$/) {
+                $operator = $symbol;
+                last;
+            }
+        }
+        return 1 unless $operator;  # No operator found
+
+        # Get operator precedence
+        my $op_info = $self->lookup_operator($operator);
+        return 1 unless $op_info;  # Unknown operator
+        my $current_level = $op_info->{level};
+
+        # Check left and right children for nested operators
+        # Children are SPPF nodes - need to extract their operators recursively
+        for my $child (@children) {
+            next unless $child;
+            next unless $child->can('symbol');  # Only SymbolNodes have symbol
+            next unless $child->symbol eq 'ArithmeticOp';
+
+            # This child is an ArithmeticOp - extract its operator
+            my $child_op = $self->_extract_operator_from_node($child);
+            next unless $child_op;
+
+            my $child_op_info = $self->lookup_operator($child_op);
+            next unless $child_op_info;
+            my $child_level = $child_op_info->{level};
+
+            # Precedence rule: Lower precedence (higher level number) cannot be child of higher precedence (lower level number)
+            # Example: (1+2)*3 is INVALID because + (level 6) is child of * (level 5)
+            # Example: 1+(2*3) is VALID because * (level 5) is child of + (level 6)
+            if ($child_level > $current_level) {
+                # Child has lower precedence than parent - INVALID
+                return 0;
+            }
+        }
+
+        return 1;  # All precedence checks passed
+    }
+
+    # Helper: Extract operator from an SPPF node by examining its packed alternatives
+    method _extract_operator_from_node($node) {
+        return undef unless $node->can('packed_nodes');
+
+        my @packed = $node->packed_nodes;
+        return undef unless @packed;
+
+        # Check first packed node's rule
+        my $first_packed = $packed[0];
+        my $rule = $first_packed->rule;
+        return undef unless $rule;
+        return undef unless $rule->lhs eq 'ArithmeticOp';
+
+        # Extract operator from rule RHS
+        my $rhs = $rule->rhs;
+        for my $symbol (@$rhs) {
+            if (defined($symbol) && !ref($symbol) && $symbol =~ qr/^[+\-*\/]$/) {
+                return $symbol;
+            }
+        }
+
+        return undef;
     }
 
     method multiply( $other, $swap = undef ) {
         # Boolean AND for sequence: both must succeed
         # If either is invalid, result is invalid
-        return Chalk::Semiring::PrecedenceElement->new(valid => 0) if !$valid || !$other->valid;
+        return Chalk::Semiring::PrecedenceElement->new(valid => 0, forest => $forest) if !$valid || !$other->valid;
 
         # Precedence validation: check if $other (right operand) has valid precedence
         # relative to $self (left context/current operator)
 
-        # If either element has no operator info, allow it (non-operator elements)
-        return Chalk::Semiring::PrecedenceElement->new(valid => 1)
-            if !defined($operator) || !defined($other->operator);
-
-        # Both have operators - validate based on precedence and associativity
+        # Extract operator info from SPPF if not already set
+        # This handles the case where multiply() is called before on_complete()
+        my $self_op = $operator;
         my $self_level = $precedence_level;
-        my $other_level = $other->precedence_level;
         my $self_assoc = $associativity;
-        my $other_assoc = $other->associativity;
 
-        # Rule 1: Lower precedence (higher index) cannot nest inside higher precedence (lower index)
-        if ($other_level > $self_level) {
-            return Chalk::Semiring::PrecedenceElement->new(valid => 0);
+        if (!defined($self_op) && $sppf_node) {
+            $self_op = $self->_extract_operator_from_node($sppf_node);
+            if ($self_op) {
+                my $op_info = $self->lookup_operator($self_op);
+                if ($op_info) {
+                    $self_level = $op_info->{level};
+                    $self_assoc = $op_info->{assoc};
+                }
+            }
         }
 
-        # Rule 2: If different precedence levels, higher can nest in lower - valid
-        if ($other_level < $self_level) {
-            return Chalk::Semiring::PrecedenceElement->new(valid => 1);
+        my $other_op = $other->operator;
+        my $other_level = $other->precedence_level;
+        my $other_assoc = $other->associativity;
+
+        if (!defined($other_op) && $other->sppf_node) {
+            $other_op = $self->_extract_operator_from_node($other->sppf_node);
+            if ($other_op) {
+                my $op_info = $self->lookup_operator($other_op);
+                if ($op_info) {
+                    $other_level = $op_info->{level};
+                    $other_assoc = $op_info->{assoc};
+                }
+            }
+        }
+
+        # If either element has no operator info, preserve the one that does
+        if (!defined($self_op) && !defined($other_op)) {
+            # Neither has operator - return plain valid element
+            return Chalk::Semiring::PrecedenceElement->new(valid => 1, forest => $forest);
+        } elsif (!defined($self_op)) {
+            # Other has operator, self doesn't - preserve other's operator
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator => $other_op,
+                precedence_level => $other_level,
+                associativity => $other_assoc,
+                forest => $forest
+            );
+        } elsif (!defined($other_op)) {
+            # Self has operator, other doesn't - preserve self's operator
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator => $self_op,
+                precedence_level => $self_level,
+                associativity => $self_assoc,
+                forest => $forest
+            );
+        }
+
+        # Both have operators - validate based on precedence and associativity
+
+        # Rule 1: Higher precedence (lower level) on LEFT with lower precedence (higher level) on RIGHT is INVALID
+        # Example: (a + b) * c where + is on left and * should bind tighter - WRONG parse
+        if ($self_level < $other_level) {
+            # self has higher precedence (lower level), other has lower precedence (higher level)
+            # This is invalid sequencing
+            return Chalk::Semiring::PrecedenceElement->new(valid => 0, forest => $forest);
+        }
+
+        # Rule 2: Lower precedence (higher level) on LEFT with higher precedence (lower level) on RIGHT is VALID
+        # Example: (a * b) + c where * is on left and + binds less tightly - CORRECT parse
+        if ($self_level > $other_level) {
+            # self has lower precedence (higher level), other has higher precedence (lower level)
+            # This is valid sequencing
+            return Chalk::Semiring::PrecedenceElement->new(valid => 1, forest => $forest);
         }
 
         # Same precedence level - check associativity rules
         # Rule 3: nonassoc operators cannot chain with themselves
         if (defined($self_assoc) && $self_assoc eq 'nonassoc') {
             # nonassoc operators at same level cannot chain
-            if ($operator eq $other->operator) {
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0);
+            if ($self_op eq $other_op) {
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, forest => $forest);
             }
         }
 
         # Rule 4: chained comparisons must maintain directional consistency
         if (defined($self_assoc) && $self_assoc eq 'chained') {
             # Determine direction of operators
-            my $self_dir = _operator_direction($operator);
-            my $other_dir = _operator_direction($other->operator);
+            my $self_dir = _operator_direction($self_op);
+            my $other_dir = _operator_direction($other_op);
 
             # If both have directions, they must match
             if (defined($self_dir) && defined($other_dir) && $self_dir ne $other_dir) {
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0);
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, forest => $forest);
             }
         }
 
@@ -72,14 +265,14 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         # For now, treat same as chained - allow chaining
         if (defined($self_assoc) && $self_assoc eq 'chain/na') {
             # Allow chaining
-            return Chalk::Semiring::PrecedenceElement->new(valid => 1);
+            return Chalk::Semiring::PrecedenceElement->new(valid => 1, forest => $forest);
         }
 
         # Rule 6: left and right associativity (existing behavior)
         # left: disallow equal precedence on right (already handled by "cannot be lower")
         # right: allow equal precedence on right (needs explicit check)
         # Default: valid
-        return Chalk::Semiring::PrecedenceElement->new(valid => 1);
+        return Chalk::Semiring::PrecedenceElement->new(valid => 1, forest => $forest);
     }
 
     # Helper: Determine comparison operator direction
@@ -111,11 +304,18 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
 class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     field $precedence_table :param :reader;
+    field $shared_context :param :reader = undef;
+    field $forest :reader;
     field $mul_id :reader;
     field $add_id :reader;
     field $operator_index :reader;  # Hash: operator -> index in precedence table
 
     ADJUST {
+        # Extract forest from shared_context if provided
+        $forest = defined($shared_context) && exists($shared_context->{forest})
+            ? $shared_context->{forest}
+            : undef;
+
         # Build operator index for fast lookup
         my %index;
         for my $i (0 .. $precedence_table->@* - 1) {
@@ -130,23 +330,37 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         $operator_index = \%index;
 
         # Identity elements: like Boolean semiring
-        $mul_id = Chalk::Semiring::PrecedenceElement->new(valid => 1);
-        $add_id = Chalk::Semiring::PrecedenceElement->new(valid => 0);
+        $mul_id = Chalk::Semiring::PrecedenceElement->new(valid => 1, forest => $forest);
+        $add_id = Chalk::Semiring::PrecedenceElement->new(valid => 0, forest => $forest);
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
         # Extract operator from rule if it's a binary operation
-        # Pattern: E -> E OP E (3 elements in RHS)
-        # Operator is at index 1 (middle position)
+        # Pattern 1: E -> E OP E (3 elements in RHS, operator at index 1)
+        # Pattern 2: E -> E WS_OPT OP WS_OPT E (5 elements in RHS, operator at index 2)
 
         my $rhs = $rule->rhs;
         my $operator = undef;
         my $prec_level = undef;
         my $assoc = undef;
 
-        # Check if this looks like a binary operation rule
+        # Check for Pattern 1: 3-element binary operation (E OP E)
         if ($rhs->@* == 3) {
             my $candidate = $rhs->[1];  # Middle element
+
+            # Check if this candidate is in our precedence table
+            if (defined($candidate) && !ref($candidate)) {
+                my $op_info = $self->lookup_operator($candidate);
+                if ($op_info) {
+                    $operator = $candidate;
+                    $prec_level = $op_info->{level};
+                    $assoc = $op_info->{assoc};
+                }
+            }
+        }
+        # Check for Pattern 2: 5-element with whitespace (E WS_OPT OP WS_OPT E)
+        elsif ($rhs->@* == 5) {
+            my $candidate = $rhs->[2];  # Operator at index 2
 
             # Check if this candidate is in our precedence table
             if (defined($candidate) && !ref($candidate)) {
@@ -163,7 +377,8 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
             valid => 1,
             operator => $operator,
             precedence_level => $prec_level,
-            associativity => $assoc
+            associativity => $assoc,
+            forest => $forest
         );
     }
 
@@ -175,6 +390,77 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     method plus($x, $y) {
         # For backward compatibility if called directly
         return $x->add($y);
+    }
+
+    # Called when a token is scanned - update element with matched operator value
+    method on_scan($item, $element, $pos, $matched_value) {
+        # If the matched value is an operator in our precedence table,
+        # create a new element with the operator information
+        if (defined($matched_value) && !ref($matched_value)) {
+            my $op_info = $self->lookup_operator($matched_value);
+            if ($op_info) {
+                return Chalk::Semiring::PrecedenceElement->new(
+                    valid => 1,
+                    operator => $matched_value,
+                    precedence_level => $op_info->{level},
+                    associativity => $op_info->{assoc},
+                    forest => $forest
+                );
+            }
+        }
+
+        # Otherwise return element unchanged
+        return $element;
+    }
+
+    # Called when a rule completes - extract operator and validate precedence
+    method on_complete($completed_item, $completed_element) {
+        my $rule = $completed_item->rule;
+        my $lhs = $rule->lhs;
+        my $start = $completed_item->start_pos;
+        my $end = $completed_item->end_pos;
+
+        # For ArithmeticOp rules, validate precedence after extraction
+        # Other rules just extract operator if present
+        my $operator = undef;
+        my $prec_level = undef;
+        my $assoc = undef;
+
+        # Extract operator from completed element
+        if ($completed_element->can('operator') && defined($completed_element->operator)) {
+            $operator = $completed_element->operator;
+            $prec_level = $completed_element->precedence_level;
+            $assoc = $completed_element->associativity;
+        }
+
+        # Look up SPPF node from forest if available
+        my $sppf_node = undef;
+        if ($forest) {
+            $sppf_node = $forest->get_node($lhs, $start, $end);
+        }
+
+        # Return element with operator information and SPPF node
+        if (defined($operator)) {
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator => $operator,
+                precedence_level => $prec_level,
+                associativity => $assoc,
+                forest => $forest,
+                sppf_node => $sppf_node,
+                start_pos => $start,
+                end_pos => $end
+            );
+        }
+
+        # Otherwise return element with span info for potential precedence checking
+        return Chalk::Semiring::PrecedenceElement->new(
+            valid => 1,
+            forest => $forest,
+            sppf_node => $sppf_node,
+            start_pos => $start,
+            end_pos => $end
+        );
     }
 
     # Lookup operator precedence and associativity

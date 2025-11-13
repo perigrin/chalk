@@ -86,13 +86,23 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
         return $elements->[$index];
     }
 
-    # Delegation methods: Forward context-related calls to semantic element (index 2)
+    # Delegation methods: Forward context-related calls to semantic element
     # These methods are needed by semantic actions (e.g., ConditionalStatement.pm)
     # that expect to work with EvalContext objects
+    # Note: Semantic element index depends on composite configuration
+
+    method _semantic_element() {
+        # Find the semantic element by looking for one with a 'context' method
+        for my $elem ($elements->@*) {
+            return $elem if $elem->can('context');
+        }
+        return undef;
+    }
 
     method context() {
-        # Delegate to semantic element (elements[2] in ChalkIR architecture)
-        return $elements->[2]->can('context') ? $elements->[2]->context : undef;
+        # Delegate to semantic element
+        my $sem = $self->_semantic_element();
+        return $sem ? $sem->context : undef;
     }
 
     method child($index) {
@@ -115,7 +125,8 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
 
     method extract() {
         # Delegate to semantic element
-        return $elements->[2]->can('extract') ? $elements->[2]->extract : undef;
+        my $sem = $self->_semantic_element();
+        return $sem ? ($sem->can('extract') ? $sem->extract : undef) : undef;
     }
 }
 
@@ -172,6 +183,18 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
     method on_complete($completed_item, $completed_element) {
         # Extract elements from CompositeElement
         my @elements = $completed_element->elements->@*;
+
+        # SHORT-CIRCUIT CHECK: Before processing, check if any element equals its add_id
+        # This prevents building IR for invalid parses (e.g., precedence violations)
+        for my $i (0..$#elements) {
+            if (defined($child_add_ids->[$i])) {
+                if ($elements[$i]->equals($child_add_ids->[$i])) {
+                    # This element is invalid (equals add_id), so short-circuit
+                    # Return composite add_id without processing any semirings
+                    return $add_id;
+                }
+            }
+        }
 
         # Call on_complete() on each wrapped semiring with its corresponding element
         my @results;

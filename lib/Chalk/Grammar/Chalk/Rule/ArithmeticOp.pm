@@ -7,25 +7,55 @@ use experimental 'class';
 class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
     method evaluate($context) {
-        # For binary operation: check child(2) for the operator
         # Grammar is: ArithmeticOp -> Expression WS_OPT %ARITHMETIC_OP% WS_OPT Expression
-        # So operator is at index 2
-        my $operator = $context->child(2);
-        return $context->child(0) unless defined $operator && !ref($operator);
-        return $context->child(0) unless $operator =~ qr/^[+\-*\/]$/;
+        # But WS_OPT may be filtered out, so we get either 3 or 5 children
+        # Search for the operator dynamically instead of hardcoding indices
 
         my $builder = $context->env->{ir_builder};
+
+        my $num_children = scalar(@{$context->children});
+        my $operator_idx;
+        my $operator;
+
+        # Find the operator by searching through children
+        for my $i (0 .. $num_children - 1) {
+            my $child = $context->child($i);
+            if (defined $child && !ref($child) && $child =~ qr/^[+\-*\/]$/) {
+                $operator = $child;
+                $operator_idx = $i;
+                last;
+            }
+        }
+
+        # If no operator found, return first child
+        return $context->child(0) unless defined $operator;
         return $context->child(0) unless $builder;
 
-        # Get left (child 0) and right (child 4)
-        my $left  = $context->child(0);
-        my $right = $context->child(4);
+        # Extract left operand (first IR node before operator)
+        my $left;
+        for my $i (0 .. $operator_idx - 1) {
+            my $child = $context->child($i);
+            if ($child && $child isa Chalk::IR::Node::Base) {
+                $left = $child;
+                last;
+            }
+        }
 
-        # Validate that we got IR nodes
-        return $left unless $left isa Chalk::IR::Node::Base;
-        return $left unless $right isa Chalk::IR::Node::Base;
+        # Extract right operand (first IR node after operator)
+        my $right;
+        for my $i ($operator_idx + 1 .. $num_children - 1) {
+            my $child = $context->child($i);
+            if ($child && $child isa Chalk::IR::Node::Base) {
+                $right = $child;
+                last;
+            }
+        }
+
+        # Validate that we got both operands
+        return $context->child(0) unless $left && $right;
 
         # Build appropriate IR node based on operator
+        # Note: Precedence validation is handled by Precedence semiring during parsing
         if ( $operator eq '+' ) {
             return $builder->build_add_node( $left, $right );
         }

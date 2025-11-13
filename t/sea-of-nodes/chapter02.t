@@ -13,7 +13,7 @@ use_ok('Chalk::IR::Builder');
 use_ok('Chalk::Parser');
 use_ok('Chalk::Grammar');
 use_ok('Chalk::Grammar::Chalk');
-use_ok('Chalk::Semiring::Semantic');
+use_ok('Chalk::Semiring::ChalkIR');
 use_ok('Chalk::IR::Node::Scope');
 
 # Helper to create parser for testing
@@ -24,12 +24,12 @@ sub make_parser {
     close $fh;
 
     my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
-    my $builder = Chalk::IR::Builder->new();
     my $scope = Chalk::IR::Node::Scope->new();
 
-    my $semiring = Chalk::Semiring::Semantic->new(
-        grammar => $grammar,
-        env => { ir_builder => $builder, scope => $scope }
+    # ChalkIR creates a composite semiring with SPPF, Precedence, and Semantic
+    # It also creates its own IR builder
+    my $semiring = Chalk::Semiring::ChalkIR->new(
+        grammar => $grammar
     );
 
     my $parser = Chalk::Parser->new(
@@ -38,7 +38,27 @@ sub make_parser {
         preprocess => ['Chalk::Preprocessor::Heredoc']
     );
 
+    # Get the builder from the ChalkIR semiring
+    my $builder = $semiring->builder;
+
     return ($parser, $builder, $scope);
+}
+
+# Helper to parse and prune IR graph to winning parse
+sub parse_and_prune {
+    my ($parser, $builder, $code) = @_;
+    my $result = $parser->parse_string($code);
+
+    # Prune graph to only include nodes from winning parse
+    # This removes IR nodes created by losing parse alternatives
+    if ($result && $result->can('context')) {
+        my $focus = $result->context->focus;
+        if ($focus && $focus->can('id')) {
+            $builder->graph->prune_to_reachable($focus->id);
+        }
+    }
+
+    return $result;
 }
 
 # Parser integration tests - Chapter 2: Arithmetic Operations
@@ -47,7 +67,7 @@ subtest 'Parse: Simple addition - return 1+2' => sub {
     my ($parser, $builder, $scope) = make_parser();
 
     my $code = 'return 1+2;';
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded');
 
     my $graph = $builder->graph;
@@ -73,7 +93,7 @@ subtest 'Parse: Operator precedence - return 1 + 2 * 3' => sub {
 
     # Chapter 2 key example: tests precedence (multiply before add)
     my $code = 'return 1 + 2 * 3;';
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded');
 
     my $graph = $builder->graph;
@@ -105,7 +125,7 @@ subtest 'Parse: Complex expression - return 1 + 2 * 3 + -5' => sub {
 
     # Chapter 2 complex example from README
     my $code = 'return 1 + 2 * 3 + -5;';
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded');
 
     my $graph = $builder->graph;
@@ -128,7 +148,7 @@ subtest 'Parse: Subtraction - return 10 - 3' => sub {
     my ($parser, $builder, $scope) = make_parser();
 
     my $code = 'return 10 - 3;';
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded');
 
     my $graph = $builder->graph;
@@ -147,7 +167,7 @@ subtest 'Parse: Division - return 6 / 2' => sub {
     my ($parser, $builder, $scope) = make_parser();
 
     my $code = 'return 6 / 2;';
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded');
 
     my $graph = $builder->graph;
@@ -171,7 +191,7 @@ TODO: {
         my ($parser, $builder, $scope) = make_parser();
 
         my $code = 'return 1 + 2;';
-        my $result = $parser->parse_string($code);
+        my $result = parse_and_prune($parser, $builder, $code);
 
         # With peephole optimization, the Add node with constant operands
         # should be replaced with a single Constant node containing 3
@@ -190,7 +210,7 @@ TODO: {
 
         # Chapter 2 README example: 1 + 6 + -5 = 2
         my $code = 'return 1 + 2 * 3 + -5;';
-        my $result = $parser->parse_string($code);
+        my $result = parse_and_prune($parser, $builder, $code);
 
         my $graph = $builder->graph;
         my @nodes = values %{$graph->nodes};

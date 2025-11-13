@@ -139,7 +139,7 @@ subtest 'IR::Builder variable definition and lookup' => sub {
 use_ok('Chalk::Parser');
 use_ok('Chalk::Grammar');
 use_ok('Chalk::Grammar::Chalk');
-use_ok('Chalk::Semiring::Semantic');
+use_ok('Chalk::Semiring::ChalkIR');
 
 # Helper to create parser for testing
 # Returns (parser, builder, scope) for easy access to IR
@@ -149,12 +149,12 @@ sub make_parser {
     close $fh;
 
     my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
-    my $builder = Chalk::IR::Builder->new();
     my $scope = Chalk::IR::Node::Scope->new();
 
-    my $semiring = Chalk::Semiring::Semantic->new(
-        grammar => $grammar,
-        env => { ir_builder => $builder, scope => $scope }
+    # ChalkIR creates a composite semiring with SPPF, Precedence, and Semantic
+    # It also creates its own IR builder
+    my $semiring = Chalk::Semiring::ChalkIR->new(
+        grammar => $grammar
     );
 
     my $parser = Chalk::Parser->new(
@@ -163,7 +163,27 @@ sub make_parser {
         preprocess => ['Chalk::Preprocessor::Heredoc']
     );
 
+    # Get the builder from the ChalkIR semiring
+    my $builder = $semiring->builder;
+
     return ($parser, $builder, $scope);
+}
+
+# Helper to parse and prune IR graph to winning parse
+sub parse_and_prune {
+    my ($parser, $builder, $code) = @_;
+    my $result = $parser->parse_string($code);
+
+    # Prune graph to only include nodes from winning parse
+    # This removes IR nodes created by losing parse alternatives
+    if ($result && $result->can('context')) {
+        my $focus = $result->context->focus;
+        if ($focus && $focus->can('id')) {
+            $builder->graph->prune_to_reachable($focus->id);
+        }
+    }
+
+    return $result;
 }
 
 subtest 'Parse: Simple bare block with scoping' => sub {
@@ -172,7 +192,7 @@ subtest 'Parse: Simple bare block with scoping' => sub {
     # Simplest Chapter 3 example: bare block creates new scope
     my $code = 'my $a = 1; { my $b = 2; } return $a;';
 
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded');
 
     my $graph = $builder->graph;
@@ -206,7 +226,7 @@ subtest 'Parse: Nested scope with variable shadowing' => sub {
         return $c;
     };
 
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded with nested scopes');
 
     my $graph = $builder->graph;
@@ -238,7 +258,7 @@ subtest 'Parse: Variable reference in expression' => sub {
 
     my $code = 'my $x = 1; return $x + 2;';
 
-    my $result = $parser->parse_string($code);
+    my $result = parse_and_prune($parser, $builder, $code);
     ok($result, 'Parse succeeded');
 
     my $graph = $builder->graph;

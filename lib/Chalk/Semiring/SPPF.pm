@@ -241,6 +241,7 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
         return Chalk::Semiring::SPPFElement->new(
             sppf_node => $lhs_node,
             forest => $forest,
+            rule => $completed_item->rule,  # Preserve rule for identity tracking
             start_pos => $start,
             end_pos => $end,
         );

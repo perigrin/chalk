@@ -173,6 +173,12 @@ class Chalk::ParseForest {
     method nodes() {
         return \%symbol_nodes;
     }
+
+    # Get a symbol node by LHS symbol and position span
+    method get_node( $lhs, $start_pos, $end_pos ) {
+        my $key = "$lhs|$start_pos|$end_pos";
+        return $symbol_nodes{$key};
+    }
 }
 
 1;
