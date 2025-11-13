@@ -16,8 +16,8 @@ use Chalk::Grammar::Chalk::Type::List;
 use Chalk::Grammar::Chalk::Type::Any;
 
 class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
-    field $value :param :reader;        # Computed semantic value
-    field $context :param :reader;      # Evaluation context
+    field $value     :param :reader;    # Computed semantic value
+    field $context   :param :reader;    # Evaluation context
     field $sppf_node :param = undef;    # Optional SPPF node
 
     method add( $other, $swap = undef ) {
@@ -115,57 +115,44 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
 }
 
 class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
-    field $env :param = {};
-    field $grammar :param :reader;
+    field $env            :param = {};
+    field $grammar        :param :reader;
     field $shared_context :param :reader = undef;
-    field $type_env :param :reader =
+    field $type_env       :param :reader =
       {};    # Maps variable names to Chalk::Type objects
-    field $forest :reader;
-    field $mul_id :reader;
-    field $add_id :reader;
+    field $forest :reader =
+      defined($shared_context)
+      && exists( $shared_context->{forest} )
+      ? $shared_context->{forest}
+      : undef;
+
+    field $mul_id :reader = Chalk::Semiring::SemanticElement->new(
+        value   => 1,                         # mul_id has value 1
+        context => Chalk::EvalContext->new(
+            focus     => undef,
+            children  => [],
+            start_pos => 0,
+            end_pos   => 0,
+            env       => $env,
+            grammar   => $grammar,
+            rule      => undef,
+            forest    => $forest
+        )
+    );
+    field $add_id :reader = Chalk::Semiring::SemanticElement->new(
+        value   => 0,    # add_id has value 0 (failure/no parse)
+        context => Chalk::EvalContext->new(
+            focus     => undef,
+            children  => [],
+            start_pos => 0,
+            end_pos   => 0,
+            env       => $env,
+            grammar   => $grammar,
+            rule      => undef,
+            forest    => $forest
+        )
+    );
     field $_add_id_is_zero :reader = 1;    # Flag to identify add_id
-
-    ADJUST {
-        # Store reference to shared forest if provided
-        $forest =
-          defined($shared_context)
-          && exists( $shared_context->{forest} )
-          ? $shared_context->{forest}
-          : undef;
-
-        # Create identity elements with empty contexts
-        my $empty_ctx_mul = Chalk::EvalContext->new(
-            focus     => undef,
-            children  => [],
-            start_pos => 0,
-            end_pos   => 0,
-            env       => $env,
-            grammar   => $grammar,
-            rule      => undef,
-            forest    => $forest
-        );
-
-        my $empty_ctx_add = Chalk::EvalContext->new(
-            focus     => undef,
-            children  => [],
-            start_pos => 0,
-            end_pos   => 0,
-            env       => $env,
-            grammar   => $grammar,
-            rule      => undef,
-            forest    => $forest
-        );
-
-        $mul_id = Chalk::Semiring::SemanticElement->new(
-            value   => 1,               # mul_id has value 1
-            context => $empty_ctx_mul
-        );
-
-        $add_id = Chalk::Semiring::SemanticElement->new(
-            value   => 0,               # add_id has value 0 (failure/no parse)
-            context => $empty_ctx_add
-        );
-    }
 
     method init_element_from_rule(
         $rule,
