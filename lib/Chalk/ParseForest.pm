@@ -47,6 +47,50 @@ class Chalk::ParseForest::SymbolNode {
     method key() { "$symbol()|$start_pos()|$end_pos()" }
 }
 
+# Intermediate Node - represents partial derivation with rule position
+# Per Scott's algorithm: labeled as (A ::= α · β, j, i) showing rule and dot position
+# Used for binarization of rules with |RHS| > 2 to achieve O(n³) complexity
+class Chalk::ParseForest::IntermediateNode {
+    use overload '""' => 'to_string';
+
+    field $rule_label :param :reader;  # Format: "A ::= α · β"
+    field $start_pos  :param :reader;
+    field $end_pos    :param :reader;
+    field @packed_nodes;
+
+    method add_packed_node($packed_node) {
+        my @new_children = $packed_node->children();
+
+        # Check if we already have a packed node with the same children
+        for my $existing (@packed_nodes) {
+            my @existing_children = $existing->children();
+
+            # Different sizes can't be duplicates, skip
+            next unless @existing_children == @new_children;
+
+            # Same size - check if all children are identical references
+            my $all_match = 1;
+            for my $i (0..$#existing_children) {
+                unless (refaddr($existing_children[$i]) == refaddr($new_children[$i])) {
+                    $all_match = 0;
+                    last;
+                }
+            }
+            return if $all_match;  # Found exact duplicate, don't add
+        }
+
+        push( @packed_nodes, $packed_node );
+    }
+
+    method packed_nodes() { @packed_nodes }
+
+    method to_string(@args) {
+        return "($rule_label, $start_pos, $end_pos)";
+    }
+
+    method key() { "$rule_label|$start_pos|$end_pos" }
+}
+
 # Packed Node - represents one alternative parse of a symbol
 class Chalk::ParseForest::PackedNode {
     use overload '""' => 'to_string';
@@ -86,6 +130,7 @@ class Chalk::ParseForest::TerminalNode {
 class Chalk::ParseForest {
     field %symbol_nodes;
     field %terminal_nodes;
+    field %intermediate_nodes;
 
     method get_or_create_symbol_node( $symbol, $start_pos, $end_pos ) {
         my $key = "$symbol|$start_pos|$end_pos";
@@ -105,18 +150,13 @@ class Chalk::ParseForest {
         );
     }
 
-    method create_sequence_node( $left_node, $right_node ) {
-        my $start = $left_node->start_pos();
-        my $end = $right_node->end_pos();
-
-        my $seq_node = $self->get_or_create_symbol_node( "SEQ", $start, $end );
-
-        my $packed = Chalk::ParseForest::PackedNode->new( rule => undef );
-        $packed->add_child($left_node);
-        $packed->add_child($right_node);
-        $seq_node->add_packed_node($packed);  # add_packed_node handles de-duplication
-
-        return $seq_node;
+    method get_or_create_intermediate_node( $rule_label, $start_pos, $end_pos ) {
+        my $key = "$rule_label|$start_pos|$end_pos";
+        return $intermediate_nodes{$key} //= Chalk::ParseForest::IntermediateNode->new(
+            rule_label => $rule_label,
+            start_pos  => $start_pos,
+            end_pos    => $end_pos
+        );
     }
 
     method add_alternative( $node1, $node2 ) {

@@ -9,8 +9,13 @@ use Chalk::Semiring::Viterbi;
 use Chalk::Semiring::Composite;
 
 # Pure SPPF Element - only tracks forest structure, no scoring
-# Lazy SPPF construction: accumulates children during multiply,
-# creates actual forest nodes only when rules complete in on_complete()
+# Per Scott's algorithm (2008): "SPPF-Style Parsing From Earley Recognisers"
+#
+# Architecture:
+# - Lazy construction: accumulates children in short rules (|RHS| <= 2)
+# - Immediate intermediate nodes: created in multiply() for long rules (|RHS| > 2)
+# - Symbol nodes: created in on_complete() when rules finish
+# - Achieves O(n³) node count through rule-labeled intermediate nodes
 class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
     field $sppf_node :param :reader = undef;  # SPPF node (symbol or intermediate)
     field $children :param :reader = [];       # Child elements for lazy construction
@@ -19,6 +24,30 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
     field $position  :param :reader = undef;   # Dot position in rule (how many RHS symbols processed)
     field $start_pos :param :reader = undef;   # Track span even without node
     field $end_pos   :param :reader = undef;
+
+    # Helper: Build intermediate node label per Scott's algorithm
+    # Format: "A ::= α · β" where α is before dot, β is after dot
+    method build_intermediate_label($rule, $position) {
+        my $lhs = $rule->lhs;
+        my @rhs = $rule->rhs->@*;
+
+        # Split RHS at position (dot position)
+        my @alpha = @rhs[0 .. $position - 1];  # before dot
+        my @beta = @rhs[$position .. $#rhs];   # after dot
+
+        # Convert symbols to strings
+        my $alpha_str = join(' ', map { ref($_) eq 'Regexp' ? "/$_/" : $_ } @alpha);
+        my $beta_str = join(' ', map { ref($_) eq 'Regexp' ? "/$_/" : $_ } @beta);
+
+        # Build label with dot separator
+        if (@alpha && @beta) {
+            return "$lhs ::= $alpha_str · $beta_str";
+        } elsif (@alpha) {
+            return "$lhs ::= $alpha_str ·";
+        } else {
+            return "$lhs ::= · $beta_str";
+        }
+    }
 
     method multiply( $other, $swap = undef ) {
         # Scott's algorithm: create nodes during parsing with full rule context
@@ -33,7 +62,38 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
         # If we have rule context, track position advancement
         my $new_position = defined($position) ? $position + 1 : undef;
 
-        # For now, keep lazy construction but propagate rule context
+        # Scott's algorithm: For rules with |RHS| > 2, create intermediate nodes
+        # This achieves cubic binarization by creating rule-labeled intermediate nodes
+        if ($rule && defined($new_position) && scalar($rule->rhs->@*) > 2) {
+            # Build intermediate node label: "A ::= α · β"
+            my $label = $self->build_intermediate_label($rule, $new_position);
+
+            # Create intermediate node in forest
+            my $intermediate_node = $forest->get_or_create_intermediate_node(
+                $label, $self_start, $other_end
+            );
+
+            # Create packed node with children
+            my $packed = Chalk::ParseForest::PackedNode->new(rule => $rule);
+            if ($sppf_node) {
+                $packed->add_child($sppf_node);
+            }
+            if ($other->sppf_node) {
+                $packed->add_child($other->sppf_node);
+            }
+            $intermediate_node->add_packed_node($packed);
+
+            return Chalk::Semiring::SPPFElement->new(
+                sppf_node => $intermediate_node,
+                forest    => $forest,
+                rule      => $rule,
+                position  => $new_position,
+                start_pos => $self_start,
+                end_pos   => $other_end,
+            );
+        }
+
+        # For short rules (|RHS| <= 2), use lazy construction
         # Children will be converted to packed nodes in on_complete()
         return Chalk::Semiring::SPPFElement->new(
             children  => [$self, $other],
@@ -57,9 +117,18 @@ class Chalk::Semiring::SPPFElement :isa(Chalk::Element) {
             if ($sppf_node && $other->sppf_node) {
                 $forest->add_alternative( $sppf_node, $other->sppf_node );
 
-                # Prefer elements with nodes over those without
-                # (nodes are created in on_complete, so they have proper LHS symbols)
-                return $self;  # Both have nodes, return self
+                # Prefer SymbolNodes over IntermediateNodes
+                # SymbolNodes are created by on_complete() and represent completed rules
+                my $self_is_symbol = $sppf_node isa Chalk::ParseForest::SymbolNode;
+                my $other_is_symbol = $other->sppf_node isa Chalk::ParseForest::SymbolNode;
+
+                if ($self_is_symbol && !$other_is_symbol) {
+                    return $self;
+                } elsif (!$self_is_symbol && $other_is_symbol) {
+                    return $other;
+                }
+                # Both same type, return self
+                return $self;
             }
             # If only one has a node, prefer it
             return $sppf_node ? $self : $other;
@@ -136,17 +205,21 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
     }
 
     method on_complete($completed_item, $completed_element) {
-        # THIS is where we create actual SPPF nodes!
-        # We have the complete rule context including LHS symbol
+        # Create LHS symbol node for completed rule
+        # Per Scott's algorithm: intermediate nodes are created in multiply() for long rules,
+        # symbol nodes are created here when rules complete
         my $lhs = $completed_item->rule->lhs;
         my $start = $completed_item->start_pos;
         my $end = $completed_item->end_pos;
 
-        # Check if the completed element already has the correct LHS node
-        if ($completed_element->sppf_node &&
-            $completed_element->sppf_node->symbol eq $lhs &&
-            $completed_element->sppf_node->start_pos == $start &&
-            $completed_element->sppf_node->end_pos == $end) {
+        # Check if the completed element already has the correct LHS symbol node
+        # Note: IntermediateNodes have rule_label, SymbolNodes have symbol
+        my $node = $completed_element->sppf_node;
+        if ($node &&
+            $node isa Chalk::ParseForest::SymbolNode &&
+            $node->symbol eq $lhs &&
+            $node->start_pos == $start &&
+            $node->end_pos == $end) {
             # Already created (shouldn't happen with lazy construction, but be safe)
             return $completed_element;
         }
@@ -155,38 +228,8 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
         my $lhs_node = $forest->get_or_create_symbol_node($lhs, $start, $end);
 
         # Extract child nodes from accumulated children
-        # Key insight: recursively ensure all children have SPPF nodes
-        my @child_nodes = $self->_extract_child_nodes($completed_element, $completed_item->rule);
-
-        sub _extract_child_nodes {
-            my ($self, $element, $rule) = @_;
-            my @nodes;
-
-            my $elem_children = $element->children // [];
-            if (@$elem_children) {
-                # Element has children from multiply operations
-                for my $child (@$elem_children) {
-                    if ($child->sppf_node) {
-                        # Child already has a node (terminal or completed rule)
-                        push @nodes, $child->sppf_node;
-                    } else {
-                        # Child has no node - recursively process its children
-                        my @grandchild_nodes = $self->_extract_child_nodes($child, $rule);
-                        if (@grandchild_nodes) {
-                            # Create intermediate node for this child's sequence
-                            # For now, just flatten the grandchildren
-                            push @nodes, @grandchild_nodes;
-                        }
-                    }
-                }
-            } elsif ($element->sppf_node) {
-                # Element is a terminal or already-completed non-terminal
-                @nodes = ($element->sppf_node);
-            }
-            # Empty case: no children and no node = epsilon
-
-            return @nodes;
-        }
+        # With intermediate nodes now created in multiply(), this is much simpler
+        my @child_nodes = $self->_extract_child_nodes_from_element($completed_element);
 
         # Create packed node with children
         my $packed = Chalk::ParseForest::PackedNode->new(rule => $completed_item->rule);
@@ -201,6 +244,33 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
             start_pos => $start,
             end_pos => $end,
         );
+    }
+
+    # Helper method: Extract child nodes from an element
+    # Simplified now that intermediate nodes are created in multiply()
+    method _extract_child_nodes_from_element($element) {
+        my @nodes;
+
+        my $elem_children = $element->children // [];
+        if (@$elem_children) {
+            # Element has children from multiply operations (short rules only now)
+            for my $child (@$elem_children) {
+                if ($child->sppf_node) {
+                    # Child already has a node (terminal, intermediate, or completed rule)
+                    push @nodes, $child->sppf_node;
+                } else {
+                    # Child has no node - recursively extract its children
+                    my @grandchild_nodes = $self->_extract_child_nodes_from_element($child);
+                    push @nodes, @grandchild_nodes if @grandchild_nodes;
+                }
+            }
+        } elsif ($element->sppf_node) {
+            # Element is a terminal, intermediate, or already-completed non-terminal
+            @nodes = ($element->sppf_node);
+        }
+        # Empty case: no children and no node = epsilon
+
+        return @nodes;
     }
 }
 

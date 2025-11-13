@@ -3,7 +3,6 @@
 
 use 5.42.0;
 use experimental 'class';
-use Scalar::Util 'blessed';
 use Chalk::Grammar;
 
 class Chalk::Grammar::Chalk::Rule::StatementList :isa(Chalk::GrammarRule) {
