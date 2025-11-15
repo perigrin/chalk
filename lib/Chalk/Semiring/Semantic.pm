@@ -91,7 +91,7 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
             rule      => $self->context->rule,
             forest    => $self->context->forest,
             type      => $self->context->type,        # Propagate type from rule
-            composite_element => $self->context->composite_element  # Propagate metadata
+            metadata_element => $self->context->metadata_element  # Propagate metadata
         );
 
         return Chalk::Semiring::SemanticElement->new(
@@ -147,7 +147,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             grammar   => $grammar,
             rule      => undef,
             forest    => $forest,
-            composite_element => undef        # Identity elements have no metadata
+            metadata_element => undef        # Identity elements have no metadata
         )
     );
     field $add_id :reader = Chalk::Semiring::SemanticElement->new(
@@ -161,7 +161,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             grammar   => $grammar,
             rule      => undef,
             forest    => $forest,
-            composite_element => undef        # Identity elements have no metadata
+            metadata_element => undef        # Identity elements have no metadata
         )
     );
     field $_add_id_is_zero :reader = 1;    # Flag to identify add_id
@@ -186,7 +186,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             rule      => $rule,
             forest    => $forest,
             type      => $inferred_type,
-            composite_element => undef        # Will be set during on_complete()
+            metadata_element => undef        # Will be set during on_complete()
         );
 
         return Chalk::Semiring::SemanticElement->new(
@@ -294,11 +294,11 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
 
     # Override base on_complete() to call semantic actions (evaluate())
     # This maintains polymorphism - Parser calls this uniformly on all semirings
-    method on_complete( $completed_item, $completed_element, $composite_element = undef ) {
+    method on_complete( $completed_item, $completed_element, $metadata_element = undef ) {
         my $ctx = $completed_element->context;
 
-        # Set composite_element on context so rule.evaluate() can access precedence metadata
-        if ($composite_element && !$ctx->composite_element) {
+        # Set metadata_element on context so rule.evaluate() can access precedence metadata
+        if ($metadata_element && !$ctx->metadata_element) {
             $ctx = Chalk::EvalContext->new(
                 focus     => $ctx->focus,
                 children  => $ctx->children,
@@ -309,7 +309,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
                 rule      => $ctx->rule,
                 forest    => $ctx->forest,
                 type      => $ctx->type,
-                composite_element => $composite_element
+                metadata_element => $metadata_element
             );
         }
 
@@ -328,7 +328,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
                 grammar   => $ctx->grammar,
                 rule      => $ctx->rule,
                 forest    => $ctx->forest,
-                composite_element => $composite_element  # Pass metadata from SPPF/Precedence
+                metadata_element => $metadata_element  # Pass metadata from SPPF/Precedence
             );
 
             # Update the completed element with evaluated context
@@ -357,7 +357,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             rule      => $item->rule,
             forest    => $element->context->forest,
             type      => $element->context->type,
-            composite_element => $element->context->composite_element  # Propagate metadata
+            metadata_element => $element->context->metadata_element  # Propagate metadata
         );
 
         my $terminal_element = Chalk::Semiring::SemanticElement->new(

@@ -204,7 +204,7 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
         );
     }
 
-    method on_complete($completed_item, $completed_element) {
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
         # Create LHS symbol node for completed rule
         # Per Scott's algorithm: intermediate nodes are created in multiply() for long rules,
         # symbol nodes are created here when rules complete
@@ -231,8 +231,11 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
         # With intermediate nodes now created in multiply(), this is much simpler
         my @child_nodes = $self->_extract_child_nodes_from_element($completed_element);
 
-        # Create packed node with children
-        my $packed = Chalk::ParseForest::PackedNode->new(rule => $completed_item->rule);
+        # Create packed node with children, storing CompositeElement for metadata access
+        my $packed = Chalk::ParseForest::PackedNode->new(
+            rule => $completed_item->rule,
+            metadata_element => $metadata_element
+        );
         for my $child_node (@child_nodes) {
             $packed->add_child($child_node);
         }
@@ -391,7 +394,7 @@ class Chalk::Semiring::SPPFViterbiSemiring :isa(Chalk::Semiring) {
         );
     }
 
-    method on_complete($completed_item, $completed_element) {
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
         # Unwrap SPPFViterbiElement to get composite
         my $composite_elem = $completed_element->composite();
 

@@ -11,6 +11,21 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         # But WS_OPT may be filtered out, so we get either 3 or 5 children
         # Search for the operator dynamically instead of hardcoding indices
 
+        # PRECEDENCE CHECK: Only build IR for valid precedence parses
+        # The Precedence semiring has already validated this parse in multiply()
+        # Check composite_element for precedence validity before building IR
+        my $composite_elem = $context->composite_element;
+        if ($composite_elem && $composite_elem->can('elements')) {
+            my @elements = $composite_elem->elements->@*;
+            # Find the Precedence element (usually at index 1 after SPPF)
+            for my $elem (@elements) {
+                if ($elem->can('valid') && !$elem->valid) {
+                    # This parse violates precedence rules - don't build IR
+                    return $context->child(0);
+                }
+            }
+        }
+
         my $builder = $context->env->{ir_builder};
 
         my $num_children = scalar(@{$context->children});

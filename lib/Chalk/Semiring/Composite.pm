@@ -180,7 +180,7 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
 
     # Delegate on_complete() to all wrapped semirings
     # This maintains polymorphism - each semiring can respond to rule completion
-    method on_complete($completed_item, $completed_element, $composite_element = undef) {
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
         # Extract elements from CompositeElement
         my @elements = $completed_element->elements->@*;
 

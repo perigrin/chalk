@@ -102,12 +102,12 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         my @children = $packed->children;
         return 1 unless @children;  # No children = valid
 
-        # Extract operator from composite_element on PackedNode (contains actual matched value)
+        # Extract operator from metadata_element on PackedNode (contains actual matched value)
         my $operator;
         my $current_level;
 
-        if ($packed->can('composite_element') && $packed->composite_element) {
-            my $comp_elem = $packed->composite_element;
+        if ($packed->can('metadata_element') && $packed->metadata_element) {
+            my $comp_elem = $packed->metadata_element;
             if ($comp_elem->can('elements')) {
                 my @elements = $comp_elem->elements->@*;
                 # Find the Precedence element (usually at index 1 after SPPF)
@@ -159,11 +159,11 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         my @packed = $node->packed_nodes;
         return undef unless @packed;
 
-        # Check first packed node's composite_element for operator
+        # Check first packed node's metadata_element for operator
         my $first_packed = $packed[0];
 
-        if ($first_packed->can('composite_element') && $first_packed->composite_element) {
-            my $comp_elem = $first_packed->composite_element;
+        if ($first_packed->can('metadata_element') && $first_packed->metadata_element) {
+            my $comp_elem = $first_packed->metadata_element;
             if ($comp_elem->can('elements')) {
                 my @elements = $comp_elem->elements->@*;
                 # Find the Precedence element with operator information
@@ -619,7 +619,7 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     }
 
     # Called when a rule completes - extract operator and validate precedence
-    method on_complete($completed_item, $completed_element, $composite_element = undef) {
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
         my $rule = $completed_item->rule;
         my $lhs = $rule->lhs;
         my $start = $completed_item->start_pos;

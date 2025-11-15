@@ -84,6 +84,12 @@ class Chalk::ParseForest::IntermediateNode {
 
     method packed_nodes() { @packed_nodes }
 
+    method prune_packed_nodes($keep_predicate) {
+        # Filter packed_nodes based on predicate
+        # $keep_predicate is a sub that returns true for nodes to keep
+        @packed_nodes = grep { $keep_predicate->($_) } @packed_nodes;
+    }
+
     method to_string(@args) {
         return "($rule_label, $start_pos, $end_pos)";
     }
@@ -97,6 +103,7 @@ class Chalk::ParseForest::PackedNode {
 
     field $rule :param :reader;
     field @children;
+    field $metadata_element :param :reader = undef;
 
     method add_child($child) {
         push( @children, $child );
@@ -131,6 +138,7 @@ class Chalk::ParseForest {
     field %symbol_nodes;
     field %terminal_nodes;
     field %intermediate_nodes;
+    field $input_string :reader :writer = undef;  # Source text being parsed
 
     method get_or_create_symbol_node( $symbol, $start_pos, $end_pos ) {
         my $key = "$symbol|$start_pos|$end_pos";

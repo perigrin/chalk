@@ -68,8 +68,8 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
     method semirings() { $composite->semirings }
 
     # Delegate on_complete() to composite
-    method on_complete($completed_item, $completed_element, $composite_element = undef) {
-        $composite->on_complete($completed_item, $completed_element, $composite_element)
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
+        $composite->on_complete($completed_item, $completed_element, $metadata_element)
     }
 
     # Delegate on_scan() to composite
