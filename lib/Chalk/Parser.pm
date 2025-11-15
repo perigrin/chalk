@@ -390,7 +390,11 @@ class Chalk::Parser {
                         my $pattern = $item->rule->terminal_to_regex($next_sym);
                         pos($input_string) = $pos;
                         if ( $input_string =~ qr/\G$pattern/ ) {
-                            $self->scan( $item, $element, $chart, $pos, $1 );
+                            # Extract matched text and pattern name (if named capture)
+                            # For named captures: %+ = (NAME => 'text'), for unnamed: $1 = 'text'
+                            my ($pattern_name, $matched_text) = %+;
+                            $matched_text //= $1;  # Fall back to $1 for unnamed captures
+                            $self->scan( $item, $element, $chart, $pos, $matched_text, $pattern_name );
                         }
 
                       # Aycock-Horspool optimization for nullable terminals:
@@ -578,7 +582,7 @@ class Chalk::Parser {
         }
     }
 
-    method scan( $item, $element, $chart, $pos, $matched_value ) {
+    method scan( $item, $element, $chart, $pos, $matched_value, $pattern_name = undef ) {
         my $match_length = length($matched_value);
         my $scanned_item = Chalk::EarleyItem->new(
             start_pos => $item->start_pos,
@@ -591,7 +595,8 @@ class Chalk::Parser {
         # This allows semirings to handle scanned terminals appropriately:
         # - Semantic: multiplies with terminal element to accumulate in children
         # - Others: creates new element with updated positions
-        my $scanned_element = $semiring->on_scan( $item, $element, $pos, $matched_value );
+        # $pattern_name is the name from named captures (e.g., 'IDENTIFIER')
+        my $scanned_element = $semiring->on_scan( $item, $element, $pos, $matched_value, $pattern_name );
 
         $chart->add_element( $scanned_item, $scanned_element );
     }

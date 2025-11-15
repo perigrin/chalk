@@ -36,9 +36,10 @@ class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
 
         my $regex_content = substr($rest, 0, $last_slash);
 
-        # Compile the regex with capture group
+        # Compile the regex with named capture group
+        # Named after the pattern: %FOO% = /bar/ compiles to qr/(?<FOO>bar)/
         # terminal_to_regex assumes Regexp terminals already have captures
-        my $compiled_regex = qr/($regex_content)/;
+        my $compiled_regex = qr/(?<$name>$regex_content)/;
 
         # Store in pattern table (env->{patterns})
         my $env = $context->env;

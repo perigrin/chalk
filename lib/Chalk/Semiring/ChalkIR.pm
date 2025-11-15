@@ -91,13 +91,13 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     method semirings() { $composite->semirings }
 
     # Delegate on_complete() to composite (which delegates to wrapped semirings)
-    method on_complete($completed_item, $completed_element) {
-        $composite->on_complete($completed_item, $completed_element)
+    method on_complete($completed_item, $completed_element, $composite_element = undef) {
+        $composite->on_complete($completed_item, $completed_element, $composite_element)
     }
 
     # Delegate on_scan() to composite (which delegates to wrapped semirings)
-    method on_scan($item, $element, $pos, $matched_value) {
-        $composite->on_scan($item, $element, $pos, $matched_value)
+    method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
+        $composite->on_scan($item, $element, $pos, $matched_value, $pattern_name)
     }
 }
 

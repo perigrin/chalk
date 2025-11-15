@@ -180,7 +180,7 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
 
     # Delegate on_complete() to all wrapped semirings
     # This maintains polymorphism - each semiring can respond to rule completion
-    method on_complete($completed_item, $completed_element) {
+    method on_complete($completed_item, $completed_element, $composite_element = undef) {
         # Extract elements from CompositeElement
         my @elements = $completed_element->elements->@*;
 
@@ -197,13 +197,14 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
         }
 
         # Call on_complete() on each wrapped semiring with its corresponding element
+        # Pass the full CompositeElement as 3rd parameter so semirings can access sibling data
         my @results;
         for my $i (0..$#$semirings) {
             my $semiring = $semirings->[$i];
             my $element = $elements[$i];
 
-            # Delegate to child semiring (which may be NOOP or may do work)
-            my $result = $semiring->on_complete($completed_item, $element);
+            # Delegate to child semiring, passing full CompositeElement for metadata access
+            my $result = $semiring->on_complete($completed_item, $element, $completed_element);
             push @results, $result;
         }
 
@@ -216,7 +217,7 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
 
     # Delegate on_scan() to all wrapped semirings
     # This maintains polymorphism - each semiring can respond to terminal scanning
-    method on_scan($item, $element, $pos, $matched_value) {
+    method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         # Extract elements from CompositeElement
         my @elements = $element->elements->@*;
 
@@ -227,7 +228,7 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
             my $child_element = $elements[$i];
 
             # Delegate to child semiring (which may handle terminals differently)
-            my $result = $semiring->on_scan($item, $child_element, $pos, $matched_value);
+            my $result = $semiring->on_scan($item, $child_element, $pos, $matched_value, $pattern_name);
             push @results, $result;
         }
 
