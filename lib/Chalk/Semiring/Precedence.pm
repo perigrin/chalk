@@ -537,53 +537,10 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
-        # Extract operator from rule if it's a binary operation
-        # Pattern 1: E -> E OP E (3 elements in RHS, operator at index 1)
-        # Pattern 2: E -> E WS_OPT OP WS_OPT E (5 elements in RHS, operator at index 2)
-
-        my $rhs = $rule->rhs;
-        my $operator = undef;
-        my $prec_level = undef;
-        my $assoc = undef;
-
-        # Check for Pattern 1: 3-element binary operation (E OP E)
-        if ($rhs->@* == 3) {
-            my $candidate = $rhs->[1];  # Middle element
-
-            # Check if this candidate is a Token marked as an operator
-            # This prevents identifiers like "x" from being confused with operator "x"
-            if (defined($candidate) && $candidate->can('is_operator') && $candidate->is_operator()) {
-                my $token_str = "$candidate";  # Stringify token
-                my $op_info = $self->lookup_operator($token_str);
-                if ($op_info) {
-                    $operator = $token_str;
-                    $prec_level = $op_info->{level};
-                    $assoc = $op_info->{assoc};
-                }
-            }
-        }
-        # Check for Pattern 2: 5-element with whitespace (E WS_OPT OP WS_OPT E)
-        elsif ($rhs->@* == 5) {
-            my $candidate = $rhs->[2];  # Operator at index 2
-
-            # Check if this candidate is a Token marked as an operator
-            # This prevents identifiers like "x" from being confused with operator "x"
-            if (defined($candidate) && $candidate->can('is_operator') && $candidate->is_operator()) {
-                my $token_str = "$candidate";  # Stringify token
-                my $op_info = $self->lookup_operator($token_str);
-                if ($op_info) {
-                    $operator = $token_str;
-                    $prec_level = $op_info->{level};
-                    $assoc = $op_info->{assoc};
-                }
-            }
-        }
-
+        # Return a plain valid element - actual operator extraction happens
+        # during on_scan() and multiply() using SPPF node metadata
         return Chalk::Semiring::PrecedenceElement->new(
             valid => 1,
-            operator => $operator,
-            precedence_level => $prec_level,
-            associativity => $assoc,
             forest => $forest,
             operator_index => $operator_index
         );
@@ -607,26 +564,26 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         if (defined($matched_value)) {
             # Get string value from token (via stringification)
             my $token_str = "$matched_value";
-            my $op_info = $self->lookup_operator($token_str);
 
-            if ($op_info) {
-                # Re-bless token as Operator if it's in the precedence table
-                if ($matched_value->can('is_operator') && !$matched_value->is_operator()) {
-                    require Chalk::Grammar::Token;
-                    $matched_value = Chalk::Grammar::Token::Operator->new(
-                        value => $token_str,
-                        pattern_name => $matched_value->pattern_name
+            # CRITICAL: Do NOT treat identifiers as operators even if they match
+            # Example: identifier "x" should not match operator "x" (string repetition)
+            # Only lookup operators for non-identifier tokens
+            my $is_identifier = defined($pattern_name) && $pattern_name eq 'IDENTIFIER';
+
+            if (!$is_identifier) {
+                my $op_info = $self->lookup_operator($token_str);
+
+                if ($op_info) {
+                    # Token metadata (pattern_name) is sufficient - no need to re-bless
+                    return Chalk::Semiring::PrecedenceElement->new(
+                        valid => 1,
+                        operator => $token_str,
+                        precedence_level => $op_info->{level},
+                        associativity => $op_info->{assoc},
+                        forest => $forest,
+                        operator_index => $operator_index
                     );
                 }
-
-                return Chalk::Semiring::PrecedenceElement->new(
-                    valid => 1,
-                    operator => $token_str,
-                    precedence_level => $op_info->{level},
-                    associativity => $op_info->{assoc},
-                    forest => $forest,
-                    operator_index => $operator_index
-                );
             }
         }
 
