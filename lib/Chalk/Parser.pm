@@ -251,6 +251,20 @@ class Chalk::Parser {
         # Store input_string for semantic actions
         $input_string = $input;
 
+        # Store input_string on SPPF forest if available (for precedence validation)
+        if ($semiring->can('forest') && $semiring->forest) {
+            $semiring->forest->set_input_string($input);
+        }
+        # Handle Composite semiring wrapping SPPF
+        elsif ($semiring->can('semirings')) {
+            for my $child_sr ($semiring->semirings->@*) {
+                if ($child_sr->can('forest') && $child_sr->forest) {
+                    $child_sr->forest->set_input_string($input);
+                    last;
+                }
+            }
+        }
+
         while ( $pos <= $input_length ) {
             my @agenda_before = $chart->items_ending_at($pos);
             $self->process_position_string( $pos, $chart, $input );
@@ -372,9 +386,10 @@ class Chalk::Parser {
                     }
                     else {
                         # Try to match terminal with lexeme support
+                        # Pattern includes capture group from terminal_to_regex
                         my $pattern = $item->rule->terminal_to_regex($next_sym);
                         pos($input_string) = $pos;
-                        if ( $input_string =~ qr/\G($pattern)/ ) {
+                        if ( $input_string =~ qr/\G$pattern/ ) {
                             $self->scan( $item, $element, $chart, $pos, $1 );
                         }
 

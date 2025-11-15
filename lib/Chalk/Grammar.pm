@@ -60,11 +60,11 @@ class Chalk::GrammarRule {
     method terminal_to_regex($terminal) {
         state %seen;
 
-        # Convert terminal to regex pattern
-        # If already a regex, return as-is
-        # If string literal, escape and convert to regex
+        # Convert terminal to regex pattern with capture group
+        # If already a regex, assume it has capture group setup
+        # If string literal, escape and convert to regex with capture group
         return $seen{$terminal} //=
-          ref($terminal) eq 'Regexp' ? $terminal : qr/\Q$terminal\E/;
+          ref($terminal) eq 'Regexp' ? $terminal : qr/(\Q$terminal\E)/;
     }
 
     # Default semantic action: die with clear error message

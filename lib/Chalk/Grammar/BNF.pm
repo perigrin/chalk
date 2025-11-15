@@ -75,40 +75,20 @@ class Chalk::Grammar::BNF {
 
             PatternDef => [
 
-# Pattern definitions: %NAME% = /regex/flags or //regex//flags
+# Pattern definitions: %NAME% = /regex/flags
 # Example: %PATTERN_1% = /unless|if|while/u
-# Example: %PATTERN_21% = //(?:[^/\\]|\\.)*+//u
 # Example: %PATTERN_38% = /\|\||///u  (captures rest of line, semantic action parses)
                 Chalk::Grammar::BNF::Rule::PatternDef->new(
                     lhs => 'PatternDef',
                     rhs => [
                         '%',
-                        qr/[a-zA-Z_][a-zA-Z0-9_]*/,    # Pattern name
+                        qr/([a-zA-Z_][a-zA-Z0-9_]*)/,    # Pattern name
                         '%',
-                        qr/\s*/,                       # Optional whitespace
+                        qr/(\s*)/,                       # Optional whitespace
                         '=',
-                        qr/\s*/,                       # Optional whitespace
+                        qr/(\s*)/,                       # Optional whitespace
                         '/',
-                        qr/[^\n]+/,  # Rest of line (semantic action will parse)
-                    ]
-                ),
-
-                # Pattern definition with double-slash delimiter
-                # Inside //, single / is allowed, but // is the terminator
-                Chalk::Grammar::BNF::Rule::PatternDef->new(
-                    lhs => 'PatternDef',
-                    rhs => [
-                        '%',
-                        qr/[a-zA-Z_][a-zA-Z0-9_]*/,    # Pattern name
-                        '%',
-                        qr/\s*/,                       # Optional whitespace
-                        '=',
-                        qr/\s*/,                       # Optional whitespace
-                        '//',
-                        qr/(?:[^\/\\]++|\\.|\/(?!\/))*+/
-                        ,    # Regex content (/ allowed, but not //)
-                        '//',
-                        qr/[a-z]*/    # Optional flags
+                        qr/([^\n]+)/,  # Rest of line (semantic action will parse)
                     ]
                 ),
             ],
@@ -121,24 +101,24 @@ class Chalk::Grammar::BNF {
                 Chalk::Grammar::BNF::Rule::GrammarRule->new(
                     lhs => 'GrammarRule',
                     rhs => [
-                        qr/[A-Z][a-zA-Z0-9_]*/
+                        qr/([A-Z][a-zA-Z0-9_]*)/
                         ,           # LHS (nonterminal, starts with capital)
-                        qr/\s*/,    # Optional whitespace
+                        qr/(\s*)/,    # Optional whitespace
                         '->',
-                        qr/\s*/,    # Optional whitespace
+                        qr/(\s*)/,    # Optional whitespace
                         'RHS',
-                        qr/\s*#[^\n]*/
+                        qr/(\s*#[^\n]*)/
                         ,           # Inline comment (with leading whitespace)
                     ]
                 ),
                 Chalk::Grammar::BNF::Rule::GrammarRule->new(
                     lhs => 'GrammarRule',
                     rhs => [
-                        qr/[A-Z][a-zA-Z0-9_]*/
+                        qr/([A-Z][a-zA-Z0-9_]*)/
                         ,           # LHS (nonterminal, starts with capital)
-                        qr/\s*/,    # Optional whitespace
+                        qr/(\s*)/,    # Optional whitespace
                         '->',
-                        qr/\s*/,    # Optional whitespace
+                        qr/(\s*)/,    # Optional whitespace
                         'RHS'
                     ]
                 ),
@@ -157,7 +137,7 @@ class Chalk::Grammar::BNF {
                 ),
                 Chalk::Grammar::BNF::Rule::RHS->new(
                     lhs => 'RHS',
-                    rhs => [ 'RHSElement', qr/\s+/, 'RHS' ]
+                    rhs => [ 'RHSElement', qr/(\s+)/, 'RHS' ]
                 ),
             ],
 
@@ -188,7 +168,7 @@ class Chalk::Grammar::BNF {
                 # Example: 'foo', '{', '}'
                 Chalk::Grammar::BNF::Rule::Terminal->new(
                     lhs => 'Terminal',
-                    rhs => [ "'", qr/(?:[^'\\]|\\.)*/, "'" ]
+                    rhs => [ "'", qr/((?:[^'\\]|\\.)*)/, "'" ]
                 ),
             ],
 
@@ -198,7 +178,7 @@ class Chalk::Grammar::BNF {
 # Example: class, method, field
                 Chalk::Grammar::BNF::Rule::BarewordTerminal->new(
                     lhs => 'BarewordTerminal',
-                    rhs => [qr/[a-z][a-z0-9_]*/]
+                    rhs => [qr/([a-z][a-z0-9_]*)/]
                 ),
 
           # Symbol bareword terminals: operators and symbols (like ::, ->, etc.)
@@ -206,7 +186,7 @@ class Chalk::Grammar::BNF {
           # Note: Excludes # to prevent matching comments as barewords
                 Chalk::Grammar::BNF::Rule::BarewordTerminal->new(
                     lhs => 'BarewordTerminal',
-                    rhs => [qr/[^A-Z\s'%#][^A-Z\s'%#\->]*/]
+                    rhs => [qr/([^A-Z\s'%#][^A-Z\s'%#\->]*)/]
                 ),
             ],
 
@@ -216,7 +196,7 @@ class Chalk::Grammar::BNF {
                 # Example: Block, StatementList, WS_OPT
                 Chalk::Grammar::BNF::Rule::Nonterminal->new(
                     lhs => 'Nonterminal',
-                    rhs => [qr/[A-Z][a-zA-Z0-9_]*/]
+                    rhs => [qr/([A-Z][a-zA-Z0-9_]*)/]
                 ),
             ],
 
@@ -226,7 +206,7 @@ class Chalk::Grammar::BNF {
                 # Example: %PATTERN_1%
                 Chalk::Grammar::BNF::Rule::PatternRef->new(
                     lhs => 'PatternRef',
-                    rhs => [ '%', qr/[a-zA-Z_][a-zA-Z0-9_]*/, '%' ]
+                    rhs => [ '%', qr/([a-zA-Z_][a-zA-Z0-9_]*)/, '%' ]
                 ),
             ],
 
@@ -235,7 +215,7 @@ class Chalk::Grammar::BNF {
                 # Comments: # followed by anything until newline
                 Chalk::Grammar::BNF::Rule::Comment->new(
                     lhs => 'Comment',
-                    rhs => [qr/#[^\n]*/]
+                    rhs => [qr/(#[^\n]*)/]
                 ),
             ],
 
@@ -244,7 +224,7 @@ class Chalk::Grammar::BNF {
                 # Blank lines: just a newline
                 Chalk::Grammar::BNF::Rule::BlankLine->new(
                     lhs => 'BlankLine',
-                    rhs => [qr/\n/]
+                    rhs => [qr/(\n)/]
                 ),
             ],
         },
