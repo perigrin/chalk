@@ -4,6 +4,7 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Semiring::Boolean;
+use Chalk::Grammar::Token;
 
 class Chalk::EarleyItem {
     use overload '""' => 'key';
@@ -394,7 +395,14 @@ class Chalk::Parser {
                             # For named captures: %+ = (NAME => 'text'), for unnamed: $1 = 'text'
                             my ($pattern_name, $matched_text) = %+;
                             $matched_text //= $1;  # Fall back to $1 for unnamed captures
-                            $self->scan( $item, $element, $chart, $pos, $matched_text, $pattern_name );
+
+                            # Bless matched text as Token with metadata
+                            my $token = Chalk::Grammar::Token->new(
+                                value => $matched_text,
+                                pattern_name => $pattern_name
+                            );
+
+                            $self->scan( $item, $element, $chart, $pos, $token, $pattern_name );
                         }
 
                       # Aycock-Horspool optimization for nullable terminals:
@@ -583,6 +591,7 @@ class Chalk::Parser {
     }
 
     method scan( $item, $element, $chart, $pos, $matched_value, $pattern_name = undef ) {
+        # $matched_value is a Chalk::Grammar::Token object (stringifies to its value)
         my $match_length = length($matched_value);
         my $scanned_item = Chalk::EarleyItem->new(
             start_pos => $item->start_pos,
@@ -594,6 +603,7 @@ class Chalk::Parser {
         # Call semiring's on_scan() hook (polymorphic)
         # This allows semirings to handle scanned terminals appropriately:
         # - Semantic: multiplies with terminal element to accumulate in children
+        # - Precedence: checks if token is_operator() to mark operators
         # - Others: creates new element with updated positions
         # $pattern_name is the name from named captures (e.g., 'IDENTIFIER')
         my $scanned_element = $semiring->on_scan( $item, $element, $pos, $matched_value, $pattern_name );
