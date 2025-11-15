@@ -23,7 +23,8 @@ class Chalk::Semiring {
 
     # NOOP hook for semirings that need to perform actions when a rule completes parsing
     # Override in subclasses as needed (e.g., Semantic uses this to call evaluate())
-    method on_complete($completed_item, $completed_element) {
+    # $composite_element is optional and provides access to sibling semiring data
+    method on_complete($completed_item, $completed_element, $composite_element = undef) {
         return $completed_element;
     }
 
