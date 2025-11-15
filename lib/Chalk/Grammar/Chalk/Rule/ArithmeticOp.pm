@@ -13,8 +13,8 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
         # PRECEDENCE CHECK: Only build IR for valid precedence parses
         # The Precedence semiring has already validated this parse in multiply()
-        # Check composite_element for precedence validity before building IR
-        my $composite_elem = $context->composite_element;
+        # Check metadata_element for precedence validity before building IR
+        my $composite_elem = $context->metadata_element;
         if ($composite_elem && $composite_elem->can('elements')) {
             my @elements = $composite_elem->elements->@*;
             # Find the Precedence element (usually at index 1 after SPPF)

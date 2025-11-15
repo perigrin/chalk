@@ -550,11 +550,13 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         if ($rhs->@* == 3) {
             my $candidate = $rhs->[1];  # Middle element
 
-            # Check if this candidate is in our precedence table
-            if (defined($candidate) && !ref($candidate)) {
-                my $op_info = $self->lookup_operator($candidate);
+            # Check if this candidate is a Token marked as an operator
+            # This prevents identifiers like "x" from being confused with operator "x"
+            if (defined($candidate) && $candidate->can('is_operator') && $candidate->is_operator()) {
+                my $token_str = "$candidate";  # Stringify token
+                my $op_info = $self->lookup_operator($token_str);
                 if ($op_info) {
-                    $operator = $candidate;
+                    $operator = $token_str;
                     $prec_level = $op_info->{level};
                     $assoc = $op_info->{assoc};
                 }
@@ -564,11 +566,13 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         elsif ($rhs->@* == 5) {
             my $candidate = $rhs->[2];  # Operator at index 2
 
-            # Check if this candidate is in our precedence table
-            if (defined($candidate) && !ref($candidate)) {
-                my $op_info = $self->lookup_operator($candidate);
+            # Check if this candidate is a Token marked as an operator
+            # This prevents identifiers like "x" from being confused with operator "x"
+            if (defined($candidate) && $candidate->can('is_operator') && $candidate->is_operator()) {
+                my $token_str = "$candidate";  # Stringify token
+                my $op_info = $self->lookup_operator($token_str);
                 if ($op_info) {
-                    $operator = $candidate;
+                    $operator = $token_str;
                     $prec_level = $op_info->{level};
                     $assoc = $op_info->{assoc};
                 }
@@ -595,17 +599,29 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         return $x->add($y);
     }
 
-    # Called when a token is scanned - update element with matched operator value
+    # Called when a token is scanned - mark operators and create precedence element
+    # $matched_value is a Chalk::Grammar::Token object
     # $pattern_name is the name from named regex captures (e.g., 'IDENTIFIER')
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
-        # If the matched value is an operator in our precedence table,
-        # create a new element with the operator information
-        if (defined($matched_value) && !ref($matched_value)) {
-            my $op_info = $self->lookup_operator($matched_value);
+        # Check if the token's value is an operator in our precedence table
+        if (defined($matched_value)) {
+            # Get string value from token (via stringification)
+            my $token_str = "$matched_value";
+            my $op_info = $self->lookup_operator($token_str);
+
             if ($op_info) {
+                # Re-bless token as Operator if it's in the precedence table
+                if ($matched_value->can('is_operator') && !$matched_value->is_operator()) {
+                    require Chalk::Grammar::Token;
+                    $matched_value = Chalk::Grammar::Token::Operator->new(
+                        value => $token_str,
+                        pattern_name => $matched_value->pattern_name
+                    );
+                }
+
                 return Chalk::Semiring::PrecedenceElement->new(
                     valid => 1,
-                    operator => $matched_value,
+                    operator => $token_str,
                     precedence_level => $op_info->{level},
                     associativity => $op_info->{assoc},
                     forest => $forest,
