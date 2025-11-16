@@ -1,0 +1,1410 @@
+---
+generation: 1
+last_run_time: 1763095796.82305
+tests:
+  t/basic/01-simple.t:
+    elapsed: 0.0579731464385986
+    gen: 1
+    last_pass_time: 1763095101.64273
+    last_result: 0
+    last_run_time: 1763095101.64273
+    last_todo: 0
+    seq: 1
+    total_passes: 1
+  t/basic/empty-args.t:
+    elapsed: 0.043956995010376
+    gen: 1
+    last_pass_time: 1763095101.68867
+    last_result: 0
+    last_run_time: 1763095101.68867
+    last_todo: 0
+    seq: 2
+    total_passes: 1
+  t/basic/simple-arith.t:
+    elapsed: 0.0427799224853516
+    gen: 1
+    last_pass_time: 1763095101.73337
+    last_result: 0
+    last_run_time: 1763095101.73337
+    last_todo: 0
+    seq: 3
+    total_passes: 1
+  t/basic/zero-token-fix.t:
+    elapsed: 0.0458800792694092
+    gen: 1
+    last_fail_time: 1763095101.78126
+    last_result: 3
+    last_run_time: 1763095101.78126
+    last_todo: 0
+    seq: 4
+    total_failures: 1
+  t/cli/app-options.t:
+    elapsed: 46.3172190189362
+    gen: 1
+    last_fail_time: 1763095148.10028
+    last_result: 2
+    last_run_time: 1763095148.10028
+    last_todo: 0
+    seq: 5
+    total_failures: 1
+  t/error/compilation-error.t:
+    elapsed: 0.0265469551086426
+    gen: 1
+    last_pass_time: 1763095148.12939
+    last_result: 0
+    last_run_time: 1763095148.12939
+    last_todo: 0
+    seq: 6
+    total_passes: 1
+  t/grammar/bare-regex-statement.t:
+    elapsed: 7.82603001594543
+    gen: 1
+    last_pass_time: 1763095155.95733
+    last_result: 0
+    last_run_time: 1763095155.95733
+    last_todo: 8
+    seq: 7
+    total_passes: 1
+  t/grammar/chalk-bnf-grammar.t:
+    elapsed: 10.0586960315704
+    gen: 1
+    last_pass_time: 1763095166.01862
+    last_result: 0
+    last_run_time: 1763095166.01862
+    last_todo: 0
+    seq: 8
+    total_passes: 1
+  t/grammar/chalk-complete-grammar.t:
+    elapsed: 0.0717320442199707
+    gen: 1
+    last_pass_time: 1763095166.09297
+    last_result: 0
+    last_run_time: 1763095166.09297
+    last_todo: 0
+    seq: 9
+    total_passes: 1
+  t/grammar/chalk/01-classes.t:
+    elapsed: 8.63738083839417
+    gen: 1
+    last_fail_time: 1763095174.7331
+    last_result: 2
+    last_run_time: 1763095174.7331
+    last_todo: 0
+    seq: 10
+    total_failures: 1
+  t/grammar/chalk/02-variables.t:
+    elapsed: 8.6575608253479
+    gen: 1
+    last_pass_time: 1763095183.39341
+    last_result: 0
+    last_run_time: 1763095183.39341
+    last_todo: 0
+    seq: 11
+    total_passes: 1
+  t/grammar/chalk/03-expressions.t:
+    elapsed: 10.8894958496094
+    gen: 1
+    last_pass_time: 1763095194.2856
+    last_result: 0
+    last_run_time: 1763095194.2856
+    last_todo: 3
+    seq: 12
+    total_passes: 1
+  t/grammar/chalk/04-control-flow.t:
+    elapsed: 9.58113098144531
+    gen: 1
+    last_fail_time: 1763095203.86933
+    last_result: 2
+    last_run_time: 1763095203.86933
+    last_todo: 8
+    seq: 13
+    total_failures: 1
+  t/grammar/chalk/05-use-statements.t:
+    elapsed: 8.20632290840149
+    gen: 1
+    last_pass_time: 1763095212.07833
+    last_result: 0
+    last_run_time: 1763095212.07833
+    last_todo: 0
+    seq: 14
+    total_passes: 1
+  t/grammar/chalk/06-literals.t:
+    elapsed: 9.52238702774048
+    gen: 1
+    last_fail_time: 1763095221.6034
+    last_result: 7
+    last_run_time: 1763095221.6034
+    last_todo: 0
+    seq: 15
+    total_failures: 1
+  t/grammar/chalk/07-subroutines.t:
+    elapsed: 8.9497241973877
+    gen: 1
+    last_fail_time: 1763095230.55584
+    last_result: 2
+    last_run_time: 1763095230.55584
+    last_todo: 0
+    seq: 16
+    total_failures: 1
+  t/grammar/chalk/08-standard-perl-compliance.t:
+    elapsed: 8.44854998588562
+    gen: 1
+    last_fail_time: 1763095239.007
+    last_result: 5
+    last_run_time: 1763095239.007
+    last_todo: 0
+    seq: 17
+    total_failures: 1
+  t/grammar/circular-expressions.t:
+    elapsed: 7.93576407432556
+    gen: 1
+    last_pass_time: 1763095246.9453
+    last_result: 0
+    last_run_time: 1763095246.9453
+    last_todo: 0
+    seq: 18
+    total_passes: 1
+  t/grammar/expression-associativity.t:
+    elapsed: 9.41389083862305
+    gen: 1
+    last_fail_time: 1763095256.36144
+    last_result: 7
+    last_run_time: 1763095256.36144
+    last_todo: 0
+    seq: 19
+    total_failures: 1
+  t/grammar/guacamole-nullable.t:
+    elapsed: 0.0534060001373291
+    gen: 1
+    last_pass_time: 1763095256.41752
+    last_result: 0
+    last_run_time: 1763095256.41752
+    last_todo: 0
+    seq: 20
+    total_passes: 1
+  t/grammar/guacamole-patterns.t:
+    elapsed: 0.0585458278656006
+    gen: 1
+    last_fail_time: 1763095256.47807
+    last_result: 2
+    last_run_time: 1763095256.47807
+    last_todo: 0
+    seq: 21
+    total_failures: 1
+  t/grammar/hash-vs-block-disambiguation.t:
+    elapsed: 8.10049510002136
+    gen: 1
+    last_fail_time: 1763095264.58067
+    last_result: 7
+    last_run_time: 1763095264.58067
+    last_todo: 0
+    seq: 22
+    total_failures: 1
+  t/grammar/lexeme-support.t:
+    elapsed: 0.0441758632659912
+    gen: 1
+    last_pass_time: 1763095264.62745
+    last_result: 0
+    last_run_time: 1763095264.62745
+    last_todo: 0
+    seq: 23
+    total_passes: 1
+  t/grammar/logical-operators.t:
+    elapsed: 8.21528482437134
+    gen: 1
+    last_fail_time: 1763095272.84461
+    last_result: 6
+    last_run_time: 1763095272.84461
+    last_todo: 0
+    seq: 24
+    total_failures: 1
+  t/grammar/modern-perl-syntax.t:
+    elapsed: 0.0487780570983887
+    gen: 1
+    last_pass_time: 1763095272.89552
+    last_result: 0
+    last_run_time: 1763095272.89552
+    last_todo: 0
+    seq: 25
+    total_passes: 1
+  t/grammar/multiline-strings.t:
+    elapsed: 7.82308912277222
+    gen: 1
+    last_pass_time: 1763095280.7206
+    last_result: 0
+    last_run_time: 1763095280.7206
+    last_todo: 0
+    seq: 26
+    total_passes: 1
+  t/grammar/nested-braces-regression.t:
+    elapsed: 7.73651003837585
+    gen: 1
+    last_fail_time: 1763095288.4599
+    last_result: 3
+    last_run_time: 1763095288.4599
+    last_todo: 0
+    seq: 27
+    total_failures: 1
+  t/grammar/numeric-expressions.t:
+    elapsed: 9.15195512771606
+    gen: 1
+    last_pass_time: 1763095297.61451
+    last_result: 0
+    last_run_time: 1763095297.61451
+    last_todo: 0
+    seq: 28
+    total_passes: 1
+  t/grammar/quote-in-comment.t:
+    elapsed: 8.29721903800964
+    gen: 1
+    last_pass_time: 1763095305.91437
+    last_result: 0
+    last_run_time: 1763095305.91437
+    last_todo: 0
+    seq: 29
+    total_passes: 1
+  t/grammar/quote-operators-alt-delimiters.t:
+    elapsed: 8.62161779403687
+    gen: 1
+    last_fail_time: 1763095314.53848
+    last_result: 6
+    last_run_time: 1763095314.53848
+    last_todo: 0
+    seq: 30
+    total_failures: 1
+  t/grammar/quote-operators-multiline.t:
+    elapsed: 8.50609612464905
+    gen: 1
+    last_fail_time: 1763095323.04703
+    last_result: 4
+    last_run_time: 1763095323.04703
+    last_todo: 0
+    seq: 31
+    total_failures: 1
+  t/grammar/quote-operators.t:
+    elapsed: 0.0543859004974365
+    gen: 1
+    last_pass_time: 1763095323.10419
+    last_result: 0
+    last_run_time: 1763095323.10419
+    last_todo: 0
+    seq: 32
+    total_passes: 1
+  t/grammar/range-operator.t:
+    elapsed: 8.9770519733429
+    gen: 1
+    last_pass_time: 1763095332.08313
+    last_result: 0
+    last_run_time: 1763095332.08313
+    last_todo: 0
+    seq: 33
+    total_passes: 1
+  t/grammar/statement-modifiers-conditional.t:
+    elapsed: 9.14483904838562
+    gen: 1
+    last_fail_time: 1763095341.23131
+    last_result: 3
+    last_run_time: 1763095341.23131
+    last_todo: 0
+    seq: 34
+    total_failures: 1
+  t/grammar/statement-modifiers-core.t:
+    elapsed: 8.67722392082214
+    gen: 1
+    last_fail_time: 1763095349.91152
+    last_result: 3
+    last_run_time: 1763095349.91152
+    last_todo: 0
+    seq: 35
+    total_failures: 1
+  t/grammar/statement-modifiers-loop.t:
+    elapsed: 9.16464805603027
+    gen: 1
+    last_fail_time: 1763095359.07944
+    last_result: 2
+    last_run_time: 1763095359.07944
+    last_todo: 0
+    seq: 36
+    total_failures: 1
+  t/grammar/substitution-operator.t:
+    elapsed: 8.5299859046936
+    gen: 1
+    last_fail_time: 1763095367.61328
+    last_result: 5
+    last_run_time: 1763095367.61328
+    last_todo: 0
+    seq: 37
+    total_failures: 1
+  t/grammar/unless-else-parsing.t:
+    elapsed: 9.28129982948303
+    gen: 1
+    last_pass_time: 1763095376.89767
+    last_result: 0
+    last_run_time: 1763095376.89767
+    last_todo: 0
+    seq: 38
+    total_passes: 1
+  t/grammar/zero-length-matches.t:
+    elapsed: 0.0478291511535645
+    gen: 1
+    last_pass_time: 1763095376.9481
+    last_result: 0
+    last_run_time: 1763095376.9481
+    last_todo: 0
+    seq: 39
+    total_passes: 1
+  t/integration/app-default-ir-generation.t:
+    elapsed: 33.0973298549652
+    gen: 1
+    last_fail_time: 1763095410.0473
+    last_result: 3
+    last_run_time: 1763095410.0473
+    last_todo: 0
+    seq: 40
+    total_failures: 1
+  t/integration/break-continue-parsing.t:
+    elapsed: 8.80902695655823
+    gen: 1
+    last_pass_time: 1763095418.85943
+    last_result: 0
+    last_run_time: 1763095418.85943
+    last_todo: 0
+    seq: 41
+    total_passes: 1
+  t/integration/loop-phi-parsing.t:
+    elapsed: 9.18364977836609
+    gen: 1
+    last_pass_time: 1763095428.04592
+    last_result: 0
+    last_run_time: 1763095428.04592
+    last_todo: 0
+    seq: 42
+    total_passes: 1
+  t/integration/precedence-semiring-composite.t:
+    elapsed: 10.3912770748138
+    gen: 1
+    last_fail_time: 1763095438.43909
+    last_result: 3
+    last_run_time: 1763095438.43909
+    last_todo: 0
+    seq: 43
+    total_failures: 1
+  t/integration/precedence-semiring-phase4-poc.t:
+    elapsed: 0.0480318069458008
+    gen: 1
+    last_pass_time: 1763095438.48973
+    last_result: 0
+    last_run_time: 1763095438.48973
+    last_todo: 0
+    seq: 44
+    total_passes: 1
+  t/interpreter/cek-all-nodes.t:
+    elapsed: 0.040759801864624
+    gen: 1
+    last_pass_time: 1763095438.53261
+    last_result: 0
+    last_run_time: 1763095438.53261
+    last_todo: 0
+    seq: 45
+    total_passes: 1
+  t/interpreter/cek-arithmetic.t:
+    elapsed: 0.0276708602905273
+    gen: 1
+    last_pass_time: 1763095438.56218
+    last_result: 0
+    last_run_time: 1763095438.56218
+    last_todo: 0
+    seq: 46
+    total_passes: 1
+  t/interpreter/cek-array-operations.t:
+    elapsed: 0.0286870002746582
+    gen: 1
+    last_pass_time: 1763095438.5928
+    last_result: 0
+    last_run_time: 1763095438.5928
+    last_todo: 0
+    seq: 47
+    total_passes: 1
+  t/interpreter/cek-compiler-validation.t:
+    elapsed: 12.9347500801086
+    gen: 1
+    last_pass_time: 1763095451.52944
+    last_result: 0
+    last_run_time: 1763095451.52944
+    last_todo: 12
+    seq: 48
+    total_passes: 1
+  t/interpreter/cek-context-helpers.t:
+    elapsed: 0.0225908756256104
+    gen: 1
+    last_pass_time: 1763095451.55447
+    last_result: 0
+    last_run_time: 1763095451.55447
+    last_todo: 0
+    seq: 49
+    total_passes: 1
+  t/interpreter/cek-control-flow.t:
+    elapsed: 0.0284781455993652
+    gen: 1
+    last_fail_time: 1763095451.58486
+    last_result: 3
+    last_run_time: 1763095451.58486
+    last_todo: 0
+    seq: 50
+    total_failures: 1
+  t/interpreter/cek-dataflow.t:
+    elapsed: 0.0261440277099609
+    gen: 1
+    last_pass_time: 1763095451.61281
+    last_result: 0
+    last_run_time: 1763095451.61281
+    last_todo: 0
+    seq: 51
+    total_passes: 1
+  t/interpreter/cek-environment.t:
+    elapsed: 0.0221068859100342
+    gen: 1
+    last_pass_time: 1763095451.6368
+    last_result: 0
+    last_run_time: 1763095451.6368
+    last_todo: 0
+    seq: 52
+    total_passes: 1
+  t/interpreter/cek-error-cases.t:
+    elapsed: 0.0344491004943848
+    gen: 1
+    last_fail_time: 1763095451.67306
+    last_result: 2
+    last_run_time: 1763095451.67306
+    last_todo: 0
+    seq: 53
+    total_failures: 1
+  t/interpreter/cek-error-missing-return.t:
+    elapsed: 0.0265190601348877
+    gen: 1
+    last_pass_time: 1763095451.70197
+    last_result: 0
+    last_run_time: 1763095451.70197
+    last_todo: 0
+    seq: 54
+    total_passes: 1
+  t/interpreter/cek-execution-log.t:
+    elapsed: 0.0275728702545166
+    gen: 1
+    last_pass_time: 1763095451.73143
+    last_result: 0
+    last_run_time: 1763095451.73143
+    last_todo: 0
+    seq: 55
+    total_passes: 1
+  t/interpreter/cek-hash-operations.t:
+    elapsed: 0.0281491279602051
+    gen: 1
+    last_fail_time: 1763095451.76137
+    last_result: 3
+    last_run_time: 1763095451.76137
+    last_todo: 0
+    seq: 56
+    total_failures: 1
+  t/interpreter/cek-heap-allocation.t:
+    elapsed: 0.0221319198608398
+    gen: 1
+    last_pass_time: 1763095451.7853
+    last_result: 0
+    last_run_time: 1763095451.7853
+    last_todo: 0
+    seq: 57
+    total_passes: 1
+  t/interpreter/cek-immutability.t:
+    elapsed: 0.0221550464630127
+    gen: 1
+    last_pass_time: 1763095451.80927
+    last_result: 0
+    last_run_time: 1763095451.80927
+    last_todo: 0
+    seq: 58
+    total_passes: 1
+  t/interpreter/cek-integration.t:
+    elapsed: 0.0285971164703369
+    gen: 1
+    last_pass_time: 1763095451.83961
+    last_result: 0
+    last_run_time: 1763095451.83961
+    last_todo: 0
+    seq: 59
+    total_passes: 1
+  t/interpreter/cek-object-operations.t:
+    elapsed: 0.0286920070648193
+    gen: 1
+    last_fail_time: 1763095451.87027
+    last_result: 3
+    last_run_time: 1763095451.87027
+    last_todo: 0
+    seq: 60
+    total_failures: 1
+  t/interpreter/cek-snapshot.t:
+    elapsed: 0.0269021987915039
+    gen: 1
+    last_pass_time: 1763095451.89898
+    last_result: 0
+    last_run_time: 1763095451.89898
+    last_todo: 0
+    seq: 61
+    total_passes: 1
+  t/interpreter/cek-stepping.t:
+    elapsed: 0.0270509719848633
+    gen: 1
+    last_pass_time: 1763095451.92789
+    last_result: 0
+    last_run_time: 1763095451.92789
+    last_todo: 0
+    seq: 62
+    total_passes: 1
+  t/ir/ambiguous-assignment.t:
+    elapsed: 0.0382177829742432
+    gen: 1
+    last_pass_time: 1763095451.96794
+    last_result: 0
+    last_run_time: 1763095451.96794
+    last_todo: 0
+    seq: 63
+    total_passes: 1
+  t/ir/builder-lexical-labels.t:
+    elapsed: 0.032153844833374
+    gen: 1
+    last_pass_time: 1763095452.00191
+    last_result: 0
+    last_run_time: 1763095452.00191
+    last_todo: 0
+    seq: 64
+    total_passes: 1
+  t/ir/context-validation-p1.t:
+    elapsed: 0.0339679718017578
+    gen: 1
+    last_pass_time: 1763095452.03783
+    last_result: 0
+    last_run_time: 1763095452.03783
+    last_todo: 0
+    seq: 65
+    total_passes: 1
+  t/ir/context-validation-p2.t:
+    elapsed: 0.0336000919342041
+    gen: 1
+    last_pass_time: 1763095452.07329
+    last_result: 0
+    last_run_time: 1763095452.07329
+    last_todo: 0
+    seq: 66
+    total_passes: 1
+  t/ir/context-validation.t:
+    elapsed: 0.0357379913330078
+    gen: 1
+    last_pass_time: 1763095452.11089
+    last_result: 0
+    last_run_time: 1763095452.11089
+    last_todo: 0
+    seq: 67
+    total_passes: 1
+  t/ir/invalid-phi.t:
+    elapsed: 0.0336248874664307
+    gen: 1
+    last_pass_time: 1763095452.14645
+    last_result: 0
+    last_run_time: 1763095452.14645
+    last_todo: 0
+    seq: 68
+    total_passes: 1
+  t/ir/ir-builder-load.t:
+    elapsed: 0.0325698852539062
+    gen: 1
+    last_pass_time: 1763095452.18081
+    last_result: 0
+    last_run_time: 1763095452.18081
+    last_todo: 0
+    seq: 69
+    total_passes: 1
+  t/ir/ir-builder-store.t:
+    elapsed: 0.0327332019805908
+    gen: 1
+    last_pass_time: 1763095452.21552
+    last_result: 0
+    last_run_time: 1763095452.21552
+    last_todo: 0
+    seq: 70
+    total_passes: 1
+  t/ir/ir-context-basic.t:
+    elapsed: 0.0221049785614014
+    gen: 1
+    last_pass_time: 1763095452.23941
+    last_result: 0
+    last_run_time: 1763095452.23941
+    last_todo: 0
+    seq: 71
+    total_passes: 1
+  t/ir/ir-context-node-storage.t:
+    elapsed: 0.0326478481292725
+    gen: 1
+    last_pass_time: 1763095452.27374
+    last_result: 0
+    last_run_time: 1763095452.27374
+    last_todo: 0
+    seq: 72
+    total_passes: 1
+  t/ir/ir-mermaid-export.t:
+    elapsed: 0.0270781517028809
+    gen: 1
+    last_pass_time: 1763095452.30252
+    last_result: 0
+    last_run_time: 1763095452.30252
+    last_todo: 0
+    seq: 73
+    total_passes: 1
+  t/ir/node-source-info-integration.t:
+    elapsed: 0.0256168842315674
+    gen: 1
+    last_pass_time: 1763095452.32994
+    last_result: 0
+    last_run_time: 1763095452.32994
+    last_todo: 0
+    seq: 74
+    total_passes: 1
+  t/ir/phi-standardization.t:
+    elapsed: 0.0284080505371094
+    gen: 1
+    last_pass_time: 1763095452.36015
+    last_result: 0
+    last_run_time: 1763095452.36015
+    last_todo: 1
+    seq: 75
+    total_passes: 1
+  t/ir/phi-validation.t:
+    elapsed: 0.0330731868743896
+    gen: 1
+    last_pass_time: 1763095452.39507
+    last_result: 0
+    last_run_time: 1763095452.39507
+    last_todo: 0
+    seq: 76
+    total_passes: 1
+  t/ir/source-info-tracking.t:
+    elapsed: 0.0328719615936279
+    gen: 1
+    last_pass_time: 1763095452.42982
+    last_result: 0
+    last_run_time: 1763095452.42982
+    last_todo: 0
+    seq: 77
+    total_passes: 1
+  t/ir/source-info.t:
+    elapsed: 0.0219628810882568
+    gen: 1
+    last_pass_time: 1763095452.45374
+    last_result: 0
+    last_run_time: 1763095452.45374
+    last_todo: 0
+    seq: 78
+    total_passes: 1
+  t/ir/transformation-tracking.t:
+    elapsed: 0.03436279296875
+    gen: 1
+    last_pass_time: 1763095452.48986
+    last_result: 0
+    last_run_time: 1763095452.48986
+    last_todo: 0
+    seq: 79
+    total_passes: 1
+  t/ir/validation.t:
+    elapsed: 0.0338490009307861
+    gen: 1
+    last_pass_time: 1763095452.52559
+    last_result: 0
+    last_run_time: 1763095452.52559
+    last_todo: 0
+    seq: 80
+    total_passes: 1
+  t/ir/validator.t:
+    elapsed: 0.03672194480896
+    gen: 1
+    last_pass_time: 1763095452.56432
+    last_result: 0
+    last_run_time: 1763095452.56432
+    last_todo: 2
+    seq: 81
+    total_passes: 1
+  t/optimization/leo-items.t:
+    elapsed: 8.58016204833984
+    gen: 1
+    last_pass_time: 1763095461.14648
+    last_result: 0
+    last_run_time: 1763095461.14648
+    last_todo: 1
+    seq: 82
+    total_passes: 1
+  t/parser/02-parser-grammars.t:
+    elapsed: 0.0481698513031006
+    gen: 1
+    last_pass_time: 1763095461.19723
+    last_result: 0
+    last_run_time: 1763095461.19723
+    last_todo: 0
+    seq: 83
+    total_passes: 1
+  t/parser/ambiguous-baseline.t:
+    elapsed: 0.0491390228271484
+    gen: 1
+    last_pass_time: 1763095461.24837
+    last_result: 0
+    last_run_time: 1763095461.24837
+    last_todo: 0
+    seq: 84
+    total_passes: 1
+  t/parser/arithmetic-ambiguity.t:
+    elapsed: 0.048224925994873
+    gen: 1
+    last_pass_time: 1763095461.3008
+    last_result: 0
+    last_run_time: 1763095461.3008
+    last_todo: 0
+    seq: 85
+    total_passes: 1
+  t/parser/augmented.t:
+    elapsed: 0.0437350273132324
+    gen: 1
+    last_pass_time: 1763095461.34641
+    last_result: 0
+    last_run_time: 1763095461.34641
+    last_todo: 0
+    seq: 86
+    total_passes: 1
+  t/parser/aycock-horspool-left-recursion.t:
+    elapsed: 0.0503571033477783
+    gen: 1
+    last_pass_time: 1763095461.39864
+    last_result: 0
+    last_run_time: 1763095461.39864
+    last_todo: 0
+    seq: 87
+    total_passes: 1
+  t/parser/bnf-parser-equivalence.t:
+    elapsed: 0.347905874252319
+    gen: 1
+    last_pass_time: 1763095461.74966
+    last_result: 0
+    last_run_time: 1763095461.74966
+    last_todo: 0
+    seq: 88
+    total_passes: 1
+  t/parser/bnf-semantic-integration.t:
+    elapsed: 0.174440860748291
+    gen: 1
+    last_pass_time: 1763095461.92662
+    last_result: 0
+    last_run_time: 1763095461.92662
+    last_todo: 0
+    seq: 89
+    total_passes: 1
+  t/parser/boolean-semiring.t:
+    elapsed: 0.0461459159851074
+    gen: 1
+    last_fail_time: 1763095461.97531
+    last_result: 2
+    last_run_time: 1763095461.97531
+    last_todo: 0
+    seq: 90
+    total_failures: 1
+  t/parser/chalk-arithmetic-ambiguity.t:
+    elapsed: 7.82177710533142
+    gen: 1
+    last_pass_time: 1763095469.79922
+    last_result: 0
+    last_run_time: 1763095469.79922
+    last_todo: 0
+    seq: 91
+    total_passes: 1
+  t/parser/generalized.t:
+    elapsed: 0.0420808792114258
+    gen: 1
+    last_pass_time: 1763095469.8438
+    last_result: 0
+    last_run_time: 1763095469.8438
+    last_todo: 0
+    seq: 92
+    total_passes: 1
+  t/parser/position-semiring.t:
+    elapsed: 0.0439128875732422
+    gen: 1
+    last_pass_time: 1763095469.88966
+    last_result: 0
+    last_run_time: 1763095469.88966
+    last_todo: 0
+    seq: 93
+    total_passes: 1
+  t/parser/precedence-semiring.t:
+    elapsed: 0.0459949970245361
+    gen: 1
+    last_pass_time: 1763095469.93752
+    last_result: 0
+    last_run_time: 1763095469.93752
+    last_todo: 0
+    seq: 94
+    total_passes: 1
+  t/parser/sppf-position.t:
+    elapsed: 0.0461158752441406
+    gen: 1
+    last_fail_time: 1763095469.9855
+    last_result: 8
+    last_run_time: 1763095469.9855
+    last_todo: 0
+    seq: 95
+    total_failures: 1
+  t/parser/sppf-viterbi.t:
+    elapsed: 0.0447170734405518
+    gen: 1
+    last_fail_time: 1763095470.03219
+    last_result: 5
+    last_run_time: 1763095470.03219
+    last_todo: 0
+    seq: 96
+    total_failures: 1
+  t/parser/with-preprocessor.t:
+    elapsed: 7.69092202186584
+    gen: 1
+    last_fail_time: 1763095477.72499
+    last_result: 6
+    last_run_time: 1763095477.72499
+    last_todo: 0
+    seq: 97
+    total_failures: 1
+  t/perl-tests/baseline-parser-perl-tests-base.t:
+    elapsed: 0.0434308052062988
+    gen: 1
+    last_fail_time: 1763095477.77125
+    last_result: 1
+    last_run_time: 1763095477.77125
+    last_todo: 0
+    seq: 98
+    total_failures: 1
+  t/preprocessor/heredoc-backslash-quoted.t:
+    elapsed: 7.52579307556152
+    gen: 1
+    last_fail_time: 1763095485.29891
+    last_result: 2
+    last_run_time: 1763095485.29891
+    last_todo: 1
+    seq: 99
+    total_failures: 1
+  t/preprocessor/heredoc.t:
+    elapsed: 0.0400931835174561
+    gen: 1
+    last_pass_time: 1763095485.34158
+    last_result: 0
+    last_run_time: 1763095485.34158
+    last_todo: 0
+    seq: 100
+    total_passes: 1
+  t/sea-of-nodes/arithmetic-nodes.t:
+    elapsed: 0.0232009887695312
+    gen: 1
+    last_pass_time: 1763095485.36667
+    last_result: 0
+    last_run_time: 1763095485.36667
+    last_todo: 0
+    seq: 101
+    total_passes: 1
+  t/sea-of-nodes/array-support.t:
+    elapsed: 0.0361440181732178
+    gen: 1
+    last_pass_time: 1763095485.40471
+    last_result: 0
+    last_run_time: 1763095485.40471
+    last_todo: 0
+    seq: 102
+    total_passes: 1
+  t/sea-of-nodes/chapter01.t:
+    elapsed: 0.0327460765838623
+    gen: 1
+    last_pass_time: 1763095485.43923
+    last_result: 0
+    last_run_time: 1763095485.43923
+    last_todo: 0
+    seq: 103
+    total_passes: 1
+  t/sea-of-nodes/chapter02.t:
+    elapsed: 61.1699450016022
+    gen: 1
+    last_fail_time: 1763095546.61113
+    last_result: 3
+    last_run_time: 1763095546.61113
+    last_todo: 2
+    seq: 104
+    total_failures: 1
+  t/sea-of-nodes/chapter03.t:
+    elapsed: 24.9679961204529
+    gen: 1
+    last_fail_time: 1763095571.58168
+    last_result: 3
+    last_run_time: 1763095571.58168
+    last_todo: 0
+    seq: 105
+    total_failures: 1
+  t/sea-of-nodes/chapter04.t:
+    elapsed: 0.035053014755249
+    gen: 1
+    last_pass_time: 1763095571.61962
+    last_result: 0
+    last_run_time: 1763095571.61962
+    last_todo: 0
+    seq: 106
+    total_passes: 1
+  t/sea-of-nodes/chapter05.t:
+    elapsed: 0.0351479053497314
+    gen: 1
+    last_pass_time: 1763095571.65652
+    last_result: 0
+    last_run_time: 1763095571.65652
+    last_todo: 0
+    seq: 107
+    total_passes: 1
+  t/sea-of-nodes/chapter06.t:
+    elapsed: 0.0309100151062012
+    gen: 1
+    last_pass_time: 1763095571.68987
+    last_result: 0
+    last_run_time: 1763095571.68987
+    last_todo: 0
+    seq: 108
+    total_passes: 1
+  t/sea-of-nodes/chapter07.t:
+    elapsed: 0.0453240871429443
+    gen: 1
+    last_pass_time: 1763095571.7369
+    last_result: 0
+    last_run_time: 1763095571.7369
+    last_todo: 0
+    seq: 109
+    total_passes: 1
+  t/sea-of-nodes/chapter08.t:
+    elapsed: 0.0469391345977783
+    gen: 1
+    last_pass_time: 1763095571.78555
+    last_result: 0
+    last_run_time: 1763095571.78555
+    last_todo: 0
+    seq: 110
+    total_passes: 1
+  t/sea-of-nodes/chapter09.t:
+    elapsed: 0.0430150032043457
+    gen: 1
+    last_pass_time: 1763095571.83044
+    last_result: 0
+    last_run_time: 1763095571.83044
+    last_todo: 0
+    seq: 111
+    total_passes: 1
+  t/sea-of-nodes/chapter11.t:
+    elapsed: 0.0424668788909912
+    gen: 1
+    last_pass_time: 1763095571.87484
+    last_result: 0
+    last_run_time: 1763095571.87484
+    last_todo: 0
+    seq: 112
+    total_passes: 1
+  t/sea-of-nodes/class-support.t:
+    elapsed: 0.0375151634216309
+    gen: 1
+    last_pass_time: 1763095571.91453
+    last_result: 0
+    last_run_time: 1763095571.91453
+    last_todo: 0
+    seq: 113
+    total_passes: 1
+  t/sea-of-nodes/comparison-nodes.t:
+    elapsed: 0.0233120918273926
+    gen: 1
+    last_pass_time: 1763095571.93968
+    last_result: 0
+    last_run_time: 1763095571.93968
+    last_todo: 0
+    seq: 114
+    total_passes: 1
+  t/sea-of-nodes/comparison-operators.t:
+    elapsed: 0.0328071117401123
+    gen: 1
+    last_pass_time: 1763095571.97435
+    last_result: 0
+    last_run_time: 1763095571.97435
+    last_todo: 0
+    seq: 115
+    total_passes: 1
+  t/sea-of-nodes/complete-ir-integration.t:
+    elapsed: 0.0381679534912109
+    gen: 1
+    last_pass_time: 1763095572.01442
+    last_result: 0
+    last_run_time: 1763095572.01442
+    last_todo: 0
+    seq: 116
+    total_passes: 1
+  t/sea-of-nodes/control-flow-nodes.t:
+    elapsed: 0.0232410430908203
+    gen: 1
+    last_pass_time: 1763095572.03939
+    last_result: 0
+    last_run_time: 1763095572.03939
+    last_todo: 0
+    seq: 117
+    total_passes: 1
+  t/sea-of-nodes/gvn.t:
+    elapsed: 0.0336692333221436
+    gen: 1
+    last_pass_time: 1763095572.07488
+    last_result: 0
+    last_run_time: 1763095572.07488
+    last_todo: 0
+    seq: 118
+    total_passes: 1
+  t/sea-of-nodes/hash-support.t:
+    elapsed: 0.0360519886016846
+    gen: 1
+    last_pass_time: 1763095572.11279
+    last_result: 0
+    last_run_time: 1763095572.11279
+    last_todo: 0
+    seq: 119
+    total_passes: 1
+  t/sea-of-nodes/ir-generation-basic.t:
+    elapsed: 7.7251889705658
+    gen: 1
+    last_pass_time: 1763095579.8399
+    last_result: 0
+    last_run_time: 1763095579.8399
+    last_todo: 0
+    seq: 120
+    total_passes: 1
+  t/sea-of-nodes/loop-phi-tracking.t:
+    elapsed: 0.0477240085601807
+    gen: 1
+    last_pass_time: 1763095579.89023
+    last_result: 0
+    last_run_time: 1763095579.89023
+    last_todo: 0
+    seq: 121
+    total_passes: 1
+  t/sea-of-nodes/module-support.t:
+    elapsed: 0.0426609516143799
+    gen: 1
+    last_pass_time: 1763095579.93492
+    last_result: 0
+    last_run_time: 1763095579.93492
+    last_todo: 0
+    seq: 122
+    total_passes: 1
+  t/sea-of-nodes/optimizer-pipeline.t:
+    elapsed: 0.0300061702728271
+    gen: 1
+    last_pass_time: 1763095579.96684
+    last_result: 0
+    last_run_time: 1763095579.96684
+    last_todo: 0
+    seq: 123
+    total_passes: 1
+  t/sea-of-nodes/polymorphic-nodes.t:
+    elapsed: 0.0228090286254883
+    gen: 1
+    last_pass_time: 1763095579.99146
+    last_result: 0
+    last_run_time: 1763095579.99146
+    last_todo: 0
+    seq: 124
+    total_passes: 1
+  t/sea-of-nodes/string-concatenation.t:
+    elapsed: 0.0370349884033203
+    gen: 1
+    last_pass_time: 1763095580.03035
+    last_result: 0
+    last_run_time: 1763095580.03035
+    last_todo: 0
+    seq: 125
+    total_passes: 1
+  t/sea-of-nodes/string-support.t:
+    elapsed: 0.0355498790740967
+    gen: 1
+    last_pass_time: 1763095580.06791
+    last_result: 0
+    last_run_time: 1763095580.06791
+    last_todo: 0
+    seq: 126
+    total_passes: 1
+  t/sea-of-nodes/unary-operators.t:
+    elapsed: 0.0327539443969727
+    gen: 1
+    last_pass_time: 1763095580.10253
+    last_result: 0
+    last_run_time: 1763095580.10253
+    last_todo: 0
+    seq: 127
+    total_passes: 1
+  t/sea-of-nodes/use-def-chains.t:
+    elapsed: 0.0311689376831055
+    gen: 1
+    last_pass_time: 1763095580.1356
+    last_result: 0
+    last_run_time: 1763095580.1356
+    last_todo: 0
+    seq: 128
+    total_passes: 1
+  t/self-hosting.t:
+    elapsed: 114.520727157593
+    gen: 1
+    last_fail_time: 1763095694.65838
+    last_result: 105
+    last_run_time: 1763095694.65838
+    last_todo: 0
+    seq: 129
+    total_failures: 1
+  t/semantic/01-eval-context.t:
+    elapsed: 0.0348920822143555
+    gen: 1
+    last_pass_time: 1763095694.697
+    last_result: 0
+    last_run_time: 1763095694.697
+    last_todo: 0
+    seq: 130
+    total_passes: 1
+  t/semantic/02-semantic-semiring.t:
+    elapsed: 0.0336229801177979
+    gen: 1
+    last_fail_time: 1763095694.73262
+    last_result: 2
+    last_run_time: 1763095694.73262
+    last_todo: 0
+    seq: 131
+    total_failures: 1
+  t/semantic/03-grammar-rule-evaluate.t:
+    elapsed: 0.0280280113220215
+    gen: 1
+    last_fail_time: 1763095694.76265
+    last_result: 1
+    last_run_time: 1763095694.76265
+    last_todo: 0
+    seq: 132
+    total_failures: 1
+  t/semantic/04-parser-integration.t:
+    elapsed: 0.0279061794281006
+    gen: 1
+    last_fail_time: 1763095694.79254
+    last_result: 1
+    last_run_time: 1763095694.79254
+    last_todo: 0
+    seq: 133
+    total_failures: 1
+  t/semantic/05-bnf-grammar.t:
+    elapsed: 0.11395788192749
+    gen: 1
+    last_pass_time: 1763095694.90842
+    last_result: 0
+    last_run_time: 1763095694.90842
+    last_todo: 1
+    seq: 134
+    total_passes: 1
+  t/semantic/06-bnf-semantic-actions.t:
+    elapsed: 0.0404410362243652
+    gen: 1
+    last_pass_time: 1763095694.95159
+    last_result: 0
+    last_run_time: 1763095694.95159
+    last_todo: 0
+    seq: 135
+    total_passes: 1
+  t/semiring/chalk-ir.t:
+    elapsed: 8.8386390209198
+    gen: 1
+    last_fail_time: 1763095703.79226
+    last_result: 5
+    last_run_time: 1763095703.79226
+    last_todo: 0
+    seq: 136
+    total_failures: 1
+  t/semiring/chalk-syntax.t:
+    elapsed: 60.4173951148987
+    gen: 1
+    last_pass_time: 1763095764.21236
+    last_result: 0
+    last_run_time: 1763095764.21236
+    last_todo: 0
+    seq: 137
+    total_passes: 1
+  t/semiring/composite.t:
+    elapsed: 0.0442609786987305
+    gen: 1
+    last_pass_time: 1763095764.25918
+    last_result: 0
+    last_run_time: 1763095764.25918
+    last_todo: 0
+    seq: 138
+    total_passes: 1
+  t/semiring/precedence-intermediate-nodes.t:
+    elapsed: 7.88629412651062
+    gen: 1
+    last_pass_time: 1763095772.14741
+    last_result: 0
+    last_run_time: 1763095772.14741
+    last_todo: 0
+    seq: 139
+    total_passes: 1
+  t/semiring/precedence-on-complete.t:
+    elapsed: 7.87764692306519
+    gen: 1
+    last_pass_time: 1763095780.02772
+    last_result: 0
+    last_run_time: 1763095780.02772
+    last_todo: 0
+    seq: 140
+    total_passes: 1
+  t/semiring/precedence.t:
+    elapsed: 8.2684850692749
+    gen: 1
+    last_fail_time: 1763095788.29918
+    last_result: 2
+    last_run_time: 1763095788.29918
+    last_todo: 0
+    seq: 141
+    total_failures: 1
+  t/semiring/sppf.t:
+    elapsed: 0.0405189990997314
+    gen: 1
+    last_pass_time: 1763095788.3427
+    last_result: 0
+    last_run_time: 1763095788.3427
+    last_todo: 0
+    seq: 142
+    total_passes: 1
+  t/semiring/viterbi.t:
+    elapsed: 0.0381550788879395
+    gen: 1
+    last_pass_time: 1763095788.38276
+    last_result: 0
+    last_run_time: 1763095788.38276
+    last_todo: 0
+    seq: 143
+    total_passes: 1
+  t/tools/import-resolver.t:
+    elapsed: 0.0310559272766113
+    gen: 1
+    last_pass_time: 1763095788.41574
+    last_result: 0
+    last_run_time: 1763095788.41574
+    last_todo: 0
+    seq: 144
+    total_passes: 1
+  t/types/builtins.t:
+    elapsed: 0.024648904800415
+    gen: 1
+    last_pass_time: 1763095788.44221
+    last_result: 0
+    last_run_time: 1763095788.44221
+    last_todo: 0
+    seq: 145
+    total_passes: 1
+  t/types/coercion.t:
+    elapsed: 0.0267219543457031
+    gen: 1
+    last_pass_time: 1763095788.47073
+    last_result: 0
+    last_run_time: 1763095788.47073
+    last_todo: 0
+    seq: 146
+    total_passes: 1
+  t/types/ephemeral.t:
+    elapsed: 0.0236029624938965
+    gen: 1
+    last_pass_time: 1763095788.49612
+    last_result: 0
+    last_run_time: 1763095788.49612
+    last_todo: 0
+    seq: 147
+    total_passes: 1
+  t/types/lattice.t:
+    elapsed: 0.0275528430938721
+    gen: 1
+    last_pass_time: 1763095788.52573
+    last_result: 0
+    last_run_time: 1763095788.52573
+    last_todo: 0
+    seq: 148
+    total_passes: 1
+  t/types/list-conversion.t:
+    elapsed: 0.0290999412536621
+    gen: 1
+    last_pass_time: 1763095788.55673
+    last_result: 0
+    last_run_time: 1763095788.55673
+    last_todo: 0
+    seq: 149
+    total_passes: 1
+  t/types/membership.t:
+    elapsed: 0.0239131450653076
+    gen: 1
+    last_pass_time: 1763095788.58235
+    last_result: 0
+    last_run_time: 1763095788.58235
+    last_todo: 0
+    seq: 150
+    total_passes: 1
+  t/types/programs.t:
+    elapsed: 8.01528906822205
+    gen: 1
+    last_fail_time: 1763095796.59953
+    last_result: 2
+    last_run_time: 1763095796.59953
+    last_todo: 0
+    seq: 151
+    total_failures: 1
+  t/types/semantic-type-tracking.t:
+    elapsed: 0.0300710201263428
+    gen: 1
+    last_pass_time: 1763095796.63174
+    last_result: 0
+    last_run_time: 1763095796.63174
+    last_todo: 0
+    seq: 152
+    total_passes: 1
+  t/types/subroutine-types.t:
+    elapsed: 0.0240099430084229
+    gen: 1
+    last_pass_time: 1763095796.65748
+    last_result: 0
+    last_run_time: 1763095796.65748
+    last_todo: 0
+    seq: 153
+    total_passes: 1
+  t/validation/baseline-parser-grammar.t:
+    elapsed: 0.0451040267944336
+    gen: 1
+    last_fail_time: 1763095796.70445
+    last_result: 1
+    last_run_time: 1763095796.70445
+    last_todo: 0
+    seq: 154
+    total_failures: 1
+  t/validation/perl-test-files.t:
+    elapsed: 0.035938024520874
+    gen: 1
+    last_pass_time: 1763095796.74221
+    last_result: 0
+    last_run_time: 1763095796.74221
+    last_todo: 0
+    seq: 155
+    total_passes: 1
+  t/validation/test-aboutme-comments.t:
+    elapsed: 0.0777819156646729
+    gen: 1
+    last_pass_time: 1763095796.82186
+    last_result: 0
+    last_run_time: 1763095796.82186
+    last_todo: 0
+    seq: 156
+    total_passes: 1
+version: 1
+...

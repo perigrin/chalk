@@ -152,7 +152,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             my $child_val = $child_ctx->extract;
 
             # Mark when we find 'else'
-            if (defined($child_val) && "$child_val" eq 'else') {
+            if (defined($child_val) && !ref($child_val) && $child_val eq 'else') {
                 $found_else = 1;
                 next;
             }

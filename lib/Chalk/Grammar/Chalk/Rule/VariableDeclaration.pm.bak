@@ -20,7 +20,7 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
         my $equals_index = -1;
         for my $i (0..$#children) {
             my $child = $children[$i]->extract;
-            if (defined($child) && "$child" eq '=') {
+            if (defined($child) && !ref($child) && $child eq '=') {
                 $has_init = 1;
                 $equals_index = $i;
                 last;

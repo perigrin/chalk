@@ -26,10 +26,9 @@ class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
         # So operator is at index 2
         return $context->child(0) unless defined $children[2];
         my $op_child = $children[2]->extract;
-        return $context->child(0) unless defined $op_child;
+        return $context->child(0) unless defined $op_child && !ref($op_child);
 
-        # Stringify operator (may be Token object or plain string)
-        my $operator = "$op_child";
+        my $operator = $op_child;
 
         # TODO: Implement IR nodes for logical operators when available
         # For now, just pass through left side

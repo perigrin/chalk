@@ -22,18 +22,22 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         # Postfix pattern: child(0) is Variable, child(1) is operator
         if (@children == 2) {
             my $last_child = $children[-1]->extract;
-            if (defined($last_child) && !ref($last_child) && ($last_child eq '++' || $last_child eq '--')) {
-                # This is postfix: Variable '++' or Variable '--'
-                # TODO: Implement postfix increment/decrement when IR nodes available
-                return $context->child(0);
+            if (defined($last_child)) {
+                my $str_val = "$last_child";  # Stringify (Token or string)
+                if ($str_val eq '++' || $str_val eq '--') {
+                    # This is postfix: Variable '++' or Variable '--'
+                    # TODO: Implement postfix increment/decrement when IR nodes available
+                    return $context->child(0);
+                }
             }
         }
 
         # Otherwise, this is a prefix operator: check child(0) for the operator
         my $op_child = $children[0]->extract;
-        return $context->child(0) unless defined $op_child && !ref($op_child);
+        return $context->child(0) unless defined $op_child;
 
-        my $operator = $op_child;
+        # Stringify operator (may be Token object or plain string)
+        my $operator = "$op_child";
         my $builder = $context->env->{ir_builder};
         return $context->child(0) unless $builder;
 

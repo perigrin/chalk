@@ -30,9 +30,10 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         # For binary operation: check OPERATOR child for the operator
         return $context->child(LEFT_EXPR) unless defined $children[OPERATOR];
         my $op_child = $children[OPERATOR]->extract;
-        return $context->child(LEFT_EXPR) unless defined $op_child && !ref($op_child);
+        return $context->child(LEFT_EXPR) unless defined $op_child;
 
-        my $operator = $op_child;
+        # Stringify operator (may be Token object or plain string)
+        my $operator = "$op_child";
         my $builder = $context->env->{ir_builder};
         return $context->child(LEFT_EXPR) unless $builder;
 
