@@ -138,7 +138,9 @@ class Chalk::ParseForest {
     field %symbol_nodes;
     field %terminal_nodes;
     field %intermediate_nodes;
-    field $input_string :reader :writer = undef;  # Source text being parsed
+    field $input_string :reader = undef;  # Source text being parsed
+
+    method set_input_string($str) { $input_string = $str; }
 
     method get_or_create_symbol_node( $symbol, $start_pos, $end_pos ) {
         my $key = "$symbol|$start_pos|$end_pos";

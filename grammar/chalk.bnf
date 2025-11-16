@@ -229,7 +229,7 @@ LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
 # Atomic values and base cases
 Expression -> Literal
 Expression -> Variable
-# Expression -> Identifier  # DISABLED: Creates ambiguity with keywords like 'return'. TODO: Re-enable with keyword exclusion
+Expression -> Identifier  # Bareword (can be function name, method name, or string in context)
 Expression -> YaddaYadda
 Expression -> FunctionCall
 Expression -> BuiltinOp

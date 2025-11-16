@@ -231,15 +231,15 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
         # Prune: keep only valid alternatives
         if (@valid_indices && @valid_indices < @packed) {
-            $intermediate_node->prune_packed_nodes(sub {
-                my ($node) = @_;
+            my $filter = sub ($node) {
                 # Check if this node is in our valid list by reference address
                 my $node_addr = refaddr($node);
                 for my $i (@valid_indices) {
                     return 1 if refaddr($packed[$i]) == $node_addr;
                 }
                 return 0;
-            });
+            };
+            $intermediate_node->prune_packed_nodes($filter);
         }
     }
 
@@ -265,11 +265,12 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         # The grammar is: Expression WS_OPT OPERATOR WS_OPT Expression
         # So the operator should be a few characters before the boundary
         # TODO: Make this more general for other operator types
-        for (my $pos = $boundary - 1; $pos >= 0 && $pos >= $boundary - 10; $pos--) {
+        my $start = ($boundary >= 10) ? $boundary - 10 : 0;
+        for my $pos (reverse $start .. $boundary - 1) {
             my $char = substr($input, $pos, 1);
 
             # Check if this is an arithmetic operator
-            if ($char =~ /[+\-*\/]/) {
+            if ($char =~ qr/[+\-*\/]/) {
                 return $char;
             }
         }
@@ -477,8 +478,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     }
 
     # Helper: Determine comparison operator direction
-    sub _operator_direction {
-        my ($op) = @_;
+    sub _operator_direction ($op) {
         # Use hash lookup to avoid < and > in regex patterns (confuses Chalk parser)
         my %ascending = ('<' => 1, '<=' => 1, 'lt' => 1, 'le' => 1);
         my %descending = ('>' => 1, '>=' => 1, 'gt' => 1, 'ge' => 1);

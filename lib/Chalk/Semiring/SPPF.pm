@@ -256,9 +256,9 @@ class Chalk::Semiring::SPPF :isa(Chalk::Semiring) {
         my @nodes;
 
         my $elem_children = $element->children // [];
-        if (@$elem_children) {
+        if (@{$elem_children}) {
             # Element has children from multiply operations (short rules only now)
-            for my $child (@$elem_children) {
+            for my $child (@{$elem_children}) {
                 if ($child->sppf_node) {
                     # Child already has a node (terminal, intermediate, or completed rule)
                     push @nodes, $child->sppf_node;
