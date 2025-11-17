@@ -22,7 +22,7 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
 
         # Determine type (Int vs Float)
         my $type  = $number_str =~ qr/\./ ? 'Float' : 'Int';
-        my $value = $number_str + 0;                        # Convert to numeric
+        my $value = "$number_str" + 0;                      # Stringify Token, then convert to numeric
 
         # Build and return Constant IR node
         return $builder->build_constant_node( $value, $type );
