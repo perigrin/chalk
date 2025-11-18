@@ -1,0 +1,64 @@
+# Detailed Churn Analysis
+
+## Churn Distribution
+
+Very Low (< 0.3): 13 PRs (27.1%)
+Low (0.3-0.5): 17 PRs (35.4%)
+Medium (0.5-0.8): 11 PRs (22.9%)
+High (0.8-1.2): 5 PRs (10.4%)
+Very High (> 1.2): 2 PRs (4.2%)
+
+## Size vs Churn Analysis
+
+Small (1-5 files): 23 PRs
+  - Average Churn: 0.58
+  - Average Commits: 1.8
+
+Medium (6-15 files): 6 PRs
+  - Average Churn: 0.49
+  - Average Commits: 5.3
+
+Large (16-30 files): 6 PRs
+  - Average Churn: 0.33
+  - Average Commits: 8.3
+
+Very Large (31+ files): 13 PRs
+  - Average Churn: 0.22
+  - Average Commits: 9.8
+
+## Commit Count Distribution
+
+1-2 commits: 26 PRs (54.2%)
+3-5 commits: 10 PRs (20.8%)
+6-10 commits: 5 PRs (10.4%)
+11-20 commits: 5 PRs (10.4%)
+21+ commits: 2 PRs (4.2%)
+
+## Key Insights
+
+1. **Efficient PRs (churn < 0.5)**: 30 out of 48 (62.5%)
+   - Average Files: 155.7
+   - Average Commits: 3.8
+
+2. **High Churn PRs (churn >= 1.0)**: 5 out of 48 (10.4%)
+   - Average Files: 5.6 (typically smaller scope)
+
+3. **Single-Pass Implementations**: 15 PRs
+   These represent tasks completed in a single commit (no iteration)
+   - PR #75: Implement pluggable optimizer pipeline infrastructure (Issue
+   - PR #111: Implement range operator (..) semantic actions and IR genera
+   - PR #116: Implement correct semantics for comparison operators (>=, <=
+   - PR #98: Add module support to Sea of Nodes IR (Issue #98 Phase 5)
+   - PR #98: Add string support to Sea of Nodes IR (Issue #98 Phase 4)
+
+4. **High Iteration PRs (15+ commits)**: 6 PRs
+   - PR #156: 36 commits, 58 files, churn=0.62
+     Add CEK context helpers for functional interpreter (Issue #156)
+   - PR #144: 26 commits, 30 files, churn=0.87
+     Complete Precedence Semiring Implementation (Issue #144 Phases 2-4)
+   - PR #154: 20 commits, 44 files, churn=0.45
+     Fix control flow Phi node generation for if/else statements (Issue #15
+   - PR #130: 20 commits, 42 files, churn=0.48
+     Complete Phase 1-4: Unified Context memory model with collections and 
+   - PR #125: 20 commits, 32 files, churn=0.62
+     Enable Chalk self-execution: Parser → Builder → Interpreter pipeline (

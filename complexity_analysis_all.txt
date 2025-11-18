@@ -1,0 +1,126 @@
+| PR# | Title | Commits | Files | Changes | Complexity | Churn Level | Churn Score |
+|-----|-------|---------|-------|---------|------------|-------------|-------------|
+| #144 | Complete Precedence Semiring Implementation (Issue... | 26 | 30 | 2080 | Multi-Phase Complex | High | 0.87 |
+| #125 | Enable Chalk self-execution: Parser → Builder → In... | 20 | 32 | 1888 | Architectural | Medium | 0.62 |
+| #130 | Complete Phase 1-4: Unified Context memory model w... | 20 | 42 | 3582 | Multi-Phase Complex | Low | 0.48 |
+| #159 | Complete Phase 5: Context-Aware IR Validation (Sup... | 17 | 42 | 2797 | Multi-Phase Complex | Low | 0.40 |
+| #113 | Refactor IR::Node into Polymorphic Subclass Hierar... | 8 | 26 | 1478 | Architectural | Low | 0.31 |
+| #74 | Implement latent type inference and checking - All... | 6 | 34 | 2655 | Multi-Phase Complex | Very Low | 0.18 |
+| #65 | Semantic Actions Architecture: Complete Implementa... | 0 | 391 | 49092 | Architectural | Very Low | 0.00 |
+| #12 | Architecture Refactoring: Grammar Migration to Ext... | 0 | 400 | 51400 | Architectural | Very Low | 0.00 |
+| #139 | Add SourceInfo foundation for IR error reporting (... | 15 | 15 | 1533 | Multi-Phase Feature | High | 1.00 |
+| #149 | Plan roadmap for self-hosting validating interpret... | 4 | 4 | 651 | System Integration | High | 1.00 |
+| #97 | Add UseStatement semantic action (Issue #97 Phase ... | 4 | 5 | 441 | Multi-Phase Feature | High | 0.80 |
+| #104 | Add Sea of Nodes IR generation infrastructure (Iss... | 7 | 9 | 731 | Architectural | Medium | 0.78 |
+| #98 | Add class and object support to Sea of Nodes IR (I... | 2 | 3 | 459 | Multi-Phase Feature | Medium | 0.67 |
+| #156 | Add CEK context helpers for functional interpreter... | 36 | 58 | 9716 | Large Feature | Medium | 0.62 |
+| #154 | Fix control flow Phi node generation for if/else s... | 20 | 44 | 3351 | Complex Fix | Low | 0.45 |
+| #128 | Add differential testing framework for interpreter... | 6 | 17 | 1037 | Architectural | Low | 0.35 |
+| #75 | Implement pluggable optimizer pipeline infrastruct... | 1 | 3 | 214 | Architectural | Low | 0.33 |
+| #98 | Add module support to Sea of Nodes IR (Issue #98 P... | 1 | 3 | 270 | Multi-Phase Feature | Low | 0.33 |
+| #98 | Add string support to Sea of Nodes IR (Issue #98 P... | 1 | 3 | 368 | Multi-Phase Feature | Low | 0.33 |
+| #98 | Add hash support to Sea of Nodes IR (Issue #98 Pha... | 1 | 3 | 464 | Multi-Phase Feature | Low | 0.33 |
+| #98 | Add array support to Sea of Nodes IR (Issue #98 Ph... | 1 | 3 | 473 | Multi-Phase Feature | Low | 0.33 |
+| #68 | Add chalk.bnf - Simplified Perl subset grammar for... | 5 | 103 | 5447 | Large Feature | Very Low | 0.05 |
+| #57 | Add perl5 test suite to perl-tests/ | 3 | 759 | 169575 | Large Feature | Very Low | 0.00 |
+| #73 | Complete Sea of Nodes IR Implementation (Chapters ... | 0 | 344 | 38523 | Large Feature | Very Low | 0.00 |
+| #45 | Fix issue #45: Support two-argument open, or/and o... | 0 | 1170 | 226023 | Complex Fix | Very Low | 0.00 |
+| #38 | Fix #38: Add unless-else support to enable num.t p... | 0 | 1166 | 225621 | Large Feature | Very Low | 0.00 |
+| #109 | Implement IR semantic actions for unary operators ... | 4 | 11 | 457 | Medium Feature | Low | 0.36 |
+| #193 | Implement Chapter 3 (Variables/Scoping) and fix co... | 6 | 19 | 725 | Medium Feature | Low | 0.32 |
+| #53 | Fix #53: Migrate tests from require chalk to use C... | 4 | 28 | 1797 | Medium Fix | Very Low | 0.14 |
+| #66 | Test Suite Audit: Documentation, Quick Wins, and S... | 0 | 25 | 1400 | Medium Fix | Very Low | 0.00 |
+| #107 | Add IR semantic actions for statement modifiers (I... | 3 | 2 | 204 | Small Feature | Very High | 1.50 |
+| #137 | Add Mermaid diagram export for IR graphs (Issue #1... | 4 | 3 | 233 | Small Feature | Very High | 1.33 |
+| #110 | Implement string concatenation operator and string... | 2 | 3 | 193 | Small Feature | Medium | 0.67 |
+| #93 | Implement Global Value Numbering optimization for ... | 2 | 3 | 1303 | Small Feature | Medium | 0.67 |
+| #81 | Implement conservative memory aliasing analysis fo... | 1 | 2 | 258 | Small Feature | Medium | 0.50 |
+| #90 | Add use-def chains to IR Graph for optimization pa... | 1 | 2 | 239 | Small Feature | Medium | 0.50 |
+| #89 | Implement systematic loop-carried dependency track... | 2 | 4 | 260 | Small Feature | Medium | 0.50 |
+| #15 | Fix #15: Complete Aycock-Horspool left-recursion h... | 4 | 8 | 739 | Small Feature | Medium | 0.50 |
+| #40 | Fix #40: Add file test operator support in express... | 1 | 2 | 113 | Small Feature | Medium | 0.50 |
+| #111 | Implement range operator (..) semantic actions and... | 1 | 3 | 142 | Small Feature | Low | 0.33 |
+| #116 | Implement correct semantics for comparison operato... | 1 | 3 | 113 | Small Feature | Low | 0.33 |
+| #10 | Add comprehensive testing and documentation for Le... | 1 | 3 | 165 | Small Feature | Low | 0.33 |
+| #39 | Fix #39: Add statement modifier support for while/... | 1 | 3 | 163 | Small Feature | Low | 0.33 |
+| #92 | Add Loop node validation and comprehensive documen... | 1 | 5 | 597 | Small Feature | Very Low | 0.20 |
+| #96 | Eliminate all external module dependencies from pr... | 1 | 7 | 19 | Small Change | Very Low | 0.14 |
+| #88 | Standardize Phi Node Representation in Sea of Node... | 1 | 7 | 418 | Small Change | Very Low | 0.14 |
+| #112 | Make IR generation the default behavior in app.pl ... | 4 | 4 | 406 | Simple Fix | High | 1.00 |
+| #153 | Fix variable reassignment not updating value in co... | 2 | 5 | 161 | Simple Fix | Low | 0.40 |
+
+## Statistics by Complexity Level
+
+Complexity Score 5 (8 PRs):
+  - Avg Commits: 12.1
+  - Avg Files: 124.6
+  - Avg Churn: 0.36
+
+Complexity Score 4 (18 PRs):
+  - Avg Commits: 5.9
+  - Avg Files: 206.2
+  - Avg Churn: 0.41
+
+Complexity Score 3 (4 PRs):
+  - Avg Commits: 3.5
+  - Avg Files: 20.8
+  - Avg Churn: 0.21
+
+Complexity Score 2 (16 PRs):
+  - Avg Commits: 1.7
+  - Avg Files: 3.8
+  - Avg Churn: 0.53
+
+Complexity Score 1 (2 PRs):
+  - Avg Commits: 3.0
+  - Avg Files: 4.5
+  - Avg Churn: 0.70
+
+
+## PRs with High Churn Relative to Complexity
+
+- PR #107: Add IR semantic actions for statement modifiers (Issue #107)
+  Churn: 1.50 (commits/file), Complexity: Small Feature
+- PR #137: Add Mermaid diagram export for IR graphs (Issue #137)
+  Churn: 1.33 (commits/file), Complexity: Small Feature
+- PR #112: Make IR generation the default behavior in app.pl (fixes #112)
+  Churn: 1.00 (commits/file), Complexity: Simple Fix
+
+## Well-Decomposed Complex Tasks (Low Churn)
+
+- PR #73: Complete Sea of Nodes IR Implementation (Chapters 1-11)
+  Churn: 0.00, Complexity: Large Feature, Files: 344
+- PR #65: Semantic Actions Architecture: Complete Implementation
+  Churn: 0.00, Complexity: Architectural, Files: 391
+- PR #12: Architecture Refactoring: Grammar Migration to External BNF Format (Fixes #12)
+  Churn: 0.00, Complexity: Architectural, Files: 400
+- PR #45: Fix issue #45: Support two-argument open, or/and operators, and special variables
+  Churn: 0.00, Complexity: Complex Fix, Files: 1170
+- PR #38: Fix #38: Add unless-else support to enable num.t parsing
+  Churn: 0.00, Complexity: Large Feature, Files: 1166
+- PR #57: Add perl5 test suite to perl-tests/
+  Churn: 0.00, Complexity: Large Feature, Files: 759
+- PR #68: Add chalk.bnf - Simplified Perl subset grammar for compilation
+  Churn: 0.05, Complexity: Large Feature, Files: 103
+- PR #74: Implement latent type inference and checking - All 5 Phases (Issue #74)
+  Churn: 0.18, Complexity: Multi-Phase Complex, Files: 34
+- PR #113: Refactor IR::Node into Polymorphic Subclass Hierarchy (Issue #113)
+  Churn: 0.31, Complexity: Architectural, Files: 26
+- PR #75: Implement pluggable optimizer pipeline infrastructure (Issue #75)
+  Churn: 0.33, Complexity: Architectural, Files: 3
+- PR #98: Add module support to Sea of Nodes IR (Issue #98 Phase 5)
+  Churn: 0.33, Complexity: Multi-Phase Feature, Files: 3
+- PR #98: Add string support to Sea of Nodes IR (Issue #98 Phase 4)
+  Churn: 0.33, Complexity: Multi-Phase Feature, Files: 3
+- PR #98: Add hash support to Sea of Nodes IR (Issue #98 Phase 3)
+  Churn: 0.33, Complexity: Multi-Phase Feature, Files: 3
+- PR #98: Add array support to Sea of Nodes IR (Issue #98 Phase 2)
+  Churn: 0.33, Complexity: Multi-Phase Feature, Files: 3
+- PR #128: Add differential testing framework for interpreter validation (Issue #128)
+  Churn: 0.35, Complexity: Architectural, Files: 17
+- PR #159: Complete Phase 5: Context-Aware IR Validation (Supersedes PR #159)
+  Churn: 0.40, Complexity: Multi-Phase Complex, Files: 42
+- PR #154: Fix control flow Phi node generation for if/else statements (Issue #154)
+  Churn: 0.45, Complexity: Complex Fix, Files: 44
+- PR #130: Complete Phase 1-4: Unified Context memory model with collections and references (Issue #130)
+  Churn: 0.48, Complexity: Multi-Phase Complex, Files: 42
