@@ -1,0 +1,85 @@
+# Issue Detail vs PR Churn Correlation Analysis
+
+Total PRs analyzed: 45 (excluding squash merges with no commit data)
+
+## Churn by Commit Message Length
+
+| Category | PRs | Avg Churn | Median Churn | Avg Msg Chars |
+|----------|-----|-----------|--------------|---------------|
+| Very Short (< 1000 chars) | 12 | 0.34 | 0.33 | 723 |
+| Short (1000-5000 chars) | 20 | 0.49 | 0.38 | 2169 |
+| Medium (5000-15000 chars) | 8 | 0.42 | 0.40 | 8946 |
+| Long (15000-25000 chars) | 2 | 0.74 | 0.74 | 21552 |
+| Very Long (25000+ chars) | 3 | 0.67 | 0.62 | 26453 |
+
+## Churn by Structural Indicators
+
+**Has Issue Reference:**
+- PRs: 34
+- Avg Churn: 0.49
+- Median Churn: 0.38
+
+**No Issue Reference:**
+- PRs: 11
+- Avg Churn: 0.39
+- Median Churn: 0.33
+
+**Has Phase Mention:**
+- PRs: 20
+- Avg Churn: 0.49
+- Median Churn: 0.35
+
+**No Phase Mention:**
+- PRs: 25
+- Avg Churn: 0.45
+- Median Churn: 0.40
+
+## Churn by Message Length Quartiles
+
+| Quartile | Char Range | PRs | Avg Churn |
+|----------|------------|-----|-----------|
+| Q1 | 578-844 | 11 | 0.33 |
+| Q2 | 859-1640 | 11 | 0.38 |
+| Q3 | 1685-6145 | 11 | 0.60 |
+| Q4 | 6411-27026 | 12 | 0.55 |
+
+## Correlation Coefficient
+
+**Pearson Correlation (Message Length vs Churn): 0.238**
+
+Interpretation: Weak positive correlation
+→ Longer commit messages tend to correlate with HIGHER churn (worse)
+
+## Examples
+
+**Lowest Churn PRs with Detailed Messages (> 10000 chars):**
+- PR #74: Implement latent type inference and checking - All 5 Phases 
+  Churn: 0.18, Msg Length: 12439 chars
+- PR #159: Complete Phase 5: Context-Aware IR Validation (Supersedes PR
+  Churn: 0.40, Msg Length: 26166 chars
+- PR #154: Fix control flow Phi node generation for if/else statements 
+  Churn: 0.45, Msg Length: 12457 chars
+- PR #130: Complete Phase 1-4: Unified Context memory model with collec
+  Churn: 0.48, Msg Length: 13694 chars
+- PR #156: Add CEK context helpers for functional interpreter (Issue #1
+  Churn: 0.62, Msg Length: 27026 chars
+
+**Highest Churn PRs with Short Messages (< 3000 chars):**
+- PR #107: Add IR semantic actions for statement modifiers (Issue #107)
+  Churn: 1.50, Msg Length: 1770 chars
+- PR #137: Add Mermaid diagram export for IR graphs (Issue #137)
+  Churn: 1.33, Msg Length: 1640 chars
+- PR #112: Make IR generation the default behavior in app.pl (fixes #11
+  Churn: 1.00, Msg Length: 2512 chars
+- PR #110: Implement string concatenation operator and string literals 
+  Churn: 0.67, Msg Length: 1964 chars
+- PR #98: Add class and object support to Sea of Nodes IR (Issue #98 P
+  Churn: 0.67, Msg Length: 674 chars
+
+## Message Structure Analysis
+
+**By Commit Message Verbosity:**
+
+Terse (< 10 lines/commit): 2 PRs, Avg Churn: 0.34
+Moderate (10-20 lines/commit): 21 PRs, Avg Churn: 0.52
+Verbose (> 20 lines/commit): 19 PRs, Avg Churn: 0.49
