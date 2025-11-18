@@ -1,0 +1,31 @@
+PR,Title,Commits,Files,Total_Changes,Complexity_Assessment,Churn_Level,Churn_Score,Notes
+193,Implement Chapter 3 (Variables/Scoping) and fix control flow with early returns,6,19,725,Medium Feature,Low,0.32,Combined feature + fix
+169,Test Suite Audit: Documentation Quick Wins and Silent Failure Fix,7,19,725,Medium Fix,Low,0.37,Test infrastructure improvements
+167,Fix control flow Phi node generation for if/else statements,20,44,3351,Complex Fix,Low,0.45,Large debugging effort with good churn
+164,Add CEK context helpers for functional interpreter,36,58,9716,Large Feature,Medium,0.62,Largest PR but acceptable churn
+162,Fix variable reassignment not updating value in context model,2,5,161,Simple Fix,Low,0.40,Small targeted fix
+160,Complete Phase 5: Context-Aware IR Validation,17,42,2797,Multi-Phase Complex,Low,0.40,Well-decomposed multi-phase
+158,Add SourceInfo foundation for IR error reporting,15,15,1533,Large Feature,High,1.00,API design iteration
+149,Plan roadmap for self-hosting validating interpreter,4,4,651,System Integration,High,1.00,Planning doc with iteration
+148,Complete Precedence Semiring Implementation (Phases 2-4),26,30,2080,Multi-Phase Complex,High,0.87,Complex but reasonable churn
+147,Make IR generation the default behavior in app.pl,4,4,406,Small Change,High,1.00,Configuration change with dependencies
+140,Complete Phase 1-4: Unified Context memory model with collections and references,20,42,3582,Multi-Phase Complex,Low,0.48,Excellent decomposition
+138,Add Mermaid diagram export for IR graphs,4,3,233,Small Feature,Very High,1.33,Visualization feature
+129,Add differential testing framework for interpreter validation,6,17,1037,Architectural,Low,0.35,Framework addition
+126,Enable Chalk self-execution: Parser → Builder → Interpreter pipeline,20,32,1888,Architectural,Medium,0.62,Major milestone
+122,Implement pluggable optimizer pipeline infrastructure,1,3,214,Architectural,Low,0.33,Single-pass architectural work
+121,Implement latent type inference and checking - All 5 Phases,6,34,2655,Multi-Phase Complex,Very Low,0.18,Exceptional planning
+119,Implement range operator semantic actions and IR generation,1,3,142,Small Feature,Low,0.33,Single-pass implementation
+118,Implement string concatenation operator and string literals,2,3,193,Small Feature,Medium,0.67,Simple operator addition
+117,Implement IR semantic actions for unary operators,4,11,457,Medium Feature,Low,0.36,Semantic actions addition
+116,Implement correct semantics for comparison operators,1,3,113,Small Feature,Low,0.33,Single-pass implementation
+115,Add IR semantic actions for statement modifiers,3,2,204,Small Feature,Very High,1.50,High churn for small scope
+114,Refactor IR::Node into Polymorphic Subclass Hierarchy,8,26,1478,Architectural,Low,0.31,Major refactoring done well
+106,Add Sea of Nodes IR generation infrastructure,7,9,731,Architectural,Medium,0.78,Foundation infrastructure
+105,Add UseStatement semantic action,4,5,441,Small Feature,High,0.80,Semantic action addition
+103,Add module support to Sea of Nodes IR,1,3,270,Small Feature,Low,0.33,Part of IR expansion series
+102,Add string support to Sea of Nodes IR,1,3,368,Small Feature,Low,0.33,Part of IR expansion series
+101,Add hash support to Sea of Nodes IR,1,3,464,Small Feature,Low,0.33,Part of IR expansion series
+100,Add array support to Sea of Nodes IR,1,3,473,Small Feature,Low,0.33,Part of IR expansion series
+99,Add class and object support to Sea of Nodes IR,2,3,459,Small Feature,Medium,0.67,Part of IR expansion series
+96,Eliminate all external module dependencies from production code,6,15,1156,Small Change,Low,0.40,Dependency cleanup

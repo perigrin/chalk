@@ -1,0 +1,31 @@
+PR#,Title,Commits,Files,Lines_Added,Lines_Deleted,Total_Changes
+193,Implement Chapter 3 (Variables/Scoping) and fix control flow with early returns,6,19,611,114,725
+169,Test Suite Audit: Documentation Quick Wins and Silent Failure Fix,7,19,611,114,725
+167,Fix control flow Phi node generation for if/else statements,20,44,2229,1122,3351
+164,Add CEK context helpers for functional interpreter,36,58,7533,2183,9716
+162,Fix variable reassignment not updating value in context model,2,5,136,25,161
+160,Complete Phase 5: Context-Aware IR Validation,17,42,2328,469,2797
+158,Add SourceInfo foundation for IR error reporting,15,15,1510,23,1533
+149,Plan roadmap for self-hosting validating interpreter,4,4,552,99,651
+148,Complete Precedence Semiring Implementation (Phases 2-4),26,30,1611,469,2080
+147,Make IR generation the default behavior in app.pl,4,4,221,185,406
+140,Complete Phase 1-4: Unified Context memory model with collections and references,20,42,3258,324,3582
+138,Add Mermaid diagram export for IR graphs,4,3,233,0,233
+129,Add differential testing framework for interpreter validation,6,17,824,213,1037
+126,Enable Chalk self-execution: Parser → Builder → Interpreter pipeline,20,32,1802,86,1888
+122,Implement pluggable optimizer pipeline infrastructure,1,3,214,0,214
+121,Implement latent type inference and checking - All 5 Phases,6,34,2650,5,2655
+119,Implement range operator semantic actions and IR generation,1,3,138,4,142
+118,Implement string concatenation operator and string literals,2,3,188,5,193
+117,Implement IR semantic actions for unary operators,4,11,446,11,457
+116,Implement correct semantics for comparison operators,1,3,102,11,113
+115,Add IR semantic actions for statement modifiers,3,2,204,0,204
+114,Refactor IR::Node into Polymorphic Subclass Hierarchy,8,26,1098,380,1478
+106,Add Sea of Nodes IR generation infrastructure,7,9,585,146,731
+105,Add UseStatement semantic action,4,5,441,0,441
+103,Add module support to Sea of Nodes IR,1,3,270,0,270
+102,Add string support to Sea of Nodes IR,1,3,368,0,368
+101,Add hash support to Sea of Nodes IR,1,3,464,0,464
+100,Add array support to Sea of Nodes IR,1,3,473,0,473
+99,Add class and object support to Sea of Nodes IR,2,3,459,0,459
+96,Eliminate all external module dependencies from production code,6,15,0,1156,1156
