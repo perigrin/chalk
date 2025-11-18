@@ -1,0 +1,157 @@
+# GitHub Issue Specification Quality vs PR Churn Analysis
+
+**PRs analyzed:** 31 (with both issue data and churn metrics)
+
+**Total PRs:** 44
+**PRs with issue refs:** 31
+**Issues fetched:** 31
+
+## Issue Specification Quality Overview
+
+Average issue body length: 5107 chars
+Median issue body length: 3727 chars
+Issues with checklists: 18 (58.1%)
+Issues with acceptance criteria: 17 (54.8%)
+Issues with phase breakdown: 18 (58.1%)
+
+## Issue Body Length vs PR Churn
+
+| Issue Length | PRs | Avg Churn | Median Churn | Avg Complexity |
+|--------------|-----|-----------|--------------|----------------|
+| Very Short (< 1500 chars) | 4 | 0.58 | 0.42 | 2.2 |
+| Short (1500-3000 chars) | 6 | 0.55 | 0.45 | 3.0 |
+| Medium (3000-5000 chars) | 13 | 0.41 | 0.33 | 3.3 |
+| Long (5000-10000 chars) | 5 | 0.65 | 0.62 | 4.2 |
+| Very Long (> 10000 chars) | 3 | 0.51 | 0.48 | 4.7 |
+
+**Pearson Correlation (Issue Body Length vs Churn): 0.044**
+
+Interpretation: Negligible positive correlation
+→ No meaningful correlation between issue length and churn
+
+## Structural Quality Indicators vs Churn
+
+### Has Checklist
+
+**With Checklist:** 18 PRs
+- Avg Churn: 0.51
+- Median Churn: 0.46
+
+**Without Checklist:** 13 PRs
+- Avg Churn: 0.50
+- Median Churn: 0.40
+
+### Has Acceptance Criteria
+
+**With Acceptance Criteria:** 17 PRs
+- Avg Churn: 0.54
+- Median Churn: 0.45
+
+**Without Acceptance Criteria:** 14 PRs
+- Avg Churn: 0.47
+- Median Churn: 0.42
+
+### Has Phase Breakdown
+
+**With Phase Breakdown:** 18 PRs
+- Avg Churn: 0.45
+- Median Churn: 0.40
+
+**Without Phase Breakdown:** 13 PRs
+- Avg Churn: 0.58
+- Median Churn: 0.50
+
+## Correlation by Complexity Level
+
+**Complexity Score 5:** r = 0.756
+  - Count: 6
+  - Avg Issue Length: 8763 chars
+  - Avg Churn: 0.45
+  → ❌ More detail → HIGHER churn (complex work)
+
+**Complexity Score 4:** r = -0.107
+  - Count: 12
+  - Avg Issue Length: 5961 chars
+  - Avg Churn: 0.47
+  → ✓ Slight benefit from detail
+
+**Complexity Score 3:** r = 0.386
+  - Count: 3
+  - Avg Issue Length: 2749 chars
+  - Avg Churn: 0.17
+  → ❌ More detail → HIGHER churn (complex work)
+
+**Complexity Score 2:** r = -0.347
+  - Count: 8
+  - Avg Issue Length: 2476 chars
+  - Avg Churn: 0.69
+  → ✅ More detail → LOWER churn (beneficial!)
+
+## Best Practice Examples
+
+### Low Churn with Detailed Issues (churn < 0.4, length > 3000)
+
+- **PR #66 / Issue #66:** Test Suite Audit: Documentation, Quick Wins, and Silent Failure Fix (I
+  - Issue Length: 3217 chars
+  - Churn: 0.00
+  - Checklist: Yes, Acceptance Criteria: No, Phase Breakdown: Yes
+
+- **PR #12 / Issue #12:** Architecture Refactoring: Grammar Migration to External BNF Format (Fi
+  - Issue Length: 3720 chars
+  - Churn: 0.00
+  - Checklist: Yes, Acceptance Criteria: Yes, Phase Breakdown: Yes
+
+- **PR #45 / Issue #45:** Fix issue #45: Support two-argument open, or/and operators, and specia
+  - Issue Length: 3530 chars
+  - Churn: 0.00
+  - Checklist: Yes, Acceptance Criteria: Yes, Phase Breakdown: No
+
+- **PR #74 / Issue #74:** Implement latent type inference and checking - All 5 Phases (Issue #74
+  - Issue Length: 19718 chars
+  - Churn: 0.18
+  - Checklist: Yes, Acceptance Criteria: Yes, Phase Breakdown: Yes
+
+- **PR #113 / Issue #113:** Refactor IR::Node into Polymorphic Subclass Hierarchy (Issue #113)
+  - Issue Length: 4922 chars
+  - Churn: 0.31
+  - Checklist: Yes, Acceptance Criteria: Yes, Phase Breakdown: Yes
+
+### High Churn Despite Detailed Issues (churn > 0.6, length > 3000)
+
+- **PR #139 / Issue #139:** Add SourceInfo foundation for IR error reporting (Phase 1 of #139)
+  - Issue Length: 5575 chars
+  - Churn: 1.00
+  - Checklist: Yes, Acceptance Criteria: No, Phase Breakdown: Yes
+
+- **PR #112 / Issue #112:** Make IR generation the default behavior in app.pl (fixes #112)
+  - Issue Length: 3209 chars
+  - Churn: 1.00
+  - Checklist: No, Acceptance Criteria: Yes, Phase Breakdown: No
+
+- **PR #144 / Issue #144:** Complete Precedence Semiring Implementation (Issue #144 Phases 2-4)
+  - Issue Length: 24697 chars
+  - Churn: 0.87
+  - Checklist: Yes, Acceptance Criteria: Yes, Phase Breakdown: Yes
+
+- **PR #97 / Issue #97:** Add UseStatement semantic action (Issue #97 Phase 1)
+  - Issue Length: 4572 chars
+  - Churn: 0.80
+  - Checklist: Yes, Acceptance Criteria: Yes, Phase Breakdown: No
+
+- **PR #104 / Issue #104:** Add Sea of Nodes IR generation infrastructure (Issue #104)
+  - Issue Length: 3870 chars
+  - Churn: 0.78
+  - Checklist: Yes, Acceptance Criteria: Yes, Phase Breakdown: Yes
+
+## Key Findings
+
+- **Detailed + Structured (>5K chars + checklist)**: 8 PRs, Avg Churn: 0.60
+- **Brief + Structured (<3K chars + checklist)**: 2 PRs, Avg Churn: 0.86
+- **Brief Only (<3K chars, no structure)**: 8 PRs, Avg Churn: 0.48
+
+## Conclusion
+
+Overall correlation: 0.044 (negligible positive)
+
+→ **No strong correlation between issue length and PR churn.**
+This suggests that other factors (complexity, task type, developer experience) matter more than specification length.
