@@ -3,8 +3,8 @@
 # Analyze PRs from git history
 echo "PR#|Title|Commits|Files|Lines_Added|Lines_Deleted"
 
-# Get the last 30 merge commits
-git log --merges --pretty=format:"%H|%s" --first-parent -30 | while IFS='|' read merge_hash merge_subject; do
+# Get all merge commits
+git log --merges --pretty=format:"%H|%s" --first-parent | while IFS='|' read merge_hash merge_subject; do
     # Extract PR number
     pr_num=$(echo "$merge_subject" | grep -oP '#\d+' | head -1)
 

@@ -1,0 +1,49 @@
+PR,Title,Commits,Files,Total_Changes,Complexity_Category,Complexity_Score,Churn_Level,Churn_Score
+193,Implement Chapter 3 (Variables/Scoping) and fix control flow with early returns,6,19,725,Medium Feature,3,Low,0.32
+66,"Test Suite Audit: Documentation, Quick Wins, and Silent Failure Fix (Issue #66)",0,25,1400,Medium Fix,3,Very Low,0.00
+154,Fix control flow Phi node generation for if/else statements (Issue #154),20,44,3351,Complex Fix,4,Low,0.45
+156,Add CEK context helpers for functional interpreter (Issue #156),36,58,9716,Large Feature,4,Medium,0.62
+153,Fix variable reassignment not updating value in context model (Issue #153),2,5,161,Simple Fix,1,Low,0.40
+159,Complete Phase 5: Context-Aware IR Validation (Supersedes PR #159),17,42,2797,Multi-Phase Complex,5,Low,0.40
+139,Add SourceInfo foundation for IR error reporting (Phase 1 of #139),15,15,1533,Multi-Phase Feature,4,High,1.00
+149,Plan roadmap for self-hosting validating interpreter,4,4,651,System Integration,4,High,1.00
+144,Complete Precedence Semiring Implementation (Issue #144 Phases 2-4),26,30,2080,Multi-Phase Complex,5,High,0.87
+112,Make IR generation the default behavior in app.pl (fixes #112),4,4,406,Simple Fix,1,High,1.00
+130,Complete Phase 1-4: Unified Context memory model with collections and references (Issue #130),20,42,3582,Multi-Phase Complex,5,Low,0.48
+137,Add Mermaid diagram export for IR graphs (Issue #137),4,3,233,Small Feature,2,Very High,1.33
+128,Add differential testing framework for interpreter validation (Issue #128),6,17,1037,Architectural,4,Low,0.35
+125,Enable Chalk self-execution: Parser → Builder → Interpreter pipeline (Issue #125),20,32,1888,Architectural,5,Medium,0.62
+75,Implement pluggable optimizer pipeline infrastructure (Issue #75),1,3,214,Architectural,4,Low,0.33
+74,Implement latent type inference and checking - All 5 Phases (Issue #74),6,34,2655,Multi-Phase Feature,4,Very Low,0.18
+111,Implement range operator (..) semantic actions and IR generation (Issue #111),1,3,142,Small Feature,2,Low,0.33
+110,Implement string concatenation operator and string literals (Issue #110),2,3,193,Small Feature,2,Medium,0.67
+109,"Implement IR semantic actions for unary operators (!, -) (Issue #109)",4,11,457,Medium Feature,3,Low,0.36
+116,"Implement correct semantics for comparison operators (>=, <=, !=, ne, ge, le)",1,3,113,Small Feature,2,Low,0.33
+107,Add IR semantic actions for statement modifiers (Issue #107),3,2,204,Small Feature,2,Very High,1.50
+113,Refactor IR::Node into Polymorphic Subclass Hierarchy (Issue #113),8,26,1478,Architectural,5,Low,0.31
+104,Add Sea of Nodes IR generation infrastructure (Issue #104),7,9,731,Architectural,4,Medium,0.78
+97,Add UseStatement semantic action (Issue #97 Phase 1),4,5,441,Multi-Phase Feature,4,High,0.80
+98,Add module support to Sea of Nodes IR (Issue #98 Phase 5),1,3,270,Multi-Phase Feature,4,Low,0.33
+98,Add string support to Sea of Nodes IR (Issue #98 Phase 4),1,3,368,Multi-Phase Feature,4,Low,0.33
+98,Add hash support to Sea of Nodes IR (Issue #98 Phase 3),1,3,464,Multi-Phase Feature,4,Low,0.33
+98,Add array support to Sea of Nodes IR (Issue #98 Phase 2),1,3,473,Multi-Phase Feature,4,Low,0.33
+98,Add class and object support to Sea of Nodes IR (Issue #98 Phase 1),2,3,459,Multi-Phase Feature,4,Medium,0.67
+96,Eliminate all external module dependencies from production code,1,7,19,Small Change,2,Very Low,0.14
+93,Implement Global Value Numbering optimization for Sea of Nodes IR,2,3,1303,Small Feature,2,Medium,0.67
+92,Add Loop node validation and comprehensive documentation,1,5,597,Small Feature,2,Very Low,0.20
+81,Implement conservative memory aliasing analysis for Sea of Nodes IR (Issue #81),1,2,258,Small Feature,2,Medium,0.50
+90,Add use-def chains to IR Graph for optimization passes,1,2,239,Small Feature,2,Medium,0.50
+89,Implement systematic loop-carried dependency tracking,2,4,260,Small Feature,2,Medium,0.50
+88,Standardize Phi Node Representation in Sea of Nodes IR,1,7,418,Small Change,2,Very Low,0.14
+73,Complete Sea of Nodes IR Implementation (Chapters 1-11),0,344,38523,Multi-Phase Complex,5,Very Low,0.00
+68,Add chalk.bnf - Simplified Perl subset grammar for compilation,5,103,5447,Large Feature,4,Very Low,0.05
+65,Semantic Actions Architecture: Complete Implementation,0,391,49092,Architectural,5,Very Low,0.00
+12,Architecture Refactoring: Grammar Migration to External BNF Format (Fixes #12),0,400,51400,Architectural,5,Very Low,0.00
+57,Add perl5 test suite to perl-tests/,3,759,169575,Large Feature,4,Very Low,0.00
+53,Fix #53: Migrate tests from require chalk to use Chalk library,4,28,1797,Medium Fix,3,Very Low,0.14
+15,Fix #15: Complete Aycock-Horspool left-recursion handling,4,8,739,Multi-Phase Feature,4,Medium,0.50
+10,Add comprehensive testing and documentation for Leo items (issue #10),1,3,165,Small Feature,2,Low,0.33
+45,"Fix issue #45: Support two-argument open, or/and operators, and special variables",0,1170,226023,Large Feature,4,Very Low,0.00
+38,Fix #38: Add unless-else support to enable num.t parsing,0,1166,225621,Large Feature,4,Very Low,0.00
+40,Fix #40: Add file test operator support in expression contexts,1,2,113,Small Feature,2,Medium,0.50
+39,Fix #39: Add statement modifier support for while/until/for/foreach/when,1,3,163,Small Feature,2,Low,0.33

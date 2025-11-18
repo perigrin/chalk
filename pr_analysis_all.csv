@@ -1,0 +1,49 @@
+PR,Title,Commits,Files,Lines_Added,Lines_Deleted,Total_Changes
+193,Implement Chapter 3 (Variables/Scoping) and fix control flow with early returns,6,19,611,114,725
+66,"Test Suite Audit: Documentation, Quick Wins, and Silent Failure Fix (Issue #66)",0,25,114,1286,1400
+154,Fix control flow Phi node generation for if/else statements (Issue #154),20,44,2229,1122,3351
+156,Add CEK context helpers for functional interpreter (Issue #156),36,58,7533,2183,9716
+153,Fix variable reassignment not updating value in context model (Issue #153),2,5,136,25,161
+159,Complete Phase 5: Context-Aware IR Validation (Supersedes PR #159),17,42,2328,469,2797
+139,Add SourceInfo foundation for IR error reporting (Phase 1 of #139),15,15,1510,23,1533
+149,Plan roadmap for self-hosting validating interpreter,4,4,552,99,651
+144,Complete Precedence Semiring Implementation (Issue #144 Phases 2-4),26,30,1611,469,2080
+112,Make IR generation the default behavior in app.pl (fixes #112),4,4,221,185,406
+130,Complete Phase 1-4: Unified Context memory model with collections and references (Issue #130),20,42,3258,324,3582
+137,Add Mermaid diagram export for IR graphs (Issue #137),4,3,233,0,233
+128,Add differential testing framework for interpreter validation (Issue #128),6,17,824,213,1037
+125,Enable Chalk self-execution: Parser → Builder → Interpreter pipeline (Issue #125),20,32,1802,86,1888
+75,Implement pluggable optimizer pipeline infrastructure (Issue #75),1,3,214,0,214
+74,Implement latent type inference and checking - All 5 Phases (Issue #74),6,34,2650,5,2655
+111,Implement range operator (..) semantic actions and IR generation (Issue #111),1,3,138,4,142
+110,Implement string concatenation operator and string literals (Issue #110),2,3,188,5,193
+109,"Implement IR semantic actions for unary operators (!, -) (Issue #109)",4,11,446,11,457
+116,"Implement correct semantics for comparison operators (>=, <=, !=, ne, ge, le)",1,3,102,11,113
+107,Add IR semantic actions for statement modifiers (Issue #107),3,2,204,0,204
+113,Refactor IR::Node into Polymorphic Subclass Hierarchy (Issue #113),8,26,1098,380,1478
+104,Add Sea of Nodes IR generation infrastructure (Issue #104),7,9,585,146,731
+97,Add UseStatement semantic action (Issue #97 Phase 1),4,5,441,0,441
+98,Add module support to Sea of Nodes IR (Issue #98 Phase 5),1,3,270,0,270
+98,Add string support to Sea of Nodes IR (Issue #98 Phase 4),1,3,368,0,368
+98,Add hash support to Sea of Nodes IR (Issue #98 Phase 3),1,3,464,0,464
+98,Add array support to Sea of Nodes IR (Issue #98 Phase 2),1,3,473,0,473
+98,Add class and object support to Sea of Nodes IR (Issue #98 Phase 1),2,3,459,0,459
+96,Eliminate all external module dependencies from production code,1,7,6,13,19
+93,Implement Global Value Numbering optimization for Sea of Nodes IR,2,3,1303,0,1303
+92,Add Loop node validation and comprehensive documentation,1,5,597,0,597
+81,Implement conservative memory aliasing analysis for Sea of Nodes IR (Issue #81),1,2,257,1,258
+90,Add use-def chains to IR Graph for optimization passes,1,2,239,0,239
+89,Implement systematic loop-carried dependency tracking,2,4,251,9,260
+88,Standardize Phi Node Representation in Sea of Nodes IR,1,7,324,94,418
+73,Complete Sea of Nodes IR Implementation (Chapters 1-11),0,344,4197,34326,38523
+68,Add chalk.bnf - Simplified Perl subset grammar for compilation,5,103,3026,2421,5447
+65,Semantic Actions Architecture: Complete Implementation,0,391,4181,44911,49092
+12,Architecture Refactoring: Grammar Migration to External BNF Format (Fixes #12),0,400,4325,47075,51400
+57,Add perl5 test suite to perl-tests/,3,759,169574,1,169575
+53,Fix #53: Migrate tests from require chalk to use Chalk library,4,28,975,822,1797
+15,Fix #15: Complete Aycock-Horspool left-recursion handling,4,8,319,420,739
+10,Add comprehensive testing and documentation for Leo items (issue #10),1,3,164,1,165
+45,"Fix issue #45: Support two-argument open, or/and operators, and special variables",0,1170,5214,220809,226023
+38,Fix #38: Add unless-else support to enable num.t parsing,0,1166,4676,220945,225621
+40,Fix #40: Add file test operator support in expression contexts,1,2,112,1,113
+39,Fix #39: Add statement modifier support for while/until/for/foreach/when,1,3,163,0,163

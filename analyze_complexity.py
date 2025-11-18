@@ -82,10 +82,10 @@ def calculate_churn_level(commits: int, files: int) -> Tuple[str, float]:
 def main():
     prs = []
 
-    with open('/home/user/chalk/pr_analysis.csv', 'r') as f:
+    with open('/home/user/chalk/pr_analysis_all.csv', 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            pr_num = row['PR#']
+            pr_num = row['PR']
             title = row['Title']
             commits = int(row['Commits'])
             files = int(row['Files'])
