@@ -1,0 +1,49 @@
+PR,Issue,Title
+193,N/A,Implement Chapter 3 (Variables/Scoping) and fix control flow with early returns
+66,66,"Test Suite Audit: Documentation, Quick Wins, and Silent Failure Fix (Issue #66)"
+154,154,Fix control flow Phi node generation for if/else statements (Issue #154)
+156,156,Add CEK context helpers for functional interpreter (Issue #156)
+153,153,Fix variable reassignment not updating value in context model (Issue #153)
+159,159,Complete Phase 5: Context-Aware IR Validation (Supersedes PR #159)
+139,139,Add SourceInfo foundation for IR error reporting (Phase 1 of #139)
+149,N/A,Plan roadmap for self-hosting validating interpreter
+144,144,Complete Precedence Semiring Implementation (Issue #144 Phases 2-4)
+112,112,Make IR generation the default behavior in app.pl (fixes #112)
+130,130,Complete Phase 1-4: Unified Context memory model with collections and references (Issue #130)
+137,137,Add Mermaid diagram export for IR graphs (Issue #137)
+128,128,Add differential testing framework for interpreter validation (Issue #128)
+125,125,Enable Chalk self-execution: Parser → Builder → Interpreter pipeline (Issue #125)
+75,75,Implement pluggable optimizer pipeline infrastructure (Issue #75)
+74,74,Implement latent type inference and checking - All 5 Phases (Issue #74)
+111,111,Implement range operator (..) semantic actions and IR generation (Issue #111)
+110,110,Implement string concatenation operator and string literals (Issue #110)
+109,109,"Implement IR semantic actions for unary operators (!, -) (Issue #109)"
+116,N/A,"Implement correct semantics for comparison operators (>=, <=, !=, ne, ge, le)"
+107,107,Add IR semantic actions for statement modifiers (Issue #107)
+113,113,Refactor IR::Node into Polymorphic Subclass Hierarchy (Issue #113)
+104,104,Add Sea of Nodes IR generation infrastructure (Issue #104)
+97,97,Add UseStatement semantic action (Issue #97 Phase 1)
+98,98,Add module support to Sea of Nodes IR (Issue #98 Phase 5)
+98,98,Add string support to Sea of Nodes IR (Issue #98 Phase 4)
+98,98,Add hash support to Sea of Nodes IR (Issue #98 Phase 3)
+98,98,Add array support to Sea of Nodes IR (Issue #98 Phase 2)
+98,98,Add class and object support to Sea of Nodes IR (Issue #98 Phase 1)
+96,N/A,Eliminate all external module dependencies from production code
+93,N/A,Implement Global Value Numbering optimization for Sea of Nodes IR
+92,N/A,Add Loop node validation and comprehensive documentation
+81,81,Implement conservative memory aliasing analysis for Sea of Nodes IR (Issue #81)
+90,N/A,Add use-def chains to IR Graph for optimization passes
+89,N/A,Implement systematic loop-carried dependency tracking
+88,N/A,Standardize Phi Node Representation in Sea of Nodes IR
+73,N/A,Complete Sea of Nodes IR Implementation (Chapters 1-11)
+68,N/A,Add chalk.bnf - Simplified Perl subset grammar for compilation
+65,N/A,Semantic Actions Architecture: Complete Implementation
+12,12,Architecture Refactoring: Grammar Migration to External BNF Format (Fixes #12)
+57,N/A,Add perl5 test suite to perl-tests/
+53,53,Fix #53: Migrate tests from require chalk to use Chalk library
+15,15,Fix #15: Complete Aycock-Horspool left-recursion handling
+10,10,Add comprehensive testing and documentation for Leo items (issue #10)
+45,45,"Fix issue #45: Support two-argument open, or/and operators, and special variables"
+38,38,Fix #38: Add unless-else support to enable num.t parsing
+40,40,Fix #40: Add file test operator support in expression contexts
+39,39,Fix #39: Add statement modifier support for while/until/for/foreach/when
