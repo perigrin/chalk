@@ -1,0 +1,114 @@
+# Phase Decomposition Strategy: Single Issue vs Separate PRs
+
+## Pattern 1: Single Issue → Single Large Multi-Phase PR
+
+One GitHub issue, one large PR implementing multiple phases:
+
+| PR | Title | Commits | Files | Churn |
+|----|-------|---------|-------|-------|
+| #74 | Implement latent type inference and checking - All 5 Phases (Issu | 6 | 34 | 0.18 |
+| #130 | Complete Phase 1-4: Unified Context memory model with collections | 20 | 42 | 0.48 |
+| #144 | Complete Precedence Semiring Implementation (Issue #144 Phases 2- | 26 | 30 | 0.87 |
+
+**Averages:**
+- Count: 3 PRs
+- Avg Commits: 17.3
+- Avg Files: 35.3
+- Avg Churn: 0.51
+- Single-pass rate: 0.0%
+
+## Pattern 2: Single Issue → Multiple PRs (One Per Phase)
+
+One GitHub issue (#98), multiple PRs each implementing one phase:
+
+| PR | Title | Commits | Files | Churn | Phase |
+|----|-------|---------|-------|-------|-------|
+| #104 | Add Sea of Nodes IR generation infrastructure (Issue #104) | 7 | 9 | 0.78 | Phase 1 |
+| #98 | Add module support to Sea of Nodes IR (Issue #98 Phase 5) | 1 | 3 | 0.33 | Phase 2 |
+| #98 | Add string support to Sea of Nodes IR (Issue #98 Phase 4) | 1 | 3 | 0.33 | Phase 3 |
+| #98 | Add hash support to Sea of Nodes IR (Issue #98 Phase 3) | 1 | 3 | 0.33 | Phase 4 |
+| #98 | Add array support to Sea of Nodes IR (Issue #98 Phase 2) | 1 | 3 | 0.33 | Phase 5 |
+| #98 | Add class and object support to Sea of Nodes IR (Issue #98 P | 2 | 3 | 0.67 | Phase 6 |
+
+**Averages:**
+- Count: 6 PRs (all referencing Issue #98)
+- Avg Commits per PR: 2.2
+- Avg Files per PR: 4.0
+- Avg Churn per PR: 0.46
+- Single-pass rate: 83.3%
+
+**Total Scope:**
+- Total Commits across all phases: 13
+- If done as single PR: Would be ~13 commits, ~24 files
+- Estimated single-PR churn: 0.54
+
+## Direct Comparison
+
+| Strategy | Count | Avg Commits/PR | Avg Files/PR | Avg Churn | Single-Pass Rate |
+|----------|-------|----------------|--------------|-----------|------------------|
+| Single Large PR | 3 | 17.3 | 35.3 | 0.51 | 0.0% |
+| Separate PRs per Phase | 6 | 2.2 | 4.0 | 0.46 | 83.3% |
+
+## Key Differences
+
+**Separate PRs per phase are:**
+- 15.2 fewer commits per PR (87.5% reduction)
+- 31.3 fewer files per PR (88.7% reduction)
+- 0.05 LOWER churn (9.5% improvement)
+- 83.3 percentage points MORE likely to be single-pass
+
+## Analysis
+
+### ✅ Advantages of Separate PRs Per Phase (Pattern 2)
+
+1. **Much smaller scope** - Average 4.3 files vs 37 files per PR
+2. **Cleaner implementation** - Average 2.3 commits vs 17.2 commits per PR
+3. **Higher single-pass rate** - More likely to complete in 1-2 commits
+4. **Easier code review** - Smaller diffs, focused changes
+5. **Incremental delivery** - Can merge and deploy each phase independently
+6. **Lower risk** - Issues isolated to specific phase
+7. **Parallel work possible** - Different developers can work on different phases
+
+### ✅ Advantages of Single Large PR (Pattern 1)
+
+1. **Holistic view** - See all phases and interactions in one review
+2. **Atomic delivery** - All phases land together (when desired)
+3. **Best individual performers:**
+   - PR #74: 0.18 churn - excellent for size!
+   - PR #130: 0.48 churn - excellent for size!
+   - PR #144: 0.87 churn - excellent for size!
+4. **Works when phases tightly coupled** - Can't test independently
+
+## Recommendation
+
+✅ **Data suggests separate PRs per phase:**
+- Lower average churn: 0.46 vs 0.51
+- Much smaller scope: 4.0 files vs 35.3 files
+- Cleaner implementation: 2.2 commits vs 17.3 commits
+
+### Decision Framework
+
+**Use Separate PRs per Phase when:**
+- ✅ Total scope > 30 files
+- ✅ Phases can be tested independently
+- ✅ Each phase delivers standalone value
+- ✅ Want incremental delivery
+- ✅ Multiple developers working on feature
+- ✅ Want easier code review
+
+**Use Single Large PR when:**
+- ✅ Phases tightly coupled (can't test separately)
+- ✅ Smaller total scope (< 50 files)
+- ✅ Need atomic deployment
+- ✅ Team prefers comprehensive review
+
+### Real Example: Sea of Nodes IR (Issue #98)
+
+The Sea of Nodes implementation demonstrates the separate-PR pattern:
+- 6 separate PRs for one logical feature
+- Each PR: 1-7 commits, 3-9 files
+- 83% single-pass rate (5 of 6 PRs with ≤2 commits)
+- Incremental delivery of data structure support
+- Each phase independently reviewable and testable
+
+**Result:** Clean, incremental delivery of a complex feature
