@@ -1,0 +1,143 @@
+{
+   "children" : [
+      {
+         "children" : [
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              "field"
+                           ],
+                           "rule" : "LexicalDeclarator",
+                           "span" : [
+                              0,
+                              5
+                           ]
+                        },
+                        {
+                           "children" : [
+                              {
+                                 "children" : [
+                                    "$",
+                                    {
+                                       "children" : [
+                                          "value"
+                                       ],
+                                       "rule" : "Identifier",
+                                       "span" : [
+                                          7,
+                                          12
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "ScalarVar",
+                                 "span" : [
+                                    6,
+                                    12
+                                 ]
+                              }
+                           ],
+                           "rule" : "Variable",
+                           "span" : [
+                              6,
+                              12
+                           ]
+                        },
+                        {
+                           "children" : [
+                              {
+                                 "children" : [
+                                    ":param"
+                                 ],
+                                 "rule" : "Attribute",
+                                 "span" : [
+                                    13,
+                                    19
+                                 ]
+                              },
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          ":reader"
+                                       ],
+                                       "rule" : "Attribute",
+                                       "span" : [
+                                          20,
+                                          27
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "AttributeList",
+                                 "span" : [
+                                    20,
+                                    27
+                                 ]
+                              }
+                           ],
+                           "rule" : "AttributeList",
+                           "span" : [
+                              13,
+                              27
+                           ]
+                        },
+                        "=",
+                        {
+                           "children" : [
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          "0"
+                                       ],
+                                       "rule" : "Number",
+                                       "span" : [
+                                          30,
+                                          31
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "Literal",
+                                 "span" : [
+                                    30,
+                                    31
+                                 ]
+                              }
+                           ],
+                           "rule" : "Expression",
+                           "span" : [
+                              30,
+                              31
+                           ]
+                        }
+                     ],
+                     "rule" : "VariableDeclaration",
+                     "span" : [
+                        0,
+                        31
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  31
+               ]
+            },
+            ";"
+         ],
+         "rule" : "StatementList",
+         "span" : [
+            0,
+            32
+         ]
+      }
+   ],
+   "rule" : "Program",
+   "span" : [
+      0,
+      32
+   ]
+}

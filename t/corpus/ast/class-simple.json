@@ -1,0 +1,112 @@
+{
+   "children" : [
+      {
+         "children" : [
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          "class"
+                                       ],
+                                       "rule" : "Identifier",
+                                       "span" : [
+                                          0,
+                                          5
+                                       ]
+                                    },
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                "Foo"
+                                             ],
+                                             "rule" : "Identifier",
+                                             "span" : [
+                                                6,
+                                                9
+                                             ]
+                                          }
+                                       ],
+                                       "rule" : "Expression",
+                                       "span" : [
+                                          6,
+                                          9
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "FunctionCall",
+                                 "span" : [
+                                    0,
+                                    9
+                                 ]
+                              }
+                           ],
+                           "rule" : "Expression",
+                           "span" : [
+                              0,
+                              9
+                           ]
+                        }
+                     ],
+                     "rule" : "ExpressionList",
+                     "span" : [
+                        0,
+                        9
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  9
+               ]
+            },
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              "{",
+                              "}"
+                           ],
+                           "rule" : "Block",
+                           "span" : [
+                              10,
+                              13
+                           ]
+                        }
+                     ],
+                     "rule" : "Statement",
+                     "span" : [
+                        10,
+                        13
+                     ]
+                  }
+               ],
+               "rule" : "StatementList",
+               "span" : [
+                  10,
+                  13
+               ]
+            }
+         ],
+         "rule" : "StatementList",
+         "span" : [
+            0,
+            13
+         ]
+      }
+   ],
+   "rule" : "Program",
+   "span" : [
+      0,
+      13
+   ]
+}

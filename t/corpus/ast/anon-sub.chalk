@@ -1,0 +1,1 @@
+my $fn = sub { return 1; };
