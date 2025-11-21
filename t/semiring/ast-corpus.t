@@ -12,7 +12,7 @@ use File::Basename qw(basename);
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::AST;
-use Chalk::Semiring::Boolean;
+use Chalk::Semiring::ChalkSyntax;
 use Chalk::Semiring::Composite;
 
 # Load grammar once
@@ -26,10 +26,10 @@ BEGIN {
 
 # Helper to parse and get AST
 sub parse_to_ast($input) {
-    my $boolean = Chalk::Semiring::Boolean->new();
+    my $chalksyntax = Chalk::Semiring::ChalkSyntax->new(grammar => $grammar);
     my $ast = Chalk::Semiring::AST->new();
     my $composite = Chalk::Semiring::Composite->new(
-        semirings => [$boolean, $ast]
+        semirings => [$chalksyntax, $ast]
     );
 
     my $parser = Chalk::Parser->new(

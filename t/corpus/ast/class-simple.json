@@ -8,91 +8,55 @@
                      "children" : [
                         {
                            "children" : [
+                              "class",
                               {
                                  "children" : [
                                     {
                                        "children" : [
-                                          "class"
+                                          "Foo"
                                        ],
                                        "rule" : "Identifier",
-                                       "span" : [
-                                          0,
-                                          5
-                                       ]
-                                    },
-                                    {
-                                       "children" : [
-                                          {
-                                             "children" : [
-                                                "Foo"
-                                             ],
-                                             "rule" : "Identifier",
-                                             "span" : [
-                                                6,
-                                                9
-                                             ]
-                                          }
-                                       ],
-                                       "rule" : "Expression",
                                        "span" : [
                                           6,
                                           9
                                        ]
                                     }
                                  ],
-                                 "rule" : "FunctionCall",
+                                 "rule" : "QualifiedIdentifier",
                                  "span" : [
-                                    0,
+                                    6,
                                     9
+                                 ]
+                              },
+                              {
+                                 "children" : [
+                                    "{",
+                                    "}"
+                                 ],
+                                 "rule" : "Block",
+                                 "span" : [
+                                    10,
+                                    13
                                  ]
                               }
                            ],
-                           "rule" : "Expression",
+                           "rule" : "ClassDeclaration",
                            "span" : [
                               0,
-                              9
+                              13
                            ]
                         }
                      ],
-                     "rule" : "ExpressionList",
+                     "rule" : "Block",
                      "span" : [
                         0,
-                        9
+                        13
                      ]
                   }
                ],
                "rule" : "Statement",
                "span" : [
                   0,
-                  9
-               ]
-            },
-            {
-               "children" : [
-                  {
-                     "children" : [
-                        {
-                           "children" : [
-                              "{",
-                              "}"
-                           ],
-                           "rule" : "Block",
-                           "span" : [
-                              10,
-                              13
-                           ]
-                        }
-                     ],
-                     "rule" : "Statement",
-                     "span" : [
-                        10,
-                        13
-                     ]
-                  }
-               ],
-               "rule" : "StatementList",
-               "span" : [
-                  10,
                   13
                ]
             }
