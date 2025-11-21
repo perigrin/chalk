@@ -62,6 +62,19 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
         my $self_children  = scalar( @{ $self->context->children } );
         my $other_children = scalar( @{ $other->context->children } );
 
+        # DEBUG: Log all equal-span disambiguations
+        if ($ENV{DEBUG_STMTLIST_DISAMBIG}) {
+            my $self_rule = $self->context->rule ? $self->context->rule->lhs : 'NORULE';
+            my $other_rule = $other->context->rule ? $other->context->rule->lhs : 'NORULE';
+            warn "[DISAMBIG] $self_rule vs $other_rule: self=$self_children children, other=$other_children children\n";
+
+            if ($self_rule eq 'StatementList' && $other_rule eq 'StatementList') {
+                my $self_stmts = ref($self_focus) eq 'ARRAY' ? scalar($self_focus->@*) : '?';
+                my $other_stmts = ref($other_focus) eq 'ARRAY' ? scalar($other_focus->@*) : '?';
+                warn "[DISAMBIG]   StatementList: self=$self_stmts stmts vs other=$other_stmts stmts\n";
+            }
+        }
+
         if ( $other_children > $self_children ) {
             return $other;
         }
