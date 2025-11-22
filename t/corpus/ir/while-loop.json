@@ -2,12 +2,6 @@
    "entry" : "node_12",
    "nodes" : [
       {
-         "attributes" : {},
-         "id" : "node_6",
-         "inputs" : [],
-         "op" : "Region"
-      },
-      {
          "attributes" : {
             "function_name" : "main",
             "params" : []
@@ -17,15 +11,10 @@
          "op" : "Start"
       },
       {
-         "attributes" : {
-            "type" : "Int",
-            "value" : null
-         },
-         "id" : "node_11",
-         "inputs" : [
-            "node_10"
-         ],
-         "op" : "Constant"
+         "attributes" : {},
+         "id" : "node_6",
+         "inputs" : [],
+         "op" : "Region"
       },
       {
          "attributes" : {
@@ -38,6 +27,17 @@
             "node_11"
          ],
          "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_11",
+         "inputs" : [
+            "node_10"
+         ],
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

@@ -3,26 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "condition_id" : "node_10"
-         },
-         "id" : "node_11",
-         "inputs" : [
-            "node_9",
-            "node_10"
-         ],
-         "op" : "If"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_25",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "type" : "Int",
             "value" : 1
          },
@@ -39,6 +19,40 @@
             "node_13"
          ],
          "op" : "Region"
+      },
+      {
+         "attributes" : {
+            "condition_id" : "node_10"
+         },
+         "id" : "node_11",
+         "inputs" : [
+            "node_9",
+            "node_10"
+         ],
+         "op" : "If"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_14",
+            "value_id" : "node_26"
+         },
+         "id" : "node_27",
+         "inputs" : [
+            "node_14",
+            "node_26"
+         ],
+         "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_26",
+         "inputs" : [
+            "node_25"
+         ],
+         "op" : "Constant"
       },
       {
          "attributes" : {
@@ -62,26 +76,12 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
+            "function_name" : "main",
+            "params" : []
          },
-         "id" : "node_26",
-         "inputs" : [
-            "node_25"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "control_id" : "node_14",
-            "value_id" : "node_26"
-         },
-         "id" : "node_27",
-         "inputs" : [
-            "node_14",
-            "node_26"
-         ],
-         "op" : "Return"
+         "id" : "node_25",
+         "inputs" : [],
+         "op" : "Start"
       }
    ],
    "version" : "1.0"

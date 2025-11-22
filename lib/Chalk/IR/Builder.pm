@@ -42,35 +42,20 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::Region;
     use Chalk::IR::Node::Phi;
     use Chalk::IR::Node::Loop;
+    use Chalk::IR::Node::NewArray;
+    use Chalk::IR::Node::NewHash;
+    use Chalk::IR::Node::StrConcat;
 
-    field $graph           :reader;
-    field $context         :reader;    # Context-as-closure for variable memory
+    field $graph           :reader = Chalk::IR::Graph->new();
+    field $context         :reader = Chalk::IR::Context->empty_context();
     field $node_counter    :reader = 0;
     field $current_control :reader;    # Current control flow node
     field $loop_depth = 0;    # Current loop nesting depth for label namespacing
-    field $loop_modified_vars =
-      [];    # Stack of sets tracking modified vars per loop depth
-    field $branch_tracking_stack :reader =
-      [];    # Unified stack for tracking variable modifications in branches (loops, conditionals)
-    field $type_inference :reader;    # Type inference instance
-    field $type_lattice   :reader;    # Grammar-specific type system
-    field $validator      :reader;    # Validation context instance
-
-    ADJUST {
-        $graph          = Chalk::IR::Graph->new();
-        $context        = Chalk::IR::Context->empty_context();
-        $type_lattice   = Chalk::Grammar::Chalk::TypeLattice->new();
-        $type_inference = Chalk::IR::TypeInference->new(
-            context      => $context,
-            graph        => $graph,
-            type_lattice => $type_lattice
-        );
-        $validator = Chalk::IR::ValidationContext->new(
-            context      => $context,
-            graph        => $graph,
-            type_lattice => $type_lattice
-        );
-    }
+    field $loop_modified_vars = [];    # Stack of sets tracking modified vars per loop depth
+    field $branch_tracking_stack :reader = [];    # Unified stack for tracking variable modifications in branches (loops, conditionals)
+    field $type_lattice   :reader = Chalk::Grammar::Chalk::TypeLattice->new();
+    field $type_inference :reader = Chalk::IR::TypeInference->new(context => $context, graph => $graph, type_lattice => $type_lattice);
+    field $validator      :reader = Chalk::IR::ValidationContext->new(context => $context, graph => $graph, type_lattice => $type_lattice);
 
     # Generate unique node ID
     method next_node_id() {
@@ -190,8 +175,6 @@ class Chalk::IR::Builder {
 
   # Create Return node
   # If $control is undef, uses current_control. Otherwise uses provided control.
-    use Carp qw(confess);
-
     method build_return_node(
         $value_node,
         $control = undef,
@@ -204,7 +187,7 @@ class Chalk::IR::Builder {
         # Check that value_node is an IR node object
         unless ( $value_node isa Chalk::IR::Node::Base ) {
             my $ref_type = ref($value_node);
-            confess
+            die
 "build_return_node: value_node is not an IR node object (got $ref_type)";
         }
 
@@ -1199,13 +1182,11 @@ class Chalk::IR::Builder {
     # Array operations (Issue #98 Phase 2)
     method build_array_new_node() {
 
-        # Create ArrayNew node for creating an empty array
+        # Create NewArray node for creating an empty array
         my $node_id   = $self->next_node_id();
-        my $array_new = Chalk::IR::Node->new(
+        my $array_new = Chalk::IR::Node::NewArray->new(
             id         => $node_id,
-            op         => 'ArrayNew',
             inputs     => [$current_control],
-            attributes => {},
         );
         $graph->add_node($array_new);
 
@@ -1333,13 +1314,11 @@ class Chalk::IR::Builder {
     # Hash operations (Issue #98 Phase 3)
     method build_hash_new_node() {
 
-        # Create HashNew node for creating an empty hash
+        # Create NewHash node for creating an empty hash
         my $node_id  = $self->next_node_id();
-        my $hash_new = Chalk::IR::Node->new(
+        my $hash_new = Chalk::IR::Node::NewHash->new(
             id         => $node_id,
-            op         => 'HashNew',
             inputs     => [$current_control],
-            attributes => {},
         );
         $graph->add_node($hash_new);
 
@@ -1468,20 +1447,12 @@ class Chalk::IR::Builder {
     method build_str_concat_node( $left_node, $right_node ) {
 
         # Create StrConcat node for concatenating two strings
-        my $left_ref  = { op => 'NodeRef', node_id => $left_node->id };
-        my $right_ref = { op => 'NodeRef', node_id => $right_node->id };
-
-        my $attributes = {
-            left  => $left_ref,
-            right => $right_ref
-        };
-
         my $node_id    = $self->next_node_id();
-        my $str_concat = Chalk::IR::Node->new(
+        my $str_concat = Chalk::IR::Node::StrConcat->new(
             id         => $node_id,
-            op         => 'StrConcat',
             inputs     => [ $current_control, $left_node->id, $right_node->id ],
-            attributes => $attributes,
+            left_id    => $left_node->id,
+            right_id   => $right_node->id,
         );
         $graph->add_node($str_concat);
 

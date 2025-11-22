@@ -3,15 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_9",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "type" : "Int",
             "value" : null
          },
@@ -32,6 +23,15 @@
             "node_10"
          ],
          "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_9",
+         "inputs" : [],
+         "op" : "Start"
       }
    ],
    "version" : "1.0"

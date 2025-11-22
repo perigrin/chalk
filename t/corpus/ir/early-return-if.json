@@ -3,17 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "operand_id" : "node_37"
-         },
-         "id" : "node_38",
-         "inputs" : [
-            "node_34",
-            "node_37"
-         ],
-         "op" : "Negate"
-      },
-      {
-         "attributes" : {
             "type" : "Int",
             "value" : 42
          },
@@ -22,6 +11,24 @@
             "node_34"
          ],
          "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_34",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_3",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -37,15 +44,6 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_3",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "type" : "Int",
             "value" : 5
          },
@@ -57,12 +55,14 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
+            "operand_id" : "node_37"
          },
-         "id" : "node_34",
-         "inputs" : [],
-         "op" : "Start"
+         "id" : "node_38",
+         "inputs" : [
+            "node_34",
+            "node_37"
+         ],
+         "op" : "Negate"
       }
    ],
    "version" : "1.0"

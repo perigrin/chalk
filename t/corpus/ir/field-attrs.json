@@ -3,21 +3,10 @@
    "nodes" : [
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : 0
-         },
-         "id" : "node_18",
-         "inputs" : [
-            "node_15"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
             "function_name" : "main",
             "params" : []
          },
-         "id" : "node_15",
+         "id" : "node_22",
          "inputs" : [],
          "op" : "Start"
       },
@@ -37,9 +26,20 @@
             "function_name" : "main",
             "params" : []
          },
-         "id" : "node_22",
+         "id" : "node_15",
          "inputs" : [],
          "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : 0
+         },
+         "id" : "node_18",
+         "inputs" : [
+            "node_15"
+         ],
+         "op" : "Constant"
       },
       {
          "attributes" : {

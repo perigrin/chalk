@@ -3,6 +3,18 @@
    "nodes" : [
       {
          "attributes" : {
+            "control_id" : "node_0",
+            "value_id" : "node_1"
+         },
+         "id" : "node_2",
+         "inputs" : [
+            "node_0",
+            "node_1"
+         ],
+         "op" : "Return"
+      },
+      {
+         "attributes" : {
             "function_name" : "main",
             "params" : []
          },
@@ -20,18 +32,6 @@
             "node_0"
          ],
          "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "control_id" : "node_0",
-            "value_id" : "node_1"
-         },
-         "id" : "node_2",
-         "inputs" : [
-            "node_0",
-            "node_1"
-         ],
-         "op" : "Return"
       }
    ],
    "version" : "1.0"

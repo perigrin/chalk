@@ -3,6 +3,15 @@
    "nodes" : [
       {
          "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_10",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
             "control_id" : "node_6",
             "value_id" : "node_11"
          },
@@ -15,32 +24,23 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
-         },
-         "id" : "node_11",
-         "inputs" : [
-            "node_10"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_10",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "type" : "String",
             "value" : "hello"
          },
          "id" : "node_6",
          "inputs" : [
             "node_3"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_11",
+         "inputs" : [
+            "node_10"
          ],
          "op" : "Constant"
       },
