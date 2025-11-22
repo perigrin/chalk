@@ -3,14 +3,15 @@
    "nodes" : [
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
+            "control_id" : "node_0",
+            "value_id" : "node_1"
          },
-         "id" : "node_1",
+         "id" : "node_2",
          "inputs" : [
-            "node_0"
+            "node_0",
+            "node_1"
          ],
-         "op" : "Constant"
+         "op" : "Return"
       },
       {
          "attributes" : {
@@ -23,15 +24,14 @@
       },
       {
          "attributes" : {
-            "control_id" : "node_0",
-            "value_id" : "node_1"
+            "type" : "Int",
+            "value" : null
          },
-         "id" : "node_2",
+         "id" : "node_1",
          "inputs" : [
-            "node_0",
-            "node_1"
+            "node_0"
          ],
-         "op" : "Return"
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

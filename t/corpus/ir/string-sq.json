@@ -12,26 +12,12 @@
       },
       {
          "attributes" : {
-            "control_id" : "node_6",
-            "value_id" : "node_11"
+            "function_name" : "main",
+            "params" : []
          },
-         "id" : "node_12",
-         "inputs" : [
-            "node_6",
-            "node_11"
-         ],
-         "op" : "Return"
-      },
-      {
-         "attributes" : {
-            "type" : "String",
-            "value" : "hello"
-         },
-         "id" : "node_6",
-         "inputs" : [
-            "node_3"
-         ],
-         "op" : "Constant"
+         "id" : "node_10",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -46,12 +32,26 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
+            "type" : "String",
+            "value" : "hello"
          },
-         "id" : "node_10",
-         "inputs" : [],
-         "op" : "Start"
+         "id" : "node_6",
+         "inputs" : [
+            "node_3"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_6",
+            "value_id" : "node_11"
+         },
+         "id" : "node_12",
+         "inputs" : [
+            "node_6",
+            "node_11"
+         ],
+         "op" : "Return"
       }
    ],
    "version" : "1.0"

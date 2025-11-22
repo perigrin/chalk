@@ -14,14 +14,25 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : 1
+            "left_id" : "node_0",
+            "right_id" : "node_7"
          },
-         "id" : "node_0",
+         "id" : "node_8",
          "inputs" : [
-            null
+            "node_4",
+            "node_0",
+            "node_7"
          ],
-         "op" : "Constant"
+         "op" : "Add"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_4",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -37,37 +48,6 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_9",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_4",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
-            "left_id" : "node_0",
-            "right_id" : "node_7"
-         },
-         "id" : "node_8",
-         "inputs" : [
-            "node_4",
-            "node_0",
-            "node_7"
-         ],
-         "op" : "Add"
-      },
-      {
-         "attributes" : {
             "type" : "Int",
             "value" : 2
          },
@@ -76,6 +56,26 @@
             "node_4"
          ],
          "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : 1
+         },
+         "id" : "node_0",
+         "inputs" : [
+            null
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_9",
+         "inputs" : [],
+         "op" : "Start"
       }
    ],
    "version" : "1.0"

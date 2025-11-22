@@ -1,1 +1,1 @@
-return 1 if $x;
+return 1 if 1;

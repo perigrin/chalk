@@ -16,83 +16,26 @@
                                        "children" : [
                                           {
                                              "children" : [
-                                                {
-                                                   "children" : [
-                                                      {
-                                                         "children" : [
-                                                            "$",
-                                                            {
-                                                               "children" : [
-                                                                  "i"
-                                                               ],
-                                                               "rule" : "Identifier",
-                                                               "span" : [
-                                                                  8,
-                                                                  9
-                                                               ]
-                                                            }
-                                                         ],
-                                                         "rule" : "ScalarVar",
-                                                         "span" : [
-                                                            7,
-                                                            9
-                                                         ]
-                                                      }
-                                                   ],
-                                                   "rule" : "Variable",
-                                                   "span" : [
-                                                      7,
-                                                      9
-                                                   ]
-                                                }
+                                                "1"
                                              ],
-                                             "rule" : "Expression",
+                                             "rule" : "Number",
                                              "span" : [
                                                 7,
-                                                9
-                                             ]
-                                          },
-                                          "<",
-                                          {
-                                             "children" : [
-                                                {
-                                                   "children" : [
-                                                      {
-                                                         "children" : [
-                                                            "10"
-                                                         ],
-                                                         "rule" : "Number",
-                                                         "span" : [
-                                                            12,
-                                                            14
-                                                         ]
-                                                      }
-                                                   ],
-                                                   "rule" : "Literal",
-                                                   "span" : [
-                                                      12,
-                                                      14
-                                                   ]
-                                                }
-                                             ],
-                                             "rule" : "Expression",
-                                             "span" : [
-                                                12,
-                                                14
+                                                8
                                              ]
                                           }
                                        ],
-                                       "rule" : "ComparisonOp",
+                                       "rule" : "Literal",
                                        "span" : [
                                           7,
-                                          14
+                                          8
                                        ]
                                     }
                                  ],
                                  "rule" : "Expression",
                                  "span" : [
                                     7,
-                                    14
+                                    8
                                  ]
                               },
                               ")",
@@ -111,110 +54,96 @@
                                                                "children" : [
                                                                   {
                                                                      "children" : [
-                                                                        {
-                                                                           "children" : [
-                                                                              "$",
-                                                                              {
-                                                                                 "children" : [
-                                                                                    "i"
-                                                                                 ],
-                                                                                 "rule" : "Identifier",
-                                                                                 "span" : [
-                                                                                    19,
-                                                                                    20
-                                                                                 ]
-                                                                              }
-                                                                           ],
-                                                                           "rule" : "ScalarVar",
-                                                                           "span" : [
-                                                                              18,
-                                                                              20
-                                                                           ]
-                                                                        }
+                                                                        "1"
                                                                      ],
-                                                                     "rule" : "Variable",
+                                                                     "rule" : "Number",
                                                                      "span" : [
-                                                                        18,
-                                                                        20
+                                                                        12,
+                                                                        13
                                                                      ]
-                                                                  },
-                                                                  "++"
+                                                                  }
                                                                ],
-                                                               "rule" : "Postfix",
+                                                               "rule" : "Literal",
                                                                "span" : [
-                                                                  18,
-                                                                  22
+                                                                  12,
+                                                                  13
                                                                ]
                                                             }
                                                          ],
                                                          "rule" : "Expression",
                                                          "span" : [
-                                                            18,
-                                                            22
+                                                            12,
+                                                            13
                                                          ]
                                                       }
                                                    ],
                                                    "rule" : "ExpressionList",
                                                    "span" : [
-                                                      18,
-                                                      22
+                                                      12,
+                                                      13
                                                    ]
                                                 }
                                              ],
                                              "rule" : "Statement",
                                              "span" : [
-                                                18,
-                                                22
+                                                12,
+                                                13
                                              ]
-                                          },
-                                          ";"
+                                          }
                                        ],
                                        "rule" : "StatementList",
                                        "span" : [
-                                          18,
-                                          23
+                                          12,
+                                          13
                                        ]
                                     },
                                     "}"
                                  ],
                                  "rule" : "Block",
                                  "span" : [
-                                    16,
-                                    25
+                                    10,
+                                    15
                                  ]
                               }
                            ],
                            "rule" : "WhileStatement",
                            "span" : [
                               0,
-                              25
+                              15
                            ]
                         }
                      ],
                      "rule" : "Block",
                      "span" : [
                         0,
-                        25
+                        15
                      ]
                   }
                ],
                "rule" : "Statement",
                "span" : [
                   0,
-                  25
+                  15
                ]
             }
          ],
          "rule" : "StatementList",
          "span" : [
             0,
-            25
+            15
+         ]
+      },
+      {
+         "rule" : "WS_OPT",
+         "span" : [
+            15,
+            16
          ]
       }
    ],
    "rule" : "Program",
    "span" : [
       0,
-      25
+      16
    ]
 }

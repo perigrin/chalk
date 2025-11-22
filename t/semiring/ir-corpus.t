@@ -79,14 +79,9 @@ if (@test_cases == 0) {
     plan skip_all => 'No corpus test cases found';
 }
 
-# Known failing tests due to incomplete IR generation (control flow, etc.)
-my %todo_tests = map { $_ => 1 } qw(
-    conditional
-    for-loop
-    while-loop
-    postfix-if
-    use-stmt
-);
+# Known failing tests due to incomplete IR generation
+# (currently all tests pass after fixing test cases to use valid expressions)
+my %todo_tests = ();
 
 # Run tests for each corpus entry
 for my $chalk_file (sort @test_cases) {

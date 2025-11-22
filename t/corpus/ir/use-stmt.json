@@ -15,6 +15,15 @@
       },
       {
          "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_5",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
             "imports" : [],
             "module" : ".42.",
             "type" : "external"
@@ -37,15 +46,6 @@
             "node_5"
          ],
          "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_5",
-         "inputs" : [],
-         "op" : "Start"
       }
    ],
    "version" : "1.0"

@@ -67,43 +67,33 @@
                            "children" : [
                               {
                                  "children" : [
-                                    "$",
-                                    {
-                                       "children" : [
-                                          "x"
-                                       ],
-                                       "rule" : "Identifier",
-                                       "span" : [
-                                          13,
-                                          14
-                                       ]
-                                    }
+                                    "1"
                                  ],
-                                 "rule" : "ScalarVar",
+                                 "rule" : "Number",
                                  "span" : [
                                     12,
-                                    14
+                                    13
                                  ]
                               }
                            ],
-                           "rule" : "Variable",
+                           "rule" : "Literal",
                            "span" : [
                               12,
-                              14
+                              13
                            ]
                         }
                      ],
                      "rule" : "Expression",
                      "span" : [
                         12,
-                        14
+                        13
                      ]
                   }
                ],
                "rule" : "Statement",
                "span" : [
                   0,
-                  14
+                  13
                ]
             },
             ";"
@@ -111,6 +101,13 @@
          "rule" : "StatementList",
          "span" : [
             0,
+            14
+         ]
+      },
+      {
+         "rule" : "WS_OPT",
+         "span" : [
+            14,
             15
          ]
       }
