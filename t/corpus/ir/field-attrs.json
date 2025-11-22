@@ -1,0 +1,58 @@
+{
+   "entry" : "node_24",
+   "nodes" : [
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_15",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_18",
+            "value_id" : "node_23"
+         },
+         "id" : "node_24",
+         "inputs" : [
+            "node_18",
+            "node_23"
+         ],
+         "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_22",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_23",
+         "inputs" : [
+            "node_22"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : 0
+         },
+         "id" : "node_18",
+         "inputs" : [
+            "node_15"
+         ],
+         "op" : "Constant"
+      }
+   ],
+   "version" : "1.0"
+}

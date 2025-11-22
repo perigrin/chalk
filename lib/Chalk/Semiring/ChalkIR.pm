@@ -58,8 +58,7 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
         );
 
         my $precedence_sr = Chalk::Semiring::Precedence->new(
-            precedence_table => \@perl_precedence_table,
-            shared_context => { forest => $forest }
+            precedence_table => \@perl_precedence_table
         );
 
         # Create Semantic semiring with IR builder in environment
