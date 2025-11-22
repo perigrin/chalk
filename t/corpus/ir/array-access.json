@@ -1,0 +1,38 @@
+{
+   "entry" : "node_36",
+   "nodes" : [
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_35",
+         "inputs" : [
+            "node_34"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_34",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_34",
+            "value_id" : "node_35"
+         },
+         "id" : "node_36",
+         "inputs" : [
+            "node_34",
+            "node_35"
+         ],
+         "op" : "Return"
+      }
+   ],
+   "version" : "1.0"
+}

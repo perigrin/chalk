@@ -3,17 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
-         },
-         "id" : "node_11",
-         "inputs" : [
-            "node_10"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
             "type" : "String",
             "value" : "hello world"
          },
@@ -22,6 +11,24 @@
             "node_3"
          ],
          "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_3",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_10",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -37,21 +44,14 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
+            "type" : "Int",
+            "value" : null
          },
-         "id" : "node_10",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_3",
-         "inputs" : [],
-         "op" : "Start"
+         "id" : "node_11",
+         "inputs" : [
+            "node_10"
+         ],
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

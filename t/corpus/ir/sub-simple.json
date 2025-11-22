@@ -3,6 +3,17 @@
    "nodes" : [
       {
          "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_17",
+         "inputs" : [
+            "node_16"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
             "control_id" : "node_16",
             "value_id" : "node_17"
          },
@@ -12,17 +23,6 @@
             "node_17"
          ],
          "op" : "Return"
-      },
-      {
-         "attributes" : {
-            "type" : "Int",
-            "value" : null
-         },
-         "id" : "node_17",
-         "inputs" : [
-            "node_16"
-         ],
-         "op" : "Constant"
       },
       {
          "attributes" : {

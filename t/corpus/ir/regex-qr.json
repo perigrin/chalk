@@ -3,14 +3,12 @@
    "nodes" : [
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
+            "function_name" : "main",
+            "params" : []
          },
-         "id" : "node_17",
-         "inputs" : [
-            "node_16"
-         ],
-         "op" : "Constant"
+         "id" : "node_16",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -26,23 +24,14 @@
       },
       {
          "attributes" : {
-            "type" : "Regex",
-            "value" : "qr/\\d+/"
+            "type" : "Int",
+            "value" : null
          },
-         "id" : "node_12",
+         "id" : "node_17",
          "inputs" : [
-            "node_9"
+            "node_16"
          ],
          "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_16",
-         "inputs" : [],
-         "op" : "Start"
       },
       {
          "attributes" : {
@@ -52,6 +41,17 @@
          "id" : "node_9",
          "inputs" : [],
          "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Regex",
+            "value" : "qr/\\d+/"
+         },
+         "id" : "node_12",
+         "inputs" : [
+            "node_9"
+         ],
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

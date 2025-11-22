@@ -4,11 +4,11 @@
       {
          "attributes" : {
             "type" : "Int",
-            "value" : null
+            "value" : 42
          },
-         "id" : "node_2",
+         "id" : "node_0",
          "inputs" : [
-            "node_1"
+            null
          ],
          "op" : "Constant"
       },
@@ -27,11 +27,11 @@
       {
          "attributes" : {
             "type" : "Int",
-            "value" : 42
+            "value" : null
          },
-         "id" : "node_0",
+         "id" : "node_2",
          "inputs" : [
-            null
+            "node_1"
          ],
          "op" : "Constant"
       },

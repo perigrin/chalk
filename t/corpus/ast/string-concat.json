@@ -1,0 +1,138 @@
+{
+   "children" : [
+      {
+         "children" : [
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        "return",
+                        {
+                           "children" : [
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      {
+                                                         "children" : [
+                                                            "\"hello\""
+                                                         ],
+                                                         "rule" : "DoubleQuotedString",
+                                                         "span" : [
+                                                            7,
+                                                            14
+                                                         ]
+                                                      }
+                                                   ],
+                                                   "rule" : "String",
+                                                   "span" : [
+                                                      7,
+                                                      14
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Literal",
+                                             "span" : [
+                                                7,
+                                                14
+                                             ]
+                                          }
+                                       ],
+                                       "rule" : "Expression",
+                                       "span" : [
+                                          7,
+                                          14
+                                       ]
+                                    },
+                                    ".",
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      {
+                                                         "children" : [
+                                                            "\" world\""
+                                                         ],
+                                                         "rule" : "DoubleQuotedString",
+                                                         "span" : [
+                                                            17,
+                                                            25
+                                                         ]
+                                                      }
+                                                   ],
+                                                   "rule" : "String",
+                                                   "span" : [
+                                                      17,
+                                                      25
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Literal",
+                                             "span" : [
+                                                17,
+                                                25
+                                             ]
+                                          }
+                                       ],
+                                       "rule" : "Expression",
+                                       "span" : [
+                                          17,
+                                          25
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "ConcatenationOp",
+                                 "span" : [
+                                    7,
+                                    25
+                                 ]
+                              }
+                           ],
+                           "rule" : "Expression",
+                           "span" : [
+                              7,
+                              25
+                           ]
+                        }
+                     ],
+                     "rule" : "ReturnStatement",
+                     "span" : [
+                        0,
+                        25
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  25
+               ]
+            },
+            ";"
+         ],
+         "rule" : "StatementList",
+         "span" : [
+            0,
+            26
+         ]
+      },
+      {
+         "rule" : "WS_OPT",
+         "span" : [
+            26,
+            27
+         ]
+      }
+   ],
+   "rule" : "Program",
+   "span" : [
+      0,
+      27
+   ]
+}

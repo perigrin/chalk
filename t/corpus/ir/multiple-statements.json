@@ -1,0 +1,58 @@
+{
+   "entry" : "node_52",
+   "nodes" : [
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_19",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_50",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : 2
+         },
+         "id" : "node_22",
+         "inputs" : [
+            "node_19"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_51",
+         "inputs" : [
+            "node_50"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_22",
+            "value_id" : "node_51"
+         },
+         "id" : "node_52",
+         "inputs" : [
+            "node_22",
+            "node_51"
+         ],
+         "op" : "Return"
+      }
+   ],
+   "version" : "1.0"
+}

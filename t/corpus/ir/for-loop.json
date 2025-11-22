@@ -14,15 +14,6 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_6",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "control_id" : "node_6",
             "value_id" : "node_7"
          },
@@ -32,6 +23,15 @@
             "node_7"
          ],
          "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_6",
+         "inputs" : [],
+         "op" : "Start"
       }
    ],
    "version" : "1.0"

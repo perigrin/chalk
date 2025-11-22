@@ -1,0 +1,305 @@
+{
+   "children" : [
+      {
+         "children" : [
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              "my"
+                           ],
+                           "rule" : "LexicalDeclarator",
+                           "span" : [
+                              0,
+                              2
+                           ]
+                        },
+                        {
+                           "children" : [
+                              {
+                                 "children" : [
+                                    "@",
+                                    {
+                                       "children" : [
+                                          "arr"
+                                       ],
+                                       "rule" : "Identifier",
+                                       "span" : [
+                                          4,
+                                          7
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "ArrayVar",
+                                 "span" : [
+                                    3,
+                                    7
+                                 ]
+                              }
+                           ],
+                           "rule" : "Variable",
+                           "span" : [
+                              3,
+                              7
+                           ]
+                        },
+                        "=",
+                        {
+                           "children" : [
+                              "(",
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      "1"
+                                                   ],
+                                                   "rule" : "Number",
+                                                   "span" : [
+                                                      11,
+                                                      12
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Literal",
+                                             "span" : [
+                                                11,
+                                                12
+                                             ]
+                                          }
+                                       ],
+                                       "rule" : "Expression",
+                                       "span" : [
+                                          11,
+                                          12
+                                       ]
+                                    },
+                                    ",",
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      {
+                                                         "children" : [
+                                                            "2"
+                                                         ],
+                                                         "rule" : "Number",
+                                                         "span" : [
+                                                            14,
+                                                            15
+                                                         ]
+                                                      }
+                                                   ],
+                                                   "rule" : "Literal",
+                                                   "span" : [
+                                                      14,
+                                                      15
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Expression",
+                                             "span" : [
+                                                14,
+                                                15
+                                             ]
+                                          },
+                                          ",",
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      {
+                                                         "children" : [
+                                                            {
+                                                               "children" : [
+                                                                  "3"
+                                                               ],
+                                                               "rule" : "Number",
+                                                               "span" : [
+                                                                  17,
+                                                                  18
+                                                               ]
+                                                            }
+                                                         ],
+                                                         "rule" : "Literal",
+                                                         "span" : [
+                                                            17,
+                                                            18
+                                                         ]
+                                                      }
+                                                   ],
+                                                   "rule" : "Expression",
+                                                   "span" : [
+                                                      17,
+                                                      18
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "ExpressionList",
+                                             "span" : [
+                                                17,
+                                                18
+                                             ]
+                                          }
+                                       ],
+                                       "rule" : "ExpressionList",
+                                       "span" : [
+                                          14,
+                                          18
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "ExpressionList",
+                                 "span" : [
+                                    11,
+                                    18
+                                 ]
+                              },
+                              ")"
+                           ],
+                           "rule" : "Expression",
+                           "span" : [
+                              10,
+                              19
+                           ]
+                        }
+                     ],
+                     "rule" : "VariableDeclaration",
+                     "span" : [
+                        0,
+                        19
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  19
+               ]
+            },
+            ";",
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              "return",
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                "$",
+                                                {
+                                                   "children" : [
+                                                      "arr"
+                                                   ],
+                                                   "rule" : "Identifier",
+                                                   "span" : [
+                                                      29,
+                                                      32
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "ScalarVar",
+                                             "span" : [
+                                                28,
+                                                32
+                                             ]
+                                          },
+                                          "[",
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      {
+                                                         "children" : [
+                                                            "1"
+                                                         ],
+                                                         "rule" : "Number",
+                                                         "span" : [
+                                                            33,
+                                                            34
+                                                         ]
+                                                      }
+                                                   ],
+                                                   "rule" : "Literal",
+                                                   "span" : [
+                                                      33,
+                                                      34
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Expression",
+                                             "span" : [
+                                                33,
+                                                34
+                                             ]
+                                          },
+                                          "]"
+                                       ],
+                                       "rule" : "Variable",
+                                       "span" : [
+                                          28,
+                                          35
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "Expression",
+                                 "span" : [
+                                    28,
+                                    35
+                                 ]
+                              }
+                           ],
+                           "rule" : "ReturnStatement",
+                           "span" : [
+                              21,
+                              35
+                           ]
+                        }
+                     ],
+                     "rule" : "Statement",
+                     "span" : [
+                        21,
+                        35
+                     ]
+                  },
+                  ";"
+               ],
+               "rule" : "StatementList",
+               "span" : [
+                  21,
+                  36
+               ]
+            }
+         ],
+         "rule" : "StatementList",
+         "span" : [
+            0,
+            36
+         ]
+      },
+      {
+         "rule" : "WS_OPT",
+         "span" : [
+            36,
+            37
+         ]
+      }
+   ],
+   "rule" : "Program",
+   "span" : [
+      0,
+      37
+   ]
+}

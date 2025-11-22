@@ -3,17 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "index" : 0,
-            "label" : "IfTrue"
-         },
-         "id" : "node_25",
-         "inputs" : [
-            "node_24"
-         ],
-         "op" : "Proj"
-      },
-      {
-         "attributes" : {
             "control_id" : "node_27",
             "value_id" : "node_103"
          },
@@ -26,32 +15,23 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
-         },
-         "id" : "node_103",
-         "inputs" : [
-            "node_102"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_102",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "function_name" : "main",
             "params" : []
          },
          "id" : "node_13",
          "inputs" : [],
          "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "index" : 0,
+            "label" : "IfTrue"
+         },
+         "id" : "node_25",
+         "inputs" : [
+            "node_24"
+         ],
+         "op" : "Proj"
       },
       {
          "attributes" : {
@@ -80,18 +60,29 @@
             "function_name" : "main",
             "params" : []
          },
-         "id" : "node_20",
+         "id" : "node_102",
          "inputs" : [],
          "op" : "Start"
       },
       {
-         "attributes" : {},
-         "id" : "node_27",
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_103",
          "inputs" : [
-            "node_25",
-            "node_26"
+            "node_102"
          ],
-         "op" : "Region"
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_20",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -103,6 +94,15 @@
             "node_16"
          ],
          "op" : "If"
+      },
+      {
+         "attributes" : {},
+         "id" : "node_27",
+         "inputs" : [
+            "node_25",
+            "node_26"
+         ],
+         "op" : "Region"
       }
    ],
    "version" : "1.0"

@@ -12,12 +12,15 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
+            "control_id" : "node_6",
+            "value_id" : "node_11"
          },
-         "id" : "node_3",
-         "inputs" : [],
-         "op" : "Start"
+         "id" : "node_12",
+         "inputs" : [
+            "node_6",
+            "node_11"
+         ],
+         "op" : "Return"
       },
       {
          "attributes" : {
@@ -43,15 +46,12 @@
       },
       {
          "attributes" : {
-            "control_id" : "node_6",
-            "value_id" : "node_11"
+            "function_name" : "main",
+            "params" : []
          },
-         "id" : "node_12",
-         "inputs" : [
-            "node_6",
-            "node_11"
-         ],
-         "op" : "Return"
+         "id" : "node_3",
+         "inputs" : [],
+         "op" : "Start"
       }
    ],
    "version" : "1.0"
