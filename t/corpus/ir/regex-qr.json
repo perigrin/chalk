@@ -15,17 +15,6 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
-         },
-         "id" : "node_17",
-         "inputs" : [
-            "node_16"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
             "function_name" : "main",
             "params" : []
          },
@@ -52,6 +41,17 @@
          "id" : "node_9",
          "inputs" : [],
          "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_17",
+         "inputs" : [
+            "node_16"
+         ],
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

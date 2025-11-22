@@ -1,26 +1,14 @@
 {
-   "entry" : "node_13",
+   "entry" : "node_0",
    "nodes" : [
-      {
-         "attributes" : {
-            "control_id" : "node_11",
-            "value_id" : "node_12"
-         },
-         "id" : "node_13",
-         "inputs" : [
-            "node_11",
-            "node_12"
-         ],
-         "op" : "Return"
-      },
       {
          "attributes" : {
             "type" : "Int",
             "value" : null
          },
-         "id" : "node_12",
+         "id" : "node_1",
          "inputs" : [
-            "node_11"
+            "node_0"
          ],
          "op" : "Constant"
       },
@@ -29,9 +17,21 @@
             "function_name" : "main",
             "params" : []
          },
-         "id" : "node_11",
+         "id" : "node_0",
          "inputs" : [],
          "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_0",
+            "value_id" : "node_1"
+         },
+         "id" : "node_2",
+         "inputs" : [
+            "node_0",
+            "node_1"
+         ],
+         "op" : "Return"
       }
    ],
    "version" : "1.0"

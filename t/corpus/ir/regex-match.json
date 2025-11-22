@@ -3,15 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_8",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "control_id" : "node_8",
             "value_id" : "node_9"
          },
@@ -21,6 +12,15 @@
             "node_9"
          ],
          "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_8",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {

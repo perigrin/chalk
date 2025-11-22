@@ -15,6 +15,15 @@
       },
       {
          "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_2",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
             "type" : "Int",
             "value" : null
          },
@@ -23,15 +32,6 @@
             "node_2"
          ],
          "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_2",
-         "inputs" : [],
-         "op" : "Start"
       }
    ],
    "version" : "1.0"

@@ -97,7 +97,13 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 
             # This should be the module name or version
             if ( defined($child) ) {
-                $module_name  = $child;
+                # If child is an IR node (e.g., Constant from Number),
+                # extract the value from its attributes
+                if ( ref($child) && $child->can('op') && $child->op eq 'Constant' ) {
+                    $module_name = $child->value;
+                } else {
+                    $module_name = $child;
+                }
                 $module_index = $i;
                 last;
             }
