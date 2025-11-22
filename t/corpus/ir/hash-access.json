@@ -3,6 +3,15 @@
    "nodes" : [
       {
          "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_32",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
             "type" : "Int",
             "value" : null
          },
@@ -11,15 +20,6 @@
             "node_32"
          ],
          "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_32",
-         "inputs" : [],
-         "op" : "Start"
       },
       {
          "attributes" : {

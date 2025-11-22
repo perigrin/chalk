@@ -12,17 +12,6 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
-         },
-         "id" : "node_1",
-         "inputs" : [
-            "node_0"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
             "control_id" : "node_0",
             "value_id" : "node_1"
          },
@@ -32,6 +21,17 @@
             "node_1"
          ],
          "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_1",
+         "inputs" : [
+            "node_0"
+         ],
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

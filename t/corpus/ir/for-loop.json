@@ -3,15 +3,12 @@
    "nodes" : [
       {
          "attributes" : {
-            "control_id" : "node_6",
-            "value_id" : "node_7"
+            "function_name" : "main",
+            "params" : []
          },
-         "id" : "node_8",
-         "inputs" : [
-            "node_6",
-            "node_7"
-         ],
-         "op" : "Return"
+         "id" : "node_6",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -26,12 +23,15 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
+            "control_id" : "node_6",
+            "value_id" : "node_7"
          },
-         "id" : "node_6",
-         "inputs" : [],
-         "op" : "Start"
+         "id" : "node_8",
+         "inputs" : [
+            "node_6",
+            "node_7"
+         ],
+         "op" : "Return"
       }
    ],
    "version" : "1.0"

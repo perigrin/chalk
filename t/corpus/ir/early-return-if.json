@@ -3,35 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : 42
-         },
-         "id" : "node_37",
-         "inputs" : [
-            "node_34"
-         ],
-         "op" : "Constant"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_34",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_3",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
             "control_id" : "node_6",
             "value_id" : "node_38"
          },
@@ -44,14 +15,12 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : 5
+            "function_name" : "main",
+            "params" : []
          },
-         "id" : "node_6",
-         "inputs" : [
-            "node_3"
-         ],
-         "op" : "Constant"
+         "id" : "node_34",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -63,6 +32,37 @@
             "node_37"
          ],
          "op" : "Negate"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_3",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : 42
+         },
+         "id" : "node_37",
+         "inputs" : [
+            "node_34"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : 5
+         },
+         "id" : "node_6",
+         "inputs" : [
+            "node_3"
+         ],
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

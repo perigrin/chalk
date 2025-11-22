@@ -3,18 +3,6 @@
    "nodes" : [
       {
          "attributes" : {
-            "control_id" : "node_25",
-            "value_id" : "node_30"
-         },
-         "id" : "node_31",
-         "inputs" : [
-            "node_25",
-            "node_30"
-         ],
-         "op" : "Return"
-      },
-      {
-         "attributes" : {
             "control_id" : "node_24",
             "value_id" : "node_20"
          },
@@ -24,26 +12,6 @@
             "node_20"
          ],
          "op" : "Return"
-      },
-      {
-         "attributes" : {
-            "function_name" : "main",
-            "params" : []
-         },
-         "id" : "node_16",
-         "inputs" : [],
-         "op" : "Start"
-      },
-      {
-         "attributes" : {
-            "condition_id" : "node_0"
-         },
-         "id" : "node_9",
-         "inputs" : [
-            "node_4",
-            "node_0"
-         ],
-         "op" : "If"
       },
       {
          "attributes" : {
@@ -58,6 +26,17 @@
       },
       {
          "attributes" : {
+            "type" : "Int",
+            "value" : 42
+         },
+         "id" : "node_7",
+         "inputs" : [
+            "node_4"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
             "function_name" : "main",
             "params" : []
          },
@@ -67,25 +46,15 @@
       },
       {
          "attributes" : {
-            "index" : 1,
-            "label" : "IfFalse"
+            "control_id" : "node_10",
+            "value_id" : "node_7"
          },
-         "id" : "node_24",
+         "id" : "node_8",
          "inputs" : [
-            "node_22"
+            "node_10",
+            "node_7"
          ],
-         "op" : "Proj"
-      },
-      {
-         "attributes" : {
-            "index" : 0,
-            "label" : "IfTrue"
-         },
-         "id" : "node_10",
-         "inputs" : [
-            "node_9"
-         ],
-         "op" : "Proj"
+         "op" : "Return"
       },
       {
          "attributes" : {
@@ -97,26 +66,6 @@
             "node_19"
          ],
          "op" : "Negate"
-      },
-      {
-         "attributes" : {},
-         "id" : "node_25",
-         "inputs" : [
-            "node_8",
-            "node_21"
-         ],
-         "op" : "Stop"
-      },
-      {
-         "attributes" : {
-            "type" : "Int",
-            "value" : 42
-         },
-         "id" : "node_7",
-         "inputs" : [
-            "node_4"
-         ],
-         "op" : "Constant"
       },
       {
          "attributes" : {
@@ -142,15 +91,64 @@
       },
       {
          "attributes" : {
-            "control_id" : "node_10",
-            "value_id" : "node_7"
+            "condition_id" : "node_0"
          },
-         "id" : "node_8",
+         "id" : "node_9",
          "inputs" : [
-            "node_10",
-            "node_7"
+            "node_4",
+            "node_0"
+         ],
+         "op" : "If"
+      },
+      {
+         "attributes" : {
+            "index" : 0,
+            "label" : "IfTrue"
+         },
+         "id" : "node_10",
+         "inputs" : [
+            "node_9"
+         ],
+         "op" : "Proj"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_25",
+            "value_id" : "node_30"
+         },
+         "id" : "node_31",
+         "inputs" : [
+            "node_25",
+            "node_30"
          ],
          "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_29",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_16",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {},
+         "id" : "node_25",
+         "inputs" : [
+            "node_8",
+            "node_21"
+         ],
+         "op" : "Stop"
       },
       {
          "attributes" : {
@@ -165,12 +163,14 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
+            "index" : 1,
+            "label" : "IfFalse"
          },
-         "id" : "node_29",
-         "inputs" : [],
-         "op" : "Start"
+         "id" : "node_24",
+         "inputs" : [
+            "node_22"
+         ],
+         "op" : "Proj"
       }
    ],
    "version" : "1.0"

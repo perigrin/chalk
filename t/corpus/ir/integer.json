@@ -12,14 +12,15 @@
       },
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : 42
+            "control_id" : "node_0",
+            "value_id" : "node_2"
          },
-         "id" : "node_0",
+         "id" : "node_3",
          "inputs" : [
-            null
+            "node_0",
+            "node_2"
          ],
-         "op" : "Constant"
+         "op" : "Return"
       },
       {
          "attributes" : {
@@ -34,15 +35,14 @@
       },
       {
          "attributes" : {
-            "control_id" : "node_0",
-            "value_id" : "node_2"
+            "type" : "Int",
+            "value" : 42
          },
-         "id" : "node_3",
+         "id" : "node_0",
          "inputs" : [
-            "node_0",
-            "node_2"
+            null
          ],
-         "op" : "Return"
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"

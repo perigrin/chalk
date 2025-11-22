@@ -3,14 +3,12 @@
    "nodes" : [
       {
          "attributes" : {
-            "type" : "Int",
-            "value" : null
+            "function_name" : "main",
+            "params" : []
          },
-         "id" : "node_10",
-         "inputs" : [
-            "node_9"
-         ],
-         "op" : "Constant"
+         "id" : "node_9",
+         "inputs" : [],
+         "op" : "Start"
       },
       {
          "attributes" : {
@@ -26,12 +24,14 @@
       },
       {
          "attributes" : {
-            "function_name" : "main",
-            "params" : []
+            "type" : "Int",
+            "value" : null
          },
-         "id" : "node_9",
-         "inputs" : [],
-         "op" : "Start"
+         "id" : "node_10",
+         "inputs" : [
+            "node_9"
+         ],
+         "op" : "Constant"
       }
    ],
    "version" : "1.0"
