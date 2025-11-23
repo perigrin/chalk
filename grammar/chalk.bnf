@@ -136,7 +136,9 @@ ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT '
 WhileStatement -> 'while' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
 
 # For loops (only foreach-style with explicit variable)
+# 'for' and 'foreach' are synonyms in Perl
 ForStatement -> 'for' WS_OPT LexicalDeclarator WS_OPT Variable WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ForStatement -> 'foreach' WS_OPT LexicalDeclarator WS_OPT Variable WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
 
 # Return statements
 ReturnStatement -> 'return'
@@ -247,7 +249,7 @@ Expression -> BuiltinOp
 Expression -> ListOp
 Expression -> ReferenceConstructor
 Expression -> AnonymousSub
-# Expression -> PostfixDeref  # Postfix dereferencing: ->@* and ->%* (temporarily disabled - circular recursion)
+Expression -> PostfixDeref  # Postfix dereferencing: ->@* and ->%*
 Expression -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
 Expression -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
 # Operators
@@ -338,12 +340,11 @@ MethodCall -> Expression '->' Identifier  # expr->method (without parens)
 
 # Postfix dereference operators - can apply to any expression returning a reference
 # Examples: $var->@*, $obj->method->@*, foo()->@*, ($x || $y)->@*, $var->@*->%*
-# Temporarily disabled - causes circular recursion with Expression -> PostfixDeref
-# PostfixDeref -> Expression '->' PostfixDerefOp
+PostfixDeref -> Expression '->' PostfixDerefOp
 
 # Deref operators: ->@* or ->%*
-# PostfixDerefOp -> '@' '*'  # Array deref
-# PostfixDerefOp -> '%' '*'  # Hash deref
+PostfixDerefOp -> '@' '*'  # Array deref
+PostfixDerefOp -> '%' '*'  # Hash deref
 
 # Built-in operators - delegates to FunctionCall with optimization hook
 # This pass-through rule allows the BuiltinOp semantic action to detect known
