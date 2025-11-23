@@ -395,16 +395,16 @@ Variable -> ArrayVar
 Variable -> HashVar
 Variable -> ArraySize
 
-ScalarVar -> '$' Identifier
+ScalarVar -> '$' %BAREWORD%
 ScalarVar -> '$' %SPECIAL_IDENTIFIER%
-ArrayVar -> '@' Identifier
+ArrayVar -> '@' %BAREWORD%
 ArrayVar -> '@' %SPECIAL_IDENTIFIER%
-HashVar -> '%' Identifier
+HashVar -> '%' %BAREWORD%
 HashVar -> '%' %SPECIAL_IDENTIFIER%
 
 # Array size
-ArraySize -> '$#' Identifier         # $#array
-ArraySize -> '$#' '$' Identifier     # $#$arrayref
+ArraySize -> '$#' %BAREWORD%         # $#array
+ArraySize -> '$#' '$' %BAREWORD%     # $#$arrayref
 
 # Array/Hash element access
 Variable -> ScalarVar '[' Expression ']'              # $arr[0]
