@@ -97,6 +97,7 @@ StatementList ->
 Statement -> ExpressionList
 Statement -> Block
 Statement -> UseStatement
+Statement -> RequireStatement
 Statement -> VariableDeclaration
 Statement -> ReturnStatement
 Statement -> LoopControl
@@ -161,6 +162,11 @@ UseStatement -> 'use' WS_OPT QualifiedIdentifier  # use Module
 UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT QuotedWordList  # use Module qw(...)
 UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT String  # use experimental 'class'
 UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT ExpressionList  # use overload ... => ...
+
+# Require statements (runtime loading)
+RequireStatement -> 'require' WS_OPT QualifiedIdentifier  # require Module
+RequireStatement -> 'require' WS_OPT String  # require "file.pm"
+RequireStatement -> 'require' WS_OPT Expression  # require $var (dynamic)
 
 # Lexical declarator
 LexicalDeclarator -> 'my'
