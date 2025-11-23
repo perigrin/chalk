@@ -5,7 +5,6 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
-use JSON::PP ();
 
 class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
     field $rule_name :param :reader = undef;  # Grammar rule name (e.g., 'ArithmeticOp')
@@ -104,13 +103,6 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
         }
 
         return $result;
-    }
-
-    # Serialize to JSON
-    method to_json($pretty = 1) {
-        my $json = JSON::PP->new->canonical;
-        $json->pretty if $pretty;
-        return $json->encode($self->to_hash());
     }
 }
 

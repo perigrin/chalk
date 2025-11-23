@@ -74,8 +74,9 @@ subtest 'Integer literal AST' => sub {
     if ($ast) {
         diag("AST type: " . ref($ast));
         diag("Rule name: " . ($ast->rule_name // 'undef'));
-        if ($ast->can('to_json')) {
-            diag("AST JSON: " . $ast->to_json());
+        if ($ast->can('to_hash')) {
+            my $json = JSON::PP->new->canonical->pretty->encode($ast->to_hash());
+            diag("AST JSON: " . $json);
         }
     }
 };
