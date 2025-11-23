@@ -5,6 +5,7 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Semiring::Boolean;
 use Chalk::Grammar::Token;
+use Chalk::Preprocessor::Heredoc;
 
 class Chalk::EarleyItem {
     use overload '""' => 'key';
@@ -209,17 +210,6 @@ class Chalk::Parser {
                                       # Apply preprocessors in sequence
         for my $preprocessor_class ( $preprocess->@* ) {
             next unless defined $preprocessor_class;
-
-            # Load the preprocessor module
-            my $file    = $preprocessor_class;
-            my $search  = '::';
-            my $replace = '/';
-            my $pos     = index( $file, $search );
-            while ( $pos >= 0 ) {
-                substr( $file, $pos, length($search), $replace );
-                $pos = index( $file, $search, $pos + length($replace) );
-            }
-            require "$file.pm";
 
             # Apply preprocessing
             my $preprocessor = $preprocessor_class->new( input => $input );
