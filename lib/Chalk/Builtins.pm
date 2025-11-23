@@ -18,7 +18,7 @@ class Chalk::Builtins {
 
     # Built-in function signatures
     # Format: 'function_name' => { params => [...], returns => Type }
-    our %BUILTIN_SIGNATURES = (
+    my %BUILTIN_SIGNATURES = (
         # String functions
         'length' => {
             params => [Chalk::Grammar::Chalk::Type::Str->new()],

@@ -122,11 +122,15 @@ ClassDeclaration -> 'class' WS_OPT QualifiedIdentifier WS_OPT AttributeList WS_O
 ConditionalKeyword -> 'if'
 ConditionalKeyword -> 'unless'
 
+# Elsif clause (recursive for arbitrary chaining)
+ElsifClause -> 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
+ElsifClause -> 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT ElsifClause
+ElsifClause -> 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+
 # Conditional statements (block form)
 ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
 ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
-ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
-ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'elsif' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT 'else' WS_OPT Block
+ConditionalStatement -> ConditionalKeyword WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block WS_OPT ElsifClause
 
 # While loops
 WhileStatement -> 'while' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
@@ -186,6 +190,10 @@ SubroutineDeclaration -> 'sub' WS_OPT QualifiedIdentifier WS_OPT Block
 # Lexical subs
 LexicalSubroutine -> LexicalDeclarator WS_OPT SubroutineDeclaration
 
+# Anonymous subroutines (for closures)
+AnonymousSub -> 'sub' WS_OPT '(' WS_OPT ParameterList WS_OPT ')' WS_OPT Block
+AnonymousSub -> 'sub' WS_OPT Block
+
 # ============================================================================
 # Expression Grammar - Flat Structure with Precedence Semiring Validation
 # ============================================================================
@@ -238,6 +246,7 @@ Expression -> FunctionCall
 Expression -> BuiltinOp
 Expression -> ListOp
 Expression -> ReferenceConstructor
+Expression -> AnonymousSub
 # Expression -> PostfixDeref  # Postfix dereferencing: ->@* and ->%* (temporarily disabled - circular recursion)
 Expression -> '(' WS_OPT Expression WS_OPT ')'  # Parenthesized expression
 Expression -> '(' WS_OPT ExpressionList WS_OPT ')'  # Parenthesized list
