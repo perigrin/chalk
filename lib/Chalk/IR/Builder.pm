@@ -599,6 +599,230 @@ class Chalk::IR::Builder {
         return \%phi_nodes;
     }
 
+    # Delegation methods for helper classes
+    # Arithmetic operations
+    method build_add_node(@args) {
+        state $helper = Chalk::IR::Builder::Arithmetic->new();
+        return $helper->build_add_node($self, @args);
+    }
+    method build_subtract_node(@args) {
+        state $helper = Chalk::IR::Builder::Arithmetic->new();
+        return $helper->build_subtract_node($self, @args);
+    }
+    method build_multiply_node(@args) {
+        state $helper = Chalk::IR::Builder::Arithmetic->new();
+        return $helper->build_multiply_node($self, @args);
+    }
+    method build_divide_node(@args) {
+        state $helper = Chalk::IR::Builder::Arithmetic->new();
+        return $helper->build_divide_node($self, @args);
+    }
+
+    # Comparison operations
+    method build_greater_node(@args) {
+        state $helper = Chalk::IR::Builder::Comparison->new();
+        return $helper->build_greater_node($self, @args);
+    }
+    method build_less_node(@args) {
+        state $helper = Chalk::IR::Builder::Comparison->new();
+        return $helper->build_less_node($self, @args);
+    }
+    method build_equal_node(@args) {
+        state $helper = Chalk::IR::Builder::Comparison->new();
+        return $helper->build_equal_node($self, @args);
+    }
+    method build_greater_or_equal_node(@args) {
+        state $helper = Chalk::IR::Builder::Comparison->new();
+        return $helper->build_greater_or_equal_node($self, @args);
+    }
+    method build_less_or_equal_node(@args) {
+        state $helper = Chalk::IR::Builder::Comparison->new();
+        return $helper->build_less_or_equal_node($self, @args);
+    }
+    method build_not_equal_node(@args) {
+        state $helper = Chalk::IR::Builder::Comparison->new();
+        return $helper->build_not_equal_node($self, @args);
+    }
+
+    # Unary operations
+    method build_not_node(@args) {
+        state $helper = Chalk::IR::Builder::Unary->new();
+        return $helper->build_not_node($self, @args);
+    }
+    method build_negate_node(@args) {
+        state $helper = Chalk::IR::Builder::Unary->new();
+        return $helper->build_negate_node($self, @args);
+    }
+    method build_pre_increment_node(@args) {
+        state $helper = Chalk::IR::Builder::Unary->new();
+        return $helper->build_pre_increment_node($self, @args);
+    }
+    method build_pre_decrement_node(@args) {
+        state $helper = Chalk::IR::Builder::Unary->new();
+        return $helper->build_pre_decrement_node($self, @args);
+    }
+    method build_post_increment_node(@args) {
+        state $helper = Chalk::IR::Builder::Unary->new();
+        return $helper->build_post_increment_node($self, @args);
+    }
+    method build_post_decrement_node(@args) {
+        state $helper = Chalk::IR::Builder::Unary->new();
+        return $helper->build_post_decrement_node($self, @args);
+    }
+
+    # Control flow operations
+    method build_if_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_if_node($self, @args);
+    }
+    method build_if_true_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_if_true_node($self, @args);
+    }
+    method build_if_false_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_if_false_node($self, @args);
+    }
+    method build_region_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_region_node($self, @args);
+    }
+    method build_phi_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_phi_node($self, @args);
+    }
+    method build_stop_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_stop_node($self, @args);
+    }
+    method build_loop_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_loop_node($self, @args);
+    }
+    method build_loop_phi_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_loop_phi_node($self, @args);
+    }
+    method build_call_node(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->build_call_node($self, @args);
+    }
+    method begin_loop_tracking(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->begin_loop_tracking($self, @args);
+    }
+    method end_loop_tracking(@args) {
+        state $helper = Chalk::IR::Builder::Control->new();
+        return $helper->end_loop_tracking($self, @args);
+    }
+
+    # Data structure operations
+    method build_array_new_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_array_new_node($self, @args);
+    }
+    method build_array_push_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_array_push_node($self, @args);
+    }
+    method build_array_get_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_array_get_node($self, @args);
+    }
+    method build_array_set_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_array_set_node($self, @args);
+    }
+    method build_array_length_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_array_length_node($self, @args);
+    }
+    method build_hash_new_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_hash_new_node($self, @args);
+    }
+    method build_hash_set_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_hash_set_node($self, @args);
+    }
+    method build_hash_get_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_hash_get_node($self, @args);
+    }
+    method build_hash_exists_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_hash_exists_node($self, @args);
+    }
+    method build_hash_keys_node(@args) {
+        state $helper = Chalk::IR::Builder::DataStructures->new();
+        return $helper->build_hash_keys_node($self, @args);
+    }
+
+    # Object operations
+    method build_classdef_node(@args) {
+        state $helper = Chalk::IR::Builder::Object->new();
+        return $helper->build_classdef_node($self, @args);
+    }
+    method build_new_node(@args) {
+        state $helper = Chalk::IR::Builder::Object->new();
+        return $helper->build_new_node($self, @args);
+    }
+    method build_field_access_node(@args) {
+        state $helper = Chalk::IR::Builder::Object->new();
+        return $helper->build_field_access_node($self, @args);
+    }
+    method build_field_store_node(@args) {
+        state $helper = Chalk::IR::Builder::Object->new();
+        return $helper->build_field_store_node($self, @args);
+    }
+
+    # String operations
+    method build_str_concat_node(@args) {
+        state $helper = Chalk::IR::Builder::String->new();
+        return $helper->build_str_concat_node($self, @args);
+    }
+    method build_range_node(@args) {
+        state $helper = Chalk::IR::Builder::String->new();
+        return $helper->build_range_node($self, @args);
+    }
+    method build_use_statement_node(@args) {
+        state $helper = Chalk::IR::Builder::String->new();
+        return $helper->build_use_statement_node($self, @args);
+    }
+    method build_str_length_node(@args) {
+        state $helper = Chalk::IR::Builder::String->new();
+        return $helper->build_str_length_node($self, @args);
+    }
+    method build_str_substr_node(@args) {
+        state $helper = Chalk::IR::Builder::String->new();
+        return $helper->build_str_substr_node($self, @args);
+    }
+    # Reference operations
+    method build_reference_node(@args) {
+        state $helper = Chalk::IR::Builder::Reference->new();
+        return $helper->build_reference_node($self, @args);
+    }
+    method build_scalar_deref_node(@args) {
+        state $helper = Chalk::IR::Builder::Reference->new();
+        return $helper->build_scalar_deref_node($self, @args);
+    }
+    method build_scalar_deref_assign_node(@args) {
+        state $helper = Chalk::IR::Builder::Reference->new();
+        return $helper->build_scalar_deref_assign_node($self, @args);
+    }
+    method build_element_ref_node(@args) {
+        state $helper = Chalk::IR::Builder::Reference->new();
+        return $helper->build_element_ref_node($self, @args);
+    }
+    method build_scalar_ref_node(@args) {
+        state $helper = Chalk::IR::Builder::Reference->new();
+        return $helper->build_scalar_ref_node($self, @args);
+    }
+    method build_variable_read_node(@args) {
+        state $helper = Chalk::IR::Builder::Reference->new();
+        return $helper->build_variable_read_node($self, @args);
+    }
+
 }
 
 # ABOUTME: Guard object for automatic cleanup of branch tracking frames
