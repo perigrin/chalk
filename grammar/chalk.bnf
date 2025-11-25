@@ -60,10 +60,10 @@
 # Pattern definitions
 %WS% = /[ \t\r\n]+/
 %COMMENT% = /#[^\n]*/
-# Reserved keywords excluded from identifiers via negative lookahead
+# Reserved keywords excluded from barewords via negative lookahead
 # Note: method/sub NOT reserved - they can be method names and need special grammar handling
-%IDENTIFIER% = /(?!(?:class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp)\b)[a-zA-Z_][a-zA-Z0-9_]*/
-%BAREWORD% = /[a-zA-Z_][a-zA-Z0-9_]*/
+%BAREWORD% = /(?!(?:class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+%BAREWORD_ANY% = /[a-zA-Z_][a-zA-Z0-9_]*/
 %SPECIAL_IDENTIFIER% = /[0-9]+|[&`'+@!$-]|^[A-Z]|\{[^}]+\}/
 %INTEGER% = /[0-9]+/
 %FLOAT% = /[0-9]+\.[0-9]+/
@@ -241,7 +241,6 @@ AnonymousSub -> 'sub' WS_OPT Block
 Expression -> Literal
 Expression -> Variable
 Expression -> Identifier  # Bareword (can be function name, method name, or string in context)
-Expression -> %BAREWORD%  # Reserved word used as bareword (auto-quoted in hash keys, etc.)
 Expression -> YaddaYadda
 Expression -> FunctionCall
 Expression -> BuiltinOp
@@ -317,9 +316,9 @@ ExpressionList -> Expression
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression  # Fat comma pair
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Fat comma pair with trailing comma
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Pairs with more
-ExpressionList -> %BAREWORD% WS_OPT '=>' WS_OPT Expression  # Bareword hash key (auto-quoted)
-ExpressionList -> %BAREWORD% WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Bareword key with trailing comma
-ExpressionList -> %BAREWORD% WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Bareword key with more
+ExpressionList -> %BAREWORD_ANY% WS_OPT '=>' WS_OPT Expression  # Bareword hash key (auto-quoted, allows keywords)
+ExpressionList -> %BAREWORD_ANY% WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Bareword key with trailing comma
+ExpressionList -> %BAREWORD_ANY% WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Bareword key with more
 ExpressionList ->
 
 # Yada-yada operator - placeholder that throws "Unimplemented" when evaluated
@@ -412,7 +411,7 @@ ArraySize -> '$#' '$' %BAREWORD%     # $#$arrayref
 # Array/Hash element access
 Variable -> ScalarVar '[' Expression ']'              # $arr[0]
 Variable -> ScalarVar '{' Expression '}'              # $hash{key}
-Variable -> ScalarVar '{' %BAREWORD% '}'              # $hash{class} - bareword key (auto-quoted)
+Variable -> ScalarVar '{' %BAREWORD_ANY% '}'          # $hash{class} - bareword key (auto-quoted, allows keywords)
 Variable -> ArrayVar '[' Expression ']'               # @arr[0..5] (slice with range expr)
 
 # Curly-brace dereferencing (for use in builtin functions like keys, values)
@@ -422,12 +421,12 @@ Variable -> '@' '{' Expression '}'                    # @{$arrayref} - array der
 # Arrow notation (method-style dereference)
 Variable -> Variable '->' '[' Expression ']'          # $ref->[0]
 Variable -> Variable '->' '{' Expression '}'          # $ref->{key}
-Variable -> Variable '->' '{' %BAREWORD% '}'          # $ref->{class} - bareword key (auto-quoted)
+Variable -> Variable '->' '{' %BAREWORD_ANY% '}'      # $ref->{class} - bareword key (auto-quoted, allows keywords)
 
 # Chained subscripts without arrows (Perl allows omitting arrows between subscripts)
 Variable -> Variable '[' Expression ']'               # $ref->[0][1] or $ref->[0]{key}
 Variable -> Variable '{' Expression '}'               # $ref->{key1}{key2} or $array->[0]{key}
-Variable -> Variable '{' %BAREWORD% '}'               # $ref->{key1}{class} - bareword key (auto-quoted)
+Variable -> Variable '{' %BAREWORD_ANY% '}'           # $ref->{key1}{class} - bareword key (auto-quoted, allows keywords)
 
 # Postfix dereferencing on Variables - for patterns like $context->children->@*
 Variable -> Variable '->' '@' '*'                     # $var->@* (array postfix deref)
@@ -467,8 +466,8 @@ DoubleQuotedString -> %DOUBLE_QUOTED_STRING%
 QuotedWordList -> 'qw' '(' WordList ')'
 
 # Words in qw() can be any bareword (including keywords) or colon-prefixed symbols
-Word -> %BAREWORD%
-Word -> ':' %BAREWORD%
+Word -> %BAREWORD_ANY%
+Word -> ':' %BAREWORD_ANY%
 
 WordList -> Word
 WordList -> Word WS_OPT WordList
@@ -491,7 +490,7 @@ Number -> %FLOAT%
 Number -> %INTEGER%
 
 # Identifiers
-Identifier -> %IDENTIFIER%
+Identifier -> %BAREWORD%
 
 # Shebang
 Shebang -> %SHEBANG%
