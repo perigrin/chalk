@@ -13,13 +13,14 @@ use Chalk::IR::Node::Loop;
 class Chalk::IR::Builder::Control {
 
     method build_if_node($builder, $condition_node) {
-        my $node_id = $builder->next_node_id();
+        # Content-addressable ID based on condition (not control)
+        my $node_id = "if_" . $condition_node->id;
         my $if_node = Chalk::IR::Node::If->new(
             id           => $node_id,
             inputs       => [ $builder->current_control, $condition_node->id ],
             condition_id => $condition_node->id,
         );
-        $builder->graph->add_node($if_node);
+        # $builder->graph->add_node($if_node);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $if_node->record_transform(
@@ -50,13 +51,14 @@ class Chalk::IR::Builder::Control {
                 $source_info );
         }
 
-        my $node_id = $builder->next_node_id();
+        # Content-addressable ID based on control inputs
+        my $node_id = "region_" . join("_", @control_inputs);
         my $region  = Chalk::IR::Node::Region->new(
             id          => $node_id,
             inputs      => \@control_inputs,
             source_info => $source_info,
         );
-        $builder->graph->add_node($region);
+        # $builder->graph->add_node($region);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $region->record_transform(
@@ -69,13 +71,14 @@ class Chalk::IR::Builder::Control {
     }
 
     method build_phi_node($builder, $region_node, @value_inputs) {
-        my $node_id = $builder->next_node_id();
+        # Content-addressable ID based on region and value inputs (not control)
+        my $node_id = "phi_" . $region_node->id . "_" . join("_", @value_inputs);
         my $phi     = Chalk::IR::Node::Phi->new(
             id        => $node_id,
             inputs    => [ $region_node->id, @value_inputs ],
             region_id => $region_node->id,
         );
-        $builder->graph->add_node($phi);
+        # $builder->graph->add_node($phi);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $phi->record_transform( 'ir_construction', 'Builder::build_phi_node',
@@ -88,13 +91,14 @@ class Chalk::IR::Builder::Control {
     }
 
     method build_stop_node($builder, $source_info = undef, @return_inputs) {
-        my $node_id = $builder->next_node_id();
+        # Content-addressable ID based on return inputs
+        my $node_id = "stop_" . join("_", @return_inputs);
         my $stop    = Chalk::IR::Node::Stop->new(
             id          => $node_id,
             inputs      => \@return_inputs,
             source_info => $source_info,
         );
-        $builder->graph->add_node($stop);
+        # $builder->graph->add_node($stop);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $stop->record_transform(
@@ -110,12 +114,13 @@ class Chalk::IR::Builder::Control {
     method build_loop_node($builder, $entry_control = undef) {
         my $ctrl = $entry_control // $builder->current_control
           // '__CONTROL_PLACEHOLDER__';
-        my $node_id = $builder->next_node_id();
+        # Content-addressable ID based on entry control
+        my $node_id = "loop_${ctrl}";
         my $loop    = Chalk::IR::Node::Loop->new(
             id     => $node_id,
             inputs => [$ctrl],    # Entry control; backedge added later
         );
-        $builder->graph->add_node($loop);
+        # $builder->graph->add_node($loop);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $loop->record_transform( 'ir_construction', 'Builder::build_loop_node',
@@ -130,13 +135,15 @@ class Chalk::IR::Builder::Control {
         my @inputs = ( $loop_node->id, $initial_value );
         push( @inputs, $loop_value ) if defined($loop_value);
 
-        my $node_id = $builder->next_node_id();
+        # Content-addressable ID based on loop and initial value (loop value may be added later)
+        my $loop_val_suffix = defined($loop_value) ? "_${loop_value}" : "";
+        my $node_id = "loop_phi_" . $loop_node->id . "_${initial_value}${loop_val_suffix}";
         my $phi     = Chalk::IR::Node::Phi->new(
             id        => $node_id,
             inputs    => \@inputs,
             region_id => $loop_node->id,
         );
-        $builder->graph->add_node($phi);
+        # $builder->graph->add_node($phi);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         my $loop_val_str = defined($loop_value) ? $loop_value : "undef";
@@ -163,7 +170,9 @@ class Chalk::IR::Builder::Control {
         # Call: control, memory, arguments...
         # For now, use current_control for both control and memory
         my $attributes = { function => $function_name };
-        my $node_id    = $builder->next_node_id();
+        # Content-addressable ID based on function name and arguments (not control)
+        my $arg_ids_str = join("_", map { $_->id } @arg_nodes);
+        my $node_id    = "call_${function_name}_${arg_ids_str}";
         my $call       = Chalk::IR::Node->new(
             id     => $node_id,
             op     => 'Call',
@@ -172,7 +181,7 @@ class Chalk::IR::Builder::Control {
             attributes  => $attributes,
             source_info => $source_info,
         );
-        $builder->graph->add_node($call);
+        # $builder->graph->add_node($call);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         my $arg_ids = join( ", ", map { $_->id } @arg_nodes );
@@ -187,6 +196,9 @@ class Chalk::IR::Builder::Control {
 
     # Loop depth tracking methods
     method begin_loop_tracking($builder) {
+        warn "DEPRECATED: IR::Builder::Control::begin_loop_tracking() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         # Increment loop depth when entering a loop
         $builder->_increment_loop_depth();
 
@@ -196,6 +208,9 @@ class Chalk::IR::Builder::Control {
     }
 
     method end_loop_tracking($builder) {
+        warn "DEPRECATED: IR::Builder::Control::end_loop_tracking() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         # Decrement loop depth when exiting a loop
         if ( $builder->loop_depth > 0 ) {
             $builder->_decrement_loop_depth();

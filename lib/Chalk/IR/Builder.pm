@@ -45,6 +45,7 @@ class Chalk::IR::Builder {
     use Chalk::IR::Node::NewArray;
     use Chalk::IR::Node::NewHash;
     use Chalk::IR::Node::StrConcat;
+    use Chalk::IR::Node::Store;
 
     field $graph           :reader = Chalk::IR::Graph->new();
     field $context         :reader = Chalk::IR::Context->empty_context();
@@ -125,7 +126,8 @@ class Chalk::IR::Builder {
     # Create Start node for a function/method
     method build_start_node( $function_name = 'main', $params = undef ) {
         $params //= [];
-        my $node_id      = $self->next_node_id();
+        # Content-addressable ID based on function name
+        my $node_id      = "start_${function_name}";
         my $empty_inputs = [];
         my $start        = Chalk::IR::Node::Start->new(
             id            => $node_id,
@@ -133,7 +135,7 @@ class Chalk::IR::Builder {
             function_name => $function_name,
             params        => $params,
         );
-        $graph->add_node($start);
+        # $graph->add_node($start);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $start->record_transform( 'ir_construction',
@@ -160,7 +162,10 @@ class Chalk::IR::Builder {
     method build_constant_node( $value, $type = 'Int', $source_info = undef ) {
         # Allow undef for representing Perl's undef constant (needed for implicit returns)
 
-        my $node_id  = $self->next_node_id();
+        # Content-addressable ID based on value and type (not control)
+        my $value_str = defined($value) ? $value : 'undef';
+        my $node_id = "const_${type}_${value_str}";
+
         my $constant = Chalk::IR::Node::Constant->new(
             id          => $node_id,
             inputs      => [$current_control],
@@ -168,7 +173,7 @@ class Chalk::IR::Builder {
             type        => $type,
             source_info => $source_info,
         );
-        $graph->add_node($constant);
+        # $graph->add_node($constant);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $constant->record_transform(
@@ -203,15 +208,19 @@ class Chalk::IR::Builder {
         # Use provided control, or current_control, or '__CONTROL_PLACEHOLDER__'
         my $ctrl = $control // $current_control // '__CONTROL_PLACEHOLDER__';
 
-        my $node_id = $self->next_node_id();
+        # Content-addressable ID based on BOTH control and value
+        # Return nodes must include control because different control paths are different nodes
+        my $node_id = "return_${ctrl}_" . $value_node->id;
+
         my $return  = Chalk::IR::Node::Return->new(
             id          => $node_id,
             inputs      => [ $ctrl, $value_node->id ],
+            value_node  => $value_node,  # Direct reference (immutable tree)
             value_id    => $value_node->id,
             control_id  => $ctrl,
             source_info => $source_info,
         );
-        $graph->add_node($return);
+        # $graph->add_node($return);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $return->record_transform(
@@ -225,6 +234,9 @@ class Chalk::IR::Builder {
 
     # Set control input for an existing node
     method set_node_control( $node, $control_id ) {
+        warn "DEPRECATED: IR::Builder::set_node_control() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         my $inputs = $node->inputs;
         $inputs->[0] = $control_id;    # Control is always first input
 
@@ -299,6 +311,39 @@ class Chalk::IR::Builder {
         return $value_node;
     }
 
+    # Create Store node for scalar variable assignment
+    # This creates an actual IR node (unlike the deprecated build_store_node above)
+    method build_scalar_store_node($var_name, $value_node, $control = undef, $source_info = undef) {
+        my $ctrl = $control // $current_control // '__CONTROL_PLACEHOLDER__';
+
+        # Content-addressable ID based on variable name, control, and value
+        my $node_id = "store_${var_name}_${ctrl}_" . $value_node->id;
+
+        my $store = Chalk::IR::Node::Store->new(
+            id         => $node_id,
+            inputs     => [$ctrl, $value_node->id],
+            var_name   => $var_name,
+            value_id   => $value_node->id,
+            value_node => $value_node,  # Keep reference for pre-materialization access
+            control_id => $ctrl,
+        );
+
+        # Record transformation
+        $store->record_transform(
+            'ir_construction',
+            'Builder::build_scalar_store_node',
+            context => "var=$var_name, value_id=" . $value_node->id
+        );
+
+        # Also bind in scope for SSA lookups
+        my $scope_env = $context->('env:scope');
+        if ($scope_env && $scope_env->can('define')) {
+            $scope_env->define($var_name, $value_node->id);
+        }
+
+        return $store;
+    }
+
     # Load node (variable read)
     # DEPRECATED: Use Chalk::IR::Node::Scope instead
     # This method will be removed in a future version
@@ -337,14 +382,15 @@ class Chalk::IR::Builder {
 
     # Create Proj node (projection from MultiNode like Start)
     method build_proj_node( $source_node, $index, $label ) {
-        my $node_id = $self->next_node_id();
+        # Content-addressable ID based on source, index, and label
+        my $node_id = "proj_" . $source_node->id . "_${index}_${label}";
         my $proj    = Chalk::IR::Node::Proj->new(
             id     => $node_id,
             inputs => [ $source_node->id ],
             index  => $index,
             label  => $label,
         );
-        $graph->add_node($proj);
+        # $graph->add_node($proj);  # Disabled: nodes added during traversal in Program.evaluate()
 
         # Record transformation
         $proj->record_transform( 'ir_construction', 'Builder::build_proj_node',
@@ -361,14 +407,22 @@ class Chalk::IR::Builder {
     # Unary operations moved to Chalk::IR::Builder::Unary
     # Control flow operations moved to Chalk::IR::Builder::Control
     method is_tracking_loop() {
+        warn "DEPRECATED: IR::Builder::is_tracking_loop() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         return $loop_depth > 0;
     }
 
     method current_loop_depth() {
+        warn "DEPRECATED: IR::Builder::current_loop_depth() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         return $loop_depth;
     }
 
     method generate_loop_phi_nodes($loop_node) {
+        warn "DEPRECATED: IR::Builder::generate_loop_phi_nodes() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
 
 # Generate phi nodes for variables modified within the loop
 # With context+labels approach, phi nodes are created for variables
@@ -428,14 +482,16 @@ class Chalk::IR::Builder {
     # Create array value node (simplified version for testing)
     # Takes array ref of initial values
     method build_array_value_node( $values = [] ) {
-        my $node_id = $self->next_node_id();
+        # Content-addressable ID based on values
+        my $value_str = join("_", map { defined($_) ? $_ : 'undef' } @$values);
+        my $node_id = "array_value_${value_str}";
         my $node    = Chalk::IR::Node->new(
             id         => $node_id,
             op         => 'ArrayValue',
             inputs     => [$current_control],
             attributes => { values => $values },
         );
-        $graph->add_node($node);
+        # $graph->add_node($node);  # Disabled: nodes added during traversal in Program.evaluate()
         $node->record_transform(
             operation => 'ir_construction',
             rule_name => 'Builder::build_array_value_node'
@@ -446,14 +502,16 @@ class Chalk::IR::Builder {
     # Create hash value node (simplified version for testing)
     # Takes hash ref of initial key-value pairs
     method build_hash_value_node( $pairs = {} ) {
-        my $node_id = $self->next_node_id();
+        # Content-addressable ID based on key-value pairs (sorted for consistency)
+        my $pairs_str = join("_", map { "$_=" . (defined($pairs->{$_}) ? $pairs->{$_} : 'undef') } sort keys %$pairs);
+        my $node_id = "hash_value_${pairs_str}";
         my $node    = Chalk::IR::Node->new(
             id         => $node_id,
             op         => 'HashValue',
             inputs     => [$current_control],
             attributes => { pairs => $pairs },
         );
-        $graph->add_node($node);
+        # $graph->add_node($node);  # Disabled: nodes added during traversal in Program.evaluate()
         $node->record_transform(
             operation => 'ir_construction',
             rule_name => 'Builder::build_hash_value_node'
@@ -609,6 +667,10 @@ class Chalk::IR::Builder {
         state $helper = Chalk::IR::Builder::Arithmetic->new();
         return $helper->build_subtract_node($self, @args);
     }
+    method build_sub_node(@args) {
+        state $helper = Chalk::IR::Builder::Arithmetic->new();
+        return $helper->build_sub_node($self, @args);
+    }
     method build_multiply_node(@args) {
         state $helper = Chalk::IR::Builder::Arithmetic->new();
         return $helper->build_multiply_node($self, @args);
@@ -708,10 +770,16 @@ class Chalk::IR::Builder {
         return $helper->build_call_node($self, @args);
     }
     method begin_loop_tracking(@args) {
+        warn "DEPRECATED: IR::Builder::begin_loop_tracking() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         state $helper = Chalk::IR::Builder::Control->new();
         return $helper->begin_loop_tracking($self, @args);
     }
     method end_loop_tracking(@args) {
+        warn "DEPRECATED: IR::Builder::end_loop_tracking() is deprecated, use Chalk::IR::Node::Scope instead\n"
+            if $ENV{CHALK_WARN_DEPRECATED};
+
         state $helper = Chalk::IR::Builder::Control->new();
         return $helper->end_loop_tracking($self, @args);
     }
