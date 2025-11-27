@@ -49,11 +49,21 @@ class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
             my @stmt_nodes = _flatten_to_nodes($statements);
             return undef unless @stmt_nodes;
 
+            # Collect early returns from statements (Issue #195)
+            # This enables parent rules to find Returns inside blocks
+            my @early_returns;
+            for my $stmt (@stmt_nodes) {
+                if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'Return') {
+                    push @early_returns, $stmt;
+                }
+            }
+
             # Return metadata about this block for parent to wire up
             # Parent needs: the statements with placeholders, entry/exit info
             return {
                 type => 'block',
                 statements => \@stmt_nodes,
+                early_returns => \@early_returns,
                 entry => '__BLOCK_ENTRY__',  # Parent will provide
                 exit => '__BLOCK_EXIT__',    # Will be last statement's control out
             };

@@ -8,6 +8,7 @@ use Scalar::Util qw(blessed);
 class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
     use Chalk::IR::Node::Start;
     use Chalk::IR::Node::Return;
+    use Chalk::IR::Node::Stop;
     use Chalk::IR::Node::Constant;
 
     method evaluate($context) {
@@ -44,12 +45,18 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         # correctly wires the final "return 0;" to use the if-statement's IfFalse output as control.
         my $current_ctrl = $start;
         my @rewired_statements;
+        my @early_returns;  # Issue #195: Collect early returns from control flow statements
 
         for my $stmt (@statements) {
             if (blessed($stmt) && $stmt->can('with_control')) {
                 # Rewire this statement to use current control
                 my $rewired = $stmt->with_control($current_ctrl);
                 push @rewired_statements, $rewired;
+
+                # Issue #195: Collect early returns from Proj nodes (from ConditionalStatement)
+                if ($rewired->can('early_returns') && $rewired->early_returns) {
+                    push @early_returns, $rewired->early_returns->@*;
+                }
 
                 # Determine what control to use for the next statement
                 # Control flow nodes (Region, Proj for IfFalse, etc.) pass their output as control
@@ -70,6 +77,11 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
                 # Node without with_control() - just add it and use it as control
                 push @rewired_statements, $stmt;
                 $current_ctrl = $stmt;
+
+                # Issue #195: Also check for early returns on non-rewired nodes
+                if ($stmt->can('early_returns') && $stmt->early_returns) {
+                    push @early_returns, $stmt->early_returns->@*;
+                }
             } else {
                 # Non-node (shouldn't happen but handle gracefully)
                 push @rewired_statements, $stmt;
@@ -80,6 +92,10 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
                 my $ctrl_id = blessed($current_ctrl) && $current_ctrl->can('id') ? $current_ctrl->id : "$current_ctrl";
                 warn "[DEBUG] Program: processed stmt=$stmt_id, next_ctrl=$ctrl_id\n";
             }
+        }
+
+        if ($ENV{CHALK_DEBUG_PROGRAM} && @early_returns) {
+            warn "[DEBUG] Program: collected ", scalar(@early_returns), " early return(s)\n";
         }
 
         # Use rewired statements for the rest of processing
@@ -99,7 +115,24 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
             my $op = $last_stmt->op;
 
             if ($op eq 'Return') {
-                # Last statement is already a Return - use the rewired version
+                # Last statement is already a Return
+                # Issue #195: If we have early returns, create Stop node with all returns
+                if (@early_returns) {
+                    my @all_returns = (@early_returns, $last_stmt);
+                    my $stop_id = "stop_" . join("_", map { $_->id } @all_returns);
+                    my $stop = Chalk::IR::Node::Stop->new(
+                        id      => $stop_id,
+                        inputs  => [ map { $_->id } @all_returns ],
+                        returns => \@all_returns,
+                    );
+                    $stop->record_transform(
+                        'ir_construction',
+                        'Program::evaluate',
+                        context => "return_inputs=" . join(", ", map { $_->id } @all_returns)
+                    );
+                    return $stop;
+                }
+                # No early returns - just return the single Return
                 return $last_stmt;
             } elsif ($op eq 'Store') {
                 # Last statement is a Store - return the stored value
@@ -118,10 +151,29 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         );
 
         # Create Return node
-        return Chalk::IR::Node::Return->new(
+        my $final_return = Chalk::IR::Node::Return->new(
             control => $final_control,
             value   => $return_value,
         );
+
+        # Issue #195: If we have early returns, create Stop node with all returns
+        if (@early_returns) {
+            my @all_returns = (@early_returns, $final_return);
+            my $stop_id = "stop_" . join("_", map { $_->id } @all_returns);
+            my $stop = Chalk::IR::Node::Stop->new(
+                id      => $stop_id,
+                inputs  => [ map { $_->id } @all_returns ],
+                returns => \@all_returns,
+            );
+            $stop->record_transform(
+                'ir_construction',
+                'Program::evaluate',
+                context => "return_inputs=" . join(", ", map { $_->id } @all_returns)
+            );
+            return $stop;
+        }
+
+        return $final_return;
     }
 }
 

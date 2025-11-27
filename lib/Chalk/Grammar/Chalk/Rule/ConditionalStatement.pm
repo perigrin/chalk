@@ -200,6 +200,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # (ReturnStatement evaluates before ConditionalStatement sets up scopes)
         my $current_ctrl = $if_true;
         my $true_last_stmt;
+        my @true_early_returns;  # Issue #195: Collect REWIRED Returns
         for my $stmt ($true_block->{statements}->@*) {
             if ($stmt->can('with_control')) {
                 my $rewired = $stmt->with_control($current_ctrl);
@@ -207,6 +208,10 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
                 # This enables forward BFS traversal to find early returns
                 if ($current_ctrl->can('add_control_user')) {
                     $current_ctrl->add_control_user($rewired);
+                }
+                # Issue #195: Track rewired Returns (not original unrewired ones)
+                if ($rewired->can('op') && $rewired->op eq 'Return') {
+                    push @true_early_returns, $rewired;
                 }
                 $current_ctrl = $rewired;
                 $true_last_stmt = $rewired;
@@ -323,6 +328,13 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             # (IfFalse returns 0 when condition is true, 1 when false)
             my $new_scope = $pre_scope->with_control($if_false->id);
             $context->env->{scope} = $new_scope;
+
+            # Issue #195 fix: Pass REWIRED early returns from true branch via IfFalse
+            # This lets Program.pm collect them for building the final Stop node
+            # CRITICAL: Must use rewired Returns (with IfTrue control), not original ones
+            if (@true_early_returns) {
+                $if_false->set_early_returns(\@true_early_returns);
+            }
 
             # Return the IfFalse node as this statement's result
             return $if_false;
