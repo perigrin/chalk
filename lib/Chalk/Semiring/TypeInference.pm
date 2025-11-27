@@ -24,7 +24,16 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
 
     method equals($other, $swap = undef) {
         return 0 unless ref($other) eq ref($self);
-        return $valid == $other->valid;
+        return 0 unless $valid == $other->valid;
+
+        # Compare types if both are defined
+        if (defined($type) && defined($other->type)) {
+            return 0 unless $type->equals($other->type);
+        } elsif (defined($type) || defined($other->type)) {
+            return 0;  # One defined, one not - not equal
+        }
+
+        return 1;
     }
 
     method add($other, $swap = undef) {

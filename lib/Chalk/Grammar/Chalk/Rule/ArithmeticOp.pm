@@ -7,6 +7,11 @@ use experimental 'class';
 class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
     method evaluate($context) {
+        use Chalk::IR::Node::Add;
+        use Chalk::IR::Node::Subtract;
+        use Chalk::IR::Node::Multiply;
+        use Chalk::IR::Node::Divide;
+
         # Grammar is: ArithmeticOp -> Expression WS_OPT %ARITHMETIC_OP% WS_OPT Expression
         # But WS_OPT may be filtered out, so we get either 3 or 5 children
         # Search for the operator dynamically instead of hardcoding indices
@@ -25,8 +30,6 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
                 }
             }
         }
-
-        my $builder = $context->env->{ir_builder};
 
         my $num_children = scalar(@{$context->children});
         my $operator_idx;
@@ -48,13 +51,12 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
         # If no operator found, return first child
         return $context->child(0) unless defined $operator;
-        return $context->child(0) unless $builder;
 
         # Extract left operand (first IR node before operator)
         my $left;
         for my $i (0 .. $operator_idx - 1) {
             my $child = $context->child($i);
-            if ($child && $child isa Chalk::IR::Node::Base) {
+            if (ref($child) && $child->can('id')) {
                 $left = $child;
                 last;
             }
@@ -64,7 +66,7 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         my $right;
         for my $i ($operator_idx + 1 .. $num_children - 1) {
             my $child = $context->child($i);
-            if ($child && $child isa Chalk::IR::Node::Base) {
+            if (ref($child) && $child->can('id')) {
                 $right = $child;
                 last;
             }
@@ -76,16 +78,16 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         # Build appropriate IR node based on operator
         # Note: Precedence validation is handled by Precedence semiring during parsing
         if ( $operator eq '+' ) {
-            return $builder->build_add_node( $left, $right );
+            return Chalk::IR::Node::Add->new( left => $left, right => $right );
         }
         elsif ( $operator eq '-' ) {
-            return $builder->build_sub_node( $left, $right );
+            return Chalk::IR::Node::Subtract->new( left => $left, right => $right );
         }
         elsif ( $operator eq '*' ) {
-            return $builder->build_multiply_node( $left, $right );
+            return Chalk::IR::Node::Multiply->new( left => $left, right => $right );
         }
         elsif ( $operator eq '/' ) {
-            return $builder->build_divide_node( $left, $right );
+            return Chalk::IR::Node::Divide->new( left => $left, right => $right );
         }
 
         return $context->child(0);

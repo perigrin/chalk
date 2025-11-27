@@ -4,6 +4,7 @@
 use 5.42.0;
 use experimental 'class';
 use Chalk::Grammar;
+use Chalk::IR::Node;
 
 class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 
@@ -80,10 +81,10 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 # UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT ExpressionList # use overload ... => ...
 
         my @children = $context->children->@*;
-        my $builder  = $context->env->{ir_builder};
+        my $scope = $context->env->{scope};
 
-        # No builder means we're just parsing without IR generation
-        return undef unless $builder;
+        # No scope means we're just parsing without IR generation
+        return undef unless $scope;
 
         # Find the module name or version number (after 'use' and optional WS)
         my $module_name;
@@ -127,9 +128,34 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
         # Extract import list if present
         my $imports = _extract_imports( $context, $module_index + 1 );
 
-        # Build UseStatement IR node
-        return $builder->build_use_statement_node( $type, $module_name,
-            $imports );
+        # Get current control flow from scope
+        my $current_control = $scope->current_control;
+        return undef unless $current_control;
+
+        # Create UseStatement IR node directly
+        my $attributes = {
+            type    => $type,
+            module  => $module_name,
+            imports => $imports
+        };
+
+        my $node_id  = "use_${type}_${module_name}";
+        my $use_stmt = Chalk::IR::Node->new(
+            id         => $node_id,
+            op         => 'UseStatement',
+            inputs     => [$current_control],
+            attributes => $attributes,
+        );
+
+        # Record transformation
+        my $import_list = join( ", ", $imports->@* );
+        $use_stmt->record_transform(
+            'ir_construction',
+            'UseStatement::evaluate',
+            context => "type=$type, module=$module_name, imports=[$import_list]"
+        );
+
+        return $use_stmt;
     }
 }
 

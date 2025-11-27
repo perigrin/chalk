@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
+use Scalar::Util qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
 
@@ -51,7 +52,7 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         my $left;
         for my $i (0 .. $operator_idx - 1) {
             my $child = $context->child($i);
-            if (ref($child) && $child->can('id')) {
+            if (blessed($child) && $child->can('id')) {
                 $left = $child;
                 last;
             }
@@ -61,14 +62,45 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         my $right;
         for my $i ($operator_idx + 1 .. $#children) {
             my $child = $context->child($i);
-            if (ref($child) && $child->can('id')) {
+            if (blessed($child) && $child->can('id')) {
                 $right = $child;
                 last;
             }
         }
 
-        # Validate that we got both operands
-        return $context->child(0) unless $left && $right;
+        # Validate that we got both operands - die if not
+        unless ($left && $right) {
+            # Build child descriptions for error message
+            my @child_descs;
+            for my $i (0..$#children) {
+                my $c = $context->child($i);
+                my $desc;
+                if (!defined($c)) {
+                    $desc = 'undef';
+                } elsif (blessed($c)) {
+                    $desc = ref($c) . ($c->can('id') ? '->' . $c->id : '');
+                } elsif (ref($c)) {
+                    $desc = ref($c) . '{...}';  # Unblessed reference (HASH/ARRAY)
+                } else {
+                    $desc = "'$c'";
+                }
+                push @child_descs, "child[$i]: $desc";
+            }
+
+            my $left_desc = defined($left)
+                ? (blessed($left) ? ref($left) . '->' . $left->id : (ref($left) ? ref($left) . '{...}' : "'$left'"))
+                : 'NOT FOUND';
+            my $right_desc = defined($right)
+                ? (blessed($right) ? ref($right) . '->' . $right->id : (ref($right) ? ref($right) . '{...}' : "'$right'"))
+                : 'NOT FOUND';
+
+            die "ComparisonOp: Could not find IR nodes with id() for both operands\n" .
+                "  operator: " . ($operator // 'undef') . " at index " . ($operator_idx // 'undef') . "\n" .
+                "  left: $left_desc\n" .
+                "  right: $right_desc\n" .
+                "  children (" . scalar(@children) . "): " . join(", ", @child_descs) . "\n" .
+                "  This usually means Expression or its sub-rules failed to build IR nodes.\n";
+        }
 
         # Build appropriate IR node based on operator
         # Comparison operators

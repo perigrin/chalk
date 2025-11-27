@@ -17,7 +17,7 @@ class Chalk::IR::Node::Scope {
         # Generate ID using object address
         $id = 'scope_' . refaddr($self);
         # Deep copy bindings to ensure immutability
-        $bindings = { %$bindings };
+        $bindings = { $bindings->%* };
     }
 
     method op() { 'Scope' }
@@ -25,7 +25,7 @@ class Chalk::IR::Node::Scope {
     # Immutable: return new Scope with added binding
     method with_binding($name, $node) {
         return Chalk::IR::Node::Scope->new(
-            bindings        => { %$bindings, $name => $node },
+            bindings        => { $bindings->%*, $name => $node },
             current_control => $current_control,
             parent          => $parent,
         );
@@ -60,13 +60,16 @@ class Chalk::IR::Node::Scope {
         return undef;
     }
 
-    # Merge two branch scopes, creating Phi nodes for differing variables
-    method merge_branches($scope_a, $scope_b, $region) {
+    # Merge two scopes, creating Phi nodes for variables that differ
+    # Used for both branch merging (if/else) and loop merging (while)
+    # $scope_a and $scope_b are the two scopes to merge
+    # $control_node is the Region or Loop node that owns the Phi nodes
+    method merge_scopes($scope_a, $scope_b, $control_node) {
         use Chalk::IR::Node::Phi;
 
-        my %merged = %$bindings;  # Start with current (pre-branch) bindings
+        my %merged = $bindings->%*;  # Start with current (pre-merge) bindings
 
-        # Get all variable names from both branch scopes
+        # Get all variable names from both scopes
         my %all_vars;
         $all_vars{$_} = 1 for keys %{$scope_a->all_bindings};
         $all_vars{$_} = 1 for keys %{$scope_b->all_bindings};
@@ -75,7 +78,7 @@ class Chalk::IR::Node::Scope {
             my $val_a = $scope_a->lookup($var);
             my $val_b = $scope_b->lookup($var);
 
-            # Skip if variable doesn't exist in both branches
+            # Skip if variable doesn't exist in both scopes
             next unless defined($val_a) && defined($val_b);
 
             # Check if values differ (by ID)
@@ -85,7 +88,7 @@ class Chalk::IR::Node::Scope {
             if ($id_a ne $id_b) {
                 # Values differ - create Phi
                 my $phi = Chalk::IR::Node::Phi->new(
-                    region => $region,
+                    region => $control_node,
                     inputs => [$val_a, $val_b],
                 );
                 $merged{$var} = $phi;
@@ -97,64 +100,21 @@ class Chalk::IR::Node::Scope {
 
         return Chalk::IR::Node::Scope->new(
             bindings        => \%merged,
-            current_control => $region,
-            parent          => $parent,
-        );
-    }
-
-    # Merge loop body scope, creating Phi nodes for loop-carried values
-    method merge_loop($body_scope, $loop_node) {
-        use Chalk::IR::Node::Phi;
-
-        my %merged = %$bindings;  # Start with current (pre-loop) bindings
-
-        # Get all variable names from body scope
-        my %all_vars;
-        $all_vars{$_} = 1 for keys %{$body_scope->all_bindings};
-
-        for my $var (keys %all_vars) {
-            my $pre_loop_value = $self->lookup($var);
-            my $body_value = $body_scope->lookup($var);
-
-            # Skip if variable doesn't exist in both scopes
-            next unless defined($pre_loop_value) && defined($body_value);
-
-            # Check if values differ (by ID)
-            my $id_pre = ref($pre_loop_value) && $pre_loop_value->can('id')
-                ? $pre_loop_value->id : "$pre_loop_value";
-            my $id_body = ref($body_value) && $body_value->can('id')
-                ? $body_value->id : "$body_value";
-
-            if ($id_pre ne $id_body) {
-                # Values differ - create Phi for loop-carried value
-                my $phi = Chalk::IR::Node::Phi->new(
-                    region => $loop_node,
-                    inputs => [$pre_loop_value, $body_value],
-                );
-                $merged{$var} = $phi;
-            } else {
-                # Values same - use either one
-                $merged{$var} = $pre_loop_value;
-            }
-        }
-
-        return Chalk::IR::Node::Scope->new(
-            bindings        => \%merged,
-            current_control => $loop_node,
+            current_control => $control_node,
             parent          => $parent,
         );
     }
 
     # Return all bindings (including from parent scopes)
     method all_bindings() {
-        my %all = $parent ? %{$parent->all_bindings} : ();
-        %all = (%all, %$bindings);
+        my %all = $parent ? $parent->all_bindings->%* : ();
+        %all = (%all, $bindings->%*);
         return \%all;
     }
 
     # Return only this scope's bindings (not parents)
     method local_bindings() {
-        return { %$bindings };
+        return { $bindings->%* };
     }
 
     method depth() {
@@ -165,7 +125,7 @@ class Chalk::IR::Node::Scope {
         # Return node IDs as inputs for graph traversal
         return [
             map { ref($_) && $_->can('id') ? $_->id : $_ }
-            values %$bindings
+            values $bindings->%*
         ];
     }
 

@@ -3,85 +3,28 @@
 
 use 5.42.0;
 use experimental 'class';
-
-# IR Quality Heuristic: Pick best parse based on IR completeness
-# Prefer parses with more defined structure (more nodes in subtree)
-sub _pick_best_ir_value($candidates, $builder) {
-    return $candidates->[0] if $candidates->@* == 1;
-
-    # Count IR nodes in the value subtree for each candidate
-    # Build scored array manually to avoid map block with hash constructor
-    my @scored = ();
-    for my $cand ($candidates->@*) {
-        my $score = _count_ir_nodes($cand, $builder->graph);
-        my $entry = { value => $cand, score => $score };
-        push(@scored, $entry);
-    }
-
-    # Sort by score descending (more nodes = more complete = better)
-    # Using manual sort to avoid sort block syntax
-    my $best = $scored[0];
-    for my $candidate (@scored) {
-        if ($candidate->{score} > $best->{score}) {
-            $best = $candidate;
-        }
-    }
-
-    return $best->{value};
-}
-
-# Recursively count nodes in IR subtree
-# More nodes indicates more complete parse
-sub _count_ir_nodes($node, $graph) {
-    return 0 unless $node;
-    return 0 unless blessed($node) && $node->can('op');
-
-    my $count = 1;  # Count self
-
-    # Recursively count children based on operation type
-    my $op = $node->op;
-
-    # Binary operations have left/right children
-    if ($op eq 'Add' || $op eq 'Subtract' || $op eq 'Multiply' || $op eq 'Divide' ||
-        $op eq 'GT' || $op eq 'LT' || $op eq 'EQ' || $op eq 'NE' || $op eq 'LE' || $op eq 'GE') {
-
-        my $left = $node->attributes->{left};
-        if ($left) {
-            if ($left->{op} eq 'NodeRef') {
-                my $left_node = $graph->get_node($left->{node_id});
-                $count += _count_ir_nodes($left_node, $graph);
-            }
-        }
-
-        my $right = $node->attributes->{right};
-        if ($right) {
-            if ($right->{op} eq 'NodeRef') {
-                my $right_node = $graph->get_node($right->{node_id});
-                $count += _count_ir_nodes($right_node, $graph);
-            }
-        }
-    }
-
-    # Note: Store nodes removed in SSA refactor - variables are direct data flow
-
-    return $count;
-}
+use Scalar::Util qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
+    use Chalk::IR::Node::Store;
+
     method evaluate($context) {
         # Assignment -> Ternary (pass-through)
         # Assignment -> Ternary WS_OPT '=' WS_OPT Assignment
-        # Assignment -> Ternary WS_OPT %ASSIGN_OP% WS_OPT Assignment (TODO: compound assignment)
 
         my @children = $context->children->@*;
-        my $builder = $context->env->{ir_builder};
 
         # Check if this is an assignment operation (has '=' operator)
         my $has_assignment = 0;
         my $equals_index = -1;
         for my $i (0..$#children) {
-            my $child = $children[$i]->extract;
-            if (defined($child) && "$child" eq '=') {
+            my $child = $children[$i];
+            # Handle both direct strings and context objects
+            my $extracted = $child;
+            if (blessed($child) && $child->can('extract')) {
+                $extracted = $child->extract;
+            }
+            if (defined($extracted) && "$extracted" eq '=') {
                 $has_assignment = 1;
                 $equals_index = $i;
                 last;
@@ -91,12 +34,11 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         # If no '=' operator, just pass through the Ternary child
         return $context->child(0) unless $has_assignment;
 
-        # We have an assignment: Ternary = Assignment
-        return $context->child(0) unless $builder;
+        # Get scope from environment
+        my $scope = $context->env->{scope};
+        return $context->child(0) unless $scope;
 
         # Extract variable name from raw parse tree BEFORE semantic evaluation
-        # For reassignments like `$x = 10`, calling child(0) would evaluate Expression
-        # which converts the scalar_var metadata into an IR Load node, losing the name
         my $var_name;
         my $lhs_context = $context->children->[0];
 
@@ -106,89 +48,62 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
             my $ctx = shift @queue;
             next unless defined($ctx);
 
-            if ($ctx->can('extract')) {
+            if (blessed($ctx) && $ctx->can('extract')) {
                 my $val = $ctx->extract;
-                if (ref($val) eq 'HASH' && $val->{type} eq 'scalar_var') {
+                if (ref($val) eq 'HASH' && $val->{type} && $val->{type} eq 'scalar_var') {
                     $var_name = $val->{name};
                     last;
                 }
             }
 
-            if ($ctx->can('children')) {
+            if (blessed($ctx) && $ctx->can('children')) {
                 push @queue, $ctx->children->@*;
             }
         }
 
-        # If BFS didn't find scalar_var, check if LHS evaluates to a Proj node (function parameter)
+        # If BFS didn't find scalar_var, check if LHS evaluates to a Proj node
         unless (defined($var_name)) {
             my $lhs = $context->child(0);
             if (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
-                # Function parameter reassignment
                 $var_name = $lhs->label;
             }
         }
 
         unless (defined($var_name)) {
-            # Couldn't find variable name - not a valid assignment target
             return $context->child(0);
         }
 
-        # Get right side (value to assign) - after '=' + WS_OPT, which is equals_index + 2
+        # Get right side (value to assign) - after '=' + WS_OPT
         my $rhs_index = $equals_index + 2;
-
-        # Query parse alternatives for RHS to handle ambiguous parses
-        # For expressions like "$i = $i - 1", SPPF may create multiple parse trees
-        my @rhs_alternatives = $context->child_alternatives($rhs_index);
-
-        my $rhs;
-        if (@rhs_alternatives > 1) {
-            # Multiple parse alternatives exist - evaluate each and pick best
-            # The "best" is the one with most complete IR structure
-
-            my $candidate_values = [];
-            for my $alt_ctx (@rhs_alternatives) {
-                # Extract semantic value from this alternative's context
-                my $alt_value = $alt_ctx->extract if $alt_ctx->can('extract');
-                next unless (blessed($alt_value) && $alt_value->can('id'));
-                push($candidate_values->@*, $alt_value);
-            }
-
-            # If we got candidates, pick the best based on IR quality
-            my $num_candidates = scalar($candidate_values->@*);
-            if ($num_candidates > 0) {
-                $rhs = _pick_best_ir_value($candidate_values, $builder);
-            } else {
-                # Fallback to default if no valid candidates
-                $rhs = $context->child($rhs_index);
-            }
-        } else {
-            # No ambiguity - use the single parse (default behavior)
-            $rhs = $context->child($rhs_index);
-        }
+        my $rhs = $context->child($rhs_index);
 
         # Validate we got an IR node for the value
-        return $context->child(0) unless (blessed($rhs) && $rhs->can('id'));
-
-        # Bind variable to value node using SSA (Chapter 3)
-        # No Store node needed - variables map directly to IR nodes
-        my $scope = $context->env->{scope};
-        $scope->define($var_name, $rhs->id()) if $scope;
-
-        # Track this variable as modified if we're in a tracked branch (conditional/loop)
-        # This is required for Phi node generation in ConditionalStatement
-        if ( $builder->can('branch_tracking_stack') ) {
-            my $tracking_stack = $builder->branch_tracking_stack;
-            if ( scalar($tracking_stack->@*) > 0 ) {
-                my $frame = $tracking_stack->[-1];
-                my $current_branch = $frame->{current_branch};
-                if (defined($current_branch)) {
-                    warn "[DEBUG] Assignment: tracking $var_name in branch $current_branch, node_id=", $rhs->id, "\n" if $ENV{CHALK_DEBUG_TRACKING};
-                    $frame->{branches}->{$current_branch}->{$var_name} = $rhs;
-                }
-            }
+        unless (blessed($rhs) && $rhs->can('id')) {
+            return $context->child(0);
         }
 
-        return $rhs;
+        # Get current control from scope
+        my $current_control = $scope->current_control;
+        unless (defined($current_control)) {
+            return $context->child(0);
+        }
+
+        # Create Store node directly (content-addressable ID)
+        my $store = Chalk::IR::Node::Store->new(
+            control => $current_control,
+            var     => $var_name,
+            value   => $rhs,
+        );
+
+        # Update scope immutably: create new scope with binding and control
+        my $new_scope = $scope->with_binding($var_name, $rhs);
+        $new_scope = $new_scope->with_control($store);
+
+        # Update env's scope reference to the new immutable scope
+        $context->env->{scope} = $new_scope;
+
+        # Return Store node so control flow can be wired through it
+        return $store;
     }
 }
 

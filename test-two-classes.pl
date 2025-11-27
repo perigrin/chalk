@@ -1,0 +1,66 @@
+#!/usr/bin/env perl
+# ABOUTME: Test two classes with full precedence table
+# ABOUTME: Isolates Precedence semiring bug
+
+use 5.42.0;
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+use Chalk::Grammar;
+use Chalk::Parser;
+use Chalk::Semiring::Boolean;
+use Chalk::Semiring::Precedence;
+use Chalk::Semiring::Composite;
+
+open my $fh, '<:utf8', "$RealBin/grammar/chalk.bnf" or die $!;
+my $bnf = do { local $/; <$fh> };
+close $fh;
+my $grammar = Chalk::Grammar->build_from_bnf($bnf, 'Program', 'Chalk');
+
+my @perl_precedence_table = (
+    { assoc => 'left',    ops => ['->'] },
+    { assoc => 'nonassoc', ops => ['++', '--'] },
+    { assoc => 'right',   ops => ['**'] },
+    { assoc => 'right',   ops => ['!', '~', '\\', 'unary +', 'unary -'] },
+    { assoc => 'left',    ops => ['=~', '!~'] },
+    { assoc => 'left',    ops => ['*', '/', '%', 'x'] },
+    { assoc => 'left',    ops => ['+', '-', '.'] },
+    { assoc => 'left',    ops => ['<<', '>>'] },
+    { assoc => 'nonassoc', ops => ['named unary'] },
+    { assoc => 'nonassoc', ops => ['isa'] },
+    { assoc => 'chained', ops => ['<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'] },
+    { assoc => 'chain/na', ops => ['==', '!=', 'eq', 'ne', '<=>', 'cmp', '~~'] },
+    { assoc => 'left',    ops => ['&'] },
+    { assoc => 'left',    ops => ['|', '^'] },
+    { assoc => 'left',    ops => ['&&'] },
+    { assoc => 'left',    ops => ['||', '^^', '//'] },
+    { assoc => 'nonassoc', ops => ['..', '...'] },
+    { assoc => 'right',   ops => ['?:'] },
+    { assoc => 'right',   ops => ['=', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '.=', '<<=', '>>=', '&&=', '||=', '//='] },
+    { assoc => 'left',    ops => [',', '=>'] },
+    { assoc => 'right',   ops => ['not'] },
+    { assoc => 'left',    ops => ['and'] },
+    { assoc => 'left',    ops => ['or', 'xor'] },
+);
+
+my $composite = Chalk::Semiring::Composite->new(
+    semirings => [
+        Chalk::Semiring::Boolean->new(),
+        Chalk::Semiring::Precedence->new(precedence_table => \@perl_precedence_table)
+    ]
+);
+my $parser = Chalk::Parser->new(grammar => $grammar, semiring => $composite);
+
+# Test two simple classes
+my $code = <<'CODE';
+class Foo {
+    field $x :param;
+}
+
+class Bar {
+    field $y :param;
+}
+CODE
+
+print "Two simple classes: ";
+my $result = $parser->parse_string($code);
+print $result ? "SUCCESS" : "FAIL", "\n";

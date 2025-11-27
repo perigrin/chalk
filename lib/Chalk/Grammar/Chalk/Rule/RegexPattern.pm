@@ -5,12 +5,11 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::RegexPattern :isa(Chalk::GrammarRule) {
+    use Chalk::IR::Node::Constant;
+
     method evaluate($context) {
         # RegexPattern -> 'qr' '/' RegexContent '/' RegexFlags
         # Children: [0]='qr', [1]='/', [2]=RegexContent, [3]='/', [4]=RegexFlags
-
-        my $builder = $context->env->{ir_builder};
-        return undef unless $builder;
 
         # Get regex content (child 2) and flags (child 4)
         my $content = $context->child(2) // '';
@@ -20,8 +19,11 @@ class Chalk::Grammar::Chalk::Rule::RegexPattern :isa(Chalk::GrammarRule) {
         # Full regex engine implementation is tracked in issue #157
         my $pattern = "qr/$content/$flags";
 
-        # Build and return Constant IR node with type 'Regex'
-        return $builder->build_constant_node($pattern, 'Regex');
+        # Create Constant node directly (content-addressable ID)
+        return Chalk::IR::Node::Constant->new(
+            type  => 'Regex',
+            value => $pattern,
+        );
     }
 }
 

@@ -14,6 +14,7 @@ use Chalk::Grammar::Chalk::Type::Array;
 use Chalk::Grammar::Chalk::Type::Hash;
 use Chalk::Grammar::Chalk::Type::List;
 use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::IR::Node::Scope;
 
 class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     field $value     :param :reader;    # Computed semantic value
@@ -178,6 +179,11 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         )
     );
     field $_add_id_is_zero :reader = 1;    # Flag to identify add_id
+
+    ADJUST {
+        # Initialize scope if not provided - required by Rule classes for variable tracking
+        $env->{scope} //= Chalk::IR::Node::Scope->new();
+    }
 
     method init_element_from_rule(
         $rule,

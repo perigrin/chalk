@@ -14,9 +14,6 @@ class Chalk::Grammar::Chalk::Rule::BreakStatement :isa(Chalk::GrammarRule) {
         #   2. Wire it to the loop exit Region
         #   3. NOT add a backedge for this path
 
-        my $builder = $context->env->{ir_builder};
-        return undef unless $builder;
-
         # Return metadata for parent to handle
         # This uses a similar pattern to Return and Assignment
         return {

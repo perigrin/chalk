@@ -102,7 +102,18 @@ Statement -> ReturnStatement
 Statement -> LoopControl
 Statement -> BreakStatement
 Statement -> ContinueStatement
-Statement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
+Statement -> PostfixConditionalStatement
+Statement -> PostfixLoopStatement
+
+# Postfix conditional statement modifier (if/unless after statement)
+PostfixConditionalStatement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
+
+# Postfix loop statement modifier (for/foreach/while/until after statement)
+# Examples: print $_ for @items;  print while <>;
+PostfixLoopStatement -> Statement WS_OPT 'for' WS_OPT Expression
+PostfixLoopStatement -> Statement WS_OPT 'foreach' WS_OPT Expression
+PostfixLoopStatement -> Statement WS_OPT 'while' WS_OPT Expression
+PostfixLoopStatement -> Statement WS_OPT 'until' WS_OPT Expression
 
 # Blocks (literal blocks and block-containing statements)
 Block -> ClassDeclaration
@@ -397,11 +408,12 @@ Variable -> ArrayVar
 Variable -> HashVar
 Variable -> ArraySize
 
-ScalarVar -> '$' %BAREWORD%
+# Variable names allow keywords (e.g., $class, $if, $while are valid in Perl)
+ScalarVar -> '$' %BAREWORD_ANY%
 ScalarVar -> '$' %SPECIAL_IDENTIFIER%
-ArrayVar -> '@' %BAREWORD%
+ArrayVar -> '@' %BAREWORD_ANY%
 ArrayVar -> '@' %SPECIAL_IDENTIFIER%
-HashVar -> '%' %BAREWORD%
+HashVar -> '%' %BAREWORD_ANY%
 HashVar -> '%' %SPECIAL_IDENTIFIER%
 
 # Array size
@@ -436,6 +448,12 @@ Variable -> Variable '->' '%' '*'                     # $var->%* (hash postfix d
 # This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
 Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
 Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
+
+# Subscript access on function/method call results (for patterns like foo()->{key}, $obj->method()->{key})
+# These rules enable chained access: $self->to_hash()->{attributes}, Class->new()->[0]
+Variable -> FunctionCall '->' '{' Expression '}'         # foo()->{key}, $obj->method()->{key}
+Variable -> FunctionCall '->' '{' %BAREWORD_ANY% '}'     # foo()->{bareword}
+Variable -> FunctionCall '->' '[' Expression ']'         # foo()->[0], $obj->method()->[0]
 
 # Note: Coderef calls have been moved to FunctionCall
 # since they are pure invocations (rvalues), not chained operations

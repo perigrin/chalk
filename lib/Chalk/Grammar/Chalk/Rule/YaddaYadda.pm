@@ -11,9 +11,6 @@ class Chalk::Grammar::Chalk::Rule::YaddaYadda :isa(Chalk::GrammarRule) {
         # The yada-yada operator is a placeholder that dies when executed
         # In Perl, it throws: "Unimplemented at <file> line <line>"
 
-        my $builder = $context->env->{ir_builder};
-        return '...' unless $builder;  # Pass through literal if no builder
-
         # TODO: Build IR node for yada-yada operator
         # This should generate a Die node with "Unimplemented" message
         # For now, pass through the literal

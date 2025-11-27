@@ -4,7 +4,7 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
-use Chalk::IR::Builder;
+use Chalk::IR::Node::Scope;
 use Chalk::Semiring::SPPF;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
@@ -12,12 +12,12 @@ use Chalk::Semiring::Composite;
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
-    field $builder :reader;
+    field $scope :reader;
     field $composite :reader;
 
     ADJUST {
-        # Create IR Builder BEFORE creating composite semiring
-        $builder = Chalk::IR::Builder->new();
+        # Create Scope for variable tracking (replaces Builder)
+        $scope = Chalk::IR::Node::Scope->new();
 
         # Create SPPF semiring for parse forest
         # This builds the complete ambiguous parse forest
@@ -61,18 +61,18 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
             precedence_table => \@perl_precedence_table
         );
 
-        # Create Semantic semiring with IR builder in environment
+        # Create Semantic semiring with scope in environment (no Builder needed)
         # Pass forest via shared_context so it's available in EvalContext
         my $semantic_sr = Chalk::Semiring::Semantic->new(
             grammar => $grammar,
-            env => { ir_builder => $builder },
+            env => { scope => $scope },
             shared_context => { forest => $forest }
         );
 
         # Use Composite with SPPF, Precedence, and Semantic
         # SPPF builds complete ambiguous forest
         # Precedence validates operator precedence during parsing (returns invalid for bad parses)
-        # Semantic builds IR
+        # Semantic builds IR via Rule classes creating nodes directly
         # Precedence.add() prefers valid over invalid, so invalid parses are automatically filtered
         $composite = Chalk::Semiring::Composite->new(
             semirings => [$sppf_sr, $precedence_sr, $semantic_sr]

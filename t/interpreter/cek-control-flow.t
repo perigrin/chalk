@@ -17,18 +17,30 @@ use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Return;
 use Chalk::Interpreter::CEKDataflow;
 
+# Tests use content-addressable IDs computed from node contents
+# Object references are used for graph traversal
+
 # Test simple If node: if (true condition)
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 1, type => 'int');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_2', inputs => ['node_1'], condition_id => 'node_1');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_3', inputs => ['node_0', 'node_2'], value_id => 'node_2', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $cond_true->id,
+        inputs => [$cond_true->id],
+        condition_id => $cond_true->id,
+        condition => $cond_true,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $if_node,
+    );
 
     $graph->add_node($start);
     $graph->add_node($cond_true);
     $graph->add_node($if_node);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -38,17 +50,32 @@ use Chalk::Interpreter::CEKDataflow;
 # Test Proj node true branch: if (true) then activate index 1
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 1, type => 'int');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_2', inputs => ['node_1'], condition_id => 'node_1');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_3', inputs => ['node_2'], index => 1, label => 'IfTrue');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_4', inputs => ['node_0', 'node_3'], value_id => 'node_3', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $cond_true->id,
+        inputs => [$cond_true->id],
+        condition_id => $cond_true->id,
+        condition => $cond_true,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $proj_true,
+    );
 
     $graph->add_node($start);
     $graph->add_node($cond_true);
     $graph->add_node($if_node);
     $graph->add_node($proj_true);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -58,12 +85,27 @@ use Chalk::Interpreter::CEKDataflow;
 # Test If with GT comparison: if (5 > 3) returns 1
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $c5 = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 5, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 3, type => 'int');
-    my $gt = Chalk::IR::Node::GT->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_4', inputs => ['node_3'], condition_id => 'node_3');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_5', inputs => ['node_0', 'node_4'], value_id => 'node_4', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $c5 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $gt = Chalk::IR::Node::GT->new(
+        id => 'gt_' . $c5->id . '_' . $c3->id,
+        inputs => [$c5->id, $c3->id],
+        left_id => $c5->id,
+        right_id => $c3->id,
+        left => $c5,
+        right => $c3,
+    );
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $gt->id,
+        inputs => [$gt->id],
+        condition_id => $gt->id,
+        condition => $gt,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $if_node,
+    );
 
     $graph->add_node($start);
     $graph->add_node($c5);
@@ -71,22 +113,47 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($gt);
     $graph->add_node($if_node);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
     is($result, 1, 'If node with GT comparison (5 > 3) returns 1');
 }
 
-# Test Region node merging true branch (index 1)
+# Test Region node merging when true branch is active
+# Region always returns 1 (control flows here), regardless of which branch is active
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 1, type => 'int');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_2', inputs => ['node_1'], condition_id => 'node_1');
-    my $proj_false = Chalk::IR::Node::Proj->new(id => 'node_3', inputs => ['node_2'], index => 0, label => 'IfFalse');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_4', inputs => ['node_2'], index => 1, label => 'IfTrue');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_5', inputs => ['node_3', 'node_4']);
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_6', inputs => ['node_0', 'node_5'], value_id => 'node_5', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $cond_true->id,
+        inputs => [$cond_true->id],
+        condition_id => $cond_true->id,
+        condition => $cond_true,
+    );
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_1_IfFalse',
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_' . $proj_false->id . '_' . $proj_true->id,
+        inputs => [$proj_false->id, $proj_true->id],
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $region,
+    );
 
     $graph->add_node($start);
     $graph->add_node($cond_true);
@@ -95,22 +162,48 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($proj_true);
     $graph->add_node($region);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
-    is($result, 1, 'Region node with true branch returns index 1');
+    is($result, 1, 'Region node returns 1 (control flows here) when true branch is active');
 }
 
-# Test Region node merging false branch (index 0)
+# Test Region node merging when false branch is active
+# Region always returns 1 (control flows here), regardless of which branch is active
+# The active path is tracked by Proj nodes, not by Region's return value
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $cond_false = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 0, type => 'int');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_2', inputs => ['node_1'], condition_id => 'node_1');
-    my $proj_false = Chalk::IR::Node::Proj->new(id => 'node_3', inputs => ['node_2'], index => 0, label => 'IfFalse');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_4', inputs => ['node_2'], index => 1, label => 'IfTrue');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_5', inputs => ['node_3', 'node_4']);
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_6', inputs => ['node_0', 'node_5'], value_id => 'node_5', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $cond_false = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $cond_false->id,
+        inputs => [$cond_false->id],
+        condition_id => $cond_false->id,
+        condition => $cond_false,
+    );
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_1_IfFalse',
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_' . $proj_false->id . '_' . $proj_true->id,
+        inputs => [$proj_false->id, $proj_true->id],
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $region,
+    );
 
     $graph->add_node($start);
     $graph->add_node($cond_false);
@@ -119,25 +212,53 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($proj_true);
     $graph->add_node($region);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
-    is($result, 0, 'Region node with false branch returns index 0');
+    is($result, 1, 'Region node returns 1 (control flows here) even when false branch is active');
 }
 
 # Test Phi node selecting true branch value
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 1, type => 'int');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_2', inputs => ['node_1'], condition_id => 'node_1');
-    my $proj_false = Chalk::IR::Node::Proj->new(id => 'node_3', inputs => ['node_2'], index => 0, label => 'IfFalse');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_4', inputs => ['node_2'], index => 1, label => 'IfTrue');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_5', inputs => ['node_3', 'node_4']);
-    my $val_false = Chalk::IR::Node::Constant->new(id => 'node_6', inputs => [], value => 42, type => 'int');
-    my $val_true = Chalk::IR::Node::Constant->new(id => 'node_7', inputs => [], value => 99, type => 'int');
-    my $phi = Chalk::IR::Node::Phi->new(id => 'node_8', inputs => ['node_5', 'node_6', 'node_7'], region_id => 'node_5');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_9', inputs => ['node_0', 'node_8'], value_id => 'node_8', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $cond_true->id,
+        inputs => [$cond_true->id],
+        condition_id => $cond_true->id,
+        condition => $cond_true,
+    );
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_1_IfFalse',
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_' . $proj_false->id . '_' . $proj_true->id,
+        inputs => [$proj_false->id, $proj_true->id],
+    );
+    my $val_false = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $val_true = Chalk::IR::Node::Constant->new(value => 99, type => 'int');
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'phi_' . $region->id,
+        inputs => [$region->id, $val_false->id, $val_true->id],
+        region_id => $region->id,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $phi,
+    );
 
     $graph->add_node($start);
     $graph->add_node($cond_true);
@@ -149,6 +270,7 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($val_true);
     $graph->add_node($phi);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -158,16 +280,43 @@ use Chalk::Interpreter::CEKDataflow;
 # Test Phi node selecting false branch value
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $cond_false = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 0, type => 'int');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_2', inputs => ['node_1'], condition_id => 'node_1');
-    my $proj_false = Chalk::IR::Node::Proj->new(id => 'node_3', inputs => ['node_2'], index => 0, label => 'IfFalse');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_4', inputs => ['node_2'], index => 1, label => 'IfTrue');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_5', inputs => ['node_3', 'node_4']);
-    my $val_false = Chalk::IR::Node::Constant->new(id => 'node_6', inputs => [], value => 42, type => 'int');
-    my $val_true = Chalk::IR::Node::Constant->new(id => 'node_7', inputs => [], value => 99, type => 'int');
-    my $phi = Chalk::IR::Node::Phi->new(id => 'node_8', inputs => ['node_5', 'node_6', 'node_7'], region_id => 'node_5');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_9', inputs => ['node_0', 'node_8'], value_id => 'node_8', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $cond_false = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $cond_false->id,
+        inputs => [$cond_false->id],
+        condition_id => $cond_false->id,
+        condition => $cond_false,
+    );
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_1_IfFalse',
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_' . $proj_false->id . '_' . $proj_true->id,
+        inputs => [$proj_false->id, $proj_true->id],
+    );
+    my $val_false = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $val_true = Chalk::IR::Node::Constant->new(value => 99, type => 'int');
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'phi_' . $region->id,
+        inputs => [$region->id, $val_false->id, $val_true->id],
+        region_id => $region->id,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $phi,
+    );
 
     $graph->add_node($start);
     $graph->add_node($cond_false);
@@ -179,6 +328,7 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($val_true);
     $graph->add_node($phi);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -188,16 +338,50 @@ use Chalk::Interpreter::CEKDataflow;
 # Test complete if/else pattern: max(x, y) where x > y
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $x = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 10, type => 'int');
-    my $y = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 5, type => 'int');
-    my $gt = Chalk::IR::Node::GT->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_4', inputs => ['node_3'], condition_id => 'node_3');
-    my $proj_false = Chalk::IR::Node::Proj->new(id => 'node_5', inputs => ['node_4'], index => 0, label => 'IfFalse');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_6', inputs => ['node_4'], index => 1, label => 'IfTrue');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_7', inputs => ['node_5', 'node_6']);
-    my $phi = Chalk::IR::Node::Phi->new(id => 'node_8', inputs => ['node_7', 'node_2', 'node_1'], region_id => 'node_7');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_9', inputs => ['node_0', 'node_8'], value_id => 'node_8', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $x = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
+    my $y = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $gt = Chalk::IR::Node::GT->new(
+        id => 'gt_' . $x->id . '_' . $y->id,
+        inputs => [$x->id, $y->id],
+        left_id => $x->id,
+        right_id => $y->id,
+        left => $x,
+        right => $y,
+    );
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $gt->id,
+        inputs => [$gt->id],
+        condition_id => $gt->id,
+        condition => $gt,
+    );
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_1_IfFalse',
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_' . $proj_false->id . '_' . $proj_true->id,
+        inputs => [$proj_false->id, $proj_true->id],
+    );
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'phi_' . $region->id,
+        inputs => [$region->id, $y->id, $x->id],
+        region_id => $region->id,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $phi,
+    );
 
     $graph->add_node($start);
     $graph->add_node($x);
@@ -209,6 +393,7 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($region);
     $graph->add_node($phi);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -218,16 +403,50 @@ use Chalk::Interpreter::CEKDataflow;
 # Test complete if/else pattern: max(x, y) where x < y
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $x = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 3, type => 'int');
-    my $y = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 8, type => 'int');
-    my $gt = Chalk::IR::Node::GT->new(id => 'node_3', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_4', inputs => ['node_3'], condition_id => 'node_3');
-    my $proj_false = Chalk::IR::Node::Proj->new(id => 'node_5', inputs => ['node_4'], index => 0, label => 'IfFalse');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_6', inputs => ['node_4'], index => 1, label => 'IfTrue');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_7', inputs => ['node_5', 'node_6']);
-    my $phi = Chalk::IR::Node::Phi->new(id => 'node_8', inputs => ['node_7', 'node_2', 'node_1'], region_id => 'node_7');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_9', inputs => ['node_0', 'node_8'], value_id => 'node_8', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $x = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $y = Chalk::IR::Node::Constant->new(value => 8, type => 'int');
+    my $gt = Chalk::IR::Node::GT->new(
+        id => 'gt_' . $x->id . '_' . $y->id,
+        inputs => [$x->id, $y->id],
+        left_id => $x->id,
+        right_id => $y->id,
+        left => $x,
+        right => $y,
+    );
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $gt->id,
+        inputs => [$gt->id],
+        condition_id => $gt->id,
+        condition => $gt,
+    );
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_1_IfFalse',
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_' . $proj_false->id . '_' . $proj_true->id,
+        inputs => [$proj_false->id, $proj_true->id],
+    );
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'phi_' . $region->id,
+        inputs => [$region->id, $y->id, $x->id],
+        region_id => $region->id,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $phi,
+    );
 
     $graph->add_node($start);
     $graph->add_node($x);
@@ -239,6 +458,7 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($region);
     $graph->add_node($phi);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -248,19 +468,60 @@ use Chalk::Interpreter::CEKDataflow;
 # Test if/else with arithmetic in true branch: if (x > 5) then x+100 else 200
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $x = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 7, type => 'int');
-    my $five = Chalk::IR::Node::Constant->new(id => 'node_2', inputs => [], value => 5, type => 'int');
-    my $hundred = Chalk::IR::Node::Constant->new(id => 'node_3', inputs => [], value => 100, type => 'int');
-    my $two_hundred = Chalk::IR::Node::Constant->new(id => 'node_4', inputs => [], value => 200, type => 'int');
-    my $gt = Chalk::IR::Node::GT->new(id => 'node_5', inputs => ['node_1', 'node_2'], left_id => 'node_1', right_id => 'node_2');
-    my $if_node = Chalk::IR::Node::If->new(id => 'node_6', inputs => ['node_5'], condition_id => 'node_5');
-    my $proj_false = Chalk::IR::Node::Proj->new(id => 'node_7', inputs => ['node_6'], index => 0, label => 'IfFalse');
-    my $proj_true = Chalk::IR::Node::Proj->new(id => 'node_8', inputs => ['node_6'], index => 1, label => 'IfTrue');
-    my $add = Chalk::IR::Node::Add->new(id => 'node_9', inputs => ['node_1', 'node_3'], left_id => 'node_1', right_id => 'node_3');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_10', inputs => ['node_7', 'node_8']);
-    my $phi = Chalk::IR::Node::Phi->new(id => 'node_11', inputs => ['node_10', 'node_4', 'node_9'], region_id => 'node_10');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_12', inputs => ['node_0', 'node_11'], value_id => 'node_11', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $x = Chalk::IR::Node::Constant->new(value => 7, type => 'int');
+    my $five = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $hundred = Chalk::IR::Node::Constant->new(value => 100, type => 'int');
+    my $two_hundred = Chalk::IR::Node::Constant->new(value => 200, type => 'int');
+    my $gt = Chalk::IR::Node::GT->new(
+        id => 'gt_' . $x->id . '_' . $five->id,
+        inputs => [$x->id, $five->id],
+        left_id => $x->id,
+        right_id => $five->id,
+        left => $x,
+        right => $five,
+    );
+    my $if_node = Chalk::IR::Node::If->new(
+        id => 'if_' . $gt->id,
+        inputs => [$gt->id],
+        condition_id => $gt->id,
+        condition => $gt,
+    );
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_1_IfFalse',
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        id => 'proj_' . $if_node->id . '_0_IfTrue',
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    my $add = Chalk::IR::Node::Add->new(
+        id => 'add_' . $x->id . '_' . $hundred->id,
+        inputs => [$x->id, $hundred->id],
+        left_id => $x->id,
+        right_id => $hundred->id,
+        left => $x,
+        right => $hundred,
+    );
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_' . $proj_false->id . '_' . $proj_true->id,
+        inputs => [$proj_false->id, $proj_true->id],
+    );
+    my $phi = Chalk::IR::Node::Phi->new(
+        id => 'phi_' . $region->id,
+        inputs => [$region->id, $two_hundred->id, $add->id],
+        region_id => $region->id,
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $phi,
+    );
 
     $graph->add_node($start);
     $graph->add_node($x);
@@ -275,6 +536,7 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($region);
     $graph->add_node($phi);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -284,16 +546,23 @@ use Chalk::Interpreter::CEKDataflow;
 # Test Region node validation: reject invalid Proj return value
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     # Create a constant that will be used as a fake Proj result (invalid value)
-    my $invalid = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 2, type => 'int');
-    my $region = Chalk::IR::Node::Region->new(id => 'node_2', inputs => ['node_1']);
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_3', inputs => ['node_0', 'node_2'], value_id => 'node_2', control_id => 'node_0');
+    my $invalid = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
+    my $region = Chalk::IR::Node::Region->new(
+        id => 'region_test',
+        inputs => [$invalid->id],
+    );
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $region,
+    );
 
     $graph->add_node($start);
     $graph->add_node($invalid);
     $graph->add_node($region);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };

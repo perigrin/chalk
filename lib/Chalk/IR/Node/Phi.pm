@@ -28,8 +28,7 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
         my @inputs = $self->inputs->@*;
 
         # Get the Region node to check its Proj inputs
-        my $env = $context->("env:");
-        my $graph = $env->graph;
+        my $graph = $context->("graph:");
         my $region_node = $graph->nodes->{$region_id};
         my $region_inputs = $region_node->inputs;
 

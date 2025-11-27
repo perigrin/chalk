@@ -40,6 +40,7 @@ use Chalk::Grammar::Chalk::Rule::MethodCall;
 use Chalk::Grammar::Chalk::Rule::Number;
 use Chalk::Grammar::Chalk::Rule::ParameterList;
 use Chalk::Grammar::Chalk::Rule::Postfix;
+use Chalk::Grammar::Chalk::Rule::PostfixConditionalStatement;
 use Chalk::Grammar::Chalk::Rule::Program;
 use Chalk::Grammar::Chalk::Rule::QualifiedIdentifier;
 use Chalk::Grammar::Chalk::Rule::QuotedWordList;

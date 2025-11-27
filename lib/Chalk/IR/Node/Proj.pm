@@ -7,6 +7,17 @@ use utf8;
 class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
     field $index  :param :reader;
     field $label  :param :reader;
+    # Object reference to source node (If) for graph traversal
+    field $source :param :reader = undef;
+    # Issue #195 fix: Nodes that use this Proj as their control input
+    # This enables forward traversal to find early returns in if-branches
+    field $control_users :param :reader = undef;
+
+    # Add a node that uses this Proj as control
+    method add_control_user($node) {
+        $control_users //= [];
+        push $control_users->@*, $node;
+    }
 
     method op() { 'Proj' }
 

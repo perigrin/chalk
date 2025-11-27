@@ -6,6 +6,9 @@ use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
     method evaluate($context) {
+        use Chalk::IR::Node::Negate;
+        use Chalk::IR::Node::Not;
+
         # Unary -> Primary (pass-through)
         # Unary -> '!' WS_OPT Unary (prefix operators)
         # Unary -> Variable '++' (postfix increment)
@@ -38,25 +41,25 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
 
         # Stringify operator (may be Token object or plain string)
         my $operator = "$op_child";
-        my $builder = $context->env->{ir_builder};
-        return $context->child(0) unless $builder;
 
         # Get operand at child 1 (WS_OPT is collapsed/absent when empty)
         my $operand = $context->child(1);
 
         # Validate that we got an IR node
-        return $operand unless (blessed($operand) && $operand->can('id'));
+        return $operand unless (ref($operand) && $operand->can('id'));
 
         # Build appropriate unary node
         if ($operator eq '!') {
-            return $builder->build_not_node($operand);
+            return Chalk::IR::Node::Not->new(operand => $operand);
         } elsif ($operator eq '-') {
-            return $builder->build_negate_node($operand);
+            return Chalk::IR::Node::Negate->new(operand => $operand);
         } elsif ($operator eq '+') {
             # Unary + is a no-op, just pass through
             return $operand;
         } elsif ($operator eq '\\') {
-            return $builder->build_reference_node($operand);
+            # TODO: Reference node needs to be updated to Builder-less architecture
+            # For now, just pass through
+            return $operand;
         } elsif ($operator eq '++' || $operator eq '--') {
             # Prefix ++/--
             # TODO: Implement prefix increment/decrement when IR nodes available

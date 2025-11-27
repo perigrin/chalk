@@ -40,9 +40,6 @@ class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
         my $first_child = $context->child(0);
         if (defined($first_child) && $first_child eq '{') {
             # Block -> '{' WS_OPT StatementList WS_OPT '}'
-            my $builder = $context->env->{ir_builder};
-            return undef unless $builder;
-
             # Get StatementList (child 2)
             my $statements = $context->child(2);
             return undef unless $statements;

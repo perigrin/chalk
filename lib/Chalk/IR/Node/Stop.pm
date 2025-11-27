@@ -5,7 +5,16 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
+    # Object references to Return nodes (for graph traversal)
+    field $returns :param :reader = [];
+
     method op() { 'Stop' }
+
+    # Provide accessor for Return node objects
+    # Used by graph traversal to follow object references
+    method return_nodes() {
+        return $returns;
+    }
 
     method to_hash() {
         return {

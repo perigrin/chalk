@@ -74,6 +74,9 @@ class Chalk::Interpreter::CEKDataflow {
                 elsif ($key eq 'env:') {
                     return $environment;
                 }
+                elsif ($key eq 'graph:') {
+                    return $graph;
+                }
                 return undef;
             };
 
@@ -89,11 +92,16 @@ class Chalk::Interpreter::CEKDataflow {
             $environment->set_node($node_id, $value);
             $computed{$node_id} = 1;
 
-            # Check if this was the Return node (terminal)
+            # Check if this was a Return node (potential terminal)
+            # Only stop if the Return returned a value (active path)
+            # Inactive paths return undef and execution should continue
             if ($node->op eq 'Return') {
-                $result = $value;
-                $found_return = 1;
-                last;
+                if (defined($value)) {
+                    $result = $value;
+                    $found_return = 1;
+                    last;
+                }
+                # Inactive Return - continue execution to find active path
             }
 
             # Update waiting nodes - check if any become ready
@@ -215,6 +223,9 @@ class Chalk::Interpreter::CEKDataflow {
             }
             elsif ($key eq 'env:') {
                 return $environment;
+            }
+            elsif ($key eq 'graph:') {
+                return $graph;
             }
             return undef;
         };

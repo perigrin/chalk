@@ -3,65 +3,125 @@
 
 use 5.42.0;
 use experimental 'class';
+use Scalar::Util qw(blessed);
 
 class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
+    use Chalk::IR::Node::Start;
+    use Chalk::IR::Node::Return;
+    use Chalk::IR::Node::Constant;
+
     method evaluate($context) {
-        my $builder = $context->env->{ir_builder};
-        return undef unless $builder;
+        # Get scope from environment
+        my $scope = $context->env->{scope};
+        return undef unless $scope;
 
         # Create Start node (program entry point)
-        my $start = $builder->build_start_node('main');
-        $builder->set_control($start->id);
+        my $start = Chalk::IR::Node::Start->new(label => 'main');
 
-        # Get statements from StatementList child
+        # Update scope immutably with new control
+        $scope = $scope->with_control($start);
+        $context->env->{scope} = $scope;
+
+        # Find StatementList in children
         # Program -> WS_OPT StatementList WS_OPT
-        # StatementList should be at child(1), but if WS_OPT is collapsed, might be child(0)
         my @children = $context->children->@*;
-        my $stmt_list_ctx;
+        my @statements;
 
-        # Find the StatementList child (it will have an array or node as focus)
         for my $child_ctx (@children) {
             next unless $child_ctx && $child_ctx->can('focus');
             my $focus = $child_ctx->focus;
             # StatementList returns an arrayref of statements
             if (ref($focus) eq 'ARRAY') {
-                $stmt_list_ctx = $child_ctx;
+                @statements = $focus->@*;
                 last;
             }
         }
 
-        my @statements;
-        if ($stmt_list_ctx) {
-            my $stmt_list = $stmt_list_ctx->focus;
-            @statements = ref($stmt_list) eq 'ARRAY' ? $stmt_list->@* : ();
-        }
+        # CRITICAL FIX for Issue #195: Wire up control flow for ALL statements sequentially
+        # Due to bottom-up parsing, child statements may have been created with incorrect control.
+        # We need to rewire controls so each statement uses the previous statement's output as control.
+        # This ensures that: my $x = 10; if ($x > 5) { return 1; } return 0;
+        # correctly wires the final "return 0;" to use the if-statement's IfFalse output as control.
+        my $current_ctrl = $start;
+        my @rewired_statements;
 
-        my $current_control = $start->id;
-
-        # Wire up all statements with control flow
         for my $stmt (@statements) {
-            next unless blessed($stmt) && $stmt->can('inputs');
+            if (blessed($stmt) && $stmt->can('with_control')) {
+                # Rewire this statement to use current control
+                my $rewired = $stmt->with_control($current_ctrl);
+                push @rewired_statements, $rewired;
 
-            # Check if this statement needs control wiring
-            if ($stmt->inputs->[0] && $stmt->inputs->[0] eq '__CONTROL_PLACEHOLDER__') {
-                $builder->set_node_control($stmt, $current_control);
+                # Determine what control to use for the next statement
+                # Control flow nodes (Region, Proj for IfFalse, etc.) pass their output as control
+                # Other nodes (Store, Return) become the control predecessor
+                if (blessed($rewired) && $rewired->can('op')) {
+                    my $op = $rewired->op;
+                    if ($op eq 'Proj' || $op eq 'Region' || $op eq 'If') {
+                        # Control flow node - use it as control for next statement
+                        $current_ctrl = $rewired;
+                    } else {
+                        # Regular statement - also becomes control for next
+                        $current_ctrl = $rewired;
+                    }
+                } else {
+                    $current_ctrl = $rewired;
+                }
+            } elsif (blessed($stmt) && $stmt->can('id')) {
+                # Node without with_control() - just add it and use it as control
+                push @rewired_statements, $stmt;
+                $current_ctrl = $stmt;
+            } else {
+                # Non-node (shouldn't happen but handle gracefully)
+                push @rewired_statements, $stmt;
             }
 
-            # Update control for next statement
-            $current_control = $stmt->id;
+            if ($ENV{CHALK_DEBUG_PROGRAM}) {
+                my $stmt_id = blessed($stmt) && $stmt->can('id') ? $stmt->id : 'unknown';
+                my $ctrl_id = blessed($current_ctrl) && $current_ctrl->can('id') ? $current_ctrl->id : "$current_ctrl";
+                warn "[DEBUG] Program: processed stmt=$stmt_id, next_ctrl=$ctrl_id\n";
+            }
         }
 
-        # Check if last statement is a Return
-        # If so, use it; otherwise create a default Return(undef)
-        if (@statements && blessed($statements[-1]) && $statements[-1]->can('op') && $statements[-1]->op eq 'Return') {
-            # Last statement is already a Return - use it
-            return $statements[-1];
-        } else {
-            # No Return found - create default Return(undef)
-            my $undef_value = $builder->build_constant_node(undef);
-            my $return = $builder->build_return_node($undef_value, $current_control);
-            return $return;
+        # Use rewired statements for the rest of processing
+        @statements = @rewired_statements;
+        my $final_control = $current_ctrl;
+
+        # Get last statement for return value
+        my $last_stmt = @statements ? $statements[-1] : undef;
+        my $return_value;
+
+        if ($ENV{CHALK_DEBUG_PROGRAM}) {
+            my $ctrl_id = blessed($final_control) && $final_control->can('id') ? $final_control->id : "$final_control";
+            warn "[DEBUG] Program: final_control after rewiring = $ctrl_id\n";
         }
+
+        if ($last_stmt && blessed($last_stmt) && $last_stmt->can('op')) {
+            my $op = $last_stmt->op;
+
+            if ($op eq 'Return') {
+                # Last statement is already a Return - use the rewired version
+                return $last_stmt;
+            } elsif ($op eq 'Store') {
+                # Last statement is a Store - return the stored value
+                $return_value = $last_stmt->value;
+                $final_control = $last_stmt;
+            } else {
+                # Other expression - use as return value
+                $return_value = $last_stmt;
+            }
+        }
+
+        # Default return value (undef constant)
+        $return_value //= Chalk::IR::Node::Constant->new(
+            type  => 'Undef',
+            value => 'undef',
+        );
+
+        # Create Return node
+        return Chalk::IR::Node::Return->new(
+            control => $final_control,
+            value   => $return_value,
+        );
     }
 }
 

@@ -18,11 +18,18 @@ class Chalk::Grammar::Chalk::Rule::Expression :isa(Chalk::GrammarRule) {
         # Check if child is a variable metadata hashref (from ScalarVar via Variable)
         # Variables in expression context need to be converted to Load nodes
         if (ref($child) eq 'HASH' && $child->{type} eq 'scalar_var') {
-            # This is a variable usage - create Load node
-            my $builder = $context->env->{ir_builder};
-            return $child unless $builder;  # Pass through if no builder
+            # Look up variable from Scope (handles nested scopes including loops)
+            my $scope = $context->env->{scope};
+            if ($scope) {
+                my $var_name = $child->{name};
+                my $node = $scope->lookup($var_name);
 
-            return $builder->build_load_node($child->{name});
+                # Return the node if found, otherwise pass through metadata
+                return $node if defined($node) && ref($node) && $node->can('id');
+            }
+
+            # Pass through metadata if no scope or variable not found
+            return $child;
         }
 
         # Otherwise pass through (Literal, Identifier, YaddaYadda, operators, etc.)

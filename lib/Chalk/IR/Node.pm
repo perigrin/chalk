@@ -24,6 +24,7 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Stop;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Reference;
 use Chalk::IR::Node::ArrayValue;
@@ -152,6 +153,7 @@ class Chalk::IR::Node {
             Phi      => 'Chalk::IR::Node::Phi',
             Proj     => 'Chalk::IR::Node::Proj',
             Return     => 'Chalk::IR::Node::Return',
+            Stop       => 'Chalk::IR::Node::Stop',
             Loop       => 'Chalk::IR::Node::Loop',
             Reference  => 'Chalk::IR::Node::Reference',
             ArrayValue => 'Chalk::IR::Node::ArrayValue',
@@ -185,10 +187,9 @@ class Chalk::IR::Node {
             $params{source_info} = $hash->{source_info};
         }
 
-        # Add transform_chain if present
-        if ($hash->{transform_chain}) {
-            $params{transform_chain} = $hash->{transform_chain};
-        }
+        # Note: Don't pass transform_chain to polymorphic constructors
+        # Most polymorphic node classes don't accept this parameter
+        # They have their own get_transform_chain()/transform_chain() stub methods
 
         # Add attributes as constructor parameters
         # Parser compat: keys() requires parentheses around argument
@@ -202,6 +203,7 @@ class Chalk::IR::Node {
         try {
             $node = $node_class->new(%params);
         } catch ($e) {
+            # Construction failed - fall back to generic node
             $node = undef;
         }
 

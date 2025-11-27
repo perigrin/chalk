@@ -143,7 +143,11 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
     method equals($other, $swap = undef) {
         return 0 unless ref($other) eq ref($self);
-        return $valid == $other->valid;
+        return 0 unless $valid == $other->valid;
+        return 0 unless ($operator // '') eq ($other->operator // '');
+        return 0 unless ($precedence_level // 0) == ($other->precedence_level // 0);
+        return 0 unless ($associativity // '') eq ($other->associativity // '');
+        return 1;
     }
 }
 

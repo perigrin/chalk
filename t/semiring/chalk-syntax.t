@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # ABOUTME: Test ChalkSyntax semiring for syntax and precedence validation
-# ABOUTME: Verifies SPPF+Precedence composition without IR generation
+# ABOUTME: Verifies Boolean+Precedence+TypeInference composition for pure validation
 use 5.42.0;
 use Test2::V0;
 use FindBin qw($RealBin);
@@ -26,12 +26,13 @@ subtest 'ChalkSyntax semiring creation' => sub {
     ok $semiring->composite, 'Has composite semiring';
     ok $semiring->grammar, 'Has grammar reference';
 
-    # Check that composite has both SPPF and Precedence semirings
+    # Check that composite has Boolean + Precedence + TypeInference semirings
     my $semirings = $semiring->composite->semirings;
-    is scalar(@$semirings), 2, 'Composite has two semirings';
+    is scalar(@$semirings), 3, 'Composite has three semirings';
 
-    isa_ok $semirings->[0], ['Chalk::Semiring::SPPF'], 'First semiring is SPPF';
+    isa_ok $semirings->[0], ['Chalk::Semiring::Boolean'], 'First semiring is Boolean';
     isa_ok $semirings->[1], ['Chalk::Semiring::Precedence'], 'Second semiring is Precedence';
+    isa_ok $semirings->[2], ['Chalk::Semiring::TypeInference'], 'Third semiring is TypeInference';
 };
 
 subtest 'ChalkSyntax identity elements' => sub {
@@ -131,9 +132,9 @@ subtest 'ChalkSyntax without Semantic semiring' => sub {
     my $semiring = Chalk::Semiring::ChalkSyntax->new(grammar => $grammar);
 
     my $semirings = $semiring->composite->semirings;
-    is scalar(@$semirings), 2, 'ChalkSyntax has exactly 2 semirings (not 3)';
+    is scalar(@$semirings), 3, 'ChalkSyntax has exactly 3 semirings (Boolean+Precedence+TypeInference)';
 
-    # Check that neither semiring is Semantic
+    # Check that no semiring is Semantic
     for my $sr (@$semirings) {
         my $class = ref($sr);
         isnt $class, 'Chalk::Semiring::Semantic', "ChalkSyntax does not include Semantic ($class)";
@@ -158,16 +159,18 @@ subtest 'ChalkSyntax syntax check mode usage' => sub {
     my $result = $parser->parse_string('my $x = 1 + 2;');
     ok $result, 'ChalkSyntax successfully validates syntax';
 
-    # Verify result is a CompositeElement with SPPF + Precedence
+    # Verify result is a CompositeElement with Boolean + Precedence + TypeInference
     isa_ok $result, ['Chalk::Semiring::CompositeElement'], 'Result is CompositeElement';
 
     # Get the elements
     my $elements = $result->elements;
-    is scalar(@$elements), 2, 'Result has 2 elements (SPPF + Precedence)';
+    is scalar(@$elements), 3, 'Result has 3 elements (Boolean + Precedence + TypeInference)';
 
-    isa_ok $elements->[0], ['Chalk::Semiring::SPPFElement'], 'First element is SPPFElement';
+    isa_ok $elements->[0], ['Chalk::Semiring::BooleanElement'], 'First element is BooleanElement';
     isa_ok $elements->[1], ['Chalk::Semiring::PrecedenceElement'], 'Second element is PrecedenceElement';
+    isa_ok $elements->[2], ['Chalk::Semiring::TypeInferenceElement'], 'Third element is TypeInferenceElement';
 
-    # Check that precedence is valid
+    # Check that precedence and type inference are valid
     ok $elements->[1]->valid, 'Precedence validation succeeded';
+    ok $elements->[2]->valid, 'TypeInference validation succeeded';
 };

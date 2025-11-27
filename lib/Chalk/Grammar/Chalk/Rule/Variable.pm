@@ -20,14 +20,14 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         if (ref($var_metadata) eq 'HASH' && $var_metadata->{type} eq 'scalar_var') {
             my $var_name = $var_metadata->{name};
             my $scope = $context->env->{scope};
-            my $builder = $context->env->{ir_builder};
 
-            # Look up the variable's IR node from Scope (Chapter 3)
+            # Look up the variable's IR node from Scope
+            # Scope stores actual node objects, not just IDs
             if ($scope) {
-                my $node_id = $scope->lookup($var_name);
-                if (defined($node_id)) {
-                    # Return the actual IR node object
-                    return $builder->graph->get_node($node_id);
+                my $node = $scope->lookup($var_name);
+                if (defined($node) && ref($node) && $node->can('id')) {
+                    # Return the node object directly
+                    return $node;
                 }
             }
 

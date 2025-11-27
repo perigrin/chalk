@@ -104,10 +104,8 @@ if ( !caller ) {
     # Handle module compilation mode
     if ($compile_module_mode) {
         use Chalk::ImportResolver;
-        use Chalk::IR::Builder;
 
         my $resolver = Chalk::ImportResolver->new();
-        my $builder = Chalk::IR::Builder->new();
 
         # Resolve dependencies for the module
         my $dependency_order = $resolver->resolve_dependencies($module_to_compile);
@@ -197,7 +195,6 @@ if ( !caller ) {
     if ( defined($input) && length($input) > 0 ) {
         # Create semiring and parser based on mode
         my $semiring;
-        my $builder;  # IR Builder (only used when generating IR)
 
         # Choose semiring based on explicit type or IR generation mode
         if ($semiring_type) {
@@ -219,9 +216,7 @@ if ( !caller ) {
             # This encapsulates Composite(SPPF, Semantic) configuration (issue #112)
             require Chalk::Semiring::ChalkIR;
 
-            my $ir_semiring = Chalk::Semiring::ChalkIR->new(grammar => $chalk_grammar);
-            $semiring = $ir_semiring;
-            $builder = $ir_semiring->builder;
+            $semiring = Chalk::Semiring::ChalkIR->new(grammar => $chalk_grammar);
         } else {
             # No IR generation (e.g., -c flag) - use ChalkSyntax for syntax check
             # ChalkSyntax = SPPF + Precedence (validates syntax and precedence)
@@ -245,36 +240,124 @@ if ( !caller ) {
                 print("$ARGV[0] syntax OK\n") if @ARGV;
                 print("syntax OK\n") unless @ARGV;
             } else {
-                # IR graph is available in $builder->graph if IR was generated
-                if ($builder) {
-                    my $graph = $builder->graph;
+                # IR mode: build graph from winning IR node and execute
+                if ($generate_ir) {
+                    require Chalk::IR::Graph;
 
-                    # Prune to winning parse
+                    # Get winning IR node from parse result
+                    my $winning_node;
                     if ($result->can('context')) {
                         my $ctx = $result->context;
                         if ($ctx->can('focus')) {
-                            my $winning_node = $ctx->focus;
-                            # Check if winning_node is an object (not a terminal string value)
-                            if ($winning_node && blessed($winning_node) && $winning_node->can('id')) {
-                                $graph->prune_to_reachable($winning_node->id);
-                            }
+                            $winning_node = $ctx->focus;
                         }
                     }
 
-                    # Run GVN optimizer
-                    require Chalk::IR::Optimizer::GVN;
-                    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
-                    $graph = $gvn_result->{graph};
+                    # Check if winning_node is an IR node
+                    if ($winning_node && blessed($winning_node) && $winning_node->can('id')) {
+                        # Build graph by traversing from winning node via object references
+                        my $graph = Chalk::IR::Graph->new();
+                        my %visited;
+                        my @queue = ($winning_node);
 
-                    # Execute with CEK interpreter
-                    require Chalk::Interpreter::CEKDataflow;
-                    my $cek = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
-                    my $execution_result = eval { $cek->execute() };
-                    if ($@) {
-                        print(STDERR "Execution error: $@\n");
-                        exit 1;
+                        while (@queue) {
+                            my $node = shift @queue;
+                            next unless blessed($node) && $node->can('id');
+                            my $node_id = $node->id;
+                            next if $visited{$node_id}++;
+
+                            # Add node to graph
+                            $graph->add_node($node);
+
+                            # Traverse via object references (polymorphic nodes)
+                            # Return: value_node, control
+                            if ($node->can('value_node')) {
+                                my $val = $node->value_node;
+                                push @queue, $val if blessed($val) && $val->can('id') && !$visited{$val->id};
+                            }
+                            if ($node->can('value') && $node->can('op') && $node->op ne 'Constant') {
+                                my $val = $node->value;
+                                push @queue, $val if blessed($val) && $val->can('id') && !$visited{$val->id};
+                            }
+                            if ($node->can('control') && $node->control) {
+                                my $ctrl = $node->control;
+                                push @queue, $ctrl if blessed($ctrl) && $ctrl->can('id') && !$visited{$ctrl->id};
+                            }
+
+                            # Binary ops: left, right
+                            if ($node->can('left')) {
+                                my $left = $node->left;
+                                push @queue, $left if blessed($left) && $left->can('id') && !$visited{$left->id};
+                            }
+                            if ($node->can('right')) {
+                                my $right = $node->right;
+                                push @queue, $right if blessed($right) && $right->can('id') && !$visited{$right->id};
+                            }
+
+                            # Unary ops: operand
+                            if ($node->can('operand')) {
+                                my $op = $node->operand;
+                                push @queue, $op if blessed($op) && $op->can('id') && !$visited{$op->id};
+                            }
+
+                            # Conditional: condition
+                            if ($node->can('condition')) {
+                                my $cond = $node->condition;
+                                push @queue, $cond if blessed($cond) && $cond->can('id') && !$visited{$cond->id};
+                            }
+
+                            # Issue #195 fix: Proj source (If node that Proj projects from)
+                            # This enables finding the If node from IfFalse/IfTrue Proj
+                            if ($node->can('source') && $node->source) {
+                                my $src = $node->source;
+                                push @queue, $src if blessed($src) && $src->can('id') && !$visited{$src->id};
+                            }
+
+                            # Issue #195 fix: If node branches (IfTrue/IfFalse Proj nodes)
+                            # This ensures both control paths are included in graph traversal
+                            if ($node->can('branches') && $node->branches) {
+                                for my $branch ($node->branches->@*) {
+                                    push @queue, $branch if blessed($branch) && $branch->can('id') && !$visited{$branch->id};
+                                }
+                            }
+
+                            # Issue #195 fix: Proj control_users (forward traversal)
+                            # This enables finding early returns that USE a Proj as control
+                            if ($node->can('control_users') && $node->control_users) {
+                                for my $user ($node->control_users->@*) {
+                                    push @queue, $user if blessed($user) && $user->can('id') && !$visited{$user->id};
+                                }
+                            }
+
+                            # Issue #195 fix: Stop node returns (for if-else where both branches return)
+                            # When ConditionalStatement creates Stop node, it stores Return nodes in 'returns' field
+                            if ($node->can('returns') && $node->returns) {
+                                for my $ret ($node->returns->@*) {
+                                    push @queue, $ret if blessed($ret) && $ret->can('id') && !$visited{$ret->id};
+                                }
+                            }
+                        }
+
+                        # Materialize pending nodes
+                        $graph->materialize_pending_nodes();
+
+                        # Run GVN optimizer
+                        require Chalk::IR::Optimizer::GVN;
+                        my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
+                        $graph = $gvn_result->{graph};
+
+                        # Execute with CEK interpreter
+                        require Chalk::Interpreter::CEKDataflow;
+                        my $cek = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+                        my $execution_result = eval { $cek->execute() };
+                        if ($@) {
+                            print(STDERR "Execution error: $@\n");
+                            exit 1;
+                        }
+                        print($execution_result // '');
+                    } else {
+                        print("Parse successful but no IR node produced\n");
                     }
-                    print($execution_result // '');
                 } else {
                     print("Parse successful: $result\n");
                 }
