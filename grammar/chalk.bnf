@@ -481,11 +481,44 @@ SingleQuotedString -> %SINGLE_QUOTED_STRING%
 DoubleQuotedString -> %DOUBLE_QUOTED_STRING%
 
 # Quote operators - only qw()
-QuotedWordList -> 'qw' '(' WordList ')'
+# WS_OPT allows whitespace/newlines inside qw() for multiline word lists
+QuotedWordList -> 'qw' '(' WS_OPT WordList WS_OPT ')'
 
 # Words in qw() can be any bareword (including keywords) or colon-prefixed symbols
+# Explicit keyword alternatives ensure keywords can be used as words in qw() lists
+# (BAREWORD_ANY may not take precedence over keyword terminals in all contexts)
 Word -> %BAREWORD_ANY%
 Word -> ':' %BAREWORD_ANY%
+Word -> 'class'
+Word -> 'field'
+Word -> 'if'
+Word -> 'unless'
+Word -> 'elsif'
+Word -> 'else'
+Word -> 'while'
+Word -> 'until'
+Word -> 'for'
+Word -> 'foreach'
+Word -> 'return'
+Word -> 'last'
+Word -> 'next'
+Word -> 'redo'
+Word -> 'my'
+Word -> 'our'
+Word -> 'state'
+Word -> 'use'
+Word -> 'no'
+Word -> 'require'
+Word -> 'and'
+Word -> 'or'
+Word -> 'not'
+Word -> 'eq'
+Word -> 'ne'
+Word -> 'lt'
+Word -> 'gt'
+Word -> 'le'
+Word -> 'ge'
+Word -> 'cmp'
 
 WordList -> Word
 WordList -> Word WS_OPT WordList
