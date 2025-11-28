@@ -7,16 +7,9 @@ use utf8;
 class Chalk::IR::Node::Constant {
     field $value :param :reader;
     field $type  :param :reader;
-    # Accept but ignore legacy params for backward compatibility
-    field $id :param = undef;
-    field $inputs :param = undef;
     field $source_info :param :reader = undef;
-    field $computed_id;
 
-    # Content-addressable ID computed from type and value
-    method id() {
-        return $computed_id //= "const_${type}_${value}";
-    }
+    field $id :reader = "const_" . $type . "_" . $value;
 
     # No inputs for constants (leaf nodes)
     method inputs() { return []; }
@@ -48,9 +41,8 @@ class Chalk::IR::Node::Constant {
         return $self;
     }
 
-    # Stub for transform tracking (not used in v2 but called by Builder)
+    # Stub for transform tracking
     method record_transform(@args) {
-        # No-op for compatibility
         return;
     }
 
