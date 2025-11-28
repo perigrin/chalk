@@ -1,5 +1,5 @@
-# ABOUTME: Semantic action for Variable - pass through variable metadata or complex variable operations
-# ABOUTME: Variable delegates to ScalarVar, ArrayVar, HashVar, or handles complex variable operations
+# ABOUTME: Semantic action for Variable - looks up variable in scope or passes through metadata
+# ABOUTME: Variable delegates to ScalarVar, ArrayVar, HashVar for variable type handling
 
 use 5.42.0;
 use experimental 'class';
@@ -10,7 +10,6 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         # Variable -> ArrayVar (TODO)
         # Variable -> HashVar (TODO)
         # Variable -> ArraySize (TODO)
-        # Variable -> Variable '->' ... (TODO: complex variable operations)
 
         # Get the variable metadata from child (ScalarVar)
         my $var_metadata = $context->child(0);
