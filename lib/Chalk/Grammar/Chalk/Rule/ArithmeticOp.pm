@@ -36,16 +36,13 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         my $operator;
 
         # Find the operator by searching through children
-        # Operators may be Token objects or plain strings, so stringify and check
+        # Use is_operator() to detect Token::Operator objects
         for my $i (0 .. $num_children - 1) {
             my $child = $context->child($i);
-            if (defined $child) {
-                my $str_val = "$child";  # Stringify (works for both Token objects and strings)
-                if ($str_val =~ qr/^[+\-*\/]$/) {
-                    $operator = $str_val;
-                    $operator_idx = $i;
-                    last;
-                }
+            if (blessed($child) && $child->can('is_operator') && $child->is_operator()) {
+                $operator = "$child";  # Stringify to get operator value
+                $operator_idx = $i;
+                last;
             }
         }
 

@@ -27,25 +27,24 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         }
 
         # Find the operator by searching through children
-        # Operators may be Token objects or plain strings, so stringify and check
+        # Use is_operator() to detect Token::Operator objects
         my $operator_idx;
         my $operator;
 
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
-            if (defined $child) {
-                my $str_val = "$child";  # Stringify (works for both Token objects and strings)
-                # Match comparison operators: ==, !=, <, <=, >, >=, eq, ne, lt, le, gt, ge
-                if ($str_val =~ qr/^(==|!=|<=?|>=?|eq|ne|lt|le|gt|ge|=~|!~|isa)$/) {
-                    $operator = $str_val;
-                    $operator_idx = $i;
-                    last;
-                }
+            if (blessed($child) && $child->can('is_operator') && $child->is_operator()) {
+                $operator = "$child";  # Stringify to get operator value
+                $operator_idx = $i;
+                last;
             }
         }
 
-        # If no operator found, return first child
-        return $context->child(0) unless defined $operator;
+        # If no operator found with multiple children, this is a bug
+        unless (defined $operator) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } map { $_->extract } @children;
+            die "ComparisonOp matched with " . scalar(@children) . " children but no operator found: [@children_debug]";
+        }
 
         # Extract left operand (first IR node before operator)
         my $left;
@@ -129,7 +128,8 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
             return $left;
         }
 
-        return $context->child(0);
+        # If we get here, we found an operator but didn't handle it - this is a bug
+        die "ComparisonOp found unrecognized operator '$operator' - not handled by any branch";
     }
 }
 
