@@ -21,9 +21,9 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
         } elsif ($token isa Chalk::Grammar::Token::Int) {
             $type = 'Int';
         } else {
-            # Fallback for non-token values (e.g., plain strings)
-            my $str = "$token";
-            $type = $str =~ /\./ ? 'Float' : 'Int';
+            # All tokens should be blessed - if not, something is wrong in the Parser
+            my $desc = ref($token) || (defined $token ? "'$token'" : 'undef');
+            die "Number::evaluate expected Token::Int or Token::Float, got: $desc";
         }
 
         # Convert to numeric value
