@@ -29,7 +29,7 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
                 my $str_val = "$last_child";  # Stringify (Token or string)
                 if ($str_val eq '++' || $str_val eq '--') {
                     # This is postfix: Variable '++' or Variable '--'
-                    # TODO: Implement postfix increment/decrement when IR nodes available
+                    # See issue #189 for wiring up PostIncrement/PostDecrement nodes
                     return $context->child(0);
                 }
             }
@@ -37,7 +37,7 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
 
         # Otherwise, this is a prefix operator: check child(0) for the operator
         my $op_child = $children[0]->extract;
-        return $context->child(0) unless defined $op_child;
+        die "Unary: expected operator at children[0], got undefined - grammar bug" unless defined $op_child;
 
         # Stringify operator (may be Token object or plain string)
         my $operator = "$op_child";
@@ -46,7 +46,10 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         my $operand = $context->child(1);
 
         # Validate that we got an IR node
-        return $operand unless (ref($operand) && $operand->can('id'));
+        unless (ref($operand) && $operand->can('id')) {
+            my $desc = ref($operand) || (defined $operand ? "'$operand'" : 'undef');
+            die "Unary: operand must be IR node, got: $desc";
+        }
 
         # Build appropriate unary node
         if ($operator eq '!') {
@@ -57,16 +60,16 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
             # Unary + is a no-op, just pass through
             return $operand;
         } elsif ($operator eq '\\') {
-            # TODO: Reference node needs to be updated to Builder-less architecture
+            # Reference node exists but needs wiring up here
             # For now, just pass through
             return $operand;
         } elsif ($operator eq '++' || $operator eq '--') {
             # Prefix ++/--
-            # TODO: Implement prefix increment/decrement when IR nodes available
+            # See issue #189 for wiring up PreIncrement/PreDecrement nodes
             return $operand;
         }
 
-        return $context->child(0);
+        die "Unary: unrecognized operator '$operator' - grammar bug";
     }
 }
 

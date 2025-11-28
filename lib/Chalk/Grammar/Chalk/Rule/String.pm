@@ -13,9 +13,9 @@ class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
         # Child [0] contains the matched string literal with quotes
 
         my $string_with_quotes = $context->child(0);
-        return undef unless defined $string_with_quotes;
+        die "String: expected string token at child(0), got undefined - grammar bug" unless defined $string_with_quotes;
 
-        # Strip surrounding quotes (both " and ')
+        # Strip surrounding quotes - see issue #201 for proper interpolation handling
         my $value = "$string_with_quotes";
         if (length($value) >= 2) {
             $value = substr($value, 1, length($value) - 2);
