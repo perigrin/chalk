@@ -12,7 +12,7 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
         # Child [0] contains the matched number token
 
         my $token = $context->child(0);
-        return unless defined $token;
+        die "Number::evaluate matched but child(0) is undefined - grammar bug" unless defined $token;
 
         # Determine type from token class
         my $type;
