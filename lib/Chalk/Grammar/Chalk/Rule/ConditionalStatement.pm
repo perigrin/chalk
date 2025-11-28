@@ -56,10 +56,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
 
         # Get scope from context for control flow tracking
         my $pre_scope = $context->env->{scope};
-        if (!$pre_scope) {
-            warn "[DEBUG] ConditionalStatement: no scope, returning undef\n" if $ENV{CHALK_DEBUG_TRACKING};
-            return undef;
-        }
+        die "ConditionalStatement: scope required in evaluation context" unless $pre_scope;
 
         # Save current control
         my $entry_control = $pre_scope->current_control;

@@ -12,7 +12,7 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
         # Child [0] contains the matched number token
 
         my $token = $context->child(0);
-        return undef unless defined $token;
+        return unless defined $token;
 
         # Determine type from token class using isa operator
         my $type;
