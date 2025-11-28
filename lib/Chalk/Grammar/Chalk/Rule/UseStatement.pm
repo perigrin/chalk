@@ -84,7 +84,7 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
         my $scope = $context->env->{scope};
 
         # No scope means we're just parsing without IR generation
-        return undef unless $scope;
+        die "UseStatement: scope required for IR generation - grammar bug" unless $scope;
 
         # Find the module name or version number (after 'use' and optional WS)
         my $module_name;
@@ -119,8 +119,8 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             }
         }
 
-        # If we can't find a module name, return undef (parse error)
-        return undef unless defined($module_name);
+        # If we can't find a module name, that's a grammar bug
+        die "UseStatement: could not find module name - grammar bug" unless defined($module_name);
 
         # Categorize the use statement
         my $type = _categorize_use_statement($module_name);
@@ -130,7 +130,7 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 
         # Get current control flow from scope
         my $current_control = $scope->current_control;
-        return undef unless $current_control;
+        die "UseStatement: no current_control in scope - grammar bug" unless $current_control;
 
         # Create UseStatement IR node directly
         my $attributes = {
@@ -147,7 +147,7 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             attributes => $attributes,
         );
 
-        # Record transformation
+        # See issue #202 - record_transform mutates node after construction
         my $import_list = join( ", ", $imports->@* );
         $use_stmt->record_transform(
             'ir_construction',
