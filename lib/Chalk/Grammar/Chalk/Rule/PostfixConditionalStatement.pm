@@ -20,24 +20,32 @@ class Chalk::Grammar::Chalk::Rule::PostfixConditionalStatement :isa(Chalk::Gramm
         my $keyword_node = $context->children->[2];
         my $condition = $context->child(4);
 
-        # If inner statement isn't an IR node, pass through
-        return $stmt_node unless blessed($stmt_node) && $stmt_node->can('id');
+        # Inner statement must be an IR node
+        unless (blessed($stmt_node) && $stmt_node->can('id')) {
+            my $desc = ref($stmt_node) || (defined $stmt_node ? "'$stmt_node'" : 'undef');
+            die "PostfixConditionalStatement: inner statement must be IR node, got: $desc";
+        }
 
         # Extract keyword
         my $keyword = blessed($keyword_node) && $keyword_node->can('extract')
             ? $keyword_node->extract
             : "$keyword_node";
-        return $stmt_node unless $keyword eq 'if' || $keyword eq 'unless';
+        unless ($keyword eq 'if' || $keyword eq 'unless') {
+            die "PostfixConditionalStatement: expected 'if' or 'unless', got: '$keyword'";
+        }
 
         # Condition must be an IR node
-        return $stmt_node unless blessed($condition) && $condition->can('id');
+        unless (blessed($condition) && $condition->can('id')) {
+            my $desc = ref($condition) || (defined $condition ? "'$condition'" : 'undef');
+            die "PostfixConditionalStatement: condition must be IR node, got: $desc";
+        }
 
         # Get scope for control flow
         my $scope = $context->env->{scope};
-        return $stmt_node unless (ref($scope) && $scope->can('current_control'));
+        die "PostfixConditionalStatement: scope required in evaluation context" unless $scope;
 
         my $current_control = $scope->current_control;
-        return $stmt_node unless $current_control;
+        die "PostfixConditionalStatement: current_control required in scope" unless $current_control;
 
         # Build If node for condition
         my $if_node = Chalk::IR::Node::If->new(
