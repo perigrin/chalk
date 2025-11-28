@@ -27,7 +27,7 @@ class Chalk::IR::Node::Negate {
     method id() {
         return $computed_id if defined $computed_id;
 
-        my $op_id = defined($operand) && $operand->can('id') ? $operand->id : ($operand_id // 'none');
+        my $op_id = defined($operand) && blessed($operand) && $operand->can('id') ? $operand->id : ($operand_id // 'none');
 
         return $computed_id = "neg_${op_id}";
     }
@@ -35,7 +35,7 @@ class Chalk::IR::Node::Negate {
     # Compute inputs from child node
     method inputs() {
         my @inputs;
-        if (defined($operand) && $operand->can('id')) {
+        if (defined($operand) && blessed($operand) && $operand->can('id')) {
             push @inputs, $operand->id;
         } elsif (defined($operand_id)) {
             push @inputs, $operand_id;
@@ -46,7 +46,7 @@ class Chalk::IR::Node::Negate {
     method op() { 'Negate' }
 
     method to_hash() {
-        my $op_id = defined($operand) && $operand->can('id') ? $operand->id : $operand_id;
+        my $op_id = defined($operand) && blessed($operand) && $operand->can('id') ? $operand->id : $operand_id;
 
         return {
             id     => $self->id,
@@ -59,7 +59,7 @@ class Chalk::IR::Node::Negate {
     }
 
     method execute($context) {
-        my $op_id = defined($operand) && $operand->can('id') ? $operand->id : $operand_id;
+        my $op_id = defined($operand) && blessed($operand) && $operand->can('id') ? $operand->id : $operand_id;
         my $operand_val = $context->("node:$op_id");
         return -$operand_val;
     }

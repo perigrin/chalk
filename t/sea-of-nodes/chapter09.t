@@ -50,6 +50,9 @@ subtest 'GVN basic concept: identical operations' => sub {
     );
     $graph->add_node($add2);
 
+    # Materialize pending nodes before counting
+    $graph->materialize_pending_nodes();
+
     # Without GVN: 2 separate Add nodes
     is $graph->node_count(), 4, 'Without GVN: 4 nodes (2 constants, 2 adds)';
     isnt $add1->id, $add2->id, 'Two separate Add nodes exist';

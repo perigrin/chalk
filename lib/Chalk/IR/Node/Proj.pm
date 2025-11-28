@@ -40,7 +40,9 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
         # True condition (if_result=1) activates index 0 (IfTrue)
         # False condition (if_result=0) activates index 1 (IfFalse)
         # Return 0 when if_result matches index (inactive), 1 otherwise (active)
-        return ($if_result == $index) ? 0 : 1;
+        # Coerce if_result to boolean (0 or 1) to avoid warnings on non-numeric values
+        my $if_bool = $if_result ? 1 : 0;
+        return ($if_bool == $index) ? 0 : 1;
     }
 }
 

@@ -3,7 +3,7 @@
 use 5.42.0;
 use experimental qw(class builtin);
 use utf8;
-use Scalar::Util 'refaddr';
+use Scalar::Util qw(refaddr);
 
 class Chalk::IR::Node::Scope {
     # Immutable Scope - all "mutation" methods return new Scope instances
@@ -82,8 +82,8 @@ class Chalk::IR::Node::Scope {
             next unless defined($val_a) && defined($val_b);
 
             # Check if values differ (by ID)
-            my $id_a = ref($val_a) && $val_a->can('id') ? $val_a->id : "$val_a";
-            my $id_b = ref($val_b) && $val_b->can('id') ? $val_b->id : "$val_b";
+            my $id_a = ref($val_a) && blessed($val_a) && $val_a->can('id') ? $val_a->id : "$val_a";
+            my $id_b = ref($val_b) && blessed($val_b) && $val_b->can('id') ? $val_b->id : "$val_b";
 
             if ($id_a ne $id_b) {
                 # Values differ - create Phi
@@ -124,7 +124,7 @@ class Chalk::IR::Node::Scope {
     method inputs() {
         # Return node IDs as inputs for graph traversal
         return [
-            map { ref($_) && $_->can('id') ? $_->id : $_ }
+            map { ref($_) && blessed($_) && $_->can('id') ? $_->id : $_ }
             values $bindings->%*
         ];
     }

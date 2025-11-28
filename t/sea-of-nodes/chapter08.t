@@ -670,6 +670,9 @@ subtest 'Validation with break and continue' => sub {
     );
     $graph->add_node($return_node);
 
+    # Materialize pending nodes before validation
+    $graph->materialize_pending_nodes();
+
     my $validator = Chalk::IR::Validator->new();
     my @cfg_errors = $validator->validate_cfg($graph);
     if (@cfg_errors) {

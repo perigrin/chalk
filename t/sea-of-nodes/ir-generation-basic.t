@@ -66,10 +66,18 @@ use Test::More;
     # Control should be Store (from variable declaration)
     is($control->op, 'Store', 'Control input is Store node');
 
-    # Store should have control pointing to Start
+    # Store should have control pointing to UseStatement (from 'use 5.42.0;')
+    # Control chain: Start -> UseStatement -> Store -> Return
     my $store_control = $control->control;
     ok($store_control, 'Store has control input');
-    is($store_control->op, 'Start', 'Store control is Start node');
+    is($store_control->op, 'UseStatement', 'Store control is UseStatement node');
+
+    # UseStatement (generic Chalk::IR::Node) uses inputs array, not control method
+    # First input is the control predecessor - verify it exists and traces back to Start
+    my $use_inputs = $store_control->inputs;
+    ok($use_inputs && @$use_inputs > 0, 'UseStatement has inputs');
+    # The first input should be the Start node's ID
+    like($use_inputs->[0], qr/start/i, 'UseStatement control input traces to Start');
 
     # Verify value chain
     my $return_value = $ir_root->value;

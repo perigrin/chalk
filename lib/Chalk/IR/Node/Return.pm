@@ -38,8 +38,8 @@ class Chalk::IR::Node::Return {
     method id() {
         return $computed_id if defined $computed_id;
 
-        my $ctrl_id = defined($control) && $control->can('id') ? $control->id : ($control_id // 'none');
-        my $val_id = defined($value) && $value->can('id') ? $value->id : ($value_id // 'none');
+        my $ctrl_id = defined($control) && blessed($control) && $control->can('id') ? $control->id : ($control_id // 'none');
+        my $val_id = defined($value) && blessed($value) && $value->can('id') ? $value->id : ($value_id // 'none');
 
         return $computed_id = "return_${ctrl_id}_${val_id}";
     }
@@ -47,12 +47,12 @@ class Chalk::IR::Node::Return {
     # Compute inputs from child nodes
     method inputs() {
         my @inputs;
-        if (defined($control) && $control->can('id')) {
+        if (defined($control) && blessed($control) && $control->can('id')) {
             push @inputs, $control->id;
         } elsif (defined($control_id)) {
             push @inputs, $control_id;
         }
-        if (defined($value) && $value->can('id')) {
+        if (defined($value) && blessed($value) && $value->can('id')) {
             push @inputs, $value->id;
         } elsif (defined($value_id)) {
             push @inputs, $value_id;
@@ -62,17 +62,9 @@ class Chalk::IR::Node::Return {
 
     method op() { 'Return' }
 
-    # Writer method to update control_id after construction
-    # Needed for wiring control edges in if/else statements
-    # TODO: In fully immutable model, create new node instead of mutating
-    method set_control_id($new_control_id) {
-        $control_id = $new_control_id;
-        $computed_id = undef;  # Invalidate cached ID
-    }
-
     method to_hash() {
-        my $ctrl_id = defined($control) && $control->can('id') ? $control->id : $control_id;
-        my $val_id = defined($value) && $value->can('id') ? $value->id : $value_id;
+        my $ctrl_id = defined($control) && blessed($control) && $control->can('id') ? $control->id : $control_id;
+        my $val_id = defined($value) && blessed($value) && $value->can('id') ? $value->id : $value_id;
 
         return {
             id     => $self->id,
@@ -91,14 +83,14 @@ class Chalk::IR::Node::Return {
         # Control nodes return: Start (undef), Proj (0 or 1), Region (1)
         # 0 = inactive path (only from Proj)
         # 1 or undef = active path
-        my $ctrl_id = defined($control) && $control->can('id') ? $control->id : $control_id;
+        my $ctrl_id = defined($control) && blessed($control) && $control->can('id') ? $control->id : $control_id;
         my $control_active = $context->("node:$ctrl_id");
 
         # Skip execution if control is explicitly 0 (inactive Proj path)
         return undef if (defined($control_active) && $control_active == 0);
 
         # Return the value from the context
-        my $val_id = defined($value) && $value->can('id') ? $value->id : $value_id;
+        my $val_id = defined($value) && blessed($value) && $value->can('id') ? $value->id : $value_id;
         return $context->("node:$val_id");
     }
 

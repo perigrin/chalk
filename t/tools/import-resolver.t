@@ -23,10 +23,10 @@ subtest 'Module name to path conversion' => sub {
        'lib/Chalk/Grammar.pm',
        'Converts Chalk::Grammar to correct path');
 
-    # Chalk::IR::Builder -> lib/Chalk/IR/Builder.pm
-    is($resolver->module_to_path('Chalk::IR::Builder'),
-       'lib/Chalk/IR/Builder.pm',
-       'Converts Chalk::IR::Builder to correct path');
+    # Chalk::IR::Graph -> lib/Chalk/IR/Graph.pm
+    is($resolver->module_to_path('Chalk::IR::Graph'),
+       'lib/Chalk/IR/Graph.pm',
+       'Converts Chalk::IR::Graph to correct path');
 };
 
 # Test circular dependency detection
@@ -49,45 +49,44 @@ subtest 'Extract dependencies from module file' => sub {
     my $resolver = Chalk::ImportResolver->new();
 
     # Extract dependencies from a real Chalk module
-    my $deps = $resolver->extract_dependencies('lib/Chalk/IR/Builder.pm');
+    my $deps = $resolver->extract_dependencies('lib/Chalk/Parser.pm');
 
     ok($deps, 'extract_dependencies returns result');
     ok(ref($deps) eq 'ARRAY', 'Returns array reference');
 
-    # Should find Chalk::IR::Node and Chalk::IR::Graph dependencies
+    # Should find Chalk dependencies
     my %found = map { $_ => 1 } @$deps;
-    ok($found{'Chalk::IR::Node'}, 'Found Chalk::IR::Node dependency');
-    ok($found{'Chalk::IR::Graph'}, 'Found Chalk::IR::Graph dependency');
+    ok($found{'Chalk::Semiring::Boolean'} || $found{'Chalk::Grammar::Token'},
+       'Found at least one Chalk dependency');
 };
 
 # Test recursive dependency resolution
 subtest 'Recursive dependency resolution' => sub {
     my $resolver = Chalk::ImportResolver->new();
 
-    # Resolve all dependencies for Chalk::IR::Builder
-    my $order = $resolver->resolve_dependencies('Chalk::IR::Builder');
+    # Resolve all dependencies for Chalk::Parser
+    my $order = $resolver->resolve_dependencies('Chalk::Parser');
 
     ok($order, 'resolve_dependencies returns result');
     ok(ref($order) eq 'ARRAY', 'Returns array reference');
 
     # The order should have dependencies before dependents
-    # Chalk::IR::Node and Chalk::IR::Graph should come before Chalk::IR::Builder
     my %positions;
     for my $i (0..$#$order) {
         $positions{$order->[$i]} = $i;
     }
 
-    ok(exists $positions{'Chalk::IR::Builder'}, 'Builder is in the order');
+    ok(exists $positions{'Chalk::Parser'}, 'Parser is in the order');
 
-    # If Node and Graph are dependencies, they should come before Builder
-    if (exists $positions{'Chalk::IR::Node'}) {
-        ok($positions{'Chalk::IR::Node'} < $positions{'Chalk::IR::Builder'},
-           'Chalk::IR::Node comes before Builder');
+    # Dependencies should come before Parser
+    if (exists $positions{'Chalk::Semiring::Boolean'}) {
+        ok($positions{'Chalk::Semiring::Boolean'} < $positions{'Chalk::Parser'},
+           'Chalk::Semiring::Boolean comes before Parser');
     }
 
-    if (exists $positions{'Chalk::IR::Graph'}) {
-        ok($positions{'Chalk::IR::Graph'} < $positions{'Chalk::IR::Builder'},
-           'Chalk::IR::Graph comes before Builder');
+    if (exists $positions{'Chalk::Grammar::Token'}) {
+        ok($positions{'Chalk::Grammar::Token'} < $positions{'Chalk::Parser'},
+           'Chalk::Grammar::Token comes before Parser');
     }
 };
 

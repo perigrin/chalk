@@ -44,8 +44,8 @@ class Chalk::IR::Node::Store {
     method id() {
         return $computed_id if defined $computed_id;
 
-        my $ctrl_id = defined($control) && $control->can('id') ? $control->id : ($control_id // 'none');
-        my $val_id = defined($value) && $value->can('id') ? $value->id : ($value_id // 'none');
+        my $ctrl_id = defined($control) && blessed($control) && $control->can('id') ? $control->id : ($control_id // 'none');
+        my $val_id = defined($value) && blessed($value) && $value->can('id') ? $value->id : ($value_id // 'none');
         my $vname = $var // $var_name // 'unknown';
 
         return $computed_id = "store_${vname}_${ctrl_id}_${val_id}";
@@ -54,12 +54,12 @@ class Chalk::IR::Node::Store {
     # Compute inputs from child nodes
     method inputs() {
         my @inputs;
-        if (defined($control) && $control->can('id')) {
+        if (defined($control) && blessed($control) && $control->can('id')) {
             push @inputs, $control->id;
         } elsif (defined($control_id)) {
             push @inputs, $control_id;
         }
-        if (defined($value) && $value->can('id')) {
+        if (defined($value) && blessed($value) && $value->can('id')) {
             push @inputs, $value->id;
         } elsif (defined($value_id)) {
             push @inputs, $value_id;
@@ -71,8 +71,8 @@ class Chalk::IR::Node::Store {
 
     method to_hash() {
         my $vname = $var // $var_name;
-        my $ctrl_id = defined($control) && $control->can('id') ? $control->id : $control_id;
-        my $val_id = defined($value) && $value->can('id') ? $value->id : $value_id;
+        my $ctrl_id = defined($control) && blessed($control) && $control->can('id') ? $control->id : $control_id;
+        my $val_id = defined($value) && blessed($value) && $value->can('id') ? $value->id : $value_id;
 
         return {
             id     => $self->id,
@@ -90,7 +90,7 @@ class Chalk::IR::Node::Store {
 
     method execute($context) {
         # Get the value to store
-        my $vid = defined($value) && $value->can('id') ? $value->id : $value_id;
+        my $vid = defined($value) && blessed($value) && $value->can('id') ? $value->id : $value_id;
         my $val = $context->("node:$vid");
 
         # Store in scope/context (implementation depends on runtime)

@@ -25,8 +25,8 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
             # Find the Precedence element (usually at index 1 after SPPF)
             for my $elem (@elements) {
                 if ($elem->can('valid') && !$elem->valid) {
-                    # This parse violates precedence rules - don't build IR
-                    return $context->child(0);
+                    # This parse violates precedence rules - this is a bug
+                    die "ArithmeticOp received invalid precedence parse - precedence semiring should have filtered this";
                 }
             }
         }
@@ -49,8 +49,12 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
             }
         }
 
-        # If no operator found, return first child
-        return $context->child(0) unless defined $operator;
+        # If no operator found, this is a bug - we matched ArithmeticOp grammar rule
+        # so there MUST be an operator. Dying here exposes bugs instead of hiding them.
+        unless (defined $operator) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } @{$context->children};
+            die "ArithmeticOp matched but no operator found in children: [@children_debug]";
+        }
 
         # Extract left operand (first IR node before operator)
         my $left;
@@ -72,8 +76,14 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
             }
         }
 
-        # Validate that we got both operands
-        return $context->child(0) unless $left && $right;
+        # Validate that we got both operands - if missing, this is a bug
+        unless ($left && $right) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } @{$context->children};
+            die "ArithmeticOp found operator '$operator' at index $operator_idx but missing operands: "
+              . "left=" . (defined $left ? $left->id : '<undef>') . ", "
+              . "right=" . (defined $right ? $right->id : '<undef>') . ", "
+              . "children=[@children_debug]";
+        }
 
         # Build appropriate IR node based on operator
         # Note: Precedence validation is handled by Precedence semiring during parsing
@@ -90,7 +100,8 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
             return Chalk::IR::Node::Divide->new( left => $left, right => $right );
         }
 
-        return $context->child(0);
+        # If we get here, we found an operator that isn't +, -, *, / - this is a bug
+        die "ArithmeticOp found unrecognized operator '$operator' - expected one of +, -, *, /";
     }
 }
 

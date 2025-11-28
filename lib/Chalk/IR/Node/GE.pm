@@ -30,8 +30,8 @@ class Chalk::IR::Node::GE {
     method id() {
         return $computed_id if defined $computed_id;
 
-        my $l_id = defined($left) && $left->can('id') ? $left->id : ($left_id // 'none');
-        my $r_id = defined($right) && $right->can('id') ? $right->id : ($right_id // 'none');
+        my $l_id = defined($left) && blessed($left) && $left->can('id') ? $left->id : ($left_id // 'none');
+        my $r_id = defined($right) && blessed($right) && $right->can('id') ? $right->id : ($right_id // 'none');
 
         return $computed_id = "ge_${l_id}_${r_id}";
     }
@@ -39,12 +39,12 @@ class Chalk::IR::Node::GE {
     # Compute inputs from child nodes
     method inputs() {
         my @inputs;
-        if (defined($left) && $left->can('id')) {
+        if (defined($left) && blessed($left) && $left->can('id')) {
             push @inputs, $left->id;
         } elsif (defined($left_id)) {
             push @inputs, $left_id;
         }
-        if (defined($right) && $right->can('id')) {
+        if (defined($right) && blessed($right) && $right->can('id')) {
             push @inputs, $right->id;
         } elsif (defined($right_id)) {
             push @inputs, $right_id;
@@ -55,8 +55,8 @@ class Chalk::IR::Node::GE {
     method op() { 'GE' }
 
     method to_hash() {
-        my $l_id = defined($left) && $left->can('id') ? $left->id : $left_id;
-        my $r_id = defined($right) && $right->can('id') ? $right->id : $right_id;
+        my $l_id = defined($left) && blessed($left) && $left->can('id') ? $left->id : $left_id;
+        my $r_id = defined($right) && blessed($right) && $right->can('id') ? $right->id : $right_id;
 
         return {
             id     => $self->id,
@@ -70,8 +70,8 @@ class Chalk::IR::Node::GE {
     }
 
     method execute($context) {
-        my $l_id = defined($left) && $left->can('id') ? $left->id : $left_id;
-        my $r_id = defined($right) && $right->can('id') ? $right->id : $right_id;
+        my $l_id = defined($left) && blessed($left) && $left->can('id') ? $left->id : $left_id;
+        my $r_id = defined($right) && blessed($right) && $right->can('id') ? $right->id : $right_id;
         my $left_val = $context->("node:$l_id");
         my $right_val = $context->("node:$r_id");
         return ($left_val >= $right_val) ? 1 : 0;
