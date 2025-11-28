@@ -14,7 +14,7 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
         my $token = $context->child(0);
         return unless defined $token;
 
-        # Determine type from token class using isa operator
+        # Determine type from token class
         my $type;
         if ($token isa Chalk::Grammar::Token::Float) {
             $type = 'Float';
