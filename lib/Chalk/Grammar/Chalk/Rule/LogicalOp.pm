@@ -29,31 +29,30 @@ class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
         }
 
         # Find the operator by searching through children
-        # Operators may be Token objects or plain strings, so stringify and check
+        # Use is_operator() to detect Token::Operator objects
         my $operator_idx;
         my $operator;
 
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
-            if (defined $child) {
-                my $str_val = "$child";  # Stringify (works for both Token objects and strings)
-                # Match logical operators: ||, or, //, &&, and
-                if ($str_val =~ qr/^(\|\||or|\/\/|&&|and)$/) {
-                    $operator = $str_val;
-                    $operator_idx = $i;
-                    last;
-                }
+            if (blessed($child) && $child->can('is_operator') && $child->is_operator()) {
+                $operator = "$child";  # Stringify to get operator value
+                $operator_idx = $i;
+                last;
             }
         }
 
-        # If no operator found, return first child
-        return $context->child(0) unless defined $operator;
+        # If no operator found with multiple children, this is a bug
+        unless (defined $operator) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } map { $_->extract } @children;
+            die "LogicalOp matched with " . scalar(@children) . " children but no operator found: [@children_debug]";
+        }
 
         # Extract left operand (first IR node before operator)
         my $left;
         for my $i (0 .. $operator_idx - 1) {
             my $child = $context->child($i);
-            if (ref($child) && $child->can('id')) {
+            if (blessed($child) && $child->can('id')) {
                 $left = $child;
                 last;
             }
@@ -63,14 +62,20 @@ class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
         my $right;
         for my $i ($operator_idx + 1 .. $#children) {
             my $child = $context->child($i);
-            if (ref($child) && $child->can('id')) {
+            if (blessed($child) && $child->can('id')) {
                 $right = $child;
                 last;
             }
         }
 
-        # Validate that we got both operands
-        return $context->child(0) unless $left && $right;
+        # Validate that we got both operands - die if not
+        unless ($left && $right) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } map { $_->extract } @children;
+            die "LogicalOp found operator '$operator' at index $operator_idx but missing operands: " .
+                "left=" . (defined $left ? $left->id : '<undef>') . ", " .
+                "right=" . (defined $right ? $right->id : '<undef>') . ", " .
+                "children=[@children_debug]";
+        }
 
         # Build appropriate IR node based on operator
         # Logical operators
@@ -82,7 +87,8 @@ class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
             return Chalk::IR::Node::And->new(left => $left, right => $right);
         }
 
-        return $context->child(0);
+        # If we get here, we found an operator but didn't handle it - this is a bug
+        die "LogicalOp found unrecognized operator '$operator' - expected ||, or, //, &&, or and";
     }
 }
 
