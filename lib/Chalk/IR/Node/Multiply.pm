@@ -9,20 +9,7 @@ class Chalk::IR::Node::Multiply {
     field $right :param :reader;
     field $source_info :param :reader = undef;
 
-    field $id;
-
-    ADJUST {
-        die "Multiply: left operand is required and must have id() method"
-            unless blessed($left) && $left->can('id');
-        die "Multiply: right operand is required and must have id() method"
-            unless blessed($right) && $right->can('id');
-    }
-
-    # Content-addressable ID computed from operand IDs
-    method id() {
-        return $id if defined $id;
-        return $id = "mul_" . $left->id . "_" . $right->id;
-    }
+    field $id :reader = "mul_" . $left->id . "_" . $right->id;
 
     # Compute inputs from child nodes
     method inputs() {

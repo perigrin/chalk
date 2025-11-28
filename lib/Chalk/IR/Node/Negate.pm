@@ -8,18 +8,7 @@ class Chalk::IR::Node::Negate {
     field $operand :param :reader;
     field $source_info :param :reader = undef;
 
-    field $id;
-
-    ADJUST {
-        die "Negate: operand is required and must have id() method"
-            unless blessed($operand) && $operand->can('id');
-    }
-
-    # Content-addressable ID computed from operand ID
-    method id() {
-        return $id if defined $id;
-        return $id = "neg_" . $operand->id;
-    }
+    field $id :reader = "neg_" . $operand->id;
 
     # Compute inputs from child node
     method inputs() {
