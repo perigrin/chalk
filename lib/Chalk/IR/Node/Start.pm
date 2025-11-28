@@ -9,11 +9,7 @@ class Chalk::IR::Node::Start {
     field $params        :param :reader = undef;
     # v2-style 'label' field (alias for function_name for backward compat)
     field $label :param :reader = undef;
-    # Accept but ignore legacy params for backward compatibility
-    field $id :param = undef;
-    field $inputs :param = undef;
     field $source_info :param :reader = undef;
-    field $computed_id;
 
     ADJUST {
         # Allow label to be used as alias for function_name
@@ -22,10 +18,7 @@ class Chalk::IR::Node::Start {
     }
 
     # Content-addressable ID computed from label/function_name
-    method id() {
-        my $name = $label // $function_name // 'anonymous';
-        return $computed_id //= "start_${name}";
-    }
+    field $id :reader = "start_" . ($label // $function_name // 'anonymous');
 
     # Start nodes have no inputs (entry point)
     method inputs() { return []; }

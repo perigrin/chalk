@@ -5,93 +5,36 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Store {
-    # v2-style direct node references
-    field $control :param :reader = undef;  # Control predecessor node
-    field $var :param :reader = undef;      # Variable name (v2 style)
-    field $value :param :reader = undef;    # Value node (v2 style)
-
-    # v1 backward compat: allow var_name as alias for var
-    field $var_name :param :reader = undef;
-
-    # v1 backward compat: allow node and id params
-    field $value_node :param :reader = undef;
-    field $control_node :param :reader = undef;
-    field $value_id :param :reader = undef;
-    field $control_id :param :reader = undef;
-
-    # Accept but ignore legacy id/inputs params
-    field $id :param = undef;
-    field $inputs :param = undef;
+    field $control :param :reader;
+    field $var :param :reader;
+    field $value :param :reader;
     field $source_info :param :reader = undef;
 
-    field $computed_id;
-
-    ADJUST {
-        # Normalize: var_name <-> var (both names for same thing)
-        $var //= $var_name;
-        $var_name //= $var;
-
-        # Normalize: value <-> value_node
-        $value //= $value_node;
-        $value_node //= $value;
-
-        # Normalize: control <-> control_node
-        $control //= $control_node;
-        $control_node //= $control;
-    }
-
-    # Content-addressable ID computed from var name and child node IDs
-    method id() {
-        return $computed_id if defined $computed_id;
-
-        my $ctrl_id = defined($control) && blessed($control) && $control->can('id') ? $control->id : ($control_id // 'none');
-        my $val_id = defined($value) && blessed($value) && $value->can('id') ? $value->id : ($value_id // 'none');
-        my $vname = $var // $var_name // 'unknown';
-
-        return $computed_id = "store_${vname}_${ctrl_id}_${val_id}";
-    }
+    field $id :reader = "store_" . $var . "_" . $control->id . "_" . $value->id;
 
     # Compute inputs from child nodes
     method inputs() {
-        my @inputs;
-        if (defined($control) && blessed($control) && $control->can('id')) {
-            push @inputs, $control->id;
-        } elsif (defined($control_id)) {
-            push @inputs, $control_id;
-        }
-        if (defined($value) && blessed($value) && $value->can('id')) {
-            push @inputs, $value->id;
-        } elsif (defined($value_id)) {
-            push @inputs, $value_id;
-        }
-        return \@inputs;
+        return [ $control->id, $value->id ];
     }
 
     method op() { 'Store' }
 
     method to_hash() {
-        my $vname = $var // $var_name;
-        my $ctrl_id = defined($control) && blessed($control) && $control->can('id') ? $control->id : $control_id;
-        my $val_id = defined($value) && blessed($value) && $value->can('id') ? $value->id : $value_id;
-
         return {
             id     => $self->id,
             op     => 'Store',
             inputs => $self->inputs,
             attributes => {
-                var        => $vname,
-                var_name   => $vname,  # backward compat
-                control    => $ctrl_id,
-                control_id => $ctrl_id,  # backward compat
-                value_id   => $val_id,
+                var        => $var,
+                control_id => $control->id,
+                value_id   => $value->id,
             },
         };
     }
 
     method execute($context) {
         # Get the value to store
-        my $vid = defined($value) && blessed($value) && $value->can('id') ? $value->id : $value_id;
-        my $val = $context->("node:$vid");
+        my $val = $context->("node:" . $value->id);
 
         # Store in scope/context (implementation depends on runtime)
         # For now, just return the value (assignment evaluates to assigned value)
@@ -120,7 +63,7 @@ class Chalk::IR::Node::Store {
     # Immutable reconstruction with new control edge
     method with_control($new_control) {
         return Chalk::IR::Node::Store->new(
-            var     => $self->var // $self->var_name,
+            var     => $self->var,
             value   => $self->value,
             control => $new_control,
         );
