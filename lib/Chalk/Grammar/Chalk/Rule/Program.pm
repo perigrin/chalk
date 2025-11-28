@@ -14,7 +14,7 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
     method evaluate($context) {
         # Get scope from environment
         my $scope = $context->env->{scope};
-        return undef unless $scope;
+        die "Program: scope required in evaluation context" unless $scope;
 
         # Create Start node (program entry point)
         my $start = Chalk::IR::Node::Start->new(label => 'main');
@@ -83,8 +83,9 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
                     push @early_returns, $stmt->early_returns->@*;
                 }
             } else {
-                # Non-node (shouldn't happen but handle gracefully)
-                push @rewired_statements, $stmt;
+                # Non-node - this is a bug in the grammar rules
+                my $desc = ref($stmt) || (defined $stmt ? "'$stmt'" : 'undef');
+                die "Program: expected IR node in statement list, got: $desc";
             }
 
             if ($ENV{CHALK_DEBUG_PROGRAM}) {
@@ -94,10 +95,6 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
             }
         }
 
-        if ($ENV{CHALK_DEBUG_PROGRAM} && @early_returns) {
-            warn "[DEBUG] Program: collected ", scalar(@early_returns), " early return(s)\n";
-        }
-
         # Use rewired statements for the rest of processing
         @statements = @rewired_statements;
         my $final_control = $current_ctrl;
@@ -105,11 +102,6 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         # Get last statement for return value
         my $last_stmt = @statements ? $statements[-1] : undef;
         my $return_value;
-
-        if ($ENV{CHALK_DEBUG_PROGRAM}) {
-            my $ctrl_id = blessed($final_control) && $final_control->can('id') ? $final_control->id : "$final_control";
-            warn "[DEBUG] Program: final_control after rewiring = $ctrl_id\n";
-        }
 
         if ($last_stmt && blessed($last_stmt) && $last_stmt->can('op')) {
             my $op = $last_stmt->op;

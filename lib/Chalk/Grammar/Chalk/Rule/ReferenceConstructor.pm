@@ -19,7 +19,7 @@ class Chalk::Grammar::Chalk::Rule::ReferenceConstructor :isa(Chalk::GrammarRule)
 
         # Get first child to determine bracket type
         my $first_child = $context->child(0);
-        return $first_child unless defined $first_child;
+        die "ReferenceConstructor: expected bracket token at child(0), got undefined - grammar bug" unless defined $first_child;
 
         my $bracket = "$first_child";  # Stringify Token
 
@@ -97,7 +97,7 @@ class Chalk::Grammar::Chalk::Rule::ReferenceConstructor :isa(Chalk::GrammarRule)
             return $hash_node;
         }
 
-        return $first_child;
+        die "ReferenceConstructor: expected '[' or '{' bracket, got '$bracket' - grammar bug";
     }
 }
 
