@@ -27,8 +27,8 @@ class Chalk::Grammar::Chalk::Rule::ReturnStatement :isa(Chalk::GrammarRule) {
 
         # Verify we have an IR node (check for id method, not Base inheritance)
         unless ( ref($expr_node) && $expr_node->can('id') ) {
-            # Not an IR node - return undef for now
-            return undef;
+            my $desc = ref($expr_node) || (defined $expr_node ? "'$expr_node'" : 'undef');
+            die "ReturnStatement: expression must be an IR node with id(), got: $desc";
         }
 
         # Get scope for control flow

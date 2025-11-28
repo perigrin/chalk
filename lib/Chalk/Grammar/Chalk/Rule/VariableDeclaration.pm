@@ -14,7 +14,7 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
 
         my @children = $context->children->@*;
         my $scope = $context->env->{scope};
-        return undef unless $scope;
+        die "VariableDeclaration: scope required in evaluation context" unless $scope;
 
         # Find the '=' to determine if this is an initialized declaration
         my $has_init = 0;
@@ -42,7 +42,8 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
         if (ref($var) eq 'HASH' && $var->{type} && $var->{type} eq 'scalar_var') {
             $var_name = $var->{name};
         } else {
-            return undef;
+            my $desc = ref($var) || (defined $var ? "'$var'" : 'undef');
+            die "VariableDeclaration: expected scalar_var hashref, got: $desc";
         }
 
         # Get the expression value (child after '=' + WS_OPT)
@@ -51,12 +52,13 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
 
         # Validate we got an IR node
         unless (blessed($value) && $value->can('id')) {
-            return undef;
+            my $desc = ref($value) || (defined $value ? "'$value'" : 'undef');
+            die "VariableDeclaration: expression must be an IR node with id(), got: $desc";
         }
 
         # Get current control from scope
         my $current_control = $scope->current_control;
-        return undef unless $current_control;
+        die "VariableDeclaration: current_control required in scope" unless $current_control;
 
         # Create Store node directly (content-addressable ID)
         my $store = Chalk::IR::Node::Store->new(
