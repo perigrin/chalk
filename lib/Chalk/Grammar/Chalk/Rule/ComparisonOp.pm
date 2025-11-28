@@ -26,14 +26,14 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
             return $context->child(0);
         }
 
-        # Find the operator by searching through children
-        # Use is_operator() to detect Token::Operator objects
+        # Find the operator by scanning children - expression structure varies
+        # because WS_OPT may or may not be present, so we can't use fixed indices
         my $operator_idx;
         my $operator;
 
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
-            if (blessed($child) && $child->can('is_operator') && $child->is_operator()) {
+            if ($child isa Chalk::Grammar::Token::Operator) {
                 $operator = "$child";  # Stringify to get operator value
                 $operator_idx = $i;
                 last;

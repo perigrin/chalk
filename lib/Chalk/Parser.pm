@@ -386,8 +386,19 @@ class Chalk::Parser {
                             my ($pattern_name, $matched_text) = %+;
                             $matched_text //= $1;  # Fall back to $1 for unnamed captures
 
-                            # Bless matched text as Token with metadata
-                            my $token = Chalk::Grammar::Token->new(
+                            # Create appropriate Token subclass based on pattern_name
+                            my $token_class = 'Chalk::Grammar::Token';
+                            if ($pattern_name) {
+                                if ($pattern_name =~ /_OP$/) {
+                                    # Operator patterns: ARITHMETIC_OP, NUM_COMPARE_OP, etc.
+                                    $token_class = 'Chalk::Grammar::Token::Operator';
+                                } elsif ($pattern_name eq 'INTEGER') {
+                                    $token_class = 'Chalk::Grammar::Token::Int';
+                                } elsif ($pattern_name eq 'FLOAT') {
+                                    $token_class = 'Chalk::Grammar::Token::Float';
+                                }
+                            }
+                            my $token = $token_class->new(
                                 value => $matched_text,
                                 pattern_name => $pattern_name
                             );

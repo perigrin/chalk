@@ -35,11 +35,11 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         my $operator_idx;
         my $operator;
 
-        # Find the operator by searching through children
-        # Use is_operator() to detect Token::Operator objects
+        # Find the operator by scanning children - expression structure varies
+        # because WS_OPT may or may not be present, so we can't use fixed indices
         for my $i (0 .. $num_children - 1) {
             my $child = $context->child($i);
-            if (blessed($child) && $child->can('is_operator') && $child->is_operator()) {
+            if ($child isa Chalk::Grammar::Token::Operator) {
                 $operator = "$child";  # Stringify to get operator value
                 $operator_idx = $i;
                 last;

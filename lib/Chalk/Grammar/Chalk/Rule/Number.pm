@@ -9,17 +9,25 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
 
     method evaluate($context) {
         # Number -> %INTEGER% | %FLOAT%
-        # Child [0] contains the matched number string
+        # Child [0] contains the matched number token
 
-        my $number_str = $context->child(0);
-        return undef unless defined $number_str;
+        my $token = $context->child(0);
+        return undef unless defined $token;
 
-        # Handle both string and token objects
-        $number_str = "$number_str" if ref($number_str);
+        # Determine type from token class using isa operator
+        my $type;
+        if ($token isa Chalk::Grammar::Token::Float) {
+            $type = 'Float';
+        } elsif ($token isa Chalk::Grammar::Token::Int) {
+            $type = 'Int';
+        } else {
+            # Fallback for non-token values (e.g., plain strings)
+            my $str = "$token";
+            $type = $str =~ /\./ ? 'Float' : 'Int';
+        }
 
-        # Determine type (Int vs Float)
-        my $type  = $number_str =~ qr/\./ ? 'Float' : 'Int';
-        my $value = $number_str + 0;  # Convert to numeric
+        # Convert to numeric value
+        my $value = "$token" + 0;
 
         # Create Constant node directly (content-addressable ID)
         return Chalk::IR::Node::Constant->new(

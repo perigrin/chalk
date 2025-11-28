@@ -22,8 +22,6 @@ class Chalk::Grammar::Token {
     method _string_ne($other, $swap) { "$value" ne "$other" }
     method _string_cmp($other, $swap) { $swap ? "$other" cmp "$value" : "$value" cmp "$other" }
 
-    # Default: not an operator (subclasses can override)
-    method is_operator() { 0 }
 
     method to_string() {
         my $type = ref($self) || 'Chalk::Grammar::Token';
@@ -33,9 +31,15 @@ class Chalk::Grammar::Token {
 }
 
 # Operator tokens: matched by operator patterns in the grammar
-class Chalk::Grammar::Token::Operator :isa(Chalk::Grammar::Token) {
-    # Operators return true for is_operator check
-    method is_operator() { 1 }
-}
+# Use isa('Chalk::Grammar::Token::Operator') to detect
+class Chalk::Grammar::Token::Operator :isa(Chalk::Grammar::Token) { }
+
+# Integer tokens: matched by INTEGER pattern in the grammar
+# Use isa('Chalk::Grammar::Token::Int') to detect
+class Chalk::Grammar::Token::Int :isa(Chalk::Grammar::Token) { }
+
+# Float tokens: matched by FLOAT pattern in the grammar
+# Use isa('Chalk::Grammar::Token::Float') to detect
+class Chalk::Grammar::Token::Float :isa(Chalk::Grammar::Token) { }
 
 1;
