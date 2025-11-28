@@ -9,23 +9,10 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
     field $label  :param :reader;
     # Object reference to source node (If) for graph traversal
     field $source :param :reader = undef;
-    # Issue #195 fix: Nodes that use this Proj as their control input
-    # This enables forward traversal to find early returns in if-branches
-    field $control_users :param :reader = undef;
-    # Issue #195 fix: Early returns collected from the branch this Proj controls
+    # Early returns collected from the branch this Proj controls (immutable)
+    # Passed at construction time by ConditionalStatement after rewiring
     # This enables Program.pm to find Returns inside if-blocks
     field $early_returns :param :reader = undef;
-
-    # Add a node that uses this Proj as control
-    method add_control_user($node) {
-        $control_users //= [];
-        push $control_users->@*, $node;
-    }
-
-    # Set early returns collected from the branch
-    method set_early_returns($returns) {
-        $early_returns = $returns;
-    }
 
     method op() { 'Proj' }
 

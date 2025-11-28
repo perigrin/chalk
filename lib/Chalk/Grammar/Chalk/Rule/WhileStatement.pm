@@ -2,26 +2,17 @@
 # ABOUTME: Handles while loop control flow with Loop nodes, lazy phis, and backedges
 
 use 5.42.0;
-use experimental 'class';
-use Scalar::Util qw(blessed);
-
-# Helper to describe a value for error messages (avoids complex nested ternary)
-sub _describe_value {
-    my ($val) = @_;
-    if (!defined $val) {
-        return 'undef';
-    }
-    if (blessed($val)) {
-        return ref($val);
-    }
-    my $reftype = ref($val);
-    if ($reftype) {
-        return $reftype;
-    }
-    return "'$val'";
-}
+use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
+    # Helper to describe a value for error messages
+    sub __describe_value($val) {
+        return 'undef' unless defined $val;
+        return ref($val) if blessed($val);
+        return ref($val) if ref($val);
+        return "'$val'";
+    }
+
     method evaluate($context) {
         # WhileStatement -> 'while' WS_OPT '(' WS_OPT Expression WS_OPT ')' WS_OPT Block
         # Actual children after parsing with semantic actions:

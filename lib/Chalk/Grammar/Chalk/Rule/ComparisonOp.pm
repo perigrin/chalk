@@ -2,8 +2,7 @@
 # ABOUTME: Handles comparison (>, <, ==, !=, isa) and regex match (=~, !~) with precedence validated by Precedence semiring
 
 use 5.42.0;
-use experimental 'class';
-use Scalar::Util qw(blessed);
+use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
 

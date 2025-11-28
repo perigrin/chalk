@@ -2,8 +2,7 @@
 # ABOUTME: Assignment handles simple assignment (=) with direct data flow
 
 use 5.42.0;
-use experimental 'class';
-use Scalar::Util qw(blessed);
+use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
     use Chalk::IR::Node::Store;

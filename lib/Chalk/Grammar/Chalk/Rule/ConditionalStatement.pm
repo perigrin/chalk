@@ -2,26 +2,17 @@
 # ABOUTME: Handles if/elsif/else control flow with proper Region merging and Phi nodes
 
 use 5.42.0;
-use experimental 'class';
-use Scalar::Util qw(blessed);
-
-# Helper to describe a value for error messages (avoids complex nested ternary)
-sub _describe_value {
-    my ($val) = @_;
-    if (!defined $val) {
-        return 'undef';
-    }
-    if (blessed($val)) {
-        return ref($val);
-    }
-    my $reftype = ref($val);
-    if ($reftype) {
-        return $reftype;
-    }
-    return "'$val'";
-}
+use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule) {
+    # Helper to describe a value for error messages
+    sub _describe_value($val) {
+        return 'undef' unless defined $val;
+        return ref($val) if blessed($val);
+        return ref($val) if ref($val);
+        return "'$val'";
+    }
+
     # Child index constants for ConditionalStatement grammar structure
     # Grammar: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block [WS_OPT 'else' WS_OPT Block]
     # NOTE: WS_OPT nodes may not be present in children array when empty
@@ -122,7 +113,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             context => "condition_id=" . $condition->id
         );
 
-        # Build Proj nodes for true/false branches directly
+        # Build IfTrue Proj node
         # Pass source object reference for graph traversal
         my $if_true_id = "proj_${if_node_id}_0_IfTrue";
         my $if_true = Chalk::IR::Node::Proj->new(
@@ -138,23 +129,10 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             context => "source_id=${if_node_id}, index=0, label=IfTrue"
         );
 
+        # IfFalse Proj is created later, after rewiring true branch,
+        # so we can pass early_returns at construction (immutability)
         my $if_false_id = "proj_${if_node_id}_1_IfFalse";
-        my $if_false = Chalk::IR::Node::Proj->new(
-            id     => $if_false_id,
-            inputs => [ $if_node->id ],
-            index  => 1,
-            label  => 'IfFalse',
-            source => $if_node,
-        );
-        $if_false->record_transform(
-            'ir_construction',
-            'ConditionalStatement::evaluate',
-            context => "source_id=${if_node_id}, index=1, label=IfFalse"
-        );
-
-        # Issue #195 fix: Store branches on If node so BFS can find both paths
-        # This enables graph traversal to include early returns in if-branches
-        $if_node->set_branches($if_true, $if_false);
+        my $if_false;  # Will be created after true branch rewiring
 
         # CRITICAL FIX: WS_OPT nodes may be absent, so we can't use fixed indices.
         # Search for the Block child after the ')' terminal.
@@ -200,16 +178,11 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # (ReturnStatement evaluates before ConditionalStatement sets up scopes)
         my $current_ctrl = $if_true;
         my $true_last_stmt;
-        my @true_early_returns;  # Issue #195: Collect REWIRED Returns
+        my @true_early_returns;  # Collect REWIRED Returns for IfFalse
         for my $stmt ($true_block->{statements}->@*) {
             if ($stmt->can('with_control')) {
                 my $rewired = $stmt->with_control($current_ctrl);
-                # Issue #195 fix: Register rewired statement as a control user
-                # This enables forward BFS traversal to find early returns
-                if ($current_ctrl->can('add_control_user')) {
-                    $current_ctrl->add_control_user($rewired);
-                }
-                # Issue #195: Track rewired Returns (not original unrewired ones)
+                # Track rewired Returns (not original unrewired ones)
                 if ($rewired->can('op') && $rewired->op eq 'Return') {
                     push @true_early_returns, $rewired;
                 }
@@ -222,6 +195,23 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         }
         # Save final true scope after evaluating statements
         my $true_final_scope = $context->env->{scope};
+
+        # Now create IfFalse Proj with early_returns (immutable construction)
+        # This enables Program.pm to find Returns inside if-blocks
+        $if_false = Chalk::IR::Node::Proj->new(
+            id            => $if_false_id,
+            inputs        => [ $if_node->id ],
+            index         => 1,
+            label         => 'IfFalse',
+            source        => $if_node,
+            early_returns => (@true_early_returns ? \@true_early_returns : undef),
+        );
+        $if_false->record_transform(
+            'ir_construction',
+            'ConditionalStatement::evaluate',
+            context => "source_id=${if_node_id}, index=1, label=IfFalse" .
+                       (@true_early_returns ? ", early_returns=" . scalar(@true_early_returns) : "")
+        );
 
         # Check if true branch ends with return
         my $true_ends_with_return = ($true_last_stmt && $true_last_stmt->op eq 'Return');
@@ -272,11 +262,6 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
                     for my $stmt ($else_block->{statements}->@*) {
                         if ($stmt->can('with_control')) {
                             my $rewired = $stmt->with_control($current_ctrl);
-                            # Issue #195 fix: Register rewired statement as a control user
-                            # This enables forward BFS traversal to find early returns
-                            if ($current_ctrl->can('add_control_user')) {
-                                $current_ctrl->add_control_user($rewired);
-                            }
                             $current_ctrl = $rewired;
                             $false_last_stmt = $rewired;
                         } else {
@@ -329,14 +314,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             my $new_scope = $pre_scope->with_control($if_false->id);
             $context->env->{scope} = $new_scope;
 
-            # Issue #195 fix: Pass REWIRED early returns from true branch via IfFalse
-            # This lets Program.pm collect them for building the final Stop node
-            # CRITICAL: Must use rewired Returns (with IfTrue control), not original ones
-            if (@true_early_returns) {
-                $if_false->set_early_returns(\@true_early_returns);
-            }
-
-            # Return the IfFalse node as this statement's result
+            # IfFalse already has early_returns set at construction (immutable)
+            # Program.pm will collect them for building the final Stop node
             return $if_false;
         } elsif ($false_ends_with_return && !scalar(@{$true_block->{statements} // []})) {
             # False branch returns, true branch is empty - true path just falls through

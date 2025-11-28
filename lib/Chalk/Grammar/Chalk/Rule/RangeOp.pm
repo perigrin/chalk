@@ -6,7 +6,7 @@ use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::RangeOp :isa(Chalk::GrammarRule) {
     use Chalk::IR::Node;
-    use Scalar::Util qw(blessed);
+    
 
     method evaluate($context) {
         # RangeOp -> Expression WS_OPT '..' WS_OPT Expression
