@@ -4,8 +4,15 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::PreDecrement :isa(Chalk::IR::Node::Base) {
-    field $operand_id :param :reader;
+class Chalk::IR::Node::PreDecrement {
+    field $operand :param :reader;
+    field $source_info :param :reader = undef;
+
+    field $id :reader = "predecr_" . $operand->id;
+
+    method inputs() {
+        return [ $operand->id ];
+    }
 
     method op() { 'PreDecrement' }
 
@@ -15,9 +22,32 @@ class Chalk::IR::Node::PreDecrement :isa(Chalk::IR::Node::Base) {
             op     => 'PreDecrement',
             inputs => $self->inputs,
             attributes => {
-                operand_id => $operand_id,
+                operand_id => $operand->id,
             },
         };
+    }
+
+    method execute($context) {
+        my $val = $context->("node:" . $operand->id);
+        return $val - 1;  # Pre-decrement: return decremented value
+    }
+
+    # Compatibility methods for code expecting Base methods
+    method attributes() {
+        return $self->to_hash()->{attributes};
+    }
+
+    method peephole($graph) {
+        return $self;
+    }
+
+    # Stub for transform tracking
+    method record_transform(@args) {
+        return;
+    }
+
+    method get_transform_chain() {
+        return [];
     }
 }
 
