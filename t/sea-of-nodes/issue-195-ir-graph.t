@@ -129,10 +129,7 @@ subtest 'Case 1: if-else with returns in both branches' => sub {
         ok(exists $counts->{Constant}, 'Has Constant nodes');
 
         # Should have If node for the conditional
-        TODO: {
-            local $TODO = 'Issue #195: If node structure for early returns';
-            ok(exists $counts->{If}, 'Has If node');
-        }
+        ok(exists $counts->{If}, 'Has If node');
     }
 };
 
@@ -177,17 +174,14 @@ subtest 'Case 3: if with early return + fallthrough return' => sub {
 
         # The key assertion: we need proper control flow merging
         # Either Region node (for branch merging) or multiple Return paths
-        TODO: {
-            local $TODO = 'Issue #195: Multiple return paths in IR';
-            my $return_count = $counts->{Return} // 0;
-            cmp_ok($return_count, '>=', 1, 'Has at least one Return node');
+        my $return_count = $counts->{Return} // 0;
+        cmp_ok($return_count, '>=', 1, 'Has at least one Return node');
 
-            # Should have If node
-            ok(exists $counts->{If}, 'Has If node for conditional');
+        # Should have If node
+        ok(exists $counts->{If}, 'Has If node for conditional');
 
-            # Should have comparison node
-            ok(exists $counts->{GT}, 'Has GT comparison node');
-        }
+        # Should have comparison node
+        ok(exists $counts->{GT}, 'Has GT comparison node');
     }
 };
 
@@ -208,10 +202,7 @@ subtest 'Case 4: if with early return (negative value, takes fallthrough)' => su
 
         ok(exists $counts->{Return}, 'Has Return node(s)');
 
-        TODO: {
-            local $TODO = 'Issue #195: Fallthrough return path';
-            ok(exists $counts->{If}, 'Has If node');
-        }
+        ok(exists $counts->{If}, 'Has If node');
     }
 };
 

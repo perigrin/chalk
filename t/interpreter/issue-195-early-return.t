@@ -132,11 +132,8 @@ subtest 'Case 1: if-else returns 42 when condition is true' => sub {
         diag("Error: $error");
     }
 
-    TODO: {
-        local $TODO = 'Issue #195: Early return execution';
-        ok(!$error, 'Execution succeeded');
-        is($result, 42, 'Returns 42 for true condition');
-    }
+    ok(!$error, 'Execution succeeded');
+    is($result, 42, 'Returns 42 for true condition');
 };
 
 # Test Case 2: if (0) { return 42; } else { return -42; }
@@ -150,11 +147,8 @@ subtest 'Case 2: if-else returns -42 when condition is false' => sub {
         diag("Error: $error");
     }
 
-    TODO: {
-        local $TODO = 'Issue #195: Early return execution';
-        ok(!$error, 'Execution succeeded');
-        is($result, -42, 'Returns -42 for false condition');
-    }
+    ok(!$error, 'Execution succeeded');
+    is($result, -42, 'Returns -42 for false condition');
 };
 
 # Test Case 3: my $x = 5; if ($x > 0) { return 42; } return -42;
@@ -168,11 +162,8 @@ subtest 'Case 3: early return when condition true' => sub {
         diag("Error: $error");
     }
 
-    TODO: {
-        local $TODO = 'Issue #195: Early return with fallthrough';
-        ok(!$error, 'Execution succeeded');
-        is($result, 42, 'Returns 42 via early return (5 > 0)');
-    }
+    ok(!$error, 'Execution succeeded');
+    is($result, 42, 'Returns 42 via early return (5 > 0)');
 };
 
 # Test Case 4: my $x = -5; if ($x > 0) { return 42; } return -42;
@@ -186,11 +177,8 @@ subtest 'Case 4: fallthrough return when condition false' => sub {
         diag("Error: $error");
     }
 
-    TODO: {
-        local $TODO = 'Issue #195: Fallthrough return path';
-        ok(!$error, 'Execution succeeded');
-        is($result, -42, 'Returns -42 via fallthrough (-5 > 0 is false)');
-    }
+    ok(!$error, 'Execution succeeded');
+    is($result, -42, 'Returns -42 via fallthrough (-5 > 0 is false)');
 };
 
 # Baseline test: simple return (should work)
