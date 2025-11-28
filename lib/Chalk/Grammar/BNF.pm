@@ -104,7 +104,7 @@ class Chalk::Grammar::BNF {
                         qr/([A-Z][a-zA-Z0-9_]*)/
                         ,           # LHS (nonterminal, starts with capital)
                         qr/(\s*)/,    # Optional whitespace
-                        '->',
+                        qr/(->|::=)/,
                         qr/(\s*)/,    # Optional whitespace
                         'RHS',
                         qr/(\s*#[^\n]*)/
@@ -117,7 +117,7 @@ class Chalk::Grammar::BNF {
                         qr/([A-Z][a-zA-Z0-9_]*)/
                         ,           # LHS (nonterminal, starts with capital)
                         qr/(\s*)/,    # Optional whitespace
-                        '->',
+                        qr/(->|::=)/,
                         qr/(\s*)/,    # Optional whitespace
                         'RHS'
                     ]

@@ -34,24 +34,9 @@ use Chalk::Interpreter::ExecutionLog;
     my $c3 = Chalk::IR::Node::Constant->new(value => 8, type => 'int');
     my $c4 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
 
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c1->id . '_' . $c2->id,
-        inputs => [$c1->id, $c2->id],
-        left_id => $c1->id,
-        right_id => $c2->id,
-    );
-    my $sub = Chalk::IR::Node::Subtract->new(
-        id => 'sub_' . $c3->id . '_' . $c4->id,
-        inputs => [$c3->id, $c4->id],
-        left_id => $c3->id,
-        right_id => $c4->id,
-    );
-    my $mul = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $add->id . '_' . $sub->id,
-        inputs => [$add->id, $sub->id],
-        left_id => $add->id,
-        right_id => $sub->id,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
+    my $sub = Chalk::IR::Node::Subtract->new(left => $c3, right => $c4);
+    my $mul = Chalk::IR::Node::Multiply->new(left => $add, right => $sub);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $mul,
@@ -100,12 +85,7 @@ use Chalk::Interpreter::ExecutionLog;
     );
     my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
     my $c2 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    my $sum = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c1->id . '_' . $c2->id,
-        inputs => [$c1->id, $c2->id],
-        left_id => $c1->id,
-        right_id => $c2->id,
-    );
+    my $sum = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
 
     my $idx0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
     my $store1 = Chalk::IR::Node::ArrayStore->new(
@@ -116,12 +96,7 @@ use Chalk::Interpreter::ExecutionLog;
         value_id => $sum->id,
     );
 
-    my $product = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $c1->id . '_' . $c2->id,
-        inputs => [$c1->id, $c2->id],
-        left_id => $c1->id,
-        right_id => $c2->id,
-    );
+    my $product = Chalk::IR::Node::Multiply->new(left => $c1, right => $c2);
 
     my $idx1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
     my $store2 = Chalk::IR::Node::ArrayStore->new(
@@ -145,12 +120,7 @@ use Chalk::Interpreter::ExecutionLog;
         index_id => $idx1->id,
     );
 
-    my $result_sum = Chalk::IR::Node::Add->new(
-        id => 'add_' . $load0->id . '_' . $load1->id,
-        inputs => [$load0->id, $load1->id],
-        left_id => $load0->id,
-        right_id => $load1->id,
-    );
+    my $result_sum = Chalk::IR::Node::Add->new(left => $load0, right => $load1);
 
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
@@ -220,12 +190,7 @@ use Chalk::Interpreter::ExecutionLog;
     my $key1 = Chalk::IR::Node::Constant->new(value => 'sum', type => 'string');
     my $c1 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
     my $c2 = Chalk::IR::Node::Constant->new(value => 15, type => 'int');
-    my $sum = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c1->id . '_' . $c2->id,
-        inputs => [$c1->id, $c2->id],
-        left_id => $c1->id,
-        right_id => $c2->id,
-    );
+    my $sum = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
 
     my $store1 = Chalk::IR::Node::HashStore->new(
         id => 'hashstore_' . $hash->id . '_' . $key1->id . '_' . $sum->id,
@@ -236,12 +201,7 @@ use Chalk::Interpreter::ExecutionLog;
     );
 
     my $key2 = Chalk::IR::Node::Constant->new(value => 'diff', type => 'string');
-    my $diff = Chalk::IR::Node::Subtract->new(
-        id => 'sub_' . $c1->id . '_' . $c2->id,
-        inputs => [$c1->id, $c2->id],
-        left_id => $c1->id,
-        right_id => $c2->id,
-    );
+    my $diff = Chalk::IR::Node::Subtract->new(left => $c1, right => $c2);
 
     my $store2 = Chalk::IR::Node::HashStore->new(
         id => 'hashstore_' . $store1->id . '_' . $key2->id . '_' . $diff->id,
@@ -264,12 +224,7 @@ use Chalk::Interpreter::ExecutionLog;
         key_id => $key2->id,
     );
 
-    my $result_mul = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $load1->id . '_' . $load2->id,
-        inputs => [$load1->id, $load2->id],
-        left_id => $load1->id,
-        right_id => $load2->id,
-    );
+    my $result_mul = Chalk::IR::Node::Multiply->new(left => $load1, right => $load2);
 
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,

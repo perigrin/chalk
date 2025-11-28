@@ -25,68 +25,35 @@ use Chalk::Interpreter::CEKDataflow;
 # Object references are used for graph traversal
 
 # Test 1: Node referencing non-existent input
+# With v2 API, we can't create Add with non-existent nodes at construction time
+# because the constructor validates operands have id() method.
+# Instead, test that the ADJUST validation catches invalid operands.
 subtest 'Node referencing non-existent input' => sub {
-    my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    # Intentionally create malformed Add node referencing non-existent input
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_malformed',
-        inputs => [$const->id, 'non_existent'],  # 'non_existent' doesn't exist!
-        left_id => $const->id,
-        right_id => 'non_existent',
-        left => $const,
-    );
-    my $return = Chalk::IR::Node::Return->new(
-        control => $start,
-        value => $add,
-    );
-    $graph->add_node($start);
-    $graph->add_node($const);
-    $graph->add_node($add);
-    $graph->add_node($return);
-    $graph->materialize_pending_nodes();
-
-    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
-    eval { $interp->execute(); };
-    ok($@, "Dies when node references non-existent input: $@");
+    # Try to create Add with undef right operand - should die in ADJUST
+    eval {
+        my $add = Chalk::IR::Node::Add->new(
+            left => $const,
+            right => undef,  # Invalid - must be an object with id() method
+        );
+    };
+    ok($@, "Dies when Add created with undef operand: $@");
+    like($@, qr/right operand is required/, "Error message mentions right operand");
 };
 
-# Test 2: Node with malformed inputs array (empty when dependencies expected)
-subtest 'Node with malformed inputs array' => sub {
-    my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+# Test 2: Node created with invalid operand type
+# With v2 API, inputs() is computed from operands, so we test ADJUST validation
+subtest 'Node with invalid operand type' => sub {
     my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-
-    # Create an Add node with empty inputs array (malformed)
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_malformed_empty',
-        inputs => [],  # Empty, but Add needs two inputs
-        left_id => $const->id,
-        right_id => $const->id,
-        left => $const,
-        right => $const,
-    );
-    my $return = Chalk::IR::Node::Return->new(
-        control => $start,
-        value => $add,
-    );
-    $graph->add_node($start);
-    $graph->add_node($const);
-    $graph->add_node($add);
-    $graph->add_node($return);
-    $graph->materialize_pending_nodes();
-
-    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
-    my $result = eval { $interp->execute(); };
-    # This might execute (Add node gets scheduled immediately) and fail during execute()
-    # The test passes if either scheduling or execution fails
-    if ($@) {
-        pass("Failed as expected with error: $@");
-    } else {
-        pass("Executed without validation (inputs array not validated at schedule time)");
-        note("This reveals missing validation: empty inputs array should be detected");
-    }
+    # Try to create Add with a string instead of a node object
+    eval {
+        my $add = Chalk::IR::Node::Add->new(
+            left => $const,
+            right => "not_a_node",  # Invalid - must be an object with id() method
+        );
+    };
+    ok($@, "Dies when Add created with non-object operand: $@");
+    like($@, qr/right operand is required|must have id/, "Error message mentions invalid operand");
 };
 
 # Test 3: ArrayLoad with non-existent heap_id
@@ -668,14 +635,7 @@ subtest 'Division by zero' => sub {
         value => 0,
         type => 'int'
     );
-    my $div = Chalk::IR::Node::Divide->new(
-        id => 'div_' . $numerator->id . '_' . $denominator->id,
-        inputs => [$numerator->id, $denominator->id],
-        left_id => $numerator->id,
-        right_id => $denominator->id,
-        left => $numerator,
-        right => $denominator,
-    );
+    my $div = Chalk::IR::Node::Divide->new(left => $numerator, right => $denominator);
     my $return = Chalk::IR::Node::Return->new(
         control => $start,
         value => $div,
@@ -748,14 +708,7 @@ subtest 'Context lookup with malformed key' => sub {
     # This is hard to test directly since context is internal
     # But we can test indirectly by ensuring nodes handle context lookups properly
     my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $const->id . '_' . $const->id,
-        inputs => [$const->id, $const->id],
-        left_id => $const->id,
-        right_id => $const->id,
-        left => $const,
-        right => $const,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $const, right => $const);
     my $return = Chalk::IR::Node::Return->new(
         control => $start,
         value => $add,

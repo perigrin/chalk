@@ -20,14 +20,7 @@ my $graph = Chalk::IR::Graph->new();
 my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
 my $const2 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-my $add = Chalk::IR::Node::Add->new(
-    id => 'add_' . $const1->id . '_' . $const2->id,
-    inputs => [$const1->id, $const2->id],
-    left_id => $const1->id,
-    right_id => $const2->id,
-    left => $const1,
-    right => $const2,
-);
+my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 my $ret = Chalk::IR::Node::Return->new(
     control => $start,
     value => $add,

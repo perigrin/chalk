@@ -39,14 +39,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $c1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
     my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c1->id . '_' . $c2->id,
-        inputs => [$c1->id, $c2->id],
-        left_id => $c1->id,
-        right_id => $c2->id,
-        left => $c1,
-        right => $c2,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $add,
@@ -70,14 +63,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
     my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-    my $mul = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $c2->id . '_' . $c3->id,
-        inputs => [$c2->id, $c3->id],
-        left_id => $c2->id,
-        right_id => $c3->id,
-        left => $c2,
-        right => $c3,
-    );
+    my $mul = Chalk::IR::Node::Multiply->new(left => $c2, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $mul,
@@ -102,22 +88,8 @@ use Chalk::Interpreter::CEKDataflow;
     my $c1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
     my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
     my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c1->id . '_' . $c2->id,
-        inputs => [$c1->id, $c2->id],
-        left_id => $c1->id,
-        right_id => $c2->id,
-        left => $c1,
-        right => $c2,
-    );
-    my $mul = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $add->id . '_' . $c3->id,
-        inputs => [$add->id, $c3->id],
-        left_id => $add->id,
-        right_id => $c3->id,
-        left => $add,
-        right => $c3,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
+    my $mul = Chalk::IR::Node::Multiply->new(left => $add, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $mul,
@@ -144,16 +116,8 @@ use Chalk::Interpreter::CEKDataflow;
     my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
     my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
 
-    # Need to load Subtract
     require Chalk::IR::Node::Subtract;
-    my $sub = Chalk::IR::Node::Subtract->new(
-        id => 'sub_' . $c10->id . '_' . $c3->id,
-        inputs => [$c10->id, $c3->id],
-        left_id => $c10->id,
-        right_id => $c3->id,
-        left => $c10,
-        right => $c3,
-    );
+    my $sub = Chalk::IR::Node::Subtract->new(left => $c10, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $sub,
@@ -178,16 +142,8 @@ use Chalk::Interpreter::CEKDataflow;
     my $c20 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
     my $c4 = Chalk::IR::Node::Constant->new(value => 4, type => 'int');
 
-    # Need to load Divide
     require Chalk::IR::Node::Divide;
-    my $div = Chalk::IR::Node::Divide->new(
-        id => 'div_' . $c20->id . '_' . $c4->id,
-        inputs => [$c20->id, $c4->id],
-        left_id => $c20->id,
-        right_id => $c4->id,
-        left => $c20,
-        right => $c4,
-    );
+    my $div = Chalk::IR::Node::Divide->new(left => $c20, right => $c4);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $div,
@@ -211,14 +167,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $c_neg5 = Chalk::IR::Node::Constant->new(value => -5, type => 'int');
     my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c_neg5->id . '_' . $c3->id,
-        inputs => [$c_neg5->id, $c3->id],
-        left_id => $c_neg5->id,
-        right_id => $c3->id,
-        left => $c_neg5,
-        right => $c3,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $c_neg5, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $add,
@@ -242,14 +191,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
     my $c5 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c0->id . '_' . $c5->id,
-        inputs => [$c0->id, $c5->id],
-        left_id => $c0->id,
-        right_id => $c5->id,
-        left => $c0,
-        right => $c5,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $c0, right => $c5);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $add,
@@ -273,14 +215,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
     my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $mul = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $c0->id . '_' . $c10->id,
-        inputs => [$c0->id, $c10->id],
-        left_id => $c0->id,
-        right_id => $c10->id,
-        left => $c0,
-        right => $c10,
-    );
+    my $mul = Chalk::IR::Node::Multiply->new(left => $c0, right => $c10);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $mul,
@@ -304,14 +239,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $c_neg2 = Chalk::IR::Node::Constant->new(value => -2, type => 'int');
     my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-    my $mul = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $c_neg2->id . '_' . $c3->id,
-        inputs => [$c_neg2->id, $c3->id],
-        left_id => $c_neg2->id,
-        right_id => $c3->id,
-        left => $c_neg2,
-        right => $c3,
-    );
+    my $mul = Chalk::IR::Node::Multiply->new(left => $c_neg2, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $mul,
@@ -337,14 +265,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
 
     require Chalk::IR::Node::Divide;
-    my $div = Chalk::IR::Node::Divide->new(
-        id => 'div_' . $c10->id . '_' . $c0->id,
-        inputs => [$c10->id, $c0->id],
-        left_id => $c10->id,
-        right_id => $c0->id,
-        left => $c10,
-        right => $c0,
-    );
+    my $div = Chalk::IR::Node::Divide->new(left => $c10, right => $c0);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $div,
@@ -379,32 +300,11 @@ use Chalk::Interpreter::CEKDataflow;
     my $c4 = Chalk::IR::Node::Constant->new(value => 4, type => 'int');
     my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
 
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $c2->id . '_' . $c3->id,
-        inputs => [$c2->id, $c3->id],
-        left_id => $c2->id,
-        right_id => $c3->id,
-        left => $c2,
-        right => $c3,
-    );
-    my $mul = Chalk::IR::Node::Multiply->new(
-        id => 'mul_' . $add->id . '_' . $c4->id,
-        inputs => [$add->id, $c4->id],
-        left_id => $add->id,
-        right_id => $c4->id,
-        left => $add,
-        right => $c4,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $c2, right => $c3);
+    my $mul = Chalk::IR::Node::Multiply->new(left => $add, right => $c4);
 
     require Chalk::IR::Node::Subtract;
-    my $sub = Chalk::IR::Node::Subtract->new(
-        id => 'sub_' . $mul->id . '_' . $c10->id,
-        inputs => [$mul->id, $c10->id],
-        left_id => $mul->id,
-        right_id => $c10->id,
-        left => $mul,
-        right => $c10,
-    );
+    my $sub = Chalk::IR::Node::Subtract->new(left => $mul, right => $c10);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $sub,

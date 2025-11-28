@@ -501,14 +501,7 @@ use Chalk::Interpreter::CEKDataflow;
         label => 'IfTrue',
         source => $if_node,
     );
-    my $add = Chalk::IR::Node::Add->new(
-        id => 'add_' . $x->id . '_' . $hundred->id,
-        inputs => [$x->id, $hundred->id],
-        left_id => $x->id,
-        right_id => $hundred->id,
-        left => $x,
-        right => $hundred,
-    );
+    my $add = Chalk::IR::Node::Add->new(left => $x, right => $hundred);
     my $region = Chalk::IR::Node::Region->new(
         id => 'region_' . $proj_false->id . '_' . $proj_true->id,
         inputs => [$proj_false->id, $proj_true->id],

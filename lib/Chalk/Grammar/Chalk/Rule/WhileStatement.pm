@@ -6,7 +6,7 @@ use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
     # Helper to describe a value for error messages
-    sub __describe_value($val) {
+    my sub _describe_value($val) {
         return 'undef' unless defined $val;
         return ref($val) if blessed($val);
         return ref($val) if ref($val);

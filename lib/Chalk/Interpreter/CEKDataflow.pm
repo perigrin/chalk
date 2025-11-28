@@ -1,5 +1,5 @@
-# ABOUTME: CEK machine with dataflow scheduling for Sea of Nodes IR execution
-# ABOUTME: Implements Control-Environment-Kontinuation model with promise-style dependencies
+# ABOUTME: CESK-style interpreter with dataflow scheduling for Sea of Nodes IR execution
+# ABOUTME: Uses Store semantics (S) for node values; replaces tree-walking Control with ready queue
 use 5.42.0;
 use experimental qw(class);
 use utf8;
@@ -9,9 +9,23 @@ use Chalk::Interpreter::Environment;
 class Chalk::Interpreter::CEKDataflow {
     field $graph :param :reader;
 
-    # CEK State Components
-    field $environment;    # Environment with discrete contexts
-    field $ready_queue;    # Dataflow ready queue
+    # Architecture: CESK-style machine with dataflow scheduling
+    #
+    # Traditional CEK/CESK machines use "Control" (C) as a pointer into the AST,
+    # walking the expression tree depth-first. This interpreter replaces tree-walking
+    # with dataflow scheduling: instead of "what expression am I evaluating now?",
+    # we ask "which nodes have all dependencies satisfied?"
+    #
+    # Components:
+    #   - $ready_queue replaces Control: nodes ready to execute (dependencies met)
+    #   - $environment (E): maps node IDs to computed values (Store semantics)
+    #   - $kontinuation (K): control flow continuation
+    #   - $waiting: tracks unmet dependencies for each node
+    #
+    # This is a natural fit for Sea of Nodes IR where data flows between graph nodes.
+
+    field $environment;    # Environment/Store: maps node IDs to computed values
+    field $ready_queue;    # Dataflow ready queue (replaces tree-walking Control)
     field $kontinuation;   # Control flow continuation
 
     # Step-by-step execution state (Phase 4 Task 2)

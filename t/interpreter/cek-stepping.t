@@ -16,14 +16,7 @@ my $graph1 = Chalk::IR::Graph->new();
 my $start1 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
 my $const2 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-my $add = Chalk::IR::Node::Add->new(
-    id => 'add_' . $const1->id . '_' . $const2->id,
-    inputs => [$const1->id, $const2->id],
-    left_id => $const1->id,
-    right_id => $const2->id,
-    left => $const1,
-    right => $const2,
-);
+my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 my $ret = Chalk::IR::Node::Return->new(
     control => $start1,
     value => $add,
@@ -89,14 +82,7 @@ my $graph2 = Chalk::IR::Graph->new();
 my $start2 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
 my $c2 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
-my $add2 = Chalk::IR::Node::Add->new(
-    id => 'add_' . $c1->id . '_' . $c2->id,
-    inputs => [$c1->id, $c2->id],
-    left_id => $c1->id,
-    right_id => $c2->id,
-    left => $c1,
-    right => $c2,
-);
+my $add2 = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
 my $ret2 = Chalk::IR::Node::Return->new(
     control => $start2,
     value => $add2,
@@ -123,14 +109,7 @@ my $graph3 = Chalk::IR::Graph->new();
 my $start3 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $c3 = Chalk::IR::Node::Constant->new(value => 15, type => 'int');
 my $c4 = Chalk::IR::Node::Constant->new(value => 25, type => 'int');
-my $add3 = Chalk::IR::Node::Add->new(
-    id => 'add_' . $c3->id . '_' . $c4->id,
-    inputs => [$c3->id, $c4->id],
-    left_id => $c3->id,
-    right_id => $c4->id,
-    left => $c3,
-    right => $c4,
-);
+my $add3 = Chalk::IR::Node::Add->new(left => $c3, right => $c4);
 my $ret3 = Chalk::IR::Node::Return->new(
     control => $start3,
     value => $add3,

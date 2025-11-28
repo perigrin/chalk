@@ -5,62 +5,42 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Negate {
-    # v2-style direct node reference
-    field $operand :param :reader = undef;
-
-    # v1 backward compat: allow string ID param
-    field $operand_id :param :reader = undef;
-
-    # Accept but ignore legacy id/inputs params
-    field $id :param = undef;
-    field $inputs :param = undef;
+    field $operand :param :reader;
     field $source_info :param :reader = undef;
 
-    field $computed_id;
+    field $id;
 
     ADJUST {
-        # Normalize: operand stays as-is (prefer object when available)
-        $operand //= undef;  # Keep as-is
+        die "Negate: operand is required and must have id() method"
+            unless blessed($operand) && $operand->can('id');
     }
 
     # Content-addressable ID computed from operand ID
     method id() {
-        return $computed_id if defined $computed_id;
-
-        my $op_id = defined($operand) && blessed($operand) && $operand->can('id') ? $operand->id : ($operand_id // 'none');
-
-        return $computed_id = "neg_${op_id}";
+        return $id if defined $id;
+        return $id = "neg_" . $operand->id;
     }
 
     # Compute inputs from child node
     method inputs() {
-        my @inputs;
-        if (defined($operand) && blessed($operand) && $operand->can('id')) {
-            push @inputs, $operand->id;
-        } elsif (defined($operand_id)) {
-            push @inputs, $operand_id;
-        }
-        return \@inputs;
+        return [ $operand->id ];
     }
 
     method op() { 'Negate' }
 
     method to_hash() {
-        my $op_id = defined($operand) && blessed($operand) && $operand->can('id') ? $operand->id : $operand_id;
-
         return {
             id     => $self->id,
             op     => 'Negate',
             inputs => $self->inputs,
             attributes => {
-                operand_id => $op_id,
+                operand_id => $operand->id,
             },
         };
     }
 
     method execute($context) {
-        my $op_id = defined($operand) && blessed($operand) && $operand->can('id') ? $operand->id : $operand_id;
-        my $operand_val = $context->("node:$op_id");
+        my $operand_val = $context->("node:" . $operand->id);
         return -$operand_val;
     }
 
