@@ -9,6 +9,7 @@ class Chalk::IR::Node::Store {
     field $var :param :reader;
     field $value :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "store_" . $var . "_" . $control->id . "_" . $value->id;
 
@@ -56,9 +57,6 @@ class Chalk::IR::Node::Store {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 
     # Immutable reconstruction with new control edge
     method with_control($new_control) {

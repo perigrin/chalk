@@ -10,6 +10,7 @@ class Chalk::IR::Node::Start {
     # v2-style 'label' field (alias for function_name for backward compat)
     field $label :param :reader = undef;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     ADJUST {
         # Allow label to be used as alias for function_name
@@ -58,9 +59,6 @@ class Chalk::IR::Node::Start {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;

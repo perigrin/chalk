@@ -22,8 +22,6 @@ use_ok('Chalk::IR::Node::Return');
 # Test 5: Constant node should implement op() method
 {
     my $const = Chalk::IR::Node::Constant->new(
-        id => 1,
-        inputs => [],
         value => 42,
         type => 'Int',
     );
@@ -33,8 +31,6 @@ use_ok('Chalk::IR::Node::Return');
 # Test 6: Constant node should have value accessor
 {
     my $const = Chalk::IR::Node::Constant->new(
-        id => 2,
-        inputs => [],
         value => 99,
         type => 'Int',
     );
@@ -44,8 +40,6 @@ use_ok('Chalk::IR::Node::Return');
 # Test 7: Start node should implement op() method
 {
     my $start = Chalk::IR::Node::Start->new(
-        id => 3,
-        inputs => [],
         function_name => 'main',
         params => undef,
     );
@@ -55,8 +49,6 @@ use_ok('Chalk::IR::Node::Return');
 # Test 8: Start node should have function_name accessor
 {
     my $start = Chalk::IR::Node::Start->new(
-        id => 4,
-        inputs => [],
         function_name => 'test_fn',
         params => undef,
     );
@@ -65,33 +57,32 @@ use_ok('Chalk::IR::Node::Return');
 
 # Test 9: Return node should implement op() method
 {
+    my $start = Chalk::IR::Node::Start->new(function_name => 'main');
+    my $value = Chalk::IR::Node::Constant->new(value => 1, type => 'Int');
     my $return = Chalk::IR::Node::Return->new(
-        id => 5,
-        inputs => [1, 2],  # value_id, control_id
-        value_id => 1,
-        control_id => 2,
+        value => $value,
+        control => $start,
     );
     is($return->op, 'Return', 'Return node returns correct op');
 }
 
-# Test 10: Return node should have value_id accessor
+# Test 10: Return node should have value accessor
 {
+    my $start = Chalk::IR::Node::Start->new(function_name => 'main');
+    my $value = Chalk::IR::Node::Constant->new(value => 10, type => 'Int');
     my $return = Chalk::IR::Node::Return->new(
-        id => 6,
-        inputs => [10, 20],
-        value_id => 10,
-        control_id => 20,
+        value => $value,
+        control => $start,
     );
-    is($return->value_id, 10, 'Return node has value_id accessor');
+    is($return->value->id, $value->id, 'Return node has value accessor');
 }
 
 # Test 11: Polymorphism - calling op() on different node types
 {
-    my @nodes = (
-        Chalk::IR::Node::Constant->new(id => 7, inputs => [], value => 1, type => 'Int'),
-        Chalk::IR::Node::Start->new(id => 8, inputs => [], function_name => 'main', params => undef),
-        Chalk::IR::Node::Return->new(id => 9, inputs => [7, 8], value_id => 7, control_id => 8),
-    );
+    my $const = Chalk::IR::Node::Constant->new(value => 1, type => 'Int');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'main', params => undef);
+    my $return = Chalk::IR::Node::Return->new(value => $const, control => $start);
+    my @nodes = ($const, $start, $return);
 
     my @ops = map { $_->op } @nodes;
     is_deeply(\@ops, ['Constant', 'Start', 'Return'], 'Polymorphic op() calls work correctly');
@@ -105,9 +96,11 @@ use_ok('Chalk::IR::Node::Return');
 
 # Test 13: All nodes should have inputs accessor (computed from control and value)
 {
-    # Return node computes inputs from control_id and value_id: [control, value]
-    my $return = Chalk::IR::Node::Return->new(value_id => 50, control_id => 60);
-    is_deeply($return->inputs, [60, 50], 'Return node has computed inputs [control, value]');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'main');
+    my $value = Chalk::IR::Node::Constant->new(value => 50, type => 'Int');
+    my $return = Chalk::IR::Node::Return->new(value => $value, control => $start);
+    # Return node computes inputs from control and value: [control.id, value.id]
+    is_deeply($return->inputs, [$start->id, $value->id], 'Return node has computed inputs [control, value]');
 }
 
 # Test 14: to_hash() should work for all nodes (content-addressable id for Constant)
@@ -119,7 +112,7 @@ use_ok('Chalk::IR::Node::Return');
 
 # Test 15: to_hash() should include op
 {
-    my $const = Chalk::IR::Node::Constant->new(id => 103, inputs => [], value => 42, type => 'Int');
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'Int');
     my $hash = $const->to_hash();
     is($hash->{op}, 'Constant', 'to_hash() includes op');
 }

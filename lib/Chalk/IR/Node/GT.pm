@@ -8,6 +8,7 @@ class Chalk::IR::Node::GT {
     field $left :param :reader;
     field $right :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "gt_" . $left->id . "_" . $right->id;
 
@@ -50,9 +51,6 @@ class Chalk::IR::Node::GT {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;

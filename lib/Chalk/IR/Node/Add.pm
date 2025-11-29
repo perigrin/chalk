@@ -8,6 +8,7 @@ class Chalk::IR::Node::Add {
     field $left :param :reader;
     field $right :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "add_" . $left->id . "_" . $right->id;
 
@@ -50,14 +51,6 @@ class Chalk::IR::Node::Add {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
-
-    # Alias for compatibility with GVN optimizer
-    method transform_chain() {
-        return [];
-    }
 }
 
 1;

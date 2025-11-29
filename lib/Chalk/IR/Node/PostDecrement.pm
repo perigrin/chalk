@@ -7,6 +7,7 @@ use utf8;
 class Chalk::IR::Node::PostDecrement {
     field $operand :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "postdecr_" . $operand->id;
 
@@ -45,9 +46,6 @@ class Chalk::IR::Node::PostDecrement {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;

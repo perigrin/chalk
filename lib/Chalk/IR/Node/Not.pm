@@ -7,6 +7,7 @@ use utf8;
 class Chalk::IR::Node::Not {
     field $operand :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "not_" . $operand->id;
 
@@ -47,9 +48,6 @@ class Chalk::IR::Node::Not {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;

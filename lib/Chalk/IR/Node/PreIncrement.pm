@@ -7,6 +7,7 @@ use utf8;
 class Chalk::IR::Node::PreIncrement {
     field $operand :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "preincr_" . $operand->id;
 
@@ -45,9 +46,6 @@ class Chalk::IR::Node::PreIncrement {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;

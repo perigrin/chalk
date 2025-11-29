@@ -8,6 +8,7 @@ class Chalk::IR::Node::And {
     field $left :param :reader;
     field $right :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "and_" . $left->id . "_" . $right->id;
 
@@ -52,9 +53,6 @@ class Chalk::IR::Node::And {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;

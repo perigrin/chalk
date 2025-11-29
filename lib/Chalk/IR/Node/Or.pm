@@ -8,6 +8,7 @@ class Chalk::IR::Node::Or {
     field $left :param :reader;
     field $right :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "or_" . $left->id . "_" . $right->id;
 
@@ -52,9 +53,6 @@ class Chalk::IR::Node::Or {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;

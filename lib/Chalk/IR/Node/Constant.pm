@@ -8,6 +8,7 @@ class Chalk::IR::Node::Constant {
     field $value :param :reader;
     field $type  :param :reader;
     field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
 
     field $id :reader = "const_" . $type . "_" . $value;
 
@@ -46,9 +47,6 @@ class Chalk::IR::Node::Constant {
         return;
     }
 
-    method get_transform_chain() {
-        return [];
-    }
 }
 
 1;
