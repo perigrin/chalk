@@ -44,4 +44,32 @@ subtest 'Constant node compute() returns TypeInteger' => sub {
     is($type0->value, 0, 'TypeInteger has value 0');
 };
 
+# Task 7: Add node compute() - returns sum if both inputs are constant
+use_ok('Chalk::IR::Node::Add');
+
+subtest 'Add node compute() with constant inputs' => sub {
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $const5 = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+
+    my $add = Chalk::IR::Node::Add->new(left => $const3, right => $const5);
+
+    ok($add->can('compute'), 'Add node has compute() method');
+
+    my $type = $add->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger for constant addition');
+    is($type->is_constant, 1, 'Result is constant');
+    is($type->value, 8, '3 + 5 = 8');
+};
+
+subtest 'Add node compute() with non-constant input returns TOP' => sub {
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    # Use Base node as a non-constant input (its compute() returns TOP)
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $add = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
+
+    my $type = $add->compute();
+    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+};
+
 done_testing();

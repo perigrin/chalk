@@ -5,6 +5,9 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Add {
+    use Chalk::IR::Type::Top;
+    use Chalk::IR::Type::TypeInteger;
+
     field $left :param :reader;
     field $right :param :reader;
     field $source_info :param :reader = undef;
@@ -44,6 +47,20 @@ class Chalk::IR::Node::Add {
 
     method peephole($graph) {
         return $self;
+    }
+
+    # Type inference for constant folding - if both inputs are constant, compute sum
+    method compute() {
+        my $left_type = $left->compute();
+        my $right_type = $right->compute();
+
+        if ($left_type->is_constant && $right_type->is_constant) {
+            return Chalk::IR::Type::TypeInteger->constant(
+                $left_type->value + $right_type->value
+            );
+        }
+
+        return Chalk::IR::Type::Top->TOP;
     }
 
     # Stub for transform tracking
