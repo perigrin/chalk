@@ -87,10 +87,7 @@ class Chalk::IR::Optimizer::GVN {
 
             # Reconstruct node preserving polymorphic type, source_info, and transform_chain
             # Use from_hash() factory to create correct node class
-            # Note: Some node classes use get_transform_chain() instead of transform_chain()
-            my $chain = $old_node->can('transform_chain') ? $old_node->transform_chain
-                      : $old_node->can('get_transform_chain') ? $old_node->get_transform_chain
-                      : [];
+            my $chain = $old_node->transform_chain // [];
             my $new_node = Chalk::IR::Node->from_hash({
                 id              => $node_id,
                 op              => $old_node->op,
