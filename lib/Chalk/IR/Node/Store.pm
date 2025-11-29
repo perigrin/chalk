@@ -11,7 +11,7 @@ class Chalk::IR::Node::Store {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
-    field $id :reader = "store_" . $var . "_" . $control->id . "_" . $value->id;
+    method id() { refaddr($self) }
 
     # Compute inputs from child nodes
     method inputs() {

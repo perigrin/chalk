@@ -98,7 +98,6 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             ? $entry_control
             : undef;
         my $if_node = Chalk::IR::Node::If->new(
-            id           => $if_node_id,
             inputs       => [ $entry_ctrl_id, $condition->id ],
             condition_id => $condition->id,
             condition    => $condition,
@@ -112,9 +111,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
 
         # Build IfTrue Proj node
         # Pass source object reference for graph traversal
-        my $if_true_id = "proj_${if_node_id}_0_IfTrue";
         my $if_true = Chalk::IR::Node::Proj->new(
-            id     => $if_true_id,
             inputs => [ $if_node->id ],
             index  => 0,
             label  => 'IfTrue',
@@ -123,12 +120,11 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         $if_true->record_transform(
             'ir_construction',
             'ConditionalStatement::evaluate',
-            context => "source_id=${if_node_id}, index=0, label=IfTrue"
+            context => "source_id=" . $if_node->id . ", index=0, label=IfTrue"
         );
 
         # IfFalse Proj is created later, after rewiring true branch,
         # so we can pass early_returns at construction (immutability)
-        my $if_false_id = "proj_${if_node_id}_1_IfFalse";
         my $if_false;  # Will be created after true branch rewiring
 
         # CRITICAL FIX: WS_OPT nodes may be absent, so we can't use fixed indices.
@@ -153,8 +149,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         }
 
         if (!$true_block_ctx) {
-            warn "[DEBUG] ConditionalStatement: no true_block_ctx found\n" if $ENV{CHALK_DEBUG_TRACKING};
-            return undef;
+            die "ConditionalStatement: no Block found after ')' - grammar bug\n";
         }
 
         # Evaluate true branch with child scope
@@ -165,7 +160,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $true_block_rule = $true_block_ctx->rule;
         my $true_block = $true_block_rule ? $true_block_rule->evaluate($true_block_ctx) : $true_block_ctx->extract;
         if (!(ref($true_block) eq 'HASH' && $true_block->{type} eq 'block')) {
-            return undef;
+            my $desc = ref($true_block) || (defined $true_block ? "'$true_block'" : 'undef');
+            die "ConditionalStatement: true_block must be a block hash, got: $desc - grammar bug\n";
         }
         warn "[DEBUG] ConditionalStatement: true_block has ", scalar(@{$true_block->{statements}}), " statements\n" if $ENV{CHALK_DEBUG_TRACKING};
 
@@ -196,7 +192,6 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # Now create IfFalse Proj with early_returns (immutable construction)
         # This enables Program.pm to find Returns inside if-blocks
         $if_false = Chalk::IR::Node::Proj->new(
-            id            => $if_false_id,
             inputs        => [ $if_node->id ],
             index         => 1,
             label         => 'IfFalse',
@@ -206,7 +201,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         $if_false->record_transform(
             'ir_construction',
             'ConditionalStatement::evaluate',
-            context => "source_id=${if_node_id}, index=1, label=IfFalse" .
+            context => "source_id=" . $if_node->id . ", index=1, label=IfFalse" .
                        (@true_early_returns ? ", early_returns=" . scalar(@true_early_returns) : "")
         );
 
@@ -289,9 +284,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         if ($true_ends_with_return && defined($false_control) && $false_ends_with_return) {
             # Both branches terminate with return - create Stop node instead of Region
             # Per Sea of Nodes chapter 5: "StopNodes only have ReturnNode inputs"
-            my $stop_id = "stop_" . join("_", $true_last_stmt->id, $false_last_stmt->id);
             my $stop = Chalk::IR::Node::Stop->new(
-                id      => $stop_id,
                 inputs  => [ $true_last_stmt->id, $false_last_stmt->id ],
                 returns => [ $true_last_stmt, $false_last_stmt ],
             );
@@ -317,9 +310,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         } elsif ($false_ends_with_return && !scalar(@{$true_block->{statements} // []})) {
             # False branch returns, true branch is empty - true path just falls through
             # Create single-input Region from IfTrue only
-            my $region_id = "region_" . $if_true->id;
             $region = Chalk::IR::Node::Region->new(
-                id     => $region_id,
                 inputs => [ $if_true->id ],
             );
             $region->record_transform(
@@ -340,9 +331,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             push @region_inputs, $true_control unless $true_ends_with_return;
             push @region_inputs, $false_control unless $false_ends_with_return;
 
-            my $region_id = "region_" . join("_", @region_inputs);
             $region = Chalk::IR::Node::Region->new(
-                id     => $region_id,
                 inputs => \@region_inputs,
             );
             $region->record_transform(

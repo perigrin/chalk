@@ -9,7 +9,7 @@ class Chalk::IR::Node::PostIncrement {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
-    field $id :reader = "postincr_" . $operand->id;
+    method id() { refaddr($self) }
 
     method inputs() {
         return [ $operand->id ];

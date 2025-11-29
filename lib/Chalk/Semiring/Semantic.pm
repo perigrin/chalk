@@ -103,7 +103,6 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
             env       => $self->context->env,
             grammar   => $self->context->grammar,
             rule      => $self->context->rule,
-            forest    => $self->context->forest,
             type      => $self->context->type,        # Propagate type from rule
             metadata_element => $self->context->metadata_element  # Propagate metadata
         );
@@ -144,11 +143,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     field $shared_context :param :reader = undef;
     field $type_env       :param :reader =
       {};    # Maps variable names to Chalk::Type objects
-    field $forest :reader =
-      defined($shared_context)
-      && exists( $shared_context->{forest} )
-      ? $shared_context->{forest}
-      : undef;
 
     field $mul_id :reader = Chalk::Semiring::SemanticElement->new(
         value   => 1,                         # mul_id has value 1
@@ -160,7 +154,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             env       => $env,
             grammar   => $grammar,
             rule      => undef,
-            forest    => $forest,
             metadata_element => undef        # Identity elements have no metadata
         )
     );
@@ -174,7 +167,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             env       => $env,
             grammar   => $grammar,
             rule      => undef,
-            forest    => $forest,
             metadata_element => undef        # Identity elements have no metadata
         )
     );
@@ -203,7 +195,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             env       => $env,
             grammar   => $grammar,
             rule      => $rule,
-            forest    => $forest,
             type      => $inferred_type,
             metadata_element => undef        # Will be set during on_complete()
         );
@@ -326,7 +317,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
                 env       => $ctx->env,
                 grammar   => $ctx->grammar,
                 rule      => $ctx->rule,
-                forest    => $ctx->forest,
                 type      => $ctx->type,
                 metadata_element => $metadata_element
             );
@@ -335,7 +325,15 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         # Evaluate the rule's semantic action if it has one
         my $rule = $ctx->rule;
         if ( $rule && $rule->can('evaluate') ) {
-            my $result = $rule->evaluate($ctx);
+            my $result;
+            try {
+                $result = $rule->evaluate($ctx);
+            } catch ($e) {
+                # Semantic action failed - return add_id to signal parse failure
+                # This allows the parser to backtrack and try other alternatives
+                warn "[SEMANTIC] evaluate() failed: $e" if $ENV{CHALK_DEBUG_SEMANTIC};
+                return $add_id;
+            }
 
             # Set the focus to the evaluated result
             $ctx = Chalk::EvalContext->new(
@@ -346,7 +344,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
                 env       => $ctx->env,
                 grammar   => $ctx->grammar,
                 rule      => $ctx->rule,
-                forest    => $ctx->forest,
                 metadata_element => $metadata_element  # Pass metadata from SPPF/Precedence
             );
 
@@ -374,7 +371,6 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             env       => $element->context->env,
             grammar   => $element->context->grammar,
             rule      => $item->rule,
-            forest    => $element->context->forest,
             type      => $element->context->type,
             metadata_element => $element->context->metadata_element  # Propagate metadata
         );

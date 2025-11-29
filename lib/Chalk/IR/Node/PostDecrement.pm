@@ -9,7 +9,7 @@ class Chalk::IR::Node::PostDecrement {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
-    field $id :reader = "postdecr_" . $operand->id;
+    method id() { refaddr($self) }
 
     method inputs() {
         return [ $operand->id ];

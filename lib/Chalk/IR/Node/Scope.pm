@@ -11,11 +11,10 @@ class Chalk::IR::Node::Scope {
     field $bindings :param :reader = {};        # { var_name => node }
     field $current_control :param :reader = undef;
     field $parent :param :reader = undef;       # Parent scope for nested lookups
-    field $id :reader;
+
+    method id() { refaddr($self) }
 
     ADJUST {
-        # Generate ID using object address
-        $id = 'scope_' . refaddr($self);
         # Deep copy bindings to ensure immutability
         $bindings = { $bindings->%* };
     }

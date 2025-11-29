@@ -10,7 +10,7 @@ class Chalk::IR::Node::LT {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
-    field $id :reader = "lt_" . $left->id . "_" . $right->id;
+    method id() { refaddr($self) }
 
     # Compute inputs from child nodes
     method inputs() {

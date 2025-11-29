@@ -235,7 +235,7 @@ sub count_node_types {
     }
 }
 
-# Test 10: Content-addressable IDs
+# Test 10: Verify refaddr-based node IDs
 {
     my $code = 'my $x = 42;';
     my ($result, $ir_root) = parse_chalk_with_ir($code);
@@ -246,11 +246,7 @@ sub count_node_types {
     if ($ir_root) {
         my $id = $ir_root->id;
         ok($id, 'ChalkIR: Return node has id');
-        like($id, qr/^return_/, 'ChalkIR: Return id starts with return_');
-
-        # ID should encode the control/value structure
-        like($id, qr/store/, 'ChalkIR: Return id contains store (control)');
-        like($id, qr/const/, 'ChalkIR: Return id contains const (value)');
+        like($id, qr/^\d+$/, 'ChalkIR: Return id is numeric (refaddr)');
     }
 }
 
