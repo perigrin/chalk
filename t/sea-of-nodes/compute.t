@@ -72,4 +72,29 @@ subtest 'Add node compute() with non-constant input returns TOP' => sub {
     ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
 };
 
+# Task 8: peephole() uses compute() to fold constants
+subtest 'Add peephole() folds constant addition' => sub {
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $const5 = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+
+    my $add = Chalk::IR::Node::Add->new(left => $const3, right => $const5);
+
+    # Peephole should return a Constant node, not the Add node
+    my $result = $add->peephole(undef);
+
+    ok($result isa Chalk::IR::Node::Constant, 'peephole() returns Constant node for constant addition');
+    is($result->value, 8, 'Constant node has folded value 3 + 5 = 8');
+};
+
+subtest 'Add peephole() returns self when not constant-foldable' => sub {
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $add = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
+
+    my $result = $add->peephole(undef);
+
+    is(refaddr($result), refaddr($add), 'peephole() returns self when inputs not constant');
+};
+
 done_testing();

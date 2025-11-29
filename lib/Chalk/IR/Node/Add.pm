@@ -7,6 +7,7 @@ use utf8;
 class Chalk::IR::Node::Add {
     use Chalk::IR::Type::Top;
     use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -46,6 +47,15 @@ class Chalk::IR::Node::Add {
     }
 
     method peephole($graph) {
+        # Use compute() for constant folding - if both inputs are constant,
+        # replace this Add with a Constant node containing the sum
+        my $type = $self->compute();
+        if ($type->is_constant) {
+            return Chalk::IR::Node::Constant->new(
+                value => $type->value,
+                type  => 'Integer',
+            );
+        }
         return $self;
     }
 
