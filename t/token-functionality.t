@@ -30,12 +30,13 @@ ok(($token_a cmp $token_b) < 0, 'Token a cmp Token b');
 ok(($token_b cmp $token_a) > 0, 'Token b cmp Token a');
 ok(($token_a cmp $token_a) == 0, 'Token a cmp Token a');
 
-# Test is_operator
-ok(!$token->is_operator, 'Regular Token is not an operator');
+# Test isa checks for operator detection (per Token.pm design)
+ok(!($token isa Chalk::Grammar::Token::Operator), 'Regular Token is not an Operator');
 
 # Test Operator subclass
 my $op_token = Chalk::Grammar::Token::Operator->new(value => '+', pattern_name => 'ARITHMETIC_OP');
-ok($op_token->is_operator, 'Operator Token is an operator');
+ok($op_token isa Chalk::Grammar::Token::Operator, 'Operator Token isa Operator');
+ok($op_token isa Chalk::Grammar::Token, 'Operator Token isa Token');
 is("$op_token", '+', 'Operator Token stringifies correctly');
 
 done_testing;
