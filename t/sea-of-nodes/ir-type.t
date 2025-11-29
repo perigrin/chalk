@@ -38,4 +38,17 @@ subtest 'Bottom type (error state)' => sub {
     is(refaddr($bot1), refaddr($bot2), 'BOTTOM is singleton');
 };
 
+use_ok('Chalk::IR::Type::TypeInteger');
+
+subtest 'TypeInteger (constant value)' => sub {
+    my $int42 = Chalk::IR::Type::TypeInteger->constant(42);
+    my $int0 = Chalk::IR::Type::TypeInteger->constant(0);
+
+    ok($int42, 'Can create TypeInteger');
+    ok($int42 isa Chalk::IR::Type, 'TypeInteger isa Type');
+    is($int42->is_constant, 1, 'TypeInteger is constant');
+    is($int42->value, 42, 'value() returns stored value');
+    is($int0->value, 0, 'value() returns 0 for zero constant');
+};
+
 done_testing();
