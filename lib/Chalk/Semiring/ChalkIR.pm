@@ -1,11 +1,10 @@
 # ABOUTME: Specialized composite semiring for Chalk IR generation
-# ABOUTME: Combines SPPF parse forest, precedence validation, and semantic IR building
+# ABOUTME: Combines precedence validation and semantic IR building
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
 use Chalk::IR::Node::Scope;
-use Chalk::Semiring::SPPF;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
@@ -18,14 +17,6 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     ADJUST {
         # Create Scope for variable tracking (replaces Builder)
         $scope = Chalk::IR::Node::Scope->new();
-
-        # Create SPPF semiring for parse forest
-        # This builds the complete ambiguous parse forest
-        my $sppf_sr = Chalk::Semiring::SPPF->new();
-
-        # Get the forest from SPPF to share with Semantic
-        # This allows semantic actions to query alternatives via EvalContext
-        my $forest = $sppf_sr->forest();
 
         # Create Precedence semiring with full Perl operator precedence table
         # Reference: perldoc perlop - Operator Precedence and Associativity
@@ -62,20 +53,17 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
         );
 
         # Create Semantic semiring with scope in environment (no Builder needed)
-        # Pass forest via shared_context so it's available in EvalContext
         my $semantic_sr = Chalk::Semiring::Semantic->new(
             grammar => $grammar,
-            env => { scope => $scope },
-            shared_context => { forest => $forest }
+            env => { scope => $scope }
         );
 
-        # Use Composite with SPPF, Precedence, and Semantic
-        # SPPF builds complete ambiguous forest
+        # Use Composite with Precedence and Semantic
         # Precedence validates operator precedence during parsing (returns invalid for bad parses)
         # Semantic builds IR via Rule classes creating nodes directly
         # Precedence.add() prefers valid over invalid, so invalid parses are automatically filtered
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$sppf_sr, $precedence_sr, $semantic_sr]
+            semirings => [$precedence_sr, $semantic_sr]
         );
     }
 

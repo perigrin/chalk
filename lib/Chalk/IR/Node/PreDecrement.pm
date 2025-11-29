@@ -9,7 +9,7 @@ class Chalk::IR::Node::PreDecrement {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
-    field $id :reader = "predecr_" . $operand->id;
+    method id() { refaddr($self) }
 
     method inputs() {
         return [ $operand->id ];

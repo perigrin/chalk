@@ -42,13 +42,25 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         # Stringify operator (may be Token object or plain string)
         my $operator = "$op_child";
 
-        # Get operand at child 1 (WS_OPT is collapsed/absent when empty)
-        my $operand = $context->child(1);
+        # Find the operand by scanning children for an IR node (has 'id' method)
+        # Grammar: Unary -> OPERATOR WS_OPT Expression
+        # Children: [operator, ws_opt?, expression] - WS_OPT may or may not be present
+        my $operand;
+        for my $i (1 .. $#children) {
+            my $child = $context->child($i);
+            if (ref($child) && $child->can('id')) {
+                $operand = $child;
+                last;
+            }
+        }
 
-        # Validate that we got an IR node
-        unless (ref($operand) && $operand->can('id')) {
-            my $desc = ref($operand) || (defined $operand ? "'$operand'" : 'undef');
-            die "Unary: operand must be IR node, got: $desc";
+        # Validate that we found an IR node operand
+        unless (defined($operand)) {
+            my @children_debug = map {
+                my $c = $context->child($_);
+                defined $c ? (ref($c) || "'$c'") : '<undef>';
+            } (0 .. $#children);
+            die "Unary: no IR node operand found in children: [@children_debug] - operator was '$operator'";
         }
 
         # Build appropriate unary node

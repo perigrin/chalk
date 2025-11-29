@@ -7,7 +7,7 @@ use utf8;
 class Chalk::IR::Node::Base {
     use Chalk::IR::TransformRecord;
 
-    field $id             :param :reader;
+    method id() { refaddr($self) }
     field $inputs         :param :reader;
     field $source_info    :param :reader = undef;
     field $transform_chain :param :reader = [];
@@ -21,7 +21,7 @@ class Chalk::IR::Node::Base {
     # Subclasses can override to include node-specific attributes
     method to_hash() {
         return {
-            id     => $id,
+            id     => $self->id,
             op     => $self->op,
             inputs => $inputs,
         };
@@ -95,7 +95,7 @@ class Chalk::IR::Node::Base {
     method debug_transform_chain() {
         return "No transformations recorded" unless $transform_chain->@*;
 
-        my @lines = ("Transformation history for node $id:");
+        my @lines = ("Transformation history for node " . $self->id . ":");
         for my $i (0 .. $#$transform_chain) {
             my $record = $transform_chain->[$i];
             push @lines, "  [$i] " . $record->to_string();

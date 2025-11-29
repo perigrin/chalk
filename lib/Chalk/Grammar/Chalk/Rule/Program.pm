@@ -111,9 +111,7 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
                 # Issue #195: If we have early returns, create Stop node with all returns
                 if (@early_returns) {
                     my @all_returns = (@early_returns, $last_stmt);
-                    my $stop_id = "stop_" . join("_", map { $_->id } @all_returns);
                     my $stop = Chalk::IR::Node::Stop->new(
-                        id      => $stop_id,
                         inputs  => [ map { $_->id } @all_returns ],
                         returns => \@all_returns,
                     );
@@ -151,9 +149,7 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         # Issue #195: If we have early returns, create Stop node with all returns
         if (@early_returns) {
             my @all_returns = (@early_returns, $final_return);
-            my $stop_id = "stop_" . join("_", map { $_->id } @all_returns);
             my $stop = Chalk::IR::Node::Stop->new(
-                id      => $stop_id,
                 inputs  => [ map { $_->id } @all_returns ],
                 returns => \@all_returns,
             );

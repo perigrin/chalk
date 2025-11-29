@@ -53,10 +53,10 @@ use Test::More;
     # Program should return a Return node
     is($ir_root->op, 'Return', 'Program produces Return node');
 
-    # Return node should have content-addressable ID
+    # Return node should have numeric ID (refaddr)
     my $id = $ir_root->id;
     ok($id, 'Return node has id');
-    like($id, qr/^return_/, 'Return node ID starts with return_');
+    like($id, qr/^\d+$/, 'Return node ID is numeric (refaddr)');
 
     # Verify control chain is established
     my $control = $ir_root->control;

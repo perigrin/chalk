@@ -120,7 +120,7 @@ sub make_const {
     my $left = make_const(50);
     my $right = make_const(60);
     my $or = Chalk::IR::Node::Or->new(left => $left, right => $right);
-    like($or->id, qr/^or_const_Int_50_const_Int_60$/, 'Or has content-addressable id');
+    like($or->id, qr/^\d+$/, 'Or has numeric id (refaddr)');
 }
 
 done_testing();

@@ -9,14 +9,8 @@ class Chalk::IR::Node::Return {
     field $value :param :reader;
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
-    field $id :reader;
 
-    ADJUST {
-        # Safely compute id after fields are set
-        my $ctrl_id = (defined $control && $control->can('id')) ? $control->id : 'undef';
-        my $val_id = (defined $value && $value->can('id')) ? $value->id : 'undef';
-        $id = "return_" . $ctrl_id . "_" . $val_id;
-    }
+    method id() { refaddr($self) }
 
     # Compute inputs from child nodes
     method inputs() {

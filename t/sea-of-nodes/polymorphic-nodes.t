@@ -88,10 +88,10 @@ use_ok('Chalk::IR::Node::Return');
     is_deeply(\@ops, ['Constant', 'Start', 'Return'], 'Polymorphic op() calls work correctly');
 }
 
-# Test 12: All nodes should have id accessor (content-addressable for Constant)
+# Test 12: All nodes should have id accessor (numeric refaddr)
 {
     my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'Int');
-    is($const->id, 'const_Int_5', 'Constant node has content-addressable id');
+    like($const->id, qr/^\d+$/, 'Constant node has numeric id (refaddr)');
 }
 
 # Test 13: All nodes should have inputs accessor (computed from control and value)
@@ -103,11 +103,11 @@ use_ok('Chalk::IR::Node::Return');
     is_deeply($return->inputs, [$start->id, $value->id], 'Return node has computed inputs [control, value]');
 }
 
-# Test 14: to_hash() should work for all nodes (content-addressable id for Constant)
+# Test 14: to_hash() should work for all nodes (numeric refaddr id)
 {
     my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'Int');
     my $hash = $const->to_hash();
-    is($hash->{id}, 'const_Int_42', 'to_hash() includes content-addressable id');
+    like($hash->{id}, qr/^\d+$/, 'to_hash() includes numeric id (refaddr)');
 }
 
 # Test 15: to_hash() should include op

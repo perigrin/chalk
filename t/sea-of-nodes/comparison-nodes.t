@@ -118,20 +118,20 @@ sub make_const {
     is($hash->{attributes}{right_id}, $right->id, 'GT to_hash() includes right_id');
 }
 
-# Test 19: Content-addressable IDs work correctly
+# Test 19: Numeric IDs work correctly
 {
     my $left = make_const(50);
     my $right = make_const(60);
     my $eq = Chalk::IR::Node::EQ->new(left => $left, right => $right);
-    like($eq->id, qr/^eq_const_Int_50_const_Int_60$/, 'EQ has content-addressable id');
+    like($eq->id, qr/^\d+$/, 'EQ has numeric id (refaddr)');
 }
 
-# Test 20: Content-addressable IDs work for NE
+# Test 20: Numeric IDs work for NE
 {
     my $left = make_const(70);
     my $right = make_const(80);
     my $ne = Chalk::IR::Node::NE->new(left => $left, right => $right);
-    like($ne->id, qr/^ne_const_Int_70_const_Int_80$/, 'NE has content-addressable id');
+    like($ne->id, qr/^\d+$/, 'NE has numeric id (refaddr)');
 }
 
 done_testing();

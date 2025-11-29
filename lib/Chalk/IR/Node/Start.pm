@@ -13,14 +13,13 @@ class Chalk::IR::Node::Start {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
+    method id() { refaddr($self) }
+
     ADJUST {
         # Allow label or function to be used as alias for function_name
         $function_name //= $label // $function;
         $label //= $function_name;
     }
-
-    # Content-addressable ID computed from label/function_name/function
-    field $id :reader = "start_" . ($label // $function_name // $function // 'anonymous');
 
     # Start nodes have no inputs (entry point)
     method inputs() { return []; }

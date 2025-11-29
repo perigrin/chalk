@@ -10,7 +10,7 @@ class Chalk::IR::Node::Constant {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
-    field $id :reader = "const_" . $type . "_" . $value;
+    method id() { refaddr($self) }
 
     # No inputs for constants (leaf nodes)
     method inputs() { return []; }

@@ -9,7 +9,7 @@ class Chalk::IR::Node::Negate {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
-    field $id :reader = "neg_" . $operand->id;
+    method id() { refaddr($self) }
 
     # Compute inputs from child node
     method inputs() {

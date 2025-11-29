@@ -12,32 +12,58 @@ class Chalk::Grammar::Chalk::Rule::PostfixConditionalStatement :isa(Chalk::Gramm
         use Chalk::IR::Node::Region;
 
         # PostfixConditionalStatement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
-        # child[0] = Statement (inner statement's IR node)
-        # child[2] = ConditionalKeyword ('if' or 'unless')
-        # child[4] = Expression (condition)
+        # WS_OPT is NOT collapsed - must scan for IR nodes and keywords
 
-        my $stmt_node = $context->child(0);
-        my $keyword_node = $context->children->[2];
-        my $condition = $context->child(4);
+        my @children = $context->children->@*;
 
-        # Inner statement must be an IR node
-        unless (blessed($stmt_node) && $stmt_node->can('id')) {
-            my $desc = ref($stmt_node) || (defined $stmt_node ? "'$stmt_node'" : 'undef');
-            die "PostfixConditionalStatement: inner statement must be IR node, got: $desc";
+        # Find first IR node (the Statement)
+        my $stmt_node;
+        for my $i (0 .. $#children) {
+            my $child = $context->child($i);
+            if (ref($child) && $child->can('id')) {
+                $stmt_node = $child;
+                last;
+            }
         }
 
-        # Extract keyword
-        my $keyword = blessed($keyword_node) && $keyword_node->can('extract')
-            ? $keyword_node->extract
-            : "$keyword_node";
-        unless ($keyword eq 'if' || $keyword eq 'unless') {
-            die "PostfixConditionalStatement: expected 'if' or 'unless', got: '$keyword'";
+        unless (defined($stmt_node)) {
+            # No IR node found for statement - this parse path is invalid
+            # Return undef to let parser try other alternatives
+            return undef;
         }
 
-        # Condition must be an IR node
-        unless (blessed($condition) && $condition->can('id')) {
-            my $desc = ref($condition) || (defined $condition ? "'$condition'" : 'undef');
-            die "PostfixConditionalStatement: condition must be IR node, got: $desc";
+        # Find keyword ('if' or 'unless') by scanning for string match
+        my $keyword;
+        for my $i (0 .. $#children) {
+            my $child_ctx = $children[$i];
+            my $extracted = $child_ctx->extract;
+            next unless defined $extracted;
+            my $str_val = "$extracted";
+            if ($str_val eq 'if' || $str_val eq 'unless') {
+                $keyword = $str_val;
+                last;
+            }
+        }
+        unless (defined($keyword)) {
+            # No keyword found - this parse path is invalid
+            return undef;
+        }
+
+        # Find last IR node (the condition Expression)
+        my $condition;
+        for my $i (reverse 0 .. $#children) {
+            my $child = $context->child($i);
+            if (ref($child) && $child->can('id')) {
+                # Skip if this is the same as stmt_node (need different node)
+                next if refaddr($child) == refaddr($stmt_node);
+                $condition = $child;
+                last;
+            }
+        }
+
+        unless (defined($condition)) {
+            # No IR node found for condition - this parse path is invalid
+            return undef;
         }
 
         # Get scope for control flow
