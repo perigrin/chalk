@@ -18,10 +18,8 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
     method add( $other, $swap = undef ) {
 
         # Choose between alternative parses
-        # Handle undef or wrong type
-        return $self unless defined $other;
-        return $self
-          unless ref($other) && $other->isa('Chalk::Semiring::ASTElement');
+        # Handle undef or wrong type (isa operator safely handles both)
+        return $self unless $other isa Chalk::Semiring::ASTElement;
 
         # If self has no rule (is identity), return other
         return $other
@@ -41,10 +39,8 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
 
     method multiply( $other, $swap = undef ) {
 
-        # Build up children during parsing
-        return $self unless defined $other;
-        return $self
-          unless ref($other) && $other->isa('Chalk::Semiring::ASTElement');
+        # Build up children during parsing (isa operator safely handles undef/non-objects)
+        return $self unless $other isa Chalk::Semiring::ASTElement;
 
         # Debug: trace multiply
         if ( $ENV{DEBUG_AST_MUL} ) {
