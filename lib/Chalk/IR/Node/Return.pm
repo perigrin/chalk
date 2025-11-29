@@ -9,30 +9,43 @@ class Chalk::IR::Node::Return {
     field $value :param :reader;
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
+    field $id :reader;
 
-    field $id :reader = "return_" . $control->id . "_" . $value->id;
+    ADJUST {
+        # Safely compute id after fields are set
+        my $ctrl_id = (defined $control && $control->can('id')) ? $control->id : 'undef';
+        my $val_id = (defined $value && $value->can('id')) ? $value->id : 'undef';
+        $id = "return_" . $ctrl_id . "_" . $val_id;
+    }
 
     # Compute inputs from child nodes
     method inputs() {
-        return [ $control->id, $value->id ];
+        my @inputs;
+        push @inputs, $control->id if defined $control && $control->can('id');
+        push @inputs, $value->id if defined $value && $value->can('id');
+        return \@inputs;
     }
 
     method op() { 'Return' }
 
     method to_hash() {
+        my $ctrl_id = (defined $control && $control->can('id')) ? $control->id : undef;
+        my $val_id = (defined $value && $value->can('id')) ? $value->id : undef;
         return {
             id     => $self->id,
             op     => 'Return',
             inputs => $self->inputs,
             attributes => {
-                control    => $control->id,
-                control_id => $control->id,
-                value_id   => $value->id,
+                control    => $ctrl_id,
+                control_id => $ctrl_id,
+                value_id   => $val_id,
             },
         };
     }
 
     method execute($context) {
+        return undef unless defined $control && $control->can('id');
+
         # Check if this Return's control path is active
         my $control_active = $context->("node:" . $control->id);
 
@@ -40,6 +53,7 @@ class Chalk::IR::Node::Return {
         return undef if (defined($control_active) && $control_active == 0);
 
         # Return the value from the context
+        return undef unless defined $value && $value->can('id');
         return $context->("node:" . $value->id);
     }
 
