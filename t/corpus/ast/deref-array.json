@@ -8,96 +8,123 @@
                      "children" : [
                         {
                            "children" : [
-                              "my"
-                           ],
-                           "rule" : "LexicalDeclarator",
-                           "span" : [
-                              0,
-                              2
-                           ]
-                        },
-                        {
-                           "children" : [
-                              {
-                                 "children" : [
-                                    "@",
-                                    {
-                                       "children" : [
-                                          "items"
-                                       ],
-                                       "rule" : "Identifier",
-                                       "span" : [
-                                          4,
-                                          9
-                                       ]
-                                    }
-                                 ],
-                                 "rule" : "ArrayVar",
-                                 "span" : [
-                                    3,
-                                    9
-                                 ]
-                              }
-                           ],
-                           "rule" : "Variable",
-                           "span" : [
-                              3,
-                              9
-                           ]
-                        },
-                        "=",
-                        {
-                           "children" : [
                               {
                                  "children" : [
                                     {
                                        "children" : [
                                           {
                                              "children" : [
-                                                "$",
                                                 {
                                                    "children" : [
-                                                      "arr"
+                                                      {
+                                                         "children" : [
+                                                            "my"
+                                                         ],
+                                                         "rule" : "LexicalDeclarator",
+                                                         "span" : [
+                                                            0,
+                                                            2
+                                                         ]
+                                                      },
+                                                      {
+                                                         "children" : [
+                                                            {
+                                                               "children" : [
+                                                                  "@",
+                                                                  "items"
+                                                               ],
+                                                               "rule" : "ArrayVar",
+                                                               "span" : [
+                                                                  3,
+                                                                  9
+                                                               ]
+                                                            }
+                                                         ],
+                                                         "rule" : "Variable",
+                                                         "span" : [
+                                                            3,
+                                                            9
+                                                         ]
+                                                      }
                                                    ],
-                                                   "rule" : "Identifier",
+                                                   "rule" : "VariableDeclaration",
                                                    "span" : [
-                                                      13,
+                                                      0,
+                                                      9
+                                                   ]
+                                                },
+                                                "=",
+                                                {
+                                                   "children" : [
+                                                      {
+                                                         "children" : [
+                                                            {
+                                                               "children" : [
+                                                                  "$",
+                                                                  "arr"
+                                                               ],
+                                                               "rule" : "ScalarVar",
+                                                               "span" : [
+                                                                  12,
+                                                                  16
+                                                               ]
+                                                            }
+                                                         ],
+                                                         "rule" : "Variable",
+                                                         "span" : [
+                                                            12,
+                                                            16
+                                                         ]
+                                                      }
+                                                   ],
+                                                   "rule" : "Expression",
+                                                   "span" : [
+                                                      12,
                                                       16
                                                    ]
                                                 }
                                              ],
-                                             "rule" : "ScalarVar",
+                                             "rule" : "Assignment",
                                              "span" : [
-                                                12,
+                                                0,
                                                 16
                                              ]
                                           }
                                        ],
-                                       "rule" : "Variable",
+                                       "rule" : "Expression",
                                        "span" : [
-                                          12,
+                                          0,
                                           16
                                        ]
                                     },
                                     "->",
-                                    "@",
-                                    "*"
+                                    {
+                                       "children" : [
+                                          "@",
+                                          "*"
+                                       ],
+                                       "rule" : "PostfixDerefOp",
+                                       "span" : [
+                                          18,
+                                          20
+                                       ]
+                                    }
                                  ],
-                                 "rule" : "Variable",
+                                 "rule" : "PostfixDeref",
                                  "span" : [
-                                    12,
+                                    0,
                                     20
                                  ]
                               }
                            ],
                            "rule" : "Expression",
                            "span" : [
-                              12,
+                              0,
                               20
                            ]
                         }
                      ],
-                     "rule" : "VariableDeclaration",
+                     "rule" : "ExpressionList",
                      "span" : [
                         0,
                         20

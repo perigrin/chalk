@@ -8,86 +8,104 @@
                      "children" : [
                         {
                            "children" : [
-                              "my"
-                           ],
-                           "rule" : "LexicalDeclarator",
-                           "span" : [
-                              0,
-                              2
-                           ]
-                        },
-                        {
-                           "children" : [
-                              {
-                                 "children" : [
-                                    "$",
-                                    {
-                                       "children" : [
-                                          "re"
-                                       ],
-                                       "rule" : "Identifier",
-                                       "span" : [
-                                          4,
-                                          6
-                                       ]
-                                    }
-                                 ],
-                                 "rule" : "ScalarVar",
-                                 "span" : [
-                                    3,
-                                    6
-                                 ]
-                              }
-                           ],
-                           "rule" : "Variable",
-                           "span" : [
-                              3,
-                              6
-                           ]
-                        },
-                        "=",
-                        {
-                           "children" : [
                               {
                                  "children" : [
                                     {
                                        "children" : [
-                                          "qr",
-                                          "/",
                                           {
                                              "children" : [
-                                                "\\d+"
+                                                "my"
                                              ],
-                                             "rule" : "RegexContent",
+                                             "rule" : "LexicalDeclarator",
                                              "span" : [
-                                                12,
-                                                15
+                                                0,
+                                                2
                                              ]
                                           },
-                                          "/"
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      "$",
+                                                      "re"
+                                                   ],
+                                                   "rule" : "ScalarVar",
+                                                   "span" : [
+                                                      3,
+                                                      6
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Variable",
+                                             "span" : [
+                                                3,
+                                                6
+                                             ]
+                                          }
                                        ],
-                                       "rule" : "RegexPattern",
+                                       "rule" : "VariableDeclaration",
+                                       "span" : [
+                                          0,
+                                          6
+                                       ]
+                                    },
+                                    "=",
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      "qr",
+                                                      "/",
+                                                      {
+                                                         "children" : [
+                                                            "\\d+"
+                                                         ],
+                                                         "rule" : "RegexContent",
+                                                         "span" : [
+                                                            12,
+                                                            15
+                                                         ]
+                                                      },
+                                                      "/"
+                                                   ],
+                                                   "rule" : "RegexPattern",
+                                                   "span" : [
+                                                      9,
+                                                      16
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Literal",
+                                             "span" : [
+                                                9,
+                                                16
+                                             ]
+                                          }
+                                       ],
+                                       "rule" : "Expression",
                                        "span" : [
                                           9,
                                           16
                                        ]
                                     }
                                  ],
-                                 "rule" : "Literal",
+                                 "rule" : "Assignment",
                                  "span" : [
-                                    9,
+                                    0,
                                     16
                                  ]
                               }
                            ],
                            "rule" : "Expression",
                            "span" : [
-                              9,
+                              0,
                               16
                            ]
                         }
                      ],
-                     "rule" : "VariableDeclaration",
+                     "rule" : "ExpressionList",
                      "span" : [
                         0,
                         16

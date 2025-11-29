@@ -14,16 +14,7 @@
                                     {
                                        "children" : [
                                           "$",
-                                          {
-                                             "children" : [
-                                                "value"
-                                             ],
-                                             "rule" : "Identifier",
-                                             "span" : [
-                                                8,
-                                                13
-                                             ]
-                                          }
+                                          "value"
                                        ],
                                        "rule" : "ScalarVar",
                                        "span" : [

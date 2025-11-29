@@ -8,65 +8,83 @@
                      "children" : [
                         {
                            "children" : [
-                              "my"
-                           ],
-                           "rule" : "LexicalDeclarator",
-                           "span" : [
-                              0,
-                              2
-                           ]
-                        },
-                        {
-                           "children" : [
                               {
                                  "children" : [
-                                    "$",
                                     {
                                        "children" : [
-                                          "fn"
+                                          {
+                                             "children" : [
+                                                "my"
+                                             ],
+                                             "rule" : "LexicalDeclarator",
+                                             "span" : [
+                                                0,
+                                                2
+                                             ]
+                                          },
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      "$",
+                                                      "fn"
+                                                   ],
+                                                   "rule" : "ScalarVar",
+                                                   "span" : [
+                                                      3,
+                                                      6
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "Variable",
+                                             "span" : [
+                                                3,
+                                                6
+                                             ]
+                                          }
                                        ],
-                                       "rule" : "Identifier",
+                                       "rule" : "VariableDeclaration",
                                        "span" : [
-                                          4,
+                                          0,
                                           6
+                                       ]
+                                    },
+                                    "=",
+                                    {
+                                       "children" : [
+                                          {
+                                             "children" : [
+                                                "sub"
+                                             ],
+                                             "rule" : "Identifier",
+                                             "span" : [
+                                                9,
+                                                12
+                                             ]
+                                          }
+                                       ],
+                                       "rule" : "Expression",
+                                       "span" : [
+                                          9,
+                                          12
                                        ]
                                     }
                                  ],
-                                 "rule" : "ScalarVar",
+                                 "rule" : "Assignment",
                                  "span" : [
-                                    3,
-                                    6
-                                 ]
-                              }
-                           ],
-                           "rule" : "Variable",
-                           "span" : [
-                              3,
-                              6
-                           ]
-                        },
-                        "=",
-                        {
-                           "children" : [
-                              {
-                                 "children" : [
-                                    "sub"
-                                 ],
-                                 "rule" : "Identifier",
-                                 "span" : [
-                                    9,
+                                    0,
                                     12
                                  ]
                               }
                            ],
                            "rule" : "Expression",
                            "span" : [
-                              9,
+                              0,
                               12
                            ]
                         }
                      ],
-                     "rule" : "VariableDeclaration",
+                     "rule" : "ExpressionList",
                      "span" : [
                         0,
                         12

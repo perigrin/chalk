@@ -15,16 +15,7 @@
                                           {
                                              "children" : [
                                                 "$",
-                                                {
-                                                   "children" : [
-                                                      "obj"
-                                                   ],
-                                                   "rule" : "Identifier",
-                                                   "span" : [
-                                                      1,
-                                                      4
-                                                   ]
-                                                }
+                                                "obj"
                                              ],
                                              "rule" : "ScalarVar",
                                              "span" : [
@@ -94,16 +85,7 @@
                                                 {
                                                    "children" : [
                                                       "$",
-                                                      {
-                                                         "children" : [
-                                                            "arg"
-                                                         ],
-                                                         "rule" : "Identifier",
-                                                         "span" : [
-                                                            14,
-                                                            17
-                                                         ]
-                                                      }
+                                                      "arg"
                                                    ],
                                                    "rule" : "ScalarVar",
                                                    "span" : [

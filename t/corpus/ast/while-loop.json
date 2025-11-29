@@ -7,8 +7,15 @@
                   {
                      "children" : [
                         {
+                           "rule" : "Statement",
+                           "span" : [
+                              0,
+                              0
+                           ]
+                        },
+                        "while",
+                        {
                            "children" : [
-                              "while",
                               "(",
                               {
                                  "children" : [
@@ -38,10 +45,37 @@
                                     8
                                  ]
                               },
-                              ")",
+                              ")"
+                           ],
+                           "rule" : "Expression",
+                           "span" : [
+                              6,
+                              9
+                           ]
+                        }
+                     ],
+                     "rule" : "PostfixLoopStatement",
+                     "span" : [
+                        0,
+                        9
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  9
+               ]
+            },
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              "{",
                               {
                                  "children" : [
-                                    "{",
                                     {
                                        "children" : [
                                           {
@@ -52,77 +86,68 @@
                                                          "children" : [
                                                             {
                                                                "children" : [
-                                                                  {
-                                                                     "children" : [
-                                                                        "1"
-                                                                     ],
-                                                                     "rule" : "Number",
-                                                                     "span" : [
-                                                                        12,
-                                                                        13
-                                                                     ]
-                                                                  }
+                                                                  "1"
                                                                ],
-                                                               "rule" : "Literal",
+                                                               "rule" : "Number",
                                                                "span" : [
                                                                   12,
                                                                   13
                                                                ]
                                                             }
                                                          ],
-                                                         "rule" : "Expression",
+                                                         "rule" : "Literal",
                                                          "span" : [
                                                             12,
                                                             13
                                                          ]
                                                       }
                                                    ],
-                                                   "rule" : "ExpressionList",
+                                                   "rule" : "Expression",
                                                    "span" : [
                                                       12,
                                                       13
                                                    ]
                                                 }
                                              ],
-                                             "rule" : "Statement",
+                                             "rule" : "ExpressionList",
                                              "span" : [
                                                 12,
                                                 13
                                              ]
                                           }
                                        ],
-                                       "rule" : "StatementList",
+                                       "rule" : "Statement",
                                        "span" : [
                                           12,
                                           13
                                        ]
-                                    },
-                                    "}"
+                                    }
                                  ],
-                                 "rule" : "Block",
+                                 "rule" : "StatementList",
                                  "span" : [
-                                    10,
-                                    15
+                                    12,
+                                    13
                                  ]
-                              }
+                              },
+                              "}"
                            ],
-                           "rule" : "WhileStatement",
+                           "rule" : "Block",
                            "span" : [
-                              0,
+                              10,
                               15
                            ]
                         }
                      ],
-                     "rule" : "Block",
+                     "rule" : "Statement",
                      "span" : [
-                        0,
+                        10,
                         15
                      ]
                   }
                ],
-               "rule" : "Statement",
+               "rule" : "StatementList",
                "span" : [
-                  0,
+                  10,
                   15
                ]
             }

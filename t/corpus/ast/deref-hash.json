@@ -8,96 +8,123 @@
                      "children" : [
                         {
                            "children" : [
-                              "my"
-                           ],
-                           "rule" : "LexicalDeclarator",
-                           "span" : [
-                              0,
-                              2
-                           ]
-                        },
-                        {
-                           "children" : [
-                              {
-                                 "children" : [
-                                    "%",
-                                    {
-                                       "children" : [
-                                          "data"
-                                       ],
-                                       "rule" : "Identifier",
-                                       "span" : [
-                                          4,
-                                          8
-                                       ]
-                                    }
-                                 ],
-                                 "rule" : "HashVar",
-                                 "span" : [
-                                    3,
-                                    8
-                                 ]
-                              }
-                           ],
-                           "rule" : "Variable",
-                           "span" : [
-                              3,
-                              8
-                           ]
-                        },
-                        "=",
-                        {
-                           "children" : [
                               {
                                  "children" : [
                                     {
                                        "children" : [
                                           {
                                              "children" : [
-                                                "$",
                                                 {
                                                    "children" : [
-                                                      "hash"
+                                                      {
+                                                         "children" : [
+                                                            "my"
+                                                         ],
+                                                         "rule" : "LexicalDeclarator",
+                                                         "span" : [
+                                                            0,
+                                                            2
+                                                         ]
+                                                      },
+                                                      {
+                                                         "children" : [
+                                                            {
+                                                               "children" : [
+                                                                  "%",
+                                                                  "data"
+                                                               ],
+                                                               "rule" : "HashVar",
+                                                               "span" : [
+                                                                  3,
+                                                                  8
+                                                               ]
+                                                            }
+                                                         ],
+                                                         "rule" : "Variable",
+                                                         "span" : [
+                                                            3,
+                                                            8
+                                                         ]
+                                                      }
                                                    ],
-                                                   "rule" : "Identifier",
+                                                   "rule" : "VariableDeclaration",
                                                    "span" : [
-                                                      12,
+                                                      0,
+                                                      8
+                                                   ]
+                                                },
+                                                "=",
+                                                {
+                                                   "children" : [
+                                                      {
+                                                         "children" : [
+                                                            {
+                                                               "children" : [
+                                                                  "$",
+                                                                  "hash"
+                                                               ],
+                                                               "rule" : "ScalarVar",
+                                                               "span" : [
+                                                                  11,
+                                                                  16
+                                                               ]
+                                                            }
+                                                         ],
+                                                         "rule" : "Variable",
+                                                         "span" : [
+                                                            11,
+                                                            16
+                                                         ]
+                                                      }
+                                                   ],
+                                                   "rule" : "Expression",
+                                                   "span" : [
+                                                      11,
                                                       16
                                                    ]
                                                 }
                                              ],
-                                             "rule" : "ScalarVar",
+                                             "rule" : "Assignment",
                                              "span" : [
-                                                11,
+                                                0,
                                                 16
                                              ]
                                           }
                                        ],
-                                       "rule" : "Variable",
+                                       "rule" : "Expression",
                                        "span" : [
-                                          11,
+                                          0,
                                           16
                                        ]
                                     },
                                     "->",
-                                    "%",
-                                    "*"
+                                    {
+                                       "children" : [
+                                          "%",
+                                          "*"
+                                       ],
+                                       "rule" : "PostfixDerefOp",
+                                       "span" : [
+                                          18,
+                                          20
+                                       ]
+                                    }
                                  ],
-                                 "rule" : "Variable",
+                                 "rule" : "PostfixDeref",
                                  "span" : [
-                                    11,
+                                    0,
                                     20
                                  ]
                               }
                            ],
                            "rule" : "Expression",
                            "span" : [
-                              11,
+                              0,
                               20
                            ]
                         }
                      ],
-                     "rule" : "VariableDeclaration",
+                     "rule" : "ExpressionList",
                      "span" : [
                         0,
                         20

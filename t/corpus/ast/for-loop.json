@@ -24,16 +24,7 @@
                                     {
                                        "children" : [
                                           "$",
-                                          {
-                                             "children" : [
-                                                "i"
-                                             ],
-                                             "rule" : "Identifier",
-                                             "span" : [
-                                                8,
-                                                9
-                                             ]
-                                          }
+                                          "i"
                                        ],
                                        "rule" : "ScalarVar",
                                        "span" : [

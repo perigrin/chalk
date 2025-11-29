@@ -14,25 +14,7 @@
                                     "{",
                                     {
                                        "children" : [
-                                          {
-                                             "children" : [
-                                                {
-                                                   "children" : [
-                                                      "a"
-                                                   ],
-                                                   "rule" : "Identifier",
-                                                   "span" : [
-                                                      9,
-                                                      10
-                                                   ]
-                                                }
-                                             ],
-                                             "rule" : "Expression",
-                                             "span" : [
-                                                9,
-                                                10
-                                             ]
-                                          },
+                                          "a",
                                           "=>",
                                           {
                                              "children" : [
@@ -65,25 +47,7 @@
                                           ",",
                                           {
                                              "children" : [
-                                                {
-                                                   "children" : [
-                                                      {
-                                                         "children" : [
-                                                            "b"
-                                                         ],
-                                                         "rule" : "Identifier",
-                                                         "span" : [
-                                                            17,
-                                                            18
-                                                         ]
-                                                      }
-                                                   ],
-                                                   "rule" : "Expression",
-                                                   "span" : [
-                                                      17,
-                                                      18
-                                                   ]
-                                                },
+                                                "b",
                                                 "=>",
                                                 {
                                                    "children" : [

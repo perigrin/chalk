@@ -36,16 +36,7 @@
                                           {
                                              "children" : [
                                                 "$",
-                                                {
-                                                   "children" : [
-                                                      "x"
-                                                   ],
-                                                   "rule" : "Identifier",
-                                                   "span" : [
-                                                      12,
-                                                      13
-                                                   ]
-                                                }
+                                                "x"
                                              ],
                                              "rule" : "ScalarVar",
                                              "span" : [
@@ -89,16 +80,7 @@
                                                                               {
                                                                                  "children" : [
                                                                                     "$",
-                                                                                    {
-                                                                                       "children" : [
-                                                                                          "x"
-                                                                                       ],
-                                                                                       "rule" : "Identifier",
-                                                                                       "span" : [
-                                                                                          25,
-                                                                                          26
-                                                                                       ]
-                                                                                    }
+                                                                                    "x"
                                                                                  ],
                                                                                  "rule" : "ScalarVar",
                                                                                  "span" : [

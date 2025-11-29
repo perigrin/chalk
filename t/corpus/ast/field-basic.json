@@ -21,16 +21,7 @@
                               {
                                  "children" : [
                                     "$",
-                                    {
-                                       "children" : [
-                                          "name"
-                                       ],
-                                       "rule" : "Identifier",
-                                       "span" : [
-                                          7,
-                                          11
-                                       ]
-                                    }
+                                    "name"
                                  ],
                                  "rule" : "ScalarVar",
                                  "span" : [

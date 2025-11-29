@@ -19,16 +19,7 @@
                                                       {
                                                          "children" : [
                                                             "$",
-                                                            {
-                                                               "children" : [
-                                                                  "obj"
-                                                               ],
-                                                               "rule" : "Identifier",
-                                                               "span" : [
-                                                                  1,
-                                                                  4
-                                                               ]
-                                                            }
+                                                            "obj"
                                                          ],
                                                          "rule" : "ScalarVar",
                                                          "span" : [
