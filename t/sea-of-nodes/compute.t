@@ -147,4 +147,54 @@ subtest 'Subtract peephole() returns self when not constant-foldable' => sub {
     is(refaddr($result), refaddr($sub), 'peephole() returns self when inputs not constant');
 };
 
+# Task 10: Multiply node compute() and peephole()
+use_ok('Chalk::IR::Node::Multiply');
+
+subtest 'Multiply node compute() with constant inputs' => sub {
+    my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
+    my $const7 = Chalk::IR::Node::Constant->new(value => 7, type => 'Integer');
+
+    my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $const7);
+
+    ok($mul->can('compute'), 'Multiply node has compute() method');
+
+    my $type = $mul->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger for constant multiplication');
+    is($type->is_constant, 1, 'Result is constant');
+    is($type->value, 42, '6 * 7 = 42');
+};
+
+subtest 'Multiply node compute() with non-constant input returns TOP' => sub {
+    my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $unknown);
+
+    my $type = $mul->compute();
+    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+};
+
+subtest 'Multiply peephole() folds constant multiplication' => sub {
+    my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
+    my $const7 = Chalk::IR::Node::Constant->new(value => 7, type => 'Integer');
+
+    my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $const7);
+
+    my $result = $mul->peephole(undef);
+
+    ok($result isa Chalk::IR::Node::Constant, 'peephole() returns Constant node for constant multiplication');
+    is($result->value, 42, 'Constant node has folded value 6 * 7 = 42');
+};
+
+subtest 'Multiply peephole() returns self when not constant-foldable' => sub {
+    my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $unknown);
+
+    my $result = $mul->peephole(undef);
+
+    is(refaddr($result), refaddr($mul), 'peephole() returns self when inputs not constant');
+};
+
 done_testing();
