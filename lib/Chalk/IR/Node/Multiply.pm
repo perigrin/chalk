@@ -70,7 +70,7 @@ class Chalk::IR::Node::Multiply {
             );
         }
 
-        return Chalk::IR::Type::Top->TOP;
+        return Chalk::IR::Type::Top::TOP();
     }
 
     # Stub for transform tracking

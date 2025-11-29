@@ -70,7 +70,7 @@ class Chalk::IR::Node::Divide {
             );
         }
 
-        return Chalk::IR::Type::Top->TOP;
+        return Chalk::IR::Type::Top::TOP();
     }
 
     # Stub for transform tracking

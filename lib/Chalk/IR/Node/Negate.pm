@@ -66,7 +66,7 @@ class Chalk::IR::Node::Negate {
             );
         }
 
-        return Chalk::IR::Type::Top->TOP;
+        return Chalk::IR::Type::Top::TOP();
     }
 
     # Stub for transform tracking

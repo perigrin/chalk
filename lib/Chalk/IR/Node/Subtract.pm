@@ -70,7 +70,7 @@ class Chalk::IR::Node::Subtract {
             );
         }
 
-        return Chalk::IR::Type::Top->TOP;
+        return Chalk::IR::Type::Top::TOP();
     }
 
     # Stub for transform tracking

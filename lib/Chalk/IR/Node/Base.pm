@@ -42,7 +42,7 @@ class Chalk::IR::Node::Base {
 
     # Default compute() returns TOP (unknown) - subclasses override for type inference
     method compute() {
-        return Chalk::IR::Type::Top->TOP;
+        return Chalk::IR::Type::Top::TOP();
     }
 
     # Record a transformation that created or modified this node
