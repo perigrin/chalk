@@ -28,7 +28,7 @@ class Chalk::Grammar::Chalk::Rule::PostfixConditionalStatement :isa(Chalk::Gramm
 
         unless (defined($stmt_node)) {
             # No IR node found for statement - this parse path is invalid
-            # Return undef to let parser try other alternatives
+            # Return undef to let parser backtrack and try other alternatives
             return undef;
         }
 

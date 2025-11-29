@@ -149,8 +149,7 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         }
 
         if (!$true_block_ctx) {
-            warn "[DEBUG] ConditionalStatement: no true_block_ctx found\n" if $ENV{CHALK_DEBUG_TRACKING};
-            return undef;
+            die "ConditionalStatement: no Block found after ')' - grammar bug\n";
         }
 
         # Evaluate true branch with child scope
@@ -161,7 +160,8 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         my $true_block_rule = $true_block_ctx->rule;
         my $true_block = $true_block_rule ? $true_block_rule->evaluate($true_block_ctx) : $true_block_ctx->extract;
         if (!(ref($true_block) eq 'HASH' && $true_block->{type} eq 'block')) {
-            return undef;
+            my $desc = ref($true_block) || (defined $true_block ? "'$true_block'" : 'undef');
+            die "ConditionalStatement: true_block must be a block hash, got: $desc - grammar bug\n";
         }
         warn "[DEBUG] ConditionalStatement: true_block has ", scalar(@{$true_block->{statements}}), " statements\n" if $ENV{CHALK_DEBUG_TRACKING};
 
