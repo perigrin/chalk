@@ -165,31 +165,35 @@ class Chalk::IR::Node {
         );
 
         my $node_class = $op_to_class{$op};
-        if (!$node_class) {
-            # Fallback to generic node for unknown ops
+
+        # Ops that can be safely constructed from hash (no node operands required)
+        # These only take scalar attributes, not node references
+        my %safe_for_polymorphic = (
+            Constant => 1,  # takes value, type
+            Start    => 1,  # takes function_name, params
+        );
+
+        # For unknown ops or ops that require node operands, create generic node
+        # V2 polymorphic nodes for binary ops (Add, Multiply, etc.) require actual
+        # node objects for their operands, which we can't provide from a hash
+        if (!$node_class || !$safe_for_polymorphic{$op}) {
             return $class->new(
-                id         => $id,
-                op         => $op,
-                inputs     => $inputs,
-                attributes => $attrs,
+                id              => $id,
+                op              => $op,
+                inputs          => $inputs,
+                attributes      => $attrs,
+                source_info     => $hash->{source_info},
+                transform_chain => $hash->{transform_chain},
             );
         }
 
-        # All classes are preloaded at compile-time, no runtime loading needed
-        # Extract constructor parameters from attributes
-        my %params = (
-            id     => $id,
-            inputs => $inputs,
-        );
+        # Safe to create polymorphic node - these only take scalar attributes
+        my %params;
 
         # Add source_info if present
         if ($hash->{source_info}) {
             $params{source_info} = $hash->{source_info};
         }
-
-        # Note: Don't pass transform_chain to polymorphic constructors
-        # Most polymorphic node classes don't accept this parameter
-        # They have their own get_transform_chain()/transform_chain() stub methods
 
         # Add attributes as constructor parameters
         # Parser compat: keys() requires parentheses around argument
@@ -198,26 +202,8 @@ class Chalk::IR::Node {
             $params{$key} = $attrs->{$key};
         }
 
-        # Create polymorphic node with proper class
-        my $node;
-        try {
-            $node = $node_class->new(%params);
-        } catch ($e) {
-            # Construction failed - fall back to generic node
-            $node = undef;
-        }
-
-        # If construction fails, fall back to generic node
-        if (!$node) {
-            return $class->new(
-                id         => $id,
-                op         => $op,
-                inputs     => $inputs,
-                attributes => $attrs,
-            );
-        }
-
-        return $node;
+        # Create polymorphic node - will die on failure (no fallback)
+        return $node_class->new(%params);
     }
 }
 

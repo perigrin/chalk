@@ -23,7 +23,7 @@ subtest 'Eliminate redundant arithmetic' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -118,7 +118,7 @@ subtest 'Common subexpression elimination' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -207,7 +207,7 @@ subtest 'Commutativity in Add operations' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -283,7 +283,7 @@ subtest 'Commutativity in Multiply operations' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -357,7 +357,7 @@ subtest 'Different constants are not merged' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -410,7 +410,7 @@ subtest 'Identical constants are merged' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -472,7 +472,7 @@ subtest 'GVN is idempotent' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -539,7 +539,7 @@ subtest 'Non-commutative operations respect order' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -616,7 +616,7 @@ subtest 'Proj nodes respect index differences' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 
@@ -683,7 +683,7 @@ subtest 'Complex expression optimization' => sub {
         id => 'node_0',
         op => 'Start',
         inputs => [],
-        attributes => { function => 'main' }
+        attributes => { function_name => 'main' }
     );
     $graph->add_node($start);
 

@@ -7,19 +7,20 @@ use utf8;
 class Chalk::IR::Node::Start {
     field $function_name :param :reader = undef;
     field $params        :param :reader = undef;
-    # v2-style 'label' field (alias for function_name for backward compat)
-    field $label :param :reader = undef;
+    # Alias fields for backward compat with different attribute names
+    field $label :param :reader = undef;      # v2-style alias
+    field $function :param = undef;           # v1-style alias
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
     ADJUST {
-        # Allow label to be used as alias for function_name
-        $function_name //= $label;
+        # Allow label or function to be used as alias for function_name
+        $function_name //= $label // $function;
         $label //= $function_name;
     }
 
-    # Content-addressable ID computed from label/function_name
-    field $id :reader = "start_" . ($label // $function_name // 'anonymous');
+    # Content-addressable ID computed from label/function_name/function
+    field $id :reader = "start_" . ($label // $function_name // $function // 'anonymous');
 
     # Start nodes have no inputs (entry point)
     method inputs() { return []; }
