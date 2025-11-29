@@ -26,4 +26,16 @@ subtest 'Top type (unknown value)' => sub {
     is(refaddr($top1), refaddr($top2), 'TOP is singleton');
 };
 
+use_ok('Chalk::IR::Type::Bottom');
+
+subtest 'Bottom type (error state)' => sub {
+    my $bot1 = Chalk::IR::Type::Bottom->BOTTOM;
+    my $bot2 = Chalk::IR::Type::Bottom->BOTTOM;
+
+    ok($bot1, 'Can get BOTTOM singleton');
+    ok($bot1 isa Chalk::IR::Type, 'BOTTOM isa Type');
+    is($bot1->is_constant, 0, 'BOTTOM is not constant');
+    is(refaddr($bot1), refaddr($bot2), 'BOTTOM is singleton');
+};
+
 done_testing();
