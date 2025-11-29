@@ -5,6 +5,10 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Negate {
+    use Chalk::IR::Type::Top;
+    use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Node::Constant;
+
     field $operand :param :reader;
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
@@ -40,7 +44,29 @@ class Chalk::IR::Node::Negate {
     }
 
     method peephole($graph) {
+        # Use compute() for constant folding - if input is constant,
+        # replace this Negate with a Constant node containing the negation
+        my $type = $self->compute();
+        if ($type->is_constant) {
+            return Chalk::IR::Node::Constant->new(
+                value => $type->value,
+                type  => 'Integer',
+            );
+        }
         return $self;
+    }
+
+    # Type inference for constant folding - if input is constant, compute negation
+    method compute() {
+        my $operand_type = $operand->compute();
+
+        if ($operand_type->is_constant) {
+            return Chalk::IR::Type::TypeInteger->constant(
+                -$operand_type->value
+            );
+        }
+
+        return Chalk::IR::Type::Top->TOP;
     }
 
     # Stub for transform tracking

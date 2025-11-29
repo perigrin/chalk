@@ -197,4 +197,100 @@ subtest 'Multiply peephole() returns self when not constant-foldable' => sub {
     is(refaddr($result), refaddr($mul), 'peephole() returns self when inputs not constant');
 };
 
+# Task 11: Divide node compute() and peephole()
+use_ok('Chalk::IR::Node::Divide');
+
+subtest 'Divide node compute() with constant inputs' => sub {
+    my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $const4 = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
+
+    my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $const4);
+
+    ok($div->can('compute'), 'Divide node has compute() method');
+
+    my $type = $div->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger for constant division');
+    is($type->is_constant, 1, 'Result is constant');
+    is($type->value, 5, '20 / 4 = 5');
+};
+
+subtest 'Divide node compute() with non-constant input returns TOP' => sub {
+    my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $unknown);
+
+    my $type = $div->compute();
+    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+};
+
+subtest 'Divide peephole() folds constant division' => sub {
+    my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $const4 = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
+
+    my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $const4);
+
+    my $result = $div->peephole(undef);
+
+    ok($result isa Chalk::IR::Node::Constant, 'peephole() returns Constant node for constant division');
+    is($result->value, 5, 'Constant node has folded value 20 / 4 = 5');
+};
+
+subtest 'Divide peephole() returns self when not constant-foldable' => sub {
+    my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $unknown);
+
+    my $result = $div->peephole(undef);
+
+    is(refaddr($result), refaddr($div), 'peephole() returns self when inputs not constant');
+};
+
+# Task 12: Negate node compute() and peephole()
+use_ok('Chalk::IR::Node::Negate');
+
+subtest 'Negate node compute() with constant input' => sub {
+    my $const42 = Chalk::IR::Node::Constant->new(value => 42, type => 'Integer');
+
+    my $neg = Chalk::IR::Node::Negate->new(operand => $const42);
+
+    ok($neg->can('compute'), 'Negate node has compute() method');
+
+    my $type = $neg->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger for constant negation');
+    is($type->is_constant, 1, 'Result is constant');
+    is($type->value, -42, '-42');
+};
+
+subtest 'Negate node compute() with non-constant input returns TOP' => sub {
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $neg = Chalk::IR::Node::Negate->new(operand => $unknown);
+
+    my $type = $neg->compute();
+    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+};
+
+subtest 'Negate peephole() folds constant negation' => sub {
+    my $const42 = Chalk::IR::Node::Constant->new(value => 42, type => 'Integer');
+
+    my $neg = Chalk::IR::Node::Negate->new(operand => $const42);
+
+    my $result = $neg->peephole(undef);
+
+    ok($result isa Chalk::IR::Node::Constant, 'peephole() returns Constant node for constant negation');
+    is($result->value, -42, 'Constant node has folded value -42');
+};
+
+subtest 'Negate peephole() returns self when not constant-foldable' => sub {
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $neg = Chalk::IR::Node::Negate->new(operand => $unknown);
+
+    my $result = $neg->peephole(undef);
+
+    is(refaddr($result), refaddr($neg), 'peephole() returns self when input not constant');
+};
+
 done_testing();
