@@ -11,6 +11,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     field $precedence_level :param :reader = undef;  # Index in precedence table
     field $associativity :param :reader = undef;  # Associativity type: left, right, nonassoc, chained, chain/na
     field $operator_index :param :reader = undef;  # Hash mapping operators to precedence info
+    field $forest :param :reader = undef;  # Optional SPPF forest reference for disambiguation
 
     # Lookup operator precedence and associativity from operator_index
     method lookup_operator($op) {
@@ -160,6 +161,7 @@ sub _operator_direction($op) {
 
 class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     field $precedence_table :param :reader = [];  # Array of { assoc => ..., ops => [...] }
+    field $shared_context :param :reader = undef;  # Optional context for SPPF forest sharing
     field $operator_index :reader;  # Hash mapping operator -> { level, assoc }
     field $mul_id :reader;
     field $add_id :reader;

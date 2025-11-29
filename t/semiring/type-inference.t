@@ -179,8 +179,10 @@ subtest 'Equivalence: Boolean vs SPPF with Precedence+TypeInference' => sub {
         my $sppf_result = $sppf_parser->parse_string($code);
 
         # Both should succeed or both should fail
-        my $bool_success = defined($bool_result) && $bool_result;
-        my $sppf_success = defined($sppf_result) && $sppf_result;
+        # Convert to actual boolean values (1/0) for comparison
+        # since the results are CompositeElement objects
+        my $bool_success = defined($bool_result) && $bool_result ? 1 : 0;
+        my $sppf_success = defined($sppf_result) && $sppf_result ? 1 : 0;
 
         is($bool_success, $sppf_success,
            "$desc: Boolean and SPPF composites give equivalent parse results");
