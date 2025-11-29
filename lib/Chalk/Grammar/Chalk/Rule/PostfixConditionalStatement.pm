@@ -28,8 +28,8 @@ class Chalk::Grammar::Chalk::Rule::PostfixConditionalStatement :isa(Chalk::Gramm
 
         unless (defined($stmt_node)) {
             # No IR node found for statement - this parse path is invalid
-            # Return undef to let parser backtrack and try other alternatives
-            return undef;
+            # Return to let parser backtrack and try other alternatives
+            return;
         }
 
         # Find keyword ('if' or 'unless') by scanning for string match
@@ -46,7 +46,7 @@ class Chalk::Grammar::Chalk::Rule::PostfixConditionalStatement :isa(Chalk::Gramm
         }
         unless (defined($keyword)) {
             # No keyword found - this parse path is invalid
-            return undef;
+            return;
         }
 
         # Find last IR node (the condition Expression)
@@ -63,7 +63,7 @@ class Chalk::Grammar::Chalk::Rule::PostfixConditionalStatement :isa(Chalk::Gramm
 
         unless (defined($condition)) {
             # No IR node found for condition - this parse path is invalid
-            return undef;
+            return;
         }
 
         # Get scope for control flow
