@@ -7,17 +7,10 @@ use utf8;
 class Chalk::IR::Graph {
     use Chalk::IR::Node;
 
-    field $nodes :reader;
-    field $entry :reader;
-    field $uses;  # Use-def map: node_id => [user_id1, user_id2, ...]
-    field $pending_nodes;  # Nodes created but not yet added to graph (deferred for materialization)
-
-    ADJUST {
-        $nodes = {};
-        $entry = undef;
-        $uses  = {};
-        $pending_nodes = {};
-    }
+    field $nodes :reader = {};
+    field $entry :reader = undef;
+    field $uses = {};  # Use-def map: node_id => [user_id1, user_id2, ...]
+    field $pending_nodes = {};  # Nodes created but not yet added to graph (deferred for materialization)
 
     method add_node($node) {
         my $node_id = $node->id;
