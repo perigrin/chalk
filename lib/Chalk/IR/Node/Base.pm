@@ -6,6 +6,7 @@ use utf8;
 
 class Chalk::IR::Node::Base {
     use Chalk::IR::TransformRecord;
+    use Chalk::IR::Type::Top;
 
     method id() { refaddr($self) }
     field $inputs         :param :reader;
@@ -37,6 +38,11 @@ class Chalk::IR::Node::Base {
     # Placeholder for optimization - subclasses can override
     method peephole($graph) {
         return $self;
+    }
+
+    # Default compute() returns TOP (unknown) - subclasses override for type inference
+    method compute() {
+        return Chalk::IR::Type::Top->TOP;
     }
 
     # Record a transformation that created or modified this node
