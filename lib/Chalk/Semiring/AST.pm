@@ -42,14 +42,6 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
         # Build up children during parsing (isa operator safely handles undef/non-objects)
         return $self unless $other isa Chalk::Semiring::ASTElement;
 
-        # Debug: trace multiply
-        if ( $ENV{DEBUG_AST_MUL} ) {
-            my $self_rule  = $self->rule_name // 'undef';
-            my $other_rule = $other->rule_name
-              // ( $other->terminal ? "term:" . $other->terminal : 'undef' );
-            warn "AST multiply: self=$self_rule, other=$other_rule\n";
-        }
-
         # Accumulate children
         my @new_children = ( $self->children->@*, $other );
 
