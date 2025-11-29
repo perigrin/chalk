@@ -97,4 +97,54 @@ subtest 'Add peephole() returns self when not constant-foldable' => sub {
     is(refaddr($result), refaddr($add), 'peephole() returns self when inputs not constant');
 };
 
+# Task 9: Subtract node compute() and peephole()
+use_ok('Chalk::IR::Node::Subtract');
+
+subtest 'Subtract node compute() with constant inputs' => sub {
+    my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+
+    my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $const3);
+
+    ok($sub->can('compute'), 'Subtract node has compute() method');
+
+    my $type = $sub->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger for constant subtraction');
+    is($type->is_constant, 1, 'Result is constant');
+    is($type->value, 7, '10 - 3 = 7');
+};
+
+subtest 'Subtract node compute() with non-constant input returns TOP' => sub {
+    my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $unknown);
+
+    my $type = $sub->compute();
+    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+};
+
+subtest 'Subtract peephole() folds constant subtraction' => sub {
+    my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+
+    my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $const3);
+
+    my $result = $sub->peephole(undef);
+
+    ok($result isa Chalk::IR::Node::Constant, 'peephole() returns Constant node for constant subtraction');
+    is($result->value, 7, 'Constant node has folded value 10 - 3 = 7');
+};
+
+subtest 'Subtract peephole() returns self when not constant-foldable' => sub {
+    my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+
+    my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $unknown);
+
+    my $result = $sub->peephole(undef);
+
+    is(refaddr($result), refaddr($sub), 'peephole() returns self when inputs not constant');
+};
+
 done_testing();

@@ -5,6 +5,10 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Subtract {
+    use Chalk::IR::Type::Top;
+    use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Node::Constant;
+
     field $left :param :reader;
     field $right :param :reader;
     field $source_info :param :reader = undef;
@@ -43,7 +47,30 @@ class Chalk::IR::Node::Subtract {
     }
 
     method peephole($graph) {
+        # Use compute() for constant folding - if both inputs are constant,
+        # replace this Subtract with a Constant node containing the difference
+        my $type = $self->compute();
+        if ($type->is_constant) {
+            return Chalk::IR::Node::Constant->new(
+                value => $type->value,
+                type  => 'Integer',
+            );
+        }
         return $self;
+    }
+
+    # Type inference for constant folding - if both inputs are constant, compute difference
+    method compute() {
+        my $left_type = $left->compute();
+        my $right_type = $right->compute();
+
+        if ($left_type->is_constant && $right_type->is_constant) {
+            return Chalk::IR::Type::TypeInteger->constant(
+                $left_type->value - $right_type->value
+            );
+        }
+
+        return Chalk::IR::Type::Top->TOP;
     }
 
     # Stub for transform tracking
