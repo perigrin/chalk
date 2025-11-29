@@ -325,7 +325,15 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         # Evaluate the rule's semantic action if it has one
         my $rule = $ctx->rule;
         if ( $rule && $rule->can('evaluate') ) {
-            my $result = $rule->evaluate($ctx);
+            my $result;
+            try {
+                $result = $rule->evaluate($ctx);
+            } catch ($e) {
+                # Semantic action failed - return add_id to signal parse failure
+                # This allows the parser to backtrack and try other alternatives
+                warn "[SEMANTIC] evaluate() failed: $e" if $ENV{CHALK_DEBUG_SEMANTIC};
+                return $add_id;
+            }
 
             # Set the focus to the evaluated result
             $ctx = Chalk::EvalContext->new(
