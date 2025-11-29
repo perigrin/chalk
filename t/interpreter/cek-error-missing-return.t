@@ -11,6 +11,9 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Return;
 use Chalk::Interpreter::CEKDataflow;
 
+# Tests use content-addressable IDs computed from node contents
+# Object references are used for graph traversal
+
 # Test: Empty graph should die
 {
     my $graph = Chalk::IR::Graph->new();
@@ -23,11 +26,12 @@ use Chalk::Interpreter::CEKDataflow;
 # Test: Graph with nodes but no Return node should die
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 42, type => 'int');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
 
     $graph->add_node($start);
     $graph->add_node($const);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -37,13 +41,17 @@ use Chalk::Interpreter::CEKDataflow;
 # Test: Graph with Return node should succeed (not die)
 {
     my $graph = Chalk::IR::Graph->new();
-    my $start = Chalk::IR::Node::Start->new(id => 'node_0', inputs => [], function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(id => 'node_1', inputs => [], value => 42, type => 'int');
-    my $ret = Chalk::IR::Node::Return->new(id => 'node_2', inputs => ['node_0', 'node_1'], value_id => 'node_1', control_id => 'node_0');
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $const,
+    );
 
     $graph->add_node($start);
     $graph->add_node($const);
     $graph->add_node($ret);
+    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result;

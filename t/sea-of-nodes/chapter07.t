@@ -141,6 +141,7 @@ subtest 'Simple while(true) infinite loop IR' => sub {
     $graph->add_node($return_node);
 
     is scalar($loop->inputs->@*), 2, 'Loop has entry and backedge';
+    $graph->materialize_pending_nodes();
     my $json = $graph->to_json();
     my $has_loop = scalar(grep { $_->{op} eq 'Loop' } $json->{nodes}->@*);
     ok $has_loop, 'IR contains Loop node';
@@ -148,7 +149,6 @@ subtest 'Simple while(true) infinite loop IR' => sub {
 
 subtest 'While loop with counter: while(i < 10) { i = i + 1; }' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Node::Scope->new();
 
     my $start = Chalk::IR::Node->new(
         id => 1,
@@ -166,7 +166,6 @@ subtest 'While loop with counter: while(i < 10) { i = i + 1; }' => sub {
         attributes => { value => 0 },
     );
     $graph->add_node($init_val);
-    $scope->define('i', $init_val);
 
     # Loop entry
     my $loop = Chalk::IR::Node->new(
@@ -176,7 +175,6 @@ subtest 'While loop with counter: while(i < 10) { i = i + 1; }' => sub {
         attributes => {},
     );
     $graph->add_node($loop);
-    $scope->push_scope();
 
     # Loop phi for i
     my $phi_i = Chalk::IR::Node->new(
@@ -186,7 +184,6 @@ subtest 'While loop with counter: while(i < 10) { i = i + 1; }' => sub {
         attributes => {},
     );
     $graph->add_node($phi_i);
-    $scope->define('i', $phi_i);
 
     # Condition: i < 10
     my $const_10 = Chalk::IR::Node->new(
@@ -264,6 +261,9 @@ subtest 'While loop with counter: while(i < 10) { i = i + 1; }' => sub {
     is scalar($loop->inputs->@*), 2, 'Loop has entry and backedge';
     is scalar($phi_i->inputs->@*), 3, 'Loop phi has control, init, and loop value';
 
+    # Materialize pending nodes before validation
+    $graph->materialize_pending_nodes();
+
     my $validator = Chalk::IR::Validator->new();
     my @cfg_errors = $validator->validate_cfg($graph);
     if (@cfg_errors) {
@@ -317,8 +317,6 @@ subtest 'Loop phi constant folding' => sub {
 }  # End SKIP
 
 subtest 'Nested scopes with loop' => sub {
-    my $scope = Chalk::IR::Node::Scope->new();
-
     # Outer scope
     my $const_0 = Chalk::IR::Node->new(
         id => 1,
@@ -326,12 +324,13 @@ subtest 'Nested scopes with loop' => sub {
         inputs => [],
         attributes => { value => 0 },
     );
-    $scope->define('x', $const_0);
+    my $outer_scope = Chalk::IR::Node::Scope->new();
+    $outer_scope = $outer_scope->with_binding('x', $const_0);
 
-    is $scope->lookup('x')->id, 1, 'Outer x defined';
+    is $outer_scope->lookup('x')->id, 1, 'Outer x defined';
 
-    # Enter loop scope
-    $scope->push_scope();
+    # Enter loop scope (immutable child)
+    my $inner_scope = $outer_scope->child_scope();
 
     my $phi_x = Chalk::IR::Node->new(
         id => 2,
@@ -339,20 +338,17 @@ subtest 'Nested scopes with loop' => sub {
         inputs => [0, $const_0->id],
         attributes => {},
     );
-    $scope->define('x', $phi_x);
+    $inner_scope = $inner_scope->with_binding('x', $phi_x);
 
-    is $scope->lookup('x')->id, 2, 'Loop x shadows outer x';
+    is $inner_scope->lookup('x')->id, 2, 'Loop x shadows outer x';
 
-    # Exit loop scope
-    $scope->pop_scope();
-
-    is $scope->lookup('x')->id, 1, 'Outer x restored after loop';
+    # Outer scope unchanged (immutable)
+    is $outer_scope->lookup('x')->id, 1, 'Outer x preserved (immutable)';
 };
 
 subtest 'Loop with multiple phis' => sub {
     # while (i < 10 && j < 5) { i++; j++; }
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Node::Scope->new();
 
     my $start = Chalk::IR::Node->new(
         id => 1,
@@ -370,7 +366,6 @@ subtest 'Loop with multiple phis' => sub {
         attributes => { value => 0 },
     );
     $graph->add_node($init_i);
-    $scope->define('i', $init_i);
 
     my $init_j = Chalk::IR::Node->new(
         id => 3,
@@ -379,7 +374,6 @@ subtest 'Loop with multiple phis' => sub {
         attributes => { value => 0 },
     );
     $graph->add_node($init_j);
-    $scope->define('j', $init_j);
 
     # Loop
     my $loop = Chalk::IR::Node->new(
@@ -389,7 +383,6 @@ subtest 'Loop with multiple phis' => sub {
         attributes => {},
     );
     $graph->add_node($loop);
-    $scope->push_scope();
 
     # Loop phis
     my $phi_i = Chalk::IR::Node->new(
@@ -399,7 +392,6 @@ subtest 'Loop with multiple phis' => sub {
         attributes => {},
     );
     $graph->add_node($phi_i);
-    $scope->define('i', $phi_i);
 
     my $phi_j = Chalk::IR::Node->new(
         id => 6,
@@ -408,7 +400,6 @@ subtest 'Loop with multiple phis' => sub {
         attributes => {},
     );
     $graph->add_node($phi_j);
-    $scope->define('j', $phi_j);
 
     # Add backedge values
     my $const_1 = Chalk::IR::Node->new(
@@ -551,6 +542,7 @@ subtest 'Loop exit with final value' => sub {
 
     is $return_node->inputs->[1], $phi->id, 'Return uses loop phi value';
 
+    $graph->materialize_pending_nodes();
     my $json = $graph->to_json();
     my $has_return = scalar(grep { $_->{op} eq 'Return' } $json->{nodes}->@*);
     my $has_loop = scalar(grep { $_->{op} eq 'Loop' } $json->{nodes}->@*);
@@ -597,6 +589,8 @@ subtest 'Loop validator integration' => sub {
         attributes => {},
     );
     $graph->add_node($return_node);
+
+    $graph->materialize_pending_nodes();
 
     my $validator = Chalk::IR::Validator->new();
 

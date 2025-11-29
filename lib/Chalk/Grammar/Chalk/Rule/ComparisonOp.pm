@@ -2,62 +2,118 @@
 # ABOUTME: Handles comparison (>, <, ==, !=, isa) and regex match (=~, !~) with precedence validated by Precedence semiring
 
 use 5.42.0;
-use experimental 'class';
+use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
-    # Grammar: ComparisonOp -> Expression WS_OPT %COMPARE_OP% WS_OPT Expression
-    # Child indices for binary comparison operations
-    use constant {
-        LEFT_EXPR  => 0,  # Left operand (Expression)
-        OPERATOR   => 2,  # Comparison operator
-        RIGHT_EXPR => 4,  # Right operand (Expression)
-    };
+
     method evaluate($context) {
-        # ComparisonOp -> StringOp (pass-through)
-        # ComparisonOp -> ComparisonOp WS_OPT %NUM_COMPARE_OP% WS_OPT StringOp
-        # ComparisonOp -> ComparisonOp WS_OPT %STRING_COMPARE_OP% WS_OPT StringOp
-        # ComparisonOp -> ComparisonOp WS_OPT 'isa' WS_OPT QualifiedIdentifier
-        # ComparisonOp -> ComparisonOp WS_OPT %REGEX_MATCH_OP% WS_OPT StringOp
+        use Chalk::IR::Node::EQ;
+        use Chalk::IR::Node::NE;
+        use Chalk::IR::Node::LT;
+        use Chalk::IR::Node::LE;
+        use Chalk::IR::Node::GT;
+        use Chalk::IR::Node::GE;
+
+        # Grammar: ComparisonOp -> Expression WS_OPT %COMPARE_OP% WS_OPT Expression
+        # But WS_OPT may be filtered out, so we get either 3 or 5 children
+        # Search for the operator dynamically instead of hardcoding indices
 
         # Count children to determine which alternative matched
         my @children = $context->children->@*;
 
         if (@children == 1) {
             # First alternative: just pass through StringOp
-            return $context->child(LEFT_EXPR);
+            return $context->child(0);
         }
 
-        # For binary operation: check OPERATOR child for the operator
-        return $context->child(LEFT_EXPR) unless defined $children[OPERATOR];
-        my $op_child = $children[OPERATOR]->extract;
-        return $context->child(LEFT_EXPR) unless defined $op_child && !ref($op_child);
+        # Find the operator by scanning children - expression structure varies
+        # because WS_OPT may or may not be present, so we can't use fixed indices
+        my $operator_idx;
+        my $operator;
 
-        my $operator = $op_child;
-        my $builder = $context->env->{ir_builder};
-        return $context->child(LEFT_EXPR) unless $builder;
+        for my $i (0 .. $#children) {
+            my $child = $context->child($i);
+            if ($child isa Chalk::Grammar::Token::Operator) {
+                $operator = "$child";  # Stringify to get operator value
+                $operator_idx = $i;
+                last;
+            }
+        }
 
-        # Get left and right operands
-        my $left = $context->child(LEFT_EXPR);
-        my $right = $context->child(RIGHT_EXPR);
+        # If no operator found with multiple children, this is a bug
+        unless (defined $operator) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } map { $_->extract } @children;
+            die "ComparisonOp matched with " . scalar(@children) . " children but no operator found: [@children_debug]";
+        }
 
-        # Validate that we got IR nodes
-        return $left unless (blessed($left) && $left->can('id'));
-        return $left unless (blessed($right) && $right->can('id'));
+        # Extract left operand (first IR node before operator)
+        my $left;
+        for my $i (0 .. $operator_idx - 1) {
+            my $child = $context->child($i);
+            if (blessed($child) && $child->can('id')) {
+                $left = $child;
+                last;
+            }
+        }
+
+        # Extract right operand (first IR node after operator)
+        my $right;
+        for my $i ($operator_idx + 1 .. $#children) {
+            my $child = $context->child($i);
+            if (blessed($child) && $child->can('id')) {
+                $right = $child;
+                last;
+            }
+        }
+
+        # Validate that we got both operands - die if not
+        unless ($left && $right) {
+            # Build child descriptions for error message
+            my @child_descs;
+            for my $i (0..$#children) {
+                my $c = $context->child($i);
+                my $desc;
+                if (!defined($c)) {
+                    $desc = 'undef';
+                } elsif (blessed($c)) {
+                    $desc = ref($c) . ($c->can('id') ? '->' . $c->id : '');
+                } elsif (ref($c)) {
+                    $desc = ref($c) . '{...}';  # Unblessed reference (HASH/ARRAY)
+                } else {
+                    $desc = "'$c'";
+                }
+                push @child_descs, "child[$i]: $desc";
+            }
+
+            my $left_desc = defined($left)
+                ? (blessed($left) ? ref($left) . '->' . $left->id : (ref($left) ? ref($left) . '{...}' : "'$left'"))
+                : 'NOT FOUND';
+            my $right_desc = defined($right)
+                ? (blessed($right) ? ref($right) . '->' . $right->id : (ref($right) ? ref($right) . '{...}' : "'$right'"))
+                : 'NOT FOUND';
+
+            die "ComparisonOp: Could not find IR nodes with id() for both operands\n" .
+                "  operator: " . ($operator // 'undef') . " at index " . ($operator_idx // 'undef') . "\n" .
+                "  left: $left_desc\n" .
+                "  right: $right_desc\n" .
+                "  children (" . scalar(@children) . "): " . join(", ", @child_descs) . "\n" .
+                "  This usually means Expression or its sub-rules failed to build IR nodes.\n";
+        }
 
         # Build appropriate IR node based on operator
         # Comparison operators
         if ($operator eq '>' || $operator eq 'gt') {
-            return $builder->build_greater_node($left, $right);
+            return Chalk::IR::Node::GT->new(left => $left, right => $right);
         } elsif ($operator eq '<' || $operator eq 'lt') {
-            return $builder->build_less_node($left, $right);
+            return Chalk::IR::Node::LT->new(left => $left, right => $right);
         } elsif ($operator eq '==' || $operator eq 'eq') {
-            return $builder->build_equal_node($left, $right);
+            return Chalk::IR::Node::EQ->new(left => $left, right => $right);
         } elsif ($operator eq '>=' || $operator eq 'ge') {
-            return $builder->build_greater_or_equal_node($left, $right);
+            return Chalk::IR::Node::GE->new(left => $left, right => $right);
         } elsif ($operator eq '<=' || $operator eq 'le') {
-            return $builder->build_less_or_equal_node($left, $right);
+            return Chalk::IR::Node::LE->new(left => $left, right => $right);
         } elsif ($operator eq '!=' || $operator eq 'ne') {
-            return $builder->build_not_equal_node($left, $right);
+            return Chalk::IR::Node::NE->new(left => $left, right => $right);
         }
         # Regex match operators (=~, !~)
         # TODO: implement when regex match IR nodes are available
@@ -65,8 +121,15 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
             # For now, just pass through left side
             return $left;
         }
+        # isa operator
+        # TODO: implement when isa IR node is available
+        elsif ($operator eq 'isa') {
+            # For now, just pass through left side
+            return $left;
+        }
 
-        return $context->child(LEFT_EXPR);
+        # If we get here, we found an operator but didn't handle it - this is a bug
+        die "ComparisonOp found unrecognized operator '$operator' - not handled by any branch";
     }
 }
 

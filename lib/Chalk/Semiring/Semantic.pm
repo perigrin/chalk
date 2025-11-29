@@ -14,13 +14,18 @@ use Chalk::Grammar::Chalk::Type::Array;
 use Chalk::Grammar::Chalk::Type::Hash;
 use Chalk::Grammar::Chalk::Type::List;
 use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::IR::Node::Scope;
 
 class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
-    field $value :param :reader;        # Computed semantic value
-    field $context :param :reader;      # Evaluation context
+    field $value     :param :reader;    # Computed semantic value
+    field $context   :param :reader;    # Evaluation context
     field $sppf_node :param = undef;    # Optional SPPF node
 
     method add( $other, $swap = undef ) {
+
+        # Handle undef or wrong type for $other
+        return $self unless defined $other;
+        return $self unless ref($other) && $other->can('context');
 
         # For alternatives (choice), prefer non-zero value
         # If self has value 0 (is add_id), return other
@@ -58,6 +63,19 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
         my $self_children  = scalar( @{ $self->context->children } );
         my $other_children = scalar( @{ $other->context->children } );
 
+        # DEBUG: Log all equal-span disambiguations
+        if ($ENV{DEBUG_STMTLIST_DISAMBIG}) {
+            my $self_rule = $self->context->rule ? $self->context->rule->lhs : 'NORULE';
+            my $other_rule = $other->context->rule ? $other->context->rule->lhs : 'NORULE';
+            warn "[DISAMBIG] $self_rule vs $other_rule: self=$self_children children, other=$other_children children\n";
+
+            if ($self_rule eq 'StatementList' && $other_rule eq 'StatementList') {
+                my $self_stmts = ref($self_focus) eq 'ARRAY' ? scalar($self_focus->@*) : '?';
+                my $other_stmts = ref($other_focus) eq 'ARRAY' ? scalar($other_focus->@*) : '?';
+                warn "[DISAMBIG]   StatementList: self=$self_stmts stmts vs other=$other_stmts stmts\n";
+            }
+        }
+
         if ( $other_children > $self_children ) {
             return $other;
         }
@@ -67,6 +85,10 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     }
 
     method multiply( $other, $swap = undef ) {
+
+        # Handle undef or wrong type for $other
+        return $self unless defined $other;
+        return $self unless ref($other) && $other->can('context');
 
        # For sequences, append other's context to self's children
        # This builds up the children list as we advance the dot through the rule
@@ -82,7 +104,8 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
             grammar   => $self->context->grammar,
             rule      => $self->context->rule,
             forest    => $self->context->forest,
-            type      => $self->context->type         # Propagate type from rule
+            type      => $self->context->type,        # Propagate type from rule
+            metadata_element => $self->context->metadata_element  # Propagate metadata
         );
 
         return Chalk::Semiring::SemanticElement->new(
@@ -93,6 +116,7 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
     }
 
     method equals( $other, $swap = undef ) {
+        return 0 unless defined $other;
         return 0 unless ref($other) eq ref($self);
 
         # Use refaddr for reference equality to avoid recursion
@@ -115,56 +139,50 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
 }
 
 class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
-    field $env :param = {};
-    field $grammar :param :reader;
+    field $env            :param = {};
+    field $grammar        :param :reader;
     field $shared_context :param :reader = undef;
-    field $type_env :param :reader =
+    field $type_env       :param :reader =
       {};    # Maps variable names to Chalk::Type objects
-    field $forest :reader;
-    field $mul_id :reader;
-    field $add_id :reader;
+    field $forest :reader =
+      defined($shared_context)
+      && exists( $shared_context->{forest} )
+      ? $shared_context->{forest}
+      : undef;
+
+    field $mul_id :reader = Chalk::Semiring::SemanticElement->new(
+        value   => 1,                         # mul_id has value 1
+        context => Chalk::EvalContext->new(
+            focus     => undef,
+            children  => [],
+            start_pos => 0,
+            end_pos   => 0,
+            env       => $env,
+            grammar   => $grammar,
+            rule      => undef,
+            forest    => $forest,
+            metadata_element => undef        # Identity elements have no metadata
+        )
+    );
+    field $add_id :reader = Chalk::Semiring::SemanticElement->new(
+        value   => 0,    # add_id has value 0 (failure/no parse)
+        context => Chalk::EvalContext->new(
+            focus     => undef,
+            children  => [],
+            start_pos => 0,
+            end_pos   => 0,
+            env       => $env,
+            grammar   => $grammar,
+            rule      => undef,
+            forest    => $forest,
+            metadata_element => undef        # Identity elements have no metadata
+        )
+    );
     field $_add_id_is_zero :reader = 1;    # Flag to identify add_id
 
     ADJUST {
-        # Store reference to shared forest if provided
-        $forest =
-          defined($shared_context)
-          && exists( $shared_context->{forest} )
-          ? $shared_context->{forest}
-          : undef;
-
-        # Create identity elements with empty contexts
-        my $empty_ctx_mul = Chalk::EvalContext->new(
-            focus     => undef,
-            children  => [],
-            start_pos => 0,
-            end_pos   => 0,
-            env       => $env,
-            grammar   => $grammar,
-            rule      => undef,
-            forest    => $forest
-        );
-
-        my $empty_ctx_add = Chalk::EvalContext->new(
-            focus     => undef,
-            children  => [],
-            start_pos => 0,
-            end_pos   => 0,
-            env       => $env,
-            grammar   => $grammar,
-            rule      => undef,
-            forest    => $forest
-        );
-
-        $mul_id = Chalk::Semiring::SemanticElement->new(
-            value   => 1,               # mul_id has value 1
-            context => $empty_ctx_mul
-        );
-
-        $add_id = Chalk::Semiring::SemanticElement->new(
-            value   => 0,               # add_id has value 0 (failure/no parse)
-            context => $empty_ctx_add
-        );
+        # Initialize scope if not provided - required by Rule classes for variable tracking
+        $env->{scope} //= Chalk::IR::Node::Scope->new();
     }
 
     method init_element_from_rule(
@@ -186,7 +204,8 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             grammar   => $grammar,
             rule      => $rule,
             forest    => $forest,
-            type      => $inferred_type
+            type      => $inferred_type,
+            metadata_element => undef        # Will be set during on_complete()
         );
 
         return Chalk::Semiring::SemanticElement->new(
@@ -294,8 +313,24 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
 
     # Override base on_complete() to call semantic actions (evaluate())
     # This maintains polymorphism - Parser calls this uniformly on all semirings
-    method on_complete( $completed_item, $completed_element ) {
+    method on_complete( $completed_item, $completed_element, $metadata_element = undef ) {
         my $ctx = $completed_element->context;
+
+        # Set metadata_element on context so rule.evaluate() can access precedence metadata
+        if ($metadata_element && !$ctx->metadata_element) {
+            $ctx = Chalk::EvalContext->new(
+                focus     => $ctx->focus,
+                children  => $ctx->children,
+                start_pos => $ctx->start_pos,
+                end_pos   => $ctx->end_pos,
+                env       => $ctx->env,
+                grammar   => $ctx->grammar,
+                rule      => $ctx->rule,
+                forest    => $ctx->forest,
+                type      => $ctx->type,
+                metadata_element => $metadata_element
+            );
+        }
 
         # Evaluate the rule's semantic action if it has one
         my $rule = $ctx->rule;
@@ -311,7 +346,8 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
                 env       => $ctx->env,
                 grammar   => $ctx->grammar,
                 rule      => $ctx->rule,
-                forest    => $ctx->forest
+                forest    => $ctx->forest,
+                metadata_element => $metadata_element  # Pass metadata from SPPF/Precedence
             );
 
             # Update the completed element with evaluated context
@@ -326,7 +362,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
 
     # Override base on_scan() to accumulate terminal values
     # This maintains polymorphism - Parser calls this uniformly on all semirings
-    method on_scan( $item, $element, $pos, $matched_value ) {
+    method on_scan( $item, $element, $pos, $matched_value, $pattern_name = undef ) {
         my $match_length = length($matched_value);
 
         # Create a terminal element with the matched value as focus
@@ -339,7 +375,8 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             grammar   => $element->context->grammar,
             rule      => $item->rule,
             forest    => $element->context->forest,
-            type      => $element->context->type
+            type      => $element->context->type,
+            metadata_element => $element->context->metadata_element  # Propagate metadata
         );
 
         my $terminal_element = Chalk::Semiring::SemanticElement->new(

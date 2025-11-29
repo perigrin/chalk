@@ -24,6 +24,7 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Stop;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Reference;
 use Chalk::IR::Node::ArrayValue;
@@ -152,6 +153,7 @@ class Chalk::IR::Node {
             Phi      => 'Chalk::IR::Node::Phi',
             Proj     => 'Chalk::IR::Node::Proj',
             Return     => 'Chalk::IR::Node::Return',
+            Stop       => 'Chalk::IR::Node::Stop',
             Loop       => 'Chalk::IR::Node::Loop',
             Reference  => 'Chalk::IR::Node::Reference',
             ArrayValue => 'Chalk::IR::Node::ArrayValue',
@@ -163,31 +165,34 @@ class Chalk::IR::Node {
         );
 
         my $node_class = $op_to_class{$op};
-        if (!$node_class) {
-            # Fallback to generic node for unknown ops
+
+        # Ops that can be safely constructed from hash (no node operands required)
+        # These only take scalar attributes, not node references
+        my %safe_for_polymorphic = (
+            Constant => 1,  # takes value, type
+            Start    => 1,  # takes function_name, params
+        );
+
+        # For unknown ops or ops that require node operands, create generic node
+        # V2 polymorphic nodes for binary ops (Add, Multiply, etc.) require actual
+        # node objects for their operands, which we can't provide from a hash
+        if (!$node_class || !$safe_for_polymorphic{$op}) {
             return $class->new(
-                id         => $id,
-                op         => $op,
-                inputs     => $inputs,
-                attributes => $attrs,
+                id              => $id,
+                op              => $op,
+                inputs          => $inputs,
+                attributes      => $attrs,
+                source_info     => $hash->{source_info},
+                transform_chain => $hash->{transform_chain},
             );
         }
 
-        # All classes are preloaded at compile-time, no runtime loading needed
-        # Extract constructor parameters from attributes
-        my %params = (
-            id     => $id,
-            inputs => $inputs,
-        );
+        # Safe to create polymorphic node - these only take scalar attributes
+        my %params;
 
         # Add source_info if present
         if ($hash->{source_info}) {
             $params{source_info} = $hash->{source_info};
-        }
-
-        # Add transform_chain if present
-        if ($hash->{transform_chain}) {
-            $params{transform_chain} = $hash->{transform_chain};
         }
 
         # Add attributes as constructor parameters
@@ -197,25 +202,8 @@ class Chalk::IR::Node {
             $params{$key} = $attrs->{$key};
         }
 
-        # Create polymorphic node with proper class
-        my $node;
-        try {
-            $node = $node_class->new(%params);
-        } catch ($e) {
-            $node = undef;
-        }
-
-        # If construction fails, fall back to generic node
-        if (!$node) {
-            return $class->new(
-                id         => $id,
-                op         => $op,
-                inputs     => $inputs,
-                attributes => $attrs,
-            );
-        }
-
-        return $node;
+        # Create polymorphic node - will die on failure (no fallback)
+        return $node_class->new(%params);
     }
 }
 

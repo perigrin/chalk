@@ -86,13 +86,23 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
         return $elements->[$index];
     }
 
-    # Delegation methods: Forward context-related calls to semantic element (index 2)
+    # Delegation methods: Forward context-related calls to semantic element
     # These methods are needed by semantic actions (e.g., ConditionalStatement.pm)
     # that expect to work with EvalContext objects
+    # Note: Semantic element index depends on composite configuration
+
+    method _semantic_element() {
+        # Find the semantic element by looking for one with a 'context' method
+        for my $elem ($elements->@*) {
+            return $elem if $elem->can('context');
+        }
+        return undef;
+    }
 
     method context() {
-        # Delegate to semantic element (elements[2] in ChalkIR architecture)
-        return $elements->[2]->can('context') ? $elements->[2]->context : undef;
+        # Delegate to semantic element
+        my $sem = $self->_semantic_element();
+        return $sem ? $sem->context : undef;
     }
 
     method child($index) {
@@ -115,7 +125,8 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
 
     method extract() {
         # Delegate to semantic element
-        return $elements->[2]->can('extract') ? $elements->[2]->extract : undef;
+        my $sem = $self->_semantic_element();
+        return $sem ? ($sem->can('extract') ? $sem->extract : undef) : undef;
     }
 }
 
@@ -169,18 +180,31 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
 
     # Delegate on_complete() to all wrapped semirings
     # This maintains polymorphism - each semiring can respond to rule completion
-    method on_complete($completed_item, $completed_element) {
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
         # Extract elements from CompositeElement
         my @elements = $completed_element->elements->@*;
 
+        # SHORT-CIRCUIT CHECK: Before processing, check if any element equals its add_id
+        # This prevents building IR for invalid parses (e.g., precedence violations)
+        for my $i (0..$#elements) {
+            if (defined($child_add_ids->[$i])) {
+                if ($elements[$i]->equals($child_add_ids->[$i])) {
+                    # This element is invalid (equals add_id), so short-circuit
+                    # Return composite add_id without processing any semirings
+                    return $add_id;
+                }
+            }
+        }
+
         # Call on_complete() on each wrapped semiring with its corresponding element
+        # Pass the full CompositeElement as 3rd parameter so semirings can access sibling data
         my @results;
         for my $i (0..$#$semirings) {
             my $semiring = $semirings->[$i];
             my $element = $elements[$i];
 
-            # Delegate to child semiring (which may be NOOP or may do work)
-            my $result = $semiring->on_complete($completed_item, $element);
+            # Delegate to child semiring, passing full CompositeElement for metadata access
+            my $result = $semiring->on_complete($completed_item, $element, $completed_element);
             push @results, $result;
         }
 
@@ -193,7 +217,7 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
 
     # Delegate on_scan() to all wrapped semirings
     # This maintains polymorphism - each semiring can respond to terminal scanning
-    method on_scan($item, $element, $pos, $matched_value) {
+    method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         # Extract elements from CompositeElement
         my @elements = $element->elements->@*;
 
@@ -204,7 +228,7 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
             my $child_element = $elements[$i];
 
             # Delegate to child semiring (which may handle terminals differently)
-            my $result = $semiring->on_scan($item, $child_element, $pos, $matched_value);
+            my $result = $semiring->on_scan($item, $child_element, $pos, $matched_value, $pattern_name);
             push @results, $result;
         }
 

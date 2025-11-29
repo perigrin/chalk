@@ -5,27 +5,35 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
-
-    use Carp qw(confess);
+    use Chalk::IR::Node::Constant;
 
     method evaluate($context) {
-
         # Number -> %INTEGER% | %FLOAT%
-        # Child [0] contains the matched number string
+        # Child [0] contains the matched number token
 
-        my $builder = $context->env->{ir_builder};
-        return unless $builder;
+        my $token = $context->child(0);
+        die "Number::evaluate matched but child(0) is undefined - grammar bug" unless defined $token;
 
-        my $number_str = $context->child(0);
-        confess "Invalid number in context: $context"
-          unless defined $number_str;
+        # Determine type from token class
+        my $type;
+        if ($token isa Chalk::Grammar::Token::Float) {
+            $type = 'Float';
+        } elsif ($token isa Chalk::Grammar::Token::Int) {
+            $type = 'Int';
+        } else {
+            # All tokens should be blessed - if not, something is wrong in the Parser
+            my $desc = ref($token) || (defined $token ? "'$token'" : 'undef');
+            die "Number::evaluate expected Token::Int or Token::Float, got: $desc";
+        }
 
-        # Determine type (Int vs Float)
-        my $type  = $number_str =~ qr/\./ ? 'Float' : 'Int';
-        my $value = $number_str + 0;                        # Convert to numeric
+        # Convert to numeric value
+        my $value = "$token" + 0;
 
-        # Build and return Constant IR node
-        return $builder->build_constant_node( $value, $type );
+        # Create Constant node directly (content-addressable ID)
+        return Chalk::IR::Node::Constant->new(
+            type  => $type,
+            value => $value,
+        );
     }
 }
 

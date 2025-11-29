@@ -1,0 +1,1 @@
+my $x = 0; if (1) { $x = 2; } return $x; PLENV_VERSION=5.42.0 plenv exec perl generate-ir-corpus.pl

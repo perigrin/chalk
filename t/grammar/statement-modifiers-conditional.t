@@ -68,7 +68,7 @@ subtest 'IR code quality verification' => sub {
     ok(-f $statement_pm, 'Statement.pm semantic action file exists');
 
     # The implementation verifies (via code inspection):
-    # - Unified control wiring using set_node_control
+    # - Unified control wiring using with_control() on nodes
     # - Assertions for bottom-up parsing assumptions
     # - Guard clauses for undefined current_control
     # - Proper if/unless logic inversion

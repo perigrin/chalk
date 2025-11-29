@@ -1,0 +1,61 @@
+{
+   "entry" : "node_23",
+   "nodes" : [
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_21",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_10",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "imports" : [],
+            "module" : "experimental",
+            "type" : "pragma"
+         },
+         "id" : "node_13",
+         "inputs" : [
+            "node_10"
+         ],
+         "op" : "UseStatement",
+         "source_info" : null,
+         "transform_chain" : null
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_13",
+            "value_id" : "node_22"
+         },
+         "id" : "node_23",
+         "inputs" : [
+            "node_13",
+            "node_22"
+         ],
+         "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_22",
+         "inputs" : [
+            "node_21"
+         ],
+         "op" : "Constant"
+      }
+   ],
+   "version" : "1.0"
+}

@@ -5,13 +5,20 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
+
     method evaluate($context) {
-        # LogicalOp -> ComparisonOp (pass-through)
+        use Chalk::IR::Node::And;
+        use Chalk::IR::Node::Or;
+        use Chalk::IR::Node::DefinedOr;
+
+        # Grammar: LogicalOp -> ComparisonOp (pass-through)
         # LogicalOp -> LogicalOp WS_OPT '||' WS_OPT ComparisonOp
         # LogicalOp -> LogicalOp WS_OPT 'or' WS_OPT ComparisonOp
         # LogicalOp -> LogicalOp WS_OPT '//' WS_OPT ComparisonOp
         # LogicalOp -> LogicalOp WS_OPT '&&' WS_OPT ComparisonOp
         # LogicalOp -> LogicalOp WS_OPT 'and' WS_OPT ComparisonOp
+        # But WS_OPT may be filtered out, so we get either 3 or 5 children
+        # Search for the operator dynamically instead of hardcoding indices
 
         # Count children to determine which alternative matched
         my @children = $context->children->@*;
@@ -21,40 +28,67 @@ class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
             return $context->child(0);
         }
 
-        # For binary operation: check child(2) for the operator
-        # Grammar is: LogicalOp WS_OPT OP WS_OPT ComparisonOp
-        # So operator is at index 2
-        return $context->child(0) unless defined $children[2];
-        my $op_child = $children[2]->extract;
-        return $context->child(0) unless defined $op_child && !ref($op_child);
+        # Find the operator by scanning children - expression structure varies
+        # because WS_OPT may or may not be present, so we can't use fixed indices
+        my $operator_idx;
+        my $operator;
 
-        my $operator = $op_child;
+        for my $i (0 .. $#children) {
+            my $child = $context->child($i);
+            if ($child isa Chalk::Grammar::Token::Operator) {
+                $operator = "$child";  # Stringify to get operator value
+                $operator_idx = $i;
+                last;
+            }
+        }
 
-        # TODO: Implement IR nodes for logical operators when available
-        # For now, just pass through left side
-        # Valid operators: ||, or, //, &&, and
-        return $context->child(0) unless ($operator eq '||' || $operator eq 'or' || $operator eq '//' ||
-                                          $operator eq '&&' || $operator eq 'and');
+        # If no operator found with multiple children, this is a bug
+        unless (defined $operator) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } map { $_->extract } @children;
+            die "LogicalOp matched with " . scalar(@children) . " children but no operator found: [@children_debug]";
+        }
 
-        # When IR builder methods are available, implement like this:
-        # my $builder = $context->env->{ir_builder};
-        # return $context->child(0) unless $builder;
-        #
-        # my $left = $context->child(0);
-        # my $right = $context->child(4);
-        #
-        # return $left unless (blessed($left) && $left->can('id'));
-        # return $left unless (blessed($right) && $right->can('id'));
-        #
-        # if ($operator eq '||' || $operator eq 'or') {
-        #     return $builder->build_logical_or_node($left, $right);
-        # } elsif ($operator eq '//') {
-        #     return $builder->build_defined_or_node($left, $right);
-        # } elsif ($operator eq '&&' || $operator eq 'and') {
-        #     return $builder->build_logical_and_node($left, $right);
-        # }
+        # Extract left operand (first IR node before operator)
+        my $left;
+        for my $i (0 .. $operator_idx - 1) {
+            my $child = $context->child($i);
+            if (blessed($child) && $child->can('id')) {
+                $left = $child;
+                last;
+            }
+        }
 
-        return $context->child(0);
+        # Extract right operand (first IR node after operator)
+        my $right;
+        for my $i ($operator_idx + 1 .. $#children) {
+            my $child = $context->child($i);
+            if (blessed($child) && $child->can('id')) {
+                $right = $child;
+                last;
+            }
+        }
+
+        # Validate that we got both operands - die if not
+        unless ($left && $right) {
+            my @children_debug = map { defined $_ ? "$_" : '<undef>' } map { $_->extract } @children;
+            die "LogicalOp found operator '$operator' at index $operator_idx but missing operands: " .
+                "left=" . (defined $left ? $left->id : '<undef>') . ", " .
+                "right=" . (defined $right ? $right->id : '<undef>') . ", " .
+                "children=[@children_debug]";
+        }
+
+        # Build appropriate IR node based on operator
+        # Logical operators
+        if ($operator eq '||' || $operator eq 'or') {
+            return Chalk::IR::Node::Or->new(left => $left, right => $right);
+        } elsif ($operator eq '//') {
+            return Chalk::IR::Node::DefinedOr->new(left => $left, right => $right);
+        } elsif ($operator eq '&&' || $operator eq 'and') {
+            return Chalk::IR::Node::And->new(left => $left, right => $right);
+        }
+
+        # If we get here, we found an operator but didn't handle it - this is a bug
+        die "LogicalOp found unrecognized operator '$operator' - expected ||, or, //, &&, or and";
     }
 }
 

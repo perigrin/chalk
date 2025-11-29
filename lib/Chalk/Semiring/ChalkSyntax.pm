@@ -1,11 +1,12 @@
-# ABOUTME: Composite semiring for Chalk syntax checking (SPPF + Precedence validation)
-# ABOUTME: Used by -c mode for syntax checking without IR generation
+# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + TypeInference)
+# ABOUTME: Pure validation composite - no building, just filtering for valid parses
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
-use Chalk::Semiring::SPPF;
+use Chalk::Semiring::Boolean;
 use Chalk::Semiring::Precedence;
+use Chalk::Semiring::TypeInference;
 use Chalk::Semiring::Composite;
 
 class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
@@ -13,10 +14,12 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
     field $composite :reader;
 
     ADJUST {
-        # Create SPPF semiring for parse forest
-        my $sppf_sr = Chalk::Semiring::SPPF->new();
+        # Phase 1: Validation filters (no building, just filtering)
 
-        # Create Precedence semiring with full Perl operator precedence table
+        # Filter 1: Boolean - Grammar syntax validation
+        my $bool_sr = Chalk::Semiring::Boolean->new();
+
+        # Filter 2: Precedence - Operator precedence validation
         # Reference: perldoc perlop - Operator Precedence and Associativity
         my @perl_precedence_table = (
             # Index 0 - Highest precedence
@@ -50,10 +53,13 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
             precedence_table => \@perl_precedence_table
         );
 
-        # Create Composite semiring with SPPF and Precedence
-        # This validates syntax and precedence without building IR
+        # Filter 3: TypeInference - Semantic constraint validation
+        my $type_sr = Chalk::Semiring::TypeInference->new();
+
+        # Composite: Boolean + Precedence + TypeInference
+        # Pure validation - returns boolean success/failure
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$sppf_sr, $precedence_sr]
+            semirings => [$bool_sr, $precedence_sr, $type_sr]
         );
     }
 
@@ -68,13 +74,13 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
     method semirings() { $composite->semirings }
 
     # Delegate on_complete() to composite
-    method on_complete($completed_item, $completed_element) {
-        $composite->on_complete($completed_item, $completed_element)
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
+        $composite->on_complete($completed_item, $completed_element, $metadata_element)
     }
 
     # Delegate on_scan() to composite
-    method on_scan($item, $element, $pos, $matched_value) {
-        $composite->on_scan($item, $element, $pos, $matched_value)
+    method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
+        $composite->on_scan($item, $element, $pos, $matched_value, $pattern_name)
     }
 }
 

@@ -7,6 +7,12 @@ use utf8;
 class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
     field $index  :param :reader;
     field $label  :param :reader;
+    # Object reference to source node (If) for graph traversal
+    field $source :param :reader = undef;
+    # Early returns collected from the branch this Proj controls (immutable)
+    # Passed at construction time by ConditionalStatement after rewiring
+    # This enables Program.pm to find Returns inside if-blocks
+    field $early_returns :param :reader = undef;
 
     method op() { 'Proj' }
 
@@ -34,7 +40,9 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
         # True condition (if_result=1) activates index 0 (IfTrue)
         # False condition (if_result=0) activates index 1 (IfFalse)
         # Return 0 when if_result matches index (inactive), 1 otherwise (active)
-        return ($if_result == $index) ? 0 : 1;
+        # Coerce if_result to boolean (0 or 1) to avoid warnings on non-numeric values
+        my $if_bool = $if_result ? 1 : 0;
+        return ($if_bool == $index) ? 0 : 1;
     }
 }
 

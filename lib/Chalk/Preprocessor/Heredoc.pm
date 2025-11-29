@@ -391,8 +391,8 @@ class Chalk::Preprocessor::Heredoc {
             }
         }
 
-        # Fallback to {} if nothing works (shouldn't happen in practice)
-        return ( '{', '}' );
+        # If no safe delimiter found, the content contains all delimiter types - this is a bug
+        die "Heredoc::_find_safe_delimiters: content contains all delimiter types, cannot find safe delimiter";
     }
 
     method map_line($output_line) {

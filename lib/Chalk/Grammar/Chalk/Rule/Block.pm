@@ -2,7 +2,7 @@
 # ABOUTME: Parent rule (ConditionalStatement, Loop, etc) is responsible for wiring control
 
 use 5.42.0;
-use experimental 'class';
+use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
     # Helper to recursively flatten arrays and extract nodes
@@ -40,9 +40,6 @@ class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
         my $first_child = $context->child(0);
         if (defined($first_child) && $first_child eq '{') {
             # Block -> '{' WS_OPT StatementList WS_OPT '}'
-            my $builder = $context->env->{ir_builder};
-            return undef unless $builder;
-
             # Get StatementList (child 2)
             my $statements = $context->child(2);
             return undef unless $statements;
@@ -54,11 +51,11 @@ class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
 
             # Return metadata about this block for parent to wire up
             # Parent needs: the statements with placeholders, entry/exit info
+            # Note: Early returns are collected by ConditionalStatement AFTER rewiring
+            # (not here) because rewiring changes control edges on Return nodes.
             return {
                 type => 'block',
                 statements => \@stmt_nodes,
-                entry => '__BLOCK_ENTRY__',  # Parent will provide
-                exit => '__BLOCK_EXIT__',    # Will be last statement's control out
             };
         }
 

@@ -4,6 +4,7 @@
 use 5.42.0;
 use experimental 'class';
 use Chalk::Grammar;
+use Chalk::IR::Node;
 
 class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 
@@ -80,10 +81,10 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 # UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT ExpressionList # use overload ... => ...
 
         my @children = $context->children->@*;
-        my $builder  = $context->env->{ir_builder};
+        my $scope = $context->env->{scope};
 
-        # No builder means we're just parsing without IR generation
-        return undef unless $builder;
+        # No scope means we're just parsing without IR generation
+        die "UseStatement: scope required for IR generation - grammar bug" unless $scope;
 
         # Find the module name or version number (after 'use' and optional WS)
         my $module_name;
@@ -96,8 +97,14 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             next if !defined($child) || $child eq 'use' || $child eq '';
 
             # This should be the module name or version
-            if ( defined($child) && !ref($child) ) {
-                $module_name  = $child;
+            if ( defined($child) ) {
+                # If child is an IR node (e.g., Constant from Number),
+                # extract the value from its attributes
+                if ( ref($child) && $child->can('op') && $child->op eq 'Constant' ) {
+                    $module_name = $child->value;
+                } else {
+                    $module_name = $child;
+                }
                 $module_index = $i;
                 last;
             }
@@ -112,8 +119,8 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             }
         }
 
-        # If we can't find a module name, return undef (parse error)
-        return undef unless defined($module_name);
+        # If we can't find a module name, that's a grammar bug
+        die "UseStatement: could not find module name - grammar bug" unless defined($module_name);
 
         # Categorize the use statement
         my $type = _categorize_use_statement($module_name);
@@ -121,9 +128,34 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
         # Extract import list if present
         my $imports = _extract_imports( $context, $module_index + 1 );
 
-        # Build UseStatement IR node
-        return $builder->build_use_statement_node( $type, $module_name,
-            $imports );
+        # Get current control flow from scope
+        my $current_control = $scope->current_control;
+        die "UseStatement: no current_control in scope - grammar bug" unless $current_control;
+
+        # Create UseStatement IR node directly
+        my $attributes = {
+            type    => $type,
+            module  => $module_name,
+            imports => $imports
+        };
+
+        my $node_id  = "use_${type}_${module_name}";
+        my $use_stmt = Chalk::IR::Node->new(
+            id         => $node_id,
+            op         => 'UseStatement',
+            inputs     => [$current_control],
+            attributes => $attributes,
+        );
+
+        # See issue #202 - record_transform mutates node after construction
+        my $import_list = join( ", ", $imports->@* );
+        $use_stmt->record_transform(
+            'ir_construction',
+            'UseStatement::evaluate',
+            context => "type=$type, module=$module_name, imports=[$import_list]"
+        );
+
+        return $use_stmt;
     }
 }
 

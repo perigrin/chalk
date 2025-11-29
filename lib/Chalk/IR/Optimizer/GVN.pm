@@ -87,13 +87,14 @@ class Chalk::IR::Optimizer::GVN {
 
             # Reconstruct node preserving polymorphic type, source_info, and transform_chain
             # Use from_hash() factory to create correct node class
+            my $chain = $old_node->transform_chain // [];
             my $new_node = Chalk::IR::Node->from_hash({
                 id              => $node_id,
                 op              => $old_node->op,
                 inputs          => \@new_inputs,
                 attributes      => $new_attributes,
                 source_info     => $old_node->source_info,
-                transform_chain => $old_node->transform_chain,
+                transform_chain => $chain,
             });
 
             # Record GVN optimization if node's inputs were redirected
@@ -123,6 +124,9 @@ class Chalk::IR::Optimizer::GVN {
             my $new_entry = $class->_follow_redirections($graph->entry, $redirections);
             $new_graph->set_entry($new_entry);
         }
+
+        # Materialize pending nodes into the graph
+        $new_graph->materialize_pending_nodes();
 
         # Compute metrics
         my $nodes_eliminated = scalar keys %{$redirections};

@@ -1,5 +1,5 @@
-# ABOUTME: CEK machine with dataflow scheduling for Sea of Nodes IR execution
-# ABOUTME: Implements Control-Environment-Kontinuation model with promise-style dependencies
+# ABOUTME: CESK-style interpreter with dataflow scheduling for Sea of Nodes IR execution
+# ABOUTME: Uses Store semantics (S) for node values; replaces tree-walking Control with ready queue
 use 5.42.0;
 use experimental qw(class);
 use utf8;
@@ -9,9 +9,23 @@ use Chalk::Interpreter::Environment;
 class Chalk::Interpreter::CEKDataflow {
     field $graph :param :reader;
 
-    # CEK State Components
-    field $environment;    # Environment with discrete contexts
-    field $ready_queue;    # Dataflow ready queue
+    # Architecture: CESK-style machine with dataflow scheduling
+    #
+    # Traditional CEK/CESK machines use "Control" (C) as a pointer into the AST,
+    # walking the expression tree depth-first. This interpreter replaces tree-walking
+    # with dataflow scheduling: instead of "what expression am I evaluating now?",
+    # we ask "which nodes have all dependencies satisfied?"
+    #
+    # Components:
+    #   - $ready_queue replaces Control: nodes ready to execute (dependencies met)
+    #   - $environment (E): maps node IDs to computed values (Store semantics)
+    #   - $kontinuation (K): control flow continuation
+    #   - $waiting: tracks unmet dependencies for each node
+    #
+    # This is a natural fit for Sea of Nodes IR where data flows between graph nodes.
+
+    field $environment;    # Environment/Store: maps node IDs to computed values
+    field $ready_queue;    # Dataflow ready queue (replaces tree-walking Control)
     field $kontinuation;   # Control flow continuation
 
     # Step-by-step execution state (Phase 4 Task 2)
@@ -74,6 +88,9 @@ class Chalk::Interpreter::CEKDataflow {
                 elsif ($key eq 'env:') {
                     return $environment;
                 }
+                elsif ($key eq 'graph:') {
+                    return $graph;
+                }
                 return undef;
             };
 
@@ -89,11 +106,16 @@ class Chalk::Interpreter::CEKDataflow {
             $environment->set_node($node_id, $value);
             $computed{$node_id} = 1;
 
-            # Check if this was the Return node (terminal)
+            # Check if this was a Return node (potential terminal)
+            # Only stop if the Return returned a value (active path)
+            # Inactive paths return undef and execution should continue
             if ($node->op eq 'Return') {
-                $result = $value;
-                $found_return = 1;
-                last;
+                if (defined($value)) {
+                    $result = $value;
+                    $found_return = 1;
+                    last;
+                }
+                # Inactive Return - continue execution to find active path
             }
 
             # Update waiting nodes - check if any become ready
@@ -215,6 +237,9 @@ class Chalk::Interpreter::CEKDataflow {
             }
             elsif ($key eq 'env:') {
                 return $environment;
+            }
+            elsif ($key eq 'graph:') {
+                return $graph;
             }
             return undef;
         };

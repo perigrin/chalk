@@ -1,0 +1,116 @@
+{
+   "children" : [
+      {
+         "children" : [
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              "class",
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          "Bar"
+                                       ],
+                                       "rule" : "Identifier",
+                                       "span" : [
+                                          6,
+                                          9
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "QualifiedIdentifier",
+                                 "span" : [
+                                    6,
+                                    9
+                                 ]
+                              },
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          ":isa",
+                                          "(",
+                                          {
+                                             "children" : [
+                                                {
+                                                   "children" : [
+                                                      "Foo"
+                                                   ],
+                                                   "rule" : "Identifier",
+                                                   "span" : [
+                                                      15,
+                                                      18
+                                                   ]
+                                                }
+                                             ],
+                                             "rule" : "QualifiedIdentifier",
+                                             "span" : [
+                                                15,
+                                                18
+                                             ]
+                                          },
+                                          ")"
+                                       ],
+                                       "rule" : "Attribute",
+                                       "span" : [
+                                          10,
+                                          19
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "AttributeList",
+                                 "span" : [
+                                    10,
+                                    19
+                                 ]
+                              },
+                              {
+                                 "children" : [
+                                    "{",
+                                    "}"
+                                 ],
+                                 "rule" : "Block",
+                                 "span" : [
+                                    20,
+                                    23
+                                 ]
+                              }
+                           ],
+                           "rule" : "ClassDeclaration",
+                           "span" : [
+                              0,
+                              23
+                           ]
+                        }
+                     ],
+                     "rule" : "Block",
+                     "span" : [
+                        0,
+                        23
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  23
+               ]
+            }
+         ],
+         "rule" : "StatementList",
+         "span" : [
+            0,
+            23
+         ]
+      }
+   ],
+   "rule" : "Program",
+   "span" : [
+      0,
+      23
+   ]
+}

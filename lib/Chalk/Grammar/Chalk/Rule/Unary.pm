@@ -6,6 +6,9 @@ use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
     method evaluate($context) {
+        use Chalk::IR::Node::Negate;
+        use Chalk::IR::Node::Not;
+
         # Unary -> Primary (pass-through)
         # Unary -> '!' WS_OPT Unary (prefix operators)
         # Unary -> Variable '++' (postfix increment)
@@ -22,44 +25,51 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         # Postfix pattern: child(0) is Variable, child(1) is operator
         if (@children == 2) {
             my $last_child = $children[-1]->extract;
-            if (defined($last_child) && !ref($last_child) && ($last_child eq '++' || $last_child eq '--')) {
-                # This is postfix: Variable '++' or Variable '--'
-                # TODO: Implement postfix increment/decrement when IR nodes available
-                return $context->child(0);
+            if (defined($last_child)) {
+                my $str_val = "$last_child";  # Stringify (Token or string)
+                if ($str_val eq '++' || $str_val eq '--') {
+                    # This is postfix: Variable '++' or Variable '--'
+                    # See issue #189 for wiring up PostIncrement/PostDecrement nodes
+                    return $context->child(0);
+                }
             }
         }
 
         # Otherwise, this is a prefix operator: check child(0) for the operator
         my $op_child = $children[0]->extract;
-        return $context->child(0) unless defined $op_child && !ref($op_child);
+        die "Unary: expected operator at children[0], got undefined - grammar bug" unless defined $op_child;
 
-        my $operator = $op_child;
-        my $builder = $context->env->{ir_builder};
-        return $context->child(0) unless $builder;
+        # Stringify operator (may be Token object or plain string)
+        my $operator = "$op_child";
 
         # Get operand at child 1 (WS_OPT is collapsed/absent when empty)
         my $operand = $context->child(1);
 
         # Validate that we got an IR node
-        return $operand unless (blessed($operand) && $operand->can('id'));
+        unless (ref($operand) && $operand->can('id')) {
+            my $desc = ref($operand) || (defined $operand ? "'$operand'" : 'undef');
+            die "Unary: operand must be IR node, got: $desc";
+        }
 
         # Build appropriate unary node
         if ($operator eq '!') {
-            return $builder->build_not_node($operand);
+            return Chalk::IR::Node::Not->new(operand => $operand);
         } elsif ($operator eq '-') {
-            return $builder->build_negate_node($operand);
+            return Chalk::IR::Node::Negate->new(operand => $operand);
         } elsif ($operator eq '+') {
             # Unary + is a no-op, just pass through
             return $operand;
         } elsif ($operator eq '\\') {
-            return $builder->build_reference_node($operand);
+            # Reference node exists but needs wiring up here
+            # For now, just pass through
+            return $operand;
         } elsif ($operator eq '++' || $operator eq '--') {
             # Prefix ++/--
-            # TODO: Implement prefix increment/decrement when IR nodes available
+            # See issue #189 for wiring up PreIncrement/PreDecrement nodes
             return $operand;
         }
 
-        return $context->child(0);
+        die "Unary: unrecognized operator '$operator' - grammar bug";
     }
 }
 

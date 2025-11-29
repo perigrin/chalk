@@ -7,37 +7,76 @@ use utf8;
 class Chalk::IR::Graph {
     use Chalk::IR::Node;
 
-    field $nodes :reader;
-    field $entry :reader;
-    field $uses;  # Use-def map: node_id => [user_id1, user_id2, ...]
-
-    ADJUST {
-        $nodes = {};
-        $entry = undef;
-        $uses  = {};
-    }
+    field $nodes :reader = {};
+    field $entry :reader = undef;
+    field $uses = {};  # Use-def map: node_id => [user_id1, user_id2, ...]
+    field $pending_nodes = {};  # Nodes created but not yet added to graph (deferred for materialization)
 
     method add_node($node) {
         my $node_id = $node->id;
-        $nodes->{$node_id} = $node;
 
-        # Initialize use list for this node (empty initially)
-        $uses->{$node_id} //= [];
-
-        # Update use-def chains: for each input, add this node as a user
-        for my $input_id ( $node->inputs->@* ) {
-            next unless defined $input_id;  # Skip undefined inputs
-            $uses->{$input_id} //= [];
-            push $uses->{$input_id}->@*, $node_id;
-        }
-
-        # First node added becomes entry point
-        $entry //= $node_id;
+        # DEFERRED ADDITION: Store in pending instead of immediately adding to graph
+        # This prevents duplicate nodes from intermediate Earley parser completions
+        # Graph will be materialized later via materialize_pending_nodes()
+        $pending_nodes->{$node_id} = $node;
 
         return;
     }
 
+    method clear_pending() {
+        # Clear all pending nodes AND materialized graph
+        # This is called at the start of each Program.evaluate() to ensure
+        # only the final Earley completion's nodes end up in the graph
+        $pending_nodes = {};
+        $nodes = {};
+        $uses = {};
+        return;
+    }
+
+    method materialize_pending_nodes() {
+        # Move all pending nodes into the actual graph
+        # This should be called once at the end of parsing (e.g., in Program.evaluate())
+        for my $node_id (keys %{$pending_nodes}) {
+            my $node = $pending_nodes->{$node_id};
+
+            # Actually add to graph
+            $nodes->{$node_id} = $node;
+
+            # Initialize use list for this node (empty initially)
+            $uses->{$node_id} //= [];
+
+            # Update use-def chains: for each input, add this node as a user
+            for my $input_id ( $node->inputs->@* ) {
+                next unless defined $input_id;  # Skip undefined inputs
+                next if $input_id eq '__CONTROL_PLACEHOLDER__';  # Skip placeholders
+                $uses->{$input_id} //= [];
+                push $uses->{$input_id}->@*, $node_id;
+            }
+
+            # First node added becomes entry point
+            $entry //= $node_id;
+        }
+
+        # Clear pending nodes
+        $pending_nodes = {};
+
+        return;
+    }
+
+    # Get a pending node by ID (for selective materialization)
+    method get_pending_node($id) {
+        return $pending_nodes->{$id};
+    }
+
+    # Get all pending nodes (returns hashref for direct manipulation)
+    method get_pending_all() {
+        return $pending_nodes;
+    }
+
     method get_node($id) {
+        # Check pending nodes first (for nodes not yet materialized)
+        return $pending_nodes->{$id} if exists $pending_nodes->{$id};
+        # Then check materialized nodes
         return $nodes->{$id};
     }
 

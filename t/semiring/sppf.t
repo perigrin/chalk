@@ -53,9 +53,11 @@ subtest 'SPPFElement multiplication (sequence)' => sub {
     my $result = $elem1->multiply($elem2);
 
     ok $result, 'Multiplication succeeds';
-    ok $result->sppf_node, 'Result has SPPF node';
-    is $result->sppf_node->start_pos, 0, 'Sequence starts at first position';
-    is $result->sppf_node->end_pos, 5, 'Sequence ends at last position';
+    # Lazy construction: multiply() doesn't create nodes immediately
+    # Nodes are created in on_complete() when rules finish
+    is scalar(@{$result->children}), 2, 'Result has 2 children';
+    is $result->start_pos, 0, 'Sequence starts at first position';
+    is $result->end_pos, 5, 'Sequence ends at last position';
 };
 
 subtest 'SPPFElement addition (alternatives)' => sub {
@@ -120,21 +122,23 @@ subtest 'SPPF forest node creation' => sub {
     isnt $node1, $node3, 'Different span creates different node';
 };
 
-subtest 'SPPF forest sequence node creation' => sub {
+subtest 'SPPF forest intermediate node creation' => sub {
     my $forest = Chalk::ParseForest->new();
 
     my $left = $forest->get_or_create_symbol_node('A', 0, 2);
     my $right = $forest->get_or_create_symbol_node('B', 2, 5);
 
-    my $seq = $forest->create_sequence_node($left, $right);
+    # Create intermediate node per Scott's algorithm
+    my $intermediate = $forest->get_or_create_intermediate_node('S ::= A B · C', 0, 5);
 
-    ok $seq, 'Sequence node created';
-    is $seq->symbol, 'SEQ', 'Sequence node has SEQ symbol';
-    is $seq->start_pos, 0, 'Sequence starts at left start';
-    is $seq->end_pos, 5, 'Sequence ends at right end';
+    ok $intermediate, 'Intermediate node created';
+    is $intermediate->rule_label, 'S ::= A B · C', 'Intermediate node has correct rule label';
+    is $intermediate->start_pos, 0, 'Intermediate starts at position 0';
+    is $intermediate->end_pos, 5, 'Intermediate ends at position 5';
 
-    my @packed = $seq->packed_nodes;
-    ok @packed > 0, 'Sequence has packed nodes';
+    # Test that same key returns same node
+    my $intermediate2 = $forest->get_or_create_intermediate_node('S ::= A B · C', 0, 5);
+    is $intermediate, $intermediate2, 'Same key returns same intermediate node';
 };
 
 subtest 'SPPF forest alternative merging' => sub {
@@ -181,8 +185,11 @@ subtest 'SPPF semiring operator overloading' => sub {
     );
 
     my $mult = $elem1 * $elem2;
-    ok $mult->sppf_node, 'Operator * works';
+    ok $mult, 'Operator * works';
+    # Lazy construction: multiply doesn't create nodes immediately
+    is scalar(@{$mult->children}), 2, 'Multiply creates lazy element with children';
 
     my $add = $elem1 + $elem2;
-    ok $add->sppf_node, 'Operator + works';
+    ok $add, 'Operator + works';
+    ok $add->sppf_node, 'Add returns element with node (prefers first arg)';
 };

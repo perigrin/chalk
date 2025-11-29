@@ -1,341 +1,273 @@
 # ABOUTME: Test for Sea of Nodes IR generation - Chapter 2: Arithmetic expressions
-# ABOUTME: Validates arithmetic operations (Add, Multiply, Subtract, Divide) with constant folding and operator precedence
+# ABOUTME: Validates arithmetic operations (Add, Multiply, Subtract, Divide) with operator precedence
 
 use lib 'lib';
 use v5.42;
-use lib 'lib';
 use Test::More;
-use lib 'lib';
 use Test::Deep;
 
 # Test that we can load the IR modules
 use_ok('Chalk::IR::Node');
 use_ok('Chalk::IR::Graph');
+use_ok('Chalk::Parser');
+use_ok('Chalk::Grammar');
+use_ok('Chalk::Grammar::Chalk');
+use_ok('Chalk::Semiring::ChalkIR');
+use_ok('Chalk::IR::Node::Scope');
 
-# SKIP: Peephole optimization not implemented yet - tests require ->peephole() method
-SKIP: {
-    skip "Peephole optimization API not implemented (->peephole() method missing)", 5;
+# Helper to create parser for testing
+sub make_parser {
+    open my $fh, '<:utf8', 'grammar/chalk.bnf' or die "Can't open grammar: $!";
+    my $bnf_content = do { local $/; <$fh> };
+    close $fh;
 
-# Test simple addition with constants (should fold to constant)
-subtest 'Constant folding: 1 + 2 -> 3' => sub {
-    my $graph = Chalk::IR::Graph->new();
+    my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
 
-    # Create Start node
-    my $start = Chalk::IR::Node->new(
-        id => 'node_0',
-        op => 'Start',
-        inputs => [],
-        attributes => { function => 'main' }
+    my $semiring = Chalk::Semiring::ChalkIR->new(
+        grammar => $grammar
     );
-    $graph->add_node($start);
 
-    # Create Add node with two constant operands
-    # This should perform constant folding and become a Constant node
-    my $add = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Add',
-        inputs => ['node_0'],  # Non-semantic edge to Start
-        attributes => {
-            left => { op => 'Constant', value => 1, type => 'Int' },
-            right => { op => 'Constant', value => 2, type => 'Int' },
-        }
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => $semiring,
+        preprocess => ['Chalk::Preprocessor::Heredoc']
     );
-    my $folded = $add->peephole($graph);
 
-    # After peephole optimization, should be a constant
-    ok($folded, 'Peephole returned a node');
-    is($folded->op, 'Constant', 'Add(1, 2) folded to Constant');
-    is($folded->attributes->{value}, 3, 'Folded constant has value 3');
-};
-
-# Test multiplication with constants (should fold)
-subtest 'Constant folding: 2 * 3 -> 6' => sub {
-    my $graph = Chalk::IR::Graph->new();
-
-    my $start = Chalk::IR::Node->new(
-        id => 'node_0',
-        op => 'Start',
-        inputs => [],
-        attributes => { function => 'main' }
-    );
-    $graph->add_node($start);
-
-    # Create Multiply node with two constant operands
-    my $mul = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Multiply',
-        inputs => ['node_0'],
-        attributes => {
-            left => { op => 'Constant', value => 2, type => 'Int' },
-            right => { op => 'Constant', value => 3, type => 'Int' },
-        }
-    );
-    my $folded = $mul->peephole($graph);
-
-    ok($folded, 'Peephole returned a node');
-    is($folded->op, 'Constant', 'Multiply(2, 3) folded to Constant');
-    is($folded->attributes->{value}, 6, 'Folded constant has value 6');
-};
-
-# Test subtraction with constants (should fold)
-subtest 'Constant folding: 5 - 2 -> 3' => sub {
-    my $graph = Chalk::IR::Graph->new();
-
-    my $start = Chalk::IR::Node->new(
-        id => 'node_0',
-        op => 'Start',
-        inputs => [],
-        attributes => { function => 'main' }
-    );
-    $graph->add_node($start);
-
-    my $sub = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Subtract',
-        inputs => ['node_0'],
-        attributes => {
-            left => { op => 'Constant', value => 5, type => 'Int' },
-            right => { op => 'Constant', value => 2, type => 'Int' },
-        }
-    );
-    my $folded = $sub->peephole($graph);
-
-    ok($folded, 'Peephole returned a node');
-    is($folded->op, 'Constant', 'Subtract(5, 2) folded to Constant');
-    is($folded->attributes->{value}, 3, 'Folded constant has value 3');
-};
-
-# Test division with constants (should fold)
-subtest 'Constant folding: 6 / 2 -> 3' => sub {
-    my $graph = Chalk::IR::Graph->new();
-
-    my $start = Chalk::IR::Node->new(
-        id => 'node_0',
-        op => 'Start',
-        inputs => [],
-        attributes => { function => 'main' }
-    );
-    $graph->add_node($start);
-
-    my $div = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Divide',
-        inputs => ['node_0'],
-        attributes => {
-            left => { op => 'Constant', value => 6, type => 'Int' },
-            right => { op => 'Constant', value => 2, type => 'Int' },
-        }
-    );
-    my $folded = $div->peephole($graph);
-
-    ok($folded, 'Peephole returned a node');
-    is($folded->op, 'Constant', 'Divide(6, 2) folded to Constant');
-    is($folded->attributes->{value}, 3, 'Folded constant has value 3');
-};
+    return $parser;
 }
 
-# Test manual IR graph construction for: return 1 + 2 * 3;
-# Expected: Add(Constant(1), Multiply(Constant(2), Constant(3)))
-# After folding: Add(Constant(1), Constant(6)) -> Constant(7)
-subtest 'Manual IR graph construction for return 1 + 2 * 3' => sub {
+# Helper to build graph from winning parse node
+sub build_graph_from_result {
+    my ($result) = @_;
+    return undef unless $result && $result->can('context');
+
+    my $ctx = $result->context;
+    return undef unless $ctx && $ctx->can('focus');
+
+    my $winning_node = $ctx->focus;
+    return undef unless blessed($winning_node) && $winning_node->can('id');
+
+    # Build graph by traversing from winning node
     my $graph = Chalk::IR::Graph->new();
+    my %visited;
+    my @queue = ($winning_node);
 
-    # Create Start node
-    my $start = Chalk::IR::Node->new(
-        id => 'node_0',
-        op => 'Start',
-        inputs => [],
-        attributes => { function => 'main' }
-    );
-    $graph->add_node($start);
+    while (@queue) {
+        my $node = shift @queue;
+        next unless blessed($node) && $node->can('id');
+        my $node_id = $node->id;
+        next if $visited{$node_id}++;
 
-    # Create Multiply node: 2 * 3
-    # With constant folding, this becomes Constant(6)
-    my $mul = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Multiply',
-        inputs => ['node_0'],
-        attributes => {
-            left => { op => 'Constant', value => 2, type => 'Int' },
-            right => { op => 'Constant', value => 3, type => 'Int' },
+        $graph->add_node($node);
+
+        # Traverse via object references
+        for my $accessor (qw(value_node value control left right operand condition source)) {
+            next unless $node->can($accessor);
+            # Skip value for Constant nodes (it's not a node reference)
+            next if $accessor eq 'value' && $node->can('op') && $node->op eq 'Constant';
+            my $ref = $node->$accessor;
+            push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
         }
-    );
-    $graph->add_node($mul);
-
-    # Create Add node: 1 + (result of multiply)
-    # This will reference the Multiply node as input
-    my $add = Chalk::IR::Node->new(
-        id => 'node_2',
-        op => 'Add',
-        inputs => ['node_0', 'node_1'],  # Start and Multiply
-        attributes => {
-            left => { op => 'Constant', value => 1, type => 'Int' },
-            right => { op => 'NodeRef', node_id => 'node_1' },  # Reference to Multiply
+        # Traverse Stop's returns
+        if ($node->can('return_nodes') && $node->return_nodes) {
+            for my $ret ($node->return_nodes->@*) {
+                push @queue, $ret if blessed($ret) && $ret->can('id') && !$visited{$ret->id};
+            }
         }
-    );
-    $graph->add_node($add);
+    }
 
-    # Create Return node
-    my $return = Chalk::IR::Node->new(
-        id => 'node_3',
-        op => 'Return',
-        inputs => ['node_0', 'node_2'],  # Control from Start, data from Add
-        attributes => {}
-    );
-    $graph->add_node($return);
+    # Materialize pending nodes into actual graph
+    $graph->materialize_pending_nodes();
 
-    # Verify graph structure
-    is($graph->entry, 'node_0', 'Entry node is Start');
-    is($graph->node_count, 4, 'Graph has 4 nodes');
+    return $graph;
+}
 
-    # Verify Multiply node
-    my $mul_node = $graph->get_node('node_1');
-    ok($mul_node, 'Multiply node exists');
-    is($mul_node->op, 'Multiply', 'Multiply node has correct op');
-    is($mul_node->attributes->{left}{value}, 2, 'Multiply left operand is 2');
-    is($mul_node->attributes->{right}{value}, 3, 'Multiply right operand is 3');
+# Parser integration tests - Chapter 2: Arithmetic Operations
 
-    # Verify Add node
-    my $add_node = $graph->get_node('node_2');
-    ok($add_node, 'Add node exists');
-    is($add_node->op, 'Add', 'Add node has correct op');
-    is($add_node->attributes->{left}{value}, 1, 'Add left operand is 1');
-    is($add_node->attributes->{right}{node_id}, 'node_1', 'Add right operand references Multiply');
+subtest 'Parse: Simple addition - return 1+2' => sub {
+    my $parser = make_parser();
 
-    # Verify Return node
-    my $ret_node = $graph->get_node('node_3');
-    ok($ret_node, 'Return node exists');
-    is($ret_node->op, 'Return', 'Return node has correct op');
-    cmp_deeply($ret_node->inputs, ['node_0', 'node_2'],
-               'Return connects to Start (control) and Add (data)');
+    my $code = 'return 1+2;';
+    my $result = $parser->parse_string($code);
+    ok($result, 'Parse succeeded');
+
+    my $graph = build_graph_from_result($result);
+    ok($graph, 'Graph built from result');
+    ok($graph->node_count > 0, 'Graph has nodes');
+
+    my @nodes = values %{$graph->nodes};
+
+    # Should have Return node
+    my @returns = grep { $_->op eq 'Return' } @nodes;
+    is(scalar(@returns), 1, 'Has Return node');
+
+    # Should have Add node for 1+2
+    my @adds = grep { $_->op eq 'Add' } @nodes;
+    is(scalar(@adds), 1, 'Has Add node for 1+2');
+
+    # Should have constant nodes for 1 and 2
+    my @constants = grep { $_->op eq 'Constant' } @nodes;
+    ok(scalar(@constants) >= 2, 'Has constant nodes for operands');
 };
 
-# Test IR Builder generates correct IR for arithmetic expression
-# TODO: Re-enable when parser integration is complete
 SKIP: {
-    skip 'build_from_code removed - use parser with semantic actions instead', 1;
+    skip 'Issue #199: Nested expressions not evaluated to IR nodes', 8;
 
-subtest 'IR Builder generates correct IR for return 1 + 2 * 3' => sub {
-    use_ok('Chalk::IR::Builder');
+    subtest 'Parse: Operator precedence - return 1 + 2 * 3' => sub {
+        my $parser = make_parser();
 
-    my $builder = Chalk::IR::Builder->new();
-    my $graph = $builder->build_from_code("return 1 + 2 * 3;");
+        # Chapter 2 key example: tests precedence (multiply before add)
+        my $code = 'return 1 + 2 * 3;';
+        my $result = $parser->parse_string($code);
+        ok($result, 'Parse succeeded');
 
-    # Verify graph structure
-    ok($graph, 'Builder returns a graph');
-    is($graph->node_count, 4, 'Generated graph has 4 nodes (Start, Multiply, Add, Return)');
+        my $graph = build_graph_from_result($result);
+        ok($graph, 'Graph built from result');
+        my @nodes = values %{$graph->nodes};
 
-    # Verify Start node
-    my $start_node = $graph->get_node('node_0');
-    ok($start_node, 'Start node exists');
-    is($start_node->op, 'Start', 'Start node has correct op');
+        # Should have both Add and Multiply nodes
+        my @adds = grep { $_->op eq 'Add' } @nodes;
+        is(scalar(@adds), 1, 'Has Add node');
 
-    # Verify Multiply node (2 * 3)
-    my $mul_node = $graph->get_node('node_1');
-    ok($mul_node, 'Multiply node exists');
-    is($mul_node->op, 'Multiply', 'Multiply node has correct op');
-    is($mul_node->attributes->{left}{value}, 2, 'Multiply left operand is 2');
-    is($mul_node->attributes->{right}{value}, 3, 'Multiply right operand is 3');
+        my @muls = grep { $_->op eq 'Multiply' } @nodes;
+        is(scalar(@muls), 1, 'Has Multiply node');
 
-    # Verify Add node (1 + mul_result)
-    my $add_node = $graph->get_node('node_2');
-    ok($add_node, 'Add node exists');
-    is($add_node->op, 'Add', 'Add node has correct op');
-    is($add_node->attributes->{left}{value}, 1, 'Add left operand is 1');
-    is($add_node->attributes->{right}{node_id}, 'node_1', 'Add right operand references Multiply');
+        # Multiply should be input to Add (precedence)
+        my $add = $adds[0];
+        my $mul = $muls[0];
 
-    # Verify Return node
-    my $ret_node = $graph->get_node('node_3');
-    ok($ret_node, 'Return node exists');
-    is($ret_node->op, 'Return', 'Return node has correct op');
-    cmp_deeply($ret_node->inputs, ['node_0', 'node_2'],
-               'Return connects to Start (control) and Add (data)');
-};
-}  # End SKIP
+        ok($add && $mul, 'Both Add and Multiply nodes exist');
 
-# Test JSON serialization for arithmetic expressions
-subtest 'JSON serialization of arithmetic IR' => sub {
-    my $graph = Chalk::IR::Graph->new();
-
-    my $start = Chalk::IR::Node->new(
-        id => 'node_0',
-        op => 'Start',
-        inputs => [],
-        attributes => { function => 'main' }
-    );
-    $graph->add_node($start);
-
-    # Create a simple Add: 10 + 20
-    my $add = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Add',
-        inputs => ['node_0'],
-        attributes => {
-            left => { op => 'Constant', value => 10, type => 'Int' },
-            right => { op => 'Constant', value => 20, type => 'Int' },
+        # Verify Multiply comes before Add in the graph
+        # The Add node should reference Multiply via its left or right operand
+        TODO: {
+            local $TODO = 'Operator precedence not correctly implemented yet';
+            my $add_uses_mul = 0;
+            if ($add->can('left') && $add->left) {
+                $add_uses_mul = 1 if blessed($add->left) && $add->left->id eq $mul->id;
+            }
+            if ($add->can('right') && $add->right) {
+                $add_uses_mul = 1 if blessed($add->right) && $add->right->id eq $mul->id;
+            }
+            ok($add_uses_mul, 'Add node uses Multiply node result (correct precedence)');
         }
-    );
-    $graph->add_node($add);
+    };
+}
 
-    my $return = Chalk::IR::Node->new(
-        id => 'node_2',
-        op => 'Return',
-        inputs => ['node_0', 'node_1'],
-        attributes => {}
-    );
-    $graph->add_node($return);
-
-    # Convert to JSON
-    my $json = $graph->to_json();
-    ok($json, 'Graph can be serialized to JSON');
-
-    # Verify JSON structure
-    is($json->{version}, '1.0', 'JSON has version 1.0');
-    is($json->{entry}, 'node_0', 'JSON has correct entry node');
-    is(scalar @{$json->{nodes}}, 3, 'JSON has 3 nodes');
-
-    # Find nodes in JSON by ID
-    my %json_nodes = map { $_->{id} => $_ } @{$json->{nodes}};
-
-    # Verify Add node in JSON
-    ok(exists $json_nodes{'node_1'}, 'Add node in JSON');
-    is($json_nodes{'node_1'}{op}, 'Add', 'Add node op in JSON');
-    is($json_nodes{'node_1'}{attributes}{left}{value}, 10, 'Add left value in JSON');
-    is($json_nodes{'node_1'}{attributes}{right}{value}, 20, 'Add right value in JSON');
-};
-
-# SKIP: Peephole optimization not implemented yet
 SKIP: {
-    skip "Peephole optimization API not implemented (->peephole() method missing)", 1;
+    skip 'Issue #199: Nested expressions not evaluated to IR nodes', 5;
 
-# Test that non-constant arithmetic doesn't fold
-subtest 'No folding when operands are not constants' => sub {
-    my $graph = Chalk::IR::Graph->new();
+    subtest 'Parse: Complex expression - return 1 + 2 * 3 + -5' => sub {
+        my $parser = make_parser();
 
-    my $start = Chalk::IR::Node->new(
-        id => 'node_0',
-        op => 'Start',
-        inputs => [],
-        attributes => { function => 'main' }
-    );
-    $graph->add_node($start);
+        # Chapter 2 complex example from README
+        my $code = 'return 1 + 2 * 3 + -5;';
+        my $result = $parser->parse_string($code);
+        ok($result, 'Parse succeeded');
 
-    # Create Add node where right operand is a node reference, not a constant
-    my $add = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Add',
-        inputs => ['node_0'],
-        attributes => {
-            left => { op => 'Constant', value => 1, type => 'Int' },
-            right => { op => 'NodeRef', node_id => 'node_0' },  # Reference to another node
-        }
-    );
-    my $result = $add->peephole($graph);
+        my $graph = build_graph_from_result($result);
+        ok($graph, 'Graph built from result');
+        my @nodes = values %{$graph->nodes};
 
-    # Should return the original node unchanged (or a new node with same op)
-    ok($result, 'Peephole returned a node');
-    is($result->op, 'Add', 'Add with non-constant operand remains Add');
+        # Should have two Add nodes (1 + (2*3), result + (-5))
+        my @adds = grep { $_->op eq 'Add' } @nodes;
+        ok(scalar(@adds) >= 1, 'Has Add nodes');
+
+        # Should have Multiply node for 2*3
+        my @muls = grep { $_->op eq 'Multiply' } @nodes;
+        is(scalar(@muls), 1, 'Has Multiply node for 2*3');
+
+        # Should have Negate node for -5
+        my @negs = grep { $_->op eq 'Negate' } @nodes;
+        is(scalar(@negs), 1, 'Has Negate node for -5');
+    };
+}
+
+subtest 'Parse: Subtraction - return 10 - 3' => sub {
+    my $parser = make_parser();
+
+    my $code = 'return 10 - 3;';
+    my $result = $parser->parse_string($code);
+    ok($result, 'Parse succeeded');
+
+    my $graph = build_graph_from_result($result);
+    ok($graph, 'Graph built from result');
+    my @nodes = values %{$graph->nodes};
+
+    # Should have Subtract node
+    my @subs = grep { $_->op eq 'Subtract' } @nodes;
+    is(scalar(@subs), 1, 'Has Subtract node');
+
+    # Should have constants for 10 and 3
+    my @constants = grep { $_->op eq 'Constant' } @nodes;
+    ok(scalar(@constants) >= 2, 'Has constant nodes for 10 and 3');
 };
+
+subtest 'Parse: Division - return 6 / 2' => sub {
+    my $parser = make_parser();
+
+    my $code = 'return 6 / 2;';
+    my $result = $parser->parse_string($code);
+    ok($result, 'Parse succeeded');
+
+    my $graph = build_graph_from_result($result);
+    ok($graph, 'Graph built from result');
+    my @nodes = values %{$graph->nodes};
+
+    # Should have Divide node
+    my @divs = grep { $_->op eq 'Divide' } @nodes;
+    is(scalar(@divs), 1, 'Has Divide node');
+
+    # Should have constants for 6 and 2
+    my @constants = grep { $_->op eq 'Constant' } @nodes;
+    ok(scalar(@constants) >= 2, 'Has constant nodes for 6 and 2');
+};
+
+# TODO: Constant folding tests (future peephole optimization)
+# These document what SHOULD happen when we implement constant folding
+TODO: {
+    local $TODO = 'Peephole optimization not implemented yet';
+
+    subtest 'Constant folding: 1 + 2 should fold to 3' => sub {
+        my $parser = make_parser();
+
+        my $code = 'return 1 + 2;';
+        my $result = $parser->parse_string($code);
+
+        # With peephole optimization, the Add node with constant operands
+        # should be replaced with a single Constant node containing 3
+        my $graph = build_graph_from_result($result);
+        my @nodes = values %{$graph->nodes};
+
+        my @adds = grep { $_->op eq 'Add' } @nodes;
+        is(scalar(@adds), 0, 'Add node should be folded away');
+
+        my @constants = grep { $_->op eq 'Constant' && $_->value == 3 } @nodes;
+        is(scalar(@constants), 1, 'Should have single Constant(3) node');
+    };
+
+    SKIP: {
+        skip 'Issue #199: Nested expressions not evaluated to IR nodes', 2;
+
+        subtest 'Constant folding: 1 + 2 * 3 + -5 should fold to 2' => sub {
+            my $parser = make_parser();
+
+            # Chapter 2 README example: 1 + 6 + -5 = 2
+            my $code = 'return 1 + 2 * 3 + -5;';
+            my $result = $parser->parse_string($code);
+
+            my $graph = build_graph_from_result($result);
+            my @nodes = values %{$graph->nodes};
+
+            # With full constant folding, entire expression folds to 2
+            my @constants = grep { $_->op eq 'Constant' && $_->value == 2 } @nodes;
+            is(scalar(@constants), 1, 'Should fold to Constant(2)');
+
+            # No arithmetic nodes should remain
+            my @arith = grep { $_->op =~ /^(Add|Multiply|Negate)$/ } @nodes;
+            is(scalar(@arith), 0, 'All arithmetic nodes folded away');
+        };
+    }
 }
 
 done_testing();

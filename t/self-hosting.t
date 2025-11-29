@@ -18,7 +18,7 @@ open my $grammar_fh, "<:utf8", "$RealBin/../grammar/chalk.bnf" or die $!;
 my $bnf_content = do { local $/; <$grammar_fh> };
 close $grammar_fh;
 
-my $chalk_grammar = Chalk::Grammar->build_from_bnf($bnf_content, "Program");
+my $chalk_grammar = Chalk::Grammar->build_from_bnf($bnf_content, "Program", "Chalk");
 
 # Find all .pm files in lib/
 my @pm_files;

@@ -6,6 +6,11 @@ use utf8;
 
 class Chalk::IR::Node::If :isa(Chalk::IR::Node::Base) {
     field $condition_id :param :reader;
+    # Object reference to condition node for graph traversal
+    field $condition :param :reader = undef;
+    # Object reference to control input for graph traversal
+    # This enables BFS to find the Start/Store node that controls this If
+    field $control :param :reader = undef;
 
     method op() { 'If' }
 

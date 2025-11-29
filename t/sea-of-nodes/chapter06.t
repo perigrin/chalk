@@ -19,7 +19,6 @@ SKIP: {
 # Test constant condition optimization: if (1) - always true
 subtest 'Constant true condition: if (1)' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node
     my $start = Chalk::IR::Node->new(
@@ -41,7 +40,6 @@ subtest 'Constant true condition: if (1)' => sub {
         attributes => { index => 0, label => '$ctrl' }
     );
     $graph->add_node($ctrl);
-    $scope->define('$ctrl', 'node_1');
 
     # Constant 1 (true condition)
     my $const_1 = Chalk::IR::Node->new(
@@ -511,6 +509,9 @@ subtest 'Validator confirms optimized IR correctness' => sub {
         inputs => ['node_1', 'node_2'],
         attributes => {}
     ));
+
+    # Materialize pending nodes
+    $graph->materialize_pending_nodes();
 
     # Run validator
     my $validator = Chalk::IR::Validator->new();

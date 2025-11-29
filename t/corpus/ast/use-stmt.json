@@ -1,0 +1,48 @@
+{
+   "children" : [
+      {
+         "children" : [
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        "use",
+                        {
+                           "children" : [
+                              "5.42.0"
+                           ],
+                           "rule" : "String",
+                           "span" : [
+                              4,
+                              10
+                           ]
+                        }
+                     ],
+                     "rule" : "UseStatement",
+                     "span" : [
+                        0,
+                        10
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  10
+               ]
+            },
+            ";"
+         ],
+         "rule" : "StatementList",
+         "span" : [
+            0,
+            11
+         ]
+      }
+   ],
+   "rule" : "Program",
+   "span" : [
+      0,
+      11
+   ]
+}

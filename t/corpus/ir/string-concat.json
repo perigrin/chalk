@@ -1,0 +1,80 @@
+{
+   "entry" : "node_12",
+   "nodes" : [
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_3",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "String",
+            "value" : "hello"
+         },
+         "id" : "node_6",
+         "inputs" : [
+            "node_3"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "left_id" : "node_6",
+            "right_id" : "node_10"
+         },
+         "id" : "node_11",
+         "inputs" : [
+            "node_9",
+            "node_6",
+            "node_10"
+         ],
+         "op" : "StrConcat"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_9",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "String",
+            "value" : " world"
+         },
+         "id" : "node_10",
+         "inputs" : [
+            "node_9"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_13",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_13",
+            "value_id" : "node_11"
+         },
+         "id" : "node_12",
+         "inputs" : [
+            "node_13",
+            "node_11"
+         ],
+         "op" : "Return"
+      }
+   ],
+   "version" : "1.0"
+}

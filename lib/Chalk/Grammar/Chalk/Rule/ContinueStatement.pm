@@ -14,9 +14,6 @@ class Chalk::Grammar::Chalk::Rule::ContinueStatement :isa(Chalk::GrammarRule) {
         #   2. Add it to the loop backedge (merge point)
         #   3. Skip remaining body statements for this path
 
-        my $builder = $context->env->{ir_builder};
-        return undef unless $builder;
-
         # Return metadata for parent to handle
         # This uses a similar pattern to Return and Assignment
         return {

@@ -1,0 +1,100 @@
+{
+   "entry" : "node_0",
+   "nodes" : [
+      {
+         "attributes" : {
+            "index" : 0,
+            "label" : "IfTrue"
+         },
+         "id" : "node_33",
+         "inputs" : [
+            "node_32"
+         ],
+         "op" : "Proj"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_35",
+            "value_id" : "node_40"
+         },
+         "id" : "node_41",
+         "inputs" : [
+            "node_35",
+            "node_40"
+         ],
+         "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "condition_id" : "node_0"
+         },
+         "id" : "node_32",
+         "inputs" : [
+            "node_28",
+            "node_0"
+         ],
+         "op" : "If"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_39",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {},
+         "id" : "node_35",
+         "inputs" : [
+            "node_33",
+            "node_34"
+         ],
+         "op" : "Region"
+      },
+      {
+         "attributes" : {
+            "index" : 1,
+            "label" : "IfFalse"
+         },
+         "id" : "node_34",
+         "inputs" : [
+            "node_32"
+         ],
+         "op" : "Proj"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_40",
+         "inputs" : [
+            "node_39"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_28",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : 0
+         },
+         "id" : "node_0",
+         "inputs" : [
+            null
+         ],
+         "op" : "Constant"
+      }
+   ],
+   "version" : "1.0"
+}

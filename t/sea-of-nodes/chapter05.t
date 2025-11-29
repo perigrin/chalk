@@ -17,7 +17,6 @@ use_ok('Chalk::IR::Validator');
 # Test If node with true/false branches
 subtest 'If node with control and condition' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node
     my $start = Chalk::IR::Node->new(
@@ -39,7 +38,6 @@ subtest 'If node with control and condition' => sub {
         attributes => { index => 0, label => '$ctrl' }
     );
     $graph->add_node($ctrl);
-    $scope->define('$ctrl', 'node_1');
 
     # Parameter projection
     my $x = Chalk::IR::Node->new(
@@ -49,7 +47,6 @@ subtest 'If node with control and condition' => sub {
         attributes => { index => 1, label => '$x' }
     );
     $graph->add_node($x);
-    $scope->define('$x', 'node_2');
 
     # Constant 0 for comparison
     my $const_0 = Chalk::IR::Node->new(
@@ -309,7 +306,6 @@ subtest 'Phi node merges values from control paths' => sub {
 # Test complete if-then-else with phi node
 subtest 'Complete if-then-else: classify($x) with phi merge' => sub {
     my $graph = Chalk::IR::Graph->new();
-    my $scope = Chalk::IR::Node::Scope->new();
 
     # Start node
     my $start = Chalk::IR::Node->new(
@@ -427,6 +423,9 @@ subtest 'Complete if-then-else: classify($x) with phi merge' => sub {
     );
     $graph->add_node($return);
 
+    # Materialize pending nodes
+    $graph->materialize_pending_nodes();
+
     # Verify graph structure
     is($graph->node_count, 12, 'Graph has 12 nodes');
 
@@ -541,6 +540,9 @@ subtest 'Validator confirms Chapter 5 IR correctness' => sub {
         attributes => {}
     ));
 
+    # Materialize pending nodes
+    $graph->materialize_pending_nodes();
+
     # Run validator
     my $validator = Chalk::IR::Validator->new();
     my ($success, $errors) = $validator->validate_all($graph);
@@ -595,6 +597,9 @@ subtest 'JSON serialization with If/Region/Phi' => sub {
         inputs => ['node_2', 'node_3'],
         attributes => {}
     ));
+
+    # Materialize pending nodes
+    $graph->materialize_pending_nodes();
 
     # Serialize to JSON
     my $json = $graph->to_json();

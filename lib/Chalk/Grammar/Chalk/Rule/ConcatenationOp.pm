@@ -5,33 +5,76 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
+
     method evaluate($context) {
-        # ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
+        use Chalk::IR::Node::StrConcat;
 
-        # For binary operation: check child(2) for the operator
-        # Grammar is: Expression WS_OPT '.' WS_OPT Expression
-        # So operator is at index 2
-        my @children = $context->children->@*;
-        return $context->child(0) unless defined $children[2];
-        my $op_child = $children[2]->extract;
-        return $context->child(0) unless defined $op_child && !ref($op_child);
+        # Grammar is: ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
+        # But WS_OPT may be filtered out, so we get either 3 or 5 children
+        # Search for the operator dynamically instead of hardcoding indices
 
-        my $operator = $op_child;
-        return $context->child(0) unless $operator eq '.';
+        # PRECEDENCE CHECK: Only build IR for valid precedence parses
+        # The Precedence semiring has already validated this parse in multiply()
+        # Check metadata_element for precedence validity before building IR
+        my $composite_elem = $context->metadata_element;
+        if ($composite_elem && $composite_elem->can('elements')) {
+            my @elements = $composite_elem->elements->@*;
+            # Find the Precedence element (usually at index 1 after SPPF)
+            for my $elem (@elements) {
+                if ($elem->can('valid') && !$elem->valid) {
+                    # This parse violates precedence rules - don't build IR
+                    return $context->child(0);
+                }
+            }
+        }
 
-        my $builder = $context->env->{ir_builder};
-        return $context->child(0) unless $builder;
+        my $num_children = scalar(@{$context->children});
+        my $operator_idx;
+        my $operator;
 
-        # Get left (child 0) and right (child 4)
-        my $left = $context->child(0);
-        my $right = $context->child(4);
+        # Find the operator by searching through children
+        # Operators may be Token objects or plain strings, so stringify and check
+        for my $i (0 .. $num_children - 1) {
+            my $child = $context->child($i);
+            if (defined $child) {
+                my $str_val = "$child";  # Stringify (works for both Token objects and strings)
+                if ($str_val eq '.') {
+                    $operator = $str_val;
+                    $operator_idx = $i;
+                    last;
+                }
+            }
+        }
 
-        # Validate that we got IR nodes
-        return $left unless (blessed($left) && $left->can('id'));
-        return $left unless (blessed($right) && $right->can('id'));
+        # If no operator found, return first child
+        return $context->child(0) unless defined $operator;
+
+        # Extract left operand (first IR node before operator)
+        my $left;
+        for my $i (0 .. $operator_idx - 1) {
+            my $child = $context->child($i);
+            if (ref($child) && $child->can('id')) {
+                $left = $child;
+                last;
+            }
+        }
+
+        # Extract right operand (first IR node after operator)
+        my $right;
+        for my $i ($operator_idx + 1 .. $num_children - 1) {
+            my $child = $context->child($i);
+            if (ref($child) && $child->can('id')) {
+                $right = $child;
+                last;
+            }
+        }
+
+        # Validate that we got both operands
+        return $context->child(0) unless $left && $right;
 
         # Build string concatenation IR node
-        return $builder->build_str_concat_node($left, $right);
+        # Note: Precedence validation is handled by Precedence semiring during parsing
+        return Chalk::IR::Node::StrConcat->new( left => $left, right => $right );
     }
 }
 

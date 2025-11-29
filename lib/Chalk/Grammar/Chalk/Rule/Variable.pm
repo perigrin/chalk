@@ -1,5 +1,5 @@
-# ABOUTME: Semantic action for Variable - pass through variable metadata or complex variable operations
-# ABOUTME: Variable delegates to ScalarVar, ArrayVar, HashVar, or handles complex variable operations
+# ABOUTME: Semantic action for Variable - looks up variable in scope or passes through metadata
+# ABOUTME: Variable delegates to ScalarVar, ArrayVar, HashVar for variable type handling
 
 use 5.42.0;
 use experimental 'class';
@@ -10,7 +10,6 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         # Variable -> ArrayVar (TODO)
         # Variable -> HashVar (TODO)
         # Variable -> ArraySize (TODO)
-        # Variable -> Variable '->' ... (TODO: complex variable operations)
 
         # Get the variable metadata from child (ScalarVar)
         my $var_metadata = $context->child(0);
@@ -20,14 +19,14 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         if (ref($var_metadata) eq 'HASH' && $var_metadata->{type} eq 'scalar_var') {
             my $var_name = $var_metadata->{name};
             my $scope = $context->env->{scope};
-            my $builder = $context->env->{ir_builder};
 
-            # Look up the variable's IR node from Scope (Chapter 3)
+            # Look up the variable's IR node from Scope
+            # Scope stores actual node objects, not just IDs
             if ($scope) {
-                my $node_id = $scope->lookup($var_name);
-                if (defined($node_id)) {
-                    # Return the actual IR node object
-                    return $builder->graph->get_node($node_id);
+                my $node = $scope->lookup($var_name);
+                if (defined($node) && ref($node) && $node->can('id')) {
+                    # Return the node object directly
+                    return $node;
                 }
             }
 

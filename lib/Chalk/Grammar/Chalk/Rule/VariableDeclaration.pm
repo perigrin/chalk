@@ -4,32 +4,33 @@
 use 5.42.0;
 use experimental 'class';
 
+
 class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) {
+    use Chalk::IR::Node::Store;
+
     method evaluate($context) {
         # VariableDeclaration -> LexicalDeclarator WS_OPT Variable
-        # VariableDeclaration -> LexicalDeclarator WS_OPT Variable WS_OPT AttributeList
         # VariableDeclaration -> LexicalDeclarator WS_OPT Variable WS_OPT '=' WS_OPT Expression
-        # VariableDeclaration -> LexicalDeclarator WS_OPT Variable WS_OPT AttributeList WS_OPT '=' WS_OPT Expression
-        # VariableDeclaration -> LexicalDeclarator WS_OPT '(' WS_OPT VariableList WS_OPT ')' WS_OPT '=' WS_OPT Expression
 
-        my $builder = $context->env->{ir_builder};
         my @children = $context->children->@*;
+        my $scope = $context->env->{scope};
+        die "VariableDeclaration: scope required in evaluation context" unless $scope;
 
         # Find the '=' to determine if this is an initialized declaration
         my $has_init = 0;
         my $equals_index = -1;
         for my $i (0..$#children) {
-            my $child = $children[$i]->extract;
-            if (defined($child) && !ref($child) && $child eq '=') {
+            my $child = $children[$i];
+            my $extracted = blessed($child) && $child->can('extract') ? $child->extract : $child;
+            if (defined($extracted) && "$extracted" eq '=') {
                 $has_init = 1;
                 $equals_index = $i;
                 last;
             }
         }
 
-        unless ($has_init && $builder) {
-            # No initialization or no builder - just return undef for now
-            # TODO: Handle uninitialized declarations
+        unless ($has_init) {
+            # No initialization - return undef for now
             return undef;
         }
 
@@ -38,29 +39,43 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
 
         # Extract variable name from metadata hashref
         my $var_name;
-        if (ref($var) eq 'HASH' && $var->{type} eq 'scalar_var') {
+        if (ref($var) eq 'HASH' && $var->{type} && $var->{type} eq 'scalar_var') {
             $var_name = $var->{name};
         } else {
-            # Unsupported variable type
-            return undef;
+            my $desc = ref($var) || (defined $var ? "'$var'" : 'undef');
+            die "VariableDeclaration: expected scalar_var hashref, got: $desc";
         }
 
-        # Get the expression value (child after '=' + WS_OPT, which is equals_index + 2)
+        # Get the expression value (child after '=' + WS_OPT)
         my $expr_index = $equals_index + 2;
         my $value = $context->child($expr_index);
 
         # Validate we got an IR node
         unless (blessed($value) && $value->can('id')) {
-            return undef;
+            my $desc = ref($value) || (defined $value ? "'$value'" : 'undef');
+            die "VariableDeclaration: expression must be an IR node with id(), got: $desc";
         }
 
-        # Bind variable to value node using SSA (Chapter 3)
-        # No Store node needed - variables map directly to IR nodes
-        my $scope = $context->env->{scope};
-        $scope->define($var_name, $value->id()) if $scope;
+        # Get current control from scope
+        my $current_control = $scope->current_control;
+        die "VariableDeclaration: current_control required in scope" unless $current_control;
 
-        # Return the value node (declaration evaluates to its value)
-        return $value;
+        # Create Store node directly (content-addressable ID)
+        my $store = Chalk::IR::Node::Store->new(
+            control => $current_control,
+            var     => $var_name,
+            value   => $value,
+        );
+
+        # Update scope immutably: create new scope with binding and control
+        my $new_scope = $scope->with_binding($var_name, $value);
+        $new_scope = $new_scope->with_control($store);
+
+        # Update env's scope reference to the new immutable scope
+        $context->env->{scope} = $new_scope;
+
+        # Return the Store node
+        return $store;
     }
 }
 

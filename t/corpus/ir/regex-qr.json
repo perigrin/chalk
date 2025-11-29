@@ -1,0 +1,58 @@
+{
+   "entry" : "node_18",
+   "nodes" : [
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_9",
+         "inputs" : [],
+         "op" : "Start"
+      },
+      {
+         "attributes" : {
+            "type" : "Regex",
+            "value" : "qr/\\d+/"
+         },
+         "id" : "node_12",
+         "inputs" : [
+            "node_9"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "control_id" : "node_12",
+            "value_id" : "node_17"
+         },
+         "id" : "node_18",
+         "inputs" : [
+            "node_12",
+            "node_17"
+         ],
+         "op" : "Return"
+      },
+      {
+         "attributes" : {
+            "type" : "Int",
+            "value" : null
+         },
+         "id" : "node_17",
+         "inputs" : [
+            "node_16"
+         ],
+         "op" : "Constant"
+      },
+      {
+         "attributes" : {
+            "function_name" : "main",
+            "params" : []
+         },
+         "id" : "node_16",
+         "inputs" : [],
+         "op" : "Start"
+      }
+   ],
+   "version" : "1.0"
+}

@@ -4,8 +4,16 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::PreIncrement :isa(Chalk::IR::Node::Base) {
-    field $operand_id :param :reader;
+class Chalk::IR::Node::PreIncrement {
+    field $operand :param :reader;
+    field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
+
+    field $id :reader = "preincr_" . $operand->id;
+
+    method inputs() {
+        return [ $operand->id ];
+    }
 
     method op() { 'PreIncrement' }
 
@@ -15,10 +23,29 @@ class Chalk::IR::Node::PreIncrement :isa(Chalk::IR::Node::Base) {
             op     => 'PreIncrement',
             inputs => $self->inputs,
             attributes => {
-                operand_id => $operand_id,
+                operand_id => $operand->id,
             },
         };
     }
+
+    method execute($context) {
+        my $val = $context->("node:" . $operand->id);
+        return $val + 1;  # Pre-increment: return incremented value
+    }
+
+    # Compatibility methods
+    method attributes() {
+        return $self->to_hash()->{attributes};
+    }
+
+    method peephole($graph) {
+        return $self;
+    }
+
+    method record_transform(@args) {
+        return;
+    }
+
 }
 
 1;

@@ -4,7 +4,7 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
-use Chalk::IR::Builder;
+use Chalk::IR::Node::Scope;
 use Chalk::Semiring::SPPF;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
@@ -12,15 +12,20 @@ use Chalk::Semiring::Composite;
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
-    field $builder :reader;
+    field $scope :reader;
     field $composite :reader;
 
     ADJUST {
-        # Create IR Builder BEFORE creating composite semiring
-        $builder = Chalk::IR::Builder->new();
+        # Create Scope for variable tracking (replaces Builder)
+        $scope = Chalk::IR::Node::Scope->new();
 
         # Create SPPF semiring for parse forest
+        # This builds the complete ambiguous parse forest
         my $sppf_sr = Chalk::Semiring::SPPF->new();
+
+        # Get the forest from SPPF to share with Semantic
+        # This allows semantic actions to query alternatives via EvalContext
+        my $forest = $sppf_sr->forest();
 
         # Create Precedence semiring with full Perl operator precedence table
         # Reference: perldoc perlop - Operator Precedence and Associativity
@@ -56,14 +61,19 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
             precedence_table => \@perl_precedence_table
         );
 
-        # Create Semantic semiring with IR builder in environment
+        # Create Semantic semiring with scope in environment (no Builder needed)
+        # Pass forest via shared_context so it's available in EvalContext
         my $semantic_sr = Chalk::Semiring::Semantic->new(
             grammar => $grammar,
-            env => { ir_builder => $builder }
+            env => { scope => $scope },
+            shared_context => { forest => $forest }
         );
 
-        # Create Composite semiring with all three components
-        # Order: SPPF (structure), Precedence (validation), Semantic (meaning)
+        # Use Composite with SPPF, Precedence, and Semantic
+        # SPPF builds complete ambiguous forest
+        # Precedence validates operator precedence during parsing (returns invalid for bad parses)
+        # Semantic builds IR via Rule classes creating nodes directly
+        # Precedence.add() prefers valid over invalid, so invalid parses are automatically filtered
         $composite = Chalk::Semiring::Composite->new(
             semirings => [$sppf_sr, $precedence_sr, $semantic_sr]
         );
@@ -80,13 +90,13 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     method semirings() { $composite->semirings }
 
     # Delegate on_complete() to composite (which delegates to wrapped semirings)
-    method on_complete($completed_item, $completed_element) {
-        $composite->on_complete($completed_item, $completed_element)
+    method on_complete($completed_item, $completed_element, $metadata_element = undef) {
+        $composite->on_complete($completed_item, $completed_element, $metadata_element)
     }
 
     # Delegate on_scan() to composite (which delegates to wrapped semirings)
-    method on_scan($item, $element, $pos, $matched_value) {
-        $composite->on_scan($item, $element, $pos, $matched_value)
+    method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
+        $composite->on_scan($item, $element, $pos, $matched_value, $pattern_name)
     }
 }
 

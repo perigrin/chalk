@@ -4,9 +4,18 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::Multiply :isa(Chalk::IR::Node::Base) {
-    field $left_id  :param :reader;
-    field $right_id :param :reader;
+class Chalk::IR::Node::Multiply {
+    field $left :param :reader;
+    field $right :param :reader;
+    field $source_info :param :reader = undef;
+    field $transform_chain :reader = [];
+
+    field $id :reader = "mul_" . $left->id . "_" . $right->id;
+
+    # Compute inputs from child nodes
+    method inputs() {
+        return [ $left->id, $right->id ];
+    }
 
     method op() { 'Multiply' }
 
@@ -16,17 +25,32 @@ class Chalk::IR::Node::Multiply :isa(Chalk::IR::Node::Base) {
             op     => 'Multiply',
             inputs => $self->inputs,
             attributes => {
-                left_id  => $left_id,
-                right_id => $right_id,
+                left_id  => $left->id,
+                right_id => $right->id,
             },
         };
     }
 
     method execute($context) {
-        my $left_val = $context->("node:$left_id");
-        my $right_val = $context->("node:$right_id");
+        my $left_val = $context->("node:" . $left->id);
+        my $right_val = $context->("node:" . $right->id);
         return $left_val * $right_val;
     }
+
+    # Compatibility methods for code expecting Base methods
+    method attributes() {
+        return $self->to_hash()->{attributes};
+    }
+
+    method peephole($graph) {
+        return $self;
+    }
+
+    # Stub for transform tracking
+    method record_transform(@args) {
+        return;
+    }
+
 }
 
 1;

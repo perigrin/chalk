@@ -6,56 +6,40 @@ use experimental 'class';
 
 class Chalk::Grammar::BNF::Rule::PatternDef :isa(Chalk::GrammarRule) {
     method evaluate($context) {
-        # Two alternatives:
-        # 1. PatternDef -> '%' NAME '%' WS '=' WS '/' REST_OF_LINE (8 children)
-        # 2. PatternDef -> '%' NAME '%' WS '=' WS '//' REGEX '//' FLAGS (10 children)
+        # PatternDef -> '%' NAME '%' WS '=' WS '/' REST_OF_LINE (8 children)
+        # Parses: %NAME% = /regex/flags
 
         my $children = $context->children();
         my @children = $children->@*;
+
+        # Verify we have expected structure
+        if (scalar(@children) != 8) {
+            my $child_summary = join(", ", map {
+                defined($_) ? (defined($_->focus) ? "'" . $_->focus . "'" : "undef-focus") : "undef"
+            } @children);
+            die "Unexpected PatternDef structure with " . scalar(@children) . " children (expected 8): [$child_summary]\n";
+        }
 
         # Extract pattern name (child 1)
         my $name_child = $children[1];
         my $name = $name_child->focus;
 
-        my ($regex_content, $flags);
+        # Extract rest of line after first '/' (child 7)
+        my $rest = $children[7]->focus;
 
-        if (scalar(@children) == 8) {
-            # Single-slash with rest-of-line (alternative 1)
-            my $rest = $children[7]->focus;
-
-            # Parse rest using index to find last /
-            my $last_slash = rindex($rest, '/');
-            if ($last_slash >= 0) {
-                $regex_content = substr($rest, 0, $last_slash);
-                $flags = substr($rest, $last_slash + 1) // '';
-            } else {
-                die "Invalid single-slash pattern definition: /$rest\n";
-            }
-        } elsif (scalar(@children) == 9 || scalar(@children) == 10) {
-            # Double-slash with explicit structure (alternative 2)
-            # 9 children if flags empty, 10 if flags present
-            $regex_content = $children[7]->focus;
-            my $flags_child = $children[9];
-            $flags = '';
-            if (defined($flags_child)) {
-                $flags = $flags_child->focus;
-            }
-            $flags //= '';
-        } else {
-            # Debug: show what we got
-            my $child_summary = join(", ", map {
-                defined($_) ? (defined($_->focus) ? "'" . $_->focus . "'" : "undef-focus") : "undef"
-            } @children);
-            die "Unexpected PatternDef structure with " . scalar(@children) . " children: [$child_summary]\n";
+        # Parse rest using rindex to find last /
+        # This handles cases like /\|\||/ where / appears in the regex
+        my $last_slash = rindex($rest, '/');
+        if ($last_slash < 0) {
+            die "Invalid pattern definition for %$name%: /$rest (missing closing /)\n";
         }
 
-        # Compile the regex with flags
-        my $compiled_regex;
-        if ($flags ne '') {
-            $compiled_regex = qr/(?$flags:$regex_content)/;
-        } else {
-            $compiled_regex = qr/$regex_content/;
-        }
+        my $regex_content = substr($rest, 0, $last_slash);
+
+        # Compile the regex with named capture group
+        # Named after the pattern: %FOO% = /bar/ compiles to qr/(?<FOO>bar)/
+        # terminal_to_regex assumes Regexp terminals already have captures
+        my $compiled_regex = qr/(?<$name>$regex_content)/;
 
         # Store in pattern table (env->{patterns})
         my $env = $context->env;

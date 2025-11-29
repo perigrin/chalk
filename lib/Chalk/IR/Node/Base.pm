@@ -70,7 +70,7 @@ class Chalk::IR::Node::Base {
         my $sn = $opts{source_node};
         if ($sn) {
             die "record_transform: source_node must be an IR node object with id() method"
-                unless ref($sn) && $sn->can('id');
+                unless ref($sn) && blessed($sn) && $sn->can('id');
             $source_node_id = $sn->id;
         }
 

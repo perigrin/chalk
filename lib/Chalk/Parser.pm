@@ -4,6 +4,8 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Semiring::Boolean;
+use Chalk::Grammar::Token;
+use Chalk::Preprocessor::Heredoc;
 
 class Chalk::EarleyItem {
     use overload '""' => 'key';
@@ -209,17 +211,6 @@ class Chalk::Parser {
         for my $preprocessor_class ( $preprocess->@* ) {
             next unless defined $preprocessor_class;
 
-            # Load the preprocessor module
-            my $file    = $preprocessor_class;
-            my $search  = '::';
-            my $replace = '/';
-            my $pos     = index( $file, $search );
-            while ( $pos >= 0 ) {
-                substr( $file, $pos, length($search), $replace );
-                $pos = index( $file, $search, $pos + length($replace) );
-            }
-            require "$file.pm";
-
             # Apply preprocessing
             my $preprocessor = $preprocessor_class->new( input => $input );
             $preprocessor->transform();
@@ -250,6 +241,20 @@ class Chalk::Parser {
 
         # Store input_string for semantic actions
         $input_string = $input;
+
+        # Store input_string on SPPF forest if available (for precedence validation)
+        if ($semiring->can('forest') && $semiring->forest) {
+            $semiring->forest->set_input_string($input);
+        }
+        # Handle Composite semiring wrapping SPPF
+        elsif ($semiring->can('semirings')) {
+            for my $child_sr ($semiring->semirings->@*) {
+                if ($child_sr->can('forest') && $child_sr->forest) {
+                    $child_sr->forest->set_input_string($input);
+                    last;
+                }
+            }
+        }
 
         while ( $pos <= $input_length ) {
             my @agenda_before = $chart->items_ending_at($pos);
@@ -372,10 +377,33 @@ class Chalk::Parser {
                     }
                     else {
                         # Try to match terminal with lexeme support
+                        # Pattern includes capture group from terminal_to_regex
                         my $pattern = $item->rule->terminal_to_regex($next_sym);
                         pos($input_string) = $pos;
-                        if ( $input_string =~ qr/\G($pattern)/ ) {
-                            $self->scan( $item, $element, $chart, $pos, $1 );
+                        if ( $input_string =~ qr/\G$pattern/ ) {
+                            # Extract matched text and pattern name (if named capture)
+                            # For named captures: %+ = (NAME => 'text'), for unnamed: $1 = 'text'
+                            my ($pattern_name, $matched_text) = %+;
+                            $matched_text //= $1;  # Fall back to $1 for unnamed captures
+
+                            # Create appropriate Token subclass based on pattern_name
+                            my $token_class = 'Chalk::Grammar::Token';
+                            if ($pattern_name) {
+                                if ($pattern_name =~ m/_OP$/) {
+                                    # Operator patterns: ARITHMETIC_OP, NUM_COMPARE_OP, etc.
+                                    $token_class = 'Chalk::Grammar::Token::Operator';
+                                } elsif ($pattern_name eq 'INTEGER') {
+                                    $token_class = 'Chalk::Grammar::Token::Int';
+                                } elsif ($pattern_name eq 'FLOAT') {
+                                    $token_class = 'Chalk::Grammar::Token::Float';
+                                }
+                            }
+                            my $token = $token_class->new(
+                                value => $matched_text,
+                                pattern_name => $pattern_name
+                            );
+
+                            $self->scan( $item, $element, $chart, $pos, $token, $pattern_name );
                         }
 
                       # Aycock-Horspool optimization for nullable terminals:
@@ -563,7 +591,8 @@ class Chalk::Parser {
         }
     }
 
-    method scan( $item, $element, $chart, $pos, $matched_value ) {
+    method scan( $item, $element, $chart, $pos, $matched_value, $pattern_name = undef ) {
+        # $matched_value is a Chalk::Grammar::Token object (stringifies to its value)
         my $match_length = length($matched_value);
         my $scanned_item = Chalk::EarleyItem->new(
             start_pos => $item->start_pos,
@@ -575,8 +604,10 @@ class Chalk::Parser {
         # Call semiring's on_scan() hook (polymorphic)
         # This allows semirings to handle scanned terminals appropriately:
         # - Semantic: multiplies with terminal element to accumulate in children
+        # - Precedence: checks if token is_operator() to mark operators
         # - Others: creates new element with updated positions
-        my $scanned_element = $semiring->on_scan( $item, $element, $pos, $matched_value );
+        # $pattern_name is the name from named captures (e.g., 'IDENTIFIER')
+        my $scanned_element = $semiring->on_scan( $item, $element, $pos, $matched_value, $pattern_name );
 
         $chart->add_element( $scanned_item, $scanned_element );
     }

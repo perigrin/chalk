@@ -16,6 +16,7 @@ class Chalk::EvalContext {
     field $rule      :param :reader;      # Rule being evaluated
     field $forest :param :reader = undef; # Optional shared parse forest
     field $type   :param :reader = undef; # Type of the expression (Chalk::Type)
+    field $metadata_element :param :reader = undef; # Optional metadata from sibling semirings
 
     method to_string (@args) {
         my $rule_name = $rule ? $rule->lhs : 'none';
@@ -39,7 +40,8 @@ class Chalk::EvalContext {
             grammar   => $grammar,
             rule      => $rule,
             forest    => $forest,
-            type      => $type
+            type      => $type,
+            metadata_element => $metadata_element
         );
     }
 
@@ -58,7 +60,8 @@ class Chalk::EvalContext {
             grammar   => $grammar,
             rule      => $rule,
             forest    => $forest,
-            type      => $type
+            type      => $type,
+            metadata_element => $metadata_element
         );
     }
 
@@ -76,7 +79,8 @@ class Chalk::EvalContext {
             grammar   => $grammar,
             rule      => $rule,
             forest    => $forest,
-            type      => $type
+            type      => $type,
+            metadata_element => $metadata_element
         );
     }
 

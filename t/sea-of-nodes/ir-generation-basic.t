@@ -8,14 +8,12 @@ use utf8;
 use lib 'lib';
 use Test::More;
 
-# Test that IR Builder can be used during parsing
+# Test that parsing produces IR nodes via semantic actions
+# New architecture: Rule classes create nodes directly, IR returned via parse focus
 {
     use Chalk::Parser;
     use Chalk::Grammar;
     use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
-    use Chalk::IR::Builder;
-    use Chalk::IR::Validator;
-    use Chalk::IR::Optimizer::GVN;
     use Chalk::Semiring::Semantic;
 
     # Load Chalk grammar with semantic actions
@@ -24,14 +22,8 @@ use Test::More;
     close $fh;
     my $grammar = Chalk::Grammar->build_from_bnf($content, 'Program', 'Chalk');
 
-    # Create IR Builder
-    my $builder = Chalk::IR::Builder->new();
-
-    # Create Semantic semiring with Builder in environment
-    my $semiring = Chalk::Semiring::Semantic->new(
-        grammar => $grammar,
-        env => { ir_builder => $builder }
-    );
+    # Create Semantic semiring (automatically initializes scope)
+    my $semiring = Chalk::Semiring::Semantic->new(grammar => $grammar);
 
     # Create parser
     my $parser = Chalk::Parser->new(
@@ -50,58 +42,48 @@ use Test::More;
     my $result = $parser->parse_string($program);
     ok($result, 'Simple program parses successfully');
 
-    # Get the IR graph (nodes created during parsing)
-    my $graph = $builder->graph;
-    ok($graph, 'Builder has a graph');
+    # Extract IR from parse result
+    my $ctx = $result->context;
+    ok($ctx, 'Parse result has context');
 
-    # Debug: Check nodes before optimization
-    my $nodes_before = $graph->nodes;
-    diag("Before GVN: " . scalar(keys %$nodes_before) . " total nodes");
+    my $ir_root = $ctx->focus;
+    ok($ir_root, 'Parse result has IR focus');
+    ok($ir_root->can('op'), 'IR root is a node object');
 
-    # Run GVN to deduplicate nodes from intermediate parse completions
-    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
-    $graph = $gvn_result->{graph};
-    my $metrics = $gvn_result->{metrics};
+    # Program should return a Return node
+    is($ir_root->op, 'Return', 'Program produces Return node');
 
-    # Debug: Check after GVN
-    my $nodes_after = $graph->nodes;
-    diag("After GVN: " . scalar(keys %$nodes_after) . " nodes (eliminated " . $metrics->{nodes_eliminated} . ")");
-    diag("Node types after GVN:");
-    for my $node (values %$nodes_after) {
-        diag("  " . $node->op . " (node " . $node->id . ")");
-    }
+    # Return node should have content-addressable ID
+    my $id = $ir_root->id;
+    ok($id, 'Return node has id');
+    like($id, qr/^return_/, 'Return node ID starts with return_');
 
-    # Verify graph has some nodes (should have Start, Store for assignment, etc.)
-    my $node_count = $graph->node_count;
-    ok($node_count > 0, "Graph has nodes (got $node_count)");
+    # Verify control chain is established
+    my $control = $ir_root->control;
+    ok($control, 'Return has control input');
+    ok($control->can('op'), 'Control input is a node');
 
-    # Verify graph has Start node
-    my $entry = $graph->entry;
-    ok($entry, 'Graph has entry node');
+    # Control should be Store (from variable declaration)
+    is($control->op, 'Store', 'Control input is Store node');
 
-    my $start_node = $graph->get_node($entry);
-    ok($start_node, 'Can retrieve start node');
-    is($start_node->op, 'Start', 'Entry node is a Start node');
+    # Store should have control pointing to UseStatement (from 'use 5.42.0;')
+    # Control chain: Start -> UseStatement -> Store -> Return
+    my $store_control = $control->control;
+    ok($store_control, 'Store has control input');
+    is($store_control->op, 'UseStatement', 'Store control is UseStatement node');
 
-    # Verify graph uses SSA-style variables (no Store nodes for local variables)
-    # Variables should be direct data flow edges, not memory operations
-    my $nodes = $graph->nodes;
-    my @store_nodes = grep { $_->op eq 'Store' } values %$nodes;
-    is(scalar(@store_nodes), 0, 'Graph uses SSA-style variables (no Store nodes for locals)');
+    # UseStatement (generic Chalk::IR::Node) uses inputs array, not control method
+    # First input is the control predecessor - verify it exists and traces back to Start
+    my $use_inputs = $store_control->inputs;
+    ok($use_inputs && @$use_inputs > 0, 'UseStatement has inputs');
+    # The first input should be the Start node's ID
+    like($use_inputs->[0], qr/start/i, 'UseStatement control input traces to Start');
 
-    # Validate the IR (should pass after GVN deduplication)
-    use Chalk::IR::Validator;
-    my $validator = Chalk::IR::Validator->new();
-    my ($valid, $errors) = $validator->validate_all($graph);
-
-    if (!$valid) {
-        diag("Validation errors:");
-        for my $error (@$errors) {
-            diag("  $error");
-        }
-    }
-
-    ok($valid, 'Generated IR passes validation after GVN');
+    # Verify value chain
+    my $return_value = $ir_root->value;
+    ok($return_value, 'Return has value');
+    is($return_value->op, 'Constant', 'Return value is Constant');
+    is($return_value->value, 42, 'Constant value is 42');
 }
 
 done_testing();

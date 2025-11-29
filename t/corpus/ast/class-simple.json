@@ -1,0 +1,76 @@
+{
+   "children" : [
+      {
+         "children" : [
+            {
+               "children" : [
+                  {
+                     "children" : [
+                        {
+                           "children" : [
+                              "class",
+                              {
+                                 "children" : [
+                                    {
+                                       "children" : [
+                                          "Foo"
+                                       ],
+                                       "rule" : "Identifier",
+                                       "span" : [
+                                          6,
+                                          9
+                                       ]
+                                    }
+                                 ],
+                                 "rule" : "QualifiedIdentifier",
+                                 "span" : [
+                                    6,
+                                    9
+                                 ]
+                              },
+                              {
+                                 "children" : [
+                                    "{",
+                                    "}"
+                                 ],
+                                 "rule" : "Block",
+                                 "span" : [
+                                    10,
+                                    13
+                                 ]
+                              }
+                           ],
+                           "rule" : "ClassDeclaration",
+                           "span" : [
+                              0,
+                              13
+                           ]
+                        }
+                     ],
+                     "rule" : "Block",
+                     "span" : [
+                        0,
+                        13
+                     ]
+                  }
+               ],
+               "rule" : "Statement",
+               "span" : [
+                  0,
+                  13
+               ]
+            }
+         ],
+         "rule" : "StatementList",
+         "span" : [
+            0,
+            13
+         ]
+      }
+   ],
+   "rule" : "Program",
+   "span" : [
+      0,
+      13
+   ]
+}
