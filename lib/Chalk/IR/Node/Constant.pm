@@ -5,6 +5,8 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Constant {
+    use Chalk::IR::Type::TypeInteger;
+
     field $value :param :reader;
     field $type  :param :reader;
     field $source_info :param :reader = undef;
@@ -40,6 +42,11 @@ class Chalk::IR::Node::Constant {
 
     method peephole($graph) {
         return $self;
+    }
+
+    # Return type for constant folding - constants always have known type
+    method compute() {
+        return Chalk::IR::Type::TypeInteger->constant($value);
     }
 
     # Stub for transform tracking
