@@ -8,6 +8,7 @@ class Chalk::IR::Node::Add {
     use Chalk::IR::Type::TypeInteger;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
+    use Chalk::IR::Node::Multiply;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -95,7 +96,6 @@ class Chalk::IR::Node::Add {
 
         # x + x -> x * 2 (doubling)
         if ($left->id eq $right->id) {
-            require Chalk::IR::Node::Multiply;
             return Chalk::IR::Node::Multiply->new(
                 left  => $left,
                 right => Chalk::IR::Node::Constant->new(value => 2, type => 'Integer'),
