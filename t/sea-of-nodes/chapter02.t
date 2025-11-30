@@ -111,78 +111,87 @@ subtest 'Parse: Simple addition - return 1+2 (constant folded)' => sub {
     is($constants[0]->value, 3, 'Constant value is 3 (1+2 folded)');
 };
 
-SKIP: {
-    skip 'Issue #199: Nested expressions not evaluated to IR nodes', 8;
+subtest 'Parse: Operator precedence - return 1 + 2 * 3' => sub {
+    my $parser = make_parser();
 
-    subtest 'Parse: Operator precedence - return 1 + 2 * 3' => sub {
-        my $parser = make_parser();
+    # Chapter 2 key example: tests precedence (multiply before add)
+    my $code = 'return 1 + 2 * 3;';
+    my $result = $parser->parse_string($code);
+    ok($result, 'Parse succeeded');
 
-        # Chapter 2 key example: tests precedence (multiply before add)
-        my $code = 'return 1 + 2 * 3;';
-        my $result = $parser->parse_string($code);
-        ok($result, 'Parse succeeded');
+    my $graph = build_graph_from_result($result);
 
-        my $graph = build_graph_from_result($result);
+    TODO: {
+        local $TODO = 'Issue #199: Nested expressions not evaluated to IR nodes';
+
         ok($graph, 'Graph built from result');
-        my @nodes = values %{$graph->nodes};
 
-        # Should have both Add and Multiply nodes
-        my @adds = grep { $_->op eq 'Add' } @nodes;
-        is(scalar(@adds), 1, 'Has Add node');
+        SKIP: {
+            skip 'No graph to inspect', 5 unless $graph;
 
-        my @muls = grep { $_->op eq 'Multiply' } @nodes;
-        is(scalar(@muls), 1, 'Has Multiply node');
+            my @nodes = values %{$graph->nodes};
 
-        # Multiply should be input to Add (precedence)
-        my $add = $adds[0];
-        my $mul = $muls[0];
+            # Should have both Add and Multiply nodes
+            my @adds = grep { $_->op eq 'Add' } @nodes;
+            is(scalar(@adds), 1, 'Has Add node');
 
-        ok($add && $mul, 'Both Add and Multiply nodes exist');
+            my @muls = grep { $_->op eq 'Multiply' } @nodes;
+            is(scalar(@muls), 1, 'Has Multiply node');
 
-        # Verify Multiply comes before Add in the graph
-        # The Add node should reference Multiply via its left or right operand
-        TODO: {
-            local $TODO = 'Operator precedence not correctly implemented yet';
+            # Multiply should be input to Add (precedence)
+            my $add = $adds[0];
+            my $mul = $muls[0];
+
+            ok($add && $mul, 'Both Add and Multiply nodes exist');
+
+            # Verify Multiply comes before Add in the graph
+            # The Add node should reference Multiply via its left or right operand
             my $add_uses_mul = 0;
-            if ($add->can('left') && $add->left) {
+            if ($add && $add->can('left') && $add->left) {
                 $add_uses_mul = 1 if blessed($add->left) && $add->left->id eq $mul->id;
             }
-            if ($add->can('right') && $add->right) {
+            if ($add && $add->can('right') && $add->right) {
                 $add_uses_mul = 1 if blessed($add->right) && $add->right->id eq $mul->id;
             }
             ok($add_uses_mul, 'Add node uses Multiply node result (correct precedence)');
         }
-    };
-}
+    }
+};
 
-SKIP: {
-    skip 'Issue #199: Nested expressions not evaluated to IR nodes', 5;
+subtest 'Parse: Complex expression - return 1 + 2 * 3 + -5' => sub {
+    my $parser = make_parser();
 
-    subtest 'Parse: Complex expression - return 1 + 2 * 3 + -5' => sub {
-        my $parser = make_parser();
+    # Chapter 2 complex example from README
+    my $code = 'return 1 + 2 * 3 + -5;';
+    my $result = $parser->parse_string($code);
+    ok($result, 'Parse succeeded');
 
-        # Chapter 2 complex example from README
-        my $code = 'return 1 + 2 * 3 + -5;';
-        my $result = $parser->parse_string($code);
-        ok($result, 'Parse succeeded');
+    my $graph = build_graph_from_result($result);
 
-        my $graph = build_graph_from_result($result);
+    TODO: {
+        local $TODO = 'Issue #199: Nested expressions not evaluated to IR nodes';
+
         ok($graph, 'Graph built from result');
-        my @nodes = values %{$graph->nodes};
 
-        # Should have two Add nodes (1 + (2*3), result + (-5))
-        my @adds = grep { $_->op eq 'Add' } @nodes;
-        ok(scalar(@adds) >= 1, 'Has Add nodes');
+        SKIP: {
+            skip 'No graph to inspect', 3 unless $graph;
 
-        # Should have Multiply node for 2*3
-        my @muls = grep { $_->op eq 'Multiply' } @nodes;
-        is(scalar(@muls), 1, 'Has Multiply node for 2*3');
+            my @nodes = values %{$graph->nodes};
 
-        # Should have Negate node for -5
-        my @negs = grep { $_->op eq 'Negate' } @nodes;
-        is(scalar(@negs), 1, 'Has Negate node for -5');
-    };
-}
+            # Should have two Add nodes (1 + (2*3), result + (-5))
+            my @adds = grep { $_->op eq 'Add' } @nodes;
+            ok(scalar(@adds) >= 1, 'Has Add nodes');
+
+            # Should have Multiply node for 2*3
+            my @muls = grep { $_->op eq 'Multiply' } @nodes;
+            is(scalar(@muls), 1, 'Has Multiply node for 2*3');
+
+            # Should have Negate node for -5
+            my @negs = grep { $_->op eq 'Negate' } @nodes;
+            is(scalar(@negs), 1, 'Has Negate node for -5');
+        }
+    }
+};
 
 subtest 'Parse: Subtraction - return 10 - 3 (constant folded)' => sub {
     my $parser = make_parser();
@@ -227,27 +236,32 @@ subtest 'Parse: Division - return 6 / 2 (constant folded)' => sub {
 };
 
 # Nested expression constant folding - blocked by Issue #199
-SKIP: {
-    skip 'Issue #199: Nested expressions not evaluated to IR nodes', 2;
+subtest 'Constant folding: 1 + 2 * 3 + -5 should fold to 2' => sub {
+    my $parser = make_parser();
 
-    subtest 'Constant folding: 1 + 2 * 3 + -5 should fold to 2' => sub {
-        my $parser = make_parser();
+    # Chapter 2 README example: 1 + 6 + -5 = 2
+    my $code = 'return 1 + 2 * 3 + -5;';
+    my $result = $parser->parse_string($code);
 
-        # Chapter 2 README example: 1 + 6 + -5 = 2
-        my $code = 'return 1 + 2 * 3 + -5;';
-        my $result = $parser->parse_string($code);
+    my $graph = build_graph_from_result($result);
 
-        my $graph = build_graph_from_result($result);
-        my @nodes = values %{$graph->nodes};
+    TODO: {
+        local $TODO = 'Issue #199: Nested expressions not evaluated to IR nodes';
 
-        # With full constant folding, entire expression folds to 2
-        my @constants = grep { $_->op eq 'Constant' && $_->value == 2 } @nodes;
-        is(scalar(@constants), 1, 'Should fold to Constant(2)');
+        SKIP: {
+            skip 'No graph to inspect', 2 unless $graph;
 
-        # No arithmetic nodes should remain
-        my @arith = grep { $_->op =~ /^(Add|Multiply|Negate)$/ } @nodes;
-        is(scalar(@arith), 0, 'All arithmetic nodes folded away');
-    };
-}
+            my @nodes = values %{$graph->nodes};
+
+            # With full constant folding, entire expression folds to 2
+            my @constants = grep { $_->op eq 'Constant' && $_->value == 2 } @nodes;
+            is(scalar(@constants), 1, 'Should fold to Constant(2)');
+
+            # No arithmetic nodes should remain
+            my @arith = grep { $_->op =~ /^(Add|Multiply|Negate)$/ } @nodes;
+            is(scalar(@arith), 0, 'All arithmetic nodes folded away');
+        }
+    }
+};
 
 done_testing();
