@@ -68,7 +68,23 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
         # Boolean AND for sequence: both must succeed
         # If either is invalid, result is invalid
-        return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index) if !$valid || !$other->valid;
+        # IMPORTANT: Preserve operator info so invalid elements don't equal add_id
+        # This prevents premature Composite short-circuit and allows add() to choose correctly
+        if (!$valid || !$other->valid) {
+            my $op = $operator // ($other->can('operator') ? $other->operator : undef);
+            my $level = $precedence_level // ($other->can('precedence_level') ? $other->precedence_level : undef);
+            my $assoc = $associativity // ($other->can('associativity') ? $other->associativity : undef);
+            my $active = $is_active || ($other->can('is_active') ? $other->is_active : 0);
+
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 0,
+                operator => $op,
+                precedence_level => $level,
+                associativity => $assoc,
+                operator_index => $operator_index,
+                is_active => $active
+            );
+        }
 
         # Precedence validation: check if $other (right operand) has valid precedence
         # relative to $self (left context/current operator)
@@ -328,6 +344,39 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                 my $op_info = $self->lookup_operator($token_str);
 
                 if ($op_info) {
+                    # Check if the existing element has a passive operator from a sub-expression
+                    # If so, validate that this active operator can legally contain it
+                    my $existing_op = $element->operator;
+                    my $existing_level = $element->precedence_level;
+
+                    if (defined($existing_op) && !$element->is_active) {
+                        # Existing element has a passive operator (from completed sub-expression)
+                        # Active operator (new) is the current rule's operator (parent)
+                        # Passive operator (existing) is from child expression
+                        #
+                        # Valid: parent has lower or equal precedence than child
+                        # Invalid: parent has higher precedence than child (child should have bound first)
+                        #
+                        # Lower precedence = higher level number
+                        # Higher precedence = lower level number
+                        my $new_level = $op_info->{level};
+
+                        if ($new_level < $existing_level) {
+                            # New operator has higher precedence (lower level) than existing
+                            # This is INVALID: e.g., * trying to contain + result
+                            # The + should have been inside the * expression, not the other way around
+                            # Mark as invalid but PRESERVE operator info for debugging
+                            return Chalk::Semiring::PrecedenceElement->new(
+                                valid => 0,
+                                operator => $token_str,
+                                precedence_level => $op_info->{level},
+                                associativity => $op_info->{assoc},
+                                operator_index => $operator_index,
+                                is_active => 1
+                            );
+                        }
+                    }
+
                     return Chalk::Semiring::PrecedenceElement->new(
                         valid => 1,
                         operator => $token_str,
@@ -349,6 +398,10 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # Get the rule name to check if we should clear operator context
         my $rule_name = $completed_item->rule->lhs // '';
 
+        # CRITICAL: Preserve invalid state if the completed element was invalid
+        # This prevents wiping out precedence validation results
+        my $was_valid = $completed_element->can('valid') ? $completed_element->valid : 1;
+
         # Preserve operator info for Expression and operator-producing rules
         # Clear it elsewhere to prevent comparing unrelated operators
         my @expression_rules = qw(
@@ -356,14 +409,15 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
             ComparisonExpression LogicalExpression
             ArithmeticOp ComparisonOp LogicalOp
             ConcatenationOp RangeOp
+            Unary Postfix
         );
 
         my $is_expression = grep { $rule_name eq $_ } @expression_rules;
 
-        # If not an expression rule, clear operator info
+        # If not an expression rule, clear operator info (but preserve validity)
         if (!$is_expression) {
             return Chalk::Semiring::PrecedenceElement->new(
-                valid => 1,
+                valid => $was_valid,
                 operator_index => $operator_index
             );
         }
@@ -380,9 +434,10 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         }
 
         # Create result element with operator information
+        # IMPORTANT: Preserve validity state - don't always return valid => 1
         if (defined($operator)) {
             return Chalk::Semiring::PrecedenceElement->new(
-                valid => 1,
+                valid => $was_valid,
                 operator => $operator,
                 precedence_level => $prec_level,
                 associativity => $assoc,
@@ -390,7 +445,7 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
             );
         } else {
             return Chalk::Semiring::PrecedenceElement->new(
-                valid => 1,
+                valid => $was_valid,
                 operator_index => $operator_index
             );
         }

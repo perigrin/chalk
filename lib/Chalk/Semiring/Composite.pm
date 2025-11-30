@@ -10,10 +10,62 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     field $parent_semiring :param :reader = undef;  # Reference to parent Composite semiring
 
     method add( $other, $swap = undef ) {
-        # Delegate addition to each child element
-        # Short-circuit if any child returns add_id
-        my @results;
-        for my $i (0..$#$elements) {
+        # COORDINATED ADD: Let the first semiring (Precedence) be the leader
+        # When Precedence chooses one derivation, ALL semirings use that derivation
+        # This ensures that when Precedence invalidates a parse, Semantic follows
+        #
+        # The first semiring (index 0) is assumed to be the Precedence semiring
+        # which filters invalid parses. Its add() returns $self or $other directly.
+
+        my $prec_self = $elements->[0];
+        my $prec_other = $other->elements->[0];
+
+        # SPECIAL CASE: If Precedence elements are the same object (shared),
+        # fall back to independent delegation - Precedence can't distinguish
+        if ($prec_self == $prec_other) {
+            my @results;
+            for my $i (0..$#$elements) {
+                my $result = $elements->[$i]->add($other->elements->[$i]);
+                push @results, $result;
+
+                # Short-circuit check: if result equals child's add_id, return composite's add_id
+                if ($parent_semiring && defined($parent_semiring->child_add_ids->[$i])) {
+                    if ($result->equals($parent_semiring->child_add_ids->[$i])) {
+                        return $parent_semiring->add_id;
+                    }
+                }
+            }
+
+            return Chalk::Semiring::CompositeElement->new(
+                elements => \@results,
+                parent_semiring => $parent_semiring
+            );
+        }
+
+        # Precedence elements are different - let Precedence be the leader
+        my $prec_result = $prec_self->add($prec_other);
+
+        # Check which derivation Precedence chose via reference equality
+        # PrecedenceElement.add() returns $self or $other, not new objects
+        my $use_self = $prec_result == $prec_self;
+        my $use_other = $prec_result == $prec_other;
+
+        # DEBUG: Uncomment to trace coordination decisions
+        # warn "COORD: self(v" . $prec_self->valid . ") vs other(v" . $prec_other->valid . ") => use_self=$use_self, use_other=$use_other";
+
+        if ($use_self) {
+            # Precedence chose self - use self's elements for ALL semirings
+            # This ensures invalid parses (other) don't contribute their Semantic elements
+            return $self;
+        } elsif ($use_other) {
+            # Precedence chose other - use other's elements for ALL semirings
+            return $other;
+        }
+
+        # Precedence created a new element - fall back to independent delegation
+        # This handles edge cases like when both are valid but combined
+        my @results = ($prec_result);
+        for my $i (1..$#$elements) {
             my $result = $elements->[$i]->add($other->elements->[$i]);
             push @results, $result;
 
@@ -184,17 +236,11 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
         # Extract elements from CompositeElement
         my @elements = $completed_element->elements->@*;
 
-        # SHORT-CIRCUIT CHECK: Before processing, check if any element equals its add_id
-        # This prevents building IR for invalid parses (e.g., precedence violations)
-        for my $i (0..$#elements) {
-            if (defined($child_add_ids->[$i])) {
-                if ($elements[$i]->equals($child_add_ids->[$i])) {
-                    # This element is invalid (equals add_id), so short-circuit
-                    # Return composite add_id without processing any semirings
-                    return $add_id;
-                }
-            }
-        }
+        # NOTE: We previously had short-circuit logic here, but it's been removed
+        # because it interferes with the add() coordination. Invalid parses need
+        # to complete (building placeholder IR) so that add() can later choose
+        # the valid derivation. The Semantic evaluation is responsible for
+        # handling invalid parses gracefully (not dying, just returning placeholder values).
 
         # Call on_complete() on each wrapped semiring with its corresponding element
         # Pass the full CompositeElement as 3rd parameter so semirings can access sibling data
