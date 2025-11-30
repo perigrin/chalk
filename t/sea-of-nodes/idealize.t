@@ -166,4 +166,42 @@ subtest 'Negate: no optimizations' => sub {
     ok(!$result, 'Negate::idealize() returns nothing');
 };
 
+# =============================================================================
+# Peephole recursion termination tests
+# =============================================================================
+
+subtest 'Peephole recursion terminates: 0 + 0 folds to 0' => sub {
+    my $zero = const(0);
+    my $add = Chalk::IR::Node::Add->new(left => $zero, right => $zero);
+
+    # This triggers: idealize returns $left (which is 0), then peephole on Constant
+    my $result = $add->peephole();
+    is($result->op, 'Constant', 'Deeply folded to Constant');
+    is($result->value, 0, 'Value is 0');
+};
+
+subtest 'Peephole recursion terminates: x + x -> x * 2 -> constant' => sub {
+    my $five = const(5);
+    my $add = Chalk::IR::Node::Add->new(left => $five, right => $five);
+
+    # This triggers: idealize returns Multiply(5, 2), then peephole folds to 10
+    my $result = $add->peephole();
+    is($result->op, 'Constant', 'x + x folded through Multiply to Constant');
+    is($result->value, 10, 'Value is 10 (5 * 2)');
+};
+
+subtest 'Peephole recursion terminates: chained identity' => sub {
+    my $x = const(42);
+    my $zero = const(0);
+    my $one = const(1);
+
+    # (x + 0) * 1 should fold to x
+    my $add = Chalk::IR::Node::Add->new(left => $x, right => $zero);
+    my $mul = Chalk::IR::Node::Multiply->new(left => $add, right => $one);
+
+    my $result = $mul->peephole();
+    is($result->op, 'Constant', 'Chained identities fold to Constant');
+    is($result->value, 42, 'Value is 42');
+};
+
 done_testing();

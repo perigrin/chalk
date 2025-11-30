@@ -1,5 +1,28 @@
 # ABOUTME: Precedence semiring for operator precedence validation during parsing
 # ABOUTME: Validates operator precedence through semiring operations without SPPF dependency
+#
+# ACTIVE/PASSIVE MODEL:
+# The semiring tracks whether each operator is "active" or "passive" to distinguish
+# between operators from the current parse rule vs operators from completed sub-expressions.
+#
+# - ACTIVE operators: Created by on_scan() when scanning an operator token. These represent
+#   the operator of the CURRENT rule being parsed (the "parent" in the parse tree).
+#
+# - PASSIVE operators: Created by on_complete() when a sub-expression finishes. These
+#   represent operators from completed child expressions.
+#
+# PRECEDENCE VALIDATION:
+# When combining operators via multiply(), the model enforces that a parent operator
+# can only contain child operators of EQUAL OR HIGHER precedence. This prevents
+# incorrect groupings like (1+2)*3 when * should bind tighter than +.
+#
+# Example for "1 + 2 * 3":
+#   - Correct parse: 1 + (2*3) - The + is active (parent), * is passive (child from sub-expr)
+#     Since + has lower precedence than *, this is VALID (lower-prec parent, higher-prec child)
+#   - Wrong parse: (1+2) * 3 - The * is active (parent), + is passive (child from sub-expr)
+#     Since * has higher precedence than +, this is INVALID (higher-prec parent can't contain
+#     lower-prec child - the + should have been inside the * expression)
+#
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
