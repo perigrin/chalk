@@ -16,17 +16,18 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         # But WS_OPT may be filtered out, so we get either 3 or 5 children
         # Search for the operator dynamically instead of hardcoding indices
 
-        # PRECEDENCE CHECK: Only build IR for valid precedence parses
-        # The Precedence semiring has already validated this parse in multiply()
-        # Check metadata_element for precedence validity before building IR
+        # PRECEDENCE CHECK: Check if this parse is valid according to precedence rules
+        # The Precedence semiring has validated this parse in multiply()/on_scan()
+        # If invalid, return undef - the add() coordination will filter out this derivation
         my $composite_elem = $context->metadata_element;
         if ($composite_elem && $composite_elem->can('elements')) {
             my @elements = $composite_elem->elements->@*;
-            # Find the Precedence element (usually at index 1 after SPPF)
+            # Find the Precedence element (usually at index 0)
             for my $elem (@elements) {
                 if ($elem->can('valid') && !$elem->valid) {
-                    # This parse violates precedence rules - this is a bug
-                    die "ArithmeticOp received invalid precedence parse - precedence semiring should have filtered this";
+                    # This parse violates precedence rules - return nothing
+                    # The coordinated add() in Composite will choose the valid derivation
+                    return;
                 }
             }
         }

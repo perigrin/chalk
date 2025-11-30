@@ -518,7 +518,48 @@ class Chalk::Parser {
 
             # Always merge element (for disambiguation), only add to agenda if new
             if ( $chart->has_item($new_item) ) {
-                $chart->merge_element( $new_item, $combined_element );
+                my $old_element = $chart->get_element($new_item);
+
+                # For complete items, call on_complete() on the new derivation BEFORE merging
+                # This ensures add() can choose between fully-evaluated semantic elements,
+                # not between an evaluated element and an unevaluated one.
+                # Without SPPF, each derivation must get its own on_complete() call.
+                if ( $new_item->complete ) {
+                    $combined_element = $semiring->on_complete( $new_item, $combined_element );
+                }
+
+                my $merged = $chart->merge_element( $new_item, $combined_element );
+
+                # If precedence filtering changed which derivation wins, propagate to parent items
+                # Parents may have already advanced with the old (invalid) derivation's value
+                if ( $new_item->complete && $merged->can('elements') && $old_element->can('elements') ) {
+                    my $old_prec = $old_element->elements->[0];
+                    my $new_prec = $combined_element->elements->[0];
+
+                    # Check if the merge changed validity (invalid→valid transition)
+                    # Only check if both elements support the valid() method (Precedence semiring)
+                    if ($old_prec->can('valid') && $new_prec->can('valid') && !$old_prec->valid && $new_prec->valid) {
+                        # Propagate the valid parse up to parent items
+                        my $lhs = $new_item->rule->lhs;
+                        my @parent_waiting = $chart->items_waiting_for( $lhs, $new_item->start_pos );
+                        for my $parent_item (@parent_waiting) {
+                            my $parent_element = $chart->get_element($parent_item);
+                            next unless $parent_element;
+                            my $parent_combined = $parent_element * $combined_element;
+                            my $parent_new_item = Chalk::EarleyItem->new(
+                                start_pos => $parent_item->start_pos,
+                                rule      => $parent_item->rule,
+                                dot_pos   => $parent_item->dot_pos + 1,
+                                end_pos   => $new_item->end_pos
+                            );
+                            $chart->merge_element( $parent_new_item, $parent_combined );
+                            # Add to agenda if not already there
+                            unless ( $chart->has_completed($parent_new_item) ) {
+                                push( $agenda->@*, $parent_new_item );
+                            }
+                        }
+                    }
+                }
             } else {
                 $chart->add_element( $new_item, $combined_element );
                 push( $agenda->@*, $new_item );
