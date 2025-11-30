@@ -38,7 +38,7 @@ class Chalk::IR::Node::PreIncrement {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
+    method peephole($graph = undef) {
         return $self;
     }
 

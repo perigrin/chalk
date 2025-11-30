@@ -46,9 +46,8 @@ class Chalk::IR::Node::Divide {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
-        # Use compute() for constant folding - if both inputs are constant,
-        # replace this Divide with a Constant node containing the quotient
+    method peephole($graph = undef) {
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -56,6 +55,12 @@ class Chalk::IR::Node::Divide {
                 type  => 'Integer',
             );
         }
+
+        # Step 2: Algebraic simplification via idealize()
+        if (my $idealized = $self->idealize()) {
+            return $idealized->peephole();
+        }
+
         return $self;
     }
 

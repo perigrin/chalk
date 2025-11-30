@@ -46,9 +46,8 @@ class Chalk::IR::Node::Subtract {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
-        # Use compute() for constant folding - if both inputs are constant,
-        # replace this Subtract with a Constant node containing the difference
+    method peephole($graph = undef) {
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -56,6 +55,12 @@ class Chalk::IR::Node::Subtract {
                 type  => 'Integer',
             );
         }
+
+        # Step 2: Algebraic simplification via idealize()
+        if (my $idealized = $self->idealize()) {
+            return $idealized->peephole();
+        }
+
         return $self;
     }
 

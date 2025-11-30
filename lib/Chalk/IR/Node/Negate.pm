@@ -43,9 +43,8 @@ class Chalk::IR::Node::Negate {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
-        # Use compute() for constant folding - if input is constant,
-        # replace this Negate with a Constant node containing the negation
+    method peephole($graph = undef) {
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -53,6 +52,12 @@ class Chalk::IR::Node::Negate {
                 type  => 'Integer',
             );
         }
+
+        # Step 2: Algebraic simplification via idealize()
+        if (my $idealized = $self->idealize()) {
+            return $idealized->peephole();
+        }
+
         return $self;
     }
 

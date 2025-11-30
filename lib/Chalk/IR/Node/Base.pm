@@ -36,7 +36,7 @@ class Chalk::IR::Node::Base {
     }
 
     # Placeholder for optimization - subclasses can override
-    method peephole($graph) {
+    method peephole($graph = undef) {
         return $self;
     }
 

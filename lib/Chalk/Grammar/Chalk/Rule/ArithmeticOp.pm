@@ -84,17 +84,18 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
         # Build appropriate IR node based on operator
         # Note: Precedence validation is handled by Precedence semiring during parsing
+        # Each node is peepholed immediately for constant folding and algebraic simplification
         if ( $operator eq '+' ) {
-            return Chalk::IR::Node::Add->new( left => $left, right => $right );
+            return Chalk::IR::Node::Add->new( left => $left, right => $right )->peephole();
         }
         elsif ( $operator eq '-' ) {
-            return Chalk::IR::Node::Subtract->new( left => $left, right => $right );
+            return Chalk::IR::Node::Subtract->new( left => $left, right => $right )->peephole();
         }
         elsif ( $operator eq '*' ) {
-            return Chalk::IR::Node::Multiply->new( left => $left, right => $right );
+            return Chalk::IR::Node::Multiply->new( left => $left, right => $right )->peephole();
         }
         elsif ( $operator eq '/' ) {
-            return Chalk::IR::Node::Divide->new( left => $left, right => $right );
+            return Chalk::IR::Node::Divide->new( left => $left, right => $right )->peephole();
         }
 
         # If we get here, we found an operator that isn't +, -, *, / - this is a bug

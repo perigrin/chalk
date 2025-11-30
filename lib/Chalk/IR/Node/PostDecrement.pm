@@ -38,7 +38,7 @@ class Chalk::IR::Node::PostDecrement {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
+    method peephole($graph = undef) {
         return $self;
     }
 
