@@ -8,6 +8,7 @@ use Chalk::IR::Node::Scope;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
+use Chalk::Grammar::Chalk;  # Load all Chalk Rule classes for semantic actions
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
