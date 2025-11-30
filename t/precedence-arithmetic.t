@@ -108,7 +108,7 @@ for my $test (@todo_tests) {
         my $result = $parser->parse_string($test->{code});
 
         TODO: {
-            local $TODO = "Parentheses precedence override not yet implemented";
+            local $TODO = "Parentheses precedence override not yet implemented (Issue #213)";
 
             ok($result, 'Parse succeeded');
 
