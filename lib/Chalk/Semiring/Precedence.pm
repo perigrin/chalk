@@ -46,6 +46,10 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     method add( $other, $swap = undef ) {
         # Choose between alternative parses based on precedence validation
         # Return the one with valid precedence, or add_id if neither is valid
+        #
+        # CONTRACT: This method returns $self or $other directly (not copies).
+        # Composite::add() relies on reference equality to determine which
+        # derivation won, ensuring all semirings use the same derivation.
 
         # Handle undef or wrong type for $other
         return $self unless defined $other;
