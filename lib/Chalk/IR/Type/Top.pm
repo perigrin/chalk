@@ -1,16 +1,17 @@
 # ABOUTME: Top type representing unknown/unanalyzed values in IR
-# ABOUTME: Singleton - use Chalk::IR::Type::Top->TOP to access
+# ABOUTME: Singleton - call Chalk::IR::Type::Top->top() to access
 
 use 5.42.0;
 use experimental qw(class);
 use Chalk::IR::Type;
 
 class Chalk::IR::Type::Top :isa(Chalk::IR::Type) {
-    my $TOP;
-
-    sub TOP {
+    # Class method to get the singleton TOP instance
+    # Uses state variable to ensure only one instance is created
+    sub top {
         my $class = shift // __PACKAGE__;
-        $TOP //= $class->new();
+        state $singleton = Chalk::IR::Type::Top->new();
+        return $singleton;
     }
 }
 

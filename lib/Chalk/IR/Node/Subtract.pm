@@ -5,8 +5,8 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Subtract {
-    use Chalk::IR::Type::Top;
     use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
@@ -70,7 +70,7 @@ class Chalk::IR::Node::Subtract {
             );
         }
 
-        return Chalk::IR::Type::Top::TOP();
+        return Chalk::IR::Type::Top->top();
     }
 
     # Stub for transform tracking

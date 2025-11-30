@@ -5,8 +5,8 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Negate {
-    use Chalk::IR::Type::Top;
     use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
 
     field $operand :param :reader;
@@ -66,7 +66,7 @@ class Chalk::IR::Node::Negate {
             );
         }
 
-        return Chalk::IR::Type::Top::TOP();
+        return Chalk::IR::Type::Top->top();
     }
 
     # Stub for transform tracking

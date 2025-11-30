@@ -22,7 +22,7 @@ subtest 'Base node compute() returns TOP' => sub {
     ok($base->can('compute'), 'Base node has compute() method');
     my $type = $base->compute();
     ok($type isa Chalk::IR::Type::Top, 'compute() returns Top type');
-    is(refaddr($type), refaddr(Chalk::IR::Type::Top->TOP), 'compute() returns TOP singleton');
+    is(refaddr($type), refaddr(Chalk::IR::Type::Top->top()), 'compute() returns TOP singleton');
 };
 
 # Task 6: Constant node compute() returns TypeInteger
