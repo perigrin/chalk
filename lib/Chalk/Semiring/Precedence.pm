@@ -12,6 +12,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     field $associativity :param :reader = undef;  # Associativity type: left, right, nonassoc, chained, chain/na
     field $operator_index :param :reader = undef;  # Hash mapping operators to precedence info
     field $forest :param :reader = undef;  # Optional SPPF forest reference for disambiguation
+    field $is_active :param :reader = 0;  # 1 if operator is from current rule (on_scan), 0 if from sub-expression (on_complete)
 
     # Lookup operator precedence and associativity from operator_index
     method lookup_operator($op) {
@@ -59,44 +60,111 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
         # If either element has no operator info, preserve the one that does
         if (!defined($self_op) && !defined($other_op)) {
-            # Neither has operator - return plain valid element
-            return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index);
+            # Neither has operator - return plain valid element, preserving any active status
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator_index => $operator_index,
+                is_active => ($is_active || ($other->is_active // 0))
+            );
         } elsif (!defined($self_op)) {
-            # Other has operator, self doesn't - preserve other's operator
+            # Other has operator, self doesn't - preserve other's operator and active status
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => 1,
                 operator => $other_op,
                 precedence_level => $other_level,
                 associativity => $other_assoc,
-                operator_index => $operator_index
+                operator_index => $operator_index,
+                is_active => ($other->is_active // 0)
             );
         } elsif (!defined($other_op)) {
-            # Self has operator, other doesn't - preserve self's operator
+            # Self has operator, other doesn't - preserve self's operator and active status
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => 1,
                 operator => $self_op,
                 precedence_level => $self_level,
                 associativity => $self_assoc,
-                operator_index => $operator_index
+                operator_index => $operator_index,
+                is_active => $is_active
             );
         }
 
-        # Both have operators - validate based on precedence and associativity
+        # Both have operators - validate based on precedence, associativity, and active/passive status
+        # "Active" = operator from on_scan (current rule's operator)
+        # "Passive" = operator from on_complete (sub-expression's operator)
+        #
+        # Key insight: The ACTIVE operator is the current rule's operator (parent).
+        # The PASSIVE operator came from a completed sub-expression (child).
+        # A parent can contain children of equal or higher precedence, but NOT lower precedence.
 
-        # Rule 1: Higher precedence (lower level) on LEFT with lower precedence (higher level) on RIGHT is INVALID
-        # Example: (a + b) * c where + is on left and * should bind tighter - WRONG parse
-        if ($self_level < $other_level) {
-            # self has higher precedence (lower level), other has lower precedence (higher level)
-            # This is invalid sequencing
-            return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+        my $self_active = $is_active;
+        my $other_active = $other->is_active;
+
+        # Determine which is the "current rule" (active) operator
+        if ($self_active && !$other_active) {
+            # self is the current rule's operator, other is from sub-expression
+            # Valid if self (parent) has lower or equal precedence than other (child)
+            # Invalid if self (parent) has higher precedence - the child should have bound first
+            if ($self_level < $other_level) {
+                # Parent has higher precedence than child - INVALID
+                # Example: `*` trying to contain `+` result
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+            }
+            # Parent has lower or equal precedence - VALID
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator => $self_op,
+                precedence_level => $self_level,
+                associativity => $self_assoc,
+                operator_index => $operator_index,
+                is_active => 1
+            );
+        } elsif (!$self_active && $other_active) {
+            # other is the current rule's operator, self is from sub-expression
+            # Valid if other (parent) has lower or equal precedence than self (child)
+            # Invalid if other (parent) has higher precedence - the child should have bound first
+            if ($other_level < $self_level) {
+                # Parent has higher precedence than child - INVALID
+                # Example: `*` trying to contain `+` result
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+            }
+            # Parent has lower or equal precedence - VALID
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator => $other_op,
+                precedence_level => $other_level,
+                associativity => $other_assoc,
+                operator_index => $operator_index,
+                is_active => 1
+            );
         }
 
-        # Rule 2: Lower precedence (higher level) on LEFT with higher precedence (lower level) on RIGHT is VALID
-        # Example: (a * b) + c where * is on left and + binds less tightly - CORRECT parse
+        # Both active or both passive - use traditional precedence rules
+        # Rule 1: Higher precedence (lower level) on LEFT with lower precedence (higher level) on RIGHT
+        if ($self_level < $other_level) {
+            # self has higher precedence (lower level), other has lower precedence (higher level)
+            # Preserve the higher precedence operator
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator => $self_op,
+                precedence_level => $self_level,
+                associativity => $self_assoc,
+                operator_index => $operator_index,
+                is_active => $self_active || $other_active
+            );
+        }
+
+        # Rule 2: Lower precedence (higher level) on LEFT with higher precedence (lower level) on RIGHT
         if ($self_level > $other_level) {
             # self has lower precedence (higher level), other has higher precedence (lower level)
-            # This is valid sequencing
-            return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index);
+            # Preserve the higher precedence operator
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator => $other_op,
+                precedence_level => $other_level,
+                associativity => $other_assoc,
+                operator_index => $operator_index,
+                is_active => $self_active || $other_active
+            );
         }
 
         # Same precedence level - check associativity rules
@@ -132,7 +200,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
     method to_string(@args) {
         if ($operator) {
-            return "Prec($operator:$precedence_level)";
+            my $active_marker = $is_active ? '*' : '';  # * marks active (scanned) operators
+            return "Prec($operator$active_marker:$precedence_level)";
         } else {
             return $valid ? "valid" : "invalid";
         }
@@ -148,6 +217,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         return 0 unless ($operator // '') eq ($other->operator // '');
         return 0 unless ($precedence_level // 0) == ($other->precedence_level // 0);
         return 0 unless ($associativity // '') eq ($other->associativity // '');
+        return 0 unless ($is_active // 0) == ($other->is_active // 0);
         return 1;
     }
 }
@@ -240,7 +310,8 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                         operator => $token_str,
                         precedence_level => $op_info->{level},
                         associativity => $op_info->{assoc},
-                        operator_index => $operator_index
+                        operator_index => $operator_index,
+                        is_active => 1  # Mark as active - this is the current rule's operator
                     );
                 }
             }
@@ -255,11 +326,13 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # Get the rule name to check if we should clear operator context
         my $rule_name = $completed_item->rule->lhs // '';
 
-        # Only preserve operator info for actual Expression rules
-        # Clear it everywhere else to prevent comparing unrelated operators
+        # Preserve operator info for Expression and operator-producing rules
+        # Clear it elsewhere to prevent comparing unrelated operators
         my @expression_rules = qw(
             Expression BinaryExpression ArithmeticExpression
             ComparisonExpression LogicalExpression
+            ArithmeticOp ComparisonOp LogicalOp
+            ConcatenationOp RangeOp
         );
 
         my $is_expression = grep { $rule_name eq $_ } @expression_rules;
