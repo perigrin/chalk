@@ -85,6 +85,14 @@ class Chalk::EarleyChart {
 
     method get_element($key) { $chart{$key} }
 
+    # Merge element via semiring add() without re-indexing (for existing items)
+    method merge_element( $item, $element ) {
+        my $key     = $item->key;
+        my $current = $self->get_element($key);
+        $chart{$key} = $current ? $current + $element : $element;
+        return $chart{$key};
+    }
+
     method add_element( $item, $element ) {
         my $key     = $item->key;
         my $current = $self->get_element($key);
@@ -508,8 +516,10 @@ class Chalk::Parser {
                 end_pos   => $completed_item->end_pos
             );
 
-            # Only add if not already in chart
-            unless ( $chart->has_item($new_item) ) {
+            # Always merge element (for disambiguation), only add to agenda if new
+            if ( $chart->has_item($new_item) ) {
+                $chart->merge_element( $new_item, $combined_element );
+            } else {
                 $chart->add_element( $new_item, $combined_element );
                 push( $agenda->@*, $new_item );
             }
