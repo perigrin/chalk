@@ -70,8 +70,11 @@ class Chalk::IR::Node::Divide {
         my $right_type = $right->compute();
 
         if ($left_type->is_constant && $right_type->is_constant) {
+            my $divisor = $right_type->value;
+            # Division by zero cannot be folded - return Top to preserve runtime behavior
+            return Chalk::IR::Type::Top->top() if $divisor == 0;
             return Chalk::IR::Type::TypeInteger->constant(
-                int($left_type->value / $right_type->value)
+                int($left_type->value / $divisor)
             );
         }
 

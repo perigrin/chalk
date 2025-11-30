@@ -93,14 +93,20 @@ class Chalk::IR::Node::Multiply {
             return $right;
         }
 
-        # x * 0 -> 0 (zero right)
+        # x * 0 -> 0 (zero right, only if x is also constant to preserve side effects)
         if ($right_type->is_constant && $right_type->value == 0) {
-            return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            # Only fold if left operand is also constant (no side effects)
+            if ($left_type->is_constant) {
+                return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            }
         }
 
-        # 0 * x -> 0 (zero left)
+        # 0 * x -> 0 (zero left, only if x is also constant to preserve side effects)
         if ($left_type->is_constant && $left_type->value == 0) {
-            return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            # Only fold if right operand is also constant (no side effects)
+            if ($right_type->is_constant) {
+                return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            }
         }
 
         return;
