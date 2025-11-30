@@ -73,6 +73,18 @@ class Chalk::IR::Node::Divide {
         return Chalk::IR::Type::Top->top();
     }
 
+    # Algebraic simplification for division
+    method idealize() {
+        my $right_type = $right->compute();
+
+        # x / 1 -> x (identity)
+        if ($right_type->is_constant && $right_type->value == 1) {
+            return $left;
+        }
+
+        return;
+    }
+
     # Stub for transform tracking
     method record_transform(@args) {
         return;

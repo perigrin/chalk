@@ -73,6 +73,11 @@ class Chalk::IR::Node::Subtract {
         return Chalk::IR::Type::Top->top();
     }
 
+    # Algebraic simplification for subtraction - no optimizations in chapter04
+    method idealize() {
+        return;
+    }
+
     # Stub for transform tracking
     method record_transform(@args) {
         return;

@@ -73,6 +73,34 @@ class Chalk::IR::Node::Multiply {
         return Chalk::IR::Type::Top->top();
     }
 
+    # Algebraic simplification for multiplication
+    method idealize() {
+        my $left_type = $left->compute();
+        my $right_type = $right->compute();
+
+        # x * 1 -> x (identity right)
+        if ($right_type->is_constant && $right_type->value == 1) {
+            return $left;
+        }
+
+        # 1 * x -> x (identity left)
+        if ($left_type->is_constant && $left_type->value == 1) {
+            return $right;
+        }
+
+        # x * 0 -> 0 (zero right)
+        if ($right_type->is_constant && $right_type->value == 0) {
+            return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+        }
+
+        # 0 * x -> 0 (zero left)
+        if ($left_type->is_constant && $left_type->value == 0) {
+            return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+        }
+
+        return;
+    }
+
     # Stub for transform tracking
     method record_transform(@args) {
         return;

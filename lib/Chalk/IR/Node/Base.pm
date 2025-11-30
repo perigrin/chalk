@@ -45,6 +45,11 @@ class Chalk::IR::Node::Base {
         return Chalk::IR::Type::Top->top();
     }
 
+    # Default idealize() returns nothing - subclasses override for algebraic simplification
+    method idealize() {
+        return;
+    }
+
     # Record a transformation that created or modified this node
     method record_transform(@args) {
         # Support both calling styles for backward compatibility:

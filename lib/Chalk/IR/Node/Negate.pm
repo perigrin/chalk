@@ -69,6 +69,11 @@ class Chalk::IR::Node::Negate {
         return Chalk::IR::Type::Top->top();
     }
 
+    # Algebraic simplification for negation - no optimizations in chapter04
+    method idealize() {
+        return;
+    }
+
     # Stub for transform tracking
     method record_transform(@args) {
         return;

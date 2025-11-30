@@ -73,6 +73,33 @@ class Chalk::IR::Node::Add {
         return Chalk::IR::Type::Top->top();
     }
 
+    # Algebraic simplification for addition
+    method idealize() {
+        my $left_type = $left->compute();
+        my $right_type = $right->compute();
+
+        # x + 0 -> x (identity right)
+        if ($right_type->is_constant && $right_type->value == 0) {
+            return $left;
+        }
+
+        # 0 + x -> x (identity left)
+        if ($left_type->is_constant && $left_type->value == 0) {
+            return $right;
+        }
+
+        # x + x -> x * 2 (doubling)
+        if ($left->id eq $right->id) {
+            require Chalk::IR::Node::Multiply;
+            return Chalk::IR::Node::Multiply->new(
+                left  => $left,
+                right => Chalk::IR::Node::Constant->new(value => 2, type => 'Integer'),
+            );
+        }
+
+        return;
+    }
+
     # Stub for transform tracking
     method record_transform(@args) {
         return;
