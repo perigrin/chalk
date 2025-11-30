@@ -30,10 +30,11 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
         my $value = "$token" + 0;
 
         # Create Constant node directly (content-addressable ID)
+        # Peephole for consistency with other nodes (constants are already optimal)
         return Chalk::IR::Node::Constant->new(
             type  => $type,
             value => $value,
-        );
+        )->peephole();
     }
 }
 

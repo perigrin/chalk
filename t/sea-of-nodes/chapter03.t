@@ -196,11 +196,12 @@ subtest 'Parse: Simple bare block with scoping' => sub {
     ok(scalar(@constants) >= 1, 'Has constant node for 1');
 };
 
-subtest 'Parse: Nested scope with variable shadowing' => sub {
+subtest 'Parse: Nested scope with variable shadowing (constant folded)' => sub {
     my $parser = make_parser();
 
     # Chapter 3 main example (simplified):
     # Outer $b=2, inner $b=3, assignment uses inner $b
+    # With constant folding: $a + $b = 1 + 3 = 4
     my $code = q{
         my $a = 1;
         my $b = 2;
@@ -225,22 +226,21 @@ subtest 'Parse: Nested scope with variable shadowing' => sub {
     my @returns = grep { $_->op eq 'Return' } @nodes;
     is(scalar(@returns), 1, 'Has Return node');
 
-    # Should have constants for 0, 1, 2, 3
+    # With constant folding, $a + $b (1 + 3) folds to Constant(4)
+    # So we should have constants including the folded result
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    ok(scalar(@constants) >= 4, 'Has constants for literal values');
+    ok(scalar(@constants) >= 1, 'Has constant nodes');
 
-    # Should have Add node for $a + $b
+    # The Add should be folded away since both operands are constant
     my @adds = grep { $_->op eq 'Add' } @nodes;
-    ok(scalar(@adds) >= 1, 'Has Add node for $a + $b');
+    is(scalar(@adds), 0, 'Add node folded away (1+3=4)');
 
-    # The critical test: the Add node should use the INNER $b (value 3)
-    # This verifies variable shadowing works correctly
-    # We'll verify this by checking that the Add has the right constant as input
-    my $add = $adds[0];
-    ok($add, 'Add node exists for verification');
+    # Verify that the folded constant 4 exists (from $a + inner $b = 1 + 3)
+    my @fours = grep { $_->op eq 'Constant' && $_->value == 4 } @constants;
+    ok(scalar(@fours) >= 1, 'Constant(4) exists (1+3 folded, proves inner $b=3 used)');
 };
 
-subtest 'Parse: Variable reference in expression' => sub {
+subtest 'Parse: Variable reference in expression (constant folded)' => sub {
     my $parser = make_parser();
 
     my $code = 'my $x = 1; return $x + 2;';
@@ -252,13 +252,13 @@ subtest 'Parse: Variable reference in expression' => sub {
     ok($graph, 'Graph built from result');
     my @nodes = values %{$graph->nodes};
 
-    # Should have Add node combining $x and 2
+    # With constant folding, $x + 2 = 1 + 2 = 3 folds to Constant(3)
     my @adds = grep { $_->op eq 'Add' } @nodes;
-    is(scalar(@adds), 1, 'Has Add node for $x + 2');
+    is(scalar(@adds), 0, 'Add node folded away ($x + 2 = 1 + 2 = 3)');
 
-    # Should have constants for 1 and 2
-    my @constants = grep { $_->op eq 'Constant' } @nodes;
-    ok(scalar(@constants) >= 2, 'Has constants for 1 and 2');
+    # Should have constant with value 3 (the folded result)
+    my @threes = grep { $_->op eq 'Constant' && $_->value == 3 } @nodes;
+    ok(scalar(@threes) >= 1, 'Has Constant(3) from folded $x + 2');
 };
 
 done_testing();

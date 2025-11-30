@@ -8,6 +8,7 @@ class Chalk::IR::Node::Add {
     use Chalk::IR::Type::TypeInteger;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
+    use Chalk::IR::Node::Multiply;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -46,9 +47,8 @@ class Chalk::IR::Node::Add {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
-        # Use compute() for constant folding - if both inputs are constant,
-        # replace this Add with a Constant node containing the sum
+    method peephole($graph = undef) {
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -56,6 +56,12 @@ class Chalk::IR::Node::Add {
                 type  => 'Integer',
             );
         }
+
+        # Step 2: Algebraic simplification via idealize()
+        if (my $idealized = $self->idealize()) {
+            return $idealized->peephole();
+        }
+
         return $self;
     }
 
@@ -71,6 +77,32 @@ class Chalk::IR::Node::Add {
         }
 
         return Chalk::IR::Type::Top->top();
+    }
+
+    # Algebraic simplification for addition
+    method idealize() {
+        my $left_type = $left->compute();
+        my $right_type = $right->compute();
+
+        # x + 0 -> x (identity right)
+        if ($right_type->is_constant && $right_type->value == 0) {
+            return $left;
+        }
+
+        # 0 + x -> x (identity left)
+        if ($left_type->is_constant && $left_type->value == 0) {
+            return $right;
+        }
+
+        # x + x -> x * 2 (doubling)
+        if ($left->id eq $right->id) {
+            return Chalk::IR::Node::Multiply->new(
+                left  => $left,
+                right => Chalk::IR::Node::Constant->new(value => 2, type => 'Integer'),
+            );
+        }
+
+        return;
     }
 
     # Stub for transform tracking

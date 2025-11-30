@@ -63,11 +63,11 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
             die "Unary: no IR node operand found in children: [@children_debug] - operator was '$operator'";
         }
 
-        # Build appropriate unary node
+        # Build appropriate unary node - peephole immediately for constant folding
         if ($operator eq '!') {
-            return Chalk::IR::Node::Not->new(operand => $operand);
+            return Chalk::IR::Node::Not->new(operand => $operand)->peephole();
         } elsif ($operator eq '-') {
-            return Chalk::IR::Node::Negate->new(operand => $operand);
+            return Chalk::IR::Node::Negate->new(operand => $operand)->peephole();
         } elsif ($operator eq '+') {
             # Unary + is a no-op, just pass through
             return $operand;

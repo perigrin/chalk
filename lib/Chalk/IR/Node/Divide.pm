@@ -46,9 +46,8 @@ class Chalk::IR::Node::Divide {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
-        # Use compute() for constant folding - if both inputs are constant,
-        # replace this Divide with a Constant node containing the quotient
+    method peephole($graph = undef) {
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -56,6 +55,12 @@ class Chalk::IR::Node::Divide {
                 type  => 'Integer',
             );
         }
+
+        # Step 2: Algebraic simplification via idealize()
+        if (my $idealized = $self->idealize()) {
+            return $idealized->peephole();
+        }
+
         return $self;
     }
 
@@ -65,12 +70,27 @@ class Chalk::IR::Node::Divide {
         my $right_type = $right->compute();
 
         if ($left_type->is_constant && $right_type->is_constant) {
+            my $divisor = $right_type->value;
+            # Division by zero cannot be folded - return Top to preserve runtime behavior
+            return Chalk::IR::Type::Top->top() if $divisor == 0;
             return Chalk::IR::Type::TypeInteger->constant(
-                int($left_type->value / $right_type->value)
+                int($left_type->value / $divisor)
             );
         }
 
         return Chalk::IR::Type::Top->top();
+    }
+
+    # Algebraic simplification for division
+    method idealize() {
+        my $right_type = $right->compute();
+
+        # x / 1 -> x (identity)
+        if ($right_type->is_constant && $right_type->value == 1) {
+            return $left;
+        }
+
+        return;
     }
 
     # Stub for transform tracking

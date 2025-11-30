@@ -17,13 +17,13 @@ subtest 'Type base class interface' => sub {
 use_ok('Chalk::IR::Type::Top');
 
 subtest 'Top type (unknown value)' => sub {
-    my $top1 = Chalk::IR::Type::Top->TOP;
-    my $top2 = Chalk::IR::Type::Top->TOP;
+    my $top1 = Chalk::IR::Type::Top->top();
+    my $top2 = Chalk::IR::Type::Top->top();
 
-    ok($top1, 'Can get TOP singleton');
-    ok($top1 isa Chalk::IR::Type, 'TOP isa Type');
-    is($top1->is_constant, 0, 'TOP is not constant');
-    is(refaddr($top1), refaddr($top2), 'TOP is singleton');
+    ok($top1, 'Can get top singleton');
+    ok($top1 isa Chalk::IR::Type, 'top isa Type');
+    is($top1->is_constant, 0, 'top is not constant');
+    is(refaddr($top1), refaddr($top2), 'top is singleton');
 };
 
 use_ok('Chalk::IR::Type::Bottom');

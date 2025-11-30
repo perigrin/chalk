@@ -44,7 +44,7 @@ class Chalk::IR::Node::DefinedOr {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
+    method peephole($graph = undef) {
         return $self;
     }
 

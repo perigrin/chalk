@@ -42,7 +42,7 @@ class Chalk::IR::Node::LT {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
+    method peephole($graph = undef) {
         return $self;
     }
 

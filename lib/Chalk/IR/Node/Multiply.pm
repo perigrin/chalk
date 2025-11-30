@@ -46,9 +46,8 @@ class Chalk::IR::Node::Multiply {
         return $self->to_hash()->{attributes};
     }
 
-    method peephole($graph) {
-        # Use compute() for constant folding - if both inputs are constant,
-        # replace this Multiply with a Constant node containing the product
+    method peephole($graph = undef) {
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -56,6 +55,12 @@ class Chalk::IR::Node::Multiply {
                 type  => 'Integer',
             );
         }
+
+        # Step 2: Algebraic simplification via idealize()
+        if (my $idealized = $self->idealize()) {
+            return $idealized->peephole();
+        }
+
         return $self;
     }
 
@@ -71,6 +76,40 @@ class Chalk::IR::Node::Multiply {
         }
 
         return Chalk::IR::Type::Top->top();
+    }
+
+    # Algebraic simplification for multiplication
+    method idealize() {
+        my $left_type = $left->compute();
+        my $right_type = $right->compute();
+
+        # x * 1 -> x (identity right)
+        if ($right_type->is_constant && $right_type->value == 1) {
+            return $left;
+        }
+
+        # 1 * x -> x (identity left)
+        if ($left_type->is_constant && $left_type->value == 1) {
+            return $right;
+        }
+
+        # x * 0 -> 0 (zero right, only if x is also constant to preserve side effects)
+        if ($right_type->is_constant && $right_type->value == 0) {
+            # Only fold if left operand is also constant (no side effects)
+            if ($left_type->is_constant) {
+                return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            }
+        }
+
+        # 0 * x -> 0 (zero left, only if x is also constant to preserve side effects)
+        if ($left_type->is_constant && $left_type->value == 0) {
+            # Only fold if right operand is also constant (no side effects)
+            if ($right_type->is_constant) {
+                return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            }
+        }
+
+        return;
     }
 
     # Stub for transform tracking

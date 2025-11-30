@@ -36,13 +36,18 @@ class Chalk::IR::Node::Base {
     }
 
     # Placeholder for optimization - subclasses can override
-    method peephole($graph) {
+    method peephole($graph = undef) {
         return $self;
     }
 
     # Default compute() returns TOP (unknown) - subclasses override for type inference
     method compute() {
         return Chalk::IR::Type::Top->top();
+    }
+
+    # Default idealize() returns nothing - subclasses override for algebraic simplification
+    method idealize() {
+        return;
     }
 
     # Record a transformation that created or modified this node
