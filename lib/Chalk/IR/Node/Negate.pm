@@ -71,6 +71,11 @@ class Chalk::IR::Node::Negate {
             );
         }
 
+        # If operand is a TypeInteger, result is unknown integer
+        if ($operand_type isa Chalk::IR::Type::TypeInteger) {
+            return Chalk::IR::Type::TypeInteger->TOP();
+        }
+
         return Chalk::IR::Type::Top->top();
     }
 

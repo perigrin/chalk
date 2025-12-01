@@ -5,7 +5,8 @@ use lib 'lib';
 use v5.42;
 use Test::More;
 use Scalar::Util qw(refaddr);
-use builtin qw(true false is_bool);
+use experimental qw(builtin);
+use builtin qw(is_bool);
 
 use_ok('Chalk::IR::Node::Start');
 use_ok('Chalk::IR::Node::Proj');
