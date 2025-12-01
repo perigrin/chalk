@@ -95,7 +95,7 @@ class Chalk::IR::Graph {
                 next unless defined $input_id;
                 next if $input_id eq '__CONTROL_PLACEHOLDER__';
                 if (exists $uses->{$input_id}) {
-                    @{$uses->{$input_id}} = grep { $_ ne $node_id } @{$uses->{$input_id}};
+                    $uses->{$input_id}->@* = grep { $_ ne $node_id } $uses->{$input_id}->@*;
                 }
             }
         }
