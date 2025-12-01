@@ -142,13 +142,16 @@ subtest 'kill does not remove inputs still in use' => sub {
     my $c1 = make_constant(1);
     my $c2 = make_constant(2);
     my $add1 = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
-    my $add2 = Chalk::IR::Node::Add->new(left => $c1, right => make_constant(3));
+    # Note: Once GVN (Global Value Numbering) is implemented, duplicate
+    # constant values would be interned to the same node automatically.
+    my $c3 = make_constant(3);
+    my $add2 = Chalk::IR::Node::Add->new(left => $c1, right => $c3);
 
     $graph->add_node($c1);
     $graph->add_node($c2);
     $graph->add_node($add1);
     $graph->add_node($add2);
-    $graph->add_node(make_constant(3));  # The third constant used by add2
+    $graph->add_node($c3);
     $graph->materialize_pending_nodes();
 
     my $initial_count = $graph->node_count();
