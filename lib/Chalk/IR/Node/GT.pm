@@ -3,7 +3,6 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
-use builtin qw(true false);
 
 class Chalk::IR::Node::GT {
     use Chalk::IR::Type::TypeBool;

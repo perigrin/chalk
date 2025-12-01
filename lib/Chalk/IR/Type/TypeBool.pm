@@ -3,7 +3,6 @@
 
 use 5.42.0;
 use experimental qw(class);
-use builtin qw(true false);
 use Chalk::IR::Type;
 
 class Chalk::IR::Type::TypeBool :isa(Chalk::IR::Type) {

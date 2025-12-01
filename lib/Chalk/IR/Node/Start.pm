@@ -64,7 +64,7 @@ class Chalk::IR::Node::Start {
             : Chalk::IR::Type::Top->top();
 
         return Chalk::IR::Type::TypeTuple->of(
-            Chalk::IR::Type::TypeCtrl->CTRL,
+            Chalk::IR::Type::TypeCtrl->CTRL(),
             $arg_type
         );
     }
