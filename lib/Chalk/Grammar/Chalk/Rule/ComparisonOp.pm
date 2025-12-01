@@ -101,19 +101,19 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         }
 
         # Build appropriate IR node based on operator
-        # Comparison operators
+        # Comparison operators - peephole immediately for constant folding
         if ($operator eq '>' || $operator eq 'gt') {
-            return Chalk::IR::Node::GT->new(left => $left, right => $right);
+            return Chalk::IR::Node::GT->new(left => $left, right => $right)->peephole();
         } elsif ($operator eq '<' || $operator eq 'lt') {
-            return Chalk::IR::Node::LT->new(left => $left, right => $right);
+            return Chalk::IR::Node::LT->new(left => $left, right => $right)->peephole();
         } elsif ($operator eq '==' || $operator eq 'eq') {
-            return Chalk::IR::Node::EQ->new(left => $left, right => $right);
+            return Chalk::IR::Node::EQ->new(left => $left, right => $right)->peephole();
         } elsif ($operator eq '>=' || $operator eq 'ge') {
-            return Chalk::IR::Node::GE->new(left => $left, right => $right);
+            return Chalk::IR::Node::GE->new(left => $left, right => $right)->peephole();
         } elsif ($operator eq '<=' || $operator eq 'le') {
-            return Chalk::IR::Node::LE->new(left => $left, right => $right);
+            return Chalk::IR::Node::LE->new(left => $left, right => $right)->peephole();
         } elsif ($operator eq '!=' || $operator eq 'ne') {
-            return Chalk::IR::Node::NE->new(left => $left, right => $right);
+            return Chalk::IR::Node::NE->new(left => $left, right => $right)->peephole();
         }
         # Regex match operators (=~, !~)
         # TODO: implement when regex match IR nodes are available
