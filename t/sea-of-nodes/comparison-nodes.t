@@ -5,7 +5,8 @@ use 5.42.0;
 use experimental qw(class);
 use lib 'lib';
 use Test::More;
-use builtin qw(true false is_bool);
+use experimental qw(builtin);
+use builtin qw(is_bool);
 
 # Test 1-8: Comparison node subclasses should be loadable
 use_ok('Chalk::IR::Node::GT');

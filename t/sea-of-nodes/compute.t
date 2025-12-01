@@ -46,7 +46,8 @@ subtest 'Constant node compute() returns TypeInteger' => sub {
 
 # TypeBool tests for Constant node
 use_ok('Chalk::IR::Type::TypeBool');
-use builtin qw(true false is_bool);
+use experimental qw(builtin);
+use builtin qw(is_bool);
 
 subtest 'Constant node compute() returns TypeBool for Bool type' => sub {
     my $const_true = Chalk::IR::Node::Constant->new(value => true, type => 'Bool');
