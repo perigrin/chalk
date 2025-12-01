@@ -111,6 +111,9 @@ class Chalk::IR::Graph {
 
     # Kill a node with no uses, recursively killing inputs that become unused
     # This is the core of Dead Code Elimination (DCE)
+    # Note: Safe against self-referential nodes - we capture input_ids before
+    # calling remove_node, so if a node references itself, the recursive kill
+    # call will find it already removed and return early.
     method kill($node_id) {
         my $node = $nodes->{$node_id};
         return unless $node;
