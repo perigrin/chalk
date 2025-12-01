@@ -50,4 +50,45 @@ subtest 'Start compute() with no arg returns Top for arg' => sub {
     ok($arg_type isa Chalk::IR::Type::Top, 'Tuple[1] is Top when no arg');
 };
 
+subtest 'Proj compute() extracts from Start tuple' => sub {
+    my $start = Chalk::IR::Node::Start->new(label => 'main', arg_value => 42);
+
+    my $ctrl_proj = Chalk::IR::Node::Proj->new(
+        source => $start,
+        index => 0,
+        label => 'ctrl',
+        inputs => [$start->id],
+    );
+
+    my $arg_proj = Chalk::IR::Node::Proj->new(
+        source => $start,
+        index => 1,
+        label => 'arg',
+        inputs => [$start->id],
+    );
+
+    my $ctrl_type = $ctrl_proj->compute();
+    ok($ctrl_type isa Chalk::IR::Type::TypeCtrl, 'Proj[0] compute() returns TypeCtrl');
+
+    my $arg_type = $arg_proj->compute();
+    ok($arg_type isa Chalk::IR::Type::TypeInteger, 'Proj[1] compute() returns TypeInteger');
+    is($arg_type->value, 42, 'Proj[1] value is 42');
+};
+
+subtest 'Proj compute() returns Top when source not tuple' => sub {
+    # Use a non-MultiNode source
+    use_ok('Chalk::IR::Node::Constant');
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'Integer');
+
+    my $proj = Chalk::IR::Node::Proj->new(
+        source => $const,
+        index => 0,
+        label => 'test',
+        inputs => [$const->id],
+    );
+
+    my $type = $proj->compute();
+    ok($type isa Chalk::IR::Type::Top, 'Proj compute() returns Top for non-tuple source');
+};
+
 done_testing();
