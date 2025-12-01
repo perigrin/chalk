@@ -45,6 +45,80 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
         # Return merged control (1 = control is here)
         return 1;
     }
+
+    # Peephole optimization for Region nodes
+    # If only one input is live (not ~Ctrl), collapse to that input
+    method peephole($graph = undef) {
+        return $self unless $graph;
+
+        my @inputs = $self->inputs->@*;
+        return $self unless @inputs;
+
+        # Check each input - count live inputs and track the live one
+        my @live_inputs;
+        my @live_indices;
+
+        for my $i (0..$#inputs) {
+            my $input_id = $inputs[$i];
+            next unless defined $input_id;
+
+            my $input_node = $graph->get_node($input_id);
+            next unless $input_node;
+
+            # Check if this input is dead control (~Ctrl constant)
+            my $is_dead = 0;
+            if ($input_node->op eq 'Constant') {
+                my $value = $input_node->attributes->{value} // $input_node->value;
+                my $type = $input_node->attributes->{type} // $input_node->type;
+                if ($type eq 'Control' && $value eq '~Ctrl') {
+                    $is_dead = 1;
+                }
+            }
+
+            unless ($is_dead) {
+                push @live_inputs, $input_node;
+                push @live_indices, $i;
+            }
+        }
+
+        # If only one live input, collapse Region to that input
+        if (@live_inputs == 1) {
+            return $live_inputs[0];
+        }
+
+        return $self;
+    }
+
+    # Get the index of live inputs (for Phi node to use)
+    method get_live_input_indices($graph) {
+        return () unless $graph;
+
+        my @inputs = $self->inputs->@*;
+        return () unless @inputs;
+
+        my @live_indices;
+        for my $i (0..$#inputs) {
+            my $input_id = $inputs[$i];
+            next unless defined $input_id;
+
+            my $input_node = $graph->get_node($input_id);
+            next unless $input_node;
+
+            # Check if dead control
+            my $is_dead = 0;
+            if ($input_node->op eq 'Constant') {
+                my $value = $input_node->attributes->{value} // $input_node->value;
+                my $type = $input_node->attributes->{type} // $input_node->type;
+                if ($type eq 'Control' && $value eq '~Ctrl') {
+                    $is_dead = 1;
+                }
+            }
+
+            push @live_indices, $i unless $is_dead;
+        }
+
+        return @live_indices;
+    }
 }
 
 1;

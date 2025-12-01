@@ -51,6 +51,39 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
 
         die "Phi node: no active path found in Region $region_id";
     }
+
+    # Peephole optimization for Phi nodes
+    # If only one Region input is live, simplify to the corresponding value
+    method peephole($graph = undef) {
+        return $self unless $graph;
+
+        # Get the Region node
+        my $region_node = $graph->get_node($region_id);
+        return $self unless $region_node;
+
+        # Get live input indices from Region
+        return $self unless $region_node->can('get_live_input_indices');
+        my @live_indices = $region_node->get_live_input_indices($graph);
+
+        # If only one live input, return the corresponding Phi value
+        if (@live_indices == 1) {
+            my $live_idx = $live_indices[0];
+            my @inputs = $self->inputs->@*;
+
+            # Phi inputs: [region_id, value1, value2, ...]
+            # Region inputs: [ctrl1, ctrl2, ...]
+            # value at index i+1 corresponds to Region input at index i
+            my $value_idx = $live_idx + 1;
+
+            if ($value_idx < @inputs) {
+                my $value_id = $inputs[$value_idx];
+                my $value_node = $graph->get_node($value_id);
+                return $value_node if $value_node;
+            }
+        }
+
+        return $self;
+    }
 }
 
 1;
