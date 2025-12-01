@@ -381,4 +381,27 @@ subtest 'Negate node compute() with unknown integer returns IntTop' => sub {
     ok($type->is_top, 'Result is IntTop (unknown integer)');
 };
 
+# IntBot propagation tests - document current behavior
+# TODO(#220): Revisit IntBot arithmetic semantics with automatic coercion
+subtest 'Add node compute() with IntBot operand returns IntTop (current behavior)' => sub {
+    # Create a node that returns IntBot (division by zero)
+    my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $const0 = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+    my $div_by_zero = Chalk::IR::Node::Divide->new(left => $const20, right => $const0);
+
+    # Verify we have IntBot
+    my $bot_type = $div_by_zero->compute();
+    ok($bot_type->is_bottom, 'Division by zero produces IntBot');
+
+    # Now add IntBot + 5
+    my $const5 = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $add = Chalk::IR::Node::Add->new(left => $div_by_zero, right => $const5);
+
+    my $result = $add->compute();
+    ok($result isa Chalk::IR::Type::TypeInteger, 'IntBot + constant returns TypeInteger');
+    # Current behavior: IntBot isa TypeInteger, so returns IntTop
+    # Future consideration: should IntBot propagate (IntBot + x = IntBot)?
+    ok($result->is_top, 'Current behavior: IntBot + constant = IntTop');
+};
+
 done_testing();
