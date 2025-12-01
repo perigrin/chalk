@@ -15,6 +15,13 @@ class Chalk::IR::Node::Add {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
+    ADJUST {
+        die "left operand is required" unless defined $left;
+        die "right operand is required" unless defined $right;
+        die "left operand must have id()" unless blessed($left) && $left->can('id');
+        die "right operand must have id()" unless blessed($right) && $right->can('id');
+    }
+
     method id() { refaddr($self) }
 
     # Compute inputs from child nodes
