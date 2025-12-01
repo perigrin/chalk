@@ -167,6 +167,123 @@ subtest 'Negate: no optimizations' => sub {
 };
 
 # =============================================================================
+# Expression Canonicalization Tests (Issue #225)
+# Chapter 4: Transform expressions like 1 + arg + 2 into arg + 3
+# =============================================================================
+
+use_ok('Chalk::IR::Node::Start');
+use_ok('Chalk::IR::Node::Proj');
+
+# Helper to create an "arg" variable node (unknown integer value at compile time)
+sub make_arg {
+    my $start = Chalk::IR::Node::Start->new(label => 'main');
+    return Chalk::IR::Node::Proj->new(
+        source => $start,
+        index => 1,
+        label => 'arg',
+        inputs => [$start->id],
+    );
+}
+
+subtest 'Canonicalization: swap operands - move non-Add to right side' => sub {
+    # When left is constant and right is not, swap to normalize
+    # const + arg -> arg + const
+    my $arg = make_arg();
+    my $c1 = const(5);
+    my $add = Chalk::IR::Node::Add->new(left => $c1, right => $arg);
+
+    my $result = $add->idealize();
+    if (ok($result, 'idealize() returns a replacement for constant on left')) {
+        is($result->op, 'Add', 'Result is still Add');
+        is($result->left->id, $arg->id, 'arg moved to left (non-constant on LHS)');
+        is($result->right->id, $c1->id, 'constant moved to right');
+    }
+};
+
+subtest 'Canonicalization: no swap when already normalized' => sub {
+    # arg + const is already normalized
+    my $arg = make_arg();
+    my $c1 = const(5);
+    my $add = Chalk::IR::Node::Add->new(left => $arg, right => $c1);
+
+    my $result = $add->idealize();
+    ok(!$result, 'idealize() returns nothing when already normalized');
+};
+
+subtest 'Canonicalization: right association to left - x + (y + z) -> (x + y) + z' => sub {
+    # This ensures we have a left-spine structure for easier optimization
+    my $x = make_arg();
+    my $c1 = const(1);
+    my $c2 = const(2);
+
+    # x + (1 + 2) - though constants will fold, test the structure
+    my $inner = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
+    my $outer = Chalk::IR::Node::Add->new(left => $x, right => $inner);
+
+    my $result = $outer->idealize();
+    # The inner Add is constant-foldable, so peephole should handle it
+    # But idealize should rotate: x + (y + z) -> (x + y) + z
+    if (ok($result, 'idealize() returns a rotation')) {
+        is($result->op, 'Add', 'Result is Add');
+        # After rotation: (x + 1) + 2
+        is($result->left->op, 'Add', 'Left is now Add node (rotated)');
+    }
+};
+
+subtest 'Canonicalization: constant combining - (x + c1) + c2 -> x + (c1 + c2)' => sub {
+    # 1 + arg + 2 should become arg + 3
+    my $arg = make_arg();
+    my $c1 = const(1);
+    my $c2 = const(2);
+
+    # Build: (1 + arg) + 2
+    my $inner = Chalk::IR::Node::Add->new(left => $c1, right => $arg);
+    my $outer = Chalk::IR::Node::Add->new(left => $inner, right => $c2);
+
+    # After peephole optimization chain:
+    # Step 1: inner idealizes to (arg + 1) - swap constants to right
+    # Step 2: outer becomes (arg + 1) + 2
+    # Step 3: constant combining: arg + (1 + 2) = arg + 3
+    my $result = $outer->peephole();
+    if (ok($result, 'peephole returns a result')) {
+        if (is($result->op, 'Add', 'Result is Add')) {
+            is($result->left->id, $arg->id, 'Left is arg');
+            if (ok($result->right, 'Right operand exists')) {
+                is($result->right->op, 'Constant', 'Right is Constant');
+                is($result->right->value, 3, 'Constants combined: 1 + 2 = 3');
+            }
+        }
+    }
+};
+
+subtest 'Canonicalization: arg + 1 + arg -> (arg + arg) + 1 -> (arg * 2) + 1' => sub {
+    my $arg = make_arg();
+    my $c1 = const(1);
+
+    # Build: (arg + 1) + arg
+    my $inner = Chalk::IR::Node::Add->new(left => $arg, right => $c1);
+    my $outer = Chalk::IR::Node::Add->new(left => $inner, right => $arg);
+
+    # After canonicalization and optimization:
+    # Should become (arg * 2) + 1
+    my $result = $outer->peephole();
+    if (ok($result, 'peephole returns a result')) {
+        if (is($result->op, 'Add', 'Result is Add')) {
+            if (ok($result->left, 'Left operand exists')) {
+                if (is($result->left->op, 'Multiply', 'Left is Multiply (arg * 2)')) {
+                    is($result->left->left->id, $arg->id, 'Multiply left is arg');
+                    is($result->left->right->value, 2, 'Multiply right is 2');
+                }
+            }
+            if (ok($result->right, 'Right operand exists')) {
+                is($result->right->op, 'Constant', 'Right is Constant');
+                is($result->right->value, 1, 'Right value is 1');
+            }
+        }
+    }
+};
+
+# =============================================================================
 # Peephole recursion termination tests
 # =============================================================================
 
