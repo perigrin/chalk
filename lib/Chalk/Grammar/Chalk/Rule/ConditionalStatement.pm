@@ -153,7 +153,9 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         }
 
         # Evaluate true branch with child scope
+        # Bind $ctrl to IfTrue per Simple Chapter 4 Petri net model
         my $true_scope = $pre_scope->child_scope()->with_control($if_true->id);
+        $true_scope = $true_scope->with_binding('$ctrl', $if_true);
         $context->env->{scope} = $true_scope;
 
         # Must call evaluate() on the rule to get the block hash!
@@ -240,7 +242,9 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
 
         if ($false_block_ctx) {
                 # Evaluate false branch with child scope
+                # Bind $ctrl to IfFalse per Simple Chapter 4 Petri net model
                 my $false_scope = $pre_scope->child_scope()->with_control($if_false->id);
+                $false_scope = $false_scope->with_binding('$ctrl', $if_false);
                 $context->env->{scope} = $false_scope;
 
                 # Must call evaluate() on the rule to get the block hash!
@@ -301,7 +305,9 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
             # Don't create Region - pass IfFalse directly as control
             # This allows subsequent statements to check IfFalse's activation state
             # (IfFalse returns 0 when condition is true, 1 when false)
+            # Bind $ctrl to IfFalse per Simple Chapter 4 Petri net model
             my $new_scope = $pre_scope->with_control($if_false->id);
+            $new_scope = $new_scope->with_binding('$ctrl', $if_false);
             $context->env->{scope} = $new_scope;
 
             # IfFalse already has early_returns set at construction (immutable)
@@ -318,7 +324,9 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
                 'ConditionalStatement::evaluate',
                 context => "inputs=" . $if_true->id
             );
+            # Bind $ctrl to Region per Simple Chapter 4 Petri net model
             my $new_scope = $pre_scope->with_control($region->id);
+            $new_scope = $new_scope->with_binding('$ctrl', $region);
             $context->env->{scope} = $new_scope;
 
             # Return the Region as this statement's result

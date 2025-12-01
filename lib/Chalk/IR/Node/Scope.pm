@@ -74,6 +74,10 @@ class Chalk::IR::Node::Scope {
         $all_vars{$_} = 1 for keys %{$scope_b->all_bindings};
 
         for my $var (keys %all_vars) {
+            # $ctrl is control flow, not data - just copy, don't create Phi
+            # Per Simple Chapter 7: "The control input is just copied"
+            next if $var eq '$ctrl';
+
             my $val_a = $scope_a->lookup($var);
             my $val_b = $scope_b->lookup($var);
 
@@ -86,9 +90,13 @@ class Chalk::IR::Node::Scope {
 
             if ($id_a ne $id_b) {
                 # Values differ - create Phi
+                # Get the region ID (control_node is the Region/Loop object)
+                my $region_id = ref($control_node) && blessed($control_node) && $control_node->can('id')
+                    ? $control_node->id
+                    : $control_node;
                 my $phi = Chalk::IR::Node::Phi->new(
-                    region => $control_node,
-                    inputs => [$val_a, $val_b],
+                    region_id => $region_id,
+                    inputs => [$region_id, $val_a, $val_b],
                 );
                 $merged{$var} = $phi;
             } else {
@@ -96,6 +104,10 @@ class Chalk::IR::Node::Scope {
                 $merged{$var} = $val_a;
             }
         }
+
+        # Bind $ctrl to the merge control node (Region/Loop)
+        # Per Simple Chapter 7: "The control input is just copied" (not Phi'd)
+        $merged{'$ctrl'} = $control_node;
 
         return Chalk::IR::Node::Scope->new(
             bindings        => \%merged,

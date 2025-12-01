@@ -43,7 +43,9 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         );
 
         # Set current control to Loop for condition evaluation (immutably)
+        # Bind $ctrl to Loop per Simple Chapter 4 Petri net model
         my $loop_scope = $pre_scope->with_control($loop->id);
+        $loop_scope = $loop_scope->with_binding('$ctrl', $loop);
         $context->env->{scope} = $loop_scope;
 
         # Get condition expression (child 3)
@@ -108,7 +110,9 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         # (SPPF creates both parses, semiring currently picks incomplete one - needs optimization pass)
 
         # Create child scope for loop body
+        # Bind $ctrl to IfTrue (loop body control) per Simple Chapter 4 Petri net model
         my $body_scope = $pre_scope->child_scope()->with_control($if_true->id);
+        $body_scope = $body_scope->with_binding('$ctrl', $if_true);
         $context->env->{scope} = $body_scope;
 
         # Wire up body statements with IfTrue control
@@ -195,7 +199,9 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         }
 
         # Update scope immutably with new control
+        # Bind $ctrl to exit Region per Simple Chapter 4 Petri net model
         my $exit_scope = $merged_scope->with_control($exit_region->id);
+        $exit_scope = $exit_scope->with_binding('$ctrl', $exit_region);
         $context->env->{scope} = $exit_scope;
 
         return $exit_region;

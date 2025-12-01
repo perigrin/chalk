@@ -19,8 +19,10 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         # Create Start node (program entry point)
         my $start = Chalk::IR::Node::Start->new(label => 'main');
 
-        # Update scope immutably with new control
+        # Update scope immutably with new control and $ctrl binding
+        # Per Simple Chapter 4: "we track the current in-scope control node via the name $ctrl"
         $scope = $scope->with_control($start);
+        $scope = $scope->with_binding('$ctrl', $start);
         $context->env->{scope} = $scope;
 
         # Find StatementList in children
