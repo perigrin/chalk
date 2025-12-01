@@ -14,13 +14,20 @@ use Chalk::IR::Type::TypeInteger;
 # Test 1: Base node compute() returns TOP (default behavior)
 use_ok('Chalk::IR::Node::Base');
 
-subtest 'Base node compute() returns TOP' => sub {
-    # Create a minimal concrete subclass for testing
-    # Since Base is abstract, we test that compute() method exists and returns TOP
-    my $base = Chalk::IR::Node::Base->new(inputs => []);
+# VariableRead is a concrete node type that implements op() but returns TOP from compute()
+# Use this instead of Base for testing non-constant values
+use_ok('Chalk::IR::Node::VariableRead');
 
-    ok($base->can('compute'), 'Base node has compute() method');
-    my $type = $base->compute();
+# Helper to create an "unknown" node (concrete but non-constant)
+sub make_unknown { Chalk::IR::Node::VariableRead->new(inputs => [], var_label => 'lexical:$unknown') }
+
+subtest 'Base node compute() returns TOP' => sub {
+    # Test using a concrete subclass (VariableRead) that doesn't override compute()
+    # This proves the Base class compute() behavior returns TOP
+    my $node = make_unknown();
+
+    ok($node->can('compute'), 'Concrete node has compute() method');
+    my $type = $node->compute();
     ok($type isa Chalk::IR::Type::Top, 'compute() returns Top type');
     is(refaddr($type), refaddr(Chalk::IR::Type::Top->top()), 'compute() returns TOP singleton');
 };
@@ -83,8 +90,8 @@ subtest 'Add node compute() with constant inputs' => sub {
 
 subtest 'Add node compute() with non-constant input returns TOP' => sub {
     my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    # Use Base node as a non-constant input (its compute() returns TOP)
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    # Use make_unknown() to create a non-constant input (compute() returns TOP)
+    my $unknown = make_unknown();
 
     my $add = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
 
@@ -95,7 +102,7 @@ subtest 'Add node compute() with non-constant input returns TOP' => sub {
 
 subtest 'Add node compute() with unknown integer returns IntTop' => sub {
     my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
     my $add = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
 
     my $type = $add->compute();
@@ -120,9 +127,10 @@ subtest 'Add peephole() folds constant addition' => sub {
 
 subtest 'Add peephole() returns self when not constant-foldable' => sub {
     my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
-    my $add = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
+    # Note: constant must be on the right (canonical form) to avoid canonicalization swap
+    my $add = Chalk::IR::Node::Add->new(left => $unknown, right => $const3);
 
     my $result = $add->peephole(undef);
 
@@ -148,7 +156,7 @@ subtest 'Subtract node compute() with constant inputs' => sub {
 
 subtest 'Subtract node compute() with non-constant input returns TypeInteger' => sub {
     my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $unknown);
 
@@ -170,7 +178,7 @@ subtest 'Subtract peephole() folds constant subtraction' => sub {
 
 subtest 'Subtract peephole() returns self when not constant-foldable' => sub {
     my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $unknown);
 
@@ -181,7 +189,7 @@ subtest 'Subtract peephole() returns self when not constant-foldable' => sub {
 
 subtest 'Subtract node compute() with unknown integer returns IntTop' => sub {
     my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
     my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $unknown);
 
     my $type = $sub->compute();
@@ -208,7 +216,7 @@ subtest 'Multiply node compute() with constant inputs' => sub {
 
 subtest 'Multiply node compute() with non-constant input returns TypeInteger' => sub {
     my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $unknown);
 
@@ -230,7 +238,7 @@ subtest 'Multiply peephole() folds constant multiplication' => sub {
 
 subtest 'Multiply peephole() returns self when not constant-foldable' => sub {
     my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $unknown);
 
@@ -241,7 +249,7 @@ subtest 'Multiply peephole() returns self when not constant-foldable' => sub {
 
 subtest 'Multiply node compute() with unknown integer returns IntTop' => sub {
     my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
     my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $unknown);
 
     my $type = $mul->compute();
@@ -268,7 +276,7 @@ subtest 'Divide node compute() with constant inputs' => sub {
 
 subtest 'Divide node compute() with non-constant input returns TypeInteger' => sub {
     my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $unknown);
 
@@ -290,7 +298,7 @@ subtest 'Divide peephole() folds constant division' => sub {
 
 subtest 'Divide peephole() returns self when not constant-foldable' => sub {
     my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $unknown);
 
@@ -301,7 +309,7 @@ subtest 'Divide peephole() returns self when not constant-foldable' => sub {
 
 subtest 'Divide node compute() with unknown integer returns IntTop' => sub {
     my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
     my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $unknown);
 
     my $type = $div->compute();
@@ -337,7 +345,7 @@ subtest 'Negate node compute() with constant input' => sub {
 };
 
 subtest 'Negate node compute() with non-constant input returns TOP' => sub {
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $neg = Chalk::IR::Node::Negate->new(operand => $unknown);
 
@@ -357,7 +365,7 @@ subtest 'Negate peephole() folds constant negation' => sub {
 };
 
 subtest 'Negate peephole() returns self when not constant-foldable' => sub {
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
 
     my $neg = Chalk::IR::Node::Negate->new(operand => $unknown);
 
@@ -370,7 +378,7 @@ subtest 'Negate node compute() with unknown integer returns IntTop' => sub {
     # Create a node that returns IntTop (unknown integer type)
     # We can do this by creating an Add with one constant and one unknown
     my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $unknown = make_unknown();
     my $int_top_node = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
 
     # Now negate this unknown integer
