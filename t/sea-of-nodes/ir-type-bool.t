@@ -3,7 +3,6 @@
 
 use lib 'lib';
 use v5.42;
-use experimental qw(builtin);
 use Test::More;
 use builtin qw(true false is_bool);
 use Scalar::Util qw(refaddr);
