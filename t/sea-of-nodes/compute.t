@@ -265,14 +265,14 @@ subtest 'Divide node compute() with constant inputs' => sub {
     is($type->value, 5, '20 / 4 = 5');
 };
 
-subtest 'Divide node compute() with non-constant input returns TOP' => sub {
+subtest 'Divide node compute() with non-constant input returns TypeInteger' => sub {
     my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
     my $unknown = Chalk::IR::Node::Base->new(inputs => []);
 
     my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $unknown);
 
     my $type = $div->compute();
-    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when input is non-constant');
 };
 
 subtest 'Divide peephole() folds constant division' => sub {
@@ -296,6 +296,27 @@ subtest 'Divide peephole() returns self when not constant-foldable' => sub {
     my $result = $div->peephole(undef);
 
     is(refaddr($result), refaddr($div), 'peephole() returns self when inputs not constant');
+};
+
+subtest 'Divide node compute() with unknown integer returns IntTop' => sub {
+    my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $unknown);
+
+    my $type = $div->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when one input is unknown');
+    ok($type->is_top, 'Result is IntTop (unknown integer)');
+};
+
+subtest 'Divide node compute() with zero divisor returns IntBot' => sub {
+    my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $const0 = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+    my $div = Chalk::IR::Node::Divide->new(left => $const20, right => $const0);
+
+    my $type = $div->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger for div by zero');
+    ok($type->is_bottom, 'Result is IntBot (error state)');
+    ok(!$type->is_constant, 'Result is not constant');
 };
 
 # Task 12: Negate node compute() and peephole()
