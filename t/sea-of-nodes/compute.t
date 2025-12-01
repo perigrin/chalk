@@ -88,7 +88,19 @@ subtest 'Add node compute() with non-constant input returns TOP' => sub {
     my $add = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
 
     my $type = $add->compute();
-    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+    # After TypeInteger lattice enhancement, adding integer to unknown returns IntTop
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when one operand is integer');
+};
+
+subtest 'Add node compute() with unknown integer returns IntTop' => sub {
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $add = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
+
+    my $type = $add->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when one input is unknown');
+    ok($type->is_top, 'Result is IntTop (unknown integer)');
+    ok(!$type->is_constant, 'Result is not constant');
 };
 
 # Task 8: peephole() uses compute() to fold constants

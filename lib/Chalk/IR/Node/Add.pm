@@ -76,6 +76,12 @@ class Chalk::IR::Node::Add {
             );
         }
 
+        # If either operand is an integer type, result is unknown integer
+        if (($left_type isa Chalk::IR::Type::TypeInteger) ||
+            ($right_type isa Chalk::IR::Type::TypeInteger)) {
+            return Chalk::IR::Type::TypeInteger->TOP;
+        }
+
         return Chalk::IR::Type::Top->top();
     }
 
