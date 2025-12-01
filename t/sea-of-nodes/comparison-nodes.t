@@ -14,6 +14,7 @@ use_ok('Chalk::IR::Node::EQ');
 use_ok('Chalk::IR::Node::NE');
 use_ok('Chalk::IR::Node::LE');
 use_ok('Chalk::IR::Node::GE');
+use_ok('Chalk::IR::Node::Not');
 use_ok('Chalk::IR::Node::Constant');
 use_ok('Chalk::IR::Type::TypeBool');
 
@@ -390,6 +391,57 @@ subtest 'GE peephole() folds to Bool Constant' => sub {
     ok($result isa Chalk::IR::Node::Constant, 'GE peephole() returns Constant');
     is($result->type, 'Bool', 'GE peephole() returns Bool type');
     ok($result->value, 'GE peephole() 5 >= 5 is true');
+};
+
+# Not tests
+subtest 'Not execute() returns native bool' => sub {
+    my $operand = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+
+    my $not = Chalk::IR::Node::Not->new(operand => $operand);
+
+    my %context = (
+        "node:" . $operand->id => 0,
+    );
+
+    my $result = $not->execute(sub { $context{$_[0]} });
+    ok(is_bool($result), 'Not execute() returns native bool');
+    ok($result, 'Not !0 is true');
+};
+
+subtest 'Not execute() negates truthy value' => sub {
+    my $operand = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
+
+    my $not = Chalk::IR::Node::Not->new(operand => $operand);
+
+    my %context = (
+        "node:" . $operand->id => 1,
+    );
+
+    my $result = $not->execute(sub { $context{$_[0]} });
+    ok(is_bool($result), 'Not execute() returns native bool');
+    ok(!$result, 'Not !1 is false');
+};
+
+subtest 'Not compute() returns TypeBool' => sub {
+    my $operand = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+
+    my $not = Chalk::IR::Node::Not->new(operand => $operand);
+
+    my $type = $not->compute();
+    ok($type isa Chalk::IR::Type::TypeBool, 'Not compute() returns TypeBool');
+    ok($type->is_constant, 'Not result is constant when input constant');
+    ok($type->value, 'Not !0 compute() is true');
+};
+
+subtest 'Not peephole() folds to Bool Constant' => sub {
+    my $operand = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+
+    my $not = Chalk::IR::Node::Not->new(operand => $operand);
+
+    my $result = $not->peephole();
+    ok($result isa Chalk::IR::Node::Constant, 'Not peephole() returns Constant');
+    is($result->type, 'Bool', 'Not peephole() returns Bool type');
+    ok($result->value, 'Not peephole() !0 is true');
 };
 
 done_testing();
