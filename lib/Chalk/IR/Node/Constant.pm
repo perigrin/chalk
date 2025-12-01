@@ -6,6 +6,7 @@ use utf8;
 
 class Chalk::IR::Node::Constant {
     use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::TypeBool;
 
     field $value :param :reader;
     field $type  :param :reader;
@@ -46,6 +47,9 @@ class Chalk::IR::Node::Constant {
 
     # Return type for constant folding - constants always have known type
     method compute() {
+        if ($type eq 'Bool') {
+            return Chalk::IR::Type::TypeBool->constant($value);
+        }
         return Chalk::IR::Type::TypeInteger->constant($value);
     }
 
