@@ -185,7 +185,7 @@ class Chalk::IR::Node::Add {
             if (!$lhs_inner_right_type->is_constant && !$right_type->is_constant) {
                 my $y = $left->right;
                 my $z = $right;
-                if ($z->id lt $y->id) {
+                if ($z->id < $y->id) {
                     my $new_left = Chalk::IR::Node::Add->new(
                         left  => $left->left,
                         right => $z,
