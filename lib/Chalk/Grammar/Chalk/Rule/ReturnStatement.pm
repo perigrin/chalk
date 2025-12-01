@@ -41,6 +41,13 @@ class Chalk::Grammar::Chalk::Rule::ReturnStatement :isa(Chalk::GrammarRule) {
             value   => $expr_node,
         );
 
+        # Kill control after return - per Simple Chapter 4:
+        # "kills control" by setting $ctrl to undef (dead code marker)
+        if ($scope) {
+            my $dead_scope = $scope->with_binding('$ctrl', undef);
+            $context->env->{scope} = $dead_scope;
+        }
+
         return $return_node;
     }
 }
