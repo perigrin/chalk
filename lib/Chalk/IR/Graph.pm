@@ -84,6 +84,57 @@ class Chalk::IR::Graph {
         return $uses->{$id} // [];
     }
 
+    # Remove a node from the graph and update use-def chains
+    method remove_node($node_id) {
+        my $node = $nodes->{$node_id};
+        return unless $node;
+
+        # Remove this node as a user of its inputs
+        if ($node->can('inputs')) {
+            for my $input_id ($node->inputs->@*) {
+                next unless defined $input_id;
+                next if $input_id eq '__CONTROL_PLACEHOLDER__';
+                if (exists $uses->{$input_id}) {
+                    @{$uses->{$input_id}} = grep { $_ ne $node_id } @{$uses->{$input_id}};
+                }
+            }
+        }
+
+        # Remove this node's entry in uses (other nodes won't reference it)
+        delete $uses->{$node_id};
+
+        # Remove from graph
+        delete $nodes->{$node_id};
+
+        return;
+    }
+
+    # Kill a node with no uses, recursively killing inputs that become unused
+    # This is the core of Dead Code Elimination (DCE)
+    method kill($node_id) {
+        my $node = $nodes->{$node_id};
+        return unless $node;
+
+        # Get inputs before removing the node
+        my @input_ids;
+        if ($node->can('inputs')) {
+            @input_ids = grep { defined $_ && $_ ne '__CONTROL_PLACEHOLDER__' } $node->inputs->@*;
+        }
+
+        # Remove this node from the graph
+        $self->remove_node($node_id);
+
+        # Recursively kill inputs that are now unused
+        for my $input_id (@input_ids) {
+            my $input_uses = $self->get_uses($input_id);
+            if (scalar($input_uses->@*) == 0) {
+                $self->kill($input_id);
+            }
+        }
+
+        return;
+    }
+
     method node_count() {
         return scalar keys %{$nodes};
     }
