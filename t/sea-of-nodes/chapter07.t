@@ -141,7 +141,6 @@ subtest 'Simple while(true) infinite loop IR' => sub {
     $graph->add_node($return_node);
 
     is scalar($loop->inputs->@*), 2, 'Loop has entry and backedge';
-    $graph->materialize_pending_nodes();
     my $json = $graph->to_json();
     my $has_loop = scalar(grep { $_->{op} eq 'Loop' } $json->{nodes}->@*);
     ok $has_loop, 'IR contains Loop node';
@@ -261,8 +260,6 @@ subtest 'While loop with counter: while(i < 10) { i = i + 1; }' => sub {
     is scalar($loop->inputs->@*), 2, 'Loop has entry and backedge';
     is scalar($phi_i->inputs->@*), 3, 'Loop phi has control, init, and loop value';
 
-    # Materialize pending nodes before validation
-    $graph->materialize_pending_nodes();
 
     my $validator = Chalk::IR::Validator->new();
     my @cfg_errors = $validator->validate_cfg($graph);
@@ -542,7 +539,6 @@ subtest 'Loop exit with final value' => sub {
 
     is $return_node->inputs->[1], $phi->id, 'Return uses loop phi value';
 
-    $graph->materialize_pending_nodes();
     my $json = $graph->to_json();
     my $has_return = scalar(grep { $_->{op} eq 'Return' } $json->{nodes}->@*);
     my $has_loop = scalar(grep { $_->{op} eq 'Loop' } $json->{nodes}->@*);
@@ -590,7 +586,6 @@ subtest 'Loop validator integration' => sub {
     );
     $graph->add_node($return_node);
 
-    $graph->materialize_pending_nodes();
 
     my $validator = Chalk::IR::Validator->new();
 

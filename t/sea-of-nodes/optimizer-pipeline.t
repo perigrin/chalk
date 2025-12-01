@@ -38,8 +38,6 @@ subtest 'Empty pipeline' => sub {
     # Create empty pipeline
     my $pipeline = Chalk::IR::OptimizerPipeline->new(optimizers => []);
 
-    # Materialize pending nodes before pipeline
-    $graph->materialize_pending_nodes();
 
     # Apply pipeline
     my $result = $pipeline->apply($graph);
@@ -104,8 +102,6 @@ subtest 'Single optimizer pipeline' => sub {
     );
     $graph->add_node($add3);
 
-    # Materialize pending nodes before counting/pipeline
-    $graph->materialize_pending_nodes();
 
     # Before optimization: 6 nodes
     is($graph->node_count, 6, 'Graph has 6 nodes before optimization');
@@ -142,8 +138,6 @@ subtest 'Multiple optimizer pipeline' => sub {
     );
     $graph->add_node($const);
 
-    # Materialize pending nodes before pipeline
-    $graph->materialize_pending_nodes();
 
     # Create pipeline with multiple optimizers (GVN twice for testing)
     my $gvn1 = Chalk::IR::Optimizer::GVN->new();
@@ -170,8 +164,6 @@ subtest 'Pipeline preserves entry point' => sub {
     $graph->add_node($start);
     $graph->set_entry('node_0');
 
-    # Materialize pending nodes before pipeline
-    $graph->materialize_pending_nodes();
 
     my $pipeline = Chalk::IR::OptimizerPipeline->new(optimizers => []);
     my $result = $pipeline->apply($graph);

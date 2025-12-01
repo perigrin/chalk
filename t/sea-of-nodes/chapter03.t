@@ -165,8 +165,6 @@ sub build_graph_from_result {
         }
     }
 
-    # Materialize pending nodes into actual graph
-    $graph->materialize_pending_nodes();
 
     return $graph;
 }

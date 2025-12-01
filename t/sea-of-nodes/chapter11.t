@@ -535,9 +535,6 @@ subtest 'JSON serialization with Call nodes' => sub {
     );
     $graph->add_node($call);
 
-    # Materialize pending nodes before JSON serialization
-    $graph->materialize_pending_nodes();
-
     my $json = $graph->to_json();
 
     my $has_call = scalar(grep { $_->{op} eq 'Call' } $json->{nodes}->@*);

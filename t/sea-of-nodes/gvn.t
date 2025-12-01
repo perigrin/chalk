@@ -89,8 +89,6 @@ subtest 'Eliminate redundant arithmetic' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before counting/GVN
-    $graph->materialize_pending_nodes();
 
     # Before GVN: 7 nodes
     is($graph->node_count, 7, 'Graph has 7 nodes before GVN');
@@ -184,8 +182,6 @@ subtest 'Common subexpression elimination' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before counting/GVN
-    $graph->materialize_pending_nodes();
 
     is($graph->node_count, 7, 'Graph has 7 nodes before GVN');
 
@@ -261,8 +257,6 @@ subtest 'Commutativity in Add operations' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # Run GVN
     my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -336,8 +330,6 @@ subtest 'Commutativity in Multiply operations' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # Run GVN
     my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -387,8 +379,6 @@ subtest 'Different constants are not merged' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # Run GVN
     my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -452,8 +442,6 @@ subtest 'Identical constants are merged' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # Run GVN
     my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -511,8 +499,6 @@ subtest 'GVN is idempotent' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # First GVN pass
     my $result1 = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -592,8 +578,6 @@ subtest 'Non-commutative operations respect order' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # Run GVN
     my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -658,8 +642,6 @@ subtest 'Proj nodes respect index differences' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # Run GVN
     my $result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
@@ -796,8 +778,6 @@ subtest 'Complex expression optimization' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before counting/GVN
-    $graph->materialize_pending_nodes();
 
     is($graph->node_count, 11, 'Graph has 11 nodes before GVN');
 
@@ -874,8 +854,6 @@ subtest 'GVN preserves polymorphic node types' => sub {
 
     $graph->set_entry($start->id);
 
-    # Materialize pending nodes before GVN
-    $graph->materialize_pending_nodes();
 
     # Verify nodes are polymorphic before GVN
     is(ref($graph->nodes->{$add1->id}), 'Chalk::IR::Node::Add', 'Add node is polymorphic before GVN');

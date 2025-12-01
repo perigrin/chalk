@@ -338,9 +338,6 @@ if ( !caller ) {
                             }
                         }
 
-                        # Materialize pending nodes
-                        $graph->materialize_pending_nodes();
-
                         # Run GVN optimizer
                         require Chalk::IR::Optimizer::GVN;
                         my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);

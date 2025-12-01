@@ -27,7 +27,6 @@ my $return1 = Chalk::IR::Node::Return->new(
 $graph1->add_node($start1);
 $graph1->add_node($new_obj);
 $graph1->add_node($return1);
-$graph1->materialize_pending_nodes();
 
 my $interp1 = Chalk::Interpreter::CEKDataflow->new(graph => $graph1);
 my $result1 = $interp1->execute();
@@ -59,7 +58,6 @@ $graph2->add_node($field);
 $graph2->add_node($value);
 $graph2->add_node($store);
 $graph2->add_node($return2);
-$graph2->materialize_pending_nodes();
 
 my $interp2 = Chalk::Interpreter::CEKDataflow->new(graph => $graph2);
 my $result2 = $interp2->execute();
@@ -98,7 +96,6 @@ $graph3->add_node($value3);
 $graph3->add_node($store3);
 $graph3->add_node($load3);
 $graph3->add_node($return3);
-$graph3->materialize_pending_nodes();
 
 my $interp3 = Chalk::Interpreter::CEKDataflow->new(graph => $graph3);
 my $result3 = $interp3->execute();
@@ -151,7 +148,6 @@ $graph4->add_node($store4a);
 $graph4->add_node($store4b);
 $graph4->add_node($load4);
 $graph4->add_node($return4);
-$graph4->materialize_pending_nodes();
 
 my $interp4 = Chalk::Interpreter::CEKDataflow->new(graph => $graph4);
 my $result4 = $interp4->execute();
@@ -204,7 +200,6 @@ $graph5->add_node($store5a);
 $graph5->add_node($store5b);
 $graph5->add_node($load5);
 $graph5->add_node($return5);
-$graph5->materialize_pending_nodes();
 
 my $interp5 = Chalk::Interpreter::CEKDataflow->new(graph => $graph5);
 my $result5 = $interp5->execute();
@@ -260,7 +255,6 @@ $graph6->add_node($store6a);
 $graph6->add_node($store6b);
 $graph6->add_node($load6a);
 $graph6->add_node($return6);
-$graph6->materialize_pending_nodes();
 
 my $interp6 = Chalk::Interpreter::CEKDataflow->new(graph => $graph6);
 my $result6 = $interp6->execute();
@@ -316,7 +310,6 @@ $graph7->add_node($store7a);
 $graph7->add_node($store7b);
 $graph7->add_node($load7b);
 $graph7->add_node($return7);
-$graph7->materialize_pending_nodes();
 
 my $interp7 = Chalk::Interpreter::CEKDataflow->new(graph => $graph7);
 my $result7 = $interp7->execute();
@@ -367,7 +360,6 @@ $graph8->add_node($test_obj);
 $graph8->add_node($test_field);
 $graph8->add_node($store_result);
 $graph8->add_node($return8);
-$graph8->materialize_pending_nodes();
 
 my $interp8 = Chalk::Interpreter::CEKDataflow->new(graph => $graph8);
 my $result8 = $interp8->execute();

@@ -131,9 +131,6 @@ subtest 'Build minimal graph: Start -> Return(Constant)' => sub {
     $graph->add_node($const);
     $graph->add_node($return);
 
-    # Graph uses deferred addition - must materialize pending nodes
-    $graph->materialize_pending_nodes();
-
     is($graph->node_count, 3, 'Graph has 3 nodes');
 
     # Verify nodes are retrievable
@@ -205,9 +202,6 @@ sub build_graph_from_result {
             }
         }
     }
-
-    # Materialize pending nodes into actual graph
-    $graph->materialize_pending_nodes();
 
     return $graph;
 }

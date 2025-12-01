@@ -39,7 +39,6 @@ subtest 'Graph tracks use counts correctly' => sub {
     $graph->add_node($add_inner);
     $graph->add_node($c3);
     $graph->add_node($add_outer);
-    $graph->materialize_pending_nodes();
 
     # Check use counts
     my $c1_uses = $graph->get_uses($c1->id);
@@ -64,7 +63,6 @@ subtest 'remove_node removes node from graph' => sub {
 
     my $c1 = make_constant(1);
     $graph->add_node($c1);
-    $graph->materialize_pending_nodes();
 
     is($graph->node_count(), 1, 'Graph has 1 node before removal');
 
@@ -84,7 +82,6 @@ subtest 'remove_node updates use lists' => sub {
     $graph->add_node($c1);
     $graph->add_node($c2);
     $graph->add_node($add);
-    $graph->materialize_pending_nodes();
 
     # c1 and c2 should have add as a user
     is(scalar(@{$graph->get_uses($c1->id)}), 1, 'c1 has 1 use before removal');
@@ -106,7 +103,6 @@ subtest 'kill removes unused node' => sub {
 
     my $c1 = make_constant(1);
     $graph->add_node($c1);
-    $graph->materialize_pending_nodes();
 
     is($graph->node_count(), 1, 'Graph has 1 node before kill');
 
@@ -126,7 +122,6 @@ subtest 'kill recursively removes unused inputs' => sub {
     $graph->add_node($c1);
     $graph->add_node($c2);
     $graph->add_node($add);
-    $graph->materialize_pending_nodes();
 
     is($graph->node_count(), 3, 'Graph has 3 nodes before kill');
 
@@ -152,7 +147,6 @@ subtest 'kill does not remove inputs still in use' => sub {
     $graph->add_node($add1);
     $graph->add_node($add2);
     $graph->add_node($c3);
-    $graph->materialize_pending_nodes();
 
     my $initial_count = $graph->node_count();
 
@@ -178,7 +172,6 @@ subtest 'DCE after constant folding cleans up original nodes' => sub {
     $graph->add_node($c1);
     $graph->add_node($c2);
     $graph->add_node($add);
-    $graph->materialize_pending_nodes();
 
     is($graph->node_count(), 3, 'Graph has 3 nodes before optimization');
 
@@ -189,7 +182,6 @@ subtest 'DCE after constant folding cleans up original nodes' => sub {
 
     # Replace add with folded in graph (simulating what would happen during optimization)
     $graph->add_node($folded);
-    $graph->materialize_pending_nodes();
 
     # Kill the original add (which is now dead code)
     $graph->kill($add->id);
