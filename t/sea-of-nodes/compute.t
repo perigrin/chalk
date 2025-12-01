@@ -365,4 +365,19 @@ subtest 'Negate peephole() returns self when not constant-foldable' => sub {
     is(refaddr($result), refaddr($neg), 'peephole() returns self when input not constant');
 };
 
+subtest 'Negate node compute() with unknown integer returns IntTop' => sub {
+    # Create a node that returns IntTop (unknown integer type)
+    # We can do this by creating an Add with one constant and one unknown
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $int_top_node = Chalk::IR::Node::Add->new(left => $const3, right => $unknown);
+
+    # Now negate this unknown integer
+    my $neg = Chalk::IR::Node::Negate->new(operand => $int_top_node);
+
+    my $type = $neg->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when input is unknown integer');
+    ok($type->is_top, 'Result is IntTop (unknown integer)');
+};
+
 done_testing();
