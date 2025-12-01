@@ -13,6 +13,13 @@ class Chalk::IR::Type::Top :isa(Chalk::IR::Type) {
         state $singleton = Chalk::IR::Type::Top->new();
         return $singleton;
     }
+
+    # Top is identity for meet - return the other type
+    # Exception: Bottom absorbs everything
+    method meet($other) {
+        return $other if $other isa Chalk::IR::Type::Bottom;
+        return $other;
+    }
 }
 
 1;
