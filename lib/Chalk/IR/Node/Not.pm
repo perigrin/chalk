@@ -1,17 +1,20 @@
 # ABOUTME: Logical negation node in the IR graph
-# ABOUTME: Represents boolean negation of a single operand (!operand or not operand)
+# ABOUTME: Represents boolean negation of a single operand, returns native bool
 use 5.42.0;
 use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Not {
+    use Chalk::IR::Type::TypeBool;
+    use Chalk::IR::Type::Top;
+    use Chalk::IR::Node::Constant;
+
     field $operand :param :reader;
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
     method id() { refaddr($self) }
 
-    # Compute inputs from child node
     method inputs() {
         return [ $operand->id ];
     }
@@ -31,19 +34,33 @@ class Chalk::IR::Node::Not {
 
     method execute($context) {
         my $operand_val = $context->("node:" . $operand->id);
-        return $operand_val ? 0 : 1;
+        return $operand_val ? false : true;
     }
 
-    # Compatibility methods for code expecting Base methods
     method attributes() {
         return $self->to_hash()->{attributes};
     }
 
+    method compute() {
+        my $operand_type = $operand->compute();
+        if ($operand_type->is_constant) {
+            my $result = $operand_type->value ? false : true;
+            return Chalk::IR::Type::TypeBool->constant($result);
+        }
+        return Chalk::IR::Type::Top->top();
+    }
+
     method peephole($graph = undef) {
+        my $type = $self->compute();
+        if ($type->is_constant) {
+            return Chalk::IR::Node::Constant->new(
+                value => $type->value,
+                type  => 'Bool',
+            );
+        }
         return $self;
     }
 
-    # Stub for transform tracking
     method record_transform(@args) {
         return;
     }

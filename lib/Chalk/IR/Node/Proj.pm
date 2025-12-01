@@ -5,6 +5,8 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
+    use Chalk::IR::Type::Top;
+
     field $index  :param :reader;
     field $label  :param :reader;
     # Object reference to source node (If) for graph traversal
@@ -43,6 +45,19 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
         # Coerce if_result to boolean (0 or 1) to avoid warnings on non-numeric values
         my $if_bool = $if_result ? 1 : 0;
         return ($if_bool == $index) ? 0 : 1;
+    }
+
+    method compute() {
+        return Chalk::IR::Type::Top->top() unless $source;
+
+        my $source_type = $source->compute();
+
+        # Extract type at index from tuple
+        if ($source_type->can('at')) {
+            return $source_type->at($index);
+        }
+
+        return Chalk::IR::Type::Top->top();
     }
 }
 

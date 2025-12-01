@@ -44,6 +44,25 @@ subtest 'Constant node compute() returns TypeInteger' => sub {
     is($type0->value, 0, 'TypeInteger has value 0');
 };
 
+# TypeBool tests for Constant node
+use_ok('Chalk::IR::Type::TypeBool');
+use builtin qw(true false is_bool);
+
+subtest 'Constant node compute() returns TypeBool for Bool type' => sub {
+    my $const_true = Chalk::IR::Node::Constant->new(value => true, type => 'Bool');
+    my $const_false = Chalk::IR::Node::Constant->new(value => false, type => 'Bool');
+
+    my $type_true = $const_true->compute();
+    ok($type_true isa Chalk::IR::Type::TypeBool, 'compute() returns TypeBool for Bool constant');
+    is($type_true->is_constant, 1, 'TypeBool is constant');
+    ok(is_bool($type_true->value), 'TypeBool value is native bool');
+    ok($type_true->value, 'TypeBool TRUE value is truthy');
+
+    my $type_false = $const_false->compute();
+    ok($type_false isa Chalk::IR::Type::TypeBool, 'compute() returns TypeBool for false');
+    ok(!$type_false->value, 'TypeBool FALSE value is falsy');
+};
+
 # Task 7: Add node compute() - returns sum if both inputs are constant
 use_ok('Chalk::IR::Node::Add');
 

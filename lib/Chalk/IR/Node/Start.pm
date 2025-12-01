@@ -1,15 +1,21 @@
 # ABOUTME: Start node representing function entry point in the IR graph
-# ABOUTME: Defines the initial control and data state for a function
+# ABOUTME: MultiNode that returns (ctrl, arg) tuple for Chapter 4 compliance
 use 5.42.0;
 use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Start {
+    use Chalk::IR::Type::TypeTuple;
+    use Chalk::IR::Type::TypeCtrl;
+    use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::Top;
+
     field $function_name :param :reader = undef;
     field $params        :param :reader = undef;
     # Alias fields for backward compat with different attribute names
     field $label :param :reader = undef;      # v2-style alias
     field $function :param = undef;           # v1-style alias
+    field $arg_value :param :reader = undef;  # @ARGV[0] passed at construction
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
@@ -26,6 +32,8 @@ class Chalk::IR::Node::Start {
 
     method op() { 'Start' }
 
+    method is_multi() { return 1; }
+
     method to_hash() {
         return {
             id     => $self->id,
@@ -35,6 +43,7 @@ class Chalk::IR::Node::Start {
                 function_name => $function_name,
                 label         => $label,
                 params        => $params,
+                arg_value     => $arg_value,
             },
         };
     }
@@ -47,6 +56,17 @@ class Chalk::IR::Node::Start {
     # Compatibility methods for code expecting Base methods
     method attributes() {
         return $self->to_hash()->{attributes};
+    }
+
+    method compute() {
+        my $arg_type = defined($arg_value)
+            ? Chalk::IR::Type::TypeInteger->constant($arg_value)
+            : Chalk::IR::Type::Top->top();
+
+        return Chalk::IR::Type::TypeTuple->of(
+            Chalk::IR::Type::TypeCtrl->CTRL(),
+            $arg_type
+        );
     }
 
     method peephole($graph = undef) {
