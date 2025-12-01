@@ -8,6 +8,7 @@ use builtin qw(true false is_bool);
 use Scalar::Util qw(refaddr);
 
 use_ok('Chalk::IR::Type::TypeBool');
+use_ok('Chalk::IR::Type::TypeCtrl');
 
 subtest 'TypeBool TRUE singleton' => sub {
     my $true1 = Chalk::IR::Type::TypeBool->TRUE;
@@ -44,6 +45,22 @@ subtest 'TypeBool constant() factory' => sub {
 subtest 'TypeBool inherits from Chalk::IR::Type' => sub {
     my $bool = Chalk::IR::Type::TypeBool->TRUE;
     ok($bool isa Chalk::IR::Type, 'TypeBool inherits from Type');
+};
+
+subtest 'TypeCtrl CTRL singleton' => sub {
+    my $ctrl1 = Chalk::IR::Type::TypeCtrl->CTRL;
+    my $ctrl2 = Chalk::IR::Type::TypeCtrl->CTRL;
+
+    ok($ctrl1, 'CTRL returns a value');
+    is(refaddr($ctrl1), refaddr($ctrl2), 'CTRL returns same singleton');
+    ok($ctrl1 isa Chalk::IR::Type::TypeCtrl, 'CTRL is a TypeCtrl');
+    ok($ctrl1->is_constant, 'CTRL is constant');
+    ok(!defined($ctrl1->value), 'CTRL value is undef (control has no data)');
+};
+
+subtest 'TypeCtrl inherits from Chalk::IR::Type' => sub {
+    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
+    ok($ctrl isa Chalk::IR::Type, 'TypeCtrl inherits from Type');
 };
 
 done_testing();
