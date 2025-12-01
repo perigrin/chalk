@@ -52,8 +52,8 @@ subtest 'TypeInteger (constant value)' => sub {
 };
 
 subtest 'TypeInteger TOP (unknown integer)' => sub {
-    my $top1 = Chalk::IR::Type::TypeInteger->TOP;
-    my $top2 = Chalk::IR::Type::TypeInteger->TOP;
+    my $top1 = Chalk::IR::Type::TypeInteger->TOP();
+    my $top2 = Chalk::IR::Type::TypeInteger->TOP();
 
     ok($top1, 'Can get IntTop singleton');
     ok($top1 isa Chalk::IR::Type::TypeInteger, 'IntTop isa TypeInteger');
@@ -64,8 +64,8 @@ subtest 'TypeInteger TOP (unknown integer)' => sub {
 };
 
 subtest 'TypeInteger BOTTOM (integer error state)' => sub {
-    my $bot1 = Chalk::IR::Type::TypeInteger->BOTTOM;
-    my $bot2 = Chalk::IR::Type::TypeInteger->BOTTOM;
+    my $bot1 = Chalk::IR::Type::TypeInteger->BOTTOM();
+    my $bot2 = Chalk::IR::Type::TypeInteger->BOTTOM();
 
     ok($bot1, 'Can get IntBot singleton');
     ok($bot1 isa Chalk::IR::Type::TypeInteger, 'IntBot isa TypeInteger');
