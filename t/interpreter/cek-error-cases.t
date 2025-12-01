@@ -86,7 +86,6 @@ subtest 'ArrayLoad with non-existent heap_id' => sub {
     $graph->add_node($index);
     $graph->add_node($load);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -124,7 +123,6 @@ subtest 'ArrayLoad with non-integer heap_id type' => sub {
     $graph->add_node($index);
     $graph->add_node($load);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -164,7 +162,6 @@ subtest 'ArrayStore with invalid index type' => sub {
     $graph->add_node($value);
     $graph->add_node($store);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = eval { $interp->execute(); };
@@ -204,7 +201,6 @@ subtest 'HashLoad with undefined key' => sub {
     $graph->add_node($key);
     $graph->add_node($load);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = eval { $interp->execute(); };
@@ -253,7 +249,6 @@ subtest 'HashStore with non-existent heap_id' => sub {
     $graph->add_node($value);
     $graph->add_node($store);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -329,7 +324,6 @@ subtest 'Phi node with active_path out of range' => sub {
     $graph->add_node($region);
     $graph->add_node($phi);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -366,7 +360,6 @@ subtest 'Region with all paths inactive' => sub {
     $graph->add_node($false_val);
     $graph->add_node($region);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -407,7 +400,6 @@ subtest 'If node with non-boolean condition' => sub {
     $graph->add_node($if_node);
     $graph->add_node($proj_true);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = eval { $interp->execute(); };
@@ -433,7 +425,6 @@ subtest 'Calling step() without initialize_stepping()' => sub {
     $graph->add_node($start);
     $graph->add_node($const);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     # Try to step without initialization
@@ -454,7 +445,6 @@ subtest 'Stepping past completion' => sub {
     $graph->add_node($start);
     $graph->add_node($const);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     $interp->initialize_stepping();
@@ -484,7 +474,6 @@ subtest 'Restoring snapshot from different graph' => sub {
     $graph1->add_node($start1);
     $graph1->add_node($const1);
     $graph1->add_node($return1);
-    $graph1->materialize_pending_nodes();
 
     my $interp1 = Chalk::Interpreter::CEKDataflow->new(graph => $graph1);
     $interp1->initialize_stepping();
@@ -506,7 +495,6 @@ subtest 'Restoring snapshot from different graph' => sub {
     $graph2->add_node($start2);
     $graph2->add_node($const2);
     $graph2->add_node($return2);
-    $graph2->materialize_pending_nodes();
 
     my $interp2 = Chalk::Interpreter::CEKDataflow->new(graph => $graph2);
 
@@ -534,7 +522,6 @@ subtest 'Snapshot with corrupted data' => sub {
     $graph->add_node($start);
     $graph->add_node($const);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
 
@@ -585,7 +572,6 @@ subtest 'Return node without value producer' => sub {
         control_id => 'non_existent'
     );
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -614,7 +600,6 @@ subtest 'Multiple Return nodes' => sub {
     $graph->add_node($const2);
     $graph->add_node($return1);
     $graph->add_node($return2);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = eval { $interp->execute(); };
@@ -646,7 +631,6 @@ subtest 'Division by zero' => sub {
     $graph->add_node($denominator);
     $graph->add_node($div);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = eval { $interp->execute(); };
@@ -692,7 +676,6 @@ subtest 'Negative array index' => sub {
     $graph->add_node($value);
     $graph->add_node($store);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = eval { $interp->execute(); };
@@ -718,7 +701,6 @@ subtest 'Context lookup with malformed key' => sub {
     $graph->add_node($const);
     $graph->add_node($add);
     $graph->add_node($return);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = eval { $interp->execute(); };

@@ -510,8 +510,6 @@ subtest 'Validator confirms optimized IR correctness' => sub {
         attributes => {}
     ));
 
-    # Materialize pending nodes
-    $graph->materialize_pending_nodes();
 
     # Run validator
     my $validator = Chalk::IR::Validator->new();

@@ -125,9 +125,6 @@ class Chalk::IR::Optimizer::GVN {
             $new_graph->set_entry($new_entry);
         }
 
-        # Materialize pending nodes into the graph
-        $new_graph->materialize_pending_nodes();
-
         # Compute metrics
         my $nodes_eliminated = scalar keys %{$redirections};
 

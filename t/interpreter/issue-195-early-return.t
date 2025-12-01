@@ -105,7 +105,6 @@ sub execute_chalk {
         }
     }
 
-    $graph->materialize_pending_nodes();
 
     # Run GVN optimizer
     my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);

@@ -27,7 +27,6 @@ $graph1->add_node($const1);
 $graph1->add_node($const2);
 $graph1->add_node($add);
 $graph1->add_node($ret);
-$graph1->materialize_pending_nodes();
 
 my $interp1 = Chalk::Interpreter::CEKDataflow->new(graph => $graph1);
 $interp1->initialize_stepping();
@@ -93,7 +92,6 @@ $graph2->add_node($c1);
 $graph2->add_node($c2);
 $graph2->add_node($add2);
 $graph2->add_node($ret2);
-$graph2->materialize_pending_nodes();
 
 my $interp2 = Chalk::Interpreter::CEKDataflow->new(graph => $graph2);
 $interp2->initialize_stepping();
@@ -120,7 +118,6 @@ $graph3->add_node($c3);
 $graph3->add_node($c4);
 $graph3->add_node($add3);
 $graph3->add_node($ret3);
-$graph3->materialize_pending_nodes();
 
 # Execute with full execute() method
 my $interp3a = Chalk::Interpreter::CEKDataflow->new(graph => $graph3);

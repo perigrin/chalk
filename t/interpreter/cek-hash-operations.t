@@ -25,7 +25,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($start);
     $graph->add_node($new_hash);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -56,7 +55,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($value);
     $graph->add_node($store);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -94,7 +92,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($store);
     $graph->add_node($load);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -146,7 +143,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($store_y);
     $graph->add_node($load_y);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -199,7 +195,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($store_y);
     $graph->add_node($load_x);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -252,7 +247,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($store_bob);
     $graph->add_node($load_alice);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -305,7 +299,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($store_bob);
     $graph->add_node($load_bob);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result = $interp->execute();
@@ -337,7 +330,6 @@ TODO: {
     $graph->add_node($key);
     $graph->add_node($load);
     $graph->add_node($return_node);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval {

@@ -31,7 +31,6 @@ $graph->add_node($const1);
 $graph->add_node($const2);
 $graph->add_node($add);
 $graph->add_node($ret);
-$graph->materialize_pending_nodes();
 
 # Test 1-2: Create execution log and capture steps
 my $log = Chalk::Interpreter::ExecutionLog->new(graph => $graph);

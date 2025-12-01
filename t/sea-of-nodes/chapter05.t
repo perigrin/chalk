@@ -423,9 +423,6 @@ subtest 'Complete if-then-else: classify($x) with phi merge' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes
-    $graph->materialize_pending_nodes();
-
     # Verify graph structure
     is($graph->node_count, 12, 'Graph has 12 nodes');
 
@@ -540,8 +537,6 @@ subtest 'Validator confirms Chapter 5 IR correctness' => sub {
         attributes => {}
     ));
 
-    # Materialize pending nodes
-    $graph->materialize_pending_nodes();
 
     # Run validator
     my $validator = Chalk::IR::Validator->new();
@@ -598,8 +593,6 @@ subtest 'JSON serialization with If/Region/Phi' => sub {
         attributes => {}
     ));
 
-    # Materialize pending nodes
-    $graph->materialize_pending_nodes();
 
     # Serialize to JSON
     my $json = $graph->to_json();

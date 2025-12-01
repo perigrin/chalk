@@ -31,7 +31,6 @@ use Chalk::Interpreter::CEKDataflow;
 
     $graph->add_node($start);
     $graph->add_node($const);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     eval { $interp->execute(); };
@@ -51,7 +50,6 @@ use Chalk::Interpreter::CEKDataflow;
     $graph->add_node($start);
     $graph->add_node($const);
     $graph->add_node($ret);
-    $graph->materialize_pending_nodes();
 
     my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
     my $result;

@@ -42,8 +42,6 @@ subtest 'Node tracks uses via Graph' => sub {
     );
     $graph->add_node($return);
 
-    # Materialize pending nodes before getting uses
-    $graph->materialize_pending_nodes();
 
     # Test: Get uses of Start node (should be used by Constant and Return)
     my $start_uses = $graph->get_uses('node_0');
@@ -80,8 +78,6 @@ subtest 'Use-def chains update when adding nodes' => sub {
     );
     $graph->add_node($start);
 
-    # Materialize pending nodes before getting uses
-    $graph->materialize_pending_nodes();
 
     # Initially, Start has no uses
     my $uses = $graph->get_uses('node_0');
@@ -97,7 +93,6 @@ subtest 'Use-def chains update when adding nodes' => sub {
     $graph->add_node($constant);
 
     # Materialize new pending nodes
-    $graph->materialize_pending_nodes();
 
     # Now Start should have one use
     $uses = $graph->get_uses('node_0');
@@ -114,7 +109,6 @@ subtest 'Use-def chains update when adding nodes' => sub {
     $graph->add_node($return);
 
     # Materialize new pending nodes
-    $graph->materialize_pending_nodes();
 
     # Now Start should have two uses, Constant should have one
     $uses = $graph->get_uses('node_0');
@@ -166,8 +160,6 @@ subtest 'Use-def chains with arithmetic operations' => sub {
     );
     $graph->add_node($add);
 
-    # Materialize pending nodes before getting uses
-    $graph->materialize_pending_nodes();
 
     # Verify use-def chains
     my $uses_a = $graph->get_uses('node_1');
@@ -224,8 +216,6 @@ subtest 'Use-def chains with Phi nodes' => sub {
     );
     $graph->add_node($phi);
 
-    # Materialize pending nodes before getting uses
-    $graph->materialize_pending_nodes();
 
     # Verify use-def chains
     my $region_uses = $graph->get_uses('region_1');
