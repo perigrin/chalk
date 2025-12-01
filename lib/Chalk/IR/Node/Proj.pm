@@ -59,6 +59,55 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
 
         return Chalk::IR::Type::Top->top();
     }
+
+    # Peephole optimization for Proj nodes
+    # If source is an If with constant condition, detect if this branch is dead
+    # Dead branches return a ~Ctrl constant; live branches pass through control
+    method peephole($graph = undef) {
+        return $self unless $graph;
+
+        # Get source node (should be an If)
+        my $source_id = $self->inputs->[0];
+        return $self unless $source_id;
+
+        my $source_node = $source // $graph->get_node($source_id);
+        return $self unless $source_node;
+
+        # Only optimize if source is an If node
+        return $self unless $source_node->op eq 'If';
+
+        # Check if the If node has a constant condition
+        if ($source_node->can('is_constant_condition')) {
+            my ($is_const, $cond_value) = $source_node->is_constant_condition($graph);
+
+            if ($is_const) {
+                # cond_value: 1 = true (take true branch), 0 = false (take false branch)
+                # index: 0 = true branch (IfTrue), 1 = false branch (IfFalse)
+                #
+                # If condition is true (1): index 0 is live, index 1 is dead
+                # If condition is false (0): index 0 is dead, index 1 is live
+                my $is_live = ($cond_value == 1 && $index == 0) ||
+                              ($cond_value == 0 && $index == 1);
+
+                if ($is_live) {
+                    # Live branch: pass through to the control input of the If node
+                    my $if_inputs = $source_node->inputs;
+                    if ($if_inputs && $if_inputs->[0]) {
+                        my $ctrl_node = $graph->get_node($if_inputs->[0]);
+                        return $ctrl_node if $ctrl_node;
+                    }
+                } else {
+                    # Dead branch: return a ~Ctrl constant
+                    return Chalk::IR::Node::Constant->new(
+                        value => '~Ctrl',
+                        type  => 'Control',
+                    );
+                }
+            }
+        }
+
+        return $self;
+    }
 }
 
 1;
