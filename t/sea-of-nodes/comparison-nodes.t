@@ -5,10 +5,9 @@ use 5.42.0;
 use experimental qw(class);
 use lib 'lib';
 use Test::More;
+use builtin qw(true false is_bool);
 
-plan tests => 20;
-
-# Test 1-7: Comparison node subclasses should be loadable
+# Test 1-8: Comparison node subclasses should be loadable
 use_ok('Chalk::IR::Node::GT');
 use_ok('Chalk::IR::Node::LT');
 use_ok('Chalk::IR::Node::EQ');
@@ -16,6 +15,7 @@ use_ok('Chalk::IR::Node::NE');
 use_ok('Chalk::IR::Node::LE');
 use_ok('Chalk::IR::Node::GE');
 use_ok('Chalk::IR::Node::Constant');
+use_ok('Chalk::IR::Type::TypeBool');
 
 # Helper to create constant nodes for testing
 sub make_const {
@@ -23,7 +23,7 @@ sub make_const {
     return Chalk::IR::Node::Constant->new(value => $val, type => 'Int');
 }
 
-# Test 8: GT node should implement op() method
+# Test 9: GT node should implement op() method
 {
     my $left = make_const(1);
     my $right = make_const(2);
@@ -133,5 +133,63 @@ sub make_const {
     my $ne = Chalk::IR::Node::NE->new(left => $left, right => $right);
     like($ne->id, qr/^\d+$/, 'NE has numeric id (refaddr)');
 }
+
+# Native bool tests for GT
+subtest 'GT execute() returns native bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+
+    my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
+
+    my %context = (
+        "node:" . $left->id => 10,
+        "node:" . $right->id => 5,
+    );
+
+    my $result = $gt->execute(sub { $context{$_[0]} });
+    ok(is_bool($result), 'GT execute() returns native bool');
+    ok($result, 'GT 10 > 5 is true');
+};
+
+subtest 'GT execute() returns native false' => sub {
+    my $left = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+
+    my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
+
+    my %context = (
+        "node:" . $left->id => 3,
+        "node:" . $right->id => 5,
+    );
+
+    my $result = $gt->execute(sub { $context{$_[0]} });
+    ok(is_bool($result), 'GT execute() returns native bool');
+    ok(!$result, 'GT 3 > 5 is false');
+};
+
+subtest 'GT compute() returns TypeBool for constant inputs' => sub {
+    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+
+    my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
+
+    my $type = $gt->compute();
+    ok($type isa Chalk::IR::Type::TypeBool, 'GT compute() returns TypeBool');
+    ok($type->is_constant, 'GT result is constant when inputs constant');
+    ok($type->value, 'GT 10 > 5 compute() is true');
+};
+
+subtest 'GT peephole() folds to Bool Constant' => sub {
+    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+
+    my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
+
+    my $result = $gt->peephole();
+    ok($result isa Chalk::IR::Node::Constant, 'GT peephole() returns Constant');
+    is($result->type, 'Bool', 'GT peephole() returns Bool type');
+    ok(is_bool($result->value), 'GT peephole() value is native bool');
+    ok($result->value, 'GT peephole() 10 > 5 is true');
+};
 
 done_testing();
