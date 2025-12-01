@@ -145,14 +145,14 @@ subtest 'Subtract node compute() with constant inputs' => sub {
     is($type->value, 7, '10 - 3 = 7');
 };
 
-subtest 'Subtract node compute() with non-constant input returns TOP' => sub {
+subtest 'Subtract node compute() with non-constant input returns TypeInteger' => sub {
     my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
     my $unknown = Chalk::IR::Node::Base->new(inputs => []);
 
     my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $unknown);
 
     my $type = $sub->compute();
-    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when one operand is integer');
 };
 
 subtest 'Subtract peephole() folds constant subtraction' => sub {
@@ -176,6 +176,16 @@ subtest 'Subtract peephole() returns self when not constant-foldable' => sub {
     my $result = $sub->peephole(undef);
 
     is(refaddr($result), refaddr($sub), 'peephole() returns self when inputs not constant');
+};
+
+subtest 'Subtract node compute() with unknown integer returns IntTop' => sub {
+    my $const10 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $sub = Chalk::IR::Node::Subtract->new(left => $const10, right => $unknown);
+
+    my $type = $sub->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when one input is unknown');
+    ok($type->is_top, 'Result is IntTop (unknown integer)');
 };
 
 # Task 10: Multiply node compute() and peephole()
