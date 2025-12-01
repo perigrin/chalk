@@ -1,5 +1,5 @@
 # ABOUTME: Tests for arithmetic operator precedence handling
-# ABOUTME: Verifies correct evaluation order for +, *, and parentheses (Issue #199)
+# ABOUTME: Verifies correct evaluation order for +, *, and parentheses
 
 use lib 'lib';
 use v5.42;
@@ -48,7 +48,7 @@ sub extract_result {
 
 # Test cases for arithmetic precedence
 my @tests = (
-    # Basic Issue #199 tests - operator ordering
+    # Basic operator ordering tests
     { code => 'return 2 * 3 + 1;', expected => 7, desc => 'multiply first (2*3)+1' },
     { code => 'return 1 + 2 * 3;', expected => 7, desc => 'add first 1+(2*3)' },
 
@@ -73,8 +73,8 @@ my @tests = (
     { code => 'return 1 + 12 / 3;', expected => 5, desc => 'add after divide: 1+(12/3)' },
 );
 
-# TODO tests - parentheses override precedence (not yet implemented)
-my @todo_tests = (
+# Parentheses override precedence (Issue #213)
+my @paren_tests = (
     { code => 'return (1 + 2) * 3;', expected => 9, desc => 'parentheses: (1+2)*3' },
     { code => 'return 3 * (1 + 2);', expected => 9, desc => 'parentheses after: 3*(1+2)' },
     { code => 'return (2 + 3) * (4 + 1);', expected => 25, desc => 'double parens: (2+3)*(4+1)' },
@@ -99,25 +99,21 @@ for my $test (@tests) {
     };
 }
 
-# Run TODO tests for parentheses (not yet implemented)
-for my $test (@todo_tests) {
+# Run parentheses tests (Issue #213)
+for my $test (@paren_tests) {
     subtest $test->{desc} => sub {
         my $parser = make_parser();
 
         diag "Parsing: $test->{code}";
         my $result = $parser->parse_string($test->{code});
 
-        TODO: {
-            local $TODO = "Parentheses precedence override not yet implemented (Issue #213)";
+        ok($result, 'Parse succeeded');
 
-            ok($result, 'Parse succeeded');
-
-            my $actual = extract_result($result);
-            if (defined $actual) {
-                is($actual, $test->{expected}, "Correct value: $test->{expected}");
-            } else {
-                fail("Could not extract result from parse");
-            }
+        my $actual = extract_result($result);
+        if (defined $actual) {
+            is($actual, $test->{expected}, "Correct value: $test->{expected}");
+        } else {
+            fail("Could not extract result from parse");
         }
     };
 }

@@ -12,8 +12,18 @@ class Chalk::Grammar::Chalk::Rule::Expression :isa(Chalk::GrammarRule) {
         # Expression -> YaddaYadda
         # Expression -> FunctionCall
         # Expression -> Assignment (and many other operators)
+        # Expression -> '(' WS_OPT Expression WS_OPT ')' (parenthesized)
 
-        my $child = $context->child(0);
+        my $first_child = $context->child(0);
+
+        # Handle parenthesized expressions: '(' WS_OPT Expression WS_OPT ')'
+        # When first child is '(', the actual expression is at child(2)
+        # This allows (1 + 2) * 3 to work correctly
+        if (defined $first_child && $first_child eq '(') {
+            return $context->child(2);
+        }
+
+        my $child = $first_child;
 
         # Check if child is a variable metadata hashref (from ScalarVar via Variable)
         # Variables in expression context need to be converted to Load nodes

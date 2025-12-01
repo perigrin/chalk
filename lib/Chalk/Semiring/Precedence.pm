@@ -406,6 +406,18 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # This prevents wiping out precedence validation results
         my $was_valid = $completed_element->can('valid') ? $completed_element->valid : 1;
 
+        # PARENTHESIZED EXPRESSIONS: Clear operator info when completing a rule
+        # that starts with '(' - parentheses "seal off" the inner precedence context.
+        # This makes (1 + 2) behave as a primary value with no operator, so
+        # (1 + 2) * 3 parses correctly (no precedence conflict between + and *).
+        my $rhs = $completed_item->rule->rhs;
+        if ($rhs && $rhs->@* > 0 && $rhs->[0] eq '(') {
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => $was_valid,
+                operator_index => $operator_index
+            );
+        }
+
         # Preserve operator info for Expression and operator-producing rules
         # Clear it elsewhere to prevent comparing unrelated operators
         my @expression_rules = qw(
