@@ -91,4 +91,20 @@ subtest 'Proj compute() returns Top when source not tuple' => sub {
     ok($type isa Chalk::IR::Type::Top, 'Proj compute() returns Top for non-tuple source');
 };
 
+# Chapter 4 canonical test case - comparison with constant folding
+use_ok('Chalk::IR::Node::GT');
+
+subtest 'Comparison with constant folding returns Bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+
+    my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
+
+    my $folded = $gt->peephole();
+    ok($folded isa Chalk::IR::Node::Constant, 'GT peephole folds to Constant');
+    is($folded->type, 'Bool', 'Folded type is Bool');
+    ok(is_bool($folded->value), 'Folded value is native bool');
+    ok($folded->value, '10 > 5 is true');
+};
+
 done_testing();
