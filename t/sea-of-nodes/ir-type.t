@@ -51,4 +51,16 @@ subtest 'TypeInteger (constant value)' => sub {
     is($int0->value, 0, 'value() returns 0 for zero constant');
 };
 
+subtest 'TypeInteger TOP (unknown integer)' => sub {
+    my $top1 = Chalk::IR::Type::TypeInteger->TOP;
+    my $top2 = Chalk::IR::Type::TypeInteger->TOP;
+
+    ok($top1, 'Can get IntTop singleton');
+    ok($top1 isa Chalk::IR::Type::TypeInteger, 'IntTop isa TypeInteger');
+    is($top1->is_constant, 0, 'IntTop is not constant');
+    ok($top1->is_top, 'IntTop is_top returns true');
+    ok(!$top1->is_bottom, 'IntTop is_bottom returns false');
+    is(refaddr($top1), refaddr($top2), 'IntTop is singleton');
+};
+
 done_testing();
