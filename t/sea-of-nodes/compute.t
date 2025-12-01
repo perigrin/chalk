@@ -205,14 +205,14 @@ subtest 'Multiply node compute() with constant inputs' => sub {
     is($type->value, 42, '6 * 7 = 42');
 };
 
-subtest 'Multiply node compute() with non-constant input returns TOP' => sub {
+subtest 'Multiply node compute() with non-constant input returns TypeInteger' => sub {
     my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
     my $unknown = Chalk::IR::Node::Base->new(inputs => []);
 
     my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $unknown);
 
     my $type = $mul->compute();
-    ok($type isa Chalk::IR::Type::Top, 'compute() returns TOP when input is non-constant');
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when input is non-constant');
 };
 
 subtest 'Multiply peephole() folds constant multiplication' => sub {
@@ -236,6 +236,16 @@ subtest 'Multiply peephole() returns self when not constant-foldable' => sub {
     my $result = $mul->peephole(undef);
 
     is(refaddr($result), refaddr($mul), 'peephole() returns self when inputs not constant');
+};
+
+subtest 'Multiply node compute() with unknown integer returns IntTop' => sub {
+    my $const6 = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
+    my $unknown = Chalk::IR::Node::Base->new(inputs => []);
+    my $mul = Chalk::IR::Node::Multiply->new(left => $const6, right => $unknown);
+
+    my $type = $mul->compute();
+    ok($type isa Chalk::IR::Type::TypeInteger, 'compute() returns TypeInteger when one input is unknown');
+    ok($type->is_top, 'Result is IntTop (unknown integer)');
 };
 
 # Task 11: Divide node compute() and peephole()
