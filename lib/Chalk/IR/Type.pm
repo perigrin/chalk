@@ -10,6 +10,19 @@ class Chalk::IR::Type {
     method value() {
         die "Cannot get value from non-constant type";
     }
+
+    # meet() computes greatest lower bound (intersection) of two types
+    # Default behavior: same type = self, different = Top
+    method meet($other) {
+        # Bottom absorbs everything
+        return $other if $other isa Chalk::IR::Type::Bottom;
+        # Top is identity for meet
+        return $self if $other isa Chalk::IR::Type::Top;
+        # Same exact type = self
+        return $self if ref($self) eq ref($other);
+        # Different types = Top (unknown)
+        return Chalk::IR::Type::Top->top();
+    }
 }
 
 1;

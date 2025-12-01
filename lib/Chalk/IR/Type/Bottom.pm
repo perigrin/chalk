@@ -12,6 +12,11 @@ class Chalk::IR::Type::Bottom :isa(Chalk::IR::Type) {
         my $class = shift // __PACKAGE__;
         $BOTTOM //= $class->new();
     }
+
+    # Bottom absorbs everything in meet
+    method meet($other) {
+        return $self;
+    }
 }
 
 1;
