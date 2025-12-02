@@ -104,6 +104,12 @@ class Chalk::IR::Node {
         );
     }
 
+    # Placeholder for peephole optimization - returns self by default
+    # Polymorphic node subclasses (Phi, Region, etc.) override this
+    method peephole($graph = undef) {
+        return $self;
+    }
+
     # Get formatted transformation history for debugging
     method transform_history() {
         return undef unless $transform_chain && $transform_chain->@*;
