@@ -1892,3 +1892,244 @@ subtest 'While with if-else and increment (with peephole)' => sub {
     is $optimized->right->op, 'Constant', 'Right is Constant';
     is $optimized->right->attributes->{value}, 1, 'Right value is 1';
 };
+
+# ============================================================================
+# Regression test: conditional with while in else branch
+# Matches Simple chapter07 testRegression pattern
+# ============================================================================
+
+subtest 'Conditional with while in else (no peephole)' => sub {
+    # Simple: if(arg) return 1; int a = 1; while(a < arg) { a = a + 1; } return a;
+    # Expected: Phi(Region,1,Phi(Loop,1,(Phi_a+1)))
+    # True branch returns 1, false branch runs a while loop
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    # arg (some input value)
+    my $arg = Chalk::IR::Node::Constant->new(
+        value => 10,  # Arbitrary non-zero value for testing structure
+        type  => 'Integer',
+    );
+    $graph->add_node($arg);
+
+    # if(arg) - conditional on arg
+    my $if_node = Chalk::IR::Node->new(
+        id => 3,
+        op => 'If',
+        inputs => [$start->id, $arg->id],
+        attributes => {},
+    );
+    $graph->add_node($if_node);
+
+    # True branch projection
+    my $proj_true = Chalk::IR::Node->new(
+        id => 4,
+        op => 'Proj',
+        inputs => [$if_node->id],
+        attributes => { index => 0 },
+    );
+    $graph->add_node($proj_true);
+
+    # False branch projection
+    my $proj_false = Chalk::IR::Node->new(
+        id => 5,
+        op => 'Proj',
+        inputs => [$if_node->id],
+        attributes => { index => 1 },
+    );
+    $graph->add_node($proj_false);
+
+    # True branch: return 1
+    my $const_1_true = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1_true);
+
+    # False branch: int a = 1; while(a < arg) { a = a + 1; } return a;
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    # Loop in false branch
+    my $loop = Chalk::IR::Node->new(
+        id => 8,
+        op => 'Loop',
+        inputs => [$proj_false->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    # Loop phi for a
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    # a = a + 1
+    my $const_1_loop = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1_loop);
+
+    my $a_plus_1 = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1_loop,
+    );
+    $graph->add_node($a_plus_1);
+
+    # Update loop backedges
+    push $phi_a->inputs->@*, $a_plus_1->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Region merges true branch (early return) and false branch (loop exit)
+    my $merge_region = Chalk::IR::Node::Region->new(
+        inputs => [$proj_true->id, $loop->id],
+    );
+    $graph->add_node($merge_region);
+
+    # Final Phi: Phi(Region, 1, Phi(Loop, 1, a+1))
+    # Selects between true branch's 1 and loop's final phi_a
+    my $result_phi = Chalk::IR::Node::Phi->new(
+        region_id => $merge_region->id,
+        inputs => [$merge_region->id, $const_1_true->id, $phi_a->id],
+    );
+    $graph->add_node($result_phi);
+
+    # Verify structure: Phi(Region,1,Phi(Loop,1,(Phi_a+1)))
+    is $result_phi->op, 'Phi', 'Result is Phi';
+    my @result_inputs = $result_phi->inputs->@*;
+    is scalar(@result_inputs), 3, 'Result Phi has 3 inputs';
+
+    # First data input: constant 1 (true branch)
+    my $true_input = $graph->get_node($result_inputs[1]);
+    is $true_input->op, 'Constant', 'True branch input is Constant';
+    is $true_input->attributes->{value}, 1, 'True branch returns 1';
+
+    # Second data input: loop Phi
+    my $loop_input = $graph->get_node($result_inputs[2]);
+    is $loop_input->op, 'Phi', 'False branch input is Phi (from loop)';
+
+    # Verify inner loop Phi structure
+    my @loop_phi_inputs = $loop_input->inputs->@*;
+    is scalar(@loop_phi_inputs), 3, 'Loop Phi has 3 inputs';
+
+    my $loop_init = $graph->get_node($loop_phi_inputs[1]);
+    is $loop_init->attributes->{value}, 1, 'Loop init is 1';
+
+    my $loop_update = $graph->get_node($loop_phi_inputs[2]);
+    is $loop_update->op, 'Add', 'Loop update is Add (a+1)';
+};
+
+subtest 'Conditional with while in else (with peephole)' => sub {
+    # Same structure - peephole should preserve it (no optimization opportunity)
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    my $arg = Chalk::IR::Node::Constant->new(
+        value => 10,
+        type  => 'Integer',
+    );
+    $graph->add_node($arg);
+
+    my $if_node = Chalk::IR::Node->new(
+        id => 3,
+        op => 'If',
+        inputs => [$start->id, $arg->id],
+        attributes => {},
+    );
+    $graph->add_node($if_node);
+
+    my $proj_true = Chalk::IR::Node->new(
+        id => 4,
+        op => 'Proj',
+        inputs => [$if_node->id],
+        attributes => { index => 0 },
+    );
+    $graph->add_node($proj_true);
+
+    my $proj_false = Chalk::IR::Node->new(
+        id => 5,
+        op => 'Proj',
+        inputs => [$if_node->id],
+        attributes => { index => 1 },
+    );
+    $graph->add_node($proj_false);
+
+    my $const_1_true = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1_true);
+
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 8,
+        op => 'Loop',
+        inputs => [$proj_false->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    my $const_1_loop = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1_loop);
+
+    my $a_plus_1 = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1_loop,
+    );
+    $graph->add_node($a_plus_1);
+
+    push $phi_a->inputs->@*, $a_plus_1->id;
+    push $loop->inputs->@*, $loop->id;
+
+    my $merge_region = Chalk::IR::Node::Region->new(
+        inputs => [$proj_true->id, $loop->id],
+    );
+    $graph->add_node($merge_region);
+
+    my $result_phi = Chalk::IR::Node::Phi->new(
+        region_id => $merge_region->id,
+        inputs => [$merge_region->id, $const_1_true->id, $phi_a->id],
+    );
+    $graph->add_node($result_phi);
+
+    # Apply peephole to result phi
+    my $optimized = $result_phi->peephole($graph);
+
+    # Should preserve structure (both inputs are different)
+    is $optimized->op, 'Phi', 'Peephole preserves Phi';
+    is $optimized->id, $result_phi->id, 'Same Phi node (no simplification)';
+};
