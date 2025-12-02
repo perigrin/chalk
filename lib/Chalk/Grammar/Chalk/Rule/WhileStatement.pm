@@ -42,9 +42,10 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
             context => "entry_control=$ctrl"
         );
 
-        # Set current control to Loop for condition evaluation (immutably)
+        # Enter loop scope - marks all variables with sentinels for lazy phi creation
+        # Per Simple Chapter 8: sentinel values trigger phi creation on lookup
         # Bind $ctrl to Loop per Simple Chapter 4 Petri net model
-        my $loop_scope = $pre_scope->with_control($loop->id);
+        my $loop_scope = $pre_scope->enter_loop($loop);
         $loop_scope = $loop_scope->with_binding('$ctrl', $loop);
         $context->env->{scope} = $loop_scope;
 
@@ -109,9 +110,10 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         # Complex assignments like "$i = $i - 1" work but may use incomplete parse
         # (SPPF creates both parses, semiring currently picks incomplete one - needs optimization pass)
 
-        # Create child scope for loop body
+        # Use loop scope for body - this allows with_binding to update phi backedges
+        # when variables are assigned inside the loop (lazy phi pattern)
         # Bind $ctrl to IfTrue (loop body control) per Simple Chapter 4 Petri net model
-        my $body_scope = $pre_scope->child_scope()->with_control($if_true->id);
+        my $body_scope = $loop_scope->with_control($if_true->id);
         $body_scope = $body_scope->with_binding('$ctrl', $if_true);
         $context->env->{scope} = $body_scope;
 
@@ -167,9 +169,9 @@ class Chalk::Grammar::Chalk::Rule::WhileStatement :isa(Chalk::GrammarRule) {
         }
         # If no backedge controls, loop has no normal exit (only break)
 
-        # Generate phi nodes for all loop-modified variables using Scope merge
-        # This captures variables that changed during loop execution
-        my $merged_scope = $pre_scope->merge_scopes($pre_scope, $body_final_scope, $loop);
+        # Exit loop scope - replaces any remaining sentinels with parent values
+        # Per Simple Chapter 8: lazy phi creation means only accessed variables get phis
+        my $merged_scope = $body_final_scope->exit_loop();
 
         # Build exit region: merge IfFalse (normal exit) + break paths
         my @exit_controls = ($if_false->id, @break_controls);
