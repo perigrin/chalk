@@ -79,7 +79,6 @@ use Chalk::Interpreter::ExecutionLog;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 
     my $arr = Chalk::IR::Node::NewArray->new(
-        id => 'newarray_1',
         inputs => [],
     );
     my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
@@ -88,7 +87,6 @@ use Chalk::Interpreter::ExecutionLog;
 
     my $idx0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
     my $store1 = Chalk::IR::Node::ArrayStore->new(
-        id => 'arraystore_' . $arr->id . '_' . $idx0->id . '_' . $sum->id,
         inputs => [$arr->id, $idx0->id, $sum->id],
         array_id => $arr->id,
         index_id => $idx0->id,
@@ -99,7 +97,6 @@ use Chalk::Interpreter::ExecutionLog;
 
     my $idx1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
     my $store2 = Chalk::IR::Node::ArrayStore->new(
-        id => 'arraystore_' . $store1->id . '_' . $idx1->id . '_' . $product->id,
         inputs => [$store1->id, $idx1->id, $product->id],
         array_id => $store1->id,
         index_id => $idx1->id,
@@ -107,13 +104,11 @@ use Chalk::Interpreter::ExecutionLog;
     );
 
     my $load0 = Chalk::IR::Node::ArrayLoad->new(
-        id => 'arrayload_' . $store2->id . '_' . $idx0->id,
         inputs => [$store2->id, $idx0->id],
         array_id => $store2->id,
         index_id => $idx0->id,
     );
     my $load1 = Chalk::IR::Node::ArrayLoad->new(
-        id => 'arrayload_' . $store2->id . '_' . $idx1->id,
         inputs => [$store2->id, $idx1->id],
         array_id => $store2->id,
         index_id => $idx1->id,
@@ -181,7 +176,6 @@ use Chalk::Interpreter::ExecutionLog;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 
     my $hash = Chalk::IR::Node::NewHash->new(
-        id => 'newhash_1',
         inputs => [],
     );
 
@@ -191,7 +185,6 @@ use Chalk::Interpreter::ExecutionLog;
     my $sum = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
 
     my $store1 = Chalk::IR::Node::HashStore->new(
-        id => 'hashstore_' . $hash->id . '_' . $key1->id . '_' . $sum->id,
         inputs => [$hash->id, $key1->id, $sum->id],
         hash_id => $hash->id,
         key_id => $key1->id,
@@ -202,7 +195,6 @@ use Chalk::Interpreter::ExecutionLog;
     my $diff = Chalk::IR::Node::Subtract->new(left => $c1, right => $c2);
 
     my $store2 = Chalk::IR::Node::HashStore->new(
-        id => 'hashstore_' . $store1->id . '_' . $key2->id . '_' . $diff->id,
         inputs => [$store1->id, $key2->id, $diff->id],
         hash_id => $store1->id,
         key_id => $key2->id,
@@ -210,13 +202,11 @@ use Chalk::Interpreter::ExecutionLog;
     );
 
     my $load1 = Chalk::IR::Node::HashLoad->new(
-        id => 'hashload_' . $store2->id . '_' . $key1->id,
         inputs => [$store2->id, $key1->id],
         hash_id => $store2->id,
         key_id => $key1->id,
     );
     my $load2 = Chalk::IR::Node::HashLoad->new(
-        id => 'hashload_' . $store2->id . '_' . $key2->id,
         inputs => [$store2->id, $key2->id],
         hash_id => $store2->id,
         key_id => $key2->id,
