@@ -91,8 +91,12 @@ class Chalk::IR::Node::Subtract {
         return Chalk::IR::Type::Top->top();
     }
 
-    # Algebraic simplification for subtraction - no optimizations in chapter04
+    # Algebraic simplification for subtraction
     method idealize() {
+        # x - x -> 0 (self-subtraction elimination)
+        if ($left->id eq $right->id) {
+            return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+        }
         return;
     }
 

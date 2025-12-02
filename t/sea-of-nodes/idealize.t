@@ -11,6 +11,8 @@ use_ok('Chalk::IR::Node::Divide');
 use_ok('Chalk::IR::Node::Subtract');
 use_ok('Chalk::IR::Node::Negate');
 use_ok('Chalk::IR::Node::Constant');
+use_ok('Chalk::IR::Node::EQ');
+use_ok('Chalk::IR::Node::NE');
 
 # Helper to create constant nodes
 sub const {
@@ -142,16 +144,26 @@ subtest 'Divide: no optimization for non-identity divisor' => sub {
 };
 
 # =============================================================================
-# Subtract::idealize() tests (no optimizations expected)
+# Subtract::idealize() tests
 # =============================================================================
 
-subtest 'Subtract: no optimizations' => sub {
+subtest 'Subtract: x - x -> 0 (self-subtraction elimination)' => sub {
+    my $x = const(42);
+    my $sub = Chalk::IR::Node::Subtract->new(left => $x, right => $x);
+
+    my $result = $sub->idealize();
+    ok($result, 'idealize() returns a replacement');
+    is($result->op, 'Constant', 'x - x returns Constant');
+    is($result->value, 0, 'x - x returns 0');
+};
+
+subtest 'Subtract: no optimization for different operands' => sub {
     my $a = const(10);
     my $b = const(3);
     my $sub = Chalk::IR::Node::Subtract->new(left => $a, right => $b);
 
     my $result = $sub->idealize();
-    ok(!$result, 'Subtract::idealize() returns nothing');
+    ok(!$result, 'Subtract::idealize() returns nothing for different operands');
 };
 
 # =============================================================================
@@ -164,6 +176,52 @@ subtest 'Negate: no optimizations' => sub {
 
     my $result = $neg->idealize();
     ok(!$result, 'Negate::idealize() returns nothing');
+};
+
+# =============================================================================
+# EQ::idealize() tests
+# =============================================================================
+
+subtest 'EQ: x == x -> true (self-equality)' => sub {
+    my $x = const(42);
+    my $eq = Chalk::IR::Node::EQ->new(left => $x, right => $x);
+
+    my $result = $eq->idealize();
+    ok($result, 'idealize() returns a replacement');
+    is($result->op, 'Constant', 'x == x returns Constant');
+    is($result->value, true, 'x == x returns true');
+};
+
+subtest 'EQ: no optimization for different operands' => sub {
+    my $a = const(5);
+    my $b = const(3);
+    my $eq = Chalk::IR::Node::EQ->new(left => $a, right => $b);
+
+    my $result = $eq->idealize();
+    ok(!$result, 'EQ::idealize() returns nothing for different operands');
+};
+
+# =============================================================================
+# NE::idealize() tests
+# =============================================================================
+
+subtest 'NE: x != x -> false (self-inequality)' => sub {
+    my $x = const(42);
+    my $ne = Chalk::IR::Node::NE->new(left => $x, right => $x);
+
+    my $result = $ne->idealize();
+    ok($result, 'idealize() returns a replacement');
+    is($result->op, 'Constant', 'x != x returns Constant');
+    is($result->value, false, 'x != x returns false');
+};
+
+subtest 'NE: no optimization for different operands' => sub {
+    my $a = const(5);
+    my $b = const(3);
+    my $ne = Chalk::IR::Node::NE->new(left => $a, right => $b);
+
+    my $result = $ne->idealize();
+    ok(!$result, 'NE::idealize() returns nothing for different operands');
 };
 
 # =============================================================================
