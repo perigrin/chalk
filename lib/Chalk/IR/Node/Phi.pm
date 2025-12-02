@@ -5,6 +5,10 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
+    use Chalk::IR::Node::Add;
+    use Chalk::IR::Node::Multiply;
+    use Chalk::IR::Node::Subtract;
+    use Chalk::IR::Node::Divide;
     field $region_id :param :reader;
 
     method op() { 'Phi' }
@@ -109,7 +113,100 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
             }
         }
 
+        # Operation pulling: Phi(region, Op(a,b), Op(c,d)) -> Op(Phi(region,a,c), Phi(region,b,d))
+        if (my $idealized = $self->idealize($graph)) {
+            return $idealized->peephole($graph);
+        }
+
         return $self;
+    }
+
+    # Idealize: algebraic simplification for Phi nodes
+    # Implements operation pulling optimization from Simple compiler
+    method idealize($graph = undef) {
+        return unless $graph;
+
+        my @inputs = $self->inputs->@*;
+        return unless @inputs > 2;  # Need region + at least 2 data inputs
+
+        # Check if control is a Loop - if so, don't apply operation pulling
+        my $control_node = $graph->get_node($region_id);
+        return if $control_node && $control_node->op eq 'Loop';
+
+        # Get all data input nodes
+        my @data_inputs = @inputs[1..$#inputs];
+        my @data_nodes = map { $graph->get_node($_) } @data_inputs;
+
+        # Verify all data input nodes exist
+        return if grep { !defined $_ } @data_nodes;
+
+        # Check if all data inputs have the same operation type
+        my $first_op = $data_nodes[0]->op;
+
+        # Skip CFG nodes - only pull data operations
+        my %cfg_ops = (
+            Region => 1, Loop => 1, If => 1, Proj => 1,
+            Start => 1, Return => 1, Stop => 1,
+        );
+        return if $cfg_ops{$first_op};
+
+        # Skip Phi and Constant - no benefit from pulling these
+        return if $first_op eq 'Phi';
+        return if $first_op eq 'Constant';
+
+        # Check all inputs have the same op
+        for my $node (@data_nodes[1..$#data_nodes]) {
+            return unless $node->op eq $first_op;
+        }
+
+        # Check all operations have left/right accessors (binary ops)
+        for my $node (@data_nodes) {
+            return unless $node->can('left') && $node->can('right');
+        }
+
+        # All data inputs have the same binary operation
+        # Create new Phi nodes for left and right operands
+
+        # Collect left operands from each input
+        my @left_nodes = map { $_->left } @data_nodes;
+        my @left_ids = map { $_->id } @left_nodes;
+
+        # Collect right operands from each input
+        my @right_nodes = map { $_->right } @data_nodes;
+        my @right_ids = map { $_->id } @right_nodes;
+
+        # Create Phi for left operands
+        my $left_phi = Chalk::IR::Node::Phi->new(
+            region_id => $region_id,
+            inputs => [$region_id, @left_ids],
+        );
+        $graph->add_node($left_phi);
+
+        # Create Phi for right operands
+        my $right_phi = Chalk::IR::Node::Phi->new(
+            region_id => $region_id,
+            inputs => [$region_id, @right_ids],
+        );
+        $graph->add_node($right_phi);
+
+        # Create the pulled-out operation with the new Phi nodes
+        my %op_class = (
+            Add      => 'Chalk::IR::Node::Add',
+            Subtract => 'Chalk::IR::Node::Subtract',
+            Multiply => 'Chalk::IR::Node::Multiply',
+            Divide   => 'Chalk::IR::Node::Divide',
+        );
+
+        my $op_class = $op_class{$first_op};
+        return unless $op_class;
+
+        my $new_op = $op_class->new(
+            left  => $left_phi,
+            right => $right_phi,
+        );
+        $graph->add_node($new_op);
+
+        return $new_op;
     }
 }
 
