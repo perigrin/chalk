@@ -704,3 +704,557 @@ subtest 'Phi singleUniqueInput: different inputs should NOT simplify' => sub {
     is $optimized->id, $phi->id, 'Phi with different inputs is preserved';
     is $optimized->op, 'Phi', 'Still a Phi node';
 };
+
+# ============================================================================
+# Paired peephole on/off tests
+# These tests match Simple chapter07 testWhile/testWhilePeep pattern
+# ============================================================================
+
+subtest 'While with chained adds (no peephole)' => sub {
+    # Simple: while(a < 10) { a = a + 1; a = a + 2; } return a;
+    # Without peephole: ((Phi_a+1)+2)
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    # Initial: a = 1
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 3,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    # Loop phi for a
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    # a = a + 1
+    my $const_1 = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1);
+
+    my $add1 = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1,
+    );
+    $graph->add_node($add1);
+
+    # a = a + 2  (where a is now add1)
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    my $add2 = Chalk::IR::Node::Add->new(
+        left  => $add1,
+        right => $const_2,
+    );
+    $graph->add_node($add2);
+
+    # Update phi backedge
+    push $phi_a->inputs->@*, $add2->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Without peephole: structure is ((Phi_a+1)+2)
+    is $add2->op, 'Add', 'Outer operation is Add';
+    is $add2->left->op, 'Add', 'Left child is Add (nested)';
+    is $add2->left->left->op, 'Phi', 'Left-left is Phi';
+    is $add2->right->op, 'Constant', 'Right is constant 2';
+    is $add2->right->attributes->{value}, 2, 'Right constant is 2';
+};
+
+subtest 'While with chained adds (with peephole)' => sub {
+    # Simple: while(a < 10) { a = a + 1; a = a + 2; } return a;
+    # With peephole: (Phi_a+3) - constants combined
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 3,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1);
+
+    my $add1 = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1,
+    );
+    $graph->add_node($add1);
+
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    my $add2 = Chalk::IR::Node::Add->new(
+        left  => $add1,
+        right => $const_2,
+    );
+    $graph->add_node($add2);
+
+    push $phi_a->inputs->@*, $add2->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Apply peephole optimization
+    my $optimized = $add2->peephole($graph);
+
+    # With peephole: (Phi_a+3)
+    is $optimized->op, 'Add', 'Result is still Add';
+    is $optimized->left->op, 'Phi', 'Left is now Phi (not nested Add)';
+    is $optimized->right->op, 'Constant', 'Right is Constant';
+    is $optimized->right->attributes->{value}, 3, 'Constants combined: 1+2=3';
+};
+
+subtest 'While with conditional assignment (no peephole)' => sub {
+    # Simple: while(arg) a = 2; return a;
+    # Expected: Phi(Loop,1,2) - no optimization opportunity
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    # Initial: a = 1
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 3,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    # Loop phi for a
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    # a = 2 (inside loop)
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    # Update phi backedge with constant 2
+    push $phi_a->inputs->@*, $const_2->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Structure: Phi(Loop,1,2)
+    is $phi_a->op, 'Phi', 'Node is Phi';
+    my @inputs = $phi_a->inputs->@*;
+    is scalar(@inputs), 3, 'Phi has 3 inputs (region, init, loop)';
+
+    # Verify the input values
+    my $init_node = $graph->get_node($inputs[1]);
+    my $loop_node = $graph->get_node($inputs[2]);
+    is $init_node->op, 'Constant', 'Init input is Constant';
+    is $init_node->attributes->{value}, 1, 'Init value is 1';
+    is $loop_node->op, 'Constant', 'Loop input is Constant';
+    is $loop_node->attributes->{value}, 2, 'Loop value is 2';
+};
+
+subtest 'While with conditional assignment (with peephole)' => sub {
+    # Simple: while(arg) a = 2; return a;
+    # With peephole: Phi(Loop,1,2) - same, no optimization opportunity
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 3,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    push $phi_a->inputs->@*, $const_2->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Apply peephole - should NOT simplify loop phi
+    my $optimized = $phi_a->peephole($graph);
+
+    is $optimized->op, 'Phi', 'Peephole preserves Phi';
+    is $optimized->id, $phi_a->id, 'Same Phi node (no transformation)';
+};
+
+subtest 'While with intermediate variable (no peephole)' => sub {
+    # Simple: while(a < 10) { int b = a + 1; a = b + 2; } return a;
+    # Without peephole: ((Phi_a+1)+2)
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 3,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    # b = a + 1 (intermediate variable)
+    my $const_1 = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1);
+
+    my $b = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1,
+    );
+    $graph->add_node($b);
+
+    # a = b + 2
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    my $new_a = Chalk::IR::Node::Add->new(
+        left  => $b,
+        right => $const_2,
+    );
+    $graph->add_node($new_a);
+
+    push $phi_a->inputs->@*, $new_a->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Without peephole: structure is ((Phi_a+1)+2)
+    is $new_a->op, 'Add', 'Outer operation is Add';
+    is $new_a->left->op, 'Add', 'Left child is Add (b = a+1)';
+    is $new_a->left->left->op, 'Phi', 'b uses Phi_a';
+    is $new_a->right->op, 'Constant', 'Right is constant';
+    is $new_a->right->attributes->{value}, 2, 'Right constant is 2';
+};
+
+subtest 'While with intermediate variable (with peephole)' => sub {
+    # Simple: while(a < 10) { int b = a + 1; a = b + 2; } return a;
+    # With peephole: (Phi_a+3)
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 3,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1);
+
+    my $b = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1,
+    );
+    $graph->add_node($b);
+
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    my $new_a = Chalk::IR::Node::Add->new(
+        left  => $b,
+        right => $const_2,
+    );
+    $graph->add_node($new_a);
+
+    push $phi_a->inputs->@*, $new_a->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Apply peephole optimization
+    my $optimized = $new_a->peephole($graph);
+
+    # With peephole: (Phi_a+3)
+    is $optimized->op, 'Add', 'Result is still Add';
+    is $optimized->left->op, 'Phi', 'Left is Phi (not nested Add)';
+    is $optimized->right->op, 'Constant', 'Right is Constant';
+    is $optimized->right->attributes->{value}, 3, 'Constants combined: 1+2=3';
+};
+
+subtest 'While with variable shadowing (no peephole)' => sub {
+    # Simple: int a = 1; int b = 2; while(a < 10) { int b = a + 1; a = b + 2; } return a;
+    # The inner 'b' shadows outer 'b', but the IR structure is same as testWhile3
+    # Without peephole: ((Phi_a+1)+2)
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    # Outer scope: a = 1, b = 2
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $init_b = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_b);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 4,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    # Inner b = a + 1 (shadows outer b)
+    my $const_1 = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1);
+
+    my $inner_b = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1,
+    );
+    $graph->add_node($inner_b);
+
+    # a = b + 2 (using inner b)
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    my $new_a = Chalk::IR::Node::Add->new(
+        left  => $inner_b,
+        right => $const_2,
+    );
+    $graph->add_node($new_a);
+
+    push $phi_a->inputs->@*, $new_a->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Without peephole: structure is ((Phi_a+1)+2)
+    is $new_a->op, 'Add', 'Outer operation is Add';
+    is $new_a->left->op, 'Add', 'Left child is Add (inner b)';
+    is $new_a->left->left->op, 'Phi', 'inner b uses Phi_a';
+    is $new_a->right->op, 'Constant', 'Right is constant 2';
+
+    # Verify outer b is not used (it exists but is shadowed)
+    ok defined($init_b), 'Outer b exists in graph';
+    is $init_b->attributes->{value}, 2, 'Outer b is still 2';
+};
+
+subtest 'While with variable shadowing (with peephole)' => sub {
+    # Simple: int a = 1; int b = 2; while(a < 10) { int b = a + 1; a = b + 2; } return a;
+    # With peephole: (Phi_a+3) - same optimization as testWhile3
+    my $graph = Chalk::IR::Graph->new();
+
+    my $start = Chalk::IR::Node->new(
+        id => 1,
+        op => 'Start',
+        inputs => [],
+        attributes => {},
+    );
+    $graph->add_node($start);
+
+    my $init_a = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_a);
+
+    my $init_b = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($init_b);
+
+    my $loop = Chalk::IR::Node->new(
+        id => 4,
+        op => 'Loop',
+        inputs => [$start->id],
+        attributes => {},
+    );
+    $graph->add_node($loop);
+
+    my $phi_a = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_a->id],
+    );
+    $graph->add_node($phi_a);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1);
+
+    my $inner_b = Chalk::IR::Node::Add->new(
+        left  => $phi_a,
+        right => $const_1,
+    );
+    $graph->add_node($inner_b);
+
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    my $new_a = Chalk::IR::Node::Add->new(
+        left  => $inner_b,
+        right => $const_2,
+    );
+    $graph->add_node($new_a);
+
+    push $phi_a->inputs->@*, $new_a->id;
+    push $loop->inputs->@*, $loop->id;
+
+    # Apply peephole optimization
+    my $optimized = $new_a->peephole($graph);
+
+    # With peephole: (Phi_a+3)
+    is $optimized->op, 'Add', 'Result is still Add';
+    is $optimized->left->op, 'Phi', 'Left is Phi (not nested Add)';
+    is $optimized->right->op, 'Constant', 'Right is Constant';
+    is $optimized->right->attributes->{value}, 3, 'Constants combined: 1+2=3';
+};
