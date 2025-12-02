@@ -13,19 +13,9 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         return "'$val'";
     }
 
-    # Child index constants for ConditionalStatement grammar structure
+    # NOTE: Child indices are NOT fixed because WS_OPT nodes may or may not be present
+    # in the children array. We must search for children dynamically.
     # Grammar: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block [WS_OPT 'else' WS_OPT Block]
-    # NOTE: WS_OPT nodes may not be present in children array when empty
-    # Actual observed structure: [if, undef, '(', Expression, ')', undef, Block] for simple if
-    use constant {
-        CHILD_KEYWORD       => 0,   # 'if' keyword
-        CHILD_LPAREN        => 2,   # '(' terminal
-        CHILD_CONDITION     => 3,   # Expression node
-        CHILD_RPAREN        => 4,   # ')' terminal
-        CHILD_TRUE_BLOCK    => 6,   # Block for true branch
-        CHILD_ELSE_KEYWORD  => 8,   # 'else' keyword (if present)
-        CHILD_FALSE_BLOCK   => 10,  # Block for false/else branch (if present)
-    };
 
     method evaluate($context) {
         warn "[DEBUG] ConditionalStatement.evaluate() called\n" if $ENV{CHALK_DEBUG_TRACKING};
@@ -61,21 +51,43 @@ class Chalk::Grammar::Chalk::Rule::ConditionalStatement :isa(Chalk::GrammarRule)
         # Save current control
         my $entry_control = $pre_scope->current_control;
 
-        # Find 'if' keyword position (should be at start)
-        my $keyword_index = 0;
+        # CRITICAL FIX (Issue #195): WS_OPT nodes ARE present in children array (with undef focus).
+        # We must search for the Expression child dynamically between '(' and ')'.
+        # Grammar: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block
+        my $condition;
+        my $found_lparen = 0;
+        for my $i (0..$#children) {
+            my $child_ctx = $children[$i];
+            my $child_val = $context->child($i);
 
-        # Parse: ConditionalKeyword WS_OPT ( WS_OPT Expression WS_OPT ) WS_OPT Block
-        # Actual observed structure:
-        # child[0]: ConditionalKeyword ('if')
-        # child[1]: undef (WS_OPT)
-        # child[2]: '(' terminal
-        # child[3]: Expression IR node
-        # child[4]: undef (WS_OPT)
-        # child[5]: ')' terminal
-        # child[6]: undef (WS_OPT)
-        # child[7]: Block (HASH with statements)
+            # Check for '(' terminal
+            if (!$found_lparen) {
+                if (blessed($child_val) && $child_val->can('value') && "$child_val" eq '(') {
+                    $found_lparen = 1;
+                    next;
+                }
+                # Also check raw string terminals
+                if (defined($child_val) && !ref($child_val) && "$child_val" eq '(') {
+                    $found_lparen = 1;
+                    next;
+                }
+                next;
+            }
 
-        my $condition = $context->child(CHILD_CONDITION);
+            # After '(', check for ')' to stop searching
+            if (blessed($child_val) && $child_val->can('value') && "$child_val" eq ')') {
+                last;
+            }
+            if (defined($child_val) && !ref($child_val) && "$child_val" eq ')') {
+                last;
+            }
+
+            # Between '(' and ')', look for Expression (IR node with id())
+            if (blessed($child_val) && $child_val->can('id')) {
+                $condition = $child_val;
+                last;
+            }
+        }
         # Use duck typing (check for id capability) rather than inheritance
         # since IR node classes may not share a common base class
         unless (blessed($condition) && $condition->can('id')) {
