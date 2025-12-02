@@ -26,17 +26,29 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
 
     method execute($context) {
         # Phi selects value based on which Region input path is active
-        # Per Sea of Nodes: "RegionNodes keep their control inputs in sync with PhiNodes"
-        # inputs[0] = region_id (not a data value)
-        # inputs[1..n] = data values corresponding to Region's control inputs
+        # For Loop regions, use the Loop's active_input_index directly
+        # For regular Regions, find which Proj returned 1
         my @inputs = $self->inputs->@*;
 
-        # Get the Region node to check its Proj inputs
+        # Get the Region/Loop node
         my $graph = $context->("graph:");
         my $region_node = $graph->nodes->{$region_id};
+
+        # Special handling for Loop regions
+        if ($region_node->op eq 'Loop') {
+            # Use Loop's active_input_index directly
+            my $idx = $region_node->active_input_index;
+            my $value_index = $idx + 1;  # inputs[0] is region_id, inputs[1] is entry, inputs[2] is backedge
+            if ($value_index >= @inputs) {
+                die "Phi node: Loop active path $idx out of range (only " . (@inputs - 1) . " data inputs)";
+            }
+            my $value_id = $inputs[$value_index];
+            return $context->("node:$value_id");
+        }
+
+        # For regular Regions, find which Proj returned 1 (active path)
         my $region_inputs = $region_node->inputs;
 
-        # Find which Proj returned 1 (active path)
         for my $i (0..$#$region_inputs) {
             my $proj_id = $region_inputs->[$i];
             my $proj_result = $context->("node:$proj_id");
