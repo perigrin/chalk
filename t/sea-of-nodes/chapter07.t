@@ -13,6 +13,9 @@ use Chalk::IR::Node;
 use Chalk::IR::Graph;
 use Chalk::IR::Node::Scope;
 use Chalk::IR::Validator;
+use Chalk::IR::Node::Region;
+use Chalk::IR::Node::Constant;
+use Chalk::IR::Node::Phi;
 
 subtest 'Loop node creation' => sub {
     my $graph = Chalk::IR::Graph->new();
@@ -633,4 +636,71 @@ subtest 'Peephole does not optimize across loop boundaries' => sub {
     # Should not simplify to constant even though init is constant
     isnt $optimized->op, 'Constant', 'Loop phi not constant folded';
     is $optimized->id, $phi->id, 'Loop phi preserved';
+};
+
+subtest 'Phi singleUniqueInput optimization: all inputs same node' => sub {
+    # When all data inputs to a Phi are the same node, simplify to that node
+    # Phi(region, x, x, x) → x
+    my $graph = Chalk::IR::Graph->new();
+
+    # Region node with two control inputs
+    my $region = Chalk::IR::Node::Region->new(
+        inputs => [0, 0],  # Two control inputs
+    );
+    $graph->add_node($region);
+
+    # The single data value that all Phi inputs point to
+    my $const_42 = Chalk::IR::Node::Constant->new(
+        value => 42,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_42);
+
+    # Phi with all inputs being the same node
+    my $phi = Chalk::IR::Node::Phi->new(
+        region_id => $region->id,
+        inputs => [$region->id, $const_42->id, $const_42->id],  # Both data inputs are const_42
+    );
+    $graph->add_node($phi);
+
+    my $optimized = $phi->peephole($graph);
+
+    # Should simplify to the single unique input
+    is $optimized->id, $const_42->id, 'Phi with same inputs simplifies to that input';
+    is $optimized->op, 'Constant', 'Simplified to Constant node';
+};
+
+subtest 'Phi singleUniqueInput: different inputs should NOT simplify' => sub {
+    # When data inputs are different, Phi should NOT simplify
+    my $graph = Chalk::IR::Graph->new();
+
+    my $region = Chalk::IR::Node::Region->new(
+        inputs => [0, 0],
+    );
+    $graph->add_node($region);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_1);
+
+    my $const_2 = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => 'Integer',
+    );
+    $graph->add_node($const_2);
+
+    # Phi with different inputs
+    my $phi = Chalk::IR::Node::Phi->new(
+        region_id => $region->id,
+        inputs => [$region->id, $const_1->id, $const_2->id],
+    );
+    $graph->add_node($phi);
+
+    my $optimized = $phi->peephole($graph);
+
+    # Should NOT simplify
+    is $optimized->id, $phi->id, 'Phi with different inputs is preserved';
+    is $optimized->op, 'Phi', 'Still a Phi node';
 };
