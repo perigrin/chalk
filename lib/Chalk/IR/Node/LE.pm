@@ -57,6 +57,7 @@ class Chalk::IR::Node::LE {
     }
 
     method peephole($graph = undef) {
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -64,7 +65,22 @@ class Chalk::IR::Node::LE {
                 type  => 'Bool',
             );
         }
+
+        # Step 2: Algebraic simplification via idealize()
+        if (my $idealized = $self->idealize()) {
+            return $idealized->peephole();
+        }
+
         return $self;
+    }
+
+    # Algebraic simplification for less-than-or-equal comparison
+    method idealize() {
+        # x <= x -> true (self-comparison)
+        if ($left->id eq $right->id) {
+            return Chalk::IR::Node::Constant->new(value => true, type => 'Bool');
+        }
+        return;
     }
 
     method record_transform(@args) {

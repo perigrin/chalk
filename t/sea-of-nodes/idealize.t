@@ -13,6 +13,10 @@ use_ok('Chalk::IR::Node::Negate');
 use_ok('Chalk::IR::Node::Constant');
 use_ok('Chalk::IR::Node::EQ');
 use_ok('Chalk::IR::Node::NE');
+use_ok('Chalk::IR::Node::LT');
+use_ok('Chalk::IR::Node::GT');
+use_ok('Chalk::IR::Node::LE');
+use_ok('Chalk::IR::Node::GE');
 
 # Helper to create constant nodes
 sub const {
@@ -222,6 +226,98 @@ subtest 'NE: no optimization for different operands' => sub {
 
     my $result = $ne->idealize();
     ok(!$result, 'NE::idealize() returns nothing for different operands');
+};
+
+# =============================================================================
+# LT::idealize() tests
+# =============================================================================
+
+subtest 'LT: x < x -> false (self-comparison)' => sub {
+    my $x = const(42);
+    my $lt = Chalk::IR::Node::LT->new(left => $x, right => $x);
+
+    my $result = $lt->idealize();
+    ok($result, 'idealize() returns a replacement');
+    is($result->op, 'Constant', 'x < x returns Constant');
+    is($result->value, false, 'x < x returns false');
+};
+
+subtest 'LT: no optimization for different operands' => sub {
+    my $a = const(5);
+    my $b = const(3);
+    my $lt = Chalk::IR::Node::LT->new(left => $a, right => $b);
+
+    my $result = $lt->idealize();
+    ok(!$result, 'LT::idealize() returns nothing for different operands');
+};
+
+# =============================================================================
+# GT::idealize() tests
+# =============================================================================
+
+subtest 'GT: x > x -> false (self-comparison)' => sub {
+    my $x = const(42);
+    my $gt = Chalk::IR::Node::GT->new(left => $x, right => $x);
+
+    my $result = $gt->idealize();
+    ok($result, 'idealize() returns a replacement');
+    is($result->op, 'Constant', 'x > x returns Constant');
+    is($result->value, false, 'x > x returns false');
+};
+
+subtest 'GT: no optimization for different operands' => sub {
+    my $a = const(5);
+    my $b = const(3);
+    my $gt = Chalk::IR::Node::GT->new(left => $a, right => $b);
+
+    my $result = $gt->idealize();
+    ok(!$result, 'GT::idealize() returns nothing for different operands');
+};
+
+# =============================================================================
+# LE::idealize() tests
+# =============================================================================
+
+subtest 'LE: x <= x -> true (self-comparison)' => sub {
+    my $x = const(42);
+    my $le = Chalk::IR::Node::LE->new(left => $x, right => $x);
+
+    my $result = $le->idealize();
+    ok($result, 'idealize() returns a replacement');
+    is($result->op, 'Constant', 'x <= x returns Constant');
+    is($result->value, true, 'x <= x returns true');
+};
+
+subtest 'LE: no optimization for different operands' => sub {
+    my $a = const(5);
+    my $b = const(3);
+    my $le = Chalk::IR::Node::LE->new(left => $a, right => $b);
+
+    my $result = $le->idealize();
+    ok(!$result, 'LE::idealize() returns nothing for different operands');
+};
+
+# =============================================================================
+# GE::idealize() tests
+# =============================================================================
+
+subtest 'GE: x >= x -> true (self-comparison)' => sub {
+    my $x = const(42);
+    my $ge = Chalk::IR::Node::GE->new(left => $x, right => $x);
+
+    my $result = $ge->idealize();
+    ok($result, 'idealize() returns a replacement');
+    is($result->op, 'Constant', 'x >= x returns Constant');
+    is($result->value, true, 'x >= x returns true');
+};
+
+subtest 'GE: no optimization for different operands' => sub {
+    my $a = const(5);
+    my $b = const(3);
+    my $ge = Chalk::IR::Node::GE->new(left => $a, right => $b);
+
+    my $result = $ge->idealize();
+    ok(!$result, 'GE::idealize() returns nothing for different operands');
 };
 
 # =============================================================================
