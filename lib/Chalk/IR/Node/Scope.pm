@@ -11,6 +11,7 @@ class Chalk::IR::Node::Scope {
     field $bindings :param :reader = {};        # { var_name => node }
     field $current_control :param :reader = undef;
     field $parent :param :reader = undef;       # Parent scope for nested lookups
+    field $loop_node :param :reader = undef;    # Loop node for lazy phi creation (Issue #246)
 
     method id() { refaddr($self) }
 
@@ -22,11 +23,24 @@ class Chalk::IR::Node::Scope {
     method op() { 'Scope' }
 
     # Immutable: return new Scope with added binding
+    # If we're in a loop and assigning to a phi, update the phi's backedge
     method with_binding($name, $node) {
+        my %new_bindings = ($bindings->%*, $name => $node);
+
+        # If we're in a loop scope and the current binding is a Phi, update its backedge
+        if ($loop_node && exists $bindings->{$name}) {
+            my $current = $bindings->{$name};
+            if (ref($current) && blessed($current) && $current->can('op') && $current->op eq 'Phi') {
+                # Add the new value as the backedge input to the phi
+                push $current->inputs->@*, $node->id;
+            }
+        }
+
         return Chalk::IR::Node::Scope->new(
-            bindings        => { $bindings->%*, $name => $node },
+            bindings        => \%new_bindings,
             current_control => $current_control,
             parent          => $parent,
+            loop_node       => $loop_node,
         );
     }
 
@@ -36,6 +50,7 @@ class Chalk::IR::Node::Scope {
             bindings        => $bindings,
             current_control => $new_control,
             parent          => $parent,
+            loop_node       => $loop_node,
         );
     }
 
@@ -45,13 +60,86 @@ class Chalk::IR::Node::Scope {
             bindings        => {},
             current_control => $current_control,
             parent          => $self,
+            loop_node       => $loop_node,
+        );
+    }
+
+    # Enter a loop - marks all current variables with sentinels for lazy phi creation
+    # Per Simple Chapter 8: sentinel values trigger phi creation on lookup
+    method enter_loop($loop) {
+        my %loop_bindings;
+
+        # Mark all bindings with sentinel (this scope itself)
+        # When lookup encounters a sentinel, it will create a phi lazily
+        for my $name (keys $self->all_bindings->%*) {
+            $loop_bindings{$name} = $self;  # Sentinel = the Scope itself
+        }
+
+        return Chalk::IR::Node::Scope->new(
+            bindings        => \%loop_bindings,
+            current_control => $loop->id,
+            parent          => $self,
+            loop_node       => $loop,
+        );
+    }
+
+    # Check if a value is a sentinel (the scope marking a lazy phi location)
+    method is_sentinel($value) {
+        return 0 unless defined $value;
+        return 0 unless ref($value);
+        return 0 unless blessed($value);
+        return $value->isa('Chalk::IR::Node::Scope');
+    }
+
+    # Exit a loop - replaces any remaining sentinels with parent values
+    method exit_loop() {
+        my %exit_bindings;
+
+        for my $name (keys $bindings->%*) {
+            my $value = $bindings->{$name};
+            if ($self->is_sentinel($value)) {
+                # Sentinel not accessed - get original value from parent
+                $exit_bindings{$name} = $value->lookup($name);
+            } else {
+                # Either a phi was created or value was set directly
+                $exit_bindings{$name} = $value;
+            }
+        }
+
+        return Chalk::IR::Node::Scope->new(
+            bindings        => \%exit_bindings,
+            current_control => $current_control,
+            parent          => $parent,
+            loop_node       => undef,  # No longer in a loop
         );
     }
 
     # Look up a variable, searching from this scope up through parents
+    # If we find a sentinel, create a phi lazily
     method lookup($name) {
         if (exists $bindings->{$name}) {
-            return $bindings->{$name};
+            my $value = $bindings->{$name};
+
+            # Check for sentinel (lazy phi marker)
+            if ($self->is_sentinel($value)) {
+                # Lazy phi creation - get initial value from sentinel scope
+                my $init_value = $value->lookup($name);
+
+                # Create Phi node with loop as region
+                my $phi = Chalk::IR::Node->new(
+                    id     => "phi_${name}_" . $loop_node->id,
+                    op     => 'Phi',
+                    inputs => [$loop_node->id, $init_value->id],  # [region, init] - backedge TBD
+                    attributes => { var_name => $name },
+                );
+
+                # Replace sentinel with phi (mutation for efficiency)
+                $bindings->{$name} = $phi;
+
+                return $phi;
+            }
+
+            return $value;
         }
         if ($parent) {
             return $parent->lookup($name);
@@ -113,6 +201,7 @@ class Chalk::IR::Node::Scope {
             bindings        => \%merged,
             current_control => $control_node,
             parent          => $parent,
+            loop_node       => $loop_node,
         );
     }
 
