@@ -29,6 +29,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
             my $input_id = $inputs[$i];
             my $ctrl_result = $context->("node:$input_id");
             if ($ctrl_result) {
+                $active_input_index = $i;  # Track which path is active
                 return $i;  # Return index of active path
             }
         }
