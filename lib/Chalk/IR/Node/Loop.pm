@@ -5,6 +5,8 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
+    field $active_input_index :reader = 0;
+
     method op() { 'Loop' }
 
     method to_hash() {
