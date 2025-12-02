@@ -2,6 +2,61 @@
 
 This document tracks deliberate semantic differences between Chalk interpreter and Perl 5.42.0, along with rationale.
 
+## Loop Iteration Limits
+
+**Status**: ✅ Implemented (as of Chapter 8 implementation)
+
+**Feature**: The CEKDataflow interpreter enforces configurable iteration limits on loops to prevent infinite execution during interpretation.
+
+### Configuration
+
+```perl
+# Default: 10,000 iterations per loop
+my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+
+# Custom limit for testing or specific use cases
+my $interp = Chalk::Interpreter::CEKDataflow->new(
+    graph => $graph,
+    max_iterations => 100,  # Lower limit for faster test failure
+);
+
+# Effectively disable limit
+my $interp = Chalk::Interpreter::CEKDataflow->new(
+    graph => $graph,
+    max_iterations => 1_000_000_000,  # Very high limit
+);
+```
+
+### Behavior
+
+When a loop exceeds its iteration limit:
+
+```
+Loop exceeded iteration limit (10000 iterations)
+```
+
+The error includes the configured limit value for diagnostic clarity.
+
+### Implementation Details
+
+- Iterations are tracked per-loop using the loop node ID
+- Counter increments on each backedge traversal (when `active_input_index > 0`)
+- Limit is checked after incrementing, before re-executing loop body
+- Each CEKDataflow instance maintains its own iteration counts
+
+### Testing
+
+Tests for this feature are in `t/interpreter/cek-loop-execution.t`:
+- Counter loop execution (terminates normally)
+- Accumulator loop execution (terminates normally)
+- Infinite loop triggers iteration limit
+
+### Related
+
+- Issue #247: Add iteration limits to graph evaluator
+- Issue #273: Implement loop iteration in CEKDataflow (prerequisite)
+- Simple Chapter 8: Graph evaluator with iteration limits
+
 ## Comparison Operators: Boolean Type
 
 **Decision**: Chalk comparison operators currently return `0` for false, while Perl 5.42.0 returns proper boolean objects.
