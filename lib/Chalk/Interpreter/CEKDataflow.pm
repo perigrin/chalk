@@ -8,6 +8,7 @@ use Chalk::Interpreter::Environment;
 
 class Chalk::Interpreter::CEKDataflow {
     field $graph :param :reader;
+    field $max_iterations :param = 10000;  # Safety limit for loop iterations
 
     # Architecture: CESK-style machine with dataflow scheduling
     #
@@ -57,6 +58,9 @@ class Chalk::Interpreter::CEKDataflow {
         # Track which nodes have been computed
         my %computed;
 
+        # Track iterations per loop node
+        my %loop_iterations;
+
         # Build waiting map: tracks unmet dependencies for each node
         my %waiting;
         foreach my $node_id (keys $nodes->%*) {
@@ -67,8 +71,33 @@ class Chalk::Interpreter::CEKDataflow {
                 # No dependencies, ready to execute immediately
                 push $ready_queue->@*, $node_id;
             } else {
-                # Has dependencies, track them
-                $waiting{$node_id} = { map { $_ => 1 } $inputs->@* };
+                # Special case for Loop nodes: only wait for entry input (index 0) initially
+                # The backedge (index 1) creates a circular dependency that's resolved during iteration
+                if ($node->op eq 'Loop') {
+                    # Only wait for first input (entry control)
+                    if ($inputs->@* > 0) {
+                        $waiting{$node_id} = { $inputs->[0] => 1 };
+                    }
+                }
+                # Special case for Phi nodes in loops: skip backedge input (last input)
+                # Phi inputs: [region_id, entry_value, backedge_value, ...]
+                # The backedge value creates a circular dependency
+                elsif ($node->op eq 'Phi' && $node->can('region_id')) {
+                    my $region_id = $node->region_id;
+                    my $region_node = $nodes->{$region_id};
+                    if ($region_node && $region_node->op eq 'Loop') {
+                        # For Loop Phis, only wait for region and entry value (first 2 inputs)
+                        # Skip backedge value (input[2] and beyond)
+                        my @init_deps = @$inputs[0..1];  # region_id and entry value
+                        $waiting{$node_id} = { map { $_ => 1 } @init_deps };
+                    } else {
+                        # Regular Phi (non-Loop), wait for all inputs
+                        $waiting{$node_id} = { map { $_ => 1 } $inputs->@* };
+                    }
+                } else {
+                    # Has dependencies, track them
+                    $waiting{$node_id} = { map { $_ => 1 } $inputs->@* };
+                }
             }
         }
 
@@ -104,7 +133,143 @@ class Chalk::Interpreter::CEKDataflow {
 
             # Store result in environment
             $environment->set_node($node_id, $value);
-            $computed{$node_id} = 1;
+
+            # Special handling for Return with inactive control:
+            # Don't mark as computed so it can be re-evaluated when control changes
+            if ($node->op eq 'Return' && !defined($value)) {
+                # Re-add to waiting with uncomputed dependencies
+                my $inputs = $node->inputs;
+                my %deps;
+                for my $input_id ($inputs->@*) {
+                    unless ($computed{$input_id}) {
+                        $deps{$input_id} = 1;
+                    }
+                }
+                if (keys %deps) {
+                    $waiting{$node_id} = \%deps;
+                }
+                # Don't mark as computed - will re-execute when deps change
+            } else {
+                $computed{$node_id} = 1;
+            }
+
+            # Handle Loop iteration
+            if ($node->op eq 'Loop') {
+                my $active_idx = $value;  # Loop.execute returns active path index
+
+                if ($active_idx > 0) {
+                    # Backedge is active - need to iterate
+                    $loop_iterations{$node_id}++;
+                    if ($loop_iterations{$node_id} > $max_iterations) {
+                        die "Loop exceeded iteration limit ($max_iterations iterations)";
+                    }
+
+                    # Latch Loop Phi values (like Simple's latchLoopPhis)
+                    # Compute all Phi values FIRST using previous iteration values
+                    # This breaks the circular dependency: Phi <- Add <- Phi
+                    my @phi_nodes;
+                    my @phi_values;
+                    for my $pid (keys $nodes->%*) {
+                        my $pnode = $nodes->{$pid};
+                        if ($pnode->op eq 'Phi' && $pnode->can('region_id') && $pnode->region_id eq $node_id) {
+                            push @phi_nodes, $pid;
+                            # Phi uses Loop's active_input_index to select value
+                            # Index 0 = entry (input[1]), Index 1+ = backedge (input[2+])
+                            my $phi_inputs = $pnode->inputs;
+                            my $value_idx = $active_idx + 1;  # inputs[0] is region_id
+                            if ($value_idx < scalar($phi_inputs->@*)) {
+                                my $value_id = $phi_inputs->[$value_idx];
+                                my $phi_val = $environment->lookup_node($value_id);
+                                push @phi_values, $phi_val;
+                            }
+                        }
+                    }
+                    # Store all Phi values atomically (prevents read-before-write issues)
+                    for my $i (0..$#phi_nodes) {
+                        $environment->set_node($phi_nodes[$i], $phi_values[$i]);
+                        $computed{$phi_nodes[$i]} = 1;
+                    }
+
+                    # Reset non-Phi loop body nodes for re-execution
+                    # Two-pass approach: first delete ALL from computed, then calculate deps
+                    # This ensures correct dependency tracking (not using stale computed state)
+                    my @body_nodes = $self->find_loop_body_nodes($node_id);
+
+                    # Pass 1: Delete all non-Phi body nodes from computed
+                    for my $body_id (@body_nodes) {
+                        my $body_node = $nodes->{$body_id};
+                        next if $body_node->op eq 'Phi';
+                        delete $computed{$body_id};
+                    }
+
+                    # Pass 2: Calculate dependencies and queue
+                    for my $body_id (@body_nodes) {
+                        my $body_node = $nodes->{$body_id};
+                        next if $body_node->op eq 'Phi';
+
+                        # Re-calculate waiting dependencies
+                        my $inputs = $body_node->inputs;
+                        if ($inputs->@* > 0) {
+                            my %deps;
+                            for my $input_id ($inputs->@*) {
+                                # Only wait on inputs that aren't computed
+                                unless ($computed{$input_id}) {
+                                    $deps{$input_id} = 1;
+                                }
+                            }
+                            if (keys %deps) {
+                                $waiting{$body_id} = \%deps;
+                            } else {
+                                # All deps satisfied, add to ready queue
+                                push $ready_queue->@*, $body_id;
+                            }
+                        } else {
+                            push $ready_queue->@*, $body_id;
+                        }
+                    }
+
+                    # Also reset Return nodes that depend on body nodes
+                    # This ensures Return re-evaluates when exit control becomes active
+                    my %body_set = map { $_ => 1 } @body_nodes;
+                    for my $nid (keys $nodes->%*) {
+                        my $n = $nodes->{$nid};
+                        next unless $n->op eq 'Return';
+                        my $ninputs = $n->inputs;
+                        # Check if Return depends on any body node
+                        my $depends_on_body = 0;
+                        for my $input_id ($ninputs->@*) {
+                            if ($body_set{$input_id}) {
+                                $depends_on_body = 1;
+                                last;
+                            }
+                        }
+                        if ($depends_on_body) {
+                            # Reset Return so it re-evaluates with new control value
+                            delete $computed{$nid};
+                            # Remove from ready_queue if present (prevents duplicate execution)
+                            $ready_queue->@* = grep { $_ ne $nid } $ready_queue->@*;
+                            my %deps;
+                            for my $input_id ($ninputs->@*) {
+                                unless ($computed{$input_id}) {
+                                    $deps{$input_id} = 1;
+                                }
+                            }
+                            if (keys %deps) {
+                                $waiting{$nid} = \%deps;
+                            } else {
+                                # Only re-queue Return if its control is active (exit path)
+                                # If control is inactive (0), the loop is still iterating
+                                my $control_id = $ninputs->[0];  # Return's first input is control
+                                my $control_val = $environment->lookup_node($control_id);
+                                if ($control_val) {
+                                    push $ready_queue->@*, $nid;
+                                }
+                                # If control inactive, don't queue - loop continues until exit
+                            }
+                        }
+                    }
+                }
+            }
 
             # Check if this was a Return node (potential terminal)
             # Only stop if the Return returned a value (active path)
@@ -127,6 +292,30 @@ class Chalk::Interpreter::CEKDataflow {
                 if (keys $waiting{$waiting_id}->%* == 0) {
                     push $ready_queue->@*, $waiting_id;
                     delete $waiting{$waiting_id};
+                }
+            }
+
+            # Check if this is an active Proj that's a backedge to a Loop
+            # This check happens AFTER waiting nodes are updated
+            if ($node->op eq 'Proj' && $value == 1) {
+                # Find any Loop nodes that have this Proj as a backedge input
+                for my $potential_loop_id (keys $nodes->%*) {
+                    my $potential_loop = $nodes->{$potential_loop_id};
+                    next unless $potential_loop->op eq 'Loop';
+
+                    my $loop_inputs = $potential_loop->inputs;
+                    # Check if this Proj is a backedge (input[1] or later)
+                    for my $i (1 .. $#$loop_inputs) {
+                        if ($loop_inputs->[$i] eq $node_id) {
+                            # This Proj is a backedge to this Loop
+                            # Deactivate the entry path so Loop will see backedge as active path
+                            my $entry_id = $loop_inputs->[0];
+                            $environment->set_node($entry_id, 0);
+                            # Re-queue the Loop for execution
+                            push $ready_queue->@*, $potential_loop_id;
+                            last;
+                        }
+                    }
                 }
             }
         }
@@ -322,11 +511,29 @@ class Chalk::Interpreter::CEKDataflow {
             }
         }
 
-        # Find dependents of the Phi nodes (nodes that use Phi outputs)
+        # Also include nodes that depend on the Loop node itself (control path)
+        # This catches If nodes that use Loop as control input
+        for my $node_id (keys $nodes->%*) {
+            next if $body_nodes{$node_id};
+            next if $node_id eq $loop_id;
+            my $node = $nodes->{$node_id};
+            my $inputs = $node->inputs;
+            if (grep { $_ eq $loop_id } $inputs->@*) {
+                # This node depends on the Loop control
+                next if $node->op eq 'Return';
+                next if $node->op eq 'Stop';
+                next if $node->op eq 'Phi';  # Phi already handled above
+                $body_nodes{$node_id} = 1;
+                push @to_process, $node_id;
+            }
+        }
+
+        # Find dependents of body nodes (nodes that use their outputs)
         while (@to_process) {
             my $current_id = shift @to_process;
             for my $node_id (keys $nodes->%*) {
                 next if $body_nodes{$node_id};  # Already found
+                next if $node_id eq $loop_id;   # Never include the Loop itself in its body
                 my $node = $nodes->{$node_id};
                 my $inputs = $node->inputs;
                 if (grep { $_ eq $current_id } $inputs->@*) {

@@ -257,3 +257,267 @@ subtest 'CEKDataflow.find_loop_body_nodes identifies loop-dependent nodes' => su
     ok(scalar(@body_nodes) >= 1, 'Found at least the Phi node in loop body');
     ok((grep { $_ eq $phi_i->id } @body_nodes), 'Phi node is in loop body');
 };
+
+subtest 'Execute simple counter loop: while (i < 3) { i++ } return i' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Build IR for: i = 0; while (i < 3) { i = i + 1; } return i;
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    $graph->add_node($start);
+
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    $graph->add_node($init_i);
+
+    my $loop = Chalk::IR::Node::Loop->new(
+        inputs => [$start->id],
+    );
+    $graph->add_node($loop);
+
+    my $phi_i = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_i->id],
+    );
+    $graph->add_node($phi_i);
+
+    my $const_3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    $graph->add_node($const_3);
+
+    my $lt = Chalk::IR::Node::LT->new(
+        left => $phi_i,
+        right => $const_3,
+    );
+    $graph->add_node($lt);
+
+    my $if_node = Chalk::IR::Node::If->new(
+        inputs => [$loop->id, $lt->id],
+        condition_id => $lt->id,
+        condition => $lt,
+    );
+    $graph->add_node($if_node);
+
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    $graph->add_node($proj_true);
+
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    $graph->add_node($proj_false);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    $graph->add_node($const_1);
+
+    my $add = Chalk::IR::Node::Add->new(
+        left => $phi_i,
+        right => $const_1,
+    );
+    $graph->add_node($add);
+
+    # Complete phi backedge with the incremented value
+    push $phi_i->inputs->@*, $add->id;
+    # Add backedge to loop from true projection
+    push $loop->inputs->@*, $proj_true->id;
+
+    # Return on false path
+    my $return_node = Chalk::IR::Node::Return->new(
+        control => $proj_false,
+        value => $phi_i,
+    );
+    $graph->add_node($return_node);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my $result = $interp->execute();
+
+    is($result, 3, 'Counter loop executes: while (i < 3) returns 3');
+};
+
+subtest 'Execute accumulator loop: sum = 0; i = 0; while (i < 5) { sum += i; i++; } return sum' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Build IR for: sum = 0; i = 0; while (i < 5) { sum = sum + i; i = i + 1; } return sum;
+    # Expected: 0+1+2+3+4 = 10
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    $graph->add_node($start);
+
+    my $init_sum = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    $graph->add_node($init_sum);
+
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    $graph->add_node($init_i);
+
+    my $loop = Chalk::IR::Node::Loop->new(
+        inputs => [$start->id],
+    );
+    $graph->add_node($loop);
+
+    # Two Phi nodes: one for sum, one for i
+    my $phi_sum = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_sum->id],
+    );
+    $graph->add_node($phi_sum);
+
+    my $phi_i = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_i->id],
+    );
+    $graph->add_node($phi_i);
+
+    my $const_5 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    $graph->add_node($const_5);
+
+    my $lt = Chalk::IR::Node::LT->new(
+        left => $phi_i,
+        right => $const_5,
+    );
+    $graph->add_node($lt);
+
+    my $if_node = Chalk::IR::Node::If->new(
+        inputs => [$loop->id, $lt->id],
+        condition_id => $lt->id,
+        condition => $lt,
+    );
+    $graph->add_node($if_node);
+
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    $graph->add_node($proj_true);
+
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    $graph->add_node($proj_false);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    $graph->add_node($const_1);
+
+    # sum = sum + i
+    my $add_sum = Chalk::IR::Node::Add->new(
+        left => $phi_sum,
+        right => $phi_i,
+    );
+    $graph->add_node($add_sum);
+
+    # i = i + 1
+    my $add_i = Chalk::IR::Node::Add->new(
+        left => $phi_i,
+        right => $const_1,
+    );
+    $graph->add_node($add_i);
+
+    # Complete phi backedges
+    push $phi_sum->inputs->@*, $add_sum->id;
+    push $phi_i->inputs->@*, $add_i->id;
+
+    # Add backedge to loop from true projection
+    push $loop->inputs->@*, $proj_true->id;
+
+    # Return sum on false path
+    my $return_node = Chalk::IR::Node::Return->new(
+        control => $proj_false,
+        value => $phi_sum,
+    );
+    $graph->add_node($return_node);
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my $result = $interp->execute();
+
+    is($result, 10, 'Accumulator loop: sum of 0..4 = 10');
+};
+
+subtest 'Iteration limit prevents infinite loops' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Build an infinite loop (backedge always active)
+    # This should trigger the iteration limit
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    $graph->add_node($start);
+
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    $graph->add_node($init_i);
+
+    my $loop = Chalk::IR::Node::Loop->new(
+        inputs => [$start->id],
+    );
+    $graph->add_node($loop);
+
+    my $phi_i = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_i->id],
+    );
+    $graph->add_node($phi_i);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    $graph->add_node($const_1);
+
+    # Always true condition
+    my $const_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    $graph->add_node($const_true);
+
+    my $if_node = Chalk::IR::Node::If->new(
+        inputs => [$loop->id, $const_true->id],
+        condition_id => $const_true->id,
+        condition => $const_true,
+    );
+    $graph->add_node($if_node);
+
+    my $proj_true = Chalk::IR::Node::Proj->new(
+        inputs => [$if_node->id],
+        index => 0,
+        label => 'IfTrue',
+        source => $if_node,
+    );
+    $graph->add_node($proj_true);
+
+    my $proj_false = Chalk::IR::Node::Proj->new(
+        inputs => [$if_node->id],
+        index => 1,
+        label => 'IfFalse',
+        source => $if_node,
+    );
+    $graph->add_node($proj_false);
+
+    my $add = Chalk::IR::Node::Add->new(
+        left => $phi_i,
+        right => $const_1,
+    );
+    $graph->add_node($add);
+
+    # Complete phi backedge
+    push $phi_i->inputs->@*, $add->id;
+    push $loop->inputs->@*, $proj_true->id;
+
+    my $return_node = Chalk::IR::Node::Return->new(
+        control => $proj_false,
+        value => $phi_i,
+    );
+    $graph->add_node($return_node);
+
+    # Create interpreter with a low iteration limit for faster testing
+    my $interp = Chalk::Interpreter::CEKDataflow->new(
+        graph => $graph,
+        max_iterations => 100,  # Low limit for test speed
+    );
+
+    my $error;
+    eval {
+        $interp->execute();
+    };
+    $error = $@;
+
+    like($error, qr/Loop exceeded iteration limit/, 'Infinite loop triggers iteration limit');
+};
