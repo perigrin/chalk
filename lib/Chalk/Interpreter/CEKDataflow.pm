@@ -302,6 +302,46 @@ class Chalk::Interpreter::CEKDataflow {
             result => $result,
         };
     }
+
+    method find_loop_body_nodes($loop_id) {
+        # Find all nodes that are part of the loop body
+        # These are nodes that need to be re-executed on each iteration
+        my $nodes = $graph->nodes;
+        my %body_nodes;
+        my @to_process;
+
+        # Start with Phi nodes attached to this Loop
+        for my $node_id (keys $nodes->%*) {
+            my $node = $nodes->{$node_id};
+            if ($node->op eq 'Phi') {
+                # Check if this Phi is attached to our Loop
+                if ($node->can('region_id') && $node->region_id eq $loop_id) {
+                    $body_nodes{$node_id} = 1;
+                    push @to_process, $node_id;
+                }
+            }
+        }
+
+        # Find dependents of the Phi nodes (nodes that use Phi outputs)
+        while (@to_process) {
+            my $current_id = shift @to_process;
+            for my $node_id (keys $nodes->%*) {
+                next if $body_nodes{$node_id};  # Already found
+                my $node = $nodes->{$node_id};
+                my $inputs = $node->inputs;
+                if (grep { $_ eq $current_id } $inputs->@*) {
+                    # This node depends on a loop body node
+                    # Only include if it's not a control flow exit (Return, etc.)
+                    next if $node->op eq 'Return';
+                    next if $node->op eq 'Stop';
+                    $body_nodes{$node_id} = 1;
+                    push @to_process, $node_id;
+                }
+            }
+        }
+
+        return keys %body_nodes;
+    }
 }
 
 1;

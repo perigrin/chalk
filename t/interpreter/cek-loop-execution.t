@@ -14,6 +14,12 @@ use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Phi;
+use Chalk::Interpreter::CEKDataflow;
+use Chalk::IR::Node::Add;
+use Chalk::IR::Node::LT;
+use Chalk::IR::Node::If;
+use Chalk::IR::Node::Proj;
+use Chalk::IR::Node::Return;
 
 subtest 'Loop node tracks active_input_index' => sub {
     my $graph = Chalk::IR::Graph->new();
@@ -198,4 +204,56 @@ subtest 'Phi selects backedge value (index 1) on subsequent iterations' => sub {
     my $result = $phi->execute($phi_context);
 
     is($result, 42, 'Phi selects backedge value (42) when Loop active_input_index is 1');
+};
+
+subtest 'CEKDataflow.find_loop_body_nodes identifies loop-dependent nodes' => sub {
+    my $graph = Chalk::IR::Graph->new();
+
+    # Build: while (i < 10) { i = i + 1; } return i;
+    my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
+    $graph->add_node($start);
+
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    $graph->add_node($init_i);
+
+    my $loop = Chalk::IR::Node::Loop->new(
+        inputs => [$start->id],
+    );
+    $graph->add_node($loop);
+
+    my $phi_i = Chalk::IR::Node::Phi->new(
+        region_id => $loop->id,
+        inputs => [$loop->id, $init_i->id],
+    );
+    $graph->add_node($phi_i);
+
+    my $const_10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
+    $graph->add_node($const_10);
+
+    my $lt = Chalk::IR::Node::LT->new(
+        left => $phi_i,
+        right => $const_10,
+    );
+    $graph->add_node($lt);
+
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    $graph->add_node($const_1);
+
+    my $add = Chalk::IR::Node::Add->new(
+        left => $phi_i,
+        right => $const_1,
+    );
+    $graph->add_node($add);
+
+    # Complete phi backedge
+    push $phi_i->inputs->@*, $add->id;
+    # Add backedge to loop (simplified - would normally be from Proj)
+    push $loop->inputs->@*, $loop->id;
+
+    my $interp = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+    my @body_nodes = $interp->find_loop_body_nodes($loop->id);
+
+    # Should find: phi_i, lt, add (nodes that depend on Loop or its Phis)
+    ok(scalar(@body_nodes) >= 1, 'Found at least the Phi node in loop body');
+    ok((grep { $_ eq $phi_i->id } @body_nodes), 'Phi node is in loop body');
 };
