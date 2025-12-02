@@ -73,6 +73,12 @@ class Chalk::IR::Node::Start {
         return $self;
     }
 
+    # Dominator tree: Start is the root, so idom returns undef
+    method idom() { return undef; }
+
+    # Dominator depth: Start is at depth 0
+    method idepth() { return 0; }
+
     # Stub for transform tracking (not used in v2 but called by Builder)
     method record_transform(@args) {
         # No-op for compatibility

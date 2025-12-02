@@ -119,6 +119,61 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
 
         return @live_indices;
     }
+
+    # Control inputs for dominator calculation (object references)
+    field $_control_inputs :reader = undef;
+
+    method set_control_inputs($inputs) {
+        $_control_inputs = $inputs;
+    }
+
+    # Cached dominator info
+    field $_idom :reader = undef;
+    field $_idepth :reader = undef;
+
+    # Region's idom is the lowest common ancestor (LCA) of all control inputs
+    # Uses parallel tree traversal algorithm from Simple Chapter 6
+    method idom() {
+        return $_idom if defined $_idom;
+
+        # Need control inputs for LCA calculation
+        return undef unless $_control_inputs && $_control_inputs->@* >= 2;
+
+        my ($lhs, $rhs) = ($_control_inputs->[0], $_control_inputs->[1]);
+
+        # Walk up both idom trees until they meet
+        while (defined $lhs && defined $rhs && refaddr($lhs) != refaddr($rhs)) {
+            return undef unless $lhs->can('idepth') && $rhs->can('idepth');
+
+            my $lhs_depth = $lhs->idepth() // 0;
+            my $rhs_depth = $rhs->idepth() // 0;
+
+            if ($lhs_depth >= $rhs_depth && $lhs->can('idom')) {
+                $lhs = $lhs->idom();
+            }
+            if ($rhs_depth >= $lhs_depth && $rhs->can('idom')) {
+                $rhs = $rhs->idom();
+            }
+        }
+
+        $_idom = $lhs;
+        return $_idom;
+    }
+
+    method idepth() {
+        return $_idepth if defined $_idepth;
+
+        my $dom = $self->idom();
+        return 0 unless $dom;
+
+        if ($dom->can('idepth')) {
+            $_idepth = $dom->idepth() + 1;
+        } else {
+            $_idepth = 1;
+        }
+
+        return $_idepth;
+    }
 }
 
 1;
