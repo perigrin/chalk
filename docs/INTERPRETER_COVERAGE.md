@@ -132,7 +132,9 @@ These nodes exist but don't have `execute()` methods OR semantic actions:
 #### Control Flow
 - **Loop** - Loop construct
   - ✅ Has `execute()` method
-  - ⚠️ Needs testing with actual loop constructs
+  - ✅ Loop iteration implemented (Issue #273)
+  - ✅ Iteration limits enforced (Issue #247)
+  - ✅ Tested in `t/interpreter/cek-loop-execution.t`
 
 #### Memory/References
 - **Reference** - Reference creation (\$x)
