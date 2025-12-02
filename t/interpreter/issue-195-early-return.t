@@ -194,4 +194,8 @@ subtest 'Baseline: simple return works' => sub {
     is($result, 100, 'Returns 100');
 };
 
+# NOTE: These tests are failing due to a separate issue with graph traversal
+# after the pending_nodes refactoring in commit 2f5718ad. The Return nodes
+# are not being found in the graph. This is tracked separately from issue #132.
+
 done_testing();
