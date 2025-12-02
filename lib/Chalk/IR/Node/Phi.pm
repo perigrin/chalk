@@ -57,6 +57,33 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
     method peephole($graph = undef) {
         return $self unless $graph;
 
+        my @inputs = $self->inputs->@*;
+
+        # singleUniqueInput optimization: if all data inputs are the same node, return that node
+        # Data inputs start at index 1 (index 0 is region_id)
+        # BUT only for Region-based phis, not Loop-based phis
+        if (@inputs > 1) {
+            # Check if control is a Loop - if so, don't apply singleUniqueInput
+            my $control_node = $graph->get_node($region_id);
+            my $is_loop = $control_node && $control_node->op eq 'Loop';
+
+            if (!$is_loop) {
+                my @data_inputs = @inputs[1..$#inputs];
+                my $first = $data_inputs[0];
+                my $all_same = 1;
+                for my $input (@data_inputs[1..$#data_inputs]) {
+                    if ($input ne $first) {
+                        $all_same = 0;
+                        last;
+                    }
+                }
+                if ($all_same && defined $first) {
+                    my $node = $graph->get_node($first);
+                    return $node if $node;
+                }
+            }
+        }
+
         # Get the Region node
         my $region_node = $graph->get_node($region_id);
         return $self unless $region_node;
