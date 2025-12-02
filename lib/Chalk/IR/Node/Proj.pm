@@ -108,6 +108,54 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
 
         return $self;
     }
+
+    # Dominator tree: Proj's immediate dominator depends on source type
+    # For Proj from If: idom is the If's control input (not the If itself)
+    # For Proj from Start: idom is Start itself
+    # Caches result for efficiency
+    field $_idom :reader = undef;
+    field $_idepth :reader = undef;
+
+    method idom() {
+        return $_idom if defined $_idom;
+
+        return undef unless $source;
+
+        # If source is Start, this Proj's idom IS the Start node
+        if ($source->op eq 'Start') {
+            $_idom = $source;
+            return $_idom;
+        }
+
+        # If source is an If node, the Proj's idom is the If's control input
+        if ($source->op eq 'If' && $source->can('control')) {
+            $_idom = $source->control;
+            return $_idom;
+        }
+
+        # Default: try source's idom if it has one
+        if ($source->can('idom')) {
+            $_idom = $source->idom;
+            return $_idom;
+        }
+
+        return undef;
+    }
+
+    method idepth() {
+        return $_idepth if defined $_idepth;
+
+        my $dom = $self->idom();
+        return 0 unless $dom;
+
+        if ($dom->can('idepth')) {
+            $_idepth = $dom->idepth() + 1;
+        } else {
+            $_idepth = 1;  # Default if idom doesn't support idepth
+        }
+
+        return $_idepth;
+    }
 }
 
 1;

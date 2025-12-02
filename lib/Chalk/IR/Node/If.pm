@@ -5,6 +5,11 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::If :isa(Chalk::IR::Node::Base) {
+    use Chalk::IR::Type::TypeTuple;
+    use Chalk::IR::Type::TypeCtrl;
+    use Chalk::IR::Type::Top;
+    use Chalk::IR::Type::Bottom;
+
     field $condition_id :param :reader;
     # Object reference to condition node for graph traversal
     field $condition :param :reader = undef;
@@ -29,6 +34,77 @@ class Chalk::IR::Node::If :isa(Chalk::IR::Node::Base) {
         # If node returns the condition value (1 or 0)
         # This tells Proj nodes which path is active
         return $context->("node:$condition_id");
+    }
+
+    # Type inference for If node
+    # Returns TypeTuple with (true_branch_ctrl, false_branch_ctrl)
+    # Uses dominator-based optimization to detect nested Ifs with identical predicates
+    method compute() {
+        # IF_BOTH: both branches reachable
+        my $IF_BOTH = Chalk::IR::Type::TypeTuple->of(
+            Chalk::IR::Type::TypeCtrl->CTRL(),
+            Chalk::IR::Type::TypeCtrl->CTRL()
+        );
+
+        # IF_TRUE: only true branch reachable
+        my $IF_TRUE = Chalk::IR::Type::TypeTuple->of(
+            Chalk::IR::Type::TypeCtrl->CTRL(),
+            Chalk::IR::Type::Bottom->BOTTOM()
+        );
+
+        # IF_FALSE: only false branch reachable
+        my $IF_FALSE = Chalk::IR::Type::TypeTuple->of(
+            Chalk::IR::Type::Bottom->BOTTOM(),
+            Chalk::IR::Type::TypeCtrl->CTRL()
+        );
+
+        # Check if condition is constant
+        if ($condition && $condition->can('compute')) {
+            my $cond_type = $condition->compute();
+            if ($cond_type->is_constant) {
+                return $cond_type->value ? $IF_TRUE : $IF_FALSE;
+            }
+        }
+
+        # Dominator-based optimization: walk up the dominator tree
+        # looking for an If with identical predicate
+        if ($control && $condition) {
+            my $dom = $control;
+
+            # Walk up the dominator tree
+            while ($dom) {
+                # Check if dom is a Proj from an If
+                if ($dom->can('source') && $dom->source && $dom->source->op eq 'If') {
+                    my $outer_if = $dom->source;
+
+                    # Check if outer If has same predicate (same node object)
+                    if ($outer_if->can('condition') && $outer_if->condition) {
+                        if (refaddr($outer_if->condition) == refaddr($condition)) {
+                            # Same predicate! Check which branch we're on
+                            # index 0 = true branch, index 1 = false branch
+                            my $proj_index = $dom->index;
+
+                            if ($proj_index == 0) {
+                                # We're on the TRUE branch of outer If
+                                # So this inner If with same predicate is always true
+                                return $IF_TRUE;
+                            } else {
+                                # We're on the FALSE branch of outer If
+                                # So this inner If with same predicate is always false
+                                return $IF_FALSE;
+                            }
+                        }
+                    }
+                }
+
+                # Move up to parent dominator
+                last unless $dom->can('idom');
+                $dom = $dom->idom();
+            }
+        }
+
+        # Default: both branches reachable
+        return $IF_BOTH;
     }
 
     # Peephole optimization for If nodes
