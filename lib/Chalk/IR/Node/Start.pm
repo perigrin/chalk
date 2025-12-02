@@ -49,8 +49,8 @@ class Chalk::IR::Node::Start {
     }
 
     method execute() {
-        # Start node returns a control token (undef for now)
-        return undef;
+        # Start node returns a control token (1 to indicate control is active)
+        return 1;
     }
 
     # Compatibility methods for code expecting Base methods
