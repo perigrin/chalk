@@ -9,6 +9,17 @@ class Chalk::IR::Node::PostIncrement {
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
+    # Dependency tracking for peephole re-optimization
+    field $_deps = [];
+
+    method add_dep($dependent_node_id) {
+        push $_deps->@*, $dependent_node_id;
+    }
+
+    method get_deps() {
+        return $_deps->@*;
+    }
+
     method id() { refaddr($self) }
 
     method inputs() {

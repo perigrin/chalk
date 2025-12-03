@@ -13,6 +13,17 @@ class Chalk::IR::Node::Scope {
     field $parent :param :reader = undef;       # Parent scope for nested lookups
     field $loop_node :param :reader = undef;    # Loop node for lazy phi creation (Issue #246)
 
+    # Dependency tracking for peephole re-optimization
+    field $_deps = [];
+
+    method add_dep($dependent_node_id) {
+        push $_deps->@*, $dependent_node_id;
+    }
+
+    method get_deps() {
+        return $_deps->@*;
+    }
+
     method id() { refaddr($self) }
 
     ADJUST {
