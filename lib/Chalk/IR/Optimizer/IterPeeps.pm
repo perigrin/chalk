@@ -91,7 +91,7 @@ class Chalk::IR::Optimizer::IterPeeps {
     method _apply_replacements($graph, $replacements) {
         # Build final redirection map (follow chains)
         my %final_redirect;
-        for my $old_id (keys %$replacements) {
+        for my $old_id (keys $replacements->%*) {
             my $new_node = $replacements->{$old_id};
             my $new_id = $new_node->id;
 
