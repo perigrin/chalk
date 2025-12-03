@@ -8,20 +8,31 @@ class Chalk::IR::Node::FieldStore :isa(Chalk::IR::Node::Base) {
     field $object_id :param :reader;
     field $field_id :param :reader;
     field $value_id :param :reader;
+    field $alias_class :param :reader = undef;
 
     method op() { 'FieldStore' }
 
     method to_hash() {
+        my %attrs = (
+            object_id => $object_id,
+            field_id => $field_id,
+            value_id => $value_id,
+        );
+        $attrs{alias_class} = $alias_class if defined $alias_class;
+
         return {
             id     => $self->id,
             op     => 'FieldStore',
             inputs => $self->inputs,
-            attributes => {
-                object_id => $object_id,
-                field_id => $field_id,
-                value_id => $value_id,
-            },
+            attributes => \%attrs,
         };
+    }
+
+    method compute($graph) {
+        use Chalk::IR::Type::Memory;
+        return Chalk::IR::Type::Memory->new(
+            alias_class => $alias_class,
+        );
     }
 
     method execute($context) {
