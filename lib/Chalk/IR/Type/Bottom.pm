@@ -17,6 +17,11 @@ class Chalk::IR::Type::Bottom :isa(Chalk::IR::Type) {
     method meet($other) {
         return $self;
     }
+
+    # Bottom is identity for join - return the other type
+    method join($other) {
+        return $other;
+    }
 }
 
 1;

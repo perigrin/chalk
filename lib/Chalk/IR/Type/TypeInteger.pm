@@ -54,6 +54,31 @@ class Chalk::IR::Type::TypeInteger :isa(Chalk::IR::Type) {
         # Cross-type meet = global Top
         return Chalk::IR::Type::Top->top();
     }
+
+    # join() for TypeInteger with IntTop/IntBot lattice
+    method join($other) {
+        # Handle global Bottom type - identity for join
+        return $self if $other isa Chalk::IR::Type::Bottom;
+        # Handle global Top type - absorbs in join
+        return $other if $other isa Chalk::IR::Type::Top;
+
+        # IntBot is identity for join within integer domain
+        return $other if $self->is_bottom && $other isa __PACKAGE__;
+        return $self if $other isa __PACKAGE__ && $other->is_bottom;
+
+        # IntTop absorbs everything within integer domain
+        return __PACKAGE__->TOP() if $self->is_top;
+        return __PACKAGE__->TOP() if $other isa __PACKAGE__ && $other->is_top;
+
+        # Two constants: same value = that constant, different = IntTop
+        if ($self->is_constant && $other isa __PACKAGE__ && $other->is_constant) {
+            return $self if $value == $other->value;
+            return __PACKAGE__->TOP();
+        }
+
+        # Cross-type join = global Top
+        return Chalk::IR::Type::Top->top();
+    }
 }
 
 1;
