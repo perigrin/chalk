@@ -16,15 +16,108 @@ class Chalk::IR::Optimizer::IterPeeps {
         return $result->{graph};
     }
 
-    # Run iterative peephole optimization pass
-    # Returns: { graph => optimized_graph, metrics => { iterations => N, peepholes_applied => N } }
+    # Compute value number for a node (for GVN table lookup)
+    method _compute_value_number($node, $node_to_value, $graph) {
+        my $op = $node->op;
+        my $attrs = $node->attributes;
+
+        # Special case: Constants
+        if ($op eq 'Constant') {
+            my $value = $attrs->{value} // '';
+            my $type = $attrs->{type} // '';
+            return "Constant:$value:$type";
+        }
+
+        # Special case: Proj nodes (include index)
+        if ($op eq 'Proj') {
+            my $index = $attrs->{index} // '';
+            my @input_vns;
+            for my $input_id ($node->inputs->@*) {
+                if (defined($input_id) && exists($node_to_value->{$input_id})) {
+                    push @input_vns, $node_to_value->{$input_id};
+                } else {
+                    push @input_vns, $input_id // 'undef';
+                }
+            }
+            my $inputs_str = join(',', @input_vns);
+            return "Proj:$index:$inputs_str";
+        }
+
+        # Special case: Phi nodes - use identity-based comparison
+        if ($op eq 'Phi') {
+            my $inputs_str = join(',', map { $_ // 'undef' } $node->inputs->@*);
+            my $region_id = $attrs->{region_id} // '';
+            return "Phi:$region_id:$inputs_str";
+        }
+
+        # General case: Operations - get value numbers of inputs
+        my @input_vns;
+        for my $input_id ($node->inputs->@*) {
+            if (defined($input_id) && exists($node_to_value->{$input_id})) {
+                push @input_vns, $node_to_value->{$input_id};
+            } else {
+                push @input_vns, $input_id // 'undef';
+            }
+        }
+
+        # Handle commutativity for Add and Multiply
+        if ($op eq 'Add' || $op eq 'Multiply') {
+            @input_vns = sort @input_vns;
+        }
+
+        my $inputs_str = join(',', @input_vns);
+        return "$op:$inputs_str";
+    }
+
+    # GVN table lookup - returns existing node or undef
+    method _gvn_lookup($node, $gvn_table, $node_to_value, $graph) {
+        my $value_num = $self->_compute_value_number($node, $node_to_value, $graph);
+        return $gvn_table->{$value_num};
+    }
+
+    # Insert node into GVN table
+    method _gvn_insert($node, $gvn_table, $node_to_value, $graph) {
+        my $value_num = $self->_compute_value_number($node, $node_to_value, $graph);
+        $gvn_table->{$value_num} = $node->id unless exists($gvn_table->{$value_num});
+        $node_to_value->{$node->id} = $value_num;
+    }
+
+    # Remove node from GVN table
+    method _gvn_remove($node, $gvn_table, $node_to_value, $graph) {
+        my $value_num = $self->_compute_value_number($node, $node_to_value, $graph);
+        if (exists($gvn_table->{$value_num}) && $gvn_table->{$value_num} eq $node->id) {
+            delete $gvn_table->{$value_num};
+        }
+        delete $node_to_value->{$node->id};
+    }
+
+    # Replace node in GVN table (remove old, insert new)
+    method _gvn_replace($old_node, $new_node, $gvn_table, $node_to_value, $graph) {
+        $self->_gvn_remove($old_node, $gvn_table, $node_to_value, $graph);
+        $self->_gvn_insert($new_node, $gvn_table, $node_to_value, $graph);
+    }
+
+    # Run iterative peephole optimization pass with integrated GVN
+    # Returns: { graph => optimized_graph, metrics => { iterations => N, peepholes_applied => N, gvn_hits => N } }
     method run_iterpeeps($graph) {
         my $peepholes_applied = 0;
+        my $gvn_hits = 0;
         my $iterations = 0;
+
+        # GVN table: value_number => canonical_node_id
+        my %gvn_table;
+        my %node_to_value;
 
         # Initialize worklist with all node IDs
         my @worklist = keys %{$graph->nodes};
         my %in_worklist = map { $_ => 1 } @worklist;
+
+        # Pre-populate GVN table with existing nodes
+        for my $node_id (@worklist) {
+            my $node = $graph->get_node($node_id);
+            next unless defined($node);
+            $self->_gvn_insert($node, \%gvn_table, \%node_to_value, $graph);
+        }
 
         # Track replacements: old_node_id => new_node
         my %replacements;
@@ -47,12 +140,29 @@ class Chalk::IR::Optimizer::IterPeeps {
             if ($optimized && $optimized->id ne $node_id) {
                 $peepholes_applied++;
 
+                # Check if optimized node matches something in GVN table
+                my $gvn_match_id = $self->_gvn_lookup($optimized, \%gvn_table, \%node_to_value, $graph);
+
+                if ($gvn_match_id && $gvn_match_id ne $optimized->id) {
+                    # GVN hit! Use existing node instead
+                    $gvn_hits++;
+                    my $gvn_match = $graph->get_node($gvn_match_id);
+                    if ($gvn_match) {
+                        # TODO: Merge types with join() if nodes have type info
+                        $optimized = $gvn_match;
+                    }
+                }
+
                 # Track the replacement
                 $replacements{$node_id} = $optimized;
+
+                # Update GVN table
+                $self->_gvn_replace($node, $optimized, \%gvn_table, \%node_to_value, $graph);
 
                 # Add the replacement node to the graph if not already there
                 unless ($graph->get_node($optimized->id)) {
                     $graph->add_node($optimized);
+                    $self->_gvn_insert($optimized, \%gvn_table, \%node_to_value, $graph);
                 }
 
                 # Add users of the old node to worklist for re-optimization
@@ -61,6 +171,14 @@ class Chalk::IR::Optimizer::IterPeeps {
                     unless ($in_worklist{$user_id}) {
                         push @worklist, $user_id;
                         $in_worklist{$user_id} = 1;
+                    }
+                }
+
+                # Add dependents (from dependency tracking) to worklist
+                for my $dep_id ($node->get_deps()) {
+                    unless ($in_worklist{$dep_id}) {
+                        push @worklist, $dep_id;
+                        $in_worklist{$dep_id} = 1;
                     }
                 }
 
@@ -82,6 +200,7 @@ class Chalk::IR::Optimizer::IterPeeps {
             metrics => {
                 iterations => $iterations,
                 peepholes_applied => $peepholes_applied,
+                gvn_hits => $gvn_hits,
             }
         };
     }
