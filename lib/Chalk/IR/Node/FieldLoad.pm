@@ -7,19 +7,30 @@ use utf8;
 class Chalk::IR::Node::FieldLoad :isa(Chalk::IR::Node::Base) {
     field $object_id :param :reader;
     field $field_id :param :reader;
+    field $alias_class :param :reader = undef;
 
     method op() { 'FieldLoad' }
 
     method to_hash() {
+        my %attrs = (
+            object_id => $object_id,
+            field_id => $field_id,
+        );
+        $attrs{alias_class} = $alias_class if defined $alias_class;
+
         return {
             id     => $self->id,
             op     => 'FieldLoad',
             inputs => $self->inputs,
-            attributes => {
-                object_id => $object_id,
-                field_id => $field_id,
-            },
+            attributes => \%attrs,
         };
+    }
+
+    method compute($graph) {
+        use Chalk::IR::Type::Memory;
+        return Chalk::IR::Type::Memory->new(
+            alias_class => $alias_class,
+        );
     }
 
     method execute($context) {

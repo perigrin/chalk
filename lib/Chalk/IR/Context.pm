@@ -26,6 +26,12 @@ class Chalk::IR::Context {
         return "${namespace}:${name}";
     }
 
+    # Creates a typed label for alias analysis (e.g., "lexical:Int:$x", "lexical:Str:$x")
+    # Different types create different labels, preventing false aliasing
+    sub make_typed_label($class, $namespace, $type, $name) {
+        return "${namespace}:${type}:${name}";
+    }
+
     # Creates index label for array elements (e.g., "index:0", "index:1")
     sub make_index_label($class, $index) {
         return "index:${index}";
