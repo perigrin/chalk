@@ -1,11 +1,11 @@
-# ABOUTME: TypeTuple represents multiple types for multi-return nodes
+# ABOUTME: Tuple represents multiple types for multi-return nodes
 # ABOUTME: Used by Start to return (ctrl, arg) and similar patterns
 
 use 5.42.0;
 use experimental qw(class);
 use Chalk::IR::Type;
 
-class Chalk::IR::Type::TypeTuple :isa(Chalk::IR::Type) {
+class Chalk::IR::Type::Tuple :isa(Chalk::IR::Type) {
     field $types :param :reader;  # ArrayRef of types
 
     method is_constant() {

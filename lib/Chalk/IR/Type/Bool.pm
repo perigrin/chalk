@@ -1,4 +1,4 @@
-# ABOUTME: TypeBool represents a constant boolean value in IR
+# ABOUTME: Bool represents a constant boolean value in IR
 # ABOUTME: Uses builtin::true/builtin::false for native Perl booleans
 
 use 5.42.0;
@@ -7,7 +7,7 @@ use Chalk::IR::Type;
 use Chalk::IR::Type::Top;
 use Chalk::IR::Type::Bottom;
 
-class Chalk::IR::Type::TypeBool :isa(Chalk::IR::Type) {
+class Chalk::IR::Type::Bool :isa(Chalk::IR::Type) {
     field $value :param :reader;
 
     method is_constant() { return 1; }

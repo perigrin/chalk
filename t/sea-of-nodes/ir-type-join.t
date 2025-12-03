@@ -10,11 +10,11 @@ defer { done_testing() }
 use Chalk::IR::Type;
 use Chalk::IR::Type::Top;
 use Chalk::IR::Type::Bottom;
-use Chalk::IR::Type::TypeInteger;
+use Chalk::IR::Type::Integer;
 
 subtest 'Top join semantics' => sub {
     my $top = Chalk::IR::Type::Top->top();
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
     my $bottom = Chalk::IR::Type::Bottom->BOTTOM();
 
     # Top is absorbing for join (opposite of meet)
@@ -30,12 +30,12 @@ subtest 'Top join semantics' => sub {
 
 subtest 'Bottom join semantics' => sub {
     my $bottom = Chalk::IR::Type::Bottom->BOTTOM();
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
     my $top = Chalk::IR::Type::Top->top();
 
     # Bottom is identity for join (opposite of meet)
     my $result1 = $bottom->join($int5);
-    is ref($result1), 'Chalk::IR::Type::TypeInteger', 'Bottom join Int = Int';
+    is ref($result1), 'Chalk::IR::Type::Integer', 'Bottom join Int = Int';
     is $result1->value, 5, 'value preserved';
 
     my $result2 = $bottom->join($top);
@@ -46,11 +46,11 @@ subtest 'Bottom join semantics' => sub {
 };
 
 subtest 'TypeInteger join semantics' => sub {
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
-    my $int5b = Chalk::IR::Type::TypeInteger->constant(5);
-    my $int3 = Chalk::IR::Type::TypeInteger->constant(3);
-    my $int_top = Chalk::IR::Type::TypeInteger->TOP();
-    my $int_bot = Chalk::IR::Type::TypeInteger->BOTTOM();
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
+    my $int5b = Chalk::IR::Type::Integer->constant(5);
+    my $int3 = Chalk::IR::Type::Integer->constant(3);
+    my $int_top = Chalk::IR::Type::Integer->TOP();
+    my $int_bot = Chalk::IR::Type::Integer->BOTTOM();
 
     # Same constant: join = that constant
     my $result1 = $int5->join($int5b);

@@ -1,4 +1,4 @@
-# ABOUTME: TypeInteger represents integer values in IR type lattice
+# ABOUTME: Integer represents integer values in IR type lattice
 # ABOUTME: Supports IntTop (unknown), IntBot (error), and constants
 
 use 5.42.0;
@@ -7,7 +7,7 @@ use Chalk::IR::Type;
 use Chalk::IR::Type::Top;
 use Chalk::IR::Type::Bottom;
 
-class Chalk::IR::Type::TypeInteger :isa(Chalk::IR::Type) {
+class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
     field $value :param :reader = undef;
     field $is_bottom :param :reader = 0;
 

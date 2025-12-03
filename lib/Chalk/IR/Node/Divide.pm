@@ -5,7 +5,7 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Divide {
-    use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::Integer;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
 
@@ -90,16 +90,16 @@ class Chalk::IR::Node::Divide {
         if ($left_type->is_constant && $right_type->is_constant) {
             my $divisor = $right_type->value;
             # Division by zero yields IntBot (error state)
-            return Chalk::IR::Type::TypeInteger->BOTTOM() if $divisor == 0;
-            return Chalk::IR::Type::TypeInteger->constant(
+            return Chalk::IR::Type::Integer->BOTTOM() if $divisor == 0;
+            return Chalk::IR::Type::Integer->constant(
                 int($left_type->value / $divisor)
             );
         }
 
         # If either operand is an integer type, result is unknown integer
-        if (($left_type isa Chalk::IR::Type::TypeInteger) ||
-            ($right_type isa Chalk::IR::Type::TypeInteger)) {
-            return Chalk::IR::Type::TypeInteger->TOP();
+        if (($left_type isa Chalk::IR::Type::Integer) ||
+            ($right_type isa Chalk::IR::Type::Integer)) {
+            return Chalk::IR::Type::Integer->TOP();
         }
 
         return Chalk::IR::Type::Top->top();

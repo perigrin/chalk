@@ -5,8 +5,8 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::If :isa(Chalk::IR::Node::Base) {
-    use Chalk::IR::Type::TypeTuple;
-    use Chalk::IR::Type::TypeCtrl;
+    use Chalk::IR::Type::Tuple;
+    use Chalk::IR::Type::Ctrl;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Type::Bottom;
 
@@ -41,21 +41,21 @@ class Chalk::IR::Node::If :isa(Chalk::IR::Node::Base) {
     # Uses dominator-based optimization to detect nested Ifs with identical predicates
     method compute() {
         # IF_BOTH: both branches reachable
-        my $IF_BOTH = Chalk::IR::Type::TypeTuple->of(
-            Chalk::IR::Type::TypeCtrl->CTRL(),
-            Chalk::IR::Type::TypeCtrl->CTRL()
+        my $IF_BOTH = Chalk::IR::Type::Tuple->of(
+            Chalk::IR::Type::Ctrl->CTRL(),
+            Chalk::IR::Type::Ctrl->CTRL()
         );
 
         # IF_TRUE: only true branch reachable
-        my $IF_TRUE = Chalk::IR::Type::TypeTuple->of(
-            Chalk::IR::Type::TypeCtrl->CTRL(),
+        my $IF_TRUE = Chalk::IR::Type::Tuple->of(
+            Chalk::IR::Type::Ctrl->CTRL(),
             Chalk::IR::Type::Bottom->BOTTOM()
         );
 
         # IF_FALSE: only false branch reachable
-        my $IF_FALSE = Chalk::IR::Type::TypeTuple->of(
+        my $IF_FALSE = Chalk::IR::Type::Tuple->of(
             Chalk::IR::Type::Bottom->BOTTOM(),
-            Chalk::IR::Type::TypeCtrl->CTRL()
+            Chalk::IR::Type::Ctrl->CTRL()
         );
 
         # Check if condition is constant

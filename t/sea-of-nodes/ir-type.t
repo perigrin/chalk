@@ -38,11 +38,11 @@ subtest 'Bottom type (error state)' => sub {
     is(refaddr($bot1), refaddr($bot2), 'BOTTOM is singleton');
 };
 
-use_ok('Chalk::IR::Type::TypeInteger');
+use_ok('Chalk::IR::Type::Integer');
 
 subtest 'TypeInteger (constant value)' => sub {
-    my $int42 = Chalk::IR::Type::TypeInteger->constant(42);
-    my $int0 = Chalk::IR::Type::TypeInteger->constant(0);
+    my $int42 = Chalk::IR::Type::Integer->constant(42);
+    my $int0 = Chalk::IR::Type::Integer->constant(0);
 
     ok($int42, 'Can create TypeInteger');
     ok($int42 isa Chalk::IR::Type, 'TypeInteger isa Type');
@@ -52,11 +52,11 @@ subtest 'TypeInteger (constant value)' => sub {
 };
 
 subtest 'TypeInteger TOP (unknown integer)' => sub {
-    my $top1 = Chalk::IR::Type::TypeInteger->TOP();
-    my $top2 = Chalk::IR::Type::TypeInteger->TOP();
+    my $top1 = Chalk::IR::Type::Integer->TOP();
+    my $top2 = Chalk::IR::Type::Integer->TOP();
 
     ok($top1, 'Can get IntTop singleton');
-    ok($top1 isa Chalk::IR::Type::TypeInteger, 'IntTop isa TypeInteger');
+    ok($top1 isa Chalk::IR::Type::Integer, 'IntTop isa TypeInteger');
     is($top1->is_constant, 0, 'IntTop is not constant');
     ok($top1->is_top, 'IntTop is_top returns true');
     ok(!$top1->is_bottom, 'IntTop is_bottom returns false');
@@ -64,11 +64,11 @@ subtest 'TypeInteger TOP (unknown integer)' => sub {
 };
 
 subtest 'TypeInteger BOTTOM (integer error state)' => sub {
-    my $bot1 = Chalk::IR::Type::TypeInteger->BOTTOM();
-    my $bot2 = Chalk::IR::Type::TypeInteger->BOTTOM();
+    my $bot1 = Chalk::IR::Type::Integer->BOTTOM();
+    my $bot2 = Chalk::IR::Type::Integer->BOTTOM();
 
     ok($bot1, 'Can get IntBot singleton');
-    ok($bot1 isa Chalk::IR::Type::TypeInteger, 'IntBot isa TypeInteger');
+    ok($bot1 isa Chalk::IR::Type::Integer, 'IntBot isa TypeInteger');
     is($bot1->is_constant, 0, 'IntBot is not constant');
     ok(!$bot1->is_top, 'IntBot is_top returns false');
     ok($bot1->is_bottom, 'IntBot is_bottom returns true');
