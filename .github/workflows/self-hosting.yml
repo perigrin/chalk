@@ -5,8 +5,16 @@ name: Self-Hosting Test
 on:
   pull_request:
     branches: [ pu ]
+    paths:
+      - 'lib/**'
+      - 't/self-hosting.t'
+      - '.github/workflows/self-hosting.yml'
   push:
     branches: [ pu ]
+    paths:
+      - 'lib/**'
+      - 't/self-hosting.t'
+      - '.github/workflows/self-hosting.yml'
 
 jobs:
   self-hosting:
