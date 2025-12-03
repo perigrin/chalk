@@ -42,6 +42,19 @@ class Chalk::IR::Node {
     field $source_info    :param :reader = undef;
     field $transform_chain :param :reader = undef;
 
+    # Dependency tracking for peephole re-optimization
+    # When a peephole inspects a remote node and fails, it registers a dependency
+    # so that when the remote node changes, this node gets re-added to the worklist
+    field $_deps = [];
+
+    method add_dep($dependent_node_id) {
+        push $_deps->@*, $dependent_node_id;
+    }
+
+    method get_deps() {
+        return $_deps->@*;  # Return copy (list context)
+    }
+
     method to_hash() {
         return {
             id              => $id,

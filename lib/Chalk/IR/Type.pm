@@ -23,6 +23,19 @@ class Chalk::IR::Type {
         # Different types = Top (unknown)
         return Chalk::IR::Type::Top->top();
     }
+
+    # join() computes least upper bound (union) of two types
+    # This is the dual of meet() - while meet goes down the lattice, join goes up
+    method join($other) {
+        # Bottom is identity for join
+        return $self if $other isa Chalk::IR::Type::Bottom;
+        # Top absorbs everything in join
+        return $other if $other isa Chalk::IR::Type::Top;
+        # Same exact type = self
+        return $self if ref($self) eq ref($other);
+        # Different types = Top (unknown)
+        return Chalk::IR::Type::Top->top();
+    }
 }
 
 1;

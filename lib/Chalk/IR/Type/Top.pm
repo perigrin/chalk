@@ -20,6 +20,11 @@ class Chalk::IR::Type::Top :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Bottom;
         return $other;
     }
+
+    # Top absorbs everything in join - always returns Top
+    method join($other) {
+        return $self;
+    }
 }
 
 1;
