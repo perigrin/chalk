@@ -152,6 +152,12 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
         # Verify all data input nodes exist
         return if grep { !defined $_ } @data_nodes;
 
+        # Register dependencies on all data input nodes since we check their ops (Issue #282)
+        # If any data input's op changes, we should re-run idealize
+        for my $node (@data_nodes) {
+            $node->add_dep($self->id);
+        }
+
         # Check if all data inputs have the same operation type
         my $first_op = $data_nodes[0]->op;
 

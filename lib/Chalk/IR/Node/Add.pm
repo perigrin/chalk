@@ -136,6 +136,8 @@ class Chalk::IR::Node::Add {
         # Canonicalization: right association to left - flatten right-nested Adds
         # x + (y + z) -> (x + y) + z
         # This creates a left-spine structure for easier optimization
+        # Register dependency on right child since we check its op (Issue #282)
+        $right->add_dep($self->id);
         if ($right->op eq 'Add') {
             # right is (y + z), we are x + (y + z)
             # Transform to (x + y) + z
@@ -150,7 +152,13 @@ class Chalk::IR::Node::Add {
         }
 
         # Canonicalization for left-spine Add structures
+        # Register dependency on left child since we check its op (Issue #282)
+        $left->add_dep($self->id);
         if ($left->op eq 'Add') {
+            # Register dependencies on grandchildren since we access them (Issue #282)
+            $left->left->add_dep($self->id);
+            $left->right->add_dep($self->id);
+
             my $lhs_inner_left_type = $left->left->compute();
             my $lhs_inner_right_type = $left->right->compute();
 
