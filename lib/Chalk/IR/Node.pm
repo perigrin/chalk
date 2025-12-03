@@ -142,7 +142,7 @@ class Chalk::IR::Node {
             my @attr_keys = keys($attributes->%*);
             for my $key (@attr_keys) {
                 my $val = $attributes->{$key};
-                if ($key =~ /_id$/ && defined $val && $val eq $target->id) {
+                if ($key =~ m/_id$/ && defined $val && $val eq $target->id) {
                     $new_attrs{$key} = $replacement->id;
                 } else {
                     $new_attrs{$key} = $val;
