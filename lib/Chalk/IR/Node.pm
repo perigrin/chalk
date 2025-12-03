@@ -110,6 +110,61 @@ class Chalk::IR::Node {
         return $self;
     }
 
+    # Subsume: replace this node with a replacement node in all users
+    # Maintains immutability through recursive clone-and-propagate
+    #
+    # When called as $old->subsume($replacement, $graph):
+    #   - Tells all users of $old to replace $old with $replacement in their inputs
+    #
+    # When called as $user->subsume($replacement, $graph, $target):
+    #   - Clones $user with $target replaced by $replacement in inputs
+    #   - Adds cloned node to graph
+    #   - Recursively tells $user's users to switch to the clone
+    #
+    # Returns: nothing (modifies graph in place)
+    method subsume($replacement, $graph, $target = undef) {
+        if (!defined $target) {
+            # Initial call: tell all my users to replace me with $replacement
+            my @user_ids = $graph->get_uses($id)->@*;
+            for my $user_id (@user_ids) {
+                my $user = $graph->get_node($user_id);
+                next unless $user;
+                $user->subsume($replacement, $graph, $self);
+            }
+        } else {
+            # Clone self with $target replaced by $replacement in inputs
+            my @new_inputs = map {
+                $_ eq $target->id ? $replacement->id : $_
+            } $inputs->@*;
+
+            # Update attributes that contain _id references
+            my %new_attrs;
+            my @attr_keys = keys($attributes->%*);
+            for my $key (@attr_keys) {
+                my $val = $attributes->{$key};
+                if ($key =~ m/_id$/ && defined $val && $val eq $target->id) {
+                    $new_attrs{$key} = $replacement->id;
+                } else {
+                    $new_attrs{$key} = $val;
+                }
+            }
+
+            my $new_self = ref($self)->new(
+                id              => $id . '_subsumed_' . time() . '_' . int(rand(1000)),
+                op              => $op,
+                inputs          => \@new_inputs,
+                attributes      => \%new_attrs,
+                source_info     => $source_info,
+                transform_chain => $transform_chain,
+            );
+            $graph->add_node($new_self);
+
+            # Now tell MY users to switch to $new_self
+            $self->subsume($new_self, $graph);
+        }
+        return;
+    }
+
     # Get formatted transformation history for debugging
     method transform_history() {
         return undef unless $transform_chain && $transform_chain->@*;
