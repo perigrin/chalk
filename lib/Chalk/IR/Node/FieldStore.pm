@@ -94,7 +94,7 @@ class Chalk::IR::Node::FieldStore :isa(Chalk::IR::Node::Base) {
 
             # Check that the intermediate store has exactly one use (this node)
             my $prev_uses = $graph->get_uses($prev_mem->id);
-            if (scalar(@$prev_uses) == 1 && $prev_uses->[0] == $self->id) {
+            if (scalar($prev_uses->@*) == 1 && $prev_uses->[0] == $self->id) {
                 # Bypass the intermediate store - connect to its memory input
                 my $new_store = Chalk::IR::Node::FieldStore->new(
                     inputs => [
