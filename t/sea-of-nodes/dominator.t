@@ -9,9 +9,9 @@ use Scalar::Util qw(refaddr);
 # Load type system
 use Chalk::IR::Type::Top;
 use Chalk::IR::Type::Bottom;
-use Chalk::IR::Type::TypeCtrl;
-use Chalk::IR::Type::TypeTuple;
-use Chalk::IR::Type::TypeBool;
+use Chalk::IR::Type::Ctrl;
+use Chalk::IR::Type::Tuple;
+use Chalk::IR::Type::Bool;
 
 # Load node classes
 use_ok('Chalk::IR::Node::Base');
@@ -242,12 +242,12 @@ subtest 'Nested If with identical predicate detected in compute()' => sub {
 
     # Type should indicate that only the true branch is reachable
     # (IF_TRUE tuple: true branch live, false branch dead)
-    ok($inner_type isa Chalk::IR::Type::TypeTuple, 'Inner If compute() returns TypeTuple');
+    ok($inner_type isa Chalk::IR::Type::Tuple, 'Inner If compute() returns TypeTuple');
 
     my $true_ctrl = $inner_type->at(0);
     my $false_ctrl = $inner_type->at(1);
 
-    ok($true_ctrl isa Chalk::IR::Type::TypeCtrl, 'True branch is Ctrl (live)');
+    ok($true_ctrl isa Chalk::IR::Type::Ctrl, 'True branch is Ctrl (live)');
     ok($false_ctrl isa Chalk::IR::Type::Bottom, 'False branch is Bottom (dead)');
 };
 
@@ -309,13 +309,13 @@ subtest 'Nested If on false branch is always false' => sub {
     # with same predicate, so condition is always false
     my $inner_type = $inner_if->compute();
 
-    ok($inner_type isa Chalk::IR::Type::TypeTuple, 'Inner If compute() returns TypeTuple');
+    ok($inner_type isa Chalk::IR::Type::Tuple, 'Inner If compute() returns TypeTuple');
 
     my $true_ctrl = $inner_type->at(0);
     my $false_ctrl = $inner_type->at(1);
 
     ok($true_ctrl isa Chalk::IR::Type::Bottom, 'True branch is Bottom (dead)');
-    ok($false_ctrl isa Chalk::IR::Type::TypeCtrl, 'False branch is Ctrl (live)');
+    ok($false_ctrl isa Chalk::IR::Type::Ctrl, 'False branch is Ctrl (live)');
 };
 
 # Test 8: Different predicates - no optimization
@@ -385,7 +385,7 @@ subtest 'Different predicates are not optimized' => sub {
     my $inner_type = $inner_if->compute();
 
     # Both branches should be reachable (IF_BOTH)
-    ok($inner_type isa Chalk::IR::Type::TypeTuple, 'Inner If compute() returns TypeTuple');
+    ok($inner_type isa Chalk::IR::Type::Tuple, 'Inner If compute() returns TypeTuple');
 
     my $true_ctrl = $inner_type->at(0);
     my $false_ctrl = $inner_type->at(1);

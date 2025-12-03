@@ -5,7 +5,7 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Subtract {
-    use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::Integer;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
 
@@ -88,15 +88,15 @@ class Chalk::IR::Node::Subtract {
         my $right_type = $right->compute();
 
         if ($left_type->is_constant && $right_type->is_constant) {
-            return Chalk::IR::Type::TypeInteger->constant(
+            return Chalk::IR::Type::Integer->constant(
                 $left_type->value - $right_type->value
             );
         }
 
         # If either operand is an integer type, result is unknown integer
-        if (($left_type isa Chalk::IR::Type::TypeInteger) ||
-            ($right_type isa Chalk::IR::Type::TypeInteger)) {
-            return Chalk::IR::Type::TypeInteger->TOP();
+        if (($left_type isa Chalk::IR::Type::Integer) ||
+            ($right_type isa Chalk::IR::Type::Integer)) {
+            return Chalk::IR::Type::Integer->TOP();
         }
 
         return Chalk::IR::Type::Top->top();

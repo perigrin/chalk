@@ -17,7 +17,7 @@ use_ok('Chalk::IR::Node::LE');
 use_ok('Chalk::IR::Node::GE');
 use_ok('Chalk::IR::Node::Not');
 use_ok('Chalk::IR::Node::Constant');
-use_ok('Chalk::IR::Type::TypeBool');
+use_ok('Chalk::IR::Type::Bool');
 
 # Helper to create constant nodes for testing
 sub make_const {
@@ -176,7 +176,7 @@ subtest 'GT compute() returns TypeBool for constant inputs' => sub {
     my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
 
     my $type = $gt->compute();
-    ok($type isa Chalk::IR::Type::TypeBool, 'GT compute() returns TypeBool');
+    ok($type isa Chalk::IR::Type::Bool, 'GT compute() returns TypeBool');
     ok($type->is_constant, 'GT result is constant when inputs constant');
     ok($type->value, 'GT 10 > 5 compute() is true');
 };
@@ -218,7 +218,7 @@ subtest 'LT compute() returns TypeBool for constant inputs' => sub {
     my $lt = Chalk::IR::Node::LT->new(left => $left, right => $right);
 
     my $type = $lt->compute();
-    ok($type isa Chalk::IR::Type::TypeBool, 'LT compute() returns TypeBool');
+    ok($type isa Chalk::IR::Type::Bool, 'LT compute() returns TypeBool');
     ok($type->value, 'LT 3 < 5 compute() is true');
 };
 
@@ -258,7 +258,7 @@ subtest 'EQ compute() returns TypeBool' => sub {
     my $eq = Chalk::IR::Node::EQ->new(left => $left, right => $right);
 
     my $type = $eq->compute();
-    ok($type isa Chalk::IR::Type::TypeBool, 'EQ compute() returns TypeBool');
+    ok($type isa Chalk::IR::Type::Bool, 'EQ compute() returns TypeBool');
     ok($type->value, 'EQ 5 == 5 compute() is true');
 };
 
@@ -298,7 +298,7 @@ subtest 'NE compute() returns TypeBool' => sub {
     my $ne = Chalk::IR::Node::NE->new(left => $left, right => $right);
 
     my $type = $ne->compute();
-    ok($type isa Chalk::IR::Type::TypeBool, 'NE compute() returns TypeBool');
+    ok($type isa Chalk::IR::Type::Bool, 'NE compute() returns TypeBool');
     ok($type->value, 'NE 5 != 3 compute() is true');
 };
 
@@ -338,7 +338,7 @@ subtest 'LE compute() returns TypeBool' => sub {
     my $le = Chalk::IR::Node::LE->new(left => $left, right => $right);
 
     my $type = $le->compute();
-    ok($type isa Chalk::IR::Type::TypeBool, 'LE compute() returns TypeBool');
+    ok($type isa Chalk::IR::Type::Bool, 'LE compute() returns TypeBool');
     ok($type->value, 'LE 5 <= 5 compute() is true');
 };
 
@@ -378,7 +378,7 @@ subtest 'GE compute() returns TypeBool' => sub {
     my $ge = Chalk::IR::Node::GE->new(left => $left, right => $right);
 
     my $type = $ge->compute();
-    ok($type isa Chalk::IR::Type::TypeBool, 'GE compute() returns TypeBool');
+    ok($type isa Chalk::IR::Type::Bool, 'GE compute() returns TypeBool');
     ok($type->value, 'GE 5 >= 5 compute() is true');
 };
 
@@ -429,7 +429,7 @@ subtest 'Not compute() returns TypeBool' => sub {
     my $not = Chalk::IR::Node::Not->new(operand => $operand);
 
     my $type = $not->compute();
-    ok($type isa Chalk::IR::Type::TypeBool, 'Not compute() returns TypeBool');
+    ok($type isa Chalk::IR::Type::Bool, 'Not compute() returns TypeBool');
     ok($type->is_constant, 'Not result is constant when input constant');
     ok($type->value, 'Not !0 compute() is true');
 };

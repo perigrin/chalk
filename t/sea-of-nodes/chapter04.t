@@ -10,9 +10,9 @@ use builtin qw(is_bool);
 
 use_ok('Chalk::IR::Node::Start');
 use_ok('Chalk::IR::Node::Proj');
-use_ok('Chalk::IR::Type::TypeTuple');
-use_ok('Chalk::IR::Type::TypeCtrl');
-use_ok('Chalk::IR::Type::TypeInteger');
+use_ok('Chalk::IR::Type::Tuple');
+use_ok('Chalk::IR::Type::Ctrl');
+use_ok('Chalk::IR::Type::Integer');
 use_ok('Chalk::IR::Type::Top');
 
 subtest 'Start is_multi() returns true' => sub {
@@ -26,7 +26,7 @@ subtest 'Start compute() returns TypeTuple' => sub {
     my $start = Chalk::IR::Node::Start->new(label => 'main');
 
     my $type = $start->compute();
-    ok($type isa Chalk::IR::Type::TypeTuple, 'Start compute() returns TypeTuple');
+    ok($type isa Chalk::IR::Type::Tuple, 'Start compute() returns TypeTuple');
 };
 
 subtest 'Start compute() tuple has (ctrl, arg)' => sub {
@@ -35,10 +35,10 @@ subtest 'Start compute() tuple has (ctrl, arg)' => sub {
     my $type = $start->compute();
 
     my $ctrl_type = $type->at(0);
-    ok($ctrl_type isa Chalk::IR::Type::TypeCtrl, 'Tuple[0] is TypeCtrl');
+    ok($ctrl_type isa Chalk::IR::Type::Ctrl, 'Tuple[0] is TypeCtrl');
 
     my $arg_type = $type->at(1);
-    ok($arg_type isa Chalk::IR::Type::TypeInteger, 'Tuple[1] is TypeInteger');
+    ok($arg_type isa Chalk::IR::Type::Integer, 'Tuple[1] is TypeInteger');
     is($arg_type->value, 42, 'Tuple[1] value is 42');
 };
 
@@ -69,10 +69,10 @@ subtest 'Proj compute() extracts from Start tuple' => sub {
     );
 
     my $ctrl_type = $ctrl_proj->compute();
-    ok($ctrl_type isa Chalk::IR::Type::TypeCtrl, 'Proj[0] compute() returns TypeCtrl');
+    ok($ctrl_type isa Chalk::IR::Type::Ctrl, 'Proj[0] compute() returns TypeCtrl');
 
     my $arg_type = $arg_proj->compute();
-    ok($arg_type isa Chalk::IR::Type::TypeInteger, 'Proj[1] compute() returns TypeInteger');
+    ok($arg_type isa Chalk::IR::Type::Integer, 'Proj[1] compute() returns TypeInteger');
     is($arg_type->value, 42, 'Proj[1] value is 42');
 };
 

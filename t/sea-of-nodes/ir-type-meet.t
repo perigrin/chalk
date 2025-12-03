@@ -9,9 +9,9 @@ use Scalar::Util qw(refaddr);
 use_ok('Chalk::IR::Type');
 use_ok('Chalk::IR::Type::Top');
 use_ok('Chalk::IR::Type::Bottom');
-use_ok('Chalk::IR::Type::TypeInteger');
-use_ok('Chalk::IR::Type::TypeBool');
-use_ok('Chalk::IR::Type::TypeCtrl');
+use_ok('Chalk::IR::Type::Integer');
+use_ok('Chalk::IR::Type::Bool');
+use_ok('Chalk::IR::Type::Ctrl');
 
 # ============================================================================
 # Base Type meet() tests
@@ -35,8 +35,8 @@ subtest 'Type base class meet()' => sub {
 subtest 'Top meet() operations' => sub {
     my $top = Chalk::IR::Type::Top->top();
     my $bot = Chalk::IR::Type::Bottom->BOTTOM;
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
-    my $true = Chalk::IR::Type::TypeBool->TRUE;
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
+    my $true = Chalk::IR::Type::Bool->TRUE;
 
     # Top meet Top = Top
     my $top_meet_top = $top->meet($top);
@@ -61,8 +61,8 @@ subtest 'Top meet() operations' => sub {
 subtest 'Bottom meet() operations' => sub {
     my $top = Chalk::IR::Type::Top->top();
     my $bot = Chalk::IR::Type::Bottom->BOTTOM;
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
-    my $true = Chalk::IR::Type::TypeBool->TRUE;
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
+    my $true = Chalk::IR::Type::Bool->TRUE;
 
     # Bottom meet Bottom = Bottom
     my $bot_meet_bot = $bot->meet($bot);
@@ -85,11 +85,11 @@ subtest 'Bottom meet() operations' => sub {
 # ============================================================================
 
 subtest 'TypeInteger meet() with IntTop/IntBot' => sub {
-    my $int_top = Chalk::IR::Type::TypeInteger->TOP();
-    my $int_bot = Chalk::IR::Type::TypeInteger->BOTTOM();
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
-    my $int7 = Chalk::IR::Type::TypeInteger->constant(7);
-    my $int5_dup = Chalk::IR::Type::TypeInteger->constant(5);
+    my $int_top = Chalk::IR::Type::Integer->TOP();
+    my $int_bot = Chalk::IR::Type::Integer->BOTTOM();
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
+    my $int7 = Chalk::IR::Type::Integer->constant(7);
+    my $int5_dup = Chalk::IR::Type::Integer->constant(5);
 
     # IntTop meet IntTop = IntTop
     my $top_meet_top = $int_top->meet($int_top);
@@ -115,10 +115,10 @@ subtest 'TypeInteger meet() with IntTop/IntBot' => sub {
 };
 
 subtest 'TypeInteger meet() with constants' => sub {
-    my $int_top = Chalk::IR::Type::TypeInteger->TOP();
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
-    my $int7 = Chalk::IR::Type::TypeInteger->constant(7);
-    my $int5_dup = Chalk::IR::Type::TypeInteger->constant(5);
+    my $int_top = Chalk::IR::Type::Integer->TOP();
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
+    my $int7 = Chalk::IR::Type::Integer->constant(7);
+    my $int5_dup = Chalk::IR::Type::Integer->constant(5);
 
     # Same constant values meet = that constant
     my $same_meet = $int5->meet($int5_dup);
@@ -136,8 +136,8 @@ subtest 'TypeInteger meet() with constants' => sub {
 # ============================================================================
 
 subtest 'TypeBool meet() operations' => sub {
-    my $true = Chalk::IR::Type::TypeBool->TRUE;
-    my $false = Chalk::IR::Type::TypeBool->FALSE;
+    my $true = Chalk::IR::Type::Bool->TRUE;
+    my $false = Chalk::IR::Type::Bool->FALSE;
     my $top = Chalk::IR::Type::Top->top();
     my $bot = Chalk::IR::Type::Bottom->BOTTOM;
 
@@ -169,7 +169,7 @@ subtest 'TypeBool meet() operations' => sub {
 # ============================================================================
 
 subtest 'TypeCtrl meet() operations' => sub {
-    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
+    my $ctrl = Chalk::IR::Type::Ctrl->CTRL;
     my $top = Chalk::IR::Type::Top->top();
     my $bot = Chalk::IR::Type::Bottom->BOTTOM;
 
@@ -191,8 +191,8 @@ subtest 'TypeCtrl meet() operations' => sub {
 # ============================================================================
 
 subtest 'Cross-type meet() operations' => sub {
-    my $int5 = Chalk::IR::Type::TypeInteger->constant(5);
-    my $true = Chalk::IR::Type::TypeBool->TRUE;
+    my $int5 = Chalk::IR::Type::Integer->constant(5);
+    my $true = Chalk::IR::Type::Bool->TRUE;
     my $top = Chalk::IR::Type::Top->top();
 
     # Different types meet = Top (incompatible)

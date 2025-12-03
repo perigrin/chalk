@@ -6,54 +6,54 @@ use v5.42;
 use Test::More;
 use Scalar::Util qw(refaddr);
 
-use_ok('Chalk::IR::Type::TypeTuple');
-use_ok('Chalk::IR::Type::TypeCtrl');
-use_ok('Chalk::IR::Type::TypeInteger');
+use_ok('Chalk::IR::Type::Tuple');
+use_ok('Chalk::IR::Type::Ctrl');
+use_ok('Chalk::IR::Type::Integer');
 use_ok('Chalk::IR::Type::Top');
 
 subtest 'TypeTuple::of() construction' => sub {
-    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
-    my $int = Chalk::IR::Type::TypeInteger->constant(42);
+    my $ctrl = Chalk::IR::Type::Ctrl->CTRL;
+    my $int = Chalk::IR::Type::Integer->constant(42);
 
-    my $tuple = Chalk::IR::Type::TypeTuple->of($ctrl, $int);
+    my $tuple = Chalk::IR::Type::Tuple->of($ctrl, $int);
 
     ok($tuple, 'of() returns a value');
-    ok($tuple isa Chalk::IR::Type::TypeTuple, 'of() returns TypeTuple');
+    ok($tuple isa Chalk::IR::Type::Tuple, 'of() returns TypeTuple');
 };
 
 subtest 'TypeTuple at() extraction' => sub {
-    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
-    my $int = Chalk::IR::Type::TypeInteger->constant(42);
+    my $ctrl = Chalk::IR::Type::Ctrl->CTRL;
+    my $int = Chalk::IR::Type::Integer->constant(42);
 
-    my $tuple = Chalk::IR::Type::TypeTuple->of($ctrl, $int);
+    my $tuple = Chalk::IR::Type::Tuple->of($ctrl, $int);
 
     is(refaddr($tuple->at(0)), refaddr($ctrl), 'at(0) returns first element');
     is(refaddr($tuple->at(1)), refaddr($int), 'at(1) returns second element');
 };
 
 subtest 'TypeTuple is_constant when all elements constant' => sub {
-    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
-    my $int = Chalk::IR::Type::TypeInteger->constant(42);
+    my $ctrl = Chalk::IR::Type::Ctrl->CTRL;
+    my $int = Chalk::IR::Type::Integer->constant(42);
 
-    my $tuple = Chalk::IR::Type::TypeTuple->of($ctrl, $int);
+    my $tuple = Chalk::IR::Type::Tuple->of($ctrl, $int);
 
     ok($tuple->is_constant, 'Tuple of constants is constant');
 };
 
 subtest 'TypeTuple not constant when any element non-constant' => sub {
-    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
+    my $ctrl = Chalk::IR::Type::Ctrl->CTRL;
     my $top = Chalk::IR::Type::Top->top;
 
-    my $tuple = Chalk::IR::Type::TypeTuple->of($ctrl, $top);
+    my $tuple = Chalk::IR::Type::Tuple->of($ctrl, $top);
 
     ok(!$tuple->is_constant, 'Tuple with Top element is not constant');
 };
 
 subtest 'TypeTuple value() returns array of values' => sub {
-    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
-    my $int = Chalk::IR::Type::TypeInteger->constant(42);
+    my $ctrl = Chalk::IR::Type::Ctrl->CTRL;
+    my $int = Chalk::IR::Type::Integer->constant(42);
 
-    my $tuple = Chalk::IR::Type::TypeTuple->of($ctrl, $int);
+    my $tuple = Chalk::IR::Type::Tuple->of($ctrl, $int);
 
     my $values = $tuple->value;
     ok(ref($values) eq 'ARRAY', 'value() returns arrayref');
@@ -63,10 +63,10 @@ subtest 'TypeTuple value() returns array of values' => sub {
 };
 
 subtest 'TypeTuple types() accessor' => sub {
-    my $ctrl = Chalk::IR::Type::TypeCtrl->CTRL;
-    my $int = Chalk::IR::Type::TypeInteger->constant(42);
+    my $ctrl = Chalk::IR::Type::Ctrl->CTRL;
+    my $int = Chalk::IR::Type::Integer->constant(42);
 
-    my $tuple = Chalk::IR::Type::TypeTuple->of($ctrl, $int);
+    my $tuple = Chalk::IR::Type::Tuple->of($ctrl, $int);
 
     my $types = $tuple->types;
     ok(ref($types) eq 'ARRAY', 'types() returns arrayref');
@@ -74,8 +74,8 @@ subtest 'TypeTuple types() accessor' => sub {
 };
 
 subtest 'TypeTuple inherits from Chalk::IR::Type' => sub {
-    my $tuple = Chalk::IR::Type::TypeTuple->of(
-        Chalk::IR::Type::TypeCtrl->CTRL
+    my $tuple = Chalk::IR::Type::Tuple->of(
+        Chalk::IR::Type::Ctrl->CTRL
     );
     ok($tuple isa Chalk::IR::Type, 'TypeTuple inherits from Type');
 };

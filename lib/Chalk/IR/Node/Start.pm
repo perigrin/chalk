@@ -5,9 +5,9 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Start {
-    use Chalk::IR::Type::TypeTuple;
-    use Chalk::IR::Type::TypeCtrl;
-    use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::Tuple;
+    use Chalk::IR::Type::Ctrl;
+    use Chalk::IR::Type::Integer;
     use Chalk::IR::Type::Top;
 
     field $function_name :param :reader = undef;
@@ -71,11 +71,11 @@ class Chalk::IR::Node::Start {
 
     method compute() {
         my $arg_type = defined($arg_value)
-            ? Chalk::IR::Type::TypeInteger->constant($arg_value)
+            ? Chalk::IR::Type::Integer->constant($arg_value)
             : Chalk::IR::Type::Top->top();
 
-        return Chalk::IR::Type::TypeTuple->of(
-            Chalk::IR::Type::TypeCtrl->CTRL(),
+        return Chalk::IR::Type::Tuple->of(
+            Chalk::IR::Type::Ctrl->CTRL(),
             $arg_type
         );
     }

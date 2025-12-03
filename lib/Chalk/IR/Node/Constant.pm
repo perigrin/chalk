@@ -5,8 +5,8 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Constant {
-    use Chalk::IR::Type::TypeInteger;
-    use Chalk::IR::Type::TypeBool;
+    use Chalk::IR::Type::Integer;
+    use Chalk::IR::Type::Bool;
 
     field $value :param :reader;
     field $type  :param :reader;
@@ -59,9 +59,9 @@ class Chalk::IR::Node::Constant {
     # Return type for constant folding - constants always have known type
     method compute() {
         if ($type eq 'Bool') {
-            return Chalk::IR::Type::TypeBool->constant($value);
+            return Chalk::IR::Type::Bool->constant($value);
         }
-        return Chalk::IR::Type::TypeInteger->constant($value);
+        return Chalk::IR::Type::Integer->constant($value);
     }
 
     # Stub for transform tracking

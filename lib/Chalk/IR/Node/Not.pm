@@ -5,7 +5,7 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Not {
-    use Chalk::IR::Type::TypeBool;
+    use Chalk::IR::Type::Bool;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
 
@@ -56,7 +56,7 @@ class Chalk::IR::Node::Not {
         my $operand_type = $operand->compute();
         if ($operand_type->is_constant) {
             my $result = $operand_type->value ? false : true;
-            return Chalk::IR::Type::TypeBool->constant($result);
+            return Chalk::IR::Type::Bool->constant($result);
         }
         return Chalk::IR::Type::Top->top();
     }

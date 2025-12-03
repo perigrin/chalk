@@ -1,4 +1,4 @@
-# ABOUTME: TypeCtrl represents a control token in IR
+# ABOUTME: Ctrl represents a control token in IR
 # ABOUTME: Singleton type for control flow (has no data value)
 
 use 5.42.0;
@@ -7,7 +7,7 @@ use Chalk::IR::Type;
 use Chalk::IR::Type::Top;
 use Chalk::IR::Type::Bottom;
 
-class Chalk::IR::Type::TypeCtrl :isa(Chalk::IR::Type) {
+class Chalk::IR::Type::Ctrl :isa(Chalk::IR::Type) {
     method is_constant() { return 1; }
     method value() { return undef; }
 

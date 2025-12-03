@@ -5,7 +5,7 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::EQ {
-    use Chalk::IR::Type::TypeBool;
+    use Chalk::IR::Type::Bool;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
 
@@ -61,7 +61,7 @@ class Chalk::IR::Node::EQ {
 
         if ($left_type->is_constant && $right_type->is_constant) {
             my $result = $left_type->value == $right_type->value;
-            return Chalk::IR::Type::TypeBool->constant($result);
+            return Chalk::IR::Type::Bool->constant($result);
         }
 
         return Chalk::IR::Type::Top->top();

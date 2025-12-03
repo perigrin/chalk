@@ -5,7 +5,7 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Negate {
-    use Chalk::IR::Type::TypeInteger;
+    use Chalk::IR::Type::Integer;
     use Chalk::IR::Type::Top;
     use Chalk::IR::Node::Constant;
 
@@ -77,14 +77,14 @@ class Chalk::IR::Node::Negate {
         my $operand_type = $operand->compute();
 
         if ($operand_type->is_constant) {
-            return Chalk::IR::Type::TypeInteger->constant(
+            return Chalk::IR::Type::Integer->constant(
                 -$operand_type->value
             );
         }
 
         # If operand is a TypeInteger, result is unknown integer
-        if ($operand_type isa Chalk::IR::Type::TypeInteger) {
-            return Chalk::IR::Type::TypeInteger->TOP();
+        if ($operand_type isa Chalk::IR::Type::Integer) {
+            return Chalk::IR::Type::Integer->TOP();
         }
 
         return Chalk::IR::Type::Top->top();
