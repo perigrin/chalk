@@ -33,6 +33,7 @@ use Chalk::IR::Node::ArrayGet;
 use Chalk::IR::Node::ArraySet;
 use Chalk::IR::Node::HashGet;
 use Chalk::IR::Node::HashSet;
+use Chalk::IR::Node::Cast;
 
 class Chalk::IR::Node {
     field $id             :param :reader;
@@ -236,6 +237,7 @@ class Chalk::IR::Node {
             ArraySet   => 'Chalk::IR::Node::ArraySet',
             HashGet    => 'Chalk::IR::Node::HashGet',
             HashSet    => 'Chalk::IR::Node::HashSet',
+            Cast       => 'Chalk::IR::Node::Cast',
         );
 
         my $node_class = $op_to_class{$op};
