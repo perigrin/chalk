@@ -61,6 +61,76 @@ class Chalk::Grammar::Chalk::Type {
         return $self->round_trip_preserves($value) &&
                $self->satisfies_contract($value);
     }
+
+    method meet($other) {
+        # Greatest lower bound (infimum/intersection)
+        # Default implementation uses subtype relationships
+        # Subclasses override for type-specific behavior
+
+        # Handle None (bottom) - absorbs everything
+        return $other if $other->is_bottom();
+        return $self if $self->is_bottom();
+
+        # Handle Any (top) - identity for meet
+        return $self if $other->is_top();
+        return $other if $self->is_top();
+
+        # Same type - return self (idempotence)
+        return $self if ref($self) eq ref($other);
+
+        # Check subtype relationships
+        return $self if $self->is_subtype_of($other);
+        return $other if $other->is_subtype_of($self);
+
+        # Incompatible types - return None (bottom)
+        return Chalk::Grammar::Chalk::Type::None->new();
+    }
+
+    method join($other) {
+        # Least upper bound (supremum/union)
+        # Default implementation uses subtype relationships
+        # Subclasses override for type-specific behavior
+
+        # Handle None (bottom) - identity for join
+        return $self if $other->is_bottom();
+        return $other if $self->is_bottom();
+
+        # Handle Any (top) - absorbs everything
+        return $other if $other->is_top();
+        return $self if $self->is_top();
+
+        # Same type - return self (idempotence)
+        return $self if ref($self) eq ref($other);
+
+        # Check subtype relationships
+        return $other if $self->is_subtype_of($other);
+        return $self if $other->is_subtype_of($self);
+
+        # Incompatible types - need to find common supertype
+        # For types in different branches, this requires walking up the hierarchy
+        # Default to Any if we can't find a better common supertype
+        return $self->_find_common_supertype($other);
+    }
+
+    method _find_common_supertype($other) {
+        # Walk up the type hierarchy to find the least common supertype
+        # This is a simple implementation that checks known ancestors
+
+        # Both under Scalar?
+        my $scalar = Chalk::Grammar::Chalk::Type::Scalar->new();
+        if ($self->is_subtype_of($scalar) && $other->is_subtype_of($scalar)) {
+            return $scalar;
+        }
+
+        # Both under List?
+        my $list = Chalk::Grammar::Chalk::Type::List->new();
+        if ($self->is_subtype_of($list) && $other->is_subtype_of($list)) {
+            return $list;
+        }
+
+        # Default to Any
+        return Chalk::Grammar::Chalk::Type::Any->new();
+    }
 }
 
 1;

@@ -19,6 +19,43 @@ class Chalk::Grammar::Chalk::Type::Array :isa(Chalk::Grammar::Chalk::Type) {
                ref($other) eq 'Chalk::Grammar::Chalk::Type::List' ||
                ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
     }
+
+    method meet($other) {
+        # Handle boundary cases
+        return $other if $other->is_bottom();
+        return $self if $other->is_top();
+
+        # Array meet Array: covariant element types
+        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Array') {
+            my $elem_meet = $element_type->meet($other->element_type);
+            return Chalk::Grammar::Chalk::Type::Array->new(element_type => $elem_meet);
+        }
+
+        # Array meet non-Array: incompatible types return None
+        return Chalk::Grammar::Chalk::Type::None->new();
+    }
+
+    method join($other) {
+        # Handle boundary cases
+        return $self if $other->is_bottom();
+        return $other if $other->is_top();
+
+        # Array join Array: covariant element types
+        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Array') {
+            my $elem_join = $element_type->join($other->element_type);
+            return Chalk::Grammar::Chalk::Type::Array->new(element_type => $elem_join);
+        }
+
+        # Array join non-Array: find common supertype
+        # Both Array and Hash are under List
+        my $list = Chalk::Grammar::Chalk::Type::List->new();
+        if ($other->is_subtype_of($list)) {
+            return $list;
+        }
+
+        # Otherwise return Any
+        return Chalk::Grammar::Chalk::Type::Any->new();
+    }
 }
 
 1;

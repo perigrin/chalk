@@ -169,6 +169,54 @@ class Chalk::Grammar::Chalk::TypeLattice {
         # Unknown type defaults to Any
         return Chalk::Grammar::Chalk::Type::Any->new();
     }
+
+    # Lattice operations - compute meet (greatest lower bound)
+    method meet($type_a, $type_b) {
+        return $type_a->meet($type_b);
+    }
+
+    # Lattice operations - compute join (least upper bound)
+    method join($type_a, $type_b) {
+        return $type_a->join($type_b);
+    }
+
+    # Compute meet of multiple types
+    method meet_all(@types) {
+        return Chalk::Grammar::Chalk::Type::Any->new() unless @types;
+        my $result = shift(@types);
+        for my $type (@types) {
+            $result = $result->meet($type);
+        }
+        return $result;
+    }
+
+    # Compute join of multiple types
+    method join_all(@types) {
+        use Chalk::Grammar::Chalk::Type::None;
+        return Chalk::Grammar::Chalk::Type::None->new() unless @types;
+        my $result = shift(@types);
+        for my $type (@types) {
+            $result = $result->join($type);
+        }
+        return $result;
+    }
+
+    # Check if two types are compatible (have non-None meet)
+    method are_compatible($type_a, $type_b) {
+        my $meet = $type_a->meet($type_b);
+        return !$meet->is_bottom();
+    }
+
+    # Get the top type (Any)
+    method top_type() {
+        return Chalk::Grammar::Chalk::Type::Any->new();
+    }
+
+    # Get the bottom type (None)
+    method bottom_type() {
+        use Chalk::Grammar::Chalk::Type::None;
+        return Chalk::Grammar::Chalk::Type::None->new();
+    }
 }
 
 1;
