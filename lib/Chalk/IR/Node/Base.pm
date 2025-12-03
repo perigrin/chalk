@@ -13,9 +13,15 @@ class Chalk::IR::Node::Base {
     field $source_info    :param :reader = undef;
     field $transform_chain :param :reader = [];
 
-    # Dependency tracking for peephole re-optimization
+    # Dependency tracking for peephole re-optimization (Issue #256)
     # When a peephole inspects a remote node and fails, it registers a dependency
-    # so that when the remote node changes, this node gets re-added to the worklist
+    # so that when the remote node changes, this node gets re-added to the worklist.
+    #
+    # NOTE: This introduces mutability to otherwise immutable nodes. This is acceptable
+    # because: (1) deps are optimization metadata, not part of node semantics/identity,
+    # (2) GVN's value numbering ignores deps, (3) deps are append-only, and (4) this
+    # matches Simple's Java implementation. If strict immutability is needed later,
+    # deps could be stored externally in IterPeeps keyed by node ID.
     field $_deps = [];
 
     method add_dep($dependent_node_id) {
