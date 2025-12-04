@@ -83,7 +83,7 @@ class Chalk::IR::Node::Cast :isa(Chalk::IR::Node::Base) {
 
             unless ((!defined($input_struct) && !defined($target_struct)) ||
                     $input_struct eq $target_struct) {
-                return 0;  # Different struct types
+                return 0;  # Struct types don't match
             }
 
             # Non-null pointer satisfies nullable target (widening)
