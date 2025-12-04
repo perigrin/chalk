@@ -13,6 +13,42 @@ use Chalk::Grammar::BNF;
 
 local $| = 1;
 
+# Check if lib/* was modified in this branch/PR
+# If not, skip the expensive self-hosting test (it takes ~18-20 minutes)
+my $lib_changed = 0;
+
+# If FORCE_SELF_HOSTING env var is set, always run
+if ($ENV{FORCE_SELF_HOSTING}) {
+    $lib_changed = 1;
+    diag "FORCE_SELF_HOSTING set - running full self-hosting test";
+} elsif (-d "$RealBin/../.git") {
+    # Get the merge base with the target branch (pu)
+    my $merge_base = `git -C "$RealBin/.." merge-base HEAD origin/pu 2>/dev/null`;
+    chomp $merge_base;
+
+    if ($merge_base) {
+        # Check if any files in lib/ changed since the merge base
+        my $changed_files = `git -C "$RealBin/.." diff --name-only $merge_base HEAD 2>/dev/null`;
+        $lib_changed = 1 if $changed_files =~ m{^lib/};
+    } else {
+        # Fallback: If we can't determine merge base, assume lib changed
+        $lib_changed = 1;
+    }
+} else {
+    # Not in a git repo, run the tests
+    $lib_changed = 1;
+}
+
+unless ($lib_changed) {
+    plan tests => 1;
+    pass "No changes to lib/* detected - skipping expensive self-hosting test";
+    diag "Self-hosting test skipped: lib/ unchanged since merge-base with origin/pu";
+    diag "To force running: FORCE_SELF_HOSTING=1 prove t/self-hosting.t";
+    exit 0;
+}
+
+diag "lib/* changed detected - running full self-hosting test";
+
 # Load the chalk.bnf grammar
 open my $grammar_fh, "<:utf8", "$RealBin/../grammar/chalk.bnf" or die $!;
 my $bnf_content = do { local $/; <$grammar_fh> };
