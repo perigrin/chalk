@@ -349,6 +349,187 @@ class Chalk::IR::Graph {
 
         return \%schedule;
     }
+
+    # Late scheduling: place unpinned data nodes at shallowest use control
+    # Performs downward DFS from Stop, scheduling nodes to minimize loop depth
+    # Takes early schedule as input to ensure nodes don't move above their inputs
+    method schedule_late($early_schedule) {
+        my %visited;
+        my %schedule;  # Maps node_id -> control_node
+
+        # Helper to check if a node is pinned (must stay at fixed location)
+        my $is_pinned = sub {
+            my ($node) = @_;
+            return 0 unless $node;
+
+            my $op = $node->can('op') ? $node->op : '';
+
+            # Pinned nodes: CFG nodes, Phi nodes, Constants
+            return 1 if $node->can('isCFG') && $node->isCFG;
+            return 1 if $op eq 'Phi';
+            return 1 if $op eq 'Constant';
+
+            return 0;
+        };
+
+        # Find the Least Common Ancestor (LCA) in the dominator tree
+        # Given two control nodes, find their lowest common dominator
+        my $find_lca;
+        $find_lca = sub {
+            my ($ctrl1_id, $ctrl2_id) = @_;
+            return $ctrl1_id unless defined $ctrl2_id;
+            return $ctrl2_id unless defined $ctrl1_id;
+            return $ctrl1_id if $ctrl1_id == $ctrl2_id;
+
+            my $ctrl1 = $nodes->{$ctrl1_id};
+            my $ctrl2 = $nodes->{$ctrl2_id};
+
+            return $ctrl1_id unless defined $ctrl2;
+            return $ctrl2_id unless defined $ctrl1;
+
+            # Get depths
+            my $depth1 = $ctrl1->can('idepth') ? $ctrl1->idepth : 0;
+            my $depth2 = $ctrl2->can('idepth') ? $ctrl2->idepth : 0;
+
+            # Walk the deeper node up to match depths
+            while ($depth1 > $depth2) {
+                my $idom = $ctrl1->idom;
+                return $ctrl2_id unless defined $idom;
+                $ctrl1_id = refaddr($idom);
+                $ctrl1 = $idom;
+                $depth1 = $ctrl1->can('idepth') ? $ctrl1->idepth : 0;
+            }
+
+            while ($depth2 > $depth1) {
+                my $idom = $ctrl2->idom;
+                return $ctrl1_id unless defined $idom;
+                $ctrl2_id = refaddr($idom);
+                $ctrl2 = $idom;
+                $depth2 = $ctrl2->can('idepth') ? $ctrl2->idepth : 0;
+            }
+
+            # Walk both up together until they meet
+            while ($ctrl1_id != $ctrl2_id) {
+                my $idom1 = $ctrl1->idom;
+                my $idom2 = $ctrl2->idom;
+                return $ctrl1_id unless defined $idom1 && defined $idom2;
+
+                $ctrl1_id = refaddr($idom1);
+                $ctrl2_id = refaddr($idom2);
+                $ctrl1 = $idom1;
+                $ctrl2 = $idom2;
+            }
+
+            return $ctrl1_id;
+        };
+
+        # Helper to choose the shallowest control between two options
+        # Prefers shallower loop depth, breaking ties with dominator depth
+        my $choose_shallowest = sub {
+            my ($ctrl1_id, $ctrl2_id) = @_;
+            return $ctrl1_id unless defined $ctrl2_id;
+            return $ctrl2_id unless defined $ctrl1_id;
+            return $ctrl1_id if $ctrl1_id == $ctrl2_id;
+
+            my $ctrl1 = $nodes->{$ctrl1_id};
+            my $ctrl2 = $nodes->{$ctrl2_id};
+
+            return $ctrl1_id unless defined $ctrl2;
+            return $ctrl2_id unless defined $ctrl1;
+
+            # Get loop depths
+            my $loop1 = $ctrl1->can('loopDepth') ? $ctrl1->loopDepth : 0;
+            my $loop2 = $ctrl2->can('loopDepth') ? $ctrl2->loopDepth : 0;
+
+            # Prefer shallower loop depth (lower is shallower)
+            return $ctrl1_id if $loop1 < $loop2;
+            return $ctrl2_id if $loop2 < $loop1;
+
+            # Same loop depth - prefer shallower dominator depth
+            my $depth1 = $ctrl1->can('idepth') ? $ctrl1->idepth : 0;
+            my $depth2 = $ctrl2->can('idepth') ? $ctrl2->idepth : 0;
+
+            return $ctrl1_id if $depth1 < $depth2;
+            return $ctrl2_id;
+        };
+
+        # Downward DFS to find shallowest use control for each node
+        my $schedule_node;
+        $schedule_node = sub {
+            my ($node_id) = @_;
+            return if $visited{$node_id};
+            $visited{$node_id} = 1;
+
+            my $node = $nodes->{$node_id};
+            return unless $node;
+
+            # First, schedule all uses recursively (downward traversal)
+            my $uses_list = $self->get_uses($node_id);
+            for my $use_id ($uses_list->@*) {
+                $schedule_node->($use_id);
+            }
+
+            # If node is pinned, it stays where it is
+            if ($is_pinned->($node)) {
+                # Pinned nodes schedule themselves at their natural location
+                if ($node->can('isCFG') && $node->isCFG) {
+                    $schedule{$node_id} = $node_id;
+                }
+                return;
+            }
+
+            # For unpinned data nodes, find shallowest control that dominates all uses
+            # Start with the early schedule location as the latest possible position
+            my $late_ctrl = $early_schedule->{$node_id};
+
+            # Find LCA of all use control points
+            for my $use_id ($uses_list->@*) {
+                my $use_node = $nodes->{$use_id};
+                next unless $use_node;
+
+                # Get the control for this use
+                my $use_ctrl = $schedule{$use_id};
+                if (!defined $use_ctrl) {
+                    # If use is not yet scheduled, try early schedule
+                    $use_ctrl = $early_schedule->{$use_id};
+                }
+
+                # Special case: if use is a Phi, use the corresponding control edge
+                # For now, just use the Phi's control block
+                if ($use_node->can('op') && $use_node->op eq 'Phi') {
+                    # Phi nodes live at their region/loop
+                    $use_ctrl = $use_id if $use_node->can('isCFG') && $use_node->isCFG;
+                }
+
+                # Find LCA of current late_ctrl and this use's control
+                if (defined $use_ctrl) {
+                    $late_ctrl = $find_lca->($late_ctrl, $use_ctrl);
+                }
+            }
+
+            # Now choose the shallowest position between early and late
+            # This prevents moving code into deeper loops
+            my $early_ctrl = $early_schedule->{$node_id};
+            if (defined $early_ctrl && defined $late_ctrl) {
+                # Choose the control with minimum loop depth between early and late
+                # That satisfies: early <= final <= late in dominator tree
+                my $final_ctrl = $choose_shallowest->($early_ctrl, $late_ctrl);
+                $schedule{$node_id} = $final_ctrl;
+            } elsif (defined $late_ctrl) {
+                $schedule{$node_id} = $late_ctrl;
+            } elsif (defined $early_ctrl) {
+                $schedule{$node_id} = $early_ctrl;
+            }
+        };
+
+        # Start DFS from all nodes (forward traversal from inputs)
+        my @node_ids = keys %{$nodes};
+        for my $node_id (@node_ids) {
+            $schedule_node->($node_id);
+        }
+
+        return \%schedule;
+    }
 }
 
 1;
