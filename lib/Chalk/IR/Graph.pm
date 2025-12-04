@@ -257,6 +257,98 @@ class Chalk::IR::Graph {
 
         return \@blocks;
     }
+
+    # Early scheduling: place unpinned data nodes at deepest input's control
+    # Performs upward DFS from Stop, scheduling nodes conservatively early
+    method schedule_early() {
+        my %visited;
+        my %schedule;  # Maps node_id -> control_node
+
+        # Helper to check if a node is pinned (must stay at fixed location)
+        my $is_pinned = sub {
+            my ($node) = @_;
+            return 0 unless $node;
+
+            my $op = $node->can('op') ? $node->op : '';
+
+            # Pinned nodes: CFG nodes, Phi nodes, Constants
+            return 1 if $node->can('isCFG') && $node->isCFG;
+            return 1 if $op eq 'Phi';
+            return 1 if $op eq 'Constant';
+
+            return 0;
+        };
+
+        # Upward DFS to find deepest dominating control for each node
+        my $schedule_node;
+        $schedule_node = sub {
+            my ($node_id) = @_;
+            return if $visited{$node_id};
+            $visited{$node_id} = 1;
+
+            my $node = $nodes->{$node_id};
+            return unless $node;
+
+            # First, schedule all inputs recursively
+            if ($node->can('inputs')) {
+                for my $input_id ($node->inputs->@*) {
+                    next unless defined $input_id;
+                    next if $input_id eq '__CONTROL_PLACEHOLDER__';
+                    $schedule_node->($input_id);
+                }
+            }
+
+            # If node is pinned, it stays where it is
+            if ($is_pinned->($node)) {
+                # Pinned nodes schedule themselves at their natural location
+                if ($node->can('isCFG') && $node->isCFG) {
+                    $schedule{$node_id} = $node_id;
+                }
+                return;
+            }
+
+            # For unpinned data nodes, find deepest input's control
+            # The control block is determined by the input with maximum idepth
+            my $deepest_ctrl = undef;
+            my $max_depth = -1;
+
+            if ($node->can('inputs')) {
+                for my $input_id ($node->inputs->@*) {
+                    next unless defined $input_id;
+                    next if $input_id eq '__CONTROL_PLACEHOLDER__';
+
+                    my $input_node = $nodes->{$input_id};
+                    next unless $input_node;
+
+                    # Get the control block for this input
+                    my $input_ctrl = $schedule{$input_id};
+                    if (defined $input_ctrl) {
+                        my $ctrl_node = $nodes->{$input_ctrl};
+                        if ($ctrl_node && $ctrl_node->can('idepth')) {
+                            my $depth = $ctrl_node->idepth;
+                            if ($depth > $max_depth) {
+                                $max_depth = $depth;
+                                $deepest_ctrl = $input_ctrl;
+                            }
+                        }
+                    }
+                }
+            }
+
+            # Schedule this node at the deepest control point
+            if (defined $deepest_ctrl) {
+                $schedule{$node_id} = $deepest_ctrl;
+            }
+        };
+
+        # Start DFS from all nodes (backward traversal)
+        my @node_ids = keys %{$nodes};
+        for my $node_id (@node_ids) {
+            $schedule_node->($node_id);
+        }
+
+        return \%schedule;
+    }
 }
 
 1;
