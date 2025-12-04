@@ -1,5 +1,5 @@
-# ABOUTME: Integer represents integer values in IR type lattice
-# ABOUTME: Supports IntTop (unknown), IntBot (error), and constants
+# ABOUTME: Float represents floating-point values in IR type lattice
+# ABOUTME: Supports FloatTop (unknown), FloatBot (error), and constants
 
 use 5.42.0;
 use experimental qw(class);
@@ -7,7 +7,7 @@ use Chalk::IR::Type;
 use Chalk::IR::Type::Top;
 use Chalk::IR::Type::Bottom;
 
-class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
+class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
     field $value :param :reader = undef;
     field $is_bottom :param :reader = 0;
 
@@ -30,22 +30,22 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
         return $class->new(value => $val);
     }
 
-    # meet() for TypeInteger with IntTop/IntBot lattice
+    # meet() for TypeFloat with FloatTop/FloatBot lattice
     method meet($other) {
         # Handle global Bottom type
         return $other if $other isa Chalk::IR::Type::Bottom;
         # Handle global Top type - we're the result
         return $self if $other isa Chalk::IR::Type::Top;
 
-        # IntBot absorbs everything within integer domain
+        # FloatBot absorbs everything within float domain
         return __PACKAGE__->BOTTOM() if $self->is_bottom;
         return __PACKAGE__->BOTTOM() if $other isa __PACKAGE__ && $other->is_bottom;
 
-        # IntTop is identity for meet within integer domain
+        # FloatTop is identity for meet within float domain
         return $other if $self->is_top && $other isa __PACKAGE__;
         return $self if $other isa __PACKAGE__ && $other->is_top;
 
-        # Two constants: same value = that constant, different = IntTop
+        # Two constants: same value = that constant, different = FloatTop
         if ($self->is_constant && $other isa __PACKAGE__ && $other->is_constant) {
             return $self if $value == $other->value;
             return __PACKAGE__->TOP();
@@ -55,22 +55,22 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
         return Chalk::IR::Type::Top->top();
     }
 
-    # join() for TypeInteger with IntTop/IntBot lattice
+    # join() for TypeFloat with FloatTop/FloatBot lattice
     method join($other) {
         # Handle global Bottom type - identity for join
         return $self if $other isa Chalk::IR::Type::Bottom;
         # Handle global Top type - absorbs in join
         return $other if $other isa Chalk::IR::Type::Top;
 
-        # IntBot is identity for join within integer domain
+        # FloatBot is identity for join within float domain
         return $other if $self->is_bottom && $other isa __PACKAGE__;
         return $self if $other isa __PACKAGE__ && $other->is_bottom;
 
-        # IntTop absorbs everything within integer domain
+        # FloatTop absorbs everything within float domain
         return __PACKAGE__->TOP() if $self->is_top;
         return __PACKAGE__->TOP() if $other isa __PACKAGE__ && $other->is_top;
 
-        # Two constants: same value = that constant, different = IntTop
+        # Two constants: same value = that constant, different = FloatTop
         if ($self->is_constant && $other isa __PACKAGE__ && $other->is_constant) {
             return $self if $value == $other->value;
             return __PACKAGE__->TOP();
@@ -80,20 +80,9 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
         return Chalk::IR::Type::Top->top();
     }
 
-    # widen() for automatic Int->Float conversion
+    # widen() for Float - Float is already widest numeric type, so returns self
     method widen($other) {
-        # If other is a Float type, widen this Integer to Float
-        if ($other->isa('Chalk::IR::Type::Float')) {
-            use Chalk::IR::Type::Float;
-            # IntBot widens to FloatBot
-            return Chalk::IR::Type::Float->BOTTOM() if $self->is_bottom;
-            # IntTop widens to FloatTop
-            return Chalk::IR::Type::Float->TOP() if $self->is_top;
-            # Constant integer widens to constant float
-            return Chalk::IR::Type::Float->constant($value + 0.0) if $self->is_constant;
-        }
-
-        # No widening needed for same type
+        # Float doesn't widen further - it's the widest numeric type
         return $self;
     }
 }
