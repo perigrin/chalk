@@ -1,5 +1,5 @@
 # ABOUTME: Grammar and rule definitions for Chalk parser
-# ABOUTME: Provides GrammarRule and Grammar classes for defining parsing grammars
+# ABOUTME: See grammar/chalk.bnf for BNF grammar and lib/Chalk/Grammar/Chalk.pm for generated parser
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
