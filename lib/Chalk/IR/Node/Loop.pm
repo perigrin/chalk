@@ -4,14 +4,14 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::CFGNode) {
-    use Chalk::IR::Node::CFGNode;
+class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
     use Chalk::IR::Graph;
+    use Scalar::Util qw(refaddr);
 
     field $active_input_index :reader = 0;
-    field $inputs :param :reader = [];
 
-    method id() { refaddr($self) }
+    # CFG marker - Loop is a control flow node
+    method isCFG() { return 1; }
 
     method op() { 'Loop' }
 
@@ -19,7 +19,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::CFGNode) {
         return {
             id     => $self->id,
             op     => 'Loop',
-            inputs => $inputs,
+            inputs => $self->inputs,
             attributes => {},
         };
     }
@@ -29,7 +29,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::CFGNode) {
         # Works like Region: returns index of active path
         # inputs[0] = entry control
         # inputs[1] = backedge control (if present)
-        my @input_list = $inputs->@*;
+        my @input_list = $self->inputs->@*;
 
         for my $i (0..$#input_list) {
             my $input_id = $input_list[$i];
@@ -52,7 +52,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::CFGNode) {
         return $_loopDepth if defined $_loopDepth;
 
         # Get entry control (inputs[0])
-        my @input_list = $inputs->@*;
+        my @input_list = $self->inputs->@*;
         return 1 unless @input_list;  # Default if no inputs
 
         my $entry_id = $input_list[0];
@@ -71,7 +71,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::CFGNode) {
     # Dominator methods for Loop node
     # Loop's idom is its entry control (inputs[0])
     method idom() {
-        my @input_list = $inputs->@*;
+        my @input_list = $self->inputs->@*;
         return undef unless @input_list;
 
         my $entry_id = $input_list[0];
@@ -99,7 +99,7 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::CFGNode) {
     # Walk backedge idom chain looking for CProjNode (indicates natural exit)
     # If no exit found, create NeverNode and synthetic path to Stop
     method forceExit() {
-        my @input_list = $inputs->@*;
+        my @input_list = $self->inputs->@*;
         return unless @input_list >= 2;  # Need backedge
 
         # Get backedge (inputs[1])
