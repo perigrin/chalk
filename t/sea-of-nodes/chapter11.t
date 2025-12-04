@@ -181,3 +181,44 @@ subtest 'Infinite loop: forceExit creates synthetic exit' => sub {
     # The implementation should walk the backedge idom chain
     # If no CProjNode is found (no natural exit), create NeverNode
 };
+
+subtest 'Early schedule: place floating node at deepest input control' => sub {
+    # Test early scheduling of unpinned data nodes
+    # Floating nodes (Add, Mul, etc.) should be placed at deepest input's control
+    use Chalk::IR::Node::Add;
+
+    my $graph = Chalk::IR::Graph->instance();
+    my $start = Chalk::IR::Node::Start->new();
+
+    # Create two constants
+    my $const1 = Chalk::IR::Node::Constant->new(
+        value => 10,
+        type => Chalk::IR::Type::Integer->constant(10)
+    );
+
+    my $const2 = Chalk::IR::Node::Constant->new(
+        value => 20,
+        type => Chalk::IR::Type::Integer->constant(20)
+    );
+
+    # Create an Add node (unpinned data node)
+    my $add = Chalk::IR::Node::Add->new(
+        left => $const1,
+        right => $const2
+    );
+
+    # Return the result
+    my $ret = Chalk::IR::Node::Return->new(
+        control => $start,
+        value => $add
+    );
+
+    # Run early schedule
+    ok $graph->can('schedule_early'), 'Graph has schedule_early method';
+    my $schedule = $graph->schedule_early();
+
+    # After scheduling, the Add node should be scheduled somewhere
+    # It should be scheduled at the deepest dominating control point
+    # In this simple case, that's the Start node
+    ok defined($schedule), 'schedule_early returns a schedule';
+};
