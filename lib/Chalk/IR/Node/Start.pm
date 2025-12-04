@@ -4,7 +4,8 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::Start {
+class Chalk::IR::Node::Start :isa(Chalk::IR::Node::CFGNode) {
+    use Chalk::IR::Node::CFGNode;
     use Chalk::IR::Type::Tuple;
     use Chalk::IR::Type::Ctrl;
     use Chalk::IR::Type::Integer;
@@ -89,6 +90,12 @@ class Chalk::IR::Node::Start {
 
     # Dominator depth: Start is at depth 0
     method idepth() { return 0; }
+
+    # Dominator check: Start dominates all nodes (by definition)
+    method dominates($other) {
+        # Start dominates every node, including itself
+        return 1;
+    }
 
     # Stub for transform tracking (not used in v2 but called by Builder)
     method record_transform(@args) {

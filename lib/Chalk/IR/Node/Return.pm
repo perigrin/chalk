@@ -4,7 +4,9 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::Return {
+class Chalk::IR::Node::Return :isa(Chalk::IR::Node::CFGNode) {
+    use Chalk::IR::Node::CFGNode;
+
     field $control :param :reader;
     field $value :param :reader;
     field $source_info :param :reader = undef;
@@ -83,6 +85,44 @@ class Chalk::IR::Node::Return {
             value   => $value,
             control => $new_control,
         );
+    }
+
+    # Dominator tree: Return's immediate dominator is its control input
+    method idom() {
+        return $control;
+    }
+
+    # Dominator depth: cached computation based on idom chain
+    field $_idepth = undef;
+    method idepth() {
+        return $_idepth if defined $_idepth;
+
+        my $idom = $self->idom;
+        if (!defined $idom) {
+            $_idepth = 0;
+        } elsif ($idom->can('idepth')) {
+            $_idepth = $idom->idepth + 1;
+        } else {
+            $_idepth = 1;
+        }
+
+        return $_idepth;
+    }
+
+    # Dominator check: walk up idom chain from $other to see if we reach $self
+    method dominates($other) {
+        return 1 if refaddr($self) == refaddr($other);
+
+        my $current = $other;
+        while (defined $current && $current->can('idom')) {
+            my $idom = $current->idom;
+            last unless defined $idom;
+
+            return 1 if refaddr($self) == refaddr($idom);
+            $current = $idom;
+        }
+
+        return 0;
     }
 }
 
