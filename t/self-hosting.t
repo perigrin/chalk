@@ -29,7 +29,7 @@ if ($ENV{FORCE_SELF_HOSTING}) {
     if ($merge_base) {
         # Check if any files in lib/ changed since the merge base
         my $changed_files = `git -C "$RealBin/.." diff --name-only $merge_base HEAD 2>/dev/null`;
-        $lib_changed = 1 if $changed_files =~ m{^lib/};
+        $lib_changed = 1 if $changed_files =~ m{^lib/}m;
     } else {
         # Fallback: If we can't determine merge base, assume lib changed
         $lib_changed = 1;
