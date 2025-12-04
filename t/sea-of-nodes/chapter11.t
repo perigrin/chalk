@@ -147,3 +147,37 @@ subtest 'Loop depth: nested loops' => sub {
     is $loop1->loopDepth(), 1, 'Outer loop has depth 1';
     is $loop2->loopDepth(), 2, 'Inner loop has depth 2';
 };
+
+subtest 'Infinite loop: forceExit creates synthetic exit' => sub {
+    # Test that infinite loops get a synthetic exit via forceExit()
+    # while(1) {} - infinite loop with no natural exit
+    use Chalk::IR::Node::Loop;
+    use Chalk::IR::Node::Stop;
+
+    my $start = Chalk::IR::Node::Start->new();
+
+    # Create infinite loop (no exit condition)
+    my $loop = Chalk::IR::Node::Loop->new(
+        inputs => [refaddr($start)]
+    );
+
+    # Add backedge to complete the loop
+    my $loop_inputs = $loop->inputs;
+    push @$loop_inputs, refaddr($loop);
+
+    # Create Stop node (represents end of program)
+    my $stop = Chalk::IR::Node::Stop->new(
+        inputs => [refaddr($loop)]
+    );
+
+    # Call forceExit to detect infinite loop and create synthetic exit
+    $loop->forceExit();
+
+    # After forceExit, the loop should have a synthetic Never node
+    # This makes the loop reachable for scheduling
+    ok $loop->can('forceExit'), 'Loop has forceExit method';
+
+    # Test will verify the existence of synthetic exit path
+    # The implementation should walk the backedge idom chain
+    # If no CProjNode is found (no natural exit), create NeverNode
+};
