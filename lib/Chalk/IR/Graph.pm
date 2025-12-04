@@ -11,6 +11,14 @@ class Chalk::IR::Graph {
     field $entry :reader = undef;
     field $uses = {};  # Use-def map: node_id => [user_id1, user_id2, ...]
 
+    # Singleton instance for global graph access
+    my $instance = undef;
+
+    sub instance($class) {
+        $instance //= $class->new();
+        return $instance;
+    }
+
     method add_node($node) {
         my $node_id = $node->id;
 
@@ -226,6 +234,28 @@ class Chalk::IR::Graph {
         }
 
         return;
+    }
+
+    # Identify basic blocks from CFG nodes
+    # Returns an array reference of basic blocks (arrays of CFG nodes)
+    method basic_blocks() {
+        my @blocks;
+
+        # Collect all CFG nodes
+        my @cfg_nodes;
+        for my $node (values %{$nodes}) {
+            if ($node->can('isCFG') && $node->isCFG) {
+                push @cfg_nodes, $node;
+            }
+        }
+
+        # For now, return a simple array of individual CFG nodes
+        # Each CFG node starts its own basic block
+        for my $cfg_node (@cfg_nodes) {
+            push @blocks, [$cfg_node];
+        }
+
+        return \@blocks;
     }
 }
 
