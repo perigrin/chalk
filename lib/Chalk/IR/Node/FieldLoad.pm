@@ -5,6 +5,7 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::FieldLoad :isa(Chalk::IR::Node::Base) {
+    field $mem_id :param :reader = undef;  # Previous memory state (for peephole optimization)
     field $object_id :param :reader;
     field $field_id :param :reader;
     field $alias_class :param :reader = undef;
@@ -16,6 +17,7 @@ class Chalk::IR::Node::FieldLoad :isa(Chalk::IR::Node::Base) {
             object_id => $object_id,
             field_id => $field_id,
         );
+        $attrs{mem_id} = $mem_id if defined $mem_id;
         $attrs{alias_class} = $alias_class if defined $alias_class;
 
         return {
@@ -48,6 +50,32 @@ class Chalk::IR::Node::FieldLoad :isa(Chalk::IR::Node::Base) {
 
         # Return the value (or undef if not found)
         return $value;
+    }
+
+    # Peephole optimization for FieldLoad
+    # Implements Load-after-Store forwarding following Simple's chapter10 design
+    method peephole($graph = undef) {
+        return $self unless $graph;
+        return $self unless defined $mem_id;
+
+        # Get the previous memory state
+        my $prev_mem = $graph->get_node($mem_id);
+        return $self unless $prev_mem;
+
+        # Load-after-Store forwarding:
+        # If previous memory is a FieldStore to the same object and field,
+        # we can forward the stored value directly (eliminate the load)
+        if ($prev_mem->isa('Chalk::IR::Node::FieldStore') &&
+            $prev_mem->object_id == $object_id &&
+            defined $alias_class &&
+            defined $prev_mem->alias_class &&
+            $alias_class == $prev_mem->alias_class) {
+
+            # Forward the stored value
+            return $graph->get_node($prev_mem->value_id);
+        }
+
+        return $self;
     }
 }
 

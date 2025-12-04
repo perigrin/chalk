@@ -351,9 +351,226 @@ $context = extend_ctx($context, 'lexical:@arr', $new_array);
 - Dereferencing: `$$ref` → `$ref->context->($ref->label)`
 - Mutation: Extends context and rebinds variable
 
+## Phase 5: Memory Slices and Alias Classes (Complete)
+
+**Status:** ✅ Implemented (Issue #259, #310)
+**Date:** 2025-12-03
+
+### Overview
+
+Chalk implements type-based alias analysis (TBAA) using **alias classes** to prove that memory operations on different fields cannot interfere with each other. This enables aggressive memory optimizations while maintaining correctness.
+
+### Alias Classes
+
+Each field in a struct is assigned a unique `alias_class` integer:
+
+```perl
+# Point struct with two fields
+class Point {
+    has Int $.x;  # alias_class 1
+    has Int $.y;  # alias_class 2
+}
+```
+
+**Key Properties:**
+- Same field across instances → same alias_class (can alias)
+- Different fields → different alias_class (proven non-aliasing)
+- Missing alias_class → `undef` (conservative, may alias)
+
+### Memory Type
+
+The `Memory` type carries alias class information through the type system:
+
+```perl
+use Chalk::IR::Type::Memory;
+
+my $mem1 = Chalk::IR::Type::Memory->new(alias_class => 1);
+my $mem2 = Chalk::IR::Type::Memory->new(alias_class => 2);
+
+# Different alias classes meet to TOP (no aliasing)
+my $result = $mem1->meet($mem2);
+$result->is_top();  # TRUE - they don't alias
+```
+
+### Field Operations with Alias Classes
+
+FieldStore and FieldLoad now track alias classes:
+
+```perl
+# Store to field 'x' (alias_class 1)
+my $store = Chalk::IR::Node::FieldStore->new(
+    inputs => [$mem_id, $object_id, $field_id, $value_id],
+    mem_id => $mem_id,           # Memory dependency (NEW)
+    object_id => $object_id,
+    field_id => $field_id,
+    value_id => $value_id,
+    alias_class => 1,            # Field 'x' alias class
+);
+```
+
+### Type-Based Non-Aliasing
+
+Alias classes enable compile-time proofs of non-interference:
+
+```perl
+# These operations are proven independent:
+FieldStore(obj, 'x', 10, alias_class => 1)  # Point.x
+FieldStore(obj, 'y', 20, alias_class => 2)  # Point.y
+FieldLoad(obj, 'x', alias_class => 1)       # Can't see y's store
+
+# Compiler can reorder these safely - different alias classes!
+```
+
+## Phase 6: Memory Edges and Peephole Optimizations (Complete)
+
+**Status:** ✅ Implemented (Issue #262, #311)
+**Date:** 2025-12-03
+
+### Overview
+
+Memory edges make memory dependencies explicit in the IR graph, enabling peephole optimizations from Simple's Chapter 10. This addition **does not conflict** with Chalk's heapless architecture.
+
+### Memory Edges Architecture
+
+Following the Phi node pattern, FieldStore and FieldLoad have `mem_id`:
+
+```perl
+class Chalk::IR::Node::FieldStore {
+    field $mem_id :param :reader = undef;  # Previous memory state
+    field $object_id :param :reader;
+    field $field_id :param :reader;
+    field $value_id :param :reader;
+    field $alias_class :param :reader = undef;
+
+    # inputs: [$mem_id, $object_id, $field_id, $value_id]
+    #          ^^^^^^^^
+    #          Memory edge is BOTH a field AND in inputs!
+}
+```
+
+**Why this works:**
+- **Field** (`$mem_id`) - Easy access in peephole methods
+- **In inputs** - Graph dependency tracking (use-def, DCE)
+- **Same pattern as Phi** - Proven design in our codebase
+
+### Heapless + Memory Edges
+
+Memory edges **complement** the heapless architecture, they don't conflict:
+
+| Aspect | Heapless Architecture | Memory Edges |
+|--------|----------------------|--------------|
+| **Purpose** | Execution model | IR dependencies |
+| **Level** | Runtime | Compile-time |
+| **What** | No separate heap data structure | Explicit dependency graph |
+| **Why** | Simpler execution semantics | Enable optimizations |
+
+**Key insight:** Memory edges track **compile-time dependencies** in the IR graph. The heapless model describes **runtime execution** (Environment-based). These are orthogonal concerns.
+
+### Memory Peephole Optimizations
+
+Three optimizations leverage memory edges and alias classes:
+
+#### 1. Store-to-Store Elimination
+
+When two stores write to the same field with no intervening read:
+
+```perl
+# Before optimization:
+store1: obj.x = 10  (alias_class 1)
+store2: obj.x = 20  (alias_class 1, mem_id => store1)
+
+# After peephole:
+store2: obj.x = 20  (mem_id => store1->mem_id)
+# store1 is dead and can be eliminated by DCE
+```
+
+**Implementation:**
+```perl
+method peephole($graph) {
+    my $prev_mem = $graph->get_node($mem_id);
+
+    if ($prev_mem->isa('FieldStore') &&
+        $prev_mem->alias_class == $alias_class &&
+        scalar($graph->get_uses($prev_mem->id)->@*) == 1) {
+        # Bypass intermediate store
+        return FieldStore->new(..., mem_id => $prev_mem->mem_id);
+    }
+}
+```
+
+#### 2. Load-after-Store Forwarding
+
+When a load reads from a just-written location:
+
+```perl
+# Before optimization:
+store: obj.x = 42  (alias_class 1)
+load:  y = obj.x   (alias_class 1, mem_id => store)
+
+# After peephole:
+load → Constant(42)  # Forward the stored value
+```
+
+**Implementation:**
+```perl
+method peephole($graph) {
+    my $prev_mem = $graph->get_node($mem_id);
+
+    if ($prev_mem->isa('FieldStore') &&
+        $prev_mem->alias_class == $alias_class) {
+        # Forward stored value
+        return $graph->get_node($prev_mem->value_id);
+    }
+}
+```
+
+#### 3. Store-after-Load Elimination
+
+When storing a value that was just loaded:
+
+```perl
+# Before optimization:
+load:  y = obj.x      (alias_class 1)
+store: obj.x = y      (alias_class 1, mem_id => load, value => load)
+
+# After peephole:
+store → load  # Redundant store eliminated
+```
+
+**Implementation:**
+```perl
+method peephole($graph) {
+    my $prev_mem = $graph->get_node($mem_id);
+
+    if ($prev_mem->isa('FieldLoad') &&
+        $prev_mem->alias_class == $alias_class &&
+        $value_id == $prev_mem->id) {
+        # Store is redundant
+        return $prev_mem;
+    }
+}
+```
+
+### Optimization Correctness
+
+These optimizations are safe because:
+
+1. **Alias classes prove non-interference:** Different fields can't alias
+2. **Memory edges track dependencies:** We know execution order
+3. **Use-def chains verify safety:** Check if intermediate results are used elsewhere
+4. **Heapless execution unchanged:** Optimizations are compile-time transformations
+
+### Performance Impact
+
+Memory peepholes enable:
+- ✅ Dead store elimination (store never read)
+- ✅ Redundant load elimination (value already in register)
+- ✅ Memory access reduction (fewer reads/writes)
+- ✅ Better instruction scheduling (proven independent operations)
+
 ## Future Work
 
-### Phase 5: ECA Type Namespaces (Next)
+### Phase 7: ECA Type Namespaces (Next)
 
 Use type-specific lexical labels to prove non-aliasing:
 
@@ -565,6 +782,14 @@ Functional contexts use more memory than mutable hashes:
 
 **Immutable + Rebind:** Functional purity with SSA-style variable rebinding
 
+**Alias Class:** Integer identifier for a field type, enabling type-based alias analysis (TBAA)
+
+**Memory Edge:** Explicit IR dependency linking a memory operation to its predecessor
+
+**Memory Slice:** Partitioning of memory into non-aliasing regions based on alias classes
+
+**Peephole Optimization:** Local IR transformation that eliminates redundant operations
+
 ---
 
-**Document Status:** Reflects actual implementation (Phases 1-4 complete, 100% self-hosting achieved). This heapless architecture is simpler and more elegant than the original two-layer design while maintaining all optimization opportunities.
+**Document Status:** Reflects actual implementation (Phases 1-6 complete, 100% self-hosting achieved). This heapless architecture with memory slices and edges is simpler and more elegant than the original two-layer design while enabling advanced memory optimizations.
