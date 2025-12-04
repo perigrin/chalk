@@ -105,3 +105,45 @@ subtest 'Basic blocks: CFG traversal' => sub {
     ok ref($blocks) eq 'ARRAY', 'Basic blocks is an array';
     ok scalar(@$blocks) > 0, 'At least one basic block exists';
 };
+
+subtest 'Loop depth: simple while loop' => sub {
+    # Test loop depth computation for a simple while loop
+    # Structure: Start -> Loop -> (body) -> backedge to Loop
+    use Chalk::IR::Node::Loop;
+
+    my $start = Chalk::IR::Node::Start->new();
+
+    # Create a Loop node with entry from Start
+    my $loop = Chalk::IR::Node::Loop->new(
+        inputs => [refaddr($start)]
+    );
+
+    # Start should have loop depth 0 (not in any loop)
+    is $start->loopDepth(), 0, 'Start has loop depth 0';
+
+    # Loop entry should have loop depth 1 (first loop level)
+    is $loop->loopDepth(), 1, 'Loop node has loop depth 1';
+};
+
+subtest 'Loop depth: nested loops' => sub {
+    # Test loop depth computation for nested loops
+    # Structure: Start -> Loop1 -> Loop2 (nested)
+    use Chalk::IR::Node::Loop;
+
+    my $start = Chalk::IR::Node::Start->new();
+
+    # Outer loop
+    my $loop1 = Chalk::IR::Node::Loop->new(
+        inputs => [refaddr($start)]
+    );
+
+    # Inner loop nested inside outer loop
+    my $loop2 = Chalk::IR::Node::Loop->new(
+        inputs => [refaddr($loop1)]
+    );
+
+    # Verify depth increments correctly
+    is $start->loopDepth(), 0, 'Start has loop depth 0';
+    is $loop1->loopDepth(), 1, 'Outer loop has depth 1';
+    is $loop2->loopDepth(), 2, 'Inner loop has depth 2';
+};
