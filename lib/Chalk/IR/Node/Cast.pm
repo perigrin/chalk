@@ -81,8 +81,8 @@ class Chalk::IR::Node::Cast :isa(Chalk::IR::Node::Base) {
             my $input_struct = $input_type->struct_name;
             my $target_struct = $target_type->struct_name;
 
-            unless ((defined($input_struct) && defined($target_struct) && $input_struct eq $target_struct) ||
-                    (!defined($input_struct) && !defined($target_struct))) {
+            unless ((!defined($input_struct) && !defined($target_struct)) ||
+                    $input_struct eq $target_struct) {
                 return 0;  # Different struct types
             }
 
