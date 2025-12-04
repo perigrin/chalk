@@ -6,6 +6,7 @@ use utf8;
 
 class Chalk::IR::Node::Cast :isa(Chalk::IR::Node::Base) {
     use Chalk::IR::Type::Top;
+    use Chalk::IR::Type::MemoryPointer;
 
     # Target type to cast to
     field $target_type :param :reader;
@@ -72,9 +73,32 @@ class Chalk::IR::Node::Cast :isa(Chalk::IR::Node::Base) {
         # If target is TOP, everything satisfies it
         return 1 if $target_type->can('is_top') && $target_type->is_top;
 
+        # Handle MemoryPointer type satisfaction
+        if ($input_type isa Chalk::IR::Type::MemoryPointer &&
+            $target_type isa Chalk::IR::Type::MemoryPointer) {
+
+            # Check struct names match (or are both undefined)
+            my $input_struct = $input_type->struct_name;
+            my $target_struct = $target_type->struct_name;
+
+            unless ((!defined($input_struct) && !defined($target_struct)) ||
+                    $input_struct eq $target_struct) {
+                return 0;  # Struct types don't match
+            }
+
+            # Non-null pointer satisfies nullable target (widening)
+            # Non-null pointer satisfies non-null target (same)
+            # Nullable pointer does NOT satisfy non-null target (narrowing - unsafe)
+            if ($input_type->nullable && !$target_type->nullable) {
+                return 0;  # Cannot narrow nullable to non-null without check
+            }
+
+            return 1;  # Types are compatible
+        }
+
         # If both are same class and input is constant while target is TOP,
         # the constant satisfies the TOP type
-        if (ref($input_type) eq ref($target_type)) {
+        if ($input_type isa $target_type) {
             if ($input_type->can('is_constant') && $input_type->is_constant &&
                 $target_type->can('is_top') && $target_type->is_top) {
                 return 1;
