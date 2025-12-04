@@ -78,6 +78,7 @@
 %REGEX_MATCH_OP% = /=~|!~/
 %ASSIGN_OP% = /\/\/=|\|\|=|\+=|-=|\.=/
 %ARITHMETIC_OP% = /[+\-*\/]/
+%ISA_COMPARE_OP% = /\bisa\b/
 
 # ============================================================================
 # GRAMMAR RULES - Organized Generic → Specific
@@ -294,6 +295,7 @@ LogicalOp -> Expression WS_OPT 'and' WS_OPT Expression
 ComparisonOp -> Expression WS_OPT %NUM_COMPARE_OP% WS_OPT Expression
 ComparisonOp -> Expression WS_OPT %STRING_COMPARE_OP% WS_OPT Expression
 ComparisonOp -> Expression WS_OPT 'isa' WS_OPT QualifiedIdentifier
+ComparisonOp -> Expression WS_OPT 'isa' WS_OPT Variable
 ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT Expression
 
 # String concatenation operator (left-associative)
