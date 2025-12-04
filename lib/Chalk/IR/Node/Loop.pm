@@ -6,7 +6,6 @@ use utf8;
 
 class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
     use Chalk::IR::Graph;
-    use Scalar::Util qw(refaddr);
 
     field $active_input_index :reader = 0;
 
