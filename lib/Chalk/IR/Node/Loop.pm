@@ -10,6 +10,12 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
 
     field $active_input_index :reader = 0;
 
+    # Auto-register Loop nodes with the singleton graph (like CFGNode does)
+    ADJUST {
+        my $graph = Chalk::IR::Graph->instance();
+        $graph->add_node($self);
+    }
+
     # CFG marker - Loop is a control flow node
     method isCFG() { return 1; }
 
