@@ -59,7 +59,7 @@ class Chalk::IR::Node::Constant {
     # Return type for constant folding - constants always have known type
     method compute() {
         # If type is an object (MemoryPointer, etc), return it directly
-        if (ref($type)) {
+        if (blessed($type)) {
             return $type;
         }
 
