@@ -15,6 +15,26 @@ class Chalk::IR::Type::MemoryPointer :isa(Chalk::IR::Type) {
     method is_constant() { 0 }  # Pointers are not constant values
     method is_top() { (!defined($struct_name) && !$is_bottom) ? 1 : 0 }
 
+    # Convert a non-null pointer to nullable (widening operation)
+    method to_nullable() {
+        return $self if $nullable;  # Already nullable
+        return __PACKAGE__->new(
+            struct_name => $struct_name,
+            nullable => 1,
+            is_bottom => $is_bottom,
+        );
+    }
+
+    # Convert a nullable pointer to non-null (narrowing operation, unsafe)
+    method to_non_null() {
+        return $self if !$nullable;  # Already non-null
+        return __PACKAGE__->new(
+            struct_name => $struct_name,
+            nullable => 0,
+            is_bottom => $is_bottom,
+        );
+    }
+
     sub TOP {
         state $singleton = __PACKAGE__->new();
         return $singleton;
