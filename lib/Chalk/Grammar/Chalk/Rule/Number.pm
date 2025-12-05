@@ -1,11 +1,13 @@
-# ABOUTME: Semantic action for Number - builds Constant IR node
-# ABOUTME: Converts numeric literals to Constant nodes
+# ABOUTME: Semantic action for Number - builds Constant IR node with Type object
+# ABOUTME: Converts numeric literals to Constant nodes with appropriate Type
 
 use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
     use Chalk::IR::Node::Constant;
+    use Chalk::IR::Type::Integer;
+    use Chalk::IR::Type::Float;
 
     method evaluate($context) {
         # Number -> %INTEGER% | %FLOAT%
@@ -14,27 +16,27 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
         my $token = $context->child(0);
         die "Number::evaluate matched but child(0) is undefined - grammar bug" unless defined $token;
 
-        # Determine type from token class
-        my $type;
+        # Convert to numeric value
+        my $value = "$token" + 0;
+
+        # Create Constant node with appropriate Type object
         if ($token isa Chalk::Grammar::Token::Float) {
-            $type = 'Float';
+            # Float literal -> Constant with TypeFloat
+            return Chalk::IR::Node::Constant->new(
+                type  => Chalk::IR::Type::Float->constant($value),
+                value => $value,
+            )->peephole();
         } elsif ($token isa Chalk::Grammar::Token::Int) {
-            $type = 'Int';
+            # Integer literal -> Constant with TypeInteger
+            return Chalk::IR::Node::Constant->new(
+                type  => Chalk::IR::Type::Integer->constant($value),
+                value => $value,
+            )->peephole();
         } else {
             # All tokens should be blessed - if not, something is wrong in the Parser
             my $desc = ref($token) || (defined $token ? "'$token'" : 'undef');
             die "Number::evaluate expected Token::Int or Token::Float, got: $desc";
         }
-
-        # Convert to numeric value
-        my $value = "$token" + 0;
-
-        # Create Constant node directly (content-addressable ID)
-        # Peephole for consistency with other nodes (constants are already optimal)
-        return Chalk::IR::Node::Constant->new(
-            type  => $type,
-            value => $value,
-        )->peephole();
     }
 }
 

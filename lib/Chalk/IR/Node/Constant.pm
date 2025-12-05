@@ -9,12 +9,19 @@ class Chalk::IR::Node::Constant {
     use Chalk::IR::Type::Bool;
 
     field $value :param :reader;
-    field $type  :param :reader;
+    field $type  :param :reader;  # Must be a Type object (TypeInteger, TypeFloat, TypeBool, etc.)
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
     # Dependency tracking for peephole re-optimization
     field $_deps = [];
+
+    ADJUST {
+        use Chalk::IR::Type;
+        # Ensure type is a Type object, not a string
+        die "Constant type must be a Chalk::IR::Type object, got: " . (ref($type) || "'$type'")
+            unless $type isa Chalk::IR::Type;
+    }
 
     method add_dep($dependent_node_id) {
         push $_deps->@*, $dependent_node_id;
@@ -58,16 +65,8 @@ class Chalk::IR::Node::Constant {
 
     # Return type for constant folding - constants always have known type
     method compute() {
-        # If type is an object (MemoryPointer, etc), return it directly
-        if (blessed($type)) {
-            return $type;
-        }
-
-        # Otherwise, type is a string - handle legacy cases
-        if ($type eq 'Bool') {
-            return Chalk::IR::Type::Bool->constant($value);
-        }
-        return Chalk::IR::Type::Integer->constant($value);
+        # Type is always a Type object (enforced by ADJUST)
+        return $type;
     }
 
     # Stub for transform tracking
