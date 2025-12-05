@@ -11,6 +11,11 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         use Chalk::IR::Node::Subtract;
         use Chalk::IR::Node::Multiply;
         use Chalk::IR::Node::Divide;
+        use Chalk::IR::Node::AddF;
+        use Chalk::IR::Node::SubF;
+        use Chalk::IR::Node::MulF;
+        use Chalk::IR::Node::DivF;
+        use Chalk::IR::Node::ToFloat;
 
         # Grammar is: ArithmeticOp -> Expression WS_OPT %ARITHMETIC_OP% WS_OPT Expression
         # But WS_OPT may be filtered out, so we get either 3 or 5 children
@@ -83,20 +88,56 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
               . "children=[@children_debug]";
         }
 
-        # Build appropriate IR node based on operator
+        # Check operand types for type widening (int→float coercion)
+        # If either operand is a float, we need float arithmetic
+        my $left_type = $left->compute();
+        my $right_type = $right->compute();
+
+        my $has_float = ($left_type->isa('Chalk::IR::Type::Float')) ||
+                        ($right_type->isa('Chalk::IR::Type::Float'));
+
+        # Apply type widening if needed
+        if ($has_float) {
+            # Wrap integer operands in ToFloat for coercion
+            if (!$left_type->isa('Chalk::IR::Type::Float')) {
+                $left = Chalk::IR::Node::ToFloat->new(operand => $left)->peephole();
+            }
+            if (!$right_type->isa('Chalk::IR::Type::Float')) {
+                $right = Chalk::IR::Node::ToFloat->new(operand => $right)->peephole();
+            }
+        }
+
+        # Build appropriate IR node based on operator and types
         # Note: Precedence validation is handled by Precedence semiring during parsing
         # Each node is peepholed immediately for constant folding and algebraic simplification
-        if ( $operator eq '+' ) {
-            return Chalk::IR::Node::Add->new( left => $left, right => $right )->peephole();
-        }
-        elsif ( $operator eq '-' ) {
-            return Chalk::IR::Node::Subtract->new( left => $left, right => $right )->peephole();
-        }
-        elsif ( $operator eq '*' ) {
-            return Chalk::IR::Node::Multiply->new( left => $left, right => $right )->peephole();
-        }
-        elsif ( $operator eq '/' ) {
-            return Chalk::IR::Node::Divide->new( left => $left, right => $right )->peephole();
+        if ($has_float) {
+            # Float arithmetic
+            if ( $operator eq '+' ) {
+                return Chalk::IR::Node::AddF->new( left => $left, right => $right )->peephole();
+            }
+            elsif ( $operator eq '-' ) {
+                return Chalk::IR::Node::SubF->new( left => $left, right => $right )->peephole();
+            }
+            elsif ( $operator eq '*' ) {
+                return Chalk::IR::Node::MulF->new( left => $left, right => $right )->peephole();
+            }
+            elsif ( $operator eq '/' ) {
+                return Chalk::IR::Node::DivF->new( left => $left, right => $right )->peephole();
+            }
+        } else {
+            # Integer arithmetic
+            if ( $operator eq '+' ) {
+                return Chalk::IR::Node::Add->new( left => $left, right => $right )->peephole();
+            }
+            elsif ( $operator eq '-' ) {
+                return Chalk::IR::Node::Subtract->new( left => $left, right => $right )->peephole();
+            }
+            elsif ( $operator eq '*' ) {
+                return Chalk::IR::Node::Multiply->new( left => $left, right => $right )->peephole();
+            }
+            elsif ( $operator eq '/' ) {
+                return Chalk::IR::Node::Divide->new( left => $left, right => $right )->peephole();
+            }
         }
 
         # If we get here, we found an operator that isn't +, -, *, / - this is a bug
