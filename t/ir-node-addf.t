@@ -9,7 +9,7 @@ use experimental qw(class);
 
 # Load required modules
 use Chalk::IR::Node::AddF;
-use Chalk::IR::Node::ConstantF;
+use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Float;
 
 # ============================================================
@@ -17,8 +17,14 @@ use Chalk::IR::Type::Float;
 # ============================================================
 
 subtest 'AddF node creation' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.5),
+        value => 3.5,
+    );
     my $add = Chalk::IR::Node::AddF->new(left => $left, right => $right);
 
     ok($add, 'AddF node created');
@@ -29,8 +35,14 @@ subtest 'AddF node creation' => sub {
 };
 
 subtest 'AddF node requires operands' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.0);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.0),
+        value => 1.0,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.0),
+        value => 2.0,
+    );
 
     eval { Chalk::IR::Node::AddF->new(left => $left) };
     like($@, qr/right.*is (required|missing)/i, 'dies without right operand');
@@ -44,8 +56,14 @@ subtest 'AddF node requires operands' => sub {
 # ============================================================
 
 subtest 'AddF inputs()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.5),
+        value => 1.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $add = Chalk::IR::Node::AddF->new(left => $left, right => $right);
 
     my $inputs = $add->inputs();
@@ -60,8 +78,14 @@ subtest 'AddF inputs()' => sub {
 # ============================================================
 
 subtest 'AddF compute() returns TypeFloat' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.5),
+        value => 1.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $add = Chalk::IR::Node::AddF->new(left => $left, right => $right);
 
     my $type = $add->compute();
@@ -72,20 +96,38 @@ subtest 'AddF compute() returns TypeFloat' => sub {
 
 subtest 'AddF compute() constant folding' => sub {
     my $add1 = Chalk::IR::Node::AddF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 3.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(3.5),
+            value => 3.5,
+        )
     );
     is($add1->compute()->value, 6.0, '2.5 + 3.5 = 6.0');
 
     my $add2 = Chalk::IR::Node::AddF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => -1.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 1.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(-1.5),
+            value => -1.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(1.5),
+            value => 1.5,
+        )
     );
     is($add2->compute()->value, 0.0, '-1.5 + 1.5 = 0.0');
 
     my $add3 = Chalk::IR::Node::AddF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 0.0),
-        right => Chalk::IR::Node::ConstantF->new(value => 5.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(0.0),
+            value => 0.0,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        )
     );
     is($add3->compute()->value, 5.5, '0.0 + 5.5 = 5.5');
 };
@@ -95,8 +137,14 @@ subtest 'AddF compute() constant folding' => sub {
 # ============================================================
 
 subtest 'AddF execute()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.5),
+        value => 3.5,
+    );
     my $add = Chalk::IR::Node::AddF->new(left => $left, right => $right);
 
     # Create a simple context that returns node values
@@ -115,8 +163,14 @@ subtest 'AddF execute()' => sub {
 # ============================================================
 
 subtest 'AddF to_hash()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.5),
+        value => 1.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $add = Chalk::IR::Node::AddF->new(left => $left, right => $right);
 
     my $hash = $add->to_hash();
@@ -134,18 +188,30 @@ subtest 'AddF to_hash()' => sub {
 
 subtest 'AddF peephole constant folding' => sub {
     my $add = Chalk::IR::Node::AddF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 3.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(3.5),
+            value => 3.5,
+        )
     );
 
     my $result = $add->peephole();
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'constant folding produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding produces Constant');
     is($result->value, 6.0, 'folded to constant 6.0');
 };
 
 subtest 'AddF idealize identity: x + 0.0 = x' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $zero = Chalk::IR::Node::ConstantF->new(value => 0.0);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $zero = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    );
 
     # Test idealize() directly (not peephole which does constant folding first)
     # x + 0.0 = x

@@ -9,7 +9,6 @@ use experimental qw(class);
 
 # Load required modules
 use Chalk::IR::Node::EQF;
-use Chalk::IR::Node::ConstantF;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Float;
 use Chalk::IR::Type::Integer;
@@ -19,8 +18,14 @@ use Chalk::IR::Type::Integer;
 # ============================================================
 
 subtest 'EQF node creation' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.5),
+        value => 3.5,
+    );
     my $eq = Chalk::IR::Node::EQF->new(left => $left, right => $right);
 
     ok($eq, 'EQF node created');
@@ -35,8 +40,14 @@ subtest 'EQF node creation' => sub {
 # ============================================================
 
 subtest 'EQF inputs()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.5),
+        value => 1.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $eq = Chalk::IR::Node::EQF->new(left => $left, right => $right);
 
     my $inputs = $eq->inputs();
@@ -51,8 +62,14 @@ subtest 'EQF inputs()' => sub {
 # ============================================================
 
 subtest 'EQF compute() returns TypeInteger' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $eq = Chalk::IR::Node::EQF->new(left => $left, right => $right);
 
     my $type = $eq->compute();
@@ -63,20 +80,38 @@ subtest 'EQF compute() returns TypeInteger' => sub {
 
 subtest 'EQF compute() constant folding' => sub {
     my $eq1 = Chalk::IR::Node::EQF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        left => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    ),
+        right => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    )
     );
     is($eq1->compute()->value, 1, '2.5 == 2.5 = 1');
 
     my $eq2 = Chalk::IR::Node::EQF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 3.0)
+        left => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    ),
+        right => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    )
     );
     is($eq2->compute()->value, 0, '2.5 == 3.0 = 0');
 
     my $eq3 = Chalk::IR::Node::EQF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 0.0),
-        right => Chalk::IR::Node::ConstantF->new(value => 0.0)
+        left => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    ),
+        right => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    )
     );
     is($eq3->compute()->value, 1, '0.0 == 0.0 = 1');
 };
@@ -86,8 +121,14 @@ subtest 'EQF compute() constant folding' => sub {
 # ============================================================
 
 subtest 'EQF execute()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $eq = Chalk::IR::Node::EQF->new(left => $left, right => $right);
 
     # Create a simple context that returns node values
@@ -101,8 +142,14 @@ subtest 'EQF execute()' => sub {
     is($eq->execute($context), 1, 'execute() returns 2.5 == 2.5 = 1');
 
     # Test with different values
-    my $left2 = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right2 = Chalk::IR::Node::ConstantF->new(value => 3.5);
+    my $left2 = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right2 = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.5),
+        value => 3.5,
+    );
     my $eq2 = Chalk::IR::Node::EQF->new(left => $left2, right => $right2);
 
     my $context2 = sub {
@@ -120,8 +167,14 @@ subtest 'EQF execute()' => sub {
 # ============================================================
 
 subtest 'EQF to_hash()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.5),
+        value => 1.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $eq = Chalk::IR::Node::EQF->new(left => $left, right => $right);
 
     my $hash = $eq->to_hash();
@@ -139,30 +192,45 @@ subtest 'EQF to_hash()' => sub {
 
 subtest 'EQF peephole constant folding' => sub {
     my $eq = Chalk::IR::Node::EQF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        left => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    ),
+        right => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    )
     );
 
     my $result = $eq->peephole();
     isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding produces Constant (integer)');
     is($result->value, 1, 'folded to constant 1');
-    is($result->type, 'Integer', 'result type is Integer');
+    isa_ok($result->type, 'Chalk::IR::Type::Integer', 'result type is Integer');
 };
 
 subtest 'EQF peephole constant folding false case' => sub {
     my $eq = Chalk::IR::Node::EQF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 3.0)
+        left => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    ),
+        right => Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    )
     );
 
     my $result = $eq->peephole();
     isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding produces Constant (integer)');
     is($result->value, 0, 'folded to constant 0');
-    is($result->type, 'Integer', 'result type is Integer');
+    isa_ok($result->type, 'Chalk::IR::Type::Integer', 'result type is Integer');
 };
 
 subtest 'EQF idealize self-comparison: x == x = 1' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
 
     # Test idealize() directly for x == x = 1
     my $eq = Chalk::IR::Node::EQF->new(left => $x, right => $x);
@@ -170,7 +238,7 @@ subtest 'EQF idealize self-comparison: x == x = 1' => sub {
     ok($result, 'idealize returns a result for x == x');
     isa_ok($result, 'Chalk::IR::Node::Constant', 'x == x produces Constant');
     is($result->value, 1, 'x == x = 1 (self-comparison)');
-    is($result->type, 'Integer', 'result type is Integer');
+    isa_ok($result->type, 'Chalk::IR::Type::Integer', 'result type is Integer');
 };
 
 done_testing();

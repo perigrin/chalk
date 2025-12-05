@@ -9,7 +9,7 @@ use experimental qw(class);
 
 # Load required modules
 use Chalk::IR::Node::MinusF;
-use Chalk::IR::Node::ConstantF;
+use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Float;
 
 # ============================================================
@@ -17,7 +17,10 @@ use Chalk::IR::Type::Float;
 # ============================================================
 
 subtest 'MinusF node creation' => sub {
-    my $operand = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $operand = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $minus = Chalk::IR::Node::MinusF->new(operand => $operand);
 
     ok($minus, 'MinusF node created');
@@ -36,7 +39,10 @@ subtest 'MinusF node requires operand' => sub {
 # ============================================================
 
 subtest 'MinusF inputs()' => sub {
-    my $operand = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $operand = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $minus = Chalk::IR::Node::MinusF->new(operand => $operand);
 
     my $inputs = $minus->inputs();
@@ -50,7 +56,10 @@ subtest 'MinusF inputs()' => sub {
 # ============================================================
 
 subtest 'MinusF compute() returns TypeFloat' => sub {
-    my $operand = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $operand = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $minus = Chalk::IR::Node::MinusF->new(operand => $operand);
 
     my $type = $minus->compute();
@@ -61,17 +70,26 @@ subtest 'MinusF compute() returns TypeFloat' => sub {
 
 subtest 'MinusF compute() constant folding' => sub {
     my $minus1 = Chalk::IR::Node::MinusF->new(
-        operand => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        operand => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        )
     );
     is($minus1->compute()->value, -2.5, '-2.5 = -2.5');
 
     my $minus2 = Chalk::IR::Node::MinusF->new(
-        operand => Chalk::IR::Node::ConstantF->new(value => -3.5)
+        operand => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(-3.5),
+            value => -3.5,
+        )
     );
     is($minus2->compute()->value, 3.5, '-(-3.5) = 3.5');
 
     my $minus3 = Chalk::IR::Node::MinusF->new(
-        operand => Chalk::IR::Node::ConstantF->new(value => 0.0)
+        operand => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(0.0),
+            value => 0.0,
+        )
     );
     is($minus3->compute()->value, 0.0, '-0.0 = 0.0');
 };
@@ -81,7 +99,10 @@ subtest 'MinusF compute() constant folding' => sub {
 # ============================================================
 
 subtest 'MinusF execute()' => sub {
-    my $operand = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $operand = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $minus = Chalk::IR::Node::MinusF->new(operand => $operand);
 
     # Create a simple context that returns node values
@@ -99,7 +120,10 @@ subtest 'MinusF execute()' => sub {
 # ============================================================
 
 subtest 'MinusF to_hash()' => sub {
-    my $operand = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $operand = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $minus = Chalk::IR::Node::MinusF->new(operand => $operand);
 
     my $hash = $minus->to_hash();
@@ -116,16 +140,22 @@ subtest 'MinusF to_hash()' => sub {
 
 subtest 'MinusF peephole constant folding' => sub {
     my $minus = Chalk::IR::Node::MinusF->new(
-        operand => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        operand => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        )
     );
 
     my $result = $minus->peephole();
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'constant folding produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding produces Constant');
     is($result->value, -2.5, 'folded to constant -2.5');
 };
 
 subtest 'MinusF idealize double negation: -(-x) = x' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $inner_minus = Chalk::IR::Node::MinusF->new(operand => $x);
     my $outer_minus = Chalk::IR::Node::MinusF->new(operand => $inner_minus);
 
@@ -136,7 +166,10 @@ subtest 'MinusF idealize double negation: -(-x) = x' => sub {
 };
 
 subtest 'MinusF peephole integration: double negation' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $inner_minus = Chalk::IR::Node::MinusF->new(operand => $x);
     my $outer_minus = Chalk::IR::Node::MinusF->new(operand => $inner_minus);
 

@@ -3,15 +3,20 @@
 use 5.42.0;
 use Test::More;
 use Chalk::IR::Node::LEF;
-use Chalk::IR::Node::ConstantF;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Float;
 use Chalk::IR::Type::Integer;
 
 # Test 1: Basic LEF node creation
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     ok($lef, 'LEF node created');
@@ -22,8 +27,14 @@ use Chalk::IR::Type::Integer;
 
 # Test 2: Constant folding - less than case (2.5 <= 3.0 = 1)
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     # compute() should return constant Integer type with value 1
@@ -35,13 +46,19 @@ use Chalk::IR::Type::Integer;
     my $optimized = $lef->peephole();
     isa_ok($optimized, 'Chalk::IR::Node::Constant', 'peephole folds to Constant');
     is($optimized->value, 1, 'peephole constant has value 1');
-    is($optimized->type, 'Integer', 'peephole constant is Integer type');
+    isa_ok($optimized->type, 'Chalk::IR::Type::Integer', 'peephole constant is Integer type');
 }
 
 # Test 3: Constant folding - equal case (2.5 <= 2.5 = 1)
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     # compute() should return constant Integer type with value 1
@@ -53,13 +70,19 @@ use Chalk::IR::Type::Integer;
     my $optimized = $lef->peephole();
     isa_ok($optimized, 'Chalk::IR::Node::Constant', 'peephole folds to Constant');
     is($optimized->value, 1, 'peephole constant has value 1');
-    is($optimized->type, 'Integer', 'peephole constant is Integer type');
+    isa_ok($optimized->type, 'Chalk::IR::Type::Integer', 'peephole constant is Integer type');
 }
 
 # Test 4: Constant folding - greater than case (3.0 <= 2.5 = 0)
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 3.0);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     # compute() should return constant Integer type with value 0
@@ -71,19 +94,22 @@ use Chalk::IR::Type::Integer;
     my $optimized = $lef->peephole();
     isa_ok($optimized, 'Chalk::IR::Node::Constant', 'peephole folds to Constant');
     is($optimized->value, 0, 'peephole constant has value 0');
-    is($optimized->type, 'Integer', 'peephole constant is Integer type');
+    isa_ok($optimized->type, 'Chalk::IR::Type::Integer', 'peephole constant is Integer type');
 }
 
 # Test 5: Self-comparison optimization (x <= x = 1)
 {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $x, right => $x);
 
     # idealize() should detect self-comparison
     my $idealized = $lef->idealize();
     isa_ok($idealized, 'Chalk::IR::Node::Constant', 'idealize detects self-comparison');
     is($idealized->value, 1, 'self-comparison returns 1');
-    is($idealized->type, 'Integer', 'self-comparison returns Integer');
+    isa_ok($idealized->type, 'Chalk::IR::Type::Integer', 'self-comparison returns Integer');
 
     # peephole() should optimize to constant 1
     my $optimized = $lef->peephole();
@@ -93,8 +119,14 @@ use Chalk::IR::Type::Integer;
 
 # Test 6: Execute method
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     my $context = sub {
@@ -110,8 +142,14 @@ use Chalk::IR::Type::Integer;
 
 # Test 7: Execute method - greater than case
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 3.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.5),
+        value => 3.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.0),
+        value => 2.0,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     my $context = sub {
@@ -127,8 +165,14 @@ use Chalk::IR::Type::Integer;
 
 # Test 8: Execute method - equal values
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     my $context = sub {
@@ -144,8 +188,14 @@ use Chalk::IR::Type::Integer;
 
 # Test 9: to_hash method
 {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
     my $lef = Chalk::IR::Node::LEF->new(left => $left, right => $right);
 
     my $hash = $lef->to_hash();

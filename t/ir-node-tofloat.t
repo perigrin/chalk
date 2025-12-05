@@ -32,8 +32,8 @@ subtest 'ToFloat: constant folding' => sub {
 
     # Peephole should fold constant int to constant float
     my $optimized = $tofloat->peephole();
-    ok $optimized->isa('Chalk::IR::Node::ConstantF'),
-        'Constant int converts to ConstantF';
+    ok $optimized->isa('Chalk::IR::Node::Constant'),
+        'Constant int converts to Constant with Float type';
     is $optimized->value, 42.0, 'Value is 42.0';
 };
 
