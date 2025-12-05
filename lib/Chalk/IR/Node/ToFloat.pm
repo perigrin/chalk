@@ -1,5 +1,5 @@
-# ABOUTME: Type conversion node: integer to float
-# ABOUTME: Wraps integer expressions for automatic widening in float contexts
+# ABOUTME: Type conversion node: integer/boolean to float
+# ABOUTME: Wraps integer and boolean expressions for automatic widening in float contexts
 use 5.42.0;
 use experimental qw(class);
 use utf8;
@@ -7,6 +7,7 @@ use utf8;
 class Chalk::IR::Node::ToFloat {
     use Chalk::IR::Type::Float;
     use Chalk::IR::Type::Integer;
+    use Chalk::IR::Type::Bool;
     use Chalk::IR::Node::Constant;
 
     field $operand :param :reader;
@@ -73,13 +74,20 @@ class Chalk::IR::Node::ToFloat {
         return $self;
     }
 
-    # Type inference: convert integer constant to float constant
+    # Type inference: convert integer/boolean constant to float constant
     method compute() {
         my $operand_type = $operand->compute();
 
         # If operand is a constant integer, convert to constant float
         if ($operand_type->isa('Chalk::IR::Type::Integer') && $operand_type->is_constant) {
             return Chalk::IR::Type::Float->constant($operand_type->value + 0.0);
+        }
+
+        # If operand is a constant boolean, convert to constant float
+        # true → 1.0, false → 0.0
+        if ($operand_type->isa('Chalk::IR::Type::Bool') && $operand_type->is_constant) {
+            my $bool_value = $operand_type->value;
+            return Chalk::IR::Type::Float->constant($bool_value ? 1.0 : 0.0);
         }
 
         # Otherwise, return unknown float (TOP)

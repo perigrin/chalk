@@ -89,7 +89,7 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
               . "children=[@children_debug]";
         }
 
-        # Check operand types for type widening (int→float coercion)
+        # Check operand types for type widening (int→float and bool→float coercion)
         # If either operand is a float, we need float arithmetic
         my $left_type = $left->compute();
         my $right_type = $right->compute();
@@ -99,7 +99,8 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
         # Apply type widening if needed
         if ($has_float) {
-            # Wrap integer operands in ToFloat for coercion
+            # Wrap integer and boolean operands in ToFloat for coercion
+            # ToFloat converts: Int → Float, Bool → Float (true→1.0, false→0.0)
             if (!$left_type->isa('Chalk::IR::Type::Float')) {
                 $left = Chalk::IR::Node::ToFloat->new(operand => $left)->peephole();
             }
