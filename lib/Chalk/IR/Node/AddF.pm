@@ -7,7 +7,7 @@ use utf8;
 class Chalk::IR::Node::AddF {
     use Chalk::IR::Type::Float;
     use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::ConstantF;
+    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -68,7 +68,8 @@ class Chalk::IR::Node::AddF {
         # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
-            return Chalk::IR::Node::ConstantF->new(
+            return Chalk::IR::Node::Constant->new(
+                type  => $type,
                 value => $type->value,
             );
         }
@@ -157,8 +158,10 @@ class Chalk::IR::Node::AddF {
             if ($right_type->is_constant) {
                 # Case 1: (x + c1) + c2 -> x + (c1 + c2) - inner already normalized
                 if ($lhs_inner_right_type->is_constant) {
-                    my $combined = Chalk::IR::Node::ConstantF->new(
-                        value => $lhs_inner_right_type->value + $right_type->value,
+                    my $combined_value = $lhs_inner_right_type->value + $right_type->value;
+                    my $combined = Chalk::IR::Node::Constant->new(
+                        type  => Chalk::IR::Type::Float->constant($combined_value),
+                        value => $combined_value,
                     );
                     return Chalk::IR::Node::AddF->new(
                         left  => $left->left,
@@ -168,8 +171,10 @@ class Chalk::IR::Node::AddF {
 
                 # Case 2: (c1 + x) + c2 -> x + (c1 + c2) - inner not yet normalized
                 if ($lhs_inner_left_type->is_constant) {
-                    my $combined = Chalk::IR::Node::ConstantF->new(
-                        value => $lhs_inner_left_type->value + $right_type->value,
+                    my $combined_value = $lhs_inner_left_type->value + $right_type->value;
+                    my $combined = Chalk::IR::Node::Constant->new(
+                        type  => Chalk::IR::Type::Float->constant($combined_value),
+                        value => $combined_value,
                     );
                     return Chalk::IR::Node::AddF->new(
                         left  => $left->right,

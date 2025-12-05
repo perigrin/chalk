@@ -7,7 +7,7 @@ use utf8;
 class Chalk::IR::Node::ToFloat {
     use Chalk::IR::Type::Float;
     use Chalk::IR::Type::Integer;
-    use Chalk::IR::Node::ConstantF;
+    use Chalk::IR::Node::Constant;
 
     field $operand :param :reader;
     field $source_info :param :reader = undef;
@@ -63,7 +63,8 @@ class Chalk::IR::Node::ToFloat {
         # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
-            return Chalk::IR::Node::ConstantF->new(
+            return Chalk::IR::Node::Constant->new(
+                type  => $type,
                 value => $type->value,
             );
         }

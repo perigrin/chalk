@@ -74,7 +74,7 @@ class Chalk::IR::Node::EQF {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Integer',
+                type  => Chalk::IR::Type::Integer->constant($type->value),
             );
         }
 
@@ -90,7 +90,10 @@ class Chalk::IR::Node::EQF {
     method idealize() {
         # x == x -> 1 (self-equality)
         if ($left->id eq $right->id) {
-            return Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
+            return Chalk::IR::Node::Constant->new(
+                value => 1,
+                type  => Chalk::IR::Type::Integer->constant(1),
+            );
         }
         return;
     }
