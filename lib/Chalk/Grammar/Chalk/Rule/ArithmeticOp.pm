@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
+use utf8;
 
 class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 
