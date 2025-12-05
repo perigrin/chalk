@@ -74,7 +74,7 @@ class Chalk::IR::Node::LTF {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Integer',
+                type  => Chalk::IR::Type::Integer->constant($type->value),
             );
         }
 
@@ -90,7 +90,10 @@ class Chalk::IR::Node::LTF {
     method idealize() {
         # x < x -> 0 (self-comparison: nothing is less than itself)
         if ($left->id eq $right->id) {
-            return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            return Chalk::IR::Node::Constant->new(
+                value => 0,
+                type  => Chalk::IR::Type::Integer->constant(0),
+            );
         }
         return;
     }

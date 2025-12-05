@@ -1,12 +1,12 @@
-# ABOUTME: Unary float negation node in the IR graph
-# ABOUTME: Represents negation of a float operand (-x)
+# ABOUTME: Type conversion node: integer to float
+# ABOUTME: Wraps integer expressions for automatic widening in float contexts
 use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::MinusF {
+class Chalk::IR::Node::ToFloat {
     use Chalk::IR::Type::Float;
-    use Chalk::IR::Type::Top;
+    use Chalk::IR::Type::Integer;
     use Chalk::IR::Node::Constant;
 
     field $operand :param :reader;
@@ -31,17 +31,17 @@ class Chalk::IR::Node::MinusF {
 
     method id() { refaddr($self) }
 
-    # Compute inputs from child nodes
+    # Compute inputs from child node
     method inputs() {
         return [ $operand->id ];
     }
 
-    method op() { 'MinusF' }
+    method op() { 'ToFloat' }
 
     method to_hash() {
         return {
             id     => $self->id,
-            op     => 'MinusF',
+            op     => 'ToFloat',
             inputs => $self->inputs,
             attributes => {
                 operand_id => $operand->id,
@@ -50,8 +50,8 @@ class Chalk::IR::Node::MinusF {
     }
 
     method execute($context) {
-        my $operand_val = $context->("node:" . $operand->id);
-        return -$operand_val;
+        my $value = $context->("node:" . $operand->id);
+        return $value + 0.0;  # Perl auto-converts to float
     }
 
     # Compatibility methods for code expecting Base methods
@@ -60,13 +60,7 @@ class Chalk::IR::Node::MinusF {
     }
 
     method peephole($graph = undef) {
-        # Step 1: Algebraic simplification via idealize()
-        # Check this first to preserve node identity (e.g., -(-x) = x, not new constant)
-        if (my $idealized = $self->idealize()) {
-            return $idealized->peephole();
-        }
-
-        # Step 2: Constant folding via compute()
+        # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
@@ -75,35 +69,21 @@ class Chalk::IR::Node::MinusF {
             );
         }
 
+        # No idealize() needed for ToFloat - it's already minimal
         return $self;
     }
 
-    # Type inference for constant folding - if input is constant, compute negation
+    # Type inference: convert integer constant to float constant
     method compute() {
         my $operand_type = $operand->compute();
 
-        if ($operand_type->is_constant) {
-            return Chalk::IR::Type::Float->constant(
-                -$operand_type->value
-            );
+        # If operand is a constant integer, convert to constant float
+        if ($operand_type->isa('Chalk::IR::Type::Integer') && $operand_type->is_constant) {
+            return Chalk::IR::Type::Float->constant($operand_type->value + 0.0);
         }
 
-        # If operand is a float type, result is unknown float
-        if ($operand_type isa Chalk::IR::Type::Float) {
-            return Chalk::IR::Type::Float->TOP();
-        }
-
-        return Chalk::IR::Type::Top->top();
-    }
-
-    # Algebraic simplification for float negation
-    method idealize() {
-        # -(-x) -> x (double negation elimination)
-        if ($operand isa Chalk::IR::Node::MinusF) {
-            return $operand->operand;
-        }
-
-        return;
+        # Otherwise, return unknown float (TOP)
+        return Chalk::IR::Type::Float->TOP();
     }
 
     # Stub for transform tracking

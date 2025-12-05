@@ -9,7 +9,7 @@ use experimental qw(class);
 
 # Load required modules
 use Chalk::IR::Node::SubF;
-use Chalk::IR::Node::ConstantF;
+use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Float;
 
 # ============================================================
@@ -17,8 +17,14 @@ use Chalk::IR::Type::Float;
 # ============================================================
 
 subtest 'SubF node creation' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $sub = Chalk::IR::Node::SubF->new(left => $left, right => $right);
 
     ok($sub, 'SubF node created');
@@ -29,8 +35,14 @@ subtest 'SubF node creation' => sub {
 };
 
 subtest 'SubF node requires operands' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.0);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.0),
+        value => 1.0,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.0),
+        value => 2.0,
+    );
 
     eval { Chalk::IR::Node::SubF->new(left => $left) };
     like($@, qr/right.*is (required|missing)/i, 'dies without right operand');
@@ -44,8 +56,14 @@ subtest 'SubF node requires operands' => sub {
 # ============================================================
 
 subtest 'SubF inputs()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $sub = Chalk::IR::Node::SubF->new(left => $left, right => $right);
 
     my $inputs = $sub->inputs();
@@ -60,8 +78,14 @@ subtest 'SubF inputs()' => sub {
 # ============================================================
 
 subtest 'SubF compute() returns TypeFloat' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $sub = Chalk::IR::Node::SubF->new(left => $left, right => $right);
 
     my $type = $sub->compute();
@@ -72,26 +96,50 @@ subtest 'SubF compute() returns TypeFloat' => sub {
 
 subtest 'SubF compute() constant folding' => sub {
     my $sub1 = Chalk::IR::Node::SubF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 5.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        )
     );
     is($sub1->compute()->value, 3.0, '5.5 - 2.5 = 3.0');
 
     my $sub2 = Chalk::IR::Node::SubF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 1.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 1.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(1.5),
+            value => 1.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(1.5),
+            value => 1.5,
+        )
     );
     is($sub2->compute()->value, 0.0, '1.5 - 1.5 = 0.0');
 
     my $sub3 = Chalk::IR::Node::SubF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 5.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 0.0)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(0.0),
+            value => 0.0,
+        )
     );
     is($sub3->compute()->value, 5.5, '5.5 - 0.0 = 5.5');
 
     my $sub4 = Chalk::IR::Node::SubF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 0.0),
-        right => Chalk::IR::Node::ConstantF->new(value => 5.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(0.0),
+            value => 0.0,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        )
     );
     is($sub4->compute()->value, -5.5, '0.0 - 5.5 = -5.5');
 };
@@ -101,8 +149,14 @@ subtest 'SubF compute() constant folding' => sub {
 # ============================================================
 
 subtest 'SubF execute()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $sub = Chalk::IR::Node::SubF->new(left => $left, right => $right);
 
     # Create a simple context that returns node values
@@ -121,8 +175,14 @@ subtest 'SubF execute()' => sub {
 # ============================================================
 
 subtest 'SubF to_hash()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $sub = Chalk::IR::Node::SubF->new(left => $left, right => $right);
 
     my $hash = $sub->to_hash();
@@ -140,18 +200,30 @@ subtest 'SubF to_hash()' => sub {
 
 subtest 'SubF peephole constant folding' => sub {
     my $sub = Chalk::IR::Node::SubF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 5.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        )
     );
 
     my $result = $sub->peephole();
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'constant folding produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding produces Constant');
     is($result->value, 3.0, 'folded to constant 3.0');
 };
 
 subtest 'SubF idealize identity: x - 0.0 = x' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $zero = Chalk::IR::Node::ConstantF->new(value => 0.0);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $zero = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    );
 
     # Test idealize() directly (not peephole which does constant folding first)
     # x - 0.0 = x (right identity)
@@ -167,22 +239,28 @@ subtest 'SubF idealize identity: x - 0.0 = x' => sub {
 };
 
 subtest 'SubF idealize self-subtraction: x - x = 0.0' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
 
     # x - x = 0.0
     my $sub = Chalk::IR::Node::SubF->new(left => $x, right => $x);
     my $result = $sub->idealize();
     ok($result, 'idealize returns a result for x - x');
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'x - x produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'x - x produces Constant');
     is($result->value, 0.0, 'x - x = 0.0');
 };
 
 subtest 'SubF peephole integration: self-subtraction' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
     my $sub = Chalk::IR::Node::SubF->new(left => $x, right => $x);
 
     my $result = $sub->peephole();
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'self-subtraction produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'self-subtraction produces Constant');
     is($result->value, 0.0, 'peephole: x - x = 0.0');
 };
 

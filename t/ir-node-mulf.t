@@ -9,7 +9,7 @@ use experimental qw(class);
 
 # Load required modules
 use Chalk::IR::Node::MulF;
-use Chalk::IR::Node::ConstantF;
+use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Float;
 
 # ============================================================
@@ -17,8 +17,14 @@ use Chalk::IR::Type::Float;
 # ============================================================
 
 subtest 'MulF node creation' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
     my $mul = Chalk::IR::Node::MulF->new(left => $left, right => $right);
 
     ok($mul, 'MulF node created');
@@ -29,8 +35,14 @@ subtest 'MulF node creation' => sub {
 };
 
 subtest 'MulF node requires operands' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.0);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.0),
+        value => 1.0,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.0),
+        value => 2.0,
+    );
 
     eval { Chalk::IR::Node::MulF->new(left => $left) };
     like($@, qr/right.*is (required|missing)/i, 'dies without right operand');
@@ -44,8 +56,14 @@ subtest 'MulF node requires operands' => sub {
 # ============================================================
 
 subtest 'MulF inputs()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.5),
+        value => 1.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $mul = Chalk::IR::Node::MulF->new(left => $left, right => $right);
 
     my $inputs = $mul->inputs();
@@ -60,8 +78,14 @@ subtest 'MulF inputs()' => sub {
 # ============================================================
 
 subtest 'MulF compute() returns TypeFloat' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
     my $mul = Chalk::IR::Node::MulF->new(left => $left, right => $right);
 
     my $type = $mul->compute();
@@ -72,20 +96,38 @@ subtest 'MulF compute() returns TypeFloat' => sub {
 
 subtest 'MulF compute() constant folding' => sub {
     my $mul1 = Chalk::IR::Node::MulF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 3.0)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(3.0),
+            value => 3.0,
+        )
     );
     is($mul1->compute()->value, 7.5, '2.5 * 3.0 = 7.5');
 
     my $mul2 = Chalk::IR::Node::MulF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => -2.0),
-        right => Chalk::IR::Node::ConstantF->new(value => 1.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(-2.0),
+            value => -2.0,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(1.5),
+            value => 1.5,
+        )
     );
     is($mul2->compute()->value, -3.0, '-2.0 * 1.5 = -3.0');
 
     my $mul3 = Chalk::IR::Node::MulF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 0.0),
-        right => Chalk::IR::Node::ConstantF->new(value => 5.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(0.0),
+            value => 0.0,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        )
     );
     is($mul3->compute()->value, 0.0, '0.0 * 5.5 = 0.0');
 };
@@ -95,8 +137,14 @@ subtest 'MulF compute() constant folding' => sub {
 # ============================================================
 
 subtest 'MulF execute()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 2.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 3.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(3.0),
+        value => 3.0,
+    );
     my $mul = Chalk::IR::Node::MulF->new(left => $left, right => $right);
 
     # Create a simple context that returns node values
@@ -115,8 +163,14 @@ subtest 'MulF execute()' => sub {
 # ============================================================
 
 subtest 'MulF to_hash()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.5),
+        value => 1.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $mul = Chalk::IR::Node::MulF->new(left => $left, right => $right);
 
     my $hash = $mul->to_hash();
@@ -134,18 +188,30 @@ subtest 'MulF to_hash()' => sub {
 
 subtest 'MulF peephole constant folding' => sub {
     my $mul = Chalk::IR::Node::MulF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 2.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 3.0)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(3.0),
+            value => 3.0,
+        )
     );
 
     my $result = $mul->peephole();
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'constant folding produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding produces Constant');
     is($result->value, 7.5, 'folded to constant 7.5');
 };
 
 subtest 'MulF idealize identity: x * 1.0 = x' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $one = Chalk::IR::Node::ConstantF->new(value => 1.0);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $one = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.0),
+        value => 1.0,
+    );
 
     # Test idealize() directly (not peephole which does constant folding first)
     # x * 1.0 = x
@@ -162,21 +228,27 @@ subtest 'MulF idealize identity: x * 1.0 = x' => sub {
 };
 
 subtest 'MulF idealize zero absorption: x * 0.0 = 0.0' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $zero = Chalk::IR::Node::ConstantF->new(value => 0.0);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $zero = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    );
 
     # x * 0.0 = 0.0 (only when both are constant to preserve side effects)
     my $mul1 = Chalk::IR::Node::MulF->new(left => $x, right => $zero);
     my $result1 = $mul1->idealize();
     ok($result1, 'idealize returns a result for x * 0.0');
-    isa_ok($result1, 'Chalk::IR::Node::ConstantF', 'x * 0.0 = 0.0 (zero absorption right)');
+    isa_ok($result1, 'Chalk::IR::Node::Constant', 'x * 0.0 = 0.0 (zero absorption right)');
     is($result1->value, 0.0, 'value is 0.0');
 
     # 0.0 * x = 0.0 (only when both are constant to preserve side effects)
     my $mul2 = Chalk::IR::Node::MulF->new(left => $zero, right => $x);
     my $result2 = $mul2->idealize();
     ok($result2, 'idealize returns a result for 0.0 * x');
-    isa_ok($result2, 'Chalk::IR::Node::ConstantF', '0.0 * x = 0.0 (zero absorption left)');
+    isa_ok($result2, 'Chalk::IR::Node::Constant', '0.0 * x = 0.0 (zero absorption left)');
     is($result2->value, 0.0, 'value is 0.0');
 };
 

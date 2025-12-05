@@ -7,7 +7,7 @@ use utf8;
 class Chalk::IR::Node::SubF {
     use Chalk::IR::Type::Float;
     use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::ConstantF;
+    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -68,7 +68,8 @@ class Chalk::IR::Node::SubF {
         # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
-            return Chalk::IR::Node::ConstantF->new(
+            return Chalk::IR::Node::Constant->new(
+                type  => $type,
                 value => $type->value,
             );
         }
@@ -113,7 +114,10 @@ class Chalk::IR::Node::SubF {
 
         # x - x -> 0.0 (self-subtraction)
         if ($left->id eq $right->id) {
-            return Chalk::IR::Node::ConstantF->new(value => 0.0);
+            return Chalk::IR::Node::Constant->new(
+                type  => Chalk::IR::Type::Float->constant(0.0),
+                value => 0.0,
+            );
         }
 
         # Note: No left identity (0.0 - x ≠ x)

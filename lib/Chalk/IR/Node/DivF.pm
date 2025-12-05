@@ -7,7 +7,7 @@ use utf8;
 class Chalk::IR::Node::DivF {
     use Chalk::IR::Type::Float;
     use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::ConstantF;
+    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -68,7 +68,8 @@ class Chalk::IR::Node::DivF {
         # Step 1: Constant folding via compute()
         my $type = $self->compute();
         if ($type->is_constant) {
-            return Chalk::IR::Node::ConstantF->new(
+            return Chalk::IR::Node::Constant->new(
+                type => $type,
                 value => $type->value,
             );
         }
@@ -119,7 +120,10 @@ class Chalk::IR::Node::DivF {
         # Only optimize if right operand is constant and non-zero
         if ($left_type->is_constant && $left_type->value == 0.0) {
             if ($right_type->is_constant && $right_type->value != 0.0) {
-                return Chalk::IR::Node::ConstantF->new(value => 0.0);
+                return Chalk::IR::Node::Constant->new(
+                    type => Chalk::IR::Type::Float->constant(0.0),
+                    value => 0.0,
+                );
             }
         }
 

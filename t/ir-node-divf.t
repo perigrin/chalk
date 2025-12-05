@@ -9,7 +9,7 @@ use experimental qw(class);
 
 # Load required modules
 use Chalk::IR::Node::DivF;
-use Chalk::IR::Node::ConstantF;
+use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Float;
 
 # ============================================================
@@ -17,8 +17,14 @@ use Chalk::IR::Type::Float;
 # ============================================================
 
 subtest 'DivF node creation' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 7.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(7.5),
+        value => 7.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $div = Chalk::IR::Node::DivF->new(left => $left, right => $right);
 
     ok($div, 'DivF node created');
@@ -29,8 +35,14 @@ subtest 'DivF node creation' => sub {
 };
 
 subtest 'DivF node requires operands' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 1.0);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.0);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.0),
+        value => 1.0,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.0),
+        value => 2.0,
+    );
 
     eval { Chalk::IR::Node::DivF->new(left => $left) };
     like($@, qr/right.*is (required|missing)/i, 'dies without right operand');
@@ -44,8 +56,14 @@ subtest 'DivF node requires operands' => sub {
 # ============================================================
 
 subtest 'DivF inputs()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 7.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(7.5),
+        value => 7.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $div = Chalk::IR::Node::DivF->new(left => $left, right => $right);
 
     my $inputs = $div->inputs();
@@ -60,8 +78,14 @@ subtest 'DivF inputs()' => sub {
 # ============================================================
 
 subtest 'DivF compute() returns TypeFloat' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 7.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(7.5),
+        value => 7.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $div = Chalk::IR::Node::DivF->new(left => $left, right => $right);
 
     my $type = $div->compute();
@@ -72,34 +96,64 @@ subtest 'DivF compute() returns TypeFloat' => sub {
 
 subtest 'DivF compute() constant folding' => sub {
     my $div1 = Chalk::IR::Node::DivF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 7.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(7.5),
+            value => 7.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        )
     );
     is($div1->compute()->value, 3.0, '7.5 / 2.5 = 3.0');
 
     my $div2 = Chalk::IR::Node::DivF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 9.0),
-        right => Chalk::IR::Node::ConstantF->new(value => 3.0)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(9.0),
+            value => 9.0,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(3.0),
+            value => 3.0,
+        )
     );
     is($div2->compute()->value, 3.0, '9.0 / 3.0 = 3.0');
 
     my $div3 = Chalk::IR::Node::DivF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 5.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 1.0)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(1.0),
+            value => 1.0,
+        )
     );
     is($div3->compute()->value, 5.5, '5.5 / 1.0 = 5.5');
 
     my $div4 = Chalk::IR::Node::DivF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 0.0),
-        right => Chalk::IR::Node::ConstantF->new(value => 5.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(0.0),
+            value => 0.0,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        )
     );
     is($div4->compute()->value, 0.0, '0.0 / 5.5 = 0.0');
 };
 
 subtest 'DivF compute() division by zero' => sub {
     my $div = Chalk::IR::Node::DivF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 5.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 0.0)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(5.5),
+            value => 5.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(0.0),
+            value => 0.0,
+        )
     );
 
     # Division by zero should NOT be constant folded - leave for runtime
@@ -113,8 +167,14 @@ subtest 'DivF compute() division by zero' => sub {
 # ============================================================
 
 subtest 'DivF execute()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 7.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(7.5),
+        value => 7.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $div = Chalk::IR::Node::DivF->new(left => $left, right => $right);
 
     # Create a simple context that returns node values
@@ -133,8 +193,14 @@ subtest 'DivF execute()' => sub {
 # ============================================================
 
 subtest 'DivF to_hash()' => sub {
-    my $left = Chalk::IR::Node::ConstantF->new(value => 7.5);
-    my $right = Chalk::IR::Node::ConstantF->new(value => 2.5);
+    my $left = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(7.5),
+        value => 7.5,
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(2.5),
+        value => 2.5,
+    );
     my $div = Chalk::IR::Node::DivF->new(left => $left, right => $right);
 
     my $hash = $div->to_hash();
@@ -152,18 +218,30 @@ subtest 'DivF to_hash()' => sub {
 
 subtest 'DivF peephole constant folding' => sub {
     my $div = Chalk::IR::Node::DivF->new(
-        left => Chalk::IR::Node::ConstantF->new(value => 7.5),
-        right => Chalk::IR::Node::ConstantF->new(value => 2.5)
+        left => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(7.5),
+            value => 7.5,
+        ),
+        right => Chalk::IR::Node::Constant->new(
+            type => Chalk::IR::Type::Float->constant(2.5),
+            value => 2.5,
+        )
     );
 
     my $result = $div->peephole();
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'constant folding produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding produces Constant');
     is($result->value, 3.0, 'folded to constant 3.0');
 };
 
 subtest 'DivF idealize identity: x / 1.0 = x' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $one = Chalk::IR::Node::ConstantF->new(value => 1.0);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $one = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.0),
+        value => 1.0,
+    );
 
     # Test idealize() directly (not peephole which does constant folding first)
     # x / 1.0 = x (right identity)
@@ -179,20 +257,32 @@ subtest 'DivF idealize identity: x / 1.0 = x' => sub {
 };
 
 subtest 'DivF idealize zero numerator: 0.0 / x = 0.0' => sub {
-    my $zero = Chalk::IR::Node::ConstantF->new(value => 0.0);
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
+    my $zero = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    );
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
 
     # 0.0 / x = 0.0 (where x != 0)
     my $div = Chalk::IR::Node::DivF->new(left => $zero, right => $x);
     my $result = $div->idealize();
     ok($result, 'idealize returns a result for 0.0 / x');
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', '0.0 / x produces ConstantF');
+    isa_ok($result, 'Chalk::IR::Node::Constant', '0.0 / x produces Constant');
     is($result->value, 0.0, '0.0 / 5.5 = 0.0');
 };
 
 subtest 'DivF idealize no optimization for x / 0.0' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $zero = Chalk::IR::Node::ConstantF->new(value => 0.0);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $zero = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    );
 
     # x / 0.0 should NOT be optimized (leave for runtime error)
     my $div = Chalk::IR::Node::DivF->new(left => $x, right => $zero);
@@ -201,7 +291,10 @@ subtest 'DivF idealize no optimization for x / 0.0' => sub {
 };
 
 subtest 'DivF idealize no optimization for 0.0 / 0.0' => sub {
-    my $zero = Chalk::IR::Node::ConstantF->new(value => 0.0);
+    my $zero = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(0.0),
+        value => 0.0,
+    );
 
     # 0.0 / 0.0 should NOT be optimized (indeterminate form)
     my $div = Chalk::IR::Node::DivF->new(left => $zero, right => $zero);
@@ -210,13 +303,19 @@ subtest 'DivF idealize no optimization for 0.0 / 0.0' => sub {
 };
 
 subtest 'DivF peephole integration: identity' => sub {
-    my $x = Chalk::IR::Node::ConstantF->new(value => 5.5);
-    my $one = Chalk::IR::Node::ConstantF->new(value => 1.0);
+    my $x = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(5.5),
+        value => 5.5,
+    );
+    my $one = Chalk::IR::Node::Constant->new(
+        type => Chalk::IR::Type::Float->constant(1.0),
+        value => 1.0,
+    );
     my $div = Chalk::IR::Node::DivF->new(left => $x, right => $one);
 
     my $result = $div->peephole();
     # Since both are constants, it will constant fold instead
-    isa_ok($result, 'Chalk::IR::Node::ConstantF', 'constant folding takes precedence');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'constant folding takes precedence');
     is($result->value, 5.5, 'peephole: 5.5 / 1.0 = 5.5');
 };
 
