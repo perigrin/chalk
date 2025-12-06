@@ -51,7 +51,7 @@ class Chalk::Grammar::Chalk::TypeRegistry {
 
     # Check if class has complete field definitions
     method is_complete($name) {
-        return 0 unless exists $registry{$name};
+        return false unless exists $registry{$name};
         return $registry{$name}->is_complete();
     }
 }

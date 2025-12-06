@@ -26,7 +26,7 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
             my $complete = Chalk::Grammar::Chalk::TypeRegistry->instance()->lookup($class_name);
 
             # Prevent infinite recursion if class is still incomplete
-            return 0 if $complete == $self || !$complete->is_complete();
+            return false if $complete == $self || !$complete->is_complete();
 
             return $complete->has_field($field_name);
         }
