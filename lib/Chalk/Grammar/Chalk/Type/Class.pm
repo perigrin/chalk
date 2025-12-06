@@ -57,7 +57,7 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
 
     method is_subtype_of($other) {
         # Nominal typing: Class("X") <: Class("X") (reflexive)
-        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Class') {
+        if ($other isa Chalk::Grammar::Chalk::Type::Class) {
             # Same class name => subtype (reflexive)
             return $self->class_name() eq $other->class_name();
         }

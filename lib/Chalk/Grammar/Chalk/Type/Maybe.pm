@@ -18,12 +18,12 @@ class Chalk::Grammar::Chalk::Type::Maybe :isa(Chalk::Grammar::Chalk::Type) {
 
     method is_subtype_of($other) {
         # Maybe[T] <: Maybe[U] if T <: U (covariant)
-        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Maybe') {
+        if ($other isa Chalk::Grammar::Chalk::Type::Maybe) {
             return $inner_type->is_subtype_of($other->inner_type());
         }
 
         # Maybe[T] <: Undef (can be undef)
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Undef';
+        return $other isa Chalk::Grammar::Chalk::Type::Undef;
     }
 }
 
