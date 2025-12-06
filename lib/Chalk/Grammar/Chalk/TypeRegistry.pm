@@ -2,6 +2,7 @@
 # ABOUTME: Maps qualified class names to Class type instances, supporting lazy resolution
 use 5.042;
 use experimental qw(class);
+use Chalk::Grammar::Chalk::Type::Class;
 
 class Chalk::Grammar::Chalk::TypeRegistry {
     # Registry storage: class_name => Class instance
@@ -35,7 +36,6 @@ class Chalk::Grammar::Chalk::TypeRegistry {
         return $registry{$name} if exists $registry{$name};
 
         # Auto-create placeholder for forward reference
-        require Chalk::Grammar::Chalk::Type::Class;
         my $placeholder = Chalk::Grammar::Chalk::Type::Class->new(
             class_name => $name,
             fields => undef  # incomplete

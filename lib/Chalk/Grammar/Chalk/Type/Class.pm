@@ -3,6 +3,7 @@
 
 use 5.042;
 use experimental qw(class keyword_any);
+use Chalk::Grammar::Chalk::TypeRegistry;
 
 class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
     # Qualified class name as string
@@ -22,7 +23,6 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
     method has_field($field_name) {
         # Auto-deepening: delegate to registry if incomplete
         unless (defined $fields) {
-            require Chalk::Grammar::Chalk::TypeRegistry;
             my $complete = Chalk::Grammar::Chalk::TypeRegistry->instance()->lookup($class_name);
 
             # Prevent infinite recursion if class is still incomplete
@@ -37,7 +37,6 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
     method field_type($field_name) {
         # Auto-deepening: delegate to registry if incomplete
         unless (defined $fields) {
-            require Chalk::Grammar::Chalk::TypeRegistry;
             my $complete = Chalk::Grammar::Chalk::TypeRegistry->instance()->lookup($class_name);
 
             # Prevent infinite recursion if class is still incomplete
