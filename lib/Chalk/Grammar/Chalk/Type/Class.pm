@@ -62,12 +62,7 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
         }
 
         # Class <: Object <: Ref <: Scalar <: Any
-        return any { $other isa $_ } (
-            'Chalk::Grammar::Chalk::Type::Object',
-            'Chalk::Grammar::Chalk::Type::Ref',
-            'Chalk::Grammar::Chalk::Type::Scalar',
-            'Chalk::Grammar::Chalk::Type::Any'
-        );
+        return any { $other isa $_ } qw(Chalk::Grammar::Chalk::Type::Object Chalk::Grammar::Chalk::Type::Ref Chalk::Grammar::Chalk::Type::Scalar Chalk::Grammar::Chalk::Type::Any);
     }
 }
 
