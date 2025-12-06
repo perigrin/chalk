@@ -22,8 +22,7 @@ use lib 'lib';
     use Chalk::Grammar::Chalk::Type::Class;
     use Chalk::Grammar::Chalk::Type::Int;
 
-    my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
-    $registry->reset();  # Clear for fresh test
+    my $registry = Chalk::Grammar::Chalk::TypeRegistry->new();
 
     # Register a complete class
     my $int_type = Chalk::Grammar::Chalk::Type::Int->new();
@@ -45,8 +44,7 @@ use lib 'lib';
 {
     use Chalk::Grammar::Chalk::TypeRegistry;
 
-    my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
-    $registry->reset();
+    my $registry = Chalk::Grammar::Chalk::TypeRegistry->new();
 
     ok(!$registry->has_class('Node'), 'Node not registered');
 
@@ -65,8 +63,7 @@ use lib 'lib';
     use Chalk::Grammar::Chalk::Type::Class;
     use Chalk::Grammar::Chalk::Type::Int;
 
-    my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
-    $registry->reset();
+    my $registry = Chalk::Grammar::Chalk::TypeRegistry->new();
 
     my $int_type = Chalk::Grammar::Chalk::Type::Int->new();
     my $class1 = Chalk::Grammar::Chalk::Type::Class->new(
