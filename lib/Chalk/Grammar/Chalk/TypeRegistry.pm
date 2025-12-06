@@ -7,14 +7,8 @@ class Chalk::Grammar::Chalk::TypeRegistry {
     # Registry storage: class_name => Class instance
     field %registry;
 
-    # Initialize registry
-    ADJUST {
-        %registry = ();
-    }
-
     # Singleton accessor (class method)
-    sub instance {
-        my $class = shift // __PACKAGE__;
+    sub instance($class = __PACKAGE__) {
         state $singleton = Chalk::Grammar::Chalk::TypeRegistry->new();
         return $singleton;
     }
