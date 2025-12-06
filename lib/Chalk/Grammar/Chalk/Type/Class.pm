@@ -2,7 +2,7 @@
 # ABOUTME: Supports forward references via placeholders and auto-deepening for lazy resolution
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
     # Qualified class name as string
@@ -63,10 +63,12 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
         }
 
         # Class <: Object <: Ref <: Scalar <: Any
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Object' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Ref' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        return any { $other isa $_ } qw(
+            Chalk::Grammar::Chalk::Type::Object
+            Chalk::Grammar::Chalk::Type::Ref
+            Chalk::Grammar::Chalk::Type::Scalar
+            Chalk::Grammar::Chalk::Type::Any
+        );
     }
 }
 
