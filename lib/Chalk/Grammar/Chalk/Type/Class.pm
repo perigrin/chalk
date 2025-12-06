@@ -16,7 +16,7 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
     }
 
     method name() {
-        return "Class($class_name)";
+        return "Class[$class_name]";
     }
 
     method has_field($field_name) {

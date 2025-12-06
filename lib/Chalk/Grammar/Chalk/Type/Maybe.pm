@@ -1,5 +1,5 @@
 # ABOUTME: Maybe type for nullable references (T or undef) in Chalk type system
-# ABOUTME: Wrapper type supporting covariant subtyping: Maybe(T) <: Maybe(U) if T <: U
+# ABOUTME: Wrapper type supporting covariant subtyping: Maybe[T] <: Maybe[U] if T <: U
 
 use 5.042;
 use experimental qw(class);
@@ -13,16 +13,16 @@ class Chalk::Grammar::Chalk::Type::Maybe :isa(Chalk::Grammar::Chalk::Type) {
     }
 
     method name() {
-        return 'Maybe(' . $inner_type->name() . ')';
+        return 'Maybe[' . $inner_type->name() . ']';
     }
 
     method is_subtype_of($other) {
-        # Maybe(T) <: Maybe(U) if T <: U (covariant)
+        # Maybe[T] <: Maybe[U] if T <: U (covariant)
         if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Maybe') {
             return $inner_type->is_subtype_of($other->inner_type());
         }
 
-        # Maybe(T) <: Undef (can be undef)
+        # Maybe[T] <: Undef (can be undef)
         return ref($other) eq 'Chalk::Grammar::Chalk::Type::Undef';
     }
 }

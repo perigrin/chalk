@@ -204,7 +204,7 @@ use lib 'lib';
 
     is($maybe_int->inner_type(), $int_type, 'Maybe wraps inner type');
     is($maybe_int->unwrap(), $int_type, 'unwrap returns inner type');
-    is($maybe_int->name(), 'Maybe(Int)', 'Maybe name includes inner type');
+    is($maybe_int->name(), 'Maybe[Int]', 'Maybe name includes inner type');
 
     # Test with Class type
     my $node_class = Chalk::Grammar::Chalk::Type::Class->new(
@@ -214,7 +214,7 @@ use lib 'lib';
     my $maybe_node = Chalk::Grammar::Chalk::Type::Maybe->new(inner_type => $node_class);
 
     is($maybe_node->inner_type(), $node_class, 'Maybe wraps Class type');
-    is($maybe_node->name(), 'Maybe(Class(Node))', 'Maybe name with Class');
+    is($maybe_node->name(), 'Maybe[Class[Node]]', 'Maybe name with Class');
 }
 
 # Test 10: Maybe type subtyping
@@ -234,15 +234,15 @@ use lib 'lib';
     my $maybe_num = Chalk::Grammar::Chalk::Type::Maybe->new(inner_type => $num_type);
     my $maybe_str = Chalk::Grammar::Chalk::Type::Maybe->new(inner_type => $str_type);
 
-    # Maybe(T) <: Maybe(T) (reflexive)
-    ok($maybe_int->is_subtype_of($maybe_int), 'Maybe(T) <: Maybe(T) reflexive');
+    # Maybe[T] <: Maybe[T] (reflexive)
+    ok($maybe_int->is_subtype_of($maybe_int), 'Maybe[T] <: Maybe[T] reflexive');
 
-    # Maybe(T) <: Maybe(U) if T <: U (covariant)
-    # Int <: Num, so Maybe(Int) <: Maybe(Num)
-    ok($maybe_int->is_subtype_of($maybe_num), 'Maybe(Int) <: Maybe(Num) covariance');
+    # Maybe[T] <: Maybe[U] if T <: U (covariant)
+    # Int <: Num, so Maybe[Int] <: Maybe[Num]
+    ok($maybe_int->is_subtype_of($maybe_num), 'Maybe[Int] <: Maybe[Num] covariance');
 
     # But not the reverse
-    ok(!$maybe_num->is_subtype_of($maybe_int), 'Maybe(Num) <!: Maybe(Int)');
+    ok(!$maybe_num->is_subtype_of($maybe_int), 'Maybe[Num] <!: Maybe[Int]');
 
     # Incompatible inner types (use Class types which use nominal typing)
     use Chalk::Grammar::Chalk::Type::Class;
@@ -257,10 +257,10 @@ use lib 'lib';
     my $maybe_node = Chalk::Grammar::Chalk::Type::Maybe->new(inner_type => $node_class);
     my $maybe_point = Chalk::Grammar::Chalk::Type::Maybe->new(inner_type => $point_class);
 
-    ok(!$maybe_node->is_subtype_of($maybe_point), 'Maybe(Node) <!: Maybe(Point) with incompatible classes');
+    ok(!$maybe_node->is_subtype_of($maybe_point), 'Maybe[Node] <!: Maybe[Point] with incompatible classes');
 
-    # Maybe(T) <: Undef (can be undef)
-    ok($maybe_int->is_subtype_of($undef_type), 'Maybe(T) <: Undef');
+    # Maybe[T] <: Undef (can be undef)
+    ok($maybe_int->is_subtype_of($undef_type), 'Maybe[T] <: Undef');
 }
 
 # Test 11: Integration - Self-referential linked list
