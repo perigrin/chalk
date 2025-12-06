@@ -486,9 +486,10 @@ DoubleQuotedString -> %DOUBLE_QUOTED_STRING%
 # WS_OPT allows whitespace/newlines inside qw() for multiline word lists
 QuotedWordList -> 'qw' '(' WS_OPT WordList WS_OPT ')'
 
-# Words in qw() can be any bareword (including keywords) or colon-prefixed symbols
+# Words in qw() can be any bareword (including keywords), colon-prefixed symbols, or qualified identifiers
 # Explicit keyword alternatives ensure keywords can be used as words in qw() lists
 # (BAREWORD_ANY may not take precedence over keyword terminals in all contexts)
+Word -> Word '::' Word  # Qualified identifier (e.g., Foo::Bar::Baz, class::field)
 Word -> %BAREWORD_ANY%
 Word -> ':' %BAREWORD_ANY%
 Word -> 'class'
