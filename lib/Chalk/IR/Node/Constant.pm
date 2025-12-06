@@ -52,7 +52,8 @@ class Chalk::IR::Node::Constant {
         };
     }
 
-    method execute() {
+    method execute($context = undef) {
+        # Constant doesn't need context, but accept it for signature compatibility
         return $value;
     }
 
