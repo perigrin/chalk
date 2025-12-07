@@ -50,7 +50,7 @@ class Chalk::IR::Node::NewObject {
         return {} unless defined $fields;
 
         # Find all reference fields (Maybe types) and initialize to null
-        for my $field_name (keys %$fields) {
+        for my $field_name (keys %{$fields}) {
             my $field_type = $fields->{$field_name};
             if ($field_type isa Chalk::Grammar::Chalk::Type::Maybe) {
                 # Create a null constant with this Maybe type
@@ -73,7 +73,7 @@ class Chalk::IR::Node::NewObject {
         # Initialize reference fields to null in the heap
         if (defined $class_type) {
             my $init_fields = $self->initialized_fields();
-            for my $field_name (keys %$init_fields) {
+            for my $field_name (keys %{$init_fields}) {
                 my $null_constant = $init_fields->{$field_name};
                 # Execute the constant to get undef, then store in heap
                 my $null_value = $null_constant->execute();
