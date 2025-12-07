@@ -18,9 +18,11 @@ class Chalk::IR::Node::Constant {
 
     ADJUST {
         use Chalk::IR::Type;
-        # Ensure type is a Type object, not a string
-        die "Constant type must be a Chalk::IR::Type object, got: " . (ref($type) || "'$type'")
-            unless $type isa Chalk::IR::Type;
+        use Chalk::Grammar::Chalk::Type;
+        # Ensure type is a Type object (either IR or Grammar type hierarchy)
+        unless ($type isa Chalk::IR::Type || $type isa Chalk::Grammar::Chalk::Type) {
+            die "Constant type must be a Type object (Chalk::IR::Type or Chalk::Grammar::Chalk::Type), got: " . (ref($type) || "'$type'");
+        }
     }
 
     method add_dep($dependent_node_id) {
@@ -50,7 +52,8 @@ class Chalk::IR::Node::Constant {
         };
     }
 
-    method execute() {
+    method execute($context = undef) {
+        # Constant doesn't need context, but accept it for signature compatibility
         return $value;
     }
 
