@@ -45,9 +45,13 @@ class Chalk::Grammar::Chalk::TypeLattice {
         return Chalk::Grammar::Chalk::Type::Num->new()
             if $op =~ qr/^(Add|Subtract|Multiply|Divide|Negate)$/;
 
-        # Comparison operations return Boolean
+        # Numeric comparison operations return Boolean
         return Chalk::Grammar::Chalk::Type::Boolean->new()
             if $op =~ qr/^(GT|LT|EQ|NE|GE|LE)$/;
+
+        # String comparison operations return Boolean
+        return Chalk::Grammar::Chalk::Type::Boolean->new()
+            if $op =~ qr/^(StrEQ|StrNE|StrLT|StrLE|StrGT|StrGE)$/;
 
         # Logical operations return Boolean
         return Chalk::Grammar::Chalk::Type::Boolean->new()
