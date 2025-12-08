@@ -118,16 +118,27 @@ subtest 'Type multiplication combines constraints via meet' => sub {
     is($result->type_obj->name(), 'Int',
        'multiply uses meet: Int ∧ Num = Int');
 
-    # Get incompatible types
+    # Get compatible but less specific type (Int <: Str)
     my $str_type = $type_sr->type_from_name('Str');
     my $str_elem = Chalk::Semiring::TypeInferenceElement->new(
         type_obj => $str_type
     );
 
-    # Int ∧ Str should yield ⊥ (contradiction)
-    my $invalid = $int_elem->multiply($str_elem);
+    # Int ∧ Str should yield Int (more specific type, since Int <: Str)
+    my $refined = $int_elem->multiply($str_elem);
+    is($refined->type_obj->name(), 'Int',
+       'multiply refines type: Int ∧ Str = Int (Int <: Str)');
+
+    # Get truly incompatible types for bottom test
+    my $hash_type = $type_sr->type_from_name('Hash');
+    my $hash_elem = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $hash_type
+    );
+
+    # Int ∧ Hash should yield ⊥ (incompatible types)
+    my $invalid = $int_elem->multiply($hash_elem);
     ok($invalid->type_obj->is_bottom(),
-       'multiply detects contradiction: Int ∧ Str = ⊥');
+       'multiply detects contradiction: Int ∧ Hash = ⊥');
 };
 
 subtest 'Type addition combines alternatives via join' => sub {

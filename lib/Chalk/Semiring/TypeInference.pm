@@ -1,5 +1,6 @@
 # ABOUTME: Tropical semiring for type inference using type lattice operations
 # ABOUTME: Implements ⊕=join, ⊗=meet, 𝟘=bottom, 𝟙=top for lattice-based type checking during parsing
+# See docs/type-system.md for complete type hierarchy (Int <: Num <: Str) and semantics
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
