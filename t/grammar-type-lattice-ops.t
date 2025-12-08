@@ -258,6 +258,28 @@ subtest 'join() associativity' => sub {
     is($left->name(), $right->name(), 'join is associative for Int, Num, Str');
 };
 
+subtest 'distributivity' => sub {
+    # meet(A, join(B, C)) = join(meet(A, B), meet(A, C))
+    # Distributivity of meet over join
+    my $left_meet_dist = $int->meet($num->join($bool));
+    my $right_meet_dist = ($int->meet($num))->join($int->meet($bool));
+    is($left_meet_dist->name(), $right_meet_dist->name(),
+       'meet(Int, join(Num, Boolean)) = join(meet(Int, Num), meet(Int, Boolean))');
+
+    # join(A, meet(B, C)) = meet(join(A, B), join(A, C))
+    # Distributivity of join over meet
+    my $left_join_dist = $int->join($num->meet($str));
+    my $right_join_dist = ($int->join($num))->meet($int->join($str));
+    is($left_join_dist->name(), $right_join_dist->name(),
+       'join(Int, meet(Num, Str)) = meet(join(Int, Num), join(Int, Str))');
+
+    # Additional distributivity test with different types
+    my $left_dist2 = $scalar->meet($int->join($bool));
+    my $right_dist2 = ($scalar->meet($int))->join($scalar->meet($bool));
+    is($left_dist2->name(), $right_dist2->name(),
+       'meet(Scalar, join(Int, Boolean)) = join(meet(Scalar, Int), meet(Scalar, Boolean))');
+};
+
 # ============================================================
 # TypeLattice helper method tests
 # ============================================================
