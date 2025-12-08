@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # ABOUTME: Test ChalkSyntax semiring for syntax and precedence validation
-# ABOUTME: Verifies Boolean+Precedence+TypeInference composition for pure validation
+# ABOUTME: Verifies Boolean+Precedence+SemanticValidation composition for pure validation
 use 5.42.0;
 use Test2::V0;
 use FindBin qw($RealBin);
@@ -26,13 +26,13 @@ subtest 'ChalkSyntax semiring creation' => sub {
     ok $semiring->composite, 'Has composite semiring';
     ok $semiring->grammar, 'Has grammar reference';
 
-    # Check that composite has Boolean + Precedence + TypeInference semirings
+    # Check that composite has Boolean + Precedence + SemanticValidation semirings
     my $semirings = $semiring->composite->semirings;
     is scalar(@$semirings), 3, 'Composite has three semirings';
 
     isa_ok $semirings->[0], ['Chalk::Semiring::Boolean'], 'First semiring is Boolean';
     isa_ok $semirings->[1], ['Chalk::Semiring::Precedence'], 'Second semiring is Precedence';
-    isa_ok $semirings->[2], ['Chalk::Semiring::TypeInference'], 'Third semiring is TypeInference';
+    isa_ok $semirings->[2], ['Chalk::Semiring::SemanticValidation'], 'Third semiring is SemanticValidation';
 };
 
 subtest 'ChalkSyntax identity elements' => sub {

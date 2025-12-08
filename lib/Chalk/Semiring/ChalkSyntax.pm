@@ -1,4 +1,4 @@
-# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + TypeInference)
+# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + SemanticValidation)
 # ABOUTME: Pure validation composite - no building, just filtering for valid parses
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
@@ -6,7 +6,8 @@ use utf8;
 use Chalk::Base;
 use Chalk::Semiring::Boolean;
 use Chalk::Semiring::Precedence;
-use Chalk::Semiring::TypeInference;
+use Chalk::Semiring::SemanticValidation;
+use Chalk::Grammar::Chalk::SemanticRules;
 use Chalk::Semiring::Composite;
 
 class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
@@ -53,13 +54,17 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
             precedence_table => \@perl_precedence_table
         );
 
-        # Filter 3: TypeInference - Semantic constraint validation
-        my $type_sr = Chalk::Semiring::TypeInference->new();
+        # Filter 3: SemanticValidation - Semantic constraint validation
+        # Uses Chalk-specific semantic rules
+        my $semantic_rules = Chalk::Grammar::Chalk::SemanticRules->new();
+        my $semantic_sr = Chalk::Semiring::SemanticValidation->new(
+            rules => $semantic_rules
+        );
 
-        # Composite: Boolean + Precedence + TypeInference
+        # Composite: Boolean + Precedence + SemanticValidation
         # Pure validation - returns boolean success/failure
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$bool_sr, $precedence_sr, $type_sr]
+            semirings => [$bool_sr, $precedence_sr, $semantic_sr]
         );
     }
 
