@@ -1,5 +1,6 @@
 # ABOUTME: Type lattice implementation for Chalk grammar
 # ABOUTME: Wraps Chalk::Grammar::Chalk::Type::* system to provide type operations for IR validation
+# See docs/type-system.md for hierarchy (Int <: Num <: Str <: Scalar) and lattice operations (meet/join)
 use 5.42.0;
 use experimental qw(class);
 use utf8;

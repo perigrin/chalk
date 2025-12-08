@@ -1,5 +1,6 @@
 # ABOUTME: Tropical semiring for type inference using type lattice operations
 # ABOUTME: Implements ⊕=join, ⊗=meet, 𝟘=bottom, 𝟙=top for lattice-based type checking during parsing
+# See docs/type-system.md for complete type hierarchy (Int <: Num <: Str) and semantics
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
@@ -105,10 +106,40 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     }
 
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
-        # Hook for scanner - currently no type-based filtering
-        # Could be extended to reject type mismatches during scanning
+        # Extract type information from scanned Token objects
+        # and combine with existing type constraints via meet (∧)
+
+        # Check if matched_value is a Token with type information
+        if (defined $matched_value && ref($matched_value)) {
+            my $type_obj;
+
+            # Token::Int → Int type
+            if ($matched_value->isa('Chalk::Grammar::Token::Int')) {
+                $type_obj = $lattice->type_from_name('Int');
+            }
+            # Token::Float → Num type
+            elsif ($matched_value->isa('Chalk::Grammar::Token::Float')) {
+                $type_obj = $lattice->type_from_name('Num');
+            }
+
+            # If we extracted a type, combine it with existing element via meet
+            if (defined $type_obj) {
+                my $type_element = Chalk::Semiring::TypeInferenceElement->new(
+                    type_obj => $type_obj
+                );
+                return $element->multiply($type_element);
+            }
+        }
+
+        # No type information extracted - return element unchanged
         return $element;
     }
+
+    # Helper method to create type from name (for testing and convenience)
+    method type_from_name($name) {
+        return $lattice->type_from_name($name);
+    }
 }
+
 
 1;
