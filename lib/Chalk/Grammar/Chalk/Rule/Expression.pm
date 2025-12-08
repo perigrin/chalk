@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
+use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 
 class Chalk::Grammar::Chalk::Rule::Expression :isa(Chalk::GrammarRule) {
     method evaluate($context) {

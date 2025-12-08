@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental qw(class);
+use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 
 class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
     # Helper to recursively flatten arrays and extract nodes
