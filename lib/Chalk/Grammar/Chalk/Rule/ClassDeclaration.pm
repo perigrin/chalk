@@ -5,15 +5,13 @@ use experimental 'class';
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 
 class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
-    use Scalar::Util 'blessed';
     use Chalk::Grammar::Chalk::TypeRegistry;
     use Chalk::Grammar::Chalk::Type::Class;
     use Chalk::Grammar::Chalk::Type::Any;
 
     # Helper to extract field name from VariableDeclaration context
     sub _extract_field_from_vardecl {
-        my ($ctx, $indent) = @_;
-        $indent //= "";
+        my ($ctx) = @_;
 
         # Get the children to find LexicalDeclarator and Variable
         my @children = $ctx->children->@*;
@@ -52,8 +50,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     # Helper to recursively extract field declarations from parse tree contexts
     # Returns array of hashrefs: { name => $field_name, type => $type_obj }
     sub _extract_fields_from_context {
-        my ($ctx, $depth) = @_;
-        $depth //= 0;
+        my ($ctx) = @_;
         my @fields;
 
         return @fields unless defined $ctx;
@@ -97,7 +94,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         # Recursively check all children
         if ($ctx->can('children')) {
             for my $child ($ctx->children->@*) {
-                push @fields, _extract_fields_from_context($child, $depth + 1);
+                push @fields, _extract_fields_from_context($child);
             }
         }
 
