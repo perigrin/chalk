@@ -5,6 +5,7 @@ use experimental 'class';
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 
 class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
+    use Scalar::Util 'blessed';
     use Chalk::Grammar::Chalk::TypeRegistry;
     use Chalk::Grammar::Chalk::Type::Class;
     use Chalk::Grammar::Chalk::Type::Any;
@@ -49,6 +50,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to recursively extract field declarations from parse tree contexts
+    # Returns array of hashrefs: { name => $field_name, type => $type_obj }
     sub _extract_fields_from_context {
         my ($ctx, $depth) = @_;
         $depth //= 0;
@@ -65,7 +67,10 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
             # Example: field $x;
             if ($rule->isa('Chalk::Grammar::Chalk::Rule::VariableDeclaration')) {
                 my $field_name = _extract_field_from_vardecl($ctx);
-                push @fields, $field_name if defined $field_name;
+                if (defined $field_name) {
+                    # No initializer, type is Any
+                    push @fields, { name => $field_name, type => undef };
+                }
             }
             # Pattern 2: Assignment where LHS is VariableDeclaration with 'field'
             # Example: field $count = 0;
@@ -79,7 +84,11 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
                     if ($lhs_ctx->can('rule') && $lhs_ctx->rule &&
                         $lhs_ctx->rule->isa('Chalk::Grammar::Chalk::Rule::VariableDeclaration')) {
                         my $field_name = _extract_field_from_vardecl($lhs_ctx);
-                        push @fields, $field_name if defined $field_name;
+                        if (defined $field_name) {
+                            # Type inference deferred to issue #332 (Chalk type system integration)
+                            # For now, all field types default to Any
+                            push @fields, { name => $field_name, type => undef };
+                        }
                     }
                 }
             }
@@ -129,14 +138,17 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         my $block_ctx = $child_contexts[$#child_contexts];
 
         # Extract field declarations from the block context (not the evaluated block)
-        my @field_names = _extract_fields_from_context($block_ctx);
+        # Returns array of hashrefs: { name => $field_name, type => $type_obj }
+        my @field_info = _extract_fields_from_context($block_ctx);
 
-        # Build field hash: field_name => Type (default to Any)
+        # Build field hash: field_name => Type (use inferred type or default to Any)
         my %fields;
         my $any_type = Chalk::Grammar::Chalk::Type::Any->new();
-        for my $field_name (@field_names) {
+        for my $info (@field_info) {
+            my $field_name = $info->{name};
+            my $field_type = $info->{type} // $any_type;
             # Field names come as scalars like '$x', '$y', etc.
-            $fields{$field_name} = $any_type;
+            $fields{$field_name} = $field_type;
         }
 
         # Create Class type object
