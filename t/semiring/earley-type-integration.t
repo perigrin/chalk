@@ -69,33 +69,41 @@ subtest 'on_scan extracts type from Token::Float' => sub {
 subtest 'on_complete propagates types through derivation' => sub {
     my $type_sr = Chalk::Semiring::TypeInference->new();
 
-    # This test will FAIL because on_complete() doesn't exist yet
-    # We need to implement it following the SPPF pattern
-
     my $can_complete = $type_sr->can('on_complete');
     ok($can_complete, 'TypeInference has on_complete method');
 
     if ($can_complete) {
-        # Mock completed item: INTEGER rule with Int type
+        # Mock rule that doesn't have infer_type method
         my $rule = bless { lhs => 'Expression' }, 'MockRule';
+
+        # Mock item with rule method
         my $item = bless {
-            rule => $rule,
+            _rule => $rule,
             start_pos => 0,
             end_pos => 2
         }, 'MockItem';
 
+        # Add rule method to MockItem
+        {
+            no strict 'refs';
+            *MockItem::rule = sub { shift->{_rule} };
+        }
+
         # Element representing "42" : Int
         my $int_type = $type_sr->type_from_name('Int');
         my $element = Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $int_type
+            type_obj => $int_type,
+            type_env => {},
+            children => [],
+            token => undef
         );
 
-        # Call on_complete
+        # Call on_complete - should preserve element since rule has no infer_type
         my $result = $type_sr->on_complete($item, $element);
 
-        # Result should preserve the Int type
+        # Result should preserve the Int type (no transformation)
         is($result->type_obj->name(), 'Int',
-           'on_complete preserves type through rule completion');
+           'on_complete preserves type when rule has no infer_type method');
     }
 };
 

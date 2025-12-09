@@ -133,8 +133,8 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
 
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         # Extract type information from scanned Token objects
-        # and combine with existing type constraints via meet (∧)
-        # Also store the token for later extraction of variable names
+        # Return a new element with the extracted type and token stored
+        # The Earley parser will handle multiply() operations automatically
 
         # Check if matched_value is a Token with type information
         if (defined $matched_value && ref($matched_value)) {
@@ -149,20 +149,34 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
                 $type_obj = $lattice->type_from_name('Num');
             }
 
-            # If we extracted a type, combine it with existing element via meet
-            # and store the token for later use in on_complete
+            # If we extracted a type, return element with that type and stored token
             if (defined $type_obj) {
-                my $type_element = Chalk::Semiring::TypeInferenceElement->new(
+                return Chalk::Semiring::TypeInferenceElement->new(
                     type_obj => $type_obj,
                     type_env => {},
                     children => [],
-                    token => $matched_value  # Store token in terminal element
+                    token => $matched_value  # Store token for later extraction
                 );
-                return $element->multiply($type_element);
             }
         }
 
         # No type information extracted - return element unchanged
+        return $element;
+    }
+
+    # Earley completion hook - delegates type inference to grammar rules
+    # Called when a rule is fully recognized (completed in Earley sense)
+    # This is the safe execution point for rule-specific type inference
+    method on_complete($item, $element) {
+        my $rule = $item->rule;
+
+        # If rule has custom type inference, delegate to it
+        # This enables extensible type inference without modifying TypeInference.pm
+        if (defined $rule && $rule->can('infer_type')) {
+            return $rule->infer_type($self, $element);
+        }
+
+        # Default: preserve element unchanged (no type inference for this rule)
         return $element;
     }
 

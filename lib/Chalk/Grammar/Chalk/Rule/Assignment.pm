@@ -7,6 +7,7 @@ use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 
 class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
     use Chalk::IR::Node::Store;
+    use Chalk::Semiring::TypeInference;  # For TypeInferenceElement
 
     method evaluate($context) {
         # Assignment -> Ternary (pass-through)
@@ -104,6 +105,84 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
 
         # Return Store node so control flow can be wired through it
         return $store;
+    }
+
+    # Type inference for TypeInference semiring
+    # Extracts variable name from LHS and type from RHS, establishes binding
+    method infer_type($semiring, $element) {
+        # Element tree structure mirrors parse tree
+        # Assignment has children built up through multiply() during parsing
+        my @children = $element->children->@*;
+
+        # Assignment -> Ternary (pass-through, no binding)
+        # Assignment -> Ternary WS_OPT '=' WS_OPT Assignment
+        # So if we have fewer than 3 children, this is a pass-through
+        return $element if scalar(@children) < 3;
+
+        # Find the '=' operator to identify this as an assignment
+        my $has_assignment = 0;
+        my $equals_index = -1;
+        for my $i (0..$#children) {
+            my $child = $children[$i];
+            # Check if this child has a token that is '='
+            if (defined $child->token) {
+                my $token_val = $child->token->value;
+                if (defined($token_val) && "$token_val" eq '=') {
+                    $has_assignment = 1;
+                    $equals_index = $i;
+                    last;
+                }
+            }
+        }
+
+        # Not an assignment, just pass through
+        return $element unless $has_assignment;
+
+        # Extract variable name from LHS (child 0) using BFS through parse tree
+        my $var_name;
+        my @queue = ($children[0]);
+        while (@queue && !defined($var_name)) {
+            my $elem = shift @queue;
+            next unless defined($elem);
+
+            # Check if this element has a token with variable name
+            if (defined $elem->token) {
+                my $token = $elem->token;
+                # Look for IDENTIFIER pattern or similar
+                if ($token->can('pattern_name') && defined $token->pattern_name) {
+                    if ($token->pattern_name eq 'IDENTIFIER') {
+                        # Found variable name, prepend sigil
+                        $var_name = '$' . $token->value;
+                        last;
+                    }
+                }
+            }
+
+            # Continue BFS
+            if (defined $elem->children) {
+                push @queue, $elem->children->@*;
+            }
+        }
+
+        # If we didn't find a variable name, just return element unchanged
+        return $element unless defined($var_name);
+
+        # Get RHS type (after '=' + WS_OPT)
+        my $rhs_index = $equals_index + 2;
+        return $element unless $rhs_index < scalar(@children);
+
+        my $rhs_element = $children[$rhs_index];
+        my $rhs_type = $rhs_element->type_obj;
+
+        # Create new element with updated type_env
+        my $new_type_env = { %{$element->type_env}, $var_name => $rhs_type };
+
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $element->type_obj,
+            type_env => $new_type_env,
+            children => $element->children,
+            token => $element->token
+        );
     }
 }
 

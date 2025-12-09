@@ -71,10 +71,10 @@ subtest 'on_scan stores token in element' => sub {
     my $result = $semiring->on_scan($item, $element, 0, $token, 'INTEGER');
 
     ok(defined($result), 'on_scan returns result');
-    is(scalar($result->children->@*), 1, 'Result has one child (the terminal)');
-    ok(defined($result->children->[0]->token), 'Child element has token stored');
-    isa_ok($result->children->[0]->token, 'Chalk::Grammar::Token::Int', 'Token is Int type');
-    is($result->children->[0]->token->value, '42', 'Token value preserved');
+    is($result->type_obj->name(), 'Int', 'Result has Int type from token');
+    ok(defined($result->token), 'Element has token stored');
+    isa_ok($result->token, 'Chalk::Grammar::Token::Int', 'Token is Int type');
+    is($result->token->value, '42', 'Token value preserved');
 };
 
 subtest 'Basic type binding: my $x = 0' => sub {
