@@ -2,6 +2,7 @@
 # ABOUTME: Handles '.' (concatenation) with precedence validated by Precedence semiring
 
 use 5.42.0;
+use utf8;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
