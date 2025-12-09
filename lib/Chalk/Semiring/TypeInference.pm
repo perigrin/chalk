@@ -8,23 +8,41 @@ use Chalk::Base;
 use Chalk::Grammar::Chalk::TypeLattice;
 
 class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
-    field $type_obj :param :reader;  # Type object from Chalk::Grammar::Chalk::Type::*
+    field $type_obj :param :reader;       # Type object from Chalk::Grammar::Chalk::Type::*
+    field $type_env :param :reader = {};  # Variable → Type bindings (hashref)
+    field $children :param :reader = [];  # Child elements (parse tree) (arrayref)
+    field $token :param :reader = undef;  # Token for terminals
 
     # Tropical semiring addition: join (∨) - "could be either type"
     method add( $other, $swap = undef ) {
         my $other_type = $other->type_obj;
         my $joined = $type_obj->join($other_type);
+        # Note: type_env is not merged in add (alternative branches)
         return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $joined
+            type_obj => $joined,
+            type_env => $type_env,
+            children => $children,
+            token => $token
         );
     }
 
     # Tropical semiring multiplication: meet (∧) - "must satisfy all constraints"
+    # Builds parse tree by appending $other as child and merging type environments
     method multiply( $other, $swap = undef ) {
         my $other_type = $other->type_obj;
         my $meet = $type_obj->meet($other_type);
+
+        # Merge type environments (right side wins on conflicts)
+        my $combined_env = { %$type_env, %{$other->type_env} };
+
+        # Append completed element as child to build parse tree
+        my @new_children = (@$children, $other);
+
         return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $meet
+            type_obj => $meet,
+            type_env => $combined_env,
+            children => \@new_children,
+            token => $token  # Preserve token from left element
         );
     }
 
@@ -59,10 +77,16 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     # 𝟘 = ⊥ (bottom) - identity for join (addition)
     # 𝟙 = ⊤ (top/Any) - identity for meet (multiplication)
     field $add_id :reader = Chalk::Semiring::TypeInferenceElement->new(
-        type_obj => $lattice->bottom_type()
+        type_obj => $lattice->bottom_type(),
+        type_env => {},
+        children => [],
+        token => undef
     );
     field $mul_id :reader = Chalk::Semiring::TypeInferenceElement->new(
-        type_obj => $lattice->top_type()
+        type_obj => $lattice->top_type(),
+        type_env => {},
+        children => [],
+        token => undef
     );
 
     # Shared context for SPPF integration (optional)
@@ -108,6 +132,7 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         # Extract type information from scanned Token objects
         # and combine with existing type constraints via meet (∧)
+        # Also store the token for later extraction of variable names
 
         # Check if matched_value is a Token with type information
         if (defined $matched_value && ref($matched_value)) {
@@ -123,9 +148,13 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             }
 
             # If we extracted a type, combine it with existing element via meet
+            # and store the token for later use in on_complete
             if (defined $type_obj) {
                 my $type_element = Chalk::Semiring::TypeInferenceElement->new(
-                    type_obj => $type_obj
+                    type_obj => $type_obj,
+                    type_env => {},
+                    children => [],
+                    token => $matched_value  # Store token in terminal element
                 );
                 return $element->multiply($type_element);
             }
