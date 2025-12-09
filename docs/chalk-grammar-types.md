@@ -1,6 +1,14 @@
-# Chalk Type System
+# Chalk Grammar Type System
 
-This document describes the type system used by the Chalk compiler, which implements Perl 5's latent dynamic type system for compile-time type inference and validation.
+This document describes the **language-specific Grammar type system** for the **Chalk language** - a restricted Perl subset. This is part of the Chalk compiler's multi-frontend architecture where each source language has its own Grammar type system.
+
+## Language-Specific Types
+
+**Important:** These types are specific to the Chalk language implementation (`Chalk::Grammar::Chalk::Type::*`). Future **hypothetical** language frontends would have their own type hierarchies:
+- `Chalk::Grammar::Perl::Type::*` - Full Perl types (DualVar, Glob, etc.) - **hypothetical**
+- `Chalk::Grammar::Raku::Type::*` - Raku types (Int, Rat, Junction, etc.) - **hypothetical**
+
+All language-specific Grammar types map to the same universal IR types (`Chalk::IR::Type::*`) for language-agnostic optimization. See [docs/chalk-ir-type-mapping.md](chalk-ir-type-mapping.md) for details on how Grammar and IR type systems interact.
 
 ## Overview
 
