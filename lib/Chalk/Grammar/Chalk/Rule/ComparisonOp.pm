@@ -151,10 +151,18 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         for my $i (0..$#children) {
             my $child = $children[$i];
             # Check if this child has a token that is a comparison operator
-            if (defined $child->token) {
+            if (defined $child->token && $child->token isa Chalk::Grammar::Token::Operator) {
                 my $token_val = $child->token->value;
+                # Check for comparison operators using string equality
                 if (defined($token_val) &&
-                    ($token_val =~ /^(==|!=|<|>|<=|>=|eq|ne|lt|gt|le|ge|=~|!~|isa)$/)) {
+                    ($token_val eq '==' || $token_val eq '!=' ||
+                     $token_val eq '<'  || $token_val eq '>'  ||
+                     $token_val eq '<=' || $token_val eq '>=' ||
+                     $token_val eq 'eq' || $token_val eq 'ne' ||
+                     $token_val eq 'lt' || $token_val eq 'gt' ||
+                     $token_val eq 'le' || $token_val eq 'ge' ||
+                     $token_val eq '=~' || $token_val eq '!~' ||
+                     $token_val eq 'isa')) {
                     $operator = $token_val;
                     $operator_idx = $i;
                     last;
