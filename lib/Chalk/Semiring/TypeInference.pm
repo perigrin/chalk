@@ -30,10 +30,10 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
     # Also builds parse tree for on_complete() to use
     method multiply( $other, $swap = undef ) {
         # Merge type environments (right side wins on conflicts)
-        my $combined_env = { %$type_env, %{$other->type_env} };
+        my $combined_env = { $type_env->%*, $other->type_env->%* };
 
         # Append completed element as child to build parse tree
-        my @new_children = (@$children, $other);
+        my @new_children = ($children->@*, $other);
 
         # Perform type inference via meet (greatest lower bound)
         my $other_type = $other->type_obj;
