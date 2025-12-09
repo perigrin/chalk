@@ -26,20 +26,22 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
         );
     }
 
-    # Tropical semiring multiplication: meet (∧) - "must satisfy all constraints"
-    # Builds parse tree by appending $other as child and merging type environments
+    # Structural multiplication - builds parse tree without type inference
+    # Type inference happens in on_complete() where we have grammar rule context
     method multiply( $other, $swap = undef ) {
-        my $other_type = $other->type_obj;
-        my $meet = $type_obj->meet($other_type);
-
         # Merge type environments (right side wins on conflicts)
         my $combined_env = { %$type_env, %{$other->type_env} };
 
         # Append completed element as child to build parse tree
         my @new_children = (@$children, $other);
 
+        # Use top type (Any) - actual type determined by on_complete()
+        # This allows grammar-specific operators like Array_Hash_map(Array, Hash)
+        # to work correctly without being prematurely rejected by meet()
+        my $top_type = Chalk::Grammar::Chalk::Type::Any->new();
+
         return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $meet,
+            type_obj => $top_type,
             type_env => $combined_env,
             children => \@new_children,
             token => $token  # Preserve token from left element
