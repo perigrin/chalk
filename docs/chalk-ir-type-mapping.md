@@ -61,7 +61,7 @@ field $type_lattice :param :reader;  # Grammar-specific type system
 | Aspect | Grammar Types (Chalk) | IR Types (Universal) |
 |--------|----------------------|----------------------|
 | **Scope** | Language-specific (Chalk language) | Language-agnostic (all frontends) |
-| **Purpose** | Classify Chalk values by behavior | Track constant values for optimization |
+| **Purpose** | Discover and enforce syntactic/semantic parse alternatives | Track constant values for optimization |
 | **Lattice Model** | Lattice of **types** | Lattice of **constants** |
 | **Top Element** | `Any` (all values match) | `Top` (unknown/unanalyzed) |
 | **Bottom Element** | `None` (no values match) | `Bottom` (error state, e.g., div-by-zero) |
