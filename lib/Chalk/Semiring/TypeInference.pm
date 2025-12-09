@@ -8,23 +8,42 @@ use Chalk::Base;
 use Chalk::Grammar::Chalk::TypeLattice;
 
 class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
-    field $type_obj :param :reader;  # Type object from Chalk::Grammar::Chalk::Type::*
+    field $type_obj :param :reader;       # Type object from Chalk::Grammar::Chalk::Type::*
+    field $type_env :param :reader = {};  # Variable → Type bindings (hashref)
+    field $children :param :reader = [];  # Child elements (parse tree) (arrayref)
+    field $token :param :reader = undef;  # Token for terminals
 
     # Tropical semiring addition: join (∨) - "could be either type"
     method add( $other, $swap = undef ) {
         my $other_type = $other->type_obj;
         my $joined = $type_obj->join($other_type);
+        # Note: type_env is not merged in add (alternative branches)
         return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $joined
+            type_obj => $joined,
+            type_env => $type_env,
+            children => $children,
+            token => $token
         );
     }
 
     # Tropical semiring multiplication: meet (∧) - "must satisfy all constraints"
+    # Also builds parse tree for on_complete() to use
     method multiply( $other, $swap = undef ) {
+        # Merge type environments (right side wins on conflicts)
+        my $combined_env = { $type_env->%*, $other->type_env->%* };
+
+        # Append completed element as child to build parse tree
+        my @new_children = ($children->@*, $other);
+
+        # Perform type inference via meet (greatest lower bound)
         my $other_type = $other->type_obj;
-        my $meet = $type_obj->meet($other_type);
+        my $meet_type = $type_obj->meet($other_type);
+
         return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $meet
+            type_obj => $meet_type,
+            type_env => $combined_env,
+            children => \@new_children,
+            token => $token  # Preserve token from left element
         );
     }
 
@@ -59,10 +78,16 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     # 𝟘 = ⊥ (bottom) - identity for join (addition)
     # 𝟙 = ⊤ (top/Any) - identity for meet (multiplication)
     field $add_id :reader = Chalk::Semiring::TypeInferenceElement->new(
-        type_obj => $lattice->bottom_type()
+        type_obj => $lattice->bottom_type(),
+        type_env => {},
+        children => [],
+        token => undef
     );
     field $mul_id :reader = Chalk::Semiring::TypeInferenceElement->new(
-        type_obj => $lattice->top_type()
+        type_obj => $lattice->top_type(),
+        type_env => {},
+        children => [],
+        token => undef
     );
 
     # Shared context for SPPF integration (optional)
@@ -107,7 +132,8 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
 
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         # Extract type information from scanned Token objects
-        # and combine with existing type constraints via meet (∧)
+        # Return a new element with the extracted type and token stored
+        # The Earley parser will handle multiply() operations automatically
 
         # Check if matched_value is a Token with type information
         if (defined $matched_value && ref($matched_value)) {
@@ -122,16 +148,35 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
                 $type_obj = $lattice->type_from_name('Num');
             }
 
-            # If we extracted a type, combine it with existing element via meet
+            # If we extracted a type, return element with that type and stored token
             if (defined $type_obj) {
-                my $type_element = Chalk::Semiring::TypeInferenceElement->new(
-                    type_obj => $type_obj
+                return Chalk::Semiring::TypeInferenceElement->new(
+                    type_obj => $type_obj,
+                    type_env => {},
+                    children => [],
+                    token => $matched_value  # Store token for later extraction
                 );
-                return $element->multiply($type_element);
             }
         }
 
         # No type information extracted - return element unchanged
+        return $element;
+    }
+
+    # Earley completion hook - delegates type inference to grammar rules
+    # Called when a rule is fully recognized (completed in Earley sense)
+    # This is the safe execution point for rule-specific type inference
+    # $completed_element is optional metadata from Composite semiring
+    method on_complete($item, $element, $completed_element = undef) {
+        my $rule = $item->rule;
+
+        # If rule has custom type inference, delegate to it
+        # This enables extensible type inference without modifying TypeInference.pm
+        if (defined $rule && $rule->can('infer_type')) {
+            return $rule->infer_type($self, $element);
+        }
+
+        # Default: preserve element unchanged (no type inference for this rule)
         return $element;
     }
 

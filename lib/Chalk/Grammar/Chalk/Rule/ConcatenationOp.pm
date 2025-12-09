@@ -2,7 +2,7 @@
 # ABOUTME: Handles '.' (concatenation) with precedence validated by Precedence semiring
 
 use 5.42.0;
-use experimental 'class';
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
 
@@ -75,6 +75,90 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         # Build string concatenation IR node
         # Note: Precedence validation is handled by Precedence semiring during parsing
         return Chalk::IR::Node::StrConcat->new( left => $left, right => $right );
+    }
+
+    # Type inference for TypeInference semiring
+    # String concatenation coerces operands to strings
+    method infer_type($semiring, $element) {
+        use Chalk::Semiring::TypeInference;  # For TypeInferenceElement
+
+        # Element tree structure mirrors parse tree
+        my @children = $element->children->@*;
+
+        # ConcatenationOp -> Expression (pass-through)
+        # ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
+        # Need at least 3 children for binary operation
+        return $element if scalar(@children) < 3;
+
+        # Find the '.' operator token
+        my $operator_idx;
+        for my $i (0..$#children) {
+            my $child = $children[$i];
+            # Check if this child has a token that is '.'
+            if (defined $child->token) {
+                my $token_val = $child->token->value;
+                if (defined($token_val) && $token_val eq '.') {
+                    $operator_idx = $i;
+                    last;
+                }
+            }
+        }
+
+        # Not a concatenation operation, pass through
+        return $element unless defined($operator_idx);
+
+        # Extract left operand type (first element before operator with type)
+        my $left_type;
+        for my $i (0 .. $operator_idx - 1) {
+            my $elem = $children[$i];
+            if (defined $elem->type_obj) {
+                $left_type = $elem->type_obj;
+                last;
+            }
+        }
+
+        # Extract right operand type (first element after operator with type)
+        my $right_type;
+        for my $i ($operator_idx + 1 .. $#children) {
+            my $elem = $children[$i];
+            if (defined $elem->type_obj) {
+                $right_type = $elem->type_obj;
+                last;
+            }
+        }
+
+        # If we can't find operand types, pass through element unchanged
+        return $element unless (defined($left_type) && defined($right_type));
+
+        # Get type lattice
+        my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+
+        # String concatenation type rules:
+        # Most types can stringify → Str
+        # CodeRef, ArrayRef, HashRef typically can't be meaningfully concatenated → ⊥
+
+        my $left_name = $left_type->name();
+        my $right_name = $right_type->name();
+
+        # Check for reference types that can't be meaningfully concatenated
+        my $left_is_ref = any { $left_name eq $_ } qw(CodeRef ArrayRef HashRef);
+        my $right_is_ref = any { $right_name eq $_ } qw(CodeRef ArrayRef HashRef);
+
+        my $result_type;
+        if ($left_is_ref || $right_is_ref) {
+            # Reference types can't be meaningfully concatenated
+            $result_type = $lattice->bottom_type();
+        } else {
+            # Most types can be coerced to strings
+            $result_type = $lattice->type_from_name('Str');
+        }
+
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $result_type,
+            type_env => $element->type_env,
+            children => $element->children,
+            token => $element->token
+        );
     }
 }
 
