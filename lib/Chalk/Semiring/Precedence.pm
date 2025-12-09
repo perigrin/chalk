@@ -365,10 +365,10 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                         # Higher precedence = lower level number
                         my $new_level = $op_info->{level};
 
-                        if ($new_level < $existing_level) {
-                            # New operator has higher precedence (lower level) than existing
-                            # This is INVALID: e.g., * trying to contain + result
-                            # The + should have been inside the * expression, not the other way around
+                        if ($new_level > $existing_level) {
+                            # New operator has lower precedence (higher level) than existing
+                            # This is INVALID: e.g., + trying to contain * result
+                            # The * should have been inside the + expression, not the other way around
                             # Mark as invalid but PRESERVE operator info for debugging
                             return Chalk::Semiring::PrecedenceElement->new(
                                 valid => 0,
