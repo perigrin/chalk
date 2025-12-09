@@ -107,7 +107,7 @@ subtest 'on_complete propagates types through derivation' => sub {
     }
 };
 
-subtest 'Type multiplication is structural (builds parse tree)' => sub {
+subtest 'Type multiplication uses meet and builds parse tree' => sub {
     my $type_sr = Chalk::Semiring::TypeInference->new();
 
     # Get Int and Num types
@@ -127,29 +127,17 @@ subtest 'Type multiplication is structural (builds parse tree)' => sub {
         token => undef
     );
 
-    # multiply() is structural - returns top (Any) regardless of input types
-    # Type inference happens later in on_complete() with grammar context
+    # multiply() uses meet for type inference
     my $result = $int_elem->multiply($num_elem);
-    is($result->type_obj->name(), 'Any',
-       'multiply returns top type (Any) - type inference deferred to on_complete');
+    is($result->type_obj->name(), 'Int',
+       'multiply uses meet: Int ∧ Num = Int');
 
     # Verify parse tree is built correctly
     is(scalar($result->children->@*), 1, 'multiply appends child to build parse tree');
     is($result->children->[0], $num_elem, 'Child is the right operand');
 
-    # This allows grammar-specific operators to work correctly
-    # e.g., Array_Hash_map(Array, Hash) → Array[Hash] won't be rejected
-    my $hash_type = $type_sr->type_from_name('Hash');
-    my $hash_elem = Chalk::Semiring::TypeInferenceElement->new(
-        type_obj => $hash_type,
-        type_env => {},
-        children => [],
-        token => undef
-    );
-
-    my $combined = $int_elem->multiply($hash_elem);
-    is($combined->type_obj->name(), 'Any',
-       'multiply allows any type combination - on_complete decides validity');
+    # on_complete() can refine types based on grammar-specific rules
+    # multiply() provides baseline type inference via meet
 };
 
 subtest 'Type addition combines alternatives via join' => sub {

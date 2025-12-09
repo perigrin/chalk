@@ -26,8 +26,8 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
         );
     }
 
-    # Structural multiplication - builds parse tree without type inference
-    # Type inference happens in on_complete() where we have grammar rule context
+    # Tropical semiring multiplication: meet (∧) - "must satisfy all constraints"
+    # Also builds parse tree for on_complete() to use
     method multiply( $other, $swap = undef ) {
         # Merge type environments (right side wins on conflicts)
         my $combined_env = { %$type_env, %{$other->type_env} };
@@ -35,13 +35,12 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
         # Append completed element as child to build parse tree
         my @new_children = (@$children, $other);
 
-        # Use top type (Any) - actual type determined by on_complete()
-        # This allows grammar-specific operators like Array_Hash_map(Array, Hash)
-        # to work correctly without being prematurely rejected by meet()
-        my $top_type = Chalk::Grammar::Chalk::Type::Any->new();
+        # Perform type inference via meet (greatest lower bound)
+        my $other_type = $other->type_obj;
+        my $meet_type = $type_obj->meet($other_type);
 
         return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $top_type,
+            type_obj => $meet_type,
             type_env => $combined_env,
             children => \@new_children,
             token => $token  # Preserve token from left element
@@ -167,7 +166,8 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     # Earley completion hook - delegates type inference to grammar rules
     # Called when a rule is fully recognized (completed in Earley sense)
     # This is the safe execution point for rule-specific type inference
-    method on_complete($item, $element) {
+    # $completed_element is optional metadata from Composite semiring
+    method on_complete($item, $element, $completed_element = undef) {
         my $rule = $item->rule;
 
         # If rule has custom type inference, delegate to it
