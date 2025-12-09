@@ -145,6 +145,104 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         # If we get here, we found an operator that isn't +, -, *, / - this is a bug
         die "ArithmeticOp found unrecognized operator '$operator' - expected one of +, -, *, /";
     }
+
+    # Type inference for TypeInference semiring
+    # Infers result type based on operator and operand types
+    method infer_type($semiring, $element) {
+        use Chalk::Semiring::TypeInference;  # For TypeInferenceElement
+
+        # Element tree structure mirrors parse tree
+        # ArithmeticOp has children built up through multiply() during parsing
+        my @children = $element->children->@*;
+
+        # ArithmeticOp -> Expression (pass-through)
+        # ArithmeticOp -> Expression WS_OPT OPERATOR WS_OPT Expression
+        # Need at least 3 children for binary operation
+        return $element if scalar(@children) < 3;
+
+        # Find the operator token
+        my $operator;
+        my $operator_idx;
+        for my $i (0..$#children) {
+            my $child = $children[$i];
+            # Check if this child has a token that is an arithmetic operator
+            if (defined $child->token) {
+                my $token_val = $child->token->value;
+                if (defined($token_val) && ($token_val eq '+' || $token_val eq '-' ||
+                                           $token_val eq '*' || $token_val eq '/')) {
+                    $operator = $token_val;
+                    $operator_idx = $i;
+                    last;
+                }
+            }
+        }
+
+        # Not a binary operation, pass through
+        return $element unless defined($operator);
+
+        # Extract left operand type (first element before operator with type)
+        my $left_type;
+        for my $i (0 .. $operator_idx - 1) {
+            my $elem = $children[$i];
+            if (defined $elem->type_obj) {
+                $left_type = $elem->type_obj;
+                last;
+            }
+        }
+
+        # Extract right operand type (first element after operator with type)
+        my $right_type;
+        for my $i ($operator_idx + 1 .. $#children) {
+            my $elem = $children[$i];
+            if (defined $elem->type_obj) {
+                $right_type = $elem->type_obj;
+                last;
+            }
+        }
+
+        # If we can't find operand types, pass through element unchanged
+        return $element unless (defined($left_type) && defined($right_type));
+
+        # Apply operator-specific type inference rules
+        my $result_type;
+
+        # Get type lattice for bottom type
+        my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+
+        # Arithmetic operations require numeric types
+        # Int ⊗ Int → Int
+        # Num ⊗ Num → Num
+        # Str ⊗ Str → ⊥ (for *, -, /)
+        # Incompatible types → ⊥
+
+        my $left_name = $left_type->name();
+        my $right_name = $right_type->name();
+
+        # Check for numeric types (Int, Num)
+        my $left_is_numeric = ($left_name eq 'Int' || $left_name eq 'Num');
+        my $right_is_numeric = ($right_name eq 'Int' || $right_name eq 'Num');
+
+        if ($left_is_numeric && $right_is_numeric) {
+            # Both numeric - result is the meet (more specific type)
+            $result_type = $left_type->meet($right_type);
+        }
+        elsif ($operator eq '+') {
+            # Special case: string concatenation via + (some languages)
+            # For now, treat non-numeric + as type error
+            $result_type = $lattice->bottom_type();
+        }
+        else {
+            # Non-numeric operands with -, *, / → bottom (type error)
+            $result_type = $lattice->bottom_type();
+        }
+
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $result_type,
+            type_env => $element->type_env,
+            children => $element->children,
+            token => $element->token
+        );
+    }
 }
 
 1;

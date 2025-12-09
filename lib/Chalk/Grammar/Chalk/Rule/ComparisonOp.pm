@@ -131,6 +131,55 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         # If we get here, we found an operator but didn't handle it - this is a bug
         die "ComparisonOp found unrecognized operator '$operator' - not handled by any branch";
     }
+
+    # Type inference for TypeInference semiring
+    # Comparison operators always return Bool type
+    method infer_type($semiring, $element) {
+        use Chalk::Semiring::TypeInference;  # For TypeInferenceElement
+
+        # Element tree structure mirrors parse tree
+        my @children = $element->children->@*;
+
+        # ComparisonOp -> Expression (pass-through)
+        # ComparisonOp -> Expression WS_OPT OPERATOR WS_OPT Expression
+        # Single child means pass-through
+        return $element if scalar(@children) < 2;
+
+        # Find the comparison operator token
+        my $operator;
+        my $operator_idx;
+        for my $i (0..$#children) {
+            my $child = $children[$i];
+            # Check if this child has a token that is a comparison operator
+            if (defined $child->token) {
+                my $token_val = $child->token->value;
+                if (defined($token_val) &&
+                    ($token_val =~ /^(==|!=|<|>|<=|>=|eq|ne|lt|gt|le|ge|=~|!~|isa)$/)) {
+                    $operator = $token_val;
+                    $operator_idx = $i;
+                    last;
+                }
+            }
+        }
+
+        # Not a comparison operation, pass through
+        return $element unless defined($operator);
+
+        # Get type lattice
+        my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+
+        # All comparison operators return Bool type
+        # We could add more sophisticated type checking here (e.g., ensure operands are comparable)
+        # but for now, we just return Bool
+        my $result_type = $lattice->type_from_name('Bool');
+
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $result_type,
+            type_env => $element->type_env,
+            children => $element->children,
+            token => $element->token
+        );
+    }
 }
 
 1;
