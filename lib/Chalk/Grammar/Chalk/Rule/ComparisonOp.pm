@@ -2,7 +2,7 @@
 # ABOUTME: Handles comparison (>, <, ==, !=, isa) and regex match (=~, !~) with precedence validated by Precedence semiring
 
 use 5.42.0;
-use experimental qw(class keyword_any);
+use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
 
@@ -151,15 +151,11 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         for my $i (0..$#children) {
             my $child = $children[$i];
             # Check if this child has a token that is a comparison operator
+            # Grammar has already validated it's a valid comparison operator
             if (defined $child->token && $child->token isa Chalk::Grammar::Token::Operator) {
-                my $token_val = $child->token->value;
-                # Check for comparison operators using string equality
-                if (defined($token_val) &&
-                    any { $token_val eq $_ } qw(== != < > <= >= eq ne lt gt le ge =~ !~ isa)) {
-                    $operator = $token_val;
-                    $operator_idx = $i;
-                    last;
-                }
+                $operator = $child->token->value;
+                $operator_idx = $i;
+                last;
             }
         }
 
