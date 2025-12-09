@@ -1,6 +1,27 @@
 # Grammar ↔ IR Type System Mapping
 
-This document explains how Chalk's two type systems interact: the **Grammar type system** (`Chalk::Grammar::Chalk::Type`) used for parsing and semantic analysis, and the **IR type system** (`Chalk::IR::Type`) used for optimization and constant folding.
+This document explains how the Chalk compiler's type systems interact: **language-specific Grammar type systems** (like `Chalk::Grammar::Chalk::Type`) used for parsing and semantic analysis, and the **universal IR type system** (`Chalk::IR::Type`) used for optimization and constant folding.
+
+## Architecture: Language Frontends → Universal IR
+
+The Chalk compiler uses a **multi-frontend architecture** where each source language has its own Grammar type system that maps to a shared IR:
+
+```
+Language-Specific Grammar Types       Language-Agnostic IR Types
+────────────────────────────────      ──────────────────────────
+Chalk::Grammar::Chalk::Type::*  ─┐
+Chalk::Grammar::Perl::Type::*   ─┼─>  Chalk::IR::Type::*
+Chalk::Grammar::Raku::Type::*   ─┘
+```
+
+**Grammar types are per-language implementations:**
+- `Chalk::Grammar::Chalk::Type::*` - Types for the Chalk language (restricted Perl subset)
+- `Chalk::Grammar::Perl::Type::*` - Would have full Perl types (DualVar, Glob, etc.) - future
+- `Chalk::Grammar::Raku::Type::*` - Would have Raku types (Int, Rat, Junction, etc.) - future
+
+Each language frontend brings its own type semantics and validation rules. All map to the same IR types for language-agnostic optimization.
+
+**This document focuses on:** `Chalk::Grammar::Chalk::Type` ↔ `Chalk::IR::Type` mapping for the Chalk language implementation.
 
 ## Quick Reference
 
@@ -37,9 +58,10 @@ field $type_lattice :param :reader;  # Grammar-specific type system
 
 ### Conceptual Difference
 
-| Aspect | Grammar Types | IR Types |
-|--------|---------------|----------|
-| **Purpose** | Classify Perl values by behavior | Track constant values for optimization |
+| Aspect | Grammar Types (Chalk) | IR Types (Universal) |
+|--------|----------------------|----------------------|
+| **Scope** | Language-specific (Chalk language) | Language-agnostic (all frontends) |
+| **Purpose** | Classify Chalk values by behavior | Track constant values for optimization |
 | **Lattice Model** | Lattice of **types** | Lattice of **constants** |
 | **Top Element** | `Any` (all values match) | `Top` (unknown/unanalyzed) |
 | **Bottom Element** | `None` (no values match) | `Bottom` (error state, e.g., div-by-zero) |
@@ -345,42 +367,56 @@ This would enable using Grammar type information to initialize IR type state for
 
 ## Why Two Systems?
 
-**Different optimization opportunities:**
+**Multi-frontend architecture enables language-specific frontends with shared optimization:**
 
-1. **Grammar types** excel at:
-   - Catching type errors early (e.g., array operation on scalar)
-   - Validating builtin function signatures
-   - Tracking source-level type declarations
-   - Following Perl's subtyping semantics
+The separation allows the Chalk compiler to:
+- **Support multiple source languages** (Chalk, Perl, Raku, etc.) each with their own type systems
+- **Share optimization infrastructure** across all language frontends via universal IR types
+- **Preserve language semantics** in the frontend while optimizing generically in the backend
 
-2. **IR types** excel at:
-   - Constant folding (`2 + 3` → `5`)
-   - Constant propagation
-   - Dead code elimination (if condition always true/false)
-   - Range analysis for bounds checking
+**Grammar types (language-specific)** excel at:
+- Catching type errors early using language-specific rules
+- Validating builtin function signatures per-language
+- Tracking source-level type declarations
+- Following language-specific subtyping semantics (e.g., Chalk's Int <: Num <: Str)
+- Enabling language-specific optimizations (e.g., Perl's context-sensitive operations)
+
+**IR types (language-agnostic)** excel at:
+- Constant folding (`2 + 3` → `5`) regardless of source language
+- Constant propagation across the IR graph
+- Dead code elimination (if condition always true/false)
+- Range analysis for bounds checking
+- Language-independent peephole optimizations
 
 **They complement each other:**
 ```perl
-# Grammar type says "this is an Int"
-my $x = 42;  # Grammar: Type::Int
+# Chalk Grammar type says "this is an Int in Chalk's type system"
+my $x = 42;  # Grammar: Chalk::Grammar::Chalk::Type::Int
 
-# IR type says "this is specifically the value 42"
-# IR: Integer->constant(42)
+# Universal IR type says "this is specifically the constant value 42"
+# IR: Chalk::IR::Type::Integer->constant(42)
 
-# Optimization: constant fold
+# Language-agnostic optimization: constant fold
 my $y = $x + 8;  # IR: Integer->constant(50)
-# But Grammar type: still Int (no more specific info)
+# But Grammar type: still Chalk::Type::Int (type-level, not value-level)
 ```
+
+This architecture means:
+- A future `Chalk::Grammar::Raku::Type` frontend would have completely different types (Int, Rat, Junction)
+- But would map to the same `Chalk::IR::Type::*` for optimization
+- Allowing code reuse across language implementations
 
 ## Implementation Files Reference
 
-### Grammar Type System
+### Grammar Type System (Chalk Language)
 
 **Core:**
-- `lib/Chalk/Grammar/Chalk/Type.pm` - Base class, lattice operations
-- `lib/Chalk/Grammar/Chalk/Type/*.pm` - Individual type implementations (22 types)
-- `lib/Chalk/Grammar/Chalk/TypeLattice.pm` - Type inference and validation
-- `lib/Chalk/Grammar/Chalk/TypeRegistry.pm` - Class and field type tracking
+- `lib/Chalk/Grammar/Chalk/Type.pm` - Base class, lattice operations for Chalk types
+- `lib/Chalk/Grammar/Chalk/Type/*.pm` - Individual type implementations (22 Chalk-specific types)
+- `lib/Chalk/Grammar/Chalk/TypeLattice.pm` - Type inference and validation for Chalk
+- `lib/Chalk/Grammar/Chalk/TypeRegistry.pm` - Class and field type tracking for Chalk
+
+Note: Future language frontends (Perl, Raku) would have their own `Chalk::Grammar::<Lang>::Type::*` hierarchies.
 
 **Tests:**
 - `t/semiring/type-lattice-semiring.t` - Lattice law verification
