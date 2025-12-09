@@ -39,7 +39,7 @@ This document breaks #332 into **6 single-session tickets** using a feature vert
 Clear documentation of how `Chalk::Grammar::Chalk::Type` maps to `Chalk::IR::Type`, when to use each system, and how they interact.
 
 **Scope:**
-- Create `docs/type-systems.md` documenting:
+- Create `docs/chalk-ir-type-mapping.md` documenting:
   - Explicit mapping table (Grammar::Type::Int → IR::Type::Integer, etc.)
   - When to use Grammar types (parsing, validation, semantic analysis)
   - When to use IR types (optimization, constant folding)
@@ -303,4 +303,4 @@ These remain for future work (not part of the 6 tickets):
 
 - Type lattice design: https://gist.github.com/perigrin/c4780a7511ba1421e49a4a8b385aaa3d
 - Current usage: `lib/Chalk/Builtins.pm`, `lib/Chalk/IR/TypeInference.pm`
-- Existing type system docs: `docs/type-system.md`
+- Existing type system docs: `docs/chalk-grammar-types.md`, `docs/chalk-ir-type-mapping.md`

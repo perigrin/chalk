@@ -439,7 +439,7 @@ Note: Future language frontends (Perl, Raku) would have their own `Chalk::Gramma
 
 ## Further Reading
 
-- [docs/type-system.md](type-system.md) - Grammar type system overview
+- [docs/chalk-grammar-types.md](chalk-grammar-types.md) - Chalk's Grammar type system overview
 - [Understanding Perl's Type System](https://gist.github.com/perigrin/c4780a7511ba1421e49a4a8b385aaa3d) - Formal foundation
 - [docs/plans/2025-12-09-type-system-integration-breakdown.md](plans/2025-12-09-type-system-integration-breakdown.md) - Future integration work
 
