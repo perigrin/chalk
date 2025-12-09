@@ -2,7 +2,7 @@
 # ABOUTME: Handles '.' (concatenation) with precedence validated by Precedence semiring
 
 use 5.42.0;
-use experimental 'class';
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
 
@@ -141,8 +141,8 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         my $right_name = $right_type->name();
 
         # Check for reference types that can't be meaningfully concatenated
-        my $left_is_ref = ($left_name eq 'CodeRef' || $left_name eq 'ArrayRef' || $left_name eq 'HashRef');
-        my $right_is_ref = ($right_name eq 'CodeRef' || $right_name eq 'ArrayRef' || $right_name eq 'HashRef');
+        my $left_is_ref = any { $left_name eq $_ } qw(CodeRef ArrayRef HashRef);
+        my $right_is_ref = any { $right_name eq $_ } qw(CodeRef ArrayRef HashRef);
 
         my $result_type;
         if ($left_is_ref || $right_is_ref) {

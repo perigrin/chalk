@@ -2,7 +2,7 @@
 # ABOUTME: Handles comparison (>, <, ==, !=, isa) and regex match (=~, !~) with precedence validated by Precedence semiring
 
 use 5.42.0;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
 
@@ -155,14 +155,7 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
                 my $token_val = $child->token->value;
                 # Check for comparison operators using string equality
                 if (defined($token_val) &&
-                    ($token_val eq '==' || $token_val eq '!=' ||
-                     $token_val eq '<'  || $token_val eq '>'  ||
-                     $token_val eq '<=' || $token_val eq '>=' ||
-                     $token_val eq 'eq' || $token_val eq 'ne' ||
-                     $token_val eq 'lt' || $token_val eq 'gt' ||
-                     $token_val eq 'le' || $token_val eq 'ge' ||
-                     $token_val eq '=~' || $token_val eq '!~' ||
-                     $token_val eq 'isa')) {
+                    any { $token_val eq $_ } qw(== != < > <= >= eq ne lt gt le ge =~ !~ isa)) {
                     $operator = $token_val;
                     $operator_idx = $i;
                     last;
