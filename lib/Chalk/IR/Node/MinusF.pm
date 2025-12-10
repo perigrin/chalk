@@ -5,9 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::MinusF {
-    use Chalk::IR::Type::Float;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::Constant;
 
     field $operand :param :reader;
     field $source_info :param :reader = undef;

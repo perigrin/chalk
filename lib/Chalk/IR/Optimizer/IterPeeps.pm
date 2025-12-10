@@ -6,8 +6,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Optimizer::IterPeeps {
-    use Chalk::IR::Graph;
-    use Chalk::IR::Node;
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)

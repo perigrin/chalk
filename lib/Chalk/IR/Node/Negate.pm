@@ -5,9 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Negate {
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::Constant;
 
     field $operand :param :reader;
     field $source_info :param :reader = undef;

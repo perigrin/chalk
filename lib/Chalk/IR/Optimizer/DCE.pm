@@ -5,7 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Optimizer::DCE {
-    use Chalk::IR::Graph;
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)

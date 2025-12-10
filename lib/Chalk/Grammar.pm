@@ -80,9 +80,6 @@ class Chalk::GrammarRule {
 }
 
 class Chalk::Grammar {
-    use Chalk::Grammar::BNF;
-    use Chalk::Parser;
-    use Chalk::Semiring::Semantic;
 
     field $rules        :param :reader;
     field $start_symbol :param :reader;

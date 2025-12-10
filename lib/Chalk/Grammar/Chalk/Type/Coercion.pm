@@ -6,10 +6,6 @@ use experimental qw(class);
 use Chalk::Grammar::Chalk::Type::Code;
 
 class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Code) {
-    use Scalar::Util qw(looks_like_number);
-    use Chalk::Grammar::Chalk::Type::Exception;
-    use Chalk::Grammar::Chalk::Type::Num;
-    use Chalk::Grammar::Chalk::Type::Str;
 
     # Numeric coercion: to_num
     # Per spec: numbers stay, valid numeric strings parse, invalid to 0, refs to address

@@ -6,8 +6,6 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
 class Chalk::IR::Optimizer::GVN {
-    use Chalk::IR::Node;
-    use Chalk::IR::Graph;
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)

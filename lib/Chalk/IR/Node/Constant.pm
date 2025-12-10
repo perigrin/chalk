@@ -5,8 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Constant {
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Bool;
 
     field $value :param :reader;
     field $type  :param :reader;  # Must be a Type object (TypeInteger, TypeFloat, TypeBool, etc.)

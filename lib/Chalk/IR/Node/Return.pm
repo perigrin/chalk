@@ -5,7 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Return :isa(Chalk::IR::Node::CFGNode) {
-    use Chalk::IR::Node::CFGNode;
 
     field $control :param :reader;
     field $value :param :reader;

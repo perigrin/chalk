@@ -5,8 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Base {
-    use Chalk::IR::TransformRecord;
-    use Chalk::IR::Type::Top;
 
     method id() { refaddr($self) }
     field $inputs         :param :reader;

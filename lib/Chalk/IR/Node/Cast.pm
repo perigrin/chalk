@@ -5,8 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Cast :isa(Chalk::IR::Node::Base) {
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Type::MemoryPointer;
 
     # Target type to cast to
     field $target_type :param :reader;

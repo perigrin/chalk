@@ -5,7 +5,6 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
 class Chalk::IR::Graph {
-    use Chalk::IR::Node;
 
     field $nodes :reader = {};
     field $entry :reader = undef;

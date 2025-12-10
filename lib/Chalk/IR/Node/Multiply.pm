@@ -5,9 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Multiply {
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;

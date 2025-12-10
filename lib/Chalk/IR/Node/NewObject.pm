@@ -5,8 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::NewObject {
-    use Chalk::IR::Node::Constant;
-    use Chalk::Grammar::Chalk::Type::Maybe;
 
     field $class_type :param :reader = undef;
     field $source_info :param :reader = undef;

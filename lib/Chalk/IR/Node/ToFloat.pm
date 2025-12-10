@@ -5,10 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::ToFloat {
-    use Chalk::IR::Type::Float;
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Bool;
-    use Chalk::IR::Node::Constant;
 
     field $operand :param :reader;
     field $source_info :param :reader = undef;

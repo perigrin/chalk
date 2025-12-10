@@ -5,7 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
-    use Chalk::IR::Type::Top;
 
     field $index  :param :reader;
     field $label  :param :reader;
