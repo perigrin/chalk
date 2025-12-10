@@ -1,11 +1,12 @@
 # ABOUTME: Implementation of type coercion rules (to Num, to Str, to Bool)
 # ABOUTME: Provides formal coercion functions per latent type spec (Issue #74 Phase 4)
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 use Chalk::Grammar::Chalk::Type::Code;
 
 class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Code) {
+    use Scalar::Util qw(looks_like_number);
 
     # Numeric coercion: to_num
     # Per spec: numbers stay, valid numeric strings parse, invalid to 0, refs to address
