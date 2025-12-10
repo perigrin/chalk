@@ -7,6 +7,7 @@ use Chalk::Base;
 
 # Symbol Node - represents a nonterminal symbol at a position
 class Chalk::ParseForest::SymbolNode {
+    use overload '""' => 'to_string';
 
     field $symbol    :param :reader;
     field $start_pos :param :reader;
@@ -50,6 +51,7 @@ class Chalk::ParseForest::SymbolNode {
 # Per Scott's algorithm: labeled as (A ::= α · β, j, i) showing rule and dot position
 # Used for binarization of rules with |RHS| > 2 to achieve O(n³) complexity
 class Chalk::ParseForest::IntermediateNode {
+    use overload '""' => 'to_string';
 
     field $rule_label :param :reader;  # Format: "A ::= α · β"
     field $start_pos  :param :reader;
@@ -97,6 +99,7 @@ class Chalk::ParseForest::IntermediateNode {
 
 # Packed Node - represents one alternative parse of a symbol
 class Chalk::ParseForest::PackedNode {
+    use overload '""' => 'to_string';
 
     field $rule :param :reader;
     field @children;
@@ -117,6 +120,7 @@ class Chalk::ParseForest::PackedNode {
 
 # Terminal Node - represents a terminal symbol at a position
 class Chalk::ParseForest::TerminalNode {
+    use overload '""' => 'to_string';
 
     field $symbol    :param :reader;
     field $start_pos :param :reader;

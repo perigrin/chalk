@@ -5,6 +5,7 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::EvalContext {
+    use overload '""' => 'to_string';
 
     field $focus     :param :reader;      # Current semantic value
     field $children  :param :reader;      # Child contexts (array ref)
