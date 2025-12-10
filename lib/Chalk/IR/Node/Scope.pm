@@ -3,7 +3,6 @@
 use 5.42.0;
 use experimental qw(class builtin);
 use utf8;
-use Scalar::Util qw(refaddr);
 
 class Chalk::IR::Node::Scope {
     # Immutable Scope - all "mutation" methods return new Scope instances
