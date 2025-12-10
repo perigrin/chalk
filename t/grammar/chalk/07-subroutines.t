@@ -21,7 +21,7 @@ open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$fh> };
 close $fh;
 
-my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program');
+my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
 my $semiring = Chalk::Semiring::Boolean->new();
 
 sub parses_ok {
