@@ -25,7 +25,7 @@ jobs:
 
     - name: Install Perl dependencies
       run: |
-        cpanm --notest Test2::V0
+        cpanm --notest Test2::V0 Test::Deep
 
     - name: Run test suite
       run: |
