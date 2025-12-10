@@ -6,6 +6,7 @@ use utf8;
 use Chalk::Base;
 
 class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
+    use overload '""' => 'to_string';
 
     field $valid :param :reader;  # Boolean: 1 = semantically valid, 0 = invalid
     field $type :param :reader = undef;  # Inferred type (if known) - reserved for future use
