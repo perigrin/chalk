@@ -6,8 +6,6 @@ use experimental qw(class);
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 
 class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Store;
-    use Chalk::Semiring::TypeInference;  # For TypeInferenceElement
 
     method evaluate($context) {
         # Assignment -> Ternary (pass-through)

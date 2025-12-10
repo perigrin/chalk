@@ -6,10 +6,6 @@ use experimental 'class';
 
 
 class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Start;
-    use Chalk::IR::Node::Return;
-    use Chalk::IR::Node::Stop;
-    use Chalk::IR::Node::Constant;
 
     method evaluate($context) {
         # Get scope from environment

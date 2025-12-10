@@ -6,7 +6,6 @@ use experimental 'class';
 
 
 class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Store;
 
     method evaluate($context) {
         # VariableDeclaration -> LexicalDeclarator WS_OPT Variable
