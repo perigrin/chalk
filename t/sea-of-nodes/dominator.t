@@ -12,6 +12,7 @@ use Chalk::IR::Type::Bottom;
 use Chalk::IR::Type::Ctrl;
 use Chalk::IR::Type::Tuple;
 use Chalk::IR::Type::Bool;
+use Chalk::IR::Type::Integer;
 
 # Load node classes
 use_ok('Chalk::IR::Node::Base');
@@ -90,7 +91,7 @@ subtest 'If projections have If control as idom' => sub {
 
     my $cond = Chalk::IR::Node::Constant->new(
         value => true,
-        type => 'Bool',
+        type => Chalk::IR::Type::Bool->constant(true),
     );
 
     my $if_node = Chalk::IR::Node::If->new(
@@ -139,7 +140,7 @@ subtest 'Region idom is lowest common ancestor of inputs' => sub {
 
     my $cond = Chalk::IR::Node::Constant->new(
         value => true,
-        type => 'Bool',
+        type => Chalk::IR::Type::Bool->constant(true),
     );
 
     my $if_node = Chalk::IR::Node::If->new(
@@ -203,7 +204,7 @@ subtest 'Nested If with identical predicate detected in compute()' => sub {
 
     my $zero = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'Integer',
+        type => Chalk::IR::Type::Integer->constant(0),
     );
 
     # Predicate: $x > 0 (non-constant because $x is unknown)
@@ -273,7 +274,7 @@ subtest 'Nested If on false branch is always false' => sub {
 
     my $zero = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'Integer',
+        type => Chalk::IR::Type::Integer->constant(0),
     );
 
     # Non-constant predicate
@@ -345,7 +346,7 @@ subtest 'Different predicates are not optimized' => sub {
 
     my $zero = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'Integer',
+        type => Chalk::IR::Type::Integer->constant(0),
     );
 
     # Outer: $x > 0 (non-constant)

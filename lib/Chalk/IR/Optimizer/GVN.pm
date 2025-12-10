@@ -144,8 +144,30 @@ class Chalk::IR::Optimizer::GVN {
         # Special case: Constants
         if ($op eq 'Constant') {
             my $value = $attrs->{value} // '';
-            my $type = $attrs->{type} // '';
-            return "Constant:$value:$type";
+            my $type = $attrs->{type};
+
+            # Create canonical type string
+            my $type_str;
+            if (ref($type)) {
+                # Type is an object - create canonical representation
+                my $type_class = ref($type);
+                if ($type->can('is_constant') && $type->is_constant) {
+                    # For constant types, include the value
+                    $type_str = "$type_class:" . ($type->value // '');
+                } elsif ($type->can('is_bottom') && $type->is_bottom) {
+                    $type_str = "$type_class:BOTTOM";
+                } elsif ($type->can('is_top') && $type->is_top) {
+                    $type_str = "$type_class:TOP";
+                } else {
+                    # Fallback: just use class name
+                    $type_str = $type_class;
+                }
+            } else {
+                # Type is a string (legacy format)
+                $type_str = $type // '';
+            }
+
+            return "Constant:$value:$type_str";
         }
 
         # Special case: Proj nodes (include index)
