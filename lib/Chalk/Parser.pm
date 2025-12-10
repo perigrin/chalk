@@ -8,6 +8,7 @@ use Chalk::Grammar::Token;
 use Chalk::Preprocessor::Heredoc;
 
 class Chalk::EarleyItem {
+    use overload '""' => 'key';
 
     field $start_pos :param :reader;
     field $rule      :param :reader;
@@ -49,6 +50,7 @@ class Chalk::EarleyItem {
 # See t/optimization/test-leo-items.t for verification tests.
 # See issue #10 for detailed analysis and rationale.
 class Chalk::LeoItem {
+    use overload '""' => 'key';
 
     field $symbol    :param :reader;
     field $start_pos :param :reader;
