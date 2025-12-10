@@ -3,17 +3,17 @@
 
 use 5.042;
 use experimental qw(class);
+use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Type::Boolean;
+use Chalk::Grammar::Chalk::Type::Hash;
+use Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::List;
+use Chalk::Grammar::Chalk::Type::Num;
+use Chalk::Grammar::Chalk::Type::Scalar;
+use Chalk::Grammar::Chalk::Type::Str;
 
 class Chalk::Builtins {
-    use Chalk::Grammar::Chalk::Type::Any;
-    use Chalk::Grammar::Chalk::Type::Array;
-    use Chalk::Grammar::Chalk::Type::Boolean;
-    use Chalk::Grammar::Chalk::Type::Hash;
-    use Chalk::Grammar::Chalk::Type::Int;
-    use Chalk::Grammar::Chalk::Type::List;
-    use Chalk::Grammar::Chalk::Type::Num;
-    use Chalk::Grammar::Chalk::Type::Scalar;
-    use Chalk::Grammar::Chalk::Type::Str;
 
     # Built-in function signatures
     # Format: 'function_name' => { params => [...], returns => Type }
