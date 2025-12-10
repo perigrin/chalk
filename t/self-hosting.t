@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: Test chalk parsing its own source code (lib/) for true self-hosting
-# ABOUTME: This is the ultimate test - can chalk parse the actual current codebase?
+# ABOUTME: Test chalk parsing its own source code (lib/) with full type inference
+# ABOUTME: Uses ChalkSyntax semiring (Boolean + Precedence + TypeInference) for complete validation
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
@@ -10,6 +10,7 @@ use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
 use File::Find;
 use Chalk::Grammar::BNF;
+use Chalk::Semiring::ChalkSyntax;
 
 local $| = 1;
 
@@ -56,6 +57,9 @@ close $grammar_fh;
 
 my $chalk_grammar = Chalk::Grammar->build_from_bnf($bnf_content, "Program", "Chalk");
 
+# Create ChalkSyntax semiring (Boolean + Precedence + TypeInference)
+my $semiring = Chalk::Semiring::ChalkSyntax->new(grammar => $chalk_grammar);
+
 # Find all .pm files in lib/
 my @pm_files;
 find(
@@ -82,7 +86,7 @@ for my $file (@pm_files) {
     my $content = do { local $/; <$fh> };
     close $fh;
 
-    my $parser = Chalk::Parser->new(grammar => $chalk_grammar);
+    my $parser = Chalk::Parser->new(grammar => $chalk_grammar, semiring => $semiring);
     my $result = $parser->parse_string($content);
 
     if ($result) {
