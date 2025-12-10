@@ -13,6 +13,7 @@ use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Multiply;
 use Chalk::IR::Graph;
 use Chalk::IR::Optimizer::IterPeeps;
+use Chalk::IR::Type::Integer;
 
 subtest 'peephole creates GVN opportunity: (a+b) + (a+b)' => sub {
     # Build: (5+10) + (5+10)
@@ -22,8 +23,8 @@ subtest 'peephole creates GVN opportunity: (a+b) + (a+b)' => sub {
 
     my $graph = Chalk::IR::Graph->new();
 
-    my $a = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
+    my $b = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->constant(10));
     my $sum1 = Chalk::IR::Node::Add->new(left => $a, right => $b);
     my $sum2 = Chalk::IR::Node::Add->new(left => $a, right => $b);
     my $total = Chalk::IR::Node::Add->new(left => $sum1, right => $sum2);
@@ -56,10 +57,10 @@ subtest 'GVN merge enables new peephole: shared subexpression' => sub {
 
     my $graph = Chalk::IR::Graph->new();
 
-    my $x = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
-    my $y = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $two = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $three = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $x = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
+    my $y = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $two = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $three = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
 
     my $sum1 = Chalk::IR::Node::Add->new(left => $x, right => $y);      # x + y = 7
     my $sum2 = Chalk::IR::Node::Add->new(left => $x, right => $y);      # x + y = 7 (duplicate)
@@ -96,8 +97,8 @@ subtest 'metrics report GVN hits' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     # Create two identical additions that will fold to same constant
-    my $a = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $b = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
     my $add1 = Chalk::IR::Node::Add->new(left => $a, right => $b);
     my $add2 = Chalk::IR::Node::Add->new(left => $a, right => $b);
 

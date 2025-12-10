@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Bool;
 
 class Chalk::IR::Node::NE {
 
@@ -70,7 +71,7 @@ class Chalk::IR::Node::NE {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Bool',
+                type  => Chalk::IR::Type::Bool->constant($type->value),
             );
         }
 
@@ -86,7 +87,10 @@ class Chalk::IR::Node::NE {
     method idealize() {
         # x != x -> false (self-inequality)
         if ($left->id eq $right->id) {
-            return Chalk::IR::Node::Constant->new(value => false, type => 'Bool');
+            return Chalk::IR::Node::Constant->new(
+                value => false,
+                type => Chalk::IR::Type::Bool->constant(false)
+            );
         }
         return;
     }

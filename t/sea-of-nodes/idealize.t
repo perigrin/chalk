@@ -18,10 +18,12 @@ use_ok('Chalk::IR::Node::GT');
 use_ok('Chalk::IR::Node::LE');
 use_ok('Chalk::IR::Node::GE');
 
+use Chalk::IR::Type::Integer;
+
 # Helper to create constant nodes
 sub const {
     my ($val) = @_;
-    return Chalk::IR::Node::Constant->new(value => $val, type => 'Integer');
+    return Chalk::IR::Node::Constant->new(value => $val, type => Chalk::IR::Type::Integer->constant($val));
 }
 
 # =============================================================================

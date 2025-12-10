@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Ctrl;
 
 class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
 
@@ -99,7 +100,7 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
                     # Dead branch: return a ~Ctrl constant
                     return Chalk::IR::Node::Constant->new(
                         value => '~Ctrl',
-                        type  => 'Control',
+                        type  => Chalk::IR::Type::Ctrl->CTRL(),
                     );
                 }
             }

@@ -67,7 +67,7 @@ class Chalk::IR::Node::Divide {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Integer',
+                type  => $type,
             );
         }
 

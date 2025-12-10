@@ -11,17 +11,18 @@ use Chalk::IR::Node::Cast;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Integer;
 use Chalk::IR::Type::Top;
+use Chalk::IR::Type::Ctrl;
 use Chalk::IR::Graph;
 
 subtest 'Cast node construction' => sub {
     my $ctrl = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Control',
+        type  => Chalk::IR::Type::Ctrl->CTRL(),
     );
 
     my $input = Chalk::IR::Node::Constant->new(
         value => 42,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(42),
     );
 
     my $target_type = Chalk::IR::Type::Integer->constant(42);
@@ -42,12 +43,12 @@ subtest 'Cast node construction' => sub {
 subtest 'Cast compute() joins input and target types' => sub {
     my $ctrl = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Control',
+        type  => Chalk::IR::Type::Ctrl->CTRL(),
     );
 
     my $input = Chalk::IR::Node::Constant->new(
         value => 42,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(42),
     );
 
     # Target type: Integer constant 42
@@ -70,12 +71,12 @@ subtest 'Cast peephole removes redundant cast' => sub {
 
     my $ctrl = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Control',
+        type  => Chalk::IR::Type::Ctrl->CTRL(),
     );
 
     my $input = Chalk::IR::Node::Constant->new(
         value => 42,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(42),
     );
 
     # Target type: Integer TOP (any integer)
@@ -105,12 +106,12 @@ subtest 'Cast peephole preserves necessary cast' => sub {
 
     my $ctrl = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Control',
+        type  => Chalk::IR::Type::Ctrl->CTRL(),
     );
 
     my $input = Chalk::IR::Node::Constant->new(
         value => 42,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(42),
     );
 
     # Target type: Integer constant 7 (different from input)
@@ -138,12 +139,12 @@ subtest 'Cast peephole preserves necessary cast' => sub {
 subtest 'Cast to_hash includes attributes' => sub {
     my $ctrl = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Control',
+        type  => Chalk::IR::Type::Ctrl->CTRL(),
     );
 
     my $input = Chalk::IR::Node::Constant->new(
         value => 42,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(42),
     );
 
     my $target_type = Chalk::IR::Type::Integer->constant(42);

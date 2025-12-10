@@ -22,6 +22,8 @@ use_ok('Chalk::Grammar');
 use_ok('Chalk::Grammar::Chalk');
 use_ok('Chalk::Semiring::ChalkIR');
 use_ok('Chalk::IR::Node::Scope');
+use_ok('Chalk::IR::Type::Integer');
+use_ok('Chalk::IR::Type::Bool');
 
 # === Part 1: Direct Node Construction Tests ===
 # These test the node classes in isolation (unit tests)
@@ -49,7 +51,7 @@ subtest 'Start node: function entry point' => sub {
 subtest 'Constant node: literal value' => sub {
     my $const = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Int',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
 
     # Constant has no inputs (leaf node)
@@ -60,7 +62,7 @@ subtest 'Constant node: literal value' => sub {
 
     # Value accessor
     is($const->value, 1, 'Constant node value is 1');
-    is($const->type, 'Int', 'Constant node type is Int');
+    ok($const->type isa Chalk::IR::Type::Integer, 'Constant node type is Integer');
 
     # id() returns unique identifier
     ok($const->id, 'Constant node has an id');
@@ -69,12 +71,12 @@ subtest 'Constant node: literal value' => sub {
     my $hash = $const->to_hash;
     is($hash->{op}, 'Constant', 'to_hash includes op');
     is($hash->{attributes}{value}, 1, 'to_hash includes value');
-    is($hash->{attributes}{type}, 'Int', 'to_hash includes type');
+    ok($hash->{attributes}{type} isa Chalk::IR::Type::Integer, 'to_hash includes type');
 };
 
 subtest 'Return node: function exit' => sub {
     my $start = Chalk::IR::Node::Start->new(label => 'main');
-    my $const = Chalk::IR::Node::Constant->new(value => 1, type => 'Int');
+    my $const = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
 
     my $return = Chalk::IR::Node::Return->new(
         control => $start,
@@ -103,8 +105,8 @@ subtest 'Return node: function exit' => sub {
 
 subtest 'Node ID uniqueness' => sub {
     my $start = Chalk::IR::Node::Start->new(label => 'main');
-    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Int');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => 'Int');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
     my $return = Chalk::IR::Node::Return->new(control => $start, value => $const1);
 
     # All nodes should have unique IDs
@@ -124,7 +126,7 @@ subtest 'Build minimal graph: Start -> Return(Constant)' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     my $start = Chalk::IR::Node::Start->new(label => 'main');
-    my $const = Chalk::IR::Node::Constant->new(value => 1, type => 'Int');
+    my $const = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
     my $return = Chalk::IR::Node::Return->new(control => $start, value => $const);
 
     $graph->add_node($start);
@@ -266,7 +268,7 @@ subtest 'Chapter 1 compliance: node structure matches Simple' => sub {
     # - Constant: inputs = [Start] for traversal (Chalk differs here)
 
     my $start = Chalk::IR::Node::Start->new(label => 'test');
-    my $const = Chalk::IR::Node::Constant->new(value => 1, type => 'Int');
+    my $const = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
     my $return = Chalk::IR::Node::Return->new(control => $start, value => $const);
 
     # Start compliance

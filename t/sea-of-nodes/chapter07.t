@@ -16,6 +16,7 @@ use Chalk::IR::Validator;
 use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Phi;
+use Chalk::IR::Type::Integer;
 
 subtest 'Loop node creation' => sub {
     my $graph = Chalk::IR::Graph->new();
@@ -652,7 +653,7 @@ subtest 'Phi singleUniqueInput optimization: all inputs same node' => sub {
     # The single data value that all Phi inputs point to
     my $const_42 = Chalk::IR::Node::Constant->new(
         value => 42,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(42),
     );
     $graph->add_node($const_42);
 
@@ -681,13 +682,13 @@ subtest 'Phi singleUniqueInput: different inputs should NOT simplify' => sub {
 
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -726,7 +727,7 @@ subtest 'While with chained adds (no peephole)' => sub {
     # Initial: a = 1
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -748,7 +749,7 @@ subtest 'While with chained adds (no peephole)' => sub {
     # a = a + 1
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -761,7 +762,7 @@ subtest 'While with chained adds (no peephole)' => sub {
     # a = a + 2  (where a is now add1)
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -798,7 +799,7 @@ subtest 'While with chained adds (with peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -818,7 +819,7 @@ subtest 'While with chained adds (with peephole)' => sub {
 
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -830,7 +831,7 @@ subtest 'While with chained adds (with peephole)' => sub {
 
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -869,7 +870,7 @@ subtest 'While with conditional assignment (no peephole)' => sub {
     # Initial: a = 1
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -891,7 +892,7 @@ subtest 'While with conditional assignment (no peephole)' => sub {
     # a = 2 (inside loop)
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -928,7 +929,7 @@ subtest 'While with conditional assignment (with peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -948,7 +949,7 @@ subtest 'While with conditional assignment (with peephole)' => sub {
 
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -977,7 +978,7 @@ subtest 'While with intermediate variable (no peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -998,7 +999,7 @@ subtest 'While with intermediate variable (no peephole)' => sub {
     # b = a + 1 (intermediate variable)
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1011,7 +1012,7 @@ subtest 'While with intermediate variable (no peephole)' => sub {
     # a = b + 2
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -1047,7 +1048,7 @@ subtest 'While with intermediate variable (with peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -1067,7 +1068,7 @@ subtest 'While with intermediate variable (with peephole)' => sub {
 
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1079,7 +1080,7 @@ subtest 'While with intermediate variable (with peephole)' => sub {
 
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -1119,13 +1120,13 @@ subtest 'While with variable shadowing (no peephole)' => sub {
     # Outer scope: a = 1, b = 2
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
     my $init_b = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($init_b);
 
@@ -1146,7 +1147,7 @@ subtest 'While with variable shadowing (no peephole)' => sub {
     # Inner b = a + 1 (shadows outer b)
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1159,7 +1160,7 @@ subtest 'While with variable shadowing (no peephole)' => sub {
     # a = b + 2 (using inner b)
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -1198,13 +1199,13 @@ subtest 'While with variable shadowing (with peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
     my $init_b = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($init_b);
 
@@ -1224,7 +1225,7 @@ subtest 'While with variable shadowing (with peephole)' => sub {
 
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1236,7 +1237,7 @@ subtest 'While with variable shadowing (with peephole)' => sub {
 
     my $const_2 = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($const_2);
 
@@ -1280,13 +1281,13 @@ subtest 'Nested while loops (no peephole)' => sub {
     # Initial: i = 0, sum = 0
     my $init_i = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_i);
 
     my $init_sum = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_sum);
 
@@ -1316,7 +1317,7 @@ subtest 'Nested while loops (no peephole)' => sub {
     # Inner loop: j = 0
     my $init_j = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_j);
 
@@ -1352,7 +1353,7 @@ subtest 'Nested while loops (no peephole)' => sub {
     # j = j + 1
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1404,13 +1405,13 @@ subtest 'Nested while loops (with peephole)' => sub {
 
     my $init_i = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_i);
 
     my $init_sum = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_sum);
 
@@ -1436,7 +1437,7 @@ subtest 'Nested while loops (with peephole)' => sub {
 
     my $init_j = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_j);
 
@@ -1468,7 +1469,7 @@ subtest 'Nested while loops (with peephole)' => sub {
 
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1517,13 +1518,13 @@ subtest 'While with conditional inside (no peephole)' => sub {
     # Initial: a = arg (assume 0), b = 2
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_a);
 
     my $init_b = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($init_b);
 
@@ -1556,7 +1557,7 @@ subtest 'While with conditional inside (no peephole)' => sub {
 
     my $const_4 = Chalk::IR::Node::Constant->new(
         value => 4,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(4),
     );
     $graph->add_node($const_4);
 
@@ -1578,7 +1579,7 @@ subtest 'While with conditional inside (no peephole)' => sub {
     # a = a + 1
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1624,13 +1625,13 @@ subtest 'While with conditional inside (with peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_a);
 
     my $init_b = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($init_b);
 
@@ -1656,7 +1657,7 @@ subtest 'While with conditional inside (with peephole)' => sub {
 
     my $const_4 = Chalk::IR::Node::Constant->new(
         value => 4,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(4),
     );
     $graph->add_node($const_4);
 
@@ -1673,7 +1674,7 @@ subtest 'While with conditional inside (with peephole)' => sub {
 
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1710,13 +1711,13 @@ subtest 'While with if-else and increment (no peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_a);
 
     my $init_b = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($init_b);
 
@@ -1743,7 +1744,7 @@ subtest 'While with if-else and increment (no peephole)' => sub {
     # if(a == 2) b = 4; else b = Phi_b
     my $const_4 = Chalk::IR::Node::Constant->new(
         value => 4,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(4),
     );
     $graph->add_node($const_4);
 
@@ -1762,7 +1763,7 @@ subtest 'While with if-else and increment (no peephole)' => sub {
     # a = a + 1
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1814,13 +1815,13 @@ subtest 'While with if-else and increment (with peephole)' => sub {
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 0,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(0),
     );
     $graph->add_node($init_a);
 
     my $init_b = Chalk::IR::Node::Constant->new(
         value => 2,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(2),
     );
     $graph->add_node($init_b);
 
@@ -1846,7 +1847,7 @@ subtest 'While with if-else and increment (with peephole)' => sub {
 
     my $const_4 = Chalk::IR::Node::Constant->new(
         value => 4,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(4),
     );
     $graph->add_node($const_4);
 
@@ -1863,7 +1864,7 @@ subtest 'While with if-else and increment (with peephole)' => sub {
 
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1);
 
@@ -1915,7 +1916,7 @@ subtest 'Conditional with while in else (no peephole)' => sub {
     # arg (some input value)
     my $arg = Chalk::IR::Node::Constant->new(
         value => 10,  # Arbitrary non-zero value for testing structure
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(10),
     );
     $graph->add_node($arg);
 
@@ -1949,14 +1950,14 @@ subtest 'Conditional with while in else (no peephole)' => sub {
     # True branch: return 1
     my $const_1_true = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1_true);
 
     # False branch: int a = 1; while(a < arg) { a = a + 1; } return a;
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -1979,7 +1980,7 @@ subtest 'Conditional with while in else (no peephole)' => sub {
     # a = a + 1
     my $const_1_loop = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1_loop);
 
@@ -2046,7 +2047,7 @@ subtest 'Conditional with while in else (with peephole)' => sub {
 
     my $arg = Chalk::IR::Node::Constant->new(
         value => 10,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(10),
     );
     $graph->add_node($arg);
 
@@ -2076,13 +2077,13 @@ subtest 'Conditional with while in else (with peephole)' => sub {
 
     my $const_1_true = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1_true);
 
     my $init_a = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($init_a);
 
@@ -2102,7 +2103,7 @@ subtest 'Conditional with while in else (with peephole)' => sub {
 
     my $const_1_loop = Chalk::IR::Node::Constant->new(
         value => 1,
-        type  => 'Integer',
+        type  => Chalk::IR::Type::Integer->constant(1),
     );
     $graph->add_node($const_1_loop);
 

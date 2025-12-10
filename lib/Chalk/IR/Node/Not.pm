@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Bool;
 
 class Chalk::IR::Node::Not {
 
@@ -63,7 +64,7 @@ class Chalk::IR::Node::Not {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Bool',
+                type  => Chalk::IR::Type::Bool->constant($type->value),
             );
         }
         return $self;
