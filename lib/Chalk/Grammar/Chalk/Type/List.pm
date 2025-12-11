@@ -2,7 +2,7 @@
 # ABOUTME: Implements List <: Any subtyping chain, parent of Array and Hash types
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 use Chalk::Grammar::Chalk::Type::Array;
 use Chalk::Grammar::Chalk::Type::Hash;
 use Chalk::Grammar::Chalk::Type::Any;

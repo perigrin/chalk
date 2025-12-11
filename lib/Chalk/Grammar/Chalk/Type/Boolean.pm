@@ -2,7 +2,7 @@
 # ABOUTME: Implements Boolean <: Scalar <: Any subtyping chain
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Boolean :isa(Chalk::Grammar::Chalk::Type) {
     # Boolean represents all truthy and falsy values
@@ -12,9 +12,11 @@ class Chalk::Grammar::Chalk::Type::Boolean :isa(Chalk::Grammar::Chalk::Type) {
         # Boolean <: Boolean (reflexive)
         # Boolean <: Scalar
         # Boolean <: Any
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Boolean' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::Boolean',
+            'Chalk::Grammar::Chalk::Type::Scalar',
+            'Chalk::Grammar::Chalk::Type::Any',
+        );
     }
 
     method round_trip_preserves($value) {

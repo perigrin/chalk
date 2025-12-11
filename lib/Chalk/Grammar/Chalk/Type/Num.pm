@@ -2,7 +2,7 @@
 # ABOUTME: Implements Num <: Str <: Scalar <: Any chain (numbers round-trip through strings)
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Num :isa(Chalk::Grammar::Chalk::Type) {
     # Num represents numeric values
@@ -14,10 +14,14 @@ class Chalk::Grammar::Chalk::Type::Num :isa(Chalk::Grammar::Chalk::Type) {
         # Num <: Str (round-trip preservation)
         # Num <: Scalar
         # Num <: Any
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Num' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Str' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::Num',
+            'Chalk::Grammar::Chalk::Type::Str',
+            'Chalk::Grammar::Chalk::Type::Scalar',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 
     method round_trip_preserves($value) {

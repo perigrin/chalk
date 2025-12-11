@@ -2,7 +2,7 @@
 # ABOUTME: Implements Int <: Num <: Str <: Scalar <: Any subtyping chain
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Int :isa(Chalk::Grammar::Chalk::Type) {
     # Int represents integer values
@@ -14,11 +14,15 @@ class Chalk::Grammar::Chalk::Type::Int :isa(Chalk::Grammar::Chalk::Type) {
         # Int <: Str (transitive)
         # Int <: Scalar (transitive)
         # Int <: Any (transitive)
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Int' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Num' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Str' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::Int',
+            'Chalk::Grammar::Chalk::Type::Num',
+            'Chalk::Grammar::Chalk::Type::Str',
+            'Chalk::Grammar::Chalk::Type::Scalar',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 
     method round_trip_preserves($value) {

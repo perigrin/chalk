@@ -2,7 +2,7 @@
 # ABOUTME: Implements Code <: Any subtyping chain (not a Scalar subtype)
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Code :isa(Chalk::Grammar::Chalk::Type) {
     # Code represents code/subroutine values
@@ -12,8 +12,12 @@ class Chalk::Grammar::Chalk::Type::Code :isa(Chalk::Grammar::Chalk::Type) {
     method is_subtype_of($other) {
         # Code <: Code (reflexive)
         # Code <: Any
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Code' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::Code',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 }
 
