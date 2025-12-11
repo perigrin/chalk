@@ -62,7 +62,7 @@
 %COMMENT% = /#[^\n]*/
 # Reserved keywords excluded from barewords via negative lookahead
 # Note: method/sub NOT reserved - they can be method names and need special grammar handling
-%BAREWORD% = /(?!(?:class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+%BAREWORD% = /(?!(?:class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp|true|false|__FILE__|__LINE__)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 %BAREWORD_ANY% = /[a-zA-Z_][a-zA-Z0-9_]*/
 %SPECIAL_IDENTIFIER% = /[0-9]+|[&`'+@!$-]|^[A-Z]|\{[^}]+\}/
 %INTEGER% = /[0-9]+/
@@ -329,9 +329,9 @@ ExpressionList -> Expression
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression  # Fat comma pair
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Fat comma pair with trailing comma
 ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Pairs with more
-ExpressionList -> %BAREWORD_ANY% WS_OPT '=>' WS_OPT Expression  # Bareword hash key (auto-quoted, allows keywords)
-ExpressionList -> %BAREWORD_ANY% WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Bareword key with trailing comma
-ExpressionList -> %BAREWORD_ANY% WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Bareword key with more
+ExpressionList -> %BAREWORD% WS_OPT '=>' WS_OPT Expression  # Bareword hash key (auto-quoted, excludes reserved keywords and constants)
+ExpressionList -> %BAREWORD% WS_OPT '=>' WS_OPT Expression WS_OPT ','  # Bareword key with trailing comma
+ExpressionList -> %BAREWORD% WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList  # Bareword key with more
 ExpressionList ->
 
 # Yada-yada operator - placeholder that throws "Unimplemented" when evaluated

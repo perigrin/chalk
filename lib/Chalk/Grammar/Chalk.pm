@@ -70,46 +70,7 @@ use Chalk::Grammar::Chalk::Rule::WS_OPT;
 use Chalk::Grammar::Chalk::Rule::YaddaYadda;
 
 class Chalk::Grammar::Chalk {
-    use FindBin qw($RealBin);
-    use File::Spec;
-    use Cwd qw(abs_path);
-
-    field $grammar :reader;
-
-    ADJUST {
-        # Load the full Chalk grammar from chalk.bnf
-        # Try multiple path resolution strategies
-        my @possible_paths = (
-            # From test directory (when running tests)
-            File::Spec->catfile($RealBin, '..', '..', 'grammar', 'chalk.bnf'),
-            # From current directory (when using as module)
-            File::Spec->catfile('grammar', 'chalk.bnf'),
-            # From module location
-            do {
-                my $module_dir = abs_path(__FILE__);
-                $module_dir =~ s{/lib/Chalk/Grammar/Chalk\.pm$}{};
-                File::Spec->catfile($module_dir, 'grammar', 'chalk.bnf');
-            }
-        );
-
-        my $bnf_path;
-        for my $path (@possible_paths) {
-            if (-f $path) {
-                $bnf_path = $path;
-                last;
-            }
-        }
-
-        die "Cannot find chalk.bnf, tried: " . join(', ', @possible_paths)
-            unless $bnf_path;
-
-        open my $fh, '<:utf8', $bnf_path
-            or die "Cannot open chalk.bnf at $bnf_path: $!";
-        my $bnf_content = do { local $/; <$fh> };
-        close $fh;
-
-        $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
-    }
+    field $grammar :reader :param;
 
     # Delegate methods to inner grammar object
     method start_symbol() { $grammar->start_symbol }
