@@ -468,6 +468,10 @@ Literal -> RegexPattern
 Literal -> RegexSubstitution
 Literal -> EmptyList
 Literal -> 'undef'
+Literal -> 'true'
+Literal -> 'false'
+Literal -> '__FILE__'
+Literal -> '__LINE__'
 
 EmptyList -> '(' WS_OPT ')'
 
