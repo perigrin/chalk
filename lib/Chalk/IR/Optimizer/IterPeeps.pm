@@ -107,7 +107,7 @@ class Chalk::IR::Optimizer::IterPeeps {
         my %node_to_value;
 
         # Initialize worklist with all node IDs
-        my @worklist = keys %{$graph->nodes};
+        my @worklist = keys($graph->nodes->%*);
         my %in_worklist = map { $_ => 1 } @worklist;
 
         # Pre-populate GVN table with existing nodes
@@ -222,7 +222,7 @@ class Chalk::IR::Optimizer::IterPeeps {
 
         # Build new graph with updated references
         my $new_graph = Chalk::IR::Graph->new();
-        my @node_ids = sort keys %{$graph->nodes};
+        my @node_ids = sort keys($graph->nodes->%*);
 
         for my $node_id (@node_ids) {
             # Skip nodes that were replaced (unless they're the final destination)

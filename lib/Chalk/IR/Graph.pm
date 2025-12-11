@@ -104,7 +104,7 @@ class Chalk::IR::Graph {
     }
 
     method node_count() {
-        return scalar keys %{$nodes};
+        return scalar keys($nodes->%*);
     }
 
     method set_entry($new_entry) {
@@ -113,7 +113,7 @@ class Chalk::IR::Graph {
     }
 
     method to_json() {
-        my @node_list = map { $_->to_hash() } values %{$nodes};
+        my @node_list = map { $_->to_hash() } values($nodes->%*);
 
         return {
             version => '1.0',
@@ -214,7 +214,7 @@ class Chalk::IR::Graph {
         }
 
         # Remove all unreachable nodes
-        my @all_node_ids = keys %{$nodes};
+        my @all_node_ids = keys($nodes->%*);
         for my $node_id (@all_node_ids) {
             if (!exists($reachable{$node_id})) {
                 delete $nodes->{$node_id};
@@ -242,7 +242,7 @@ class Chalk::IR::Graph {
 
         # Collect all CFG nodes
         my @cfg_nodes;
-        for my $node (values %{$nodes}) {
+        for my $node (values($nodes->%*)) {
             if ($node->can('isCFG') && $node->isCFG) {
                 push @cfg_nodes, $node;
             }
@@ -341,7 +341,7 @@ class Chalk::IR::Graph {
         };
 
         # Start DFS from all nodes (backward traversal)
-        my @node_ids = keys %{$nodes};
+        my @node_ids = keys($nodes->%*);
         for my $node_id (@node_ids) {
             $schedule_node->($node_id);
         }
@@ -522,7 +522,7 @@ class Chalk::IR::Graph {
         };
 
         # Start DFS from all nodes (forward traversal from inputs)
-        my @node_ids = keys %{$nodes};
+        my @node_ids = keys($nodes->%*);
         for my $node_id (@node_ids) {
             $schedule_node->($node_id);
         }

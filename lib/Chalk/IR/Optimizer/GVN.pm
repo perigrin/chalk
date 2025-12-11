@@ -27,7 +27,7 @@ class Chalk::IR::Optimizer::GVN {
         my $redirections = {};
 
         # Get all nodes in a consistent order (we'll process them by ID order)
-        my @node_ids = sort keys %{$graph->nodes};
+        my @node_ids = sort keys($graph->nodes->%*);
 
         # Phase 1: Compute value numbers for all nodes
         for my $node_id (@node_ids) {
@@ -124,7 +124,7 @@ class Chalk::IR::Optimizer::GVN {
         }
 
         # Compute metrics
-        my $nodes_eliminated = scalar keys %{$redirections};
+        my $nodes_eliminated = scalar keys($redirections->%*);
 
         return {
             graph => $new_graph,

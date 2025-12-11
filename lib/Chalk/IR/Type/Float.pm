@@ -14,19 +14,17 @@ class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
     method is_constant() { (defined($value) && !$is_bottom) ? 1 : 0 }
     method is_top()      { (!defined($value) && !$is_bottom) ? 1 : 0 }
 
-    sub TOP {
-        state $singleton = __PACKAGE__->new();
+    sub TOP ($class) {
+        state $singleton = $class->new();
         return $singleton;
     }
 
-    sub BOTTOM {
-        state $singleton = __PACKAGE__->new(is_bottom => 1);
+    sub BOTTOM ($class) {
+        state $singleton = $class->new(is_bottom => 1);
         return $singleton;
     }
 
-    sub constant {
-        my $class = shift // __PACKAGE__;
-        my $val = shift;
+    sub constant ($class, $val) {
         return $class->new(value => $val);
     }
 
@@ -38,17 +36,17 @@ class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
         return $self if $other isa Chalk::IR::Type::Top;
 
         # FloatBot absorbs everything within float domain
-        return __PACKAGE__->BOTTOM() if $self->is_bottom;
-        return __PACKAGE__->BOTTOM() if $other isa __PACKAGE__ && $other->is_bottom;
+        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $other isa blessed($self) && $other->is_bottom;
 
         # FloatTop is identity for meet within float domain
-        return $other if $self->is_top && $other isa __PACKAGE__;
-        return $self if $other isa __PACKAGE__ && $other->is_top;
+        return $other if $self->is_top && $other isa blessed($self);
+        return $self if $other isa blessed($self) && $other->is_top;
 
         # Two constants: same value = that constant, different = FloatTop
-        if ($self->is_constant && $other isa __PACKAGE__ && $other->is_constant) {
+        if ($self->is_constant && $other isa blessed($self) && $other->is_constant) {
             return $self if $value == $other->value;
-            return __PACKAGE__->TOP();
+            return blessed($self)->TOP();
         }
 
         # Cross-type meet = global Top
@@ -63,17 +61,17 @@ class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Top;
 
         # FloatBot is identity for join within float domain
-        return $other if $self->is_bottom && $other isa __PACKAGE__;
-        return $self if $other isa __PACKAGE__ && $other->is_bottom;
+        return $other if $self->is_bottom && $other isa blessed($self);
+        return $self if $other isa blessed($self) && $other->is_bottom;
 
         # FloatTop absorbs everything within float domain
-        return __PACKAGE__->TOP() if $self->is_top;
-        return __PACKAGE__->TOP() if $other isa __PACKAGE__ && $other->is_top;
+        return blessed($self)->TOP() if $self->is_top;
+        return blessed($self)->TOP() if $other isa blessed($self) && $other->is_top;
 
         # Two constants: same value = that constant, different = FloatTop
-        if ($self->is_constant && $other isa __PACKAGE__ && $other->is_constant) {
+        if ($self->is_constant && $other isa blessed($self) && $other->is_constant) {
             return $self if $value == $other->value;
-            return __PACKAGE__->TOP();
+            return blessed($self)->TOP();
         }
 
         # Cross-type join = global Top

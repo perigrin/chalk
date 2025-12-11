@@ -8,9 +8,8 @@ use Chalk::IR::Type;
 class Chalk::IR::Type::Top :isa(Chalk::IR::Type) {
     # Class method to get the singleton TOP instance
     # Uses state variable to ensure only one instance is created
-    sub top {
-        my $class = shift // __PACKAGE__;
-        state $singleton = Chalk::IR::Type::Top->new();
+    sub top ($class) {
+        state $singleton = $class->new();
         return $singleton;
     }
 

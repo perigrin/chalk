@@ -32,7 +32,7 @@ class Chalk::IR::Optimizer::GCM {
             graph => $graph,
             schedule => $late_schedule,
             metrics => {
-                scheduled_nodes => scalar(keys %{$late_schedule}),
+                scheduled_nodes => scalar(keys($late_schedule->%*)),
             }
         };
     }
