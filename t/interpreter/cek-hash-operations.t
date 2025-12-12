@@ -11,6 +11,8 @@ use Chalk::IR::Node::HashStore;
 use Chalk::IR::Node::HashLoad;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Start;
+use Chalk::IR::Type::Integer;
+use Chalk::Grammar::Chalk::Type::Str;
 use Chalk::Interpreter::CEKDataflow;
 
 # Test 1: NewHash allocates a heap ID
@@ -36,8 +38,8 @@ use Chalk::Interpreter::CEKDataflow;
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test2', params => []);
     my $new_hash = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
-    my $key = Chalk::IR::Node::Constant->new(value => 'name', type => 'string');
-    my $value = Chalk::IR::Node::Constant->new(value => 'Alice', type => 'string');
+    my $key = Chalk::IR::Node::Constant->new(value => 'name', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $value = Chalk::IR::Node::Constant->new(value => 'Alice', type => Chalk::Grammar::Chalk::Type::Str->new());
     my $store = Chalk::IR::Node::HashStore->new(
         inputs => [$new_hash->id, $key->id, $value->id],
         hash_id => $new_hash->id,
@@ -65,8 +67,8 @@ use Chalk::Interpreter::CEKDataflow;
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test3', params => []);
     my $new_hash = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
-    my $key = Chalk::IR::Node::Constant->new(value => 'age', type => 'string');
-    my $value = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $key = Chalk::IR::Node::Constant->new(value => 'age', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $value = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
     my $store = Chalk::IR::Node::HashStore->new(
         inputs => [$new_hash->id, $key->id, $value->id],
         hash_id => $new_hash->id,
@@ -100,10 +102,10 @@ use Chalk::Interpreter::CEKDataflow;
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test4', params => []);
     my $new_hash = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
-    my $key_x = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $val_10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $key_y = Chalk::IR::Node::Constant->new(value => 'y', type => 'string');
-    my $val_20 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+    my $key_x = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $key_y = Chalk::IR::Node::Constant->new(value => 'y', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_20 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 
     my $store_x = Chalk::IR::Node::HashStore->new(
         inputs => [$new_hash->id, $key_x->id, $val_10->id],
@@ -148,10 +150,10 @@ use Chalk::Interpreter::CEKDataflow;
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test5', params => []);
     my $new_hash = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
-    my $key_x = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $val_10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $key_y = Chalk::IR::Node::Constant->new(value => 'y', type => 'string');
-    my $val_20 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+    my $key_x = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $key_y = Chalk::IR::Node::Constant->new(value => 'y', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_20 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 
     my $store_x = Chalk::IR::Node::HashStore->new(
         inputs => [$new_hash->id, $key_x->id, $val_10->id],
@@ -198,9 +200,9 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test6', params => []);
     my $hash1 = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
     my $hash2 = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
-    my $key = Chalk::IR::Node::Constant->new(value => 'name', type => 'string');
-    my $val_alice = Chalk::IR::Node::Constant->new(value => 'Alice', type => 'string');
-    my $val_bob = Chalk::IR::Node::Constant->new(value => 'Bob', type => 'string');
+    my $key = Chalk::IR::Node::Constant->new(value => 'name', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_alice = Chalk::IR::Node::Constant->new(value => 'Alice', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_bob = Chalk::IR::Node::Constant->new(value => 'Bob', type => Chalk::Grammar::Chalk::Type::Str->new());
 
     my $store_alice = Chalk::IR::Node::HashStore->new(
         inputs => [$hash1->id, $key->id, $val_alice->id],
@@ -247,9 +249,9 @@ use Chalk::Interpreter::CEKDataflow;
     my $start = Chalk::IR::Node::Start->new(function_name => 'test7', params => []);
     my $hash1 = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
     my $hash2 = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
-    my $key = Chalk::IR::Node::Constant->new(value => 'name', type => 'string');
-    my $val_alice = Chalk::IR::Node::Constant->new(value => 'Alice', type => 'string');
-    my $val_bob = Chalk::IR::Node::Constant->new(value => 'Bob', type => 'string');
+    my $key = Chalk::IR::Node::Constant->new(value => 'name', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_alice = Chalk::IR::Node::Constant->new(value => 'Alice', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $val_bob = Chalk::IR::Node::Constant->new(value => 'Bob', type => Chalk::Grammar::Chalk::Type::Str->new());
 
     my $store_alice = Chalk::IR::Node::HashStore->new(
         inputs => [$hash1->id, $key->id, $val_alice->id],
@@ -299,7 +301,7 @@ TODO: {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test8', params => []);
     my $new_hash = Chalk::IR::Node::NewHash->new(inputs => [$start->id]);
-    my $key = Chalk::IR::Node::Constant->new(value => 'missing', type => 'string');
+    my $key = Chalk::IR::Node::Constant->new(value => 'missing', type => Chalk::Grammar::Chalk::Type::Str->new());
     my $load = Chalk::IR::Node::HashLoad->new(
         inputs => [$new_hash->id, $key->id],
         hash_id => $new_hash->id,

@@ -9,6 +9,7 @@ use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
 use Chalk::Interpreter::CEKDataflow;
 use Chalk::Interpreter::ExecutionLog;
 
@@ -18,8 +19,8 @@ use Chalk::Interpreter::ExecutionLog;
 # Build a simple graph: (5 + 3) = 8
 my $graph = Chalk::IR::Graph->new();
 my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-my $const2 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
+my $const2 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
 my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 my $ret = Chalk::IR::Node::Return->new(
     control => $start,

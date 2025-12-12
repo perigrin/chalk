@@ -15,6 +15,7 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
 use Chalk::Interpreter::CEKDataflow;
 
 # Tests use content-addressable IDs computed from node contents
@@ -24,7 +25,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$cond_true->id],
         condition_id => $cond_true->id,
@@ -49,7 +50,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$cond_true->id],
         condition_id => $cond_true->id,
@@ -81,8 +82,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c5 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $c5 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
     my $gt = Chalk::IR::Node::GT->new(
         left => $c5,
         right => $c3,
@@ -114,7 +115,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$cond_true->id],
         condition_id => $cond_true->id,
@@ -159,7 +160,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $cond_false = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $cond_false = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$cond_false->id],
         condition_id => $cond_false->id,
@@ -202,7 +203,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $cond_true = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$cond_true->id],
         condition_id => $cond_true->id,
@@ -223,8 +224,8 @@ use Chalk::Interpreter::CEKDataflow;
     my $region = Chalk::IR::Node::Region->new(
         inputs => [$proj_false->id, $proj_true->id],
     );
-    my $val_false = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
-    my $val_true = Chalk::IR::Node::Constant->new(value => 99, type => 'int');
+    my $val_false = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
+    my $val_true = Chalk::IR::Node::Constant->new(value => 99, type => Chalk::IR::Type::Integer->TOP());
     my $phi = Chalk::IR::Node::Phi->new(
         inputs => [$region->id, $val_false->id, $val_true->id],
         region_id => $region->id,
@@ -254,7 +255,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $cond_false = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $cond_false = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$cond_false->id],
         condition_id => $cond_false->id,
@@ -275,8 +276,8 @@ use Chalk::Interpreter::CEKDataflow;
     my $region = Chalk::IR::Node::Region->new(
         inputs => [$proj_false->id, $proj_true->id],
     );
-    my $val_false = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
-    my $val_true = Chalk::IR::Node::Constant->new(value => 99, type => 'int');
+    my $val_false = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
+    my $val_true = Chalk::IR::Node::Constant->new(value => 99, type => Chalk::IR::Type::Integer->TOP());
     my $phi = Chalk::IR::Node::Phi->new(
         inputs => [$region->id, $val_false->id, $val_true->id],
         region_id => $region->id,
@@ -306,8 +307,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $x = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $y = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $x = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $y = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $gt = Chalk::IR::Node::GT->new(
         left => $x,
         right => $y,
@@ -361,8 +362,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $x = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-    my $y = Chalk::IR::Node::Constant->new(value => 8, type => 'int');
+    my $x = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
+    my $y = Chalk::IR::Node::Constant->new(value => 8, type => Chalk::IR::Type::Integer->TOP());
     my $gt = Chalk::IR::Node::GT->new(
         left => $x,
         right => $y,
@@ -416,10 +417,10 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $x = Chalk::IR::Node::Constant->new(value => 7, type => 'int');
-    my $five = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    my $hundred = Chalk::IR::Node::Constant->new(value => 100, type => 'int');
-    my $two_hundred = Chalk::IR::Node::Constant->new(value => 200, type => 'int');
+    my $x = Chalk::IR::Node::Constant->new(value => 7, type => Chalk::IR::Type::Integer->TOP());
+    my $five = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
+    my $hundred = Chalk::IR::Node::Constant->new(value => 100, type => Chalk::IR::Type::Integer->TOP());
+    my $two_hundred = Chalk::IR::Node::Constant->new(value => 200, type => Chalk::IR::Type::Integer->TOP());
     my $gt = Chalk::IR::Node::GT->new(
         left => $x,
         right => $five,
@@ -478,7 +479,7 @@ use Chalk::Interpreter::CEKDataflow;
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     # Create a constant that will be used as a fake Proj result (invalid value)
-    my $invalid = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
+    my $invalid = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->TOP());
     my $region = Chalk::IR::Node::Region->new(
         inputs => [$invalid->id],
     );
@@ -502,6 +503,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     # This test requires manually constructing an invalid IR graph where two Proj nodes return 1
     # We'll use a custom context that simulates this invalid state
+use Chalk::IR::Type::Integer;
     use Chalk::Interpreter::CEKDataflow;
 
     my $region = Chalk::IR::Node::Region->new(inputs => ['proj_0', 'proj_1']);

@@ -25,7 +25,6 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
     }
 
     sub constant ($class, $val) {
-        my $val = shift;
         return $class->new(value => $val);
     }
 

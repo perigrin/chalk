@@ -14,6 +14,7 @@ use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Loop;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Phi;
+use Chalk::IR::Type::Integer;
 use Chalk::Interpreter::CEKDataflow;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::LT;
@@ -108,10 +109,10 @@ subtest 'Phi selects entry value (index 0) on first iteration' => sub {
     );
     $graph->add_node($loop);
 
-    my $init_val = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $init_val = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($init_val);
 
-    my $loop_val = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $loop_val = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($loop_val);
 
     # Phi with Loop region: inputs = [region_id, entry_value, backedge_value]
@@ -163,10 +164,10 @@ subtest 'Phi selects backedge value (index 1) on subsequent iterations' => sub {
     );
     $graph->add_node($loop);
 
-    my $init_val = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $init_val = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($init_val);
 
-    my $loop_val = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $loop_val = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($loop_val);
 
     my $phi = Chalk::IR::Node::Phi->new(
@@ -213,7 +214,7 @@ subtest 'CEKDataflow.find_loop_body_nodes identifies loop-dependent nodes' => su
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     $graph->add_node($start);
 
-    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($init_i);
 
     my $loop = Chalk::IR::Node::Loop->new(
@@ -227,7 +228,7 @@ subtest 'CEKDataflow.find_loop_body_nodes identifies loop-dependent nodes' => su
     );
     $graph->add_node($phi_i);
 
-    my $const_10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
+    my $const_10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_10);
 
     my $lt = Chalk::IR::Node::LT->new(
@@ -236,7 +237,7 @@ subtest 'CEKDataflow.find_loop_body_nodes identifies loop-dependent nodes' => su
     );
     $graph->add_node($lt);
 
-    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_1);
 
     my $add = Chalk::IR::Node::Add->new(
@@ -265,7 +266,7 @@ subtest 'Execute simple counter loop: while (i < 3) { i++ } return i' => sub {
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     $graph->add_node($start);
 
-    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($init_i);
 
     my $loop = Chalk::IR::Node::Loop->new(
@@ -279,7 +280,7 @@ subtest 'Execute simple counter loop: while (i < 3) { i++ } return i' => sub {
     );
     $graph->add_node($phi_i);
 
-    my $const_3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $const_3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_3);
 
     my $lt = Chalk::IR::Node::LT->new(
@@ -311,7 +312,7 @@ subtest 'Execute simple counter loop: while (i < 3) { i++ } return i' => sub {
     );
     $graph->add_node($proj_false);
 
-    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_1);
 
     my $add = Chalk::IR::Node::Add->new(
@@ -346,10 +347,10 @@ subtest 'Execute accumulator loop: sum = 0; i = 0; while (i < 5) { sum += i; i++
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     $graph->add_node($start);
 
-    my $init_sum = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $init_sum = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($init_sum);
 
-    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($init_i);
 
     my $loop = Chalk::IR::Node::Loop->new(
@@ -370,7 +371,7 @@ subtest 'Execute accumulator loop: sum = 0; i = 0; while (i < 5) { sum += i; i++
     );
     $graph->add_node($phi_i);
 
-    my $const_5 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const_5 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_5);
 
     my $lt = Chalk::IR::Node::LT->new(
@@ -402,7 +403,7 @@ subtest 'Execute accumulator loop: sum = 0; i = 0; while (i < 5) { sum += i; i++
     );
     $graph->add_node($proj_false);
 
-    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_1);
 
     # sum = sum + i
@@ -447,7 +448,7 @@ subtest 'Iteration limit prevents infinite loops' => sub {
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     $graph->add_node($start);
 
-    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $init_i = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($init_i);
 
     my $loop = Chalk::IR::Node::Loop->new(
@@ -461,11 +462,11 @@ subtest 'Iteration limit prevents infinite loops' => sub {
     );
     $graph->add_node($phi_i);
 
-    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $const_1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_1);
 
     # Always true condition
-    my $const_true = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $const_true = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     $graph->add_node($const_true);
 
     my $if_node = Chalk::IR::Node::If->new(

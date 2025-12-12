@@ -11,6 +11,7 @@ use Chalk::IR::Node::NewArray;
 use Chalk::IR::Node::ArrayStore;
 use Chalk::IR::Node::ArrayLoad;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
 use Chalk::Interpreter::CEKDataflow;
 
 # Test 1: NewArray allocates a heap ID
@@ -33,8 +34,8 @@ is($result1, 1, "NewArray should allocate heap ID 1");
 my $graph2 = Chalk::IR::Graph->new();
 my $start2 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $new_array2 = Chalk::IR::Node::NewArray->new(inputs => []);
-my $index = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-my $value = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+my $index = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+my $value = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 my $store = Chalk::IR::Node::ArrayStore->new(
     inputs => [$new_array2->id, $index->id, $value->id],
     array_id => $new_array2->id,
@@ -60,8 +61,8 @@ is($result2, 1, "ArrayStore should return the heap ID");
 my $graph3 = Chalk::IR::Graph->new();
 my $start3 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $new_array3 = Chalk::IR::Node::NewArray->new(inputs => []);
-my $index3 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-my $value3 = Chalk::IR::Node::Constant->new(value => 99, type => 'int');
+my $index3 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+my $value3 = Chalk::IR::Node::Constant->new(value => 99, type => Chalk::IR::Type::Integer->TOP());
 my $store3 = Chalk::IR::Node::ArrayStore->new(
     inputs => [$new_array3->id, $index3->id, $value3->id],
     array_id => $new_array3->id,
@@ -93,10 +94,10 @@ is($result3, 99, "ArrayLoad should retrieve stored value");
 my $graph4 = Chalk::IR::Graph->new();
 my $start4 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $new_array4 = Chalk::IR::Node::NewArray->new(inputs => []);
-my $idx0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-my $val10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-my $idx1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
-my $val20 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+my $idx0 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+my $val10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+my $idx1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
+my $val20 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 
 my $store4a = Chalk::IR::Node::ArrayStore->new(
     inputs => [$new_array4->id, $idx0->id, $val10->id],
@@ -139,10 +140,10 @@ is($result4, 20, "Should load value from index 1");
 my $graph5 = Chalk::IR::Graph->new();
 my $start5 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $new_array5 = Chalk::IR::Node::NewArray->new(inputs => []);
-my $idx0_5 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-my $val10_5 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-my $idx1_5 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
-my $val20_5 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+my $idx0_5 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+my $val10_5 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+my $idx1_5 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
+my $val20_5 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 
 my $store5a = Chalk::IR::Node::ArrayStore->new(
     inputs => [$new_array5->id, $idx0_5->id, $val10_5->id],
@@ -186,9 +187,9 @@ my $graph6 = Chalk::IR::Graph->new();
 my $start6 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $array1 = Chalk::IR::Node::NewArray->new(inputs => []);
 my $array2 = Chalk::IR::Node::NewArray->new(inputs => []);
-my $idx_6 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-my $val1 = Chalk::IR::Node::Constant->new(value => 100, type => 'int');
-my $val2 = Chalk::IR::Node::Constant->new(value => 200, type => 'int');
+my $idx_6 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+my $val1 = Chalk::IR::Node::Constant->new(value => 100, type => Chalk::IR::Type::Integer->TOP());
+my $val2 = Chalk::IR::Node::Constant->new(value => 200, type => Chalk::IR::Type::Integer->TOP());
 
 my $store6a = Chalk::IR::Node::ArrayStore->new(
     inputs => [$array1->id, $idx_6->id, $val1->id],
@@ -232,9 +233,9 @@ my $graph7 = Chalk::IR::Graph->new();
 my $start7 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $array1_7 = Chalk::IR::Node::NewArray->new(inputs => []);
 my $array2_7 = Chalk::IR::Node::NewArray->new(inputs => []);
-my $idx_7 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-my $val1_7 = Chalk::IR::Node::Constant->new(value => 100, type => 'int');
-my $val2_7 = Chalk::IR::Node::Constant->new(value => 200, type => 'int');
+my $idx_7 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+my $val1_7 = Chalk::IR::Node::Constant->new(value => 100, type => Chalk::IR::Type::Integer->TOP());
+my $val2_7 = Chalk::IR::Node::Constant->new(value => 200, type => Chalk::IR::Type::Integer->TOP());
 
 my $store7a = Chalk::IR::Node::ArrayStore->new(
     inputs => [$array1_7->id, $idx_7->id, $val1_7->id],
@@ -287,9 +288,9 @@ is($result7, 200, "Array 2 should have value 200 at index 0");
 my $graph10 = Chalk::IR::Graph->new();
 my $start10 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 my $new_array10 = Chalk::IR::Node::NewArray->new(inputs => []);
-my $idx10 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-my $first_val = Chalk::IR::Node::Constant->new(value => 111, type => 'int');
-my $second_val = Chalk::IR::Node::Constant->new(value => 222, type => 'int');
+my $idx10 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+my $first_val = Chalk::IR::Node::Constant->new(value => 111, type => Chalk::IR::Type::Integer->TOP());
+my $second_val = Chalk::IR::Node::Constant->new(value => 222, type => Chalk::IR::Type::Integer->TOP());
 
 my $store10a = Chalk::IR::Node::ArrayStore->new(
     inputs => [$new_array10->id, $idx10->id, $first_val->id],

@@ -9,13 +9,14 @@ use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
 use Chalk::Interpreter::CEKDataflow;
 
 # Test 1-2: Basic stepping initialization
 my $graph1 = Chalk::IR::Graph->new();
 my $start1 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-my $const2 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
+my $const2 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
 my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 my $ret = Chalk::IR::Node::Return->new(
     control => $start1,
@@ -79,8 +80,8 @@ is($step6->{value}, 8, "Final value is 8");
 # Test 18-19: State inspection during execution
 my $graph2 = Chalk::IR::Graph->new();
 my $start2 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-my $c2 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+my $c2 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 my $add2 = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
 my $ret2 = Chalk::IR::Node::Return->new(
     control => $start2,
@@ -105,8 +106,8 @@ ok(exists $mid_state->{waiting}->{$add2->id} || exists $mid_state->{waiting}->{$
 # Test 20-22: Step-by-step produces same result as execute()
 my $graph3 = Chalk::IR::Graph->new();
 my $start3 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $c3 = Chalk::IR::Node::Constant->new(value => 15, type => 'int');
-my $c4 = Chalk::IR::Node::Constant->new(value => 25, type => 'int');
+my $c3 = Chalk::IR::Node::Constant->new(value => 15, type => Chalk::IR::Type::Integer->TOP());
+my $c4 = Chalk::IR::Node::Constant->new(value => 25, type => Chalk::IR::Type::Integer->TOP());
 my $add3 = Chalk::IR::Node::Add->new(left => $c3, right => $c4);
 my $ret3 = Chalk::IR::Node::Return->new(
     control => $start3,

@@ -9,6 +9,7 @@ use Chalk::IR::Graph;
 use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
 use Chalk::Interpreter::CEKDataflow;
 
 # Tests use content-addressable IDs computed from node contents
@@ -27,7 +28,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 
     $graph->add_node($start);
     $graph->add_node($const);
@@ -41,7 +42,7 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $const,

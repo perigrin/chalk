@@ -11,14 +11,14 @@ use Chalk::IR::Node::NewObject;
 use Chalk::IR::Node::FieldStore;
 use Chalk::IR::Node::FieldLoad;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
+use Chalk::Grammar::Chalk::Type::Str;
 use Chalk::Interpreter::CEKDataflow;
 
 # Test 1: NewObject allocates a heap ID
 my $graph1 = Chalk::IR::Graph->new();
 my $start1 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $new_obj = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
+my $new_obj = Chalk::IR::Node::NewObject->new();
 my $return1 = Chalk::IR::Node::Return->new(
     control => $start1,
     value => $new_obj,
@@ -34,11 +34,9 @@ is($result1, 1, "NewObject should allocate heap ID 1");
 # Test 2: FieldStore stores a value and returns heap ID
 my $graph2 = Chalk::IR::Graph->new();
 my $start2 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $new_obj2 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $field = Chalk::IR::Node::Constant->new(value => 'name', type => 'string');
-my $value = Chalk::IR::Node::Constant->new(value => 'Alice', type => 'string');
+my $new_obj2 = Chalk::IR::Node::NewObject->new();
+my $field = Chalk::IR::Node::Constant->new(value => 'name', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $value = Chalk::IR::Node::Constant->new(value => 'Alice', type => Chalk::Grammar::Chalk::Type::Str->new());
 my $store = Chalk::IR::Node::FieldStore->new(
     inputs => [$new_obj2->id, $field->id, $value->id],
     object_id => $new_obj2->id,
@@ -63,11 +61,9 @@ is($result2, 1, "FieldStore should return the heap ID");
 # Test 3: FieldLoad retrieves stored value
 my $graph3 = Chalk::IR::Graph->new();
 my $start3 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $new_obj3 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $field3 = Chalk::IR::Node::Constant->new(value => 'age', type => 'string');
-my $value3 = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+my $new_obj3 = Chalk::IR::Node::NewObject->new();
+my $field3 = Chalk::IR::Node::Constant->new(value => 'age', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $value3 = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 my $store3 = Chalk::IR::Node::FieldStore->new(
     inputs => [$new_obj3->id, $field3->id, $value3->id],
     object_id => $new_obj3->id,
@@ -98,13 +94,11 @@ is($result3, 42, "FieldLoad should retrieve stored value");
 # Test 4: Object with multiple fields
 my $graph4 = Chalk::IR::Graph->new();
 my $start4 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $new_obj4 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $field4a = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-my $val4a = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-my $field4b = Chalk::IR::Node::Constant->new(value => 'y', type => 'string');
-my $val4b = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+my $new_obj4 = Chalk::IR::Node::NewObject->new();
+my $field4a = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val4a = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+my $field4b = Chalk::IR::Node::Constant->new(value => 'y', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val4b = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 
 my $store4a = Chalk::IR::Node::FieldStore->new(
     inputs => [$new_obj4->id, $field4a->id, $val4a->id],
@@ -146,13 +140,11 @@ is($result4, 20, "Should load value from field 'y'");
 # Test 5: Load earlier field from multi-field object
 my $graph5 = Chalk::IR::Graph->new();
 my $start5 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $new_obj5 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $field5a = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-my $val5a = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-my $field5b = Chalk::IR::Node::Constant->new(value => 'y', type => 'string');
-my $val5b = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+my $new_obj5 = Chalk::IR::Node::NewObject->new();
+my $field5a = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val5a = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+my $field5b = Chalk::IR::Node::Constant->new(value => 'y', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val5b = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 
 my $store5a = Chalk::IR::Node::FieldStore->new(
     inputs => [$new_obj5->id, $field5a->id, $val5a->id],
@@ -194,15 +186,11 @@ is($result5, 10, "Should load value from field 'x'");
 # Test 6: Multiple objects are isolated
 my $graph6 = Chalk::IR::Graph->new();
 my $start6 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $obj1 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $obj2 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $field_6 = Chalk::IR::Node::Constant->new(value => 'name', type => 'string');
-my $val1 = Chalk::IR::Node::Constant->new(value => 'Alice', type => 'string');
-my $val2 = Chalk::IR::Node::Constant->new(value => 'Bob', type => 'string');
+my $obj1 = Chalk::IR::Node::NewObject->new();
+my $obj2 = Chalk::IR::Node::NewObject->new();
+my $field_6 = Chalk::IR::Node::Constant->new(value => 'name', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val1 = Chalk::IR::Node::Constant->new(value => 'Alice', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val2 = Chalk::IR::Node::Constant->new(value => 'Bob', type => Chalk::Grammar::Chalk::Type::Str->new());
 
 my $store6a = Chalk::IR::Node::FieldStore->new(
     inputs => [$obj1->id, $field_6->id, $val1->id],
@@ -244,15 +232,11 @@ is($result6, 'Alice', "Object 1 should have value 'Alice' at field 'name'");
 # Test 7: Load from second object
 my $graph7 = Chalk::IR::Graph->new();
 my $start7 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $obj1_7 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $obj2_7 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $field_7 = Chalk::IR::Node::Constant->new(value => 'name', type => 'string');
-my $val1_7 = Chalk::IR::Node::Constant->new(value => 'Alice', type => 'string');
-my $val2_7 = Chalk::IR::Node::Constant->new(value => 'Bob', type => 'string');
+my $obj1_7 = Chalk::IR::Node::NewObject->new();
+my $obj2_7 = Chalk::IR::Node::NewObject->new();
+my $field_7 = Chalk::IR::Node::Constant->new(value => 'name', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val1_7 = Chalk::IR::Node::Constant->new(value => 'Alice', type => Chalk::Grammar::Chalk::Type::Str->new());
+my $val2_7 = Chalk::IR::Node::Constant->new(value => 'Bob', type => Chalk::Grammar::Chalk::Type::Str->new());
 
 my $store7a = Chalk::IR::Node::FieldStore->new(
     inputs => [$obj1_7->id, $field_7->id, $val1_7->id],
@@ -296,10 +280,8 @@ is($result7, 'Bob', "Object 2 should have value 'Bob' at field 'name'");
 # Instead, we store the result in a field and verify it's undef
 my $graph8 = Chalk::IR::Graph->new();
 my $start8 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-my $new_obj8 = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $field8 = Chalk::IR::Node::Constant->new(value => 'missing', type => 'string');
+my $new_obj8 = Chalk::IR::Node::NewObject->new();
+my $field8 = Chalk::IR::Node::Constant->new(value => 'missing', type => Chalk::Grammar::Chalk::Type::Str->new());
 my $load8 = Chalk::IR::Node::FieldLoad->new(
     inputs => [$new_obj8->id, $field8->id],
     object_id => $new_obj8->id,
@@ -307,10 +289,8 @@ my $load8 = Chalk::IR::Node::FieldLoad->new(
 );
 
 # Store the undefined result in another object to test it
-my $test_obj = Chalk::IR::Node::NewObject->new(
-    inputs => [],
-);
-my $test_field = Chalk::IR::Node::Constant->new(value => 'result', type => 'string');
+my $test_obj = Chalk::IR::Node::NewObject->new();
+my $test_field = Chalk::IR::Node::Constant->new(value => 'result', type => Chalk::Grammar::Chalk::Type::Str->new());
 my $store_result = Chalk::IR::Node::FieldStore->new(
     inputs => [$test_obj->id, $test_field->id, $load8->id],
     object_id => $test_obj->id,
