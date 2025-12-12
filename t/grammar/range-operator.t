@@ -4,7 +4,7 @@ use 5.42.0;
 use experimental qw(class builtin);
 use Test::More;
 use FindBin qw($RealBin);
-use lib "$RealBin/../lib";
+use lib "$RealBin/../../lib";
 use Chalk::Grammar;
 use Chalk::Parser;
 use Chalk::Semiring::Boolean;
