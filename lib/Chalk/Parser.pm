@@ -732,30 +732,36 @@ class Chalk::Parser {
     method predict( $item, $nonterminal, $chart, $agenda ) {
         my $pos = $item->end_pos;
 
-# Check if we've already predicted this nonterminal from this rule at this position
-# Multiple rules can predict the same nonterminal, so we track by rule origin
-        return if $chart->has_predicted( $nonterminal, $pos, $item->rule->id );
-        $chart->mark_predicted( $nonterminal, $pos, $item->rule->id );
+        # Check if we've already predicted this nonterminal from this rule at this position
+        # Multiple rules can predict the same nonterminal, so we track by rule origin
+        # NOTE: We only skip adding prediction items, NOT the nullable advancement below!
+        unless ( $chart->has_predicted( $nonterminal, $pos, $item->rule->id ) ) {
+            $chart->mark_predicted( $nonterminal, $pos, $item->rule->id );
 
-        for my $rule ( $grammar->rules_for($nonterminal) ) {
-            my $predicted_item = Chalk::EarleyItem->new(
-                start_pos => $pos,
-                rule      => $rule,
-                dot_pos   => 0,
-                end_pos   => $pos
-            );
+            for my $rule ( $grammar->rules_for($nonterminal) ) {
+                my $predicted_item = Chalk::EarleyItem->new(
+                    start_pos => $pos,
+                    rule      => $rule,
+                    dot_pos   => 0,
+                    end_pos   => $pos
+                );
 
-            # Only add if not already in chart
-            unless ( $chart->has_item($predicted_item) ) {
-                my $rule_element =
-                  $semiring->init_element_from_rule( $rule, $pos, $pos );
-                $chart->add_element( $predicted_item, $rule_element );
-                push( $agenda->@*, $predicted_item );
+                # Only add if not already in chart
+                unless ( $chart->has_item($predicted_item) ) {
+                    my $rule_element =
+                      $semiring->init_element_from_rule( $rule, $pos, $pos );
+                    $chart->add_element( $predicted_item, $rule_element );
+                    push( $agenda->@*, $predicted_item );
+                }
             }
         }
 
         # Aycock-Horspool optimization: if the nonterminal is nullable,
-        # we can also advance the dot past it immediately
+        # we can also advance the dot past it immediately.
+        # CRITICAL: This MUST happen unconditionally, even if we've already
+        # predicted this nonterminal. The same nullable symbol (e.g., WS_OPT)
+        # may appear multiple times in a rule (e.g., Block -> '{' WS_OPT StatementList WS_OPT '}')
+        # and each occurrence must advance the dot past it.
         if ( $grammar->is_nullable($nonterminal) ) {
             my $advanced_item = Chalk::EarleyItem->new(
                 start_pos => $item->start_pos,
