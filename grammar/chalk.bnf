@@ -352,6 +352,10 @@ FunctionCall -> MethodCall  # Delegate to instance method calls
 MethodCall -> Expression WS_OPT '->' WS_OPT Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->method($args)
 MethodCall -> Expression WS_OPT '->' WS_OPT Identifier '(' WS_OPT ')'  # expr->method() (empty parens)
 MethodCall -> Expression WS_OPT '->' WS_OPT Identifier  # expr->method (without parens)
+# Qualified method calls - for SUPER::method, Package::method patterns
+# Examples: $self->SUPER::method(), $obj->Some::Package::method()
+MethodCall -> Expression WS_OPT '->' WS_OPT QualifiedIdentifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->Package::method($args)
+MethodCall -> Expression WS_OPT '->' WS_OPT QualifiedIdentifier '(' WS_OPT ')'  # expr->Package::method()
 
 # Postfix dereference operators - can apply to any expression returning a reference
 # Examples: $var->@*, $obj->method->@*, foo()->@*, ($x || $y)->@*, $var->@*->%*
