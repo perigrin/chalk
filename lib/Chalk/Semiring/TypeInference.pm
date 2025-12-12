@@ -279,6 +279,13 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     method on_complete($item, $element, $completed_element = undef) {
         my $rule = $item->rule;
 
+        # Emit any type errors accumulated in the element to diagnostic context
+        if ($element->can('errors') && $element->errors->@*) {
+            for my $error ($element->errors->@*) {
+                $self->emit_diagnostic($error);
+            }
+        }
+
         # If rule has custom type inference, delegate to it
         # This enables extensible type inference without modifying TypeInference.pm
         if (defined $rule && $rule->can('infer_type')) {

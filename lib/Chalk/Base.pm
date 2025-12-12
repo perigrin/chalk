@@ -19,6 +19,8 @@ class Chalk::Element {
 }
 
 class Chalk::Semiring {
+    field $diagnostic_context :reader;
+
     method init_element_from_rule($rule) { ... }
 
     # NOOP hook for semirings that need to perform actions when a rule completes parsing
@@ -40,6 +42,29 @@ class Chalk::Semiring {
             $pos + length($matched_value),
             $matched_value
         );
+    }
+
+    # Set diagnostic context for furthest-failure error reporting
+    # Override in subclasses like Composite to propagate to children
+    method set_diagnostic_context($ctx) {
+        $diagnostic_context = $ctx;
+    }
+
+    # Helper to emit an error to the diagnostic context at the furthest position
+    # Only records error if position >= current furthest position
+    method emit_diagnostic($error_hash) {
+        return unless $diagnostic_context;
+        my $pos = $error_hash->{start_pos} // 0;
+
+        if ($pos > $diagnostic_context->{furthest_pos}) {
+            # New furthest point - replace all previous errors
+            $diagnostic_context->{furthest_pos} = $pos;
+            $diagnostic_context->{furthest_errors} = [$error_hash];
+        } elsif ($pos == $diagnostic_context->{furthest_pos}) {
+            # Same position - accumulate
+            push $diagnostic_context->{furthest_errors}->@*, $error_hash;
+        }
+        # else: earlier position - ignore (not relevant)
     }
 }
 

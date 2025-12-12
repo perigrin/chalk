@@ -213,11 +213,25 @@ class Chalk::Parser {
     field $preprocess :param = [];    # Arrayref of preprocessor class names
     field $input_string;              # Store input string for semantic actions
     field @last_errors;               # Errors from last parse attempt
+    field $diagnostic_context;        # Shared context for furthest-failure error tracking
 
     method parse_string($input) {
         $input_string = $input;       # Store for semantic actions
         @last_errors = ();            # Clear errors from previous parse
-                                      # Apply preprocessors in sequence
+
+        # Initialize diagnostic context for furthest-failure error tracking
+        $diagnostic_context = {
+            furthest_pos => 0,
+            furthest_errors => [],
+            input_string => $input,
+        };
+
+        # Pass diagnostic context to semiring if it supports it
+        if ($semiring->can('set_diagnostic_context')) {
+            $semiring->set_diagnostic_context($diagnostic_context);
+        }
+
+        # Apply preprocessors in sequence
         for my $preprocessor_class ( $preprocess->@* ) {
             next unless defined $preprocessor_class;
 
@@ -386,6 +400,15 @@ class Chalk::Parser {
     }
 
     method _display_semantic_errors($input) {
+        # First priority: Display furthest-failure errors from diagnostic context
+        # These are the most relevant since they represent where parsing actually got stuck
+        if ($diagnostic_context && scalar($diagnostic_context->{furthest_errors}->@*) > 0) {
+            my $pos = $diagnostic_context->{furthest_pos};
+            warn("🔍 SEMANTIC ERRORS at furthest position $pos:\n");
+            $self->_format_and_display_errors($diagnostic_context->{furthest_errors}, $input);
+            return;  # Furthest errors are most relevant, skip others
+        }
+
         # Display any errors collected during parsing
         if (@last_errors) {
             $self->_format_and_display_errors(\@last_errors, $input);

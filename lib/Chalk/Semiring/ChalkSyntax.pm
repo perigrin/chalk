@@ -1,4 +1,4 @@
-# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + SemanticValidation)
+# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + SemanticValidation + TypeInference)
 # ABOUTME: Pure validation composite - no building, just filtering for valid parses
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
@@ -7,6 +7,7 @@ use Chalk::Base;
 use Chalk::Semiring::Boolean;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::SemanticValidation;
+use Chalk::Semiring::TypeInference;
 use Chalk::Grammar::Chalk::SemanticRules;
 use Chalk::Semiring::Composite;
 
@@ -61,10 +62,14 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
             rules => $semantic_rules
         );
 
-        # Composite: Boolean + Precedence + SemanticValidation
+        # Filter 4: TypeInference - Type checking during parsing
+        # Uses tropical semiring (join/meet) for type lattice operations
+        my $type_sr = Chalk::Semiring::TypeInference->new();
+
+        # Composite: Boolean + Precedence + SemanticValidation + TypeInference
         # Pure validation - returns boolean success/failure
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$bool_sr, $precedence_sr, $semantic_sr]
+            semirings => [$bool_sr, $precedence_sr, $semantic_sr, $type_sr]
         );
     }
 
@@ -86,6 +91,11 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
     # Delegate on_scan() to composite
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         $composite->on_scan($item, $element, $pos, $matched_value, $pattern_name)
+    }
+
+    # Delegate set_diagnostic_context to composite (which propagates to children)
+    method set_diagnostic_context($ctx) {
+        $composite->set_diagnostic_context($ctx);
     }
 }
 

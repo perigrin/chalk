@@ -372,6 +372,19 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                             # New operator has lower precedence (higher level) than existing
                             # This is INVALID: e.g., + trying to contain * result
                             # The * should have been inside the + expression, not the other way around
+
+                            # Emit diagnostic for precedence violation
+                            $self->emit_diagnostic({
+                                type => 'precedence_violation',
+                                message => "Precedence violation: '$token_str' (level $new_level) " .
+                                           "cannot contain '$existing_op' (level $existing_level) - " .
+                                           "higher precedence operator should bind first",
+                                start_pos => $pos,
+                                end_pos => $pos + length($token_str),
+                                parent_op => $token_str,
+                                child_op => $existing_op,
+                            });
+
                             # Mark as invalid but PRESERVE operator info for debugging
                             return Chalk::Semiring::PrecedenceElement->new(
                                 valid => 0,

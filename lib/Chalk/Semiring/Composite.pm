@@ -284,6 +284,19 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
             parent_semiring => $self
         );
     }
+
+    # Override to propagate diagnostic context to all child semirings
+    method set_diagnostic_context($ctx) {
+        # Call parent implementation
+        $self->SUPER::set_diagnostic_context($ctx);
+
+        # Propagate to all child semirings
+        for my $child_sr ($semirings->@*) {
+            if ($child_sr->can('set_diagnostic_context')) {
+                $child_sr->set_diagnostic_context($ctx);
+            }
+        }
+    }
 }
 
 1;
