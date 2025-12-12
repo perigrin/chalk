@@ -356,46 +356,15 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                     my $existing_op = $element->operator;
                     my $existing_level = $element->precedence_level;
 
-                    if (defined($existing_op) && !$element->is_active) {
-                        # Existing element has a passive operator (from completed sub-expression)
-                        # Active operator (new) is the current rule's operator (parent)
-                        # Passive operator (existing) is from child expression
-                        #
-                        # Valid: parent has lower or equal precedence than child
-                        # Invalid: parent has higher precedence than child (child should have bound first)
-                        #
-                        # Lower precedence = higher level number
-                        # Higher precedence = lower level number
-                        my $new_level = $op_info->{level};
-
-                        if ($new_level > $existing_level) {
-                            # New operator has lower precedence (higher level) than existing
-                            # This is INVALID: e.g., + trying to contain * result
-                            # The * should have been inside the + expression, not the other way around
-
-                            # Emit diagnostic for precedence violation
-                            $self->emit_diagnostic({
-                                type => 'precedence_violation',
-                                message => "Precedence violation: '$token_str' (level $new_level) " .
-                                           "cannot contain '$existing_op' (level $existing_level) - " .
-                                           "higher precedence operator should bind first",
-                                start_pos => $pos,
-                                end_pos => $pos + length($token_str),
-                                parent_op => $token_str,
-                                child_op => $existing_op,
-                            });
-
-                            # Mark as invalid but PRESERVE operator info for debugging
-                            return Chalk::Semiring::PrecedenceElement->new(
-                                valid => 0,
-                                operator => $token_str,
-                                precedence_level => $op_info->{level},
-                                associativity => $op_info->{assoc},
-                                operator_index => $operator_index,
-                                is_active => 1
-                            );
-                        }
-                    }
+                    # NOTE: on_scan precedence checking has been disabled.
+                    # The multiply() method handles precedence validation correctly.
+                    # on_scan was incorrectly rejecting valid expressions like `1 + 2 * 3`
+                    # because it confused "operand stealing" with "containment".
+                    # In Earley parsing, higher-precedence operators like * should be
+                    # able to steal operands from lower-precedence operators like +.
+                    # This is handled correctly in multiply() when elements are combined.
+                    #
+                    # See t/parser/operator-precedence-comprehensive.t for test cases.
 
                     return Chalk::Semiring::PrecedenceElement->new(
                         valid => 1,
