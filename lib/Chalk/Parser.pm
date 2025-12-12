@@ -212,9 +212,11 @@ class Chalk::Parser {
     field $grammar    :param;
     field $preprocess :param = [];    # Arrayref of preprocessor class names
     field $input_string;              # Store input string for semantic actions
+    field @last_errors;               # Errors from last parse attempt
 
     method parse_string($input) {
         $input_string = $input;       # Store for semantic actions
+        @last_errors = ();            # Clear errors from previous parse
                                       # Apply preprocessors in sequence
         for my $preprocessor_class ( $preprocess->@* ) {
             next unless defined $preprocessor_class;
@@ -278,6 +280,11 @@ class Chalk::Parser {
 
         my $result =
           $chart->goal_value( $grammar->start_symbol, $input_length );
+
+        # Collect errors from the result if available
+        if ($result) {
+            $self->_collect_errors_from_element($result);
+        }
 
         # Show where parsing actually stopped if it failed
         if ( !$result && $last_active_pos < $input_length ) {
@@ -363,7 +370,110 @@ class Chalk::Parser {
                   . "\n" );
         }
 
+        # Check for semantic/type errors in the result
+        if (!$result) {
+            # Try to get errors from any failed parse elements
+            $self->_display_semantic_errors($input);
+        } elsif ($result && $result->can('has_errors') && $result->has_errors()) {
+            # Parse succeeded but had warnings
+            warn("⚠️  SEMANTIC WARNINGS:\n" . $result->format_errors($input) . "\n");
+        } elsif ($result && $result->can('errors') && scalar($result->errors->@*) > 0) {
+            # Result has errors array directly
+            $self->_format_and_display_errors($result->errors, $input);
+        }
+
         return $result;
+    }
+
+    method _display_semantic_errors($input) {
+        # Display any errors collected during parsing
+        if (@last_errors) {
+            $self->_format_and_display_errors(\@last_errors, $input);
+        }
+
+        # Try to get errors from the semiring itself
+        if ($semiring->can('collected_errors')) {
+            my @errors = $semiring->collected_errors();
+            if (@errors) {
+                $self->_format_and_display_errors(\@errors, $input);
+            }
+        }
+
+        # Also try to extract errors from composite semiring elements
+        if ($semiring->can('semirings')) {
+            for my $child_sr ($semiring->semirings->@*) {
+                # Check for collected_errors method
+                if ($child_sr->can('collected_errors')) {
+                    my @errors = $child_sr->collected_errors();
+                    if (@errors) {
+                        $self->_format_and_display_errors(\@errors, $input);
+                    }
+                }
+                # Also check add_id for errors
+                if ($child_sr->can('add_id')) {
+                    my $add_id = $child_sr->add_id;
+                    if ($add_id->can('errors') && scalar($add_id->errors->@*) > 0) {
+                        $self->_format_and_display_errors($add_id->errors, $input);
+                    }
+                }
+            }
+        }
+    }
+
+    # Get errors from last parse attempt
+    method last_errors() {
+        return @last_errors;
+    }
+
+    # Add an error to the error list
+    method _add_error($error) {
+        push @last_errors, $error;
+    }
+
+    # Collect errors from an element
+    method _collect_errors_from_element($element) {
+        return unless defined $element;
+        if ($element->can('errors')) {
+            my $errors = $element->errors;
+            push @last_errors, $errors->@* if $errors && scalar($errors->@*) > 0;
+        }
+        # For composite elements, collect from children
+        if ($element->can('elements')) {
+            for my $child ($element->elements->@*) {
+                $self->_collect_errors_from_element($child);
+            }
+        }
+    }
+
+    method _format_and_display_errors($errors, $input) {
+        return unless $errors && scalar($errors->@*) > 0;
+
+        my @lines;
+        for my $err ($errors->@*) {
+            my $msg = $err->{message} // 'Unknown semantic error';
+            my $pos = $err->{start_pos} // 0;
+
+            # Calculate line/column from position
+            if (defined $input && $pos > 0) {
+                my $line = 1;
+                my $col = 1;
+                for my $i (0 .. $pos - 1) {
+                    if (substr($input, $i, 1) eq "\n") {
+                        $line++;
+                        $col = 1;
+                    } else {
+                        $col++;
+                    }
+                }
+                push @lines, "  Line $line, Col $col: $msg";
+            } else {
+                push @lines, "  Position $pos: $msg";
+            }
+        }
+
+        if (@lines) {
+            warn("⚠️  SEMANTIC ERRORS:\n" . join("\n", @lines) . "\n");
+        }
     }
 
     method process_position_string( $pos, $chart, $input_string ) {

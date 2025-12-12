@@ -36,6 +36,9 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     field $operator_index :param :reader = undef;  # Hash mapping operators to precedence info
     field $forest :param :reader = undef;  # Optional SPPF forest reference for disambiguation
     field $is_active :param :reader = 0;  # 1 if operator is from current rule (on_scan), 0 if from sub-expression (on_complete)
+    field $errors :param :reader = [];  # Accumulated error messages (arrayref)
+    field $start_pos :param :reader = 0;  # Start position for error reporting
+    field $end_pos :param :reader = 0;  # End position for error reporting
 
     # Lookup operator precedence and associativity from operator_index
     method lookup_operator($op) {

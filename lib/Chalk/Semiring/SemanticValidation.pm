@@ -13,6 +13,9 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
     field $sppf_node :param :reader = undef;  # SPPF node for examining parse structure
     field $forest :param :reader = undef;  # Reference to SPPF forest
     field $rules :param :reader = undef;  # Grammar-specific semantic rules
+    field $errors :param :reader = [];  # Accumulated error messages (arrayref)
+    field $start_pos :param :reader = 0;  # Start position for error reporting
+    field $end_pos :param :reader = 0;  # End position for error reporting
 
     method to_string(@args) {
         return $valid ? 'valid' : 'invalid';
@@ -44,6 +47,9 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
         return $self unless defined $other;
         return $self unless ref($other) && $other->can('valid');
 
+        # Merge errors from both alternatives
+        my @merged_errors = ($errors->@*, ($other->can('errors') ? $other->errors->@* : ()));
+
         # If self is invalid (add_id), return other
         return $other if !$valid;
 
@@ -59,11 +65,20 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
         } elsif ($other_valid && !$self_valid) {
             return $other;
         } elsif (!$self_valid && !$other_valid) {
-            # Neither valid - return add_id
+            # Neither valid - return invalid element with errors
+            push @merged_errors, {
+                type => 'semantic_validation_failed',
+                message => 'No valid semantic alternative found',
+                start_pos => $start_pos,
+                end_pos => $end_pos
+            };
             return Chalk::Semiring::SemanticValidationElement->new(
                 valid => 0,
                 forest => $forest,
-                rules => $rules
+                rules => $rules,
+                errors => \@merged_errors,
+                start_pos => $start_pos,
+                end_pos => $end_pos
             );
         } else {
             # Both valid - prefer self (first alternative)
@@ -98,17 +113,71 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
         return $self unless defined $other;
         return $self unless ref($other) && $other->can('valid');
 
+        # Merge errors from both operands
+        my @new_errors = ($errors->@*, ($other->can('errors') ? $other->errors->@* : ()));
+
+        # Calculate combined position span
+        my $other_start = $other->can('start_pos') ? $other->start_pos : 0;
+        my $other_end = $other->can('end_pos') ? $other->end_pos : 0;
+        my $new_start = $start_pos < $other_start ? $start_pos : $other_start;
+        my $new_end = $end_pos > $other_end ? $end_pos : $other_end;
+
         # If either is invalid, result is invalid
         if (!$valid || !$other->valid) {
             return Chalk::Semiring::SemanticValidationElement->new(
                 valid => 0,
                 forest => $forest,
-                rules => $rules
+                rules => $rules,
+                errors => \@new_errors,
+                start_pos => $new_start,
+                end_pos => $new_end
             );
         }
 
-        # Both valid - return self (could do type unification here later)
-        return $self;
+        # Both valid - return new element with combined errors and positions
+        return Chalk::Semiring::SemanticValidationElement->new(
+            valid => 1,
+            sppf_node => $sppf_node,
+            forest => $forest,
+            rules => $rules,
+            errors => \@new_errors,
+            start_pos => $new_start,
+            end_pos => $new_end
+        );
+    }
+
+    # Check if any errors have been recorded
+    method has_errors() {
+        return scalar($errors->@*) > 0;
+    }
+
+    # Format errors for display
+    method format_errors($input_string = undef) {
+        return '' unless $self->has_errors();
+
+        my @lines;
+        for my $err ($errors->@*) {
+            my $msg = $err->{message} // 'Unknown error';
+            my $pos = $err->{start_pos} // 0;
+
+            # Calculate line/column from position if input string provided
+            if (defined $input_string && $pos > 0) {
+                my $line = 1;
+                my $col = 1;
+                for my $i (0 .. $pos - 1) {
+                    if (substr($input_string, $i, 1) eq "\n") {
+                        $line++;
+                        $col = 1;
+                    } else {
+                        $col++;
+                    }
+                }
+                push @lines, "Line $line, Col $col: $msg";
+            } else {
+                push @lines, "Position $pos: $msg";
+            }
+        }
+        return join("\n", @lines);
     }
 }
 
@@ -118,6 +187,7 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
     field $shared_context :param = undef;
     field $mul_id :reader;  # Multiplicative identity (one)
     field $add_id :reader;  # Additive identity (zero)
+    field @collected_errors;  # Errors collected during parsing
 
     ADJUST {
         # Extract forest from shared_context if provided
@@ -129,13 +199,19 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
         $add_id = Chalk::Semiring::SemanticValidationElement->new(
             valid => 0,
             forest => $forest,
-            rules => $rules
+            rules => $rules,
+            errors => [],
+            start_pos => 0,
+            end_pos => 0
         );
 
         $mul_id = Chalk::Semiring::SemanticValidationElement->new(
             valid => 1,
             forest => $forest,
-            rules => $rules
+            rules => $rules,
+            errors => [],
+            start_pos => 0,
+            end_pos => 0
         );
     }
 
@@ -161,19 +237,51 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             valid => 1,
             sppf_node => $actual_sppf_node,
             forest => $forest,
-            rules => $rules
+            rules => $rules,
+            errors => [],
+            start_pos => $start_pos,
+            end_pos => $end_pos
         );
     }
 
     method from_terminal($symbol, $start_pos, $end_pos) {
         # Terminals are always valid
-        return $self->one();
+        return Chalk::Semiring::SemanticValidationElement->new(
+            valid => 1,
+            forest => $forest,
+            rules => $rules,
+            errors => [],
+            start_pos => $start_pos,
+            end_pos => $end_pos
+        );
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
         # All rules start as valid (1) - they are syntactically correct
         # Semantic validation happens in add() when choosing between alternatives
-        return $self->one();
+        return Chalk::Semiring::SemanticValidationElement->new(
+            valid => 1,
+            forest => $forest,
+            rules => $rules,
+            errors => [],
+            start_pos => $start_pos,
+            end_pos => $end_pos
+        );
+    }
+
+    # Collect an error for later retrieval
+    method collect_error($error) {
+        push @collected_errors, $error;
+    }
+
+    # Get all collected errors
+    method collected_errors() {
+        return @collected_errors;
+    }
+
+    # Clear collected errors (for new parse)
+    method clear_errors() {
+        @collected_errors = ();
     }
 }
 
