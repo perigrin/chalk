@@ -391,12 +391,22 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # This prevents wiping out precedence validation results
         my $was_valid = $completed_element->can('valid') ? $completed_element->valid : 1;
 
-        # PARENTHESIZED EXPRESSIONS: Clear operator info when completing a rule
-        # that starts with '(' - parentheses "seal off" the inner precedence context.
+        # BRACKETED EXPRESSIONS: Clear operator info when completing a rule
+        # that starts with '(' or '[' - these "seal off" the inner precedence context.
         # This makes (1 + 2) behave as a primary value with no operator, so
         # (1 + 2) * 3 parses correctly (no precedence conflict between + and *).
         my $rhs = $completed_item->rule->rhs;
-        if ($rhs && $rhs->@* > 0 && $rhs->[0] eq '(') {
+        if ($rhs && $rhs->@* > 0 && ($rhs->[0] eq '(' || $rhs->[0] eq '[')) {
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => $was_valid,
+                operator_index => $operator_index
+            );
+        }
+
+        # UNARY EXPRESSIONS: Also clear operator info for Unary rules.
+        # Unary operators like -1 should not conflict with surrounding binary
+        # operators. The '-' in '-1' is unary (high precedence) not binary.
+        if ($rule_name eq 'Unary') {
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => $was_valid,
                 operator_index => $operator_index

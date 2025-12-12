@@ -25,7 +25,10 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
         # Reference: perldoc perlop - Operator Precedence and Associativity
         my @perl_precedence_table = (
             # Index 0 - Highest precedence
-            { assoc => 'left',    ops => ['->'] },
+            # NOTE: '->' removed from precedence table - it's a postfix dereference
+            # operator, not a binary expression operator. The grammar structure
+            # already enforces its binding. Including it caused conflicts with
+            # operators inside subscripts like $ref->[1 + 2].
             { assoc => 'nonassoc', ops => ['++', '--'] },  # postfix
             { assoc => 'right',   ops => ['**'] },
             { assoc => 'right',   ops => ['!', '~', '\\', 'unary +', 'unary -'] },
