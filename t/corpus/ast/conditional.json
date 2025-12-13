@@ -537,169 +537,142 @@
                                                                      "children" : [
                                                                         {
                                                                            "children" : [
-                                                                              "generate"
-                                                                           ],
-                                                                           "rule" : "Identifier",
-                                                                           "span" : [
-                                                                              78,
-                                                                              86
-                                                                           ]
-                                                                        }
-                                                                     ],
-                                                                     "rule" : "Expression",
-                                                                     "span" : [
-                                                                        78,
-                                                                        86
-                                                                     ]
-                                                                  },
-                                                                  "-",
-                                                                  {
-                                                                     "children" : [
-                                                                        {
-                                                                           "children" : [
-                                                                              "ir"
-                                                                           ],
-                                                                           "rule" : "Identifier",
-                                                                           "span" : [
-                                                                              87,
-                                                                              89
-                                                                           ]
-                                                                        }
-                                                                     ],
-                                                                     "rule" : "Expression",
-                                                                     "span" : [
-                                                                        87,
-                                                                        89
-                                                                     ]
-                                                                  }
-                                                               ],
-                                                               "rule" : "ArithmeticOp",
-                                                               "span" : [
-                                                                  78,
-                                                                  89
-                                                               ]
-                                                            }
-                                                         ],
-                                                         "rule" : "Expression",
-                                                         "span" : [
-                                                            78,
-                                                            89
-                                                         ]
-                                                      }
-                                                   ],
-                                                   "rule" : "ExpressionList",
-                                                   "span" : [
-                                                      78,
-                                                      89
-                                                   ]
-                                                }
-                                             ],
-                                             "rule" : "Statement",
-                                             "span" : [
-                                                78,
-                                                89
-                                             ]
-                                          },
-                                          {
-                                             "children" : [
-                                                {
-                                                   "children" : [
-                                                      {
-                                                         "children" : [
-                                                            {
-                                                               "children" : [
-                                                                  {
-                                                                     "children" : [
-                                                                        {
-                                                                           "children" : [
                                                                               {
                                                                                  "children" : [
-                                                                                    "-",
                                                                                     {
                                                                                        "children" : [
                                                                                           {
                                                                                              "children" : [
-                                                                                                "corpus"
+                                                                                                {
+                                                                                                   "children" : [
+                                                                                                      "generate"
+                                                                                                   ],
+                                                                                                   "rule" : "Identifier",
+                                                                                                   "span" : [
+                                                                                                      78,
+                                                                                                      86
+                                                                                                   ]
+                                                                                                }
                                                                                              ],
-                                                                                             "rule" : "Identifier",
+                                                                                             "rule" : "Expression",
                                                                                              "span" : [
-                                                                                                90,
-                                                                                                96
+                                                                                                78,
+                                                                                                86
+                                                                                             ]
+                                                                                          },
+                                                                                          "-",
+                                                                                          {
+                                                                                             "children" : [
+                                                                                                {
+                                                                                                   "children" : [
+                                                                                                      "ir"
+                                                                                                   ],
+                                                                                                   "rule" : "Identifier",
+                                                                                                   "span" : [
+                                                                                                      87,
+                                                                                                      89
+                                                                                                   ]
+                                                                                                }
+                                                                                             ],
+                                                                                             "rule" : "Expression",
+                                                                                             "span" : [
+                                                                                                87,
+                                                                                                89
                                                                                              ]
                                                                                           }
                                                                                        ],
-                                                                                       "rule" : "Expression",
+                                                                                       "rule" : "ArithmeticOp",
+                                                                                       "span" : [
+                                                                                          78,
+                                                                                          89
+                                                                                       ]
+                                                                                    }
+                                                                                 ],
+                                                                                 "rule" : "Expression",
+                                                                                 "span" : [
+                                                                                    78,
+                                                                                    89
+                                                                                 ]
+                                                                              },
+                                                                              "-",
+                                                                              {
+                                                                                 "children" : [
+                                                                                    {
+                                                                                       "children" : [
+                                                                                          "corpus"
+                                                                                       ],
+                                                                                       "rule" : "Identifier",
                                                                                        "span" : [
                                                                                           90,
                                                                                           96
                                                                                        ]
                                                                                     }
                                                                                  ],
-                                                                                 "rule" : "Unary",
+                                                                                 "rule" : "Expression",
                                                                                  "span" : [
-                                                                                    89,
+                                                                                    90,
                                                                                     96
                                                                                  ]
                                                                               }
                                                                            ],
-                                                                           "rule" : "Expression",
+                                                                           "rule" : "ArithmeticOp",
                                                                            "span" : [
-                                                                              89,
+                                                                              78,
                                                                               96
                                                                            ]
-                                                                        },
-                                                                        ".",
+                                                                        }
+                                                                     ],
+                                                                     "rule" : "Expression",
+                                                                     "span" : [
+                                                                        78,
+                                                                        96
+                                                                     ]
+                                                                  },
+                                                                  ".",
+                                                                  {
+                                                                     "children" : [
                                                                         {
                                                                            "children" : [
-                                                                              {
-                                                                                 "children" : [
-                                                                                    "pl"
-                                                                                 ],
-                                                                                 "rule" : "Identifier",
-                                                                                 "span" : [
-                                                                                    97,
-                                                                                    99
-                                                                                 ]
-                                                                              }
+                                                                              "pl"
                                                                            ],
-                                                                           "rule" : "Expression",
+                                                                           "rule" : "Identifier",
                                                                            "span" : [
                                                                               97,
                                                                               99
                                                                            ]
                                                                         }
                                                                      ],
-                                                                     "rule" : "ConcatenationOp",
+                                                                     "rule" : "Expression",
                                                                      "span" : [
-                                                                        89,
+                                                                        97,
                                                                         99
                                                                      ]
                                                                   }
                                                                ],
-                                                               "rule" : "Expression",
+                                                               "rule" : "ConcatenationOp",
                                                                "span" : [
-                                                                  89,
+                                                                  78,
                                                                   99
                                                                ]
                                                             }
                                                          ],
-                                                         "rule" : "ExpressionList",
+                                                         "rule" : "Expression",
                                                          "span" : [
-                                                            89,
+                                                            78,
                                                             99
                                                          ]
                                                       }
                                                    ],
-                                                   "rule" : "Statement",
+                                                   "rule" : "ExpressionList",
                                                    "span" : [
-                                                      89,
+                                                      78,
                                                       99
                                                    ]
                                                 }
                                              ],
-                                             "rule" : "StatementList",
+                                             "rule" : "Statement",
                                              "span" : [
-                                                89,
+                                                78,
                                                 99
                                              ]
                                           }

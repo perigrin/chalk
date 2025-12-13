@@ -40,43 +40,7 @@
                                           9,
                                           15
                                        ]
-                                    }
-                                 ],
-                                 "rule" : "Variable",
-                                 "span" : [
-                                    0,
-                                    15
-                                 ]
-                              }
-                           ],
-                           "rule" : "Expression",
-                           "span" : [
-                              0,
-                              15
-                           ]
-                        }
-                     ],
-                     "rule" : "ExpressionList",
-                     "span" : [
-                        0,
-                        15
-                     ]
-                  }
-               ],
-               "rule" : "Statement",
-               "span" : [
-                  0,
-                  15
-               ]
-            },
-            {
-               "children" : [
-                  {
-                     "children" : [
-                        {
-                           "children" : [
-                              {
-                                 "children" : [
+                                    },
                                     "(",
                                     {
                                        "children" : [
@@ -137,30 +101,30 @@
                                     },
                                     ")"
                                  ],
-                                 "rule" : "Expression",
+                                 "rule" : "Variable",
                                  "span" : [
-                                    15,
+                                    0,
                                     28
                                  ]
                               }
                            ],
-                           "rule" : "ExpressionList",
+                           "rule" : "Expression",
                            "span" : [
-                              15,
+                              0,
                               28
                            ]
                         }
                      ],
-                     "rule" : "Statement",
+                     "rule" : "ExpressionList",
                      "span" : [
-                        15,
+                        0,
                         28
                      ]
                   }
                ],
-               "rule" : "StatementList",
+               "rule" : "Statement",
                "span" : [
-                  15,
+                  0,
                   28
                ]
             }

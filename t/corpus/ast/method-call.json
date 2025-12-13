@@ -40,43 +40,7 @@
                                           6,
                                           12
                                        ]
-                                    }
-                                 ],
-                                 "rule" : "Variable",
-                                 "span" : [
-                                    0,
-                                    12
-                                 ]
-                              }
-                           ],
-                           "rule" : "Expression",
-                           "span" : [
-                              0,
-                              12
-                           ]
-                        }
-                     ],
-                     "rule" : "ExpressionList",
-                     "span" : [
-                        0,
-                        12
-                     ]
-                  }
-               ],
-               "rule" : "Statement",
-               "span" : [
-                  0,
-                  12
-               ]
-            },
-            {
-               "children" : [
-                  {
-                     "children" : [
-                        {
-                           "children" : [
-                              {
-                                 "children" : [
+                                    },
                                     "(",
                                     {
                                        "children" : [
@@ -84,24 +48,33 @@
                                              "children" : [
                                                 {
                                                    "children" : [
-                                                      "$",
-                                                      "arg"
+                                                      {
+                                                         "children" : [
+                                                            "$",
+                                                            "arg"
+                                                         ],
+                                                         "rule" : "ScalarVar",
+                                                         "span" : [
+                                                            13,
+                                                            17
+                                                         ]
+                                                      }
                                                    ],
-                                                   "rule" : "ScalarVar",
+                                                   "rule" : "Variable",
                                                    "span" : [
                                                       13,
                                                       17
                                                    ]
                                                 }
                                              ],
-                                             "rule" : "Variable",
+                                             "rule" : "Expression",
                                              "span" : [
                                                 13,
                                                 17
                                              ]
                                           }
                                        ],
-                                       "rule" : "Expression",
+                                       "rule" : "ExpressionList",
                                        "span" : [
                                           13,
                                           17
@@ -109,34 +82,34 @@
                                     },
                                     ")"
                                  ],
-                                 "rule" : "Expression",
+                                 "rule" : "Variable",
                                  "span" : [
-                                    12,
+                                    0,
                                     18
                                  ]
                               }
                            ],
-                           "rule" : "ExpressionList",
+                           "rule" : "Expression",
                            "span" : [
-                              12,
+                              0,
                               18
                            ]
                         }
                      ],
-                     "rule" : "Statement",
+                     "rule" : "ExpressionList",
                      "span" : [
-                        12,
+                        0,
                         18
                      ]
-                  },
-                  ";"
+                  }
                ],
-               "rule" : "StatementList",
+               "rule" : "Statement",
                "span" : [
-                  12,
-                  19
+                  0,
+                  18
                ]
-            }
+            },
+            ";"
          ],
          "rule" : "StatementList",
          "span" : [

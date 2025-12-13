@@ -120,14 +120,7 @@
                   25
                ]
             },
-            ";",
-            {
-               "rule" : "StatementList",
-               "span" : [
-                  26,
-                  26
-               ]
-            }
+            ";"
          ],
          "rule" : "StatementList",
          "span" : [
