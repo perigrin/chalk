@@ -3,6 +3,10 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Tuple;
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Ctrl;
+use Chalk::IR::Type::Top;
 
 class Chalk::IR::Node::Start :isa(Chalk::IR::Node::CFGNode) {
 

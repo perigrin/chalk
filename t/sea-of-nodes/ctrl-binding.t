@@ -14,6 +14,8 @@ use_ok('Chalk::IR::Node::Region');
 use_ok('Chalk::IR::Node::Loop');
 use_ok('Chalk::IR::Node::Phi');
 use_ok('Chalk::IR::Node::Constant');
+use_ok('Chalk::IR::Type::Bool');
+use_ok('Chalk::IR::Type::Integer');
 
 # =============================================================================
 # Phase 1: Core Infrastructure - $ctrl binding at program start

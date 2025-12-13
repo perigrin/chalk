@@ -23,7 +23,22 @@ class Chalk::IR::Optimizer::IterPeeps {
         if ($op eq 'Constant') {
             my $value = $attrs->{value} // '';
             my $type = $attrs->{type} // '';
-            return "Constant:$value:$type";
+            # Extract meaningful type info instead of stringifying object
+            # Type objects stringify to address, which breaks GVN matching
+            my $type_str;
+            if (ref($type) && $type->can('value')) {
+                # For constant types like Integer->constant(10)
+                my $type_class = ref($type);
+                my $type_val = $type->value // '';
+                $type_str = "$type_class:$type_val";
+            } elsif (ref($type)) {
+                # For other type objects, use class name
+                $type_str = ref($type);
+            } else {
+                # For string types
+                $type_str = "$type";
+            }
+            return "Constant:$value:$type_str";
         }
 
         # Special case: Proj nodes (include index)

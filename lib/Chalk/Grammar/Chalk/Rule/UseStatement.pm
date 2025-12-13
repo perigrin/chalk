@@ -155,6 +155,10 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             context => "type=$type, module=$module_name, imports=[$import_list]"
         );
 
+        # Update scope's control to thread UseStatement into control flow
+        my $new_scope = $scope->with_control($use_stmt);
+        $context->env->{scope} = $new_scope;
+
         return $use_stmt;
     }
 }
