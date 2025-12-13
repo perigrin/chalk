@@ -351,22 +351,8 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                 my $op_info = $self->lookup_operator($token_str);
 
                 if ($op_info) {
-                    # Check if the existing element has a passive operator from a sub-expression
-                    # If so, validate that this active operator can legally contain it
-                    my $existing_op = $element->operator;
-                    my $existing_level = $element->precedence_level;
-
-                    # NOTE: on_scan precedence checking has been disabled.
-                    # The multiply() method handles precedence validation correctly.
-                    # on_scan was incorrectly rejecting valid expressions like `1 + 2 * 3`
-                    # because it confused "operand stealing" with "containment".
-                    # In Earley parsing, higher-precedence operators like * should be
-                    # able to steal operands from lower-precedence operators like +.
-                    # This is handled correctly in multiply() when elements are combined.
-                    #
-                    # See t/parser/operator-precedence-comprehensive.t for test cases.
-
-                    return Chalk::Semiring::PrecedenceElement->new(
+                    # Create element for the scanned operator (active)
+                    my $new_op_element = Chalk::Semiring::PrecedenceElement->new(
                         valid => 1,
                         operator => $token_str,
                         precedence_level => $op_info->{level},
@@ -374,6 +360,13 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                         operator_index => $operator_index,
                         is_active => 1  # Mark as active - this is the current rule's operator
                     );
+
+                    # CRITICAL: Use multiply() to combine with existing element
+                    # This ensures precedence validation happens when active operator
+                    # (new) tries to combine with passive operator (existing from sub-expr)
+                    # multiply() at lines 149-185 will reject invalid precedence like
+                    # * (active, level 5) trying to contain + (passive, level 6)
+                    return $element->multiply($new_op_element);
                 }
             }
         }
