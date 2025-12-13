@@ -45,7 +45,7 @@ class Chalk::IR::Type::MemoryPointer :isa(Chalk::IR::Type) {
         return $singleton;
     }
 
-    sub NULL {
+    sub NULL ($class) {
         # null is a nullable pointer to TOP (non-existent memory)
         state $singleton = $class->new(nullable => 1);
         return $singleton;
