@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
+use Chalk::Grammar::Chalk::Type::Undef;
 
 class Chalk::Grammar::Chalk::Rule::ReturnStatement :isa(Chalk::GrammarRule) {
 
@@ -21,8 +22,8 @@ class Chalk::Grammar::Chalk::Rule::ReturnStatement :isa(Chalk::GrammarRule) {
 
         # Default to undef constant if no expression
         $expr_node //= Chalk::IR::Node::Constant->new(
-            type  => 'Undef',
-            value => 'undef',
+            type  => Chalk::Grammar::Chalk::Type::Undef->new(),
+            value => undef,
         );
 
         # Verify we have an IR node (check for id method, not Base inheritance)
