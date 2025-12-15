@@ -3,11 +3,14 @@
 
 use 5.42.0;
 use experimental 'class';
+use Scalar::Util 'blessed';
 
 class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
     method evaluate($context) {
         use Chalk::IR::Node::Negate;
         use Chalk::IR::Node::Not;
+        use Chalk::IR::Node::PreIncrement;
+        use Chalk::IR::Node::PreDecrement;
 
         # Unary -> Primary (pass-through)
         # Unary -> '!' WS_OPT Unary (prefix operators)
@@ -48,7 +51,7 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         my $operand;
         for my $i (1 .. $#children) {
             my $child = $context->child($i);
-            if (ref($child) && $child->can('id')) {
+            if (blessed($child) && $child->can('id')) {
                 $operand = $child;
                 last;
             }
@@ -75,10 +78,10 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
             # Reference node exists but needs wiring up here
             # For now, just pass through
             return $operand;
-        } elsif ($operator eq '++' || $operator eq '--') {
-            # Prefix ++/--
-            # See issue #189 for wiring up PreIncrement/PreDecrement nodes
-            return $operand;
+        } elsif ($operator eq '++') {
+            return Chalk::IR::Node::PreIncrement->new(operand => $operand)->peephole();
+        } elsif ($operator eq '--') {
+            return Chalk::IR::Node::PreDecrement->new(operand => $operand)->peephole();
         }
 
         die "Unary: unrecognized operator '$operator' - grammar bug";
