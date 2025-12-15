@@ -297,6 +297,8 @@ ComparisonOp -> Expression WS_OPT %STRING_COMPARE_OP% WS_OPT Expression
 ComparisonOp -> Expression WS_OPT 'isa' WS_OPT QualifiedIdentifier
 ComparisonOp -> Expression WS_OPT 'isa' WS_OPT Expression
 ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT Expression
+# Bare regex match: $x =~ /pattern/flags (shorthand for m/pattern/flags)
+ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT '/' RegexContent '/' RegexFlags
 
 # String concatenation operator (left-associative)
 ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression

@@ -44,7 +44,7 @@ ok(!$step1->{done}, "First step not done");
 ok($step1->{node_id} eq $start1->id || $step1->{node_id} eq $const1->id || $step1->{node_id} eq $const2->id,
    "First step is Start or a constant node");
 ok($step1->{node_op} eq 'Start' || $step1->{node_op} eq 'Constant', "First step is Start or Constant operation");
-ok(!defined($step1->{value}) || $step1->{value} == 5 || $step1->{value} == 3, "First step value is undef, 5, or 3");
+ok($step1->{value} == 1 || $step1->{value} == 5 || $step1->{value} == 3, "First step value is 1 (Start), 5, or 3");
 
 # Second step
 my $step2 = $interp1->step();
