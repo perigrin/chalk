@@ -5,10 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::If :isa(Chalk::IR::Node::Base) {
-    use Chalk::IR::Type::Tuple;
-    use Chalk::IR::Type::Ctrl;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Type::Bottom;
 
     field $condition_id :param :reader;
     # Object reference to condition node for graph traversal

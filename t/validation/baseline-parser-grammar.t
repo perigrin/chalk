@@ -7,7 +7,7 @@ use FindBin qw($RealBin);
 use experimental qw(defer);
 defer { done_testing() }
 
-use lib "$RealBin/../lib";
+use lib "$RealBin/../../lib";
 use Chalk::Grammar::BNF;
 use Chalk::Parser;
 use File::Find;
@@ -24,7 +24,7 @@ find(
     sub {
         push @bnf_files, $File::Find::name if /\.bnf$/;
     },
-    "$RealBin/../grammar"
+    "$RealBin/../../grammar"
 );
 
 # Sort for consistent test ordering
@@ -73,7 +73,7 @@ diag "=== Baseline Parser Assessment for grammar/ ===";
 diag "Total files: $total";
 diag "Passed: $passed";
 diag "Failed: $failed";
-diag "Success rate: " . sprintf("%.1f%%", ($passed / $total) * 100);
+diag "Success rate: " . ($total > 0 ? sprintf("%.1f%%", ($passed / $total) * 100) : "N/A (no files found)");
 
 if (@failures) {
     diag "";

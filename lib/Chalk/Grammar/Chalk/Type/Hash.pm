@@ -2,7 +2,7 @@
 # ABOUTME: Implements Hash <: List <: Any subtyping chain with value_type parameter
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Hash :isa(Chalk::Grammar::Chalk::Type) {
     # Hash represents hash values
@@ -15,9 +15,13 @@ class Chalk::Grammar::Chalk::Type::Hash :isa(Chalk::Grammar::Chalk::Type) {
         # Hash <: Hash (reflexive)
         # Hash <: List
         # Hash <: Any (transitive)
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Hash' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::List' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::Hash',
+            'Chalk::Grammar::Chalk::Type::List',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 
     method meet($other) {
@@ -26,7 +30,7 @@ class Chalk::Grammar::Chalk::Type::Hash :isa(Chalk::Grammar::Chalk::Type) {
         return $self if $other->is_top();
 
         # Hash meet Hash: covariant value types
-        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Hash') {
+        if (            $other isa Chalk::Grammar::Chalk::Type::Hash) {
             my $val_meet = $value_type->meet($other->value_type);
             return Chalk::Grammar::Chalk::Type::Hash->new(value_type => $val_meet);
         }
@@ -41,7 +45,7 @@ class Chalk::Grammar::Chalk::Type::Hash :isa(Chalk::Grammar::Chalk::Type) {
         return $other if $other->is_top();
 
         # Hash join Hash: covariant value types
-        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Hash') {
+        if (            $other isa Chalk::Grammar::Chalk::Type::Hash) {
             my $val_join = $value_type->join($other->value_type);
             return Chalk::Grammar::Chalk::Type::Hash->new(value_type => $val_join);
         }

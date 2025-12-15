@@ -182,14 +182,7 @@
                         30
                      ]
                   },
-                  ";",
-                  {
-                     "rule" : "StatementList",
-                     "span" : [
-                        31,
-                        31
-                     ]
-                  }
+                  ";"
                ],
                "rule" : "StatementList",
                "span" : [

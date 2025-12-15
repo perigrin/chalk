@@ -21,6 +21,10 @@ use_ok('Chalk::IR::Node::Region');
 use_ok('Chalk::IR::Node::Phi');
 use_ok('Chalk::IR::Node::Return');
 
+# Load IR Type classes
+use_ok('Chalk::IR::Type::Integer');
+use_ok('Chalk::IR::Type::Ctrl');
+
 # Test constant condition optimization: if (1) - always true
 subtest 'Constant true condition: if (1)' => sub {
     my $graph = Chalk::IR::Graph->new();
@@ -48,7 +52,7 @@ subtest 'Constant true condition: if (1)' => sub {
     # Constant 1 (true condition)
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(1)
     );
     $graph->add_node($const_1);
 
@@ -94,7 +98,7 @@ subtest 'Constant false condition: if (0)' => sub {
     # Constant 0 (false condition)
     my $const_0 = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(0)
     );
     $graph->add_node($const_0);
 
@@ -135,7 +139,7 @@ subtest 'Proj node optimization: dead branch becomes ~Ctrl' => sub {
     # Constant 1 (true)
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(1)
     );
     $graph->add_node($const_1);
 
@@ -173,7 +177,7 @@ subtest 'Proj node optimization: dead branch becomes ~Ctrl' => sub {
     # False branch should become ~Ctrl constant
     is($opt_false->op, 'Constant', 'False branch becomes Constant');
     is($opt_false->value, '~Ctrl', 'False branch is ~Ctrl');
-    is($opt_false->type, 'Control', 'False branch type is Control');
+    ok($opt_false->type isa Chalk::IR::Type::Ctrl, 'False branch type is Ctrl');
 };
 
 # Test Phi node simplification when one input is dead
@@ -183,7 +187,7 @@ subtest 'Phi node simplification: single live input' => sub {
     # Dead control constant
     my $dead_ctrl = Chalk::IR::Node::Constant->new(
         value => '~Ctrl',
-        type => 'Control'
+        type => Chalk::IR::Type::Ctrl->CTRL()
     );
     $graph->add_node($dead_ctrl);
 
@@ -204,13 +208,13 @@ subtest 'Phi node simplification: single live input' => sub {
     # Two values for Phi
     my $value_1 = Chalk::IR::Node::Constant->new(
         value => 42,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(42)
     );
     $graph->add_node($value_1);
 
     my $value_2 = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(0)
     );
     $graph->add_node($value_2);
 
@@ -237,7 +241,7 @@ subtest 'Region node collapse: single live input' => sub {
     # Dead control
     my $dead_ctrl = Chalk::IR::Node::Constant->new(
         value => '~Ctrl',
-        type => 'Control'
+        type => Chalk::IR::Type::Ctrl->CTRL()
     );
     $graph->add_node($dead_ctrl);
 
@@ -289,7 +293,7 @@ subtest 'Complete dead code elimination: if (1) with dead else branch' => sub {
     # Constant 1 (always true)
     my $const_1 = Chalk::IR::Node::Constant->new(
         value => 1,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(1)
     );
     $graph->add_node($const_1);
 
@@ -319,14 +323,14 @@ subtest 'Complete dead code elimination: if (1) with dead else branch' => sub {
     # Constant 42 (return value from true branch)
     my $const_42 = Chalk::IR::Node::Constant->new(
         value => 42,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(42)
     );
     $graph->add_node($const_42);
 
     # Constant 0 (return value from false branch - dead code)
     my $const_0 = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(0)
     );
     $graph->add_node($const_0);
 
@@ -370,14 +374,14 @@ subtest 'Constant comparison optimization: 5 > 3 (always true)' => sub {
     # Constant 5
     my $const_5 = Chalk::IR::Node::Constant->new(
         value => 5,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(5)
     );
     $graph->add_node($const_5);
 
     # Constant 3
     my $const_3 = Chalk::IR::Node::Constant->new(
         value => 3,
-        type => 'Int'
+        type => Chalk::IR::Type::Integer->constant(3)
     );
     $graph->add_node($const_3);
 
@@ -409,7 +413,7 @@ subtest 'Validator confirms optimized IR correctness' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 42, type => 'Int' }
+        attributes => { value => 42, type => Chalk::IR::Type::Integer->constant(42) }
     ));
 
     $graph->add_node(Chalk::IR::Node->new(

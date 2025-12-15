@@ -6,6 +6,7 @@ use utf8;
 
 class Chalk::Error::CompilationError {
     use overload '""' => 'as_string', fallback => 1;
+
     field $message      :param :reader;
     field $source_info  :param :reader = undef;
     field $hints        :param :reader = undef;

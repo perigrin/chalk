@@ -5,9 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Divide {
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -70,7 +67,7 @@ class Chalk::IR::Node::Divide {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Integer',
+                type  => $type,
             );
         }
 

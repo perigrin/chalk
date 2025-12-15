@@ -12,17 +12,25 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
     field $type_env :param :reader = {};  # Variable → Type bindings (hashref)
     field $children :param :reader = [];  # Child elements (parse tree) (arrayref)
     field $token :param :reader = undef;  # Token for terminals
+    field $errors :param :reader = [];    # Accumulated error messages (arrayref)
+    field $start_pos :param :reader = 0;  # Start position for error reporting
+    field $end_pos :param :reader = 0;    # End position for error reporting
 
     # Tropical semiring addition: join (∨) - "could be either type"
     method add( $other, $swap = undef ) {
         my $other_type = $other->type_obj;
         my $joined = $type_obj->join($other_type);
         # Note: type_env is not merged in add (alternative branches)
+        # Merge errors from both alternatives
+        my @merged_errors = ($errors->@*, $other->errors->@*);
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $joined,
             type_env => $type_env,
             children => $children,
-            token => $token
+            token => $token,
+            errors => \@merged_errors,
+            start_pos => $start_pos,
+            end_pos => $end_pos
         );
     }
 
@@ -39,11 +47,34 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
         my $other_type = $other->type_obj;
         my $meet_type = $type_obj->meet($other_type);
 
+        # Merge errors from both operands
+        my @new_errors = ($errors->@*, $other->errors->@*);
+
+        # Track type contradiction if meet produces bottom from non-bottom types
+        if ($meet_type->is_bottom() && !$type_obj->is_bottom() && !$other_type->is_bottom()) {
+            push @new_errors, {
+                type => 'type_contradiction',
+                message => "Type contradiction: cannot unify '" . $type_obj->name() .
+                           "' with '" . $other_type->name() . "'",
+                start_pos => $start_pos,
+                end_pos => $other->end_pos,
+                left_type => $type_obj->name(),
+                right_type => $other_type->name()
+            };
+        }
+
+        # Calculate combined position span
+        my $new_start = $start_pos < $other->start_pos ? $start_pos : $other->start_pos;
+        my $new_end = $end_pos > $other->end_pos ? $end_pos : $other->end_pos;
+
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $meet_type,
             type_env => $combined_env,
             children => \@new_children,
-            token => $token  # Preserve token from left element
+            token => $token,  # Preserve token from left element
+            errors => \@new_errors,
+            start_pos => $new_start,
+            end_pos => $new_end
         );
     }
 
@@ -69,6 +100,40 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
         # A type is "valid" if it's not bottom (not a type contradiction)
         return !$type_obj->is_bottom();
     }
+
+    # Check if any errors have been recorded
+    method has_errors() {
+        return scalar($errors->@*) > 0;
+    }
+
+    # Format errors for display
+    method format_errors($input_string = undef) {
+        return '' unless $self->has_errors();
+
+        my @lines;
+        for my $err ($errors->@*) {
+            my $msg = $err->{message} // 'Unknown error';
+            my $pos = $err->{start_pos} // 0;
+
+            # Calculate line/column from position if input string provided
+            if (defined $input_string && $pos > 0) {
+                my $line = 1;
+                my $col = 1;
+                for my $i (0 .. $pos - 1) {
+                    if (substr($input_string, $i, 1) eq "\n") {
+                        $line++;
+                        $col = 1;
+                    } else {
+                        $col++;
+                    }
+                }
+                push @lines, "Line $line, Col $col: $msg";
+            } else {
+                push @lines, "Position $pos: $msg";
+            }
+        }
+        return join("\n", @lines);
+    }
 }
 
 class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
@@ -81,13 +146,19 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         type_obj => $lattice->bottom_type(),
         type_env => {},
         children => [],
-        token => undef
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 0
     );
     field $mul_id :reader = Chalk::Semiring::TypeInferenceElement->new(
         type_obj => $lattice->top_type(),
         type_env => {},
         children => [],
-        token => undef
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 0
     );
 
     # Shared context for SPPF integration (optional)
@@ -105,19 +176,43 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
         # Start with top type (no constraints yet)
         # Type constraints will be refined through meet operations
-        return $mul_id;
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $lattice->top_type(),
+            type_env => {},
+            children => [],
+            token => undef,
+            errors => [],
+            start_pos => $start_pos,
+            end_pos => $end_pos
+        );
     }
 
     method from_symbol($symbol, $start_pos, $end_pos, $sppf_node = undef) {
         # Infer type from IR operation if available
         # For now, return top type (Any) - constraints added via multiply
-        return $mul_id;
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $lattice->top_type(),
+            type_env => {},
+            children => [],
+            token => undef,
+            errors => [],
+            start_pos => $start_pos,
+            end_pos => $end_pos
+        );
     }
 
     method from_terminal($symbol, $start_pos, $end_pos) {
         # Terminals don't directly carry type information
         # Return top type - actual type inferred from context
-        return $mul_id;
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $lattice->top_type(),
+            type_env => {},
+            children => [],
+            token => undef,
+            errors => [],
+            start_pos => $start_pos,
+            end_pos => $end_pos
+        );
     }
 
     method multiply($x, $y) {
@@ -134,6 +229,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         # Extract type information from scanned Token objects
         # Return a new element with the extracted type and token stored
         # The Earley parser will handle multiply() operations automatically
+
+        my $match_len = defined($matched_value) ? length($matched_value) : 0;
+        my $end_pos = $pos + $match_len;
 
         # Check if matched_value is a Token with type information
         if (defined $matched_value && ref($matched_value)) {
@@ -154,13 +252,24 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
                     type_obj => $type_obj,
                     type_env => {},
                     children => [],
-                    token => $matched_value  # Store token for later extraction
+                    token => $matched_value,  # Store token for later extraction
+                    errors => [],
+                    start_pos => $pos,
+                    end_pos => $end_pos
                 );
             }
         }
 
-        # No type information extracted - return element unchanged
-        return $element;
+        # No type information extracted - return element with updated positions
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj => $element->type_obj,
+            type_env => $element->type_env,
+            children => $element->children,
+            token => $element->token,
+            errors => $element->errors,
+            start_pos => $pos,
+            end_pos => $end_pos
+        );
     }
 
     # Earley completion hook - delegates type inference to grammar rules
@@ -169,6 +278,13 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     # $completed_element is optional metadata from Composite semiring
     method on_complete($item, $element, $completed_element = undef) {
         my $rule = $item->rule;
+
+        # Emit any type errors accumulated in the element to diagnostic context
+        if ($element->can('errors') && $element->errors->@*) {
+            for my $error ($element->errors->@*) {
+                $self->emit_diagnostic($error);
+            }
+        }
 
         # If rule has custom type inference, delegate to it
         # This enables extensible type inference without modifying TypeInference.pm

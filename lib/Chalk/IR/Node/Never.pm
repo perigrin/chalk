@@ -5,10 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Never :isa(Chalk::IR::Node::If) {
-    use Chalk::IR::Node::If;
-    use Chalk::IR::Type::Tuple;
-    use Chalk::IR::Type::Ctrl;
-    use Chalk::IR::Type::Bottom;
 
     method op() { 'Never' }
 

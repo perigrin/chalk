@@ -13,6 +13,10 @@ use_ok('Chalk::IR::Node');
 use_ok('Chalk::IR::Graph');
 use_ok('Chalk::IR::Optimizer::GVN');
 
+# Load type system
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Bool;
+
 # Test 1: Elimination of redundant arithmetic (x+y computed twice)
 subtest 'Eliminate redundant arithmetic' => sub {
     my $graph = Chalk::IR::Graph->new();
@@ -32,7 +36,7 @@ subtest 'Eliminate redundant arithmetic' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 3, type => 'Int' }
+        attributes => { value => 3, type => Chalk::IR::Type::Integer->constant(3) }
     );
     $graph->add_node($const_x);
 
@@ -40,7 +44,7 @@ subtest 'Eliminate redundant arithmetic' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 5, type => 'Int' }
+        attributes => { value => 5, type => Chalk::IR::Type::Integer->constant(5) }
     );
     $graph->add_node($const_y);
 
@@ -125,7 +129,7 @@ subtest 'Common subexpression elimination' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 4, type => 'Int' }
+        attributes => { value => 4, type => Chalk::IR::Type::Integer->constant(4) }
     );
     $graph->add_node($const_a);
 
@@ -133,7 +137,7 @@ subtest 'Common subexpression elimination' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 7, type => 'Int' }
+        attributes => { value => 7, type => Chalk::IR::Type::Integer->constant(7) }
     );
     $graph->add_node($const_b);
 
@@ -212,7 +216,7 @@ subtest 'Commutativity in Add operations' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 10, type => 'Int' }
+        attributes => { value => 10, type => Chalk::IR::Type::Integer->constant(10) }
     );
     $graph->add_node($const_a);
 
@@ -220,7 +224,7 @@ subtest 'Commutativity in Add operations' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 20, type => 'Int' }
+        attributes => { value => 20, type => Chalk::IR::Type::Integer->constant(20) }
     );
     $graph->add_node($const_b);
 
@@ -285,7 +289,7 @@ subtest 'Commutativity in Multiply operations' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 6, type => 'Int' }
+        attributes => { value => 6, type => Chalk::IR::Type::Integer->constant(6) }
     );
     $graph->add_node($const_a);
 
@@ -293,7 +297,7 @@ subtest 'Commutativity in Multiply operations' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 9, type => 'Int' }
+        attributes => { value => 9, type => Chalk::IR::Type::Integer->constant(9) }
     );
     $graph->add_node($const_b);
 
@@ -358,7 +362,7 @@ subtest 'Different constants are not merged' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 42, type => 'Int' }
+        attributes => { value => 42, type => Chalk::IR::Type::Integer->constant(42) }
     );
     $graph->add_node($const1);
 
@@ -366,7 +370,7 @@ subtest 'Different constants are not merged' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 99, type => 'Int' }
+        attributes => { value => 99, type => Chalk::IR::Type::Integer->constant(99) }
     );
     $graph->add_node($const2);
 
@@ -409,7 +413,7 @@ subtest 'Identical constants are merged' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 42, type => 'Int' }
+        attributes => { value => 42, type => Chalk::IR::Type::Integer->constant(42) }
     );
     $graph->add_node($const1);
 
@@ -417,7 +421,7 @@ subtest 'Identical constants are merged' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 42, type => 'Int' }
+        attributes => { value => 42, type => Chalk::IR::Type::Integer->constant(42) }
     );
     $graph->add_node($const2);
 
@@ -468,7 +472,7 @@ subtest 'GVN is idempotent' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 5, type => 'Int' }
+        attributes => { value => 5, type => Chalk::IR::Type::Integer->constant(5) }
     );
     $graph->add_node($const_a);
 
@@ -476,7 +480,7 @@ subtest 'GVN is idempotent' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 5, type => 'Int' }
+        attributes => { value => 5, type => Chalk::IR::Type::Integer->constant(5) }
     );
     $graph->add_node($const_b);
 
@@ -533,7 +537,7 @@ subtest 'Non-commutative operations respect order' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 10, type => 'Int' }
+        attributes => { value => 10, type => Chalk::IR::Type::Integer->constant(10) }
     );
     $graph->add_node($const_a);
 
@@ -541,7 +545,7 @@ subtest 'Non-commutative operations respect order' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 3, type => 'Int' }
+        attributes => { value => 3, type => Chalk::IR::Type::Integer->constant(3) }
     );
     $graph->add_node($const_b);
 
@@ -610,7 +614,7 @@ subtest 'Proj nodes respect index differences' => sub {
         op => 'If',
         inputs => ['node_0'],
         attributes => {
-            condition => { op => 'Constant', value => 1, type => 'Int' }
+            condition => { op => 'Constant', value => 1, type => Chalk::IR::Type::Integer->constant(1) }
         }
     );
     $graph->add_node($if_node);
@@ -673,7 +677,7 @@ subtest 'Complex expression optimization' => sub {
         id => 'node_1',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 2, type => 'Int' }
+        attributes => { value => 2, type => Chalk::IR::Type::Integer->constant(2) }
     );
     $graph->add_node($const_a);
 
@@ -681,7 +685,7 @@ subtest 'Complex expression optimization' => sub {
         id => 'node_2',
         op => 'Constant',
         inputs => [],
-        attributes => { value => 3, type => 'Int' }
+        attributes => { value => 3, type => Chalk::IR::Type::Integer->constant(3) }
     );
     $graph->add_node($const_b);
 
@@ -812,13 +816,13 @@ subtest 'GVN preserves polymorphic node types' => sub {
 
     my $const3 = Chalk::IR::Node::Constant->new(
         value => 3,
-        type => 'Int',
+        type => Chalk::IR::Type::Integer->constant(3),
     );
     $graph->add_node($const3);
 
     my $const5 = Chalk::IR::Node::Constant->new(
         value => 5,
-        type => 'Int',
+        type => Chalk::IR::Type::Integer->constant(5),
     );
     $graph->add_node($const5);
 

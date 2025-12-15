@@ -5,9 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Subtract {
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -70,7 +67,7 @@ class Chalk::IR::Node::Subtract {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Integer',
+                type  => $type,
             );
         }
 
@@ -106,7 +103,7 @@ class Chalk::IR::Node::Subtract {
     method idealize() {
         # x - x -> 0 (self-subtraction elimination)
         if ($left->id eq $right->id) {
-            return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+            return Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->constant(0));
         }
         return;
     }

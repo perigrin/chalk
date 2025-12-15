@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: Test Composite(SPPF, Precedence, Semantic) with real Chalk grammar
-# ABOUTME: Validates Phase 2 & 3 precedence semiring integration with arithmetic expressions
+# ABOUTME: Test Composite(Boolean, SPPF, Precedence, Semantic) with real Chalk grammar
+# ABOUTME: Validates precedence semiring integration with arithmetic expressions
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all defer);
 use utf8;
@@ -14,6 +14,7 @@ use File::Spec;
 use Chalk::Grammar;
 use Chalk::Grammar::Chalk;  # Pre-loads all Chalk grammar rule classes for static compilation
 use Chalk::Parser;
+use Chalk::Semiring::Boolean;
 use Chalk::Semiring::SPPF;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
@@ -35,13 +36,17 @@ my @precedence_table = (
     { assoc => 'left',  ops => ['+', '-'] },      # Index 2 - Lowest
 );
 
-# Create Composite(SPPF, Precedence, Semantic)
+# Create Composite(Boolean, SPPF, Precedence, Semantic)
+# NOTE: Boolean must be first for Composite coordination to work correctly.
+# The Composite's add() uses the first semiring as the "leader" to decide
+# which derivation to use. Boolean (or Precedence) filters invalid parses.
+my $bool_sr = Chalk::Semiring::Boolean->new();
 my $sppf_sr = Chalk::Semiring::SPPF->new();
 my $prec_sr = Chalk::Semiring::Precedence->new(precedence_table => \@precedence_table);
 my $sem_sr = Chalk::Semiring::Semantic->new(grammar => $grammar);
 
 my $composite_sr = Chalk::Semiring::Composite->new(
-    semirings => [$sppf_sr, $prec_sr, $sem_sr]
+    semirings => [$bool_sr, $sppf_sr, $prec_sr, $sem_sr]
 );
 
 sub parses_ok {
@@ -106,17 +111,18 @@ subtest 'Composite elements structure' => sub {
     my $result = parses_ok(q{ my $x = 1 + 2; }, 'parse for composite inspection');
 
     if ($result) {
-        # Result should be a CompositeElement with 3 children
+        # Result should be a CompositeElement with 4 children (Boolean, SPPF, Precedence, Semantic)
         isa_ok $result, ['Chalk::Semiring::CompositeElement'], 'Result is CompositeElement';
-        is scalar($result->elements->@*), 3, 'CompositeElement has 3 child elements';
+        is scalar($result->elements->@*), 4, 'CompositeElement has 4 child elements';
 
         # Check child elements
-        isa_ok $result->element_at(0), ['Chalk::Semiring::SPPFElement'], 'First child is SPPF';
-        isa_ok $result->element_at(1), ['Chalk::Semiring::PrecedenceElement'], 'Second child is Precedence';
-        isa_ok $result->element_at(2), ['Chalk::Semiring::SemanticElement'], 'Third child is Semantic';
+        isa_ok $result->element_at(0), ['Chalk::Semiring::BooleanElement'], 'First child is Boolean';
+        isa_ok $result->element_at(1), ['Chalk::Semiring::SPPFElement'], 'Second child is SPPF';
+        isa_ok $result->element_at(2), ['Chalk::Semiring::PrecedenceElement'], 'Third child is Precedence';
+        isa_ok $result->element_at(3), ['Chalk::Semiring::SemanticElement'], 'Fourth child is Semantic';
 
         # Precedence element should be valid for valid expression
-        ok $result->element_at(1)->valid, 'Precedence element is valid for correct precedence';
+        ok $result->element_at(2)->valid, 'Precedence element is valid for correct precedence';
     }
 };
 

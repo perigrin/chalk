@@ -14,9 +14,11 @@ use_ok('Chalk::IR::Node::Add');
 # Helper functions
 # =============================================================================
 
+use Chalk::IR::Type::Integer;
+
 sub make_constant {
     my ($value) = @_;
-    return Chalk::IR::Node::Constant->new(value => $value, type => 'Integer');
+    return Chalk::IR::Node::Constant->new(value => $value, type => Chalk::IR::Type::Integer->constant($value));
 }
 
 # =============================================================================

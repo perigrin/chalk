@@ -5,8 +5,6 @@ use experimental qw(class builtin);
 use utf8;
 
 class Chalk::IR::ValidationContext {
-    use Chalk::Error::CompilationError;
-    use Chalk::IR::TypeInference;
 
     # Simple string distance function for "did you mean?" suggestions
     # No external dependencies - uses basic string matching

@@ -3,10 +3,9 @@
 
 use 5.42.0;
 use experimental 'class';
-
+use Chalk::IR::Node::Store;
 
 class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Store;
 
     method evaluate($context) {
         # VariableDeclaration -> LexicalDeclarator WS_OPT Variable

@@ -19,6 +19,8 @@ use Chalk::IR::Node::Region;
 use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
+use Chalk::Grammar::Chalk::Type::Str;
 use Chalk::Interpreter::CEKDataflow;
 
 # Tests use content-addressable IDs computed from node contents
@@ -29,7 +31,7 @@ use Chalk::Interpreter::CEKDataflow;
 # because the constructor validates operands have id() method.
 # Instead, test that the ADJUST validation catches invalid operands.
 subtest 'Node referencing non-existent input' => sub {
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     # Try to create Add with undef right operand - should die in ADJUST
     eval {
         my $add = Chalk::IR::Node::Add->new(
@@ -44,7 +46,7 @@ subtest 'Node referencing non-existent input' => sub {
 # Test 2: Node created with invalid operand type
 # With v2 API, inputs() is computed from operands, so we test ADJUST validation
 subtest 'Node with invalid operand type' => sub {
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     # Try to create Add with a string instead of a node object
     eval {
         my $add = Chalk::IR::Node::Add->new(
@@ -64,11 +66,11 @@ subtest 'ArrayLoad with non-existent heap_id' => sub {
     # Create a constant that returns an invalid heap ID
     my $fake_heap_id = Chalk::IR::Node::Constant->new(
         value => 9999,  # Non-existent heap ID
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $index = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $load = Chalk::IR::Node::ArrayLoad->new(
         inputs => [$fake_heap_id->id, $index->id],
@@ -100,11 +102,11 @@ subtest 'ArrayLoad with non-integer heap_id type' => sub {
     # Create a constant that returns a string instead of heap ID
     my $string_heap_id = Chalk::IR::Node::Constant->new(
         value => "not_a_heap_id",
-        type => 'string'
+        type => Chalk::Grammar::Chalk::Type::Str->new()
     );
     my $index = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $load = Chalk::IR::Node::ArrayLoad->new(
         inputs => [$string_heap_id->id, $index->id],
@@ -136,11 +138,11 @@ subtest 'ArrayStore with invalid index type' => sub {
     # Use a string as index instead of integer
     my $invalid_index = Chalk::IR::Node::Constant->new(
         value => "not_an_index",
-        type => 'string'
+        type => Chalk::Grammar::Chalk::Type::Str->new()
     );
     my $value = Chalk::IR::Node::Constant->new(
         value => 42,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $store = Chalk::IR::Node::ArrayStore->new(
         inputs => [$new_array->id, $invalid_index->id, $value->id],
@@ -180,7 +182,7 @@ subtest 'HashLoad with undefined key' => sub {
     # Try to load a key that was never stored
     my $key = Chalk::IR::Node::Constant->new(
         value => "missing_key",
-        type => 'string'
+        type => Chalk::Grammar::Chalk::Type::Str->new()
     );
     my $load = Chalk::IR::Node::HashLoad->new(
         inputs => [$new_hash->id, $key->id],
@@ -217,15 +219,15 @@ subtest 'HashStore with non-existent heap_id' => sub {
 
     my $fake_heap_id = Chalk::IR::Node::Constant->new(
         value => 9999,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $key = Chalk::IR::Node::Constant->new(
         value => "test_key",
-        type => 'string'
+        type => Chalk::Grammar::Chalk::Type::Str->new()
     );
     my $value = Chalk::IR::Node::Constant->new(
         value => 42,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $store = Chalk::IR::Node::HashStore->new(
         inputs => [$fake_heap_id->id, $key->id, $value->id],
@@ -259,7 +261,7 @@ subtest 'Phi node with active_path out of range' => sub {
     # Create an If node with condition
     my $condition = Chalk::IR::Node::Constant->new(
         value => 1,
-        type => 'bool'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$condition->id],
@@ -281,11 +283,11 @@ subtest 'Phi node with active_path out of range' => sub {
 
     my $val_true = Chalk::IR::Node::Constant->new(
         value => 10,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $val_false = Chalk::IR::Node::Constant->new(
         value => 20,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
 
     my $region = Chalk::IR::Node::Region->new(
@@ -331,7 +333,7 @@ subtest 'Region with all paths inactive' => sub {
     # This is a malformed graph but tests the error handling
     my $false_val = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'bool'
+        type => Chalk::IR::Type::Integer->TOP()
     );
 
     # Create a region with inputs that are not Proj nodes
@@ -364,7 +366,7 @@ subtest 'If node with non-boolean condition' => sub {
     # Use a string as condition instead of boolean
     my $condition = Chalk::IR::Node::Constant->new(
         value => "not a bool",
-        type => 'string'
+        type => Chalk::Grammar::Chalk::Type::Str->new()
     );
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$condition->id],
@@ -404,7 +406,7 @@ subtest 'If node with non-boolean condition' => sub {
 subtest 'Calling step() without initialize_stepping()' => sub {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $return = Chalk::IR::Node::Return->new(
         control => $start,
         value => $const,
@@ -424,7 +426,7 @@ subtest 'Calling step() without initialize_stepping()' => sub {
 subtest 'Stepping past completion' => sub {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $return = Chalk::IR::Node::Return->new(
         control => $start,
         value => $const,
@@ -453,7 +455,7 @@ subtest 'Restoring snapshot from different graph' => sub {
     # Create first graph and take snapshot
     my $graph1 = Chalk::IR::Graph->new();
     my $start1 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $return1 = Chalk::IR::Node::Return->new(
         control => $start1,
         value => $const1,
@@ -474,7 +476,7 @@ subtest 'Restoring snapshot from different graph' => sub {
     # Create different graph with different node IDs
     my $graph2 = Chalk::IR::Graph->new();
     my $start2 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const2 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');  # Different value = Different ID!
+    my $const2 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());  # Different value = Different ID!
     my $return2 = Chalk::IR::Node::Return->new(
         control => $start2,
         value => $const2,
@@ -501,7 +503,7 @@ subtest 'Restoring snapshot from different graph' => sub {
 subtest 'Snapshot with corrupted data' => sub {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $return = Chalk::IR::Node::Return->new(
         control => $start,
         value => $const,
@@ -577,8 +579,8 @@ subtest 'Multiple Return nodes' => sub {
     my $graph = Chalk::IR::Graph->new();
     my $start1 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $start2 = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
+    my $const2 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
     my $return1 = Chalk::IR::Node::Return->new(
         control => $start1,
         value => $const1,
@@ -608,11 +610,11 @@ subtest 'Division by zero' => sub {
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
     my $numerator = Chalk::IR::Node::Constant->new(
         value => 10,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $denominator = Chalk::IR::Node::Constant->new(
         value => 0,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $div = Chalk::IR::Node::Divide->new(left => $numerator, right => $denominator);
     my $return = Chalk::IR::Node::Return->new(
@@ -646,11 +648,11 @@ subtest 'Negative array index' => sub {
     my $new_array = Chalk::IR::Node::NewArray->new(inputs => []);
     my $negative_index = Chalk::IR::Node::Constant->new(
         value => -1,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $value = Chalk::IR::Node::Constant->new(
         value => 42,
-        type => 'int'
+        type => Chalk::IR::Type::Integer->TOP()
     );
     my $store = Chalk::IR::Node::ArrayStore->new(
         inputs => [$new_array->id, $negative_index->id, $value->id],
@@ -683,7 +685,7 @@ subtest 'Context lookup with malformed key' => sub {
 
     # This is hard to test directly since context is internal
     # But we can test indirectly by ensuring nodes handle context lookups properly
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $add = Chalk::IR::Node::Add->new(left => $const, right => $const);
     my $return = Chalk::IR::Node::Return->new(
         control => $start,

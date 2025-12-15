@@ -13,6 +13,7 @@ use_ok('Chalk::IR::Node::Add');
 use_ok('Chalk::IR::Node::Multiply');
 use_ok('Chalk::IR::Graph');
 use_ok('Chalk::IR::Optimizer::IterPeeps');
+use Chalk::IR::Type::Integer;
 
 # Test 1: Basic construction and empty graph
 subtest 'IterPeeps construction' => sub {
@@ -30,8 +31,8 @@ subtest 'Single constant folding' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     # Build: 1 + 2
-    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
     my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 
     $graph->add_node($const1);
@@ -52,10 +53,10 @@ subtest 'Iterative constant folding' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     # Build: (1 + 2) * (3 + 4)
-    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $const4 = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $const4 = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
 
     my $add1 = Chalk::IR::Node::Add->new(left => $const1, right => $const2);    # 1 + 2 = 3
     my $add2 = Chalk::IR::Node::Add->new(left => $const3, right => $const4);    # 3 + 4 = 7
@@ -99,9 +100,9 @@ subtest 'Users added to worklist on change' => sub {
     # Build: (1 + 2) + x where x is a variable (non-constant)
     # The (1 + 2) should fold to 3, and then the outer Add
     # should be re-checked (though it won't fold further without x being constant)
-    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $const_x = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');  # Using constant as stand-in
+    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $const_x = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->constant(10));  # Using constant as stand-in
 
     my $add_inner = Chalk::IR::Node::Add->new(left => $const1, right => $const2);  # 1 + 2 = 3
     my $add_outer = Chalk::IR::Node::Add->new(left => $add_inner, right => $const_x);  # 3 + 10 = 13
@@ -136,8 +137,8 @@ subtest 'Fixed-point convergence' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     # Build a graph that won't change - just constants
-    my $const1 = Chalk::IR::Node::Constant->new(value => 42, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 99, type => 'Integer');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->constant(42));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 99, type => Chalk::IR::Type::Integer->constant(99));
 
     $graph->add_node($const1);
     $graph->add_node($const2);
@@ -154,7 +155,7 @@ subtest 'Pipeline compatibility' => sub {
     use_ok('Chalk::IR::OptimizerPipeline');
 
     my $graph = Chalk::IR::Graph->new();
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
     $graph->add_node($const);
 
     my $iterpeeps = Chalk::IR::Optimizer::IterPeeps->new();
@@ -170,8 +171,8 @@ subtest 'Metrics tracking' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     # Build: 1 + 2
-    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
     my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 
     $graph->add_node($const1);

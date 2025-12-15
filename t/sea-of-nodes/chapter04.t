@@ -79,7 +79,7 @@ subtest 'Proj compute() extracts from Start tuple' => sub {
 subtest 'Proj compute() returns Top when source not tuple' => sub {
     # Use a non-MultiNode source
     use_ok('Chalk::IR::Node::Constant');
-    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'Integer');
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->constant(42));
 
     my $proj = Chalk::IR::Node::Proj->new(
         source => $const,
@@ -96,14 +96,14 @@ subtest 'Proj compute() returns Top when source not tuple' => sub {
 use_ok('Chalk::IR::Node::GT');
 
 subtest 'Comparison with constant folding returns Bool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->constant(10));
+    my $right = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
 
     my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
 
     my $folded = $gt->peephole();
     ok($folded isa Chalk::IR::Node::Constant, 'GT peephole folds to Constant');
-    is($folded->type, 'Bool', 'Folded type is Bool');
+    ok($folded->type isa Chalk::IR::Type::Bool, 'Folded type is Bool');
     ok(is_bool($folded->value), 'Folded value is native bool');
     ok($folded->value, '10 > 5 is true');
 };

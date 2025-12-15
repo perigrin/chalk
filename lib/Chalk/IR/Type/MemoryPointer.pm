@@ -35,19 +35,19 @@ class Chalk::IR::Type::MemoryPointer :isa(Chalk::IR::Type) {
         );
     }
 
-    sub TOP {
-        state $singleton = __PACKAGE__->new();
+    sub TOP ($class) {
+        state $singleton = $class->new();
         return $singleton;
     }
 
-    sub BOTTOM {
-        state $singleton = __PACKAGE__->new(is_bottom => 1);
+    sub BOTTOM ($class) {
+        state $singleton = $class->new(is_bottom => 1);
         return $singleton;
     }
 
-    sub NULL {
+    sub NULL ($class) {
         # null is a nullable pointer to TOP (non-existent memory)
-        state $singleton = __PACKAGE__->new(nullable => 1);
+        state $singleton = $class->new(nullable => 1);
         return $singleton;
     }
 
@@ -60,19 +60,19 @@ class Chalk::IR::Type::MemoryPointer :isa(Chalk::IR::Type) {
         return $self if $other isa Chalk::IR::Type::Top;
 
         # PtrBot absorbs everything within pointer domain
-        return __PACKAGE__->BOTTOM() if $self->is_bottom;
-        return __PACKAGE__->BOTTOM() if $other isa __PACKAGE__ && $other->is_bottom;
+        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $other isa blessed($self) && $other->is_bottom;
 
         # PtrTop is identity for meet within pointer domain
-        return $other if $self->is_top && $other isa __PACKAGE__;
-        return $self if $other isa __PACKAGE__ && $other->is_top;
+        return $other if $self->is_top && $other isa blessed($self);
+        return $self if $other isa blessed($self) && $other->is_top;
 
         # Both are pointers to specific types
-        if ($other isa __PACKAGE__) {
+        if ($other isa blessed($self)) {
             # Different struct types -> incompatible -> PtrTop
             if (defined($struct_name) && defined($other->struct_name)
                 && $struct_name ne $other->struct_name) {
-                return __PACKAGE__->TOP();
+                return blessed($self)->TOP();
             }
 
             # Same struct type - meet on nullability
@@ -82,7 +82,7 @@ class Chalk::IR::Type::MemoryPointer :isa(Chalk::IR::Type) {
             my $result_nullable = $nullable && $other->nullable;
             my $result_struct = $struct_name // $other->struct_name;
 
-            return __PACKAGE__->new(
+            return blessed($self)->new(
                 struct_name => $result_struct,
                 nullable => $result_nullable,
             );
@@ -101,19 +101,19 @@ class Chalk::IR::Type::MemoryPointer :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Top;
 
         # PtrBot is identity for join within pointer domain
-        return $other if $self->is_bottom && $other isa __PACKAGE__;
-        return $self if $other isa __PACKAGE__ && $other->is_bottom;
+        return $other if $self->is_bottom && $other isa blessed($self);
+        return $self if $other isa blessed($self) && $other->is_bottom;
 
         # PtrTop absorbs everything within pointer domain
-        return __PACKAGE__->TOP() if $self->is_top;
-        return __PACKAGE__->TOP() if $other isa __PACKAGE__ && $other->is_top;
+        return blessed($self)->TOP() if $self->is_top;
+        return blessed($self)->TOP() if $other isa blessed($self) && $other->is_top;
 
         # Both are pointers to specific types
-        if ($other isa __PACKAGE__) {
+        if ($other isa blessed($self)) {
             # Different struct types -> unknown which -> PtrTop
             if (defined($struct_name) && defined($other->struct_name)
                 && $struct_name ne $other->struct_name) {
-                return __PACKAGE__->TOP();
+                return blessed($self)->TOP();
             }
 
             # Same struct type - join on nullability
@@ -123,7 +123,7 @@ class Chalk::IR::Type::MemoryPointer :isa(Chalk::IR::Type) {
             my $result_nullable = $nullable || $other->nullable;
             my $result_struct = $struct_name // $other->struct_name;
 
-            return __PACKAGE__->new(
+            return blessed($self)->new(
                 struct_name => $result_struct,
                 nullable => $result_nullable,
             );

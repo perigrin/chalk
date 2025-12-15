@@ -5,10 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
-    use Chalk::IR::Node::Add;
-    use Chalk::IR::Node::Multiply;
-    use Chalk::IR::Node::Subtract;
-    use Chalk::IR::Node::Divide;
     field $region_id :param :reader;
 
     method op() { 'Phi' }

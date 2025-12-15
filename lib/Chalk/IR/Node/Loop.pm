@@ -3,9 +3,9 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Graph;
 
 class Chalk::IR::Node::Loop :isa(Chalk::IR::Node::Base) {
-    use Chalk::IR::Graph;
 
     field $active_input_index :reader = 0;
 

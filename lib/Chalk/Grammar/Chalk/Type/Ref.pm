@@ -2,7 +2,7 @@
 # ABOUTME: Implements Ref <: Scalar <: Any subtyping chain, parent of all reference types
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Ref :isa(Chalk::Grammar::Chalk::Type) {
     # Ref represents all reference values
@@ -13,9 +13,13 @@ class Chalk::Grammar::Chalk::Type::Ref :isa(Chalk::Grammar::Chalk::Type) {
         # Ref <: Ref (reflexive)
         # Ref <: Scalar
         # Ref <: Any
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Ref' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::Ref',
+            'Chalk::Grammar::Chalk::Type::Scalar',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 }
 

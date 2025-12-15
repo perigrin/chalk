@@ -5,9 +5,6 @@ use experimental 'class';
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 
 class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
-    use Chalk::Grammar::Chalk::TypeRegistry;
-    use Chalk::Grammar::Chalk::Type::Class;
-    use Chalk::Grammar::Chalk::Type::Any;
 
     # Helper to extract field name from VariableDeclaration context
     sub _extract_field_from_vardecl {

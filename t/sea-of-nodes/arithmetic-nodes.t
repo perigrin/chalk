@@ -17,10 +17,14 @@ use_ok('Chalk::IR::Node::Negate');
 
 # Use Constant nodes as test operands (they have id() method)
 use Chalk::IR::Node::Constant;
+use Chalk::IR::Type::Integer;
 
 # Helper to create mock operands
 sub make_operand($val) {
-    return Chalk::IR::Node::Constant->new(value => $val, type => 'int');
+    return Chalk::IR::Node::Constant->new(
+        value => $val,
+        type => Chalk::IR::Type::Integer->constant($val)
+    );
 }
 
 # Test 6: Add node should implement op() method

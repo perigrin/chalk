@@ -8,159 +8,105 @@
                      "children" : [
                         {
                            "children" : [
+                              "method",
                               {
                                  "children" : [
-                                    {
-                                       "children" : [
-                                          "method"
-                                       ],
-                                       "rule" : "Identifier",
-                                       "span" : [
-                                          0,
-                                          6
-                                       ]
-                                    },
-                                    {
-                                       "children" : [
-                                          {
-                                             "children" : [
-                                                {
-                                                   "children" : [
-                                                      "greet"
-                                                   ],
-                                                   "rule" : "Identifier",
-                                                   "span" : [
-                                                      7,
-                                                      12
-                                                   ]
-                                                },
-                                                "(",
-                                                ")"
-                                             ],
-                                             "rule" : "FunctionCall",
-                                             "span" : [
-                                                7,
-                                                14
-                                             ]
-                                          }
-                                       ],
-                                       "rule" : "Expression",
-                                       "span" : [
-                                          7,
-                                          14
-                                       ]
-                                    }
+                                    "greet"
                                  ],
-                                 "rule" : "FunctionCall",
+                                 "rule" : "Identifier",
                                  "span" : [
-                                    0,
-                                    14
+                                    7,
+                                    12
                                  ]
-                              }
-                           ],
-                           "rule" : "Expression",
-                           "span" : [
-                              0,
-                              14
-                           ]
-                        }
-                     ],
-                     "rule" : "ExpressionList",
-                     "span" : [
-                        0,
-                        14
-                     ]
-                  }
-               ],
-               "rule" : "Statement",
-               "span" : [
-                  0,
-                  14
-               ]
-            },
-            {
-               "children" : [
-                  {
-                     "children" : [
-                        {
-                           "children" : [
-                              "{",
+                              },
+                              "(",
+                              ")",
                               {
                                  "children" : [
+                                    "{",
                                     {
                                        "children" : [
                                           {
                                              "children" : [
-                                                "return",
                                                 {
                                                    "children" : [
+                                                      "return",
                                                       {
                                                          "children" : [
                                                             {
                                                                "children" : [
-                                                                  "1"
+                                                                  {
+                                                                     "children" : [
+                                                                        "1"
+                                                                     ],
+                                                                     "rule" : "Number",
+                                                                     "span" : [
+                                                                        24,
+                                                                        25
+                                                                     ]
+                                                                  }
                                                                ],
-                                                               "rule" : "Number",
+                                                               "rule" : "Literal",
                                                                "span" : [
                                                                   24,
                                                                   25
                                                                ]
                                                             }
                                                          ],
-                                                         "rule" : "Literal",
+                                                         "rule" : "Expression",
                                                          "span" : [
                                                             24,
                                                             25
                                                          ]
                                                       }
                                                    ],
-                                                   "rule" : "Expression",
+                                                   "rule" : "ReturnStatement",
                                                    "span" : [
-                                                      24,
+                                                      17,
                                                       25
                                                    ]
                                                 }
                                              ],
-                                             "rule" : "ReturnStatement",
+                                             "rule" : "Statement",
                                              "span" : [
                                                 17,
                                                 25
                                              ]
-                                          }
+                                          },
+                                          ";"
                                        ],
-                                       "rule" : "Statement",
+                                       "rule" : "StatementList",
                                        "span" : [
                                           17,
-                                          25
+                                          26
                                        ]
                                     },
-                                    ";"
+                                    "}"
                                  ],
-                                 "rule" : "StatementList",
+                                 "rule" : "Block",
                                  "span" : [
-                                    17,
-                                    26
+                                    15,
+                                    28
                                  ]
-                              },
-                              "}"
+                              }
                            ],
-                           "rule" : "Block",
+                           "rule" : "MethodDeclaration",
                            "span" : [
-                              15,
+                              0,
                               28
                            ]
                         }
                      ],
-                     "rule" : "Statement",
+                     "rule" : "Block",
                      "span" : [
-                        15,
+                        0,
                         28
                      ]
                   }
                ],
-               "rule" : "StatementList",
+               "rule" : "Statement",
                "span" : [
-                  15,
+                  0,
                   28
                ]
             }

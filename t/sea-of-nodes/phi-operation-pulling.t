@@ -16,6 +16,7 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Phi;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Multiply;
+use Chalk::IR::Type::Integer;
 
 # Test 1: Basic operation pulling with Add
 subtest 'Phi operation pulling: Phi(region, Add(a,b), Add(c,d)) -> Add(Phi(a,c), Phi(b,d))' => sub {
@@ -28,10 +29,10 @@ subtest 'Phi operation pulling: Phi(region, Add(a,b), Add(c,d)) -> Add(Phi(a,c),
     $graph->add_node($region);
 
     # Create constants for Add inputs
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $d = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $c = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $d = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
     $graph->add_node($a);
     $graph->add_node($b);
     $graph->add_node($c);
@@ -75,10 +76,10 @@ subtest 'Phi does NOT pull when operations differ' => sub {
     );
     $graph->add_node($region);
 
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $d = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $c = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $d = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
     $graph->add_node($a);
     $graph->add_node($b);
     $graph->add_node($c);
@@ -113,9 +114,9 @@ subtest 'Phi does NOT pull when input types differ' => sub {
     );
     $graph->add_node($region);
 
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $c = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
     $graph->add_node($a);
     $graph->add_node($b);
     $graph->add_node($c);
@@ -145,10 +146,10 @@ subtest 'Phi operation pulling works with Multiply' => sub {
     );
     $graph->add_node($region);
 
-    my $a = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
-    my $d = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $b = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $c = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
+    my $d = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
     $graph->add_node($a);
     $graph->add_node($b);
     $graph->add_node($c);
@@ -185,10 +186,10 @@ subtest 'Phi does NOT pull from Loop-based Phi' => sub {
     );
     $graph->add_node($loop);
 
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $d = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $c = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $d = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
     $graph->add_node($a);
     $graph->add_node($b);
     $graph->add_node($c);
@@ -222,12 +223,12 @@ subtest 'Phi operation pulling with three inputs' => sub {
     );
     $graph->add_node($region);
 
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $d = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
-    my $e = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $f = Chalk::IR::Node::Constant->new(value => 6, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $c = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $d = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
+    my $e = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
+    my $f = Chalk::IR::Node::Constant->new(value => 6, type => Chalk::IR::Type::Integer->constant(6));
     $graph->add_node($a);
     $graph->add_node($b);
     $graph->add_node($c);
@@ -264,8 +265,8 @@ subtest 'Phi with single data input uses singleUniqueInput optimization instead'
     );
     $graph->add_node($region);
 
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
     $graph->add_node($a);
     $graph->add_node($b);
 

@@ -5,7 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Optimizer::DCE {
-    use Chalk::IR::Graph;
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)
@@ -23,7 +22,7 @@ class Chalk::IR::Optimizer::DCE {
         # Phase 1: Apply peephole optimizations to all nodes
         # This detects constant conditions and dead branches
         my %replacements;
-        my @node_ids = sort keys %{$graph->nodes};
+        my @node_ids = sort keys($graph->nodes->%*);
 
         for my $node_id (@node_ids) {
             my $node = $graph->get_node($node_id);
@@ -46,7 +45,7 @@ class Chalk::IR::Optimizer::DCE {
         }
 
         # Phase 2: Update inputs to use replacements
-        @node_ids = sort keys %{$graph->nodes};
+        @node_ids = sort keys($graph->nodes->%*);
         for my $node_id (@node_ids) {
             my $node = $graph->get_node($node_id);
             next unless defined($node);
@@ -78,7 +77,7 @@ class Chalk::IR::Optimizer::DCE {
         }
 
         # Also start from any Return nodes (they are always reachable)
-        for my $node_id (keys %{$graph->nodes}) {
+        for my $node_id (keys($graph->nodes->%*)) {
             my $node = $graph->get_node($node_id);
             next unless defined($node);
             if ($node->op eq 'Return') {
@@ -117,7 +116,7 @@ class Chalk::IR::Optimizer::DCE {
         }
 
         # Remove unreachable nodes
-        for my $node_id (keys %{$graph->nodes}) {
+        for my $node_id (keys($graph->nodes->%*)) {
             unless (exists($reachable{$node_id})) {
                 $graph->remove_node($node_id);
                 $nodes_eliminated++;

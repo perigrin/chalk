@@ -6,7 +6,7 @@ use experimental qw(class);
 use lib 'lib';
 use Test::More;
 
-plan tests => 20;
+plan tests => 21;
 
 # Test 1-4: Logical node subclasses should be loadable
 use_ok('Chalk::IR::Node::And');
@@ -14,11 +14,16 @@ use_ok('Chalk::IR::Node::Or');
 use_ok('Chalk::IR::Node::Not');
 use_ok('Chalk::IR::Node::DefinedOr');
 use_ok('Chalk::IR::Node::Constant');
+use_ok('Chalk::IR::Type::Integer');
 
 # Helper to create constant nodes for testing
 sub make_const {
     my ($val) = @_;
-    return Chalk::IR::Node::Constant->new(value => $val, type => 'Int');
+    use Chalk::IR::Type::Integer;
+    return Chalk::IR::Node::Constant->new(
+        value => $val,
+        type => Chalk::IR::Type::Integer->constant($val)
+    );
 }
 
 # Test 6: And node should implement op() method

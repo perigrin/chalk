@@ -6,8 +6,6 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
 class Chalk::IR::Optimizer::GVN {
-    use Chalk::IR::Node;
-    use Chalk::IR::Graph;
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)
@@ -29,7 +27,7 @@ class Chalk::IR::Optimizer::GVN {
         my $redirections = {};
 
         # Get all nodes in a consistent order (we'll process them by ID order)
-        my @node_ids = sort keys %{$graph->nodes};
+        my @node_ids = sort keys($graph->nodes->%*);
 
         # Phase 1: Compute value numbers for all nodes
         for my $node_id (@node_ids) {
@@ -126,7 +124,7 @@ class Chalk::IR::Optimizer::GVN {
         }
 
         # Compute metrics
-        my $nodes_eliminated = scalar keys %{$redirections};
+        my $nodes_eliminated = scalar keys($redirections->%*);
 
         return {
             graph => $new_graph,
@@ -146,8 +144,30 @@ class Chalk::IR::Optimizer::GVN {
         # Special case: Constants
         if ($op eq 'Constant') {
             my $value = $attrs->{value} // '';
-            my $type = $attrs->{type} // '';
-            return "Constant:$value:$type";
+            my $type = $attrs->{type};
+
+            # Create canonical type string
+            my $type_str;
+            if (ref($type)) {
+                # Type is an object - create canonical representation
+                my $type_class = ref($type);
+                if ($type->can('is_constant') && $type->is_constant) {
+                    # For constant types, include the value
+                    $type_str = "$type_class:" . ($type->value // '');
+                } elsif ($type->can('is_bottom') && $type->is_bottom) {
+                    $type_str = "$type_class:BOTTOM";
+                } elsif ($type->can('is_top') && $type->is_top) {
+                    $type_str = "$type_class:TOP";
+                } else {
+                    # Fallback: just use class name
+                    $type_str = $type_class;
+                }
+            } else {
+                # Type is a string (legacy format)
+                $type_str = $type // '';
+            }
+
+            return "Constant:$value:$type_str";
         }
 
         # Special case: Proj nodes (include index)

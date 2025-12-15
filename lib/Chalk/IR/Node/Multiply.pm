@@ -5,9 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Multiply {
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::Constant;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -70,7 +67,7 @@ class Chalk::IR::Node::Multiply {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Integer',
+                type  => $type,
             );
         }
 
@@ -121,7 +118,7 @@ class Chalk::IR::Node::Multiply {
         if ($right_type->is_constant && $right_type->value == 0) {
             # Only fold if left operand is also constant (no side effects)
             if ($left_type->is_constant) {
-                return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+                return Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->constant(0));
             }
         }
 
@@ -129,7 +126,7 @@ class Chalk::IR::Node::Multiply {
         if ($left_type->is_constant && $left_type->value == 0) {
             # Only fold if right operand is also constant (no side effects)
             if ($right_type->is_constant) {
-                return Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+                return Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->constant(0));
             }
         }
 

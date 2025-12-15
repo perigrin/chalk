@@ -9,16 +9,18 @@ use Chalk::IR::Node::NewObject;
 use Chalk::IR::Node::FieldLoad;
 use Chalk::IR::Node::FieldStore;
 use Chalk::IR::Node::Constant;
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Top;
 
 # Test 1: Store-to-Store Elimination
 # When two stores write to the same field with no intervening read,
 # the first store is dead and should be eliminated
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $value1 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $value2 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::IR::Type::Top->top());
+    my $value1 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $value2 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
 
     # First store: obj.x = 10
     my $store1 = Chalk::IR::Node::FieldStore->new(
@@ -68,9 +70,9 @@ use Chalk::IR::Node::Constant;
 # When a load reads from a location just written, forward the stored value
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $value = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::IR::Type::Top->top());
+    my $value = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 
     # Store: obj.x = 42
     my $store = Chalk::IR::Node::FieldStore->new(
@@ -116,11 +118,11 @@ use Chalk::IR::Node::Constant;
 # When storing the same value that was just loaded, the store is redundant
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::IR::Type::Top->top());
 
     # Initial store: obj.x = 99 (to set up initial state)
-    my $initial_value = Chalk::IR::Node::Constant->new(value => 99, type => 'int');
+    my $initial_value = Chalk::IR::Node::Constant->new(value => 99, type => Chalk::IR::Type::Integer->TOP());
     my $initial_store = Chalk::IR::Node::FieldStore->new(
         inputs => [$new_obj->id, $field->id, $initial_value->id],
         mem_id => undef,

@@ -5,7 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Optimizer::GCM {
-    use Chalk::IR::Graph;
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)
@@ -33,7 +32,7 @@ class Chalk::IR::Optimizer::GCM {
             graph => $graph,
             schedule => $late_schedule,
             metrics => {
-                scheduled_nodes => scalar(keys %{$late_schedule}),
+                scheduled_nodes => scalar(keys($late_schedule->%*)),
             }
         };
     }

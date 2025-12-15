@@ -14,13 +14,13 @@ class Chalk::IR::Type::Memory :isa(Chalk::IR::Type) {
     method is_constant() { 0 }  # Memory states are not constant values
     method is_top() { (!defined($alias_class) && !$is_bottom) ? 1 : 0 }
 
-    sub TOP {
-        state $singleton = __PACKAGE__->new();
+    sub TOP ($class) {
+        state $singleton = $class->new();
         return $singleton;
     }
 
-    sub BOTTOM {
-        state $singleton = __PACKAGE__->new(is_bottom => 1);
+    sub BOTTOM ($class) {
+        state $singleton = $class->new(is_bottom => 1);
         return $singleton;
     }
 
@@ -33,24 +33,24 @@ class Chalk::IR::Type::Memory :isa(Chalk::IR::Type) {
         return $self if $other isa Chalk::IR::Type::Top;
 
         # MemBot absorbs everything within memory domain
-        return __PACKAGE__->BOTTOM() if $self->is_bottom;
-        return __PACKAGE__->BOTTOM() if $other isa __PACKAGE__ && $other->is_bottom;
+        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $other isa blessed($self) && $other->is_bottom;
 
         # MemTop is identity for meet within memory domain
-        return $other if $self->is_top && $other isa __PACKAGE__;
-        return $self if $other isa __PACKAGE__ && $other->is_top;
+        return $other if $self->is_top && $other isa blessed($self);
+        return $self if $other isa blessed($self) && $other->is_top;
 
         # Both are memory slices
-        if ($other isa __PACKAGE__) {
+        if ($other isa blessed($self)) {
             # Different alias classes -> incompatible -> MemTop
             if (defined($alias_class) && defined($other->alias_class)
                 && $alias_class != $other->alias_class) {
-                return __PACKAGE__->TOP();
+                return blessed($self)->TOP();
             }
 
             # Same alias class
             my $result_class = $alias_class // $other->alias_class;
-            return __PACKAGE__->new(alias_class => $result_class);
+            return blessed($self)->new(alias_class => $result_class);
         }
 
         # Cross-type meet = global Top
@@ -66,24 +66,24 @@ class Chalk::IR::Type::Memory :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Top;
 
         # MemBot is identity for join within memory domain
-        return $other if $self->is_bottom && $other isa __PACKAGE__;
-        return $self if $other isa __PACKAGE__ && $other->is_bottom;
+        return $other if $self->is_bottom && $other isa blessed($self);
+        return $self if $other isa blessed($self) && $other->is_bottom;
 
         # MemTop absorbs everything within memory domain
-        return __PACKAGE__->TOP() if $self->is_top;
-        return __PACKAGE__->TOP() if $other isa __PACKAGE__ && $other->is_top;
+        return blessed($self)->TOP() if $self->is_top;
+        return blessed($self)->TOP() if $other isa blessed($self) && $other->is_top;
 
         # Both are memory slices
-        if ($other isa __PACKAGE__) {
+        if ($other isa blessed($self)) {
             # Different alias classes -> unknown which -> MemTop
             if (defined($alias_class) && defined($other->alias_class)
                 && $alias_class != $other->alias_class) {
-                return __PACKAGE__->TOP();
+                return blessed($self)->TOP();
             }
 
             # Same alias class
             my $result_class = $alias_class // $other->alias_class;
-            return __PACKAGE__->new(alias_class => $result_class);
+            return blessed($self)->new(alias_class => $result_class);
         }
 
         # Cross-type join = global Top

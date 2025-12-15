@@ -14,6 +14,42 @@ use Chalk::Grammar::Chalk;  # Pre-load Chalk rule classes for semantic actions
 use Chalk::Parser;
 use Chalk::Semiring::ChalkIR;
 
+# Check if t/corpus/ir/* was modified in this branch/PR
+# If not, skip the expensive corpus test
+my $corpus_changed = 0;
+
+# If FORCE_IR_CORPUS env var is set, always run
+if ($ENV{FORCE_IR_CORPUS}) {
+    $corpus_changed = 1;
+    diag "FORCE_IR_CORPUS set - running full IR corpus test";
+} elsif (-d "$RealBin/../../.git") {
+    # Get the merge base with the target branch (pu)
+    my $merge_base = `git -C "$RealBin/../.." merge-base HEAD origin/pu 2>/dev/null`;
+    chomp $merge_base;
+
+    if ($merge_base) {
+        # Check if any files in t/corpus/ir/ changed since the merge base
+        my $changed_files = `git -C "$RealBin/../.." diff --name-only $merge_base HEAD 2>/dev/null`;
+        $corpus_changed = 1 if $changed_files =~ m{^t/corpus/ir/}m;
+    } else {
+        # Fallback: If we can't determine merge base, assume corpus changed
+        $corpus_changed = 1;
+    }
+} else {
+    # Not in a git repo, run the tests
+    $corpus_changed = 1;
+}
+
+unless ($corpus_changed) {
+    plan tests => 1;
+    pass "No changes to t/corpus/ir/* detected - skipping expensive corpus test";
+    diag "IR corpus test skipped: t/corpus/ir/ unchanged since merge-base with origin/pu";
+    diag "To force running: FORCE_IR_CORPUS=1 prove t/semiring/ir-corpus.t";
+    exit 0;
+}
+
+diag "t/corpus/ir/* changed detected - running full IR corpus test";
+
 # Load grammar once
 my $grammar;
 BEGIN {

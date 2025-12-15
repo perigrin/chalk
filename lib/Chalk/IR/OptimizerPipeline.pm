@@ -6,7 +6,6 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
 class Chalk::IR::OptimizerPipeline {
-    use Chalk::IR::Graph;
 
     field $optimizers :param :reader;
 

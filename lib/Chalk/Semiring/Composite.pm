@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
+use Scalar::Util qw(refaddr);
 use Chalk::Base;
 
 class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
@@ -22,7 +23,8 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
 
         # SPECIAL CASE: If Precedence elements are the same object (shared),
         # fall back to independent delegation - Precedence can't distinguish
-        if ($prec_self == $prec_other) {
+        # Use refaddr for reference equality since == is overloaded to call equals()
+        if (refaddr($prec_self) == refaddr($prec_other)) {
             my @results;
             for my $i (0..$#$elements) {
                 my $result = $elements->[$i]->add($other->elements->[$i]);
@@ -47,23 +49,38 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
 
         # Check which derivation Precedence chose via reference equality
         # PrecedenceElement.add() returns $self or $other, not new objects
-        my $use_self = $prec_result == $prec_self;
-        my $use_other = $prec_result == $prec_other;
+        # Use refaddr for reference equality since == is overloaded to call equals()
+        my $use_self = refaddr($prec_result) == refaddr($prec_self);
+        my $use_other = refaddr($prec_result) == refaddr($prec_other);
 
-        # DEBUG: Uncomment to trace coordination decisions
-        # warn "COORD: self(v" . $prec_self->valid . ") vs other(v" . $prec_other->valid . ") => use_self=$use_self, use_other=$use_other";
+        # DEBUG: Trace coordination decisions
+        if ($ENV{DEBUG_PRECEDENCE}) {
+            warn "COORD: self(v" . $prec_self->valid . ") vs other(v" . $prec_other->valid . ") => use_self=$use_self, use_other=$use_other\n";
+        }
 
-        if ($use_self) {
-            # Precedence chose self - use self's elements for ALL semirings
-            # This ensures invalid parses (other) don't contribute their Semantic elements
+        # Only let Precedence be the leader when it makes a MEANINGFUL choice
+        # (i.e., one element is valid and the other is invalid).
+        # When both are valid, fall through to independent delegation so
+        # Semantic.add() can prefer elements with defined focus.
+        #
+        # Note: Only PrecedenceElement has the 'valid' method. Other semiring
+        # elements (Boolean, Position, etc.) don't participate in this optimization.
+        my $both_valid = $prec_self->can('valid') && $prec_other->can('valid')
+            ? ($prec_self->valid && $prec_other->valid)
+            : 0;  # If no 'valid' method, use standard Precedence leadership
+
+        if ($use_self && !$both_valid) {
+            # Precedence chose self because other is invalid (or non-Precedence element)
+            # Use self's elements for ALL semirings
             return $self;
-        } elsif ($use_other) {
-            # Precedence chose other - use other's elements for ALL semirings
+        } elsif ($use_other && !$both_valid) {
+            # Precedence chose other because self is invalid
+            # Use other's elements for ALL semirings
             return $other;
         }
 
+        # Either both are valid (Precedence can't meaningfully choose) or
         # Precedence created a new element - fall back to independent delegation
-        # This handles edge cases like when both are valid but combined
         my @results = ($prec_result);
         for my $i (1..$#$elements) {
             my $result = $elements->[$i]->add($other->elements->[$i]);
@@ -283,6 +300,19 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
             elements => \@results,
             parent_semiring => $self
         );
+    }
+
+    # Override to propagate diagnostic context to all child semirings
+    method set_diagnostic_context($ctx) {
+        # Call parent implementation
+        $self->SUPER::set_diagnostic_context($ctx);
+
+        # Propagate to all child semirings
+        for my $child_sr ($semirings->@*) {
+            if ($child_sr->can('set_diagnostic_context')) {
+                $child_sr->set_diagnostic_context($ctx);
+            }
+        }
     }
 }
 

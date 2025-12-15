@@ -1,4 +1,4 @@
-# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + SemanticValidation)
+# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + SemanticValidation + TypeInference)
 # ABOUTME: Pure validation composite - no building, just filtering for valid parses
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
@@ -7,6 +7,7 @@ use Chalk::Base;
 use Chalk::Semiring::Boolean;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::SemanticValidation;
+use Chalk::Semiring::TypeInference;
 use Chalk::Grammar::Chalk::SemanticRules;
 use Chalk::Semiring::Composite;
 
@@ -24,7 +25,10 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
         # Reference: perldoc perlop - Operator Precedence and Associativity
         my @perl_precedence_table = (
             # Index 0 - Highest precedence
-            { assoc => 'left',    ops => ['->'] },
+            # NOTE: '->' removed from precedence table - it's a postfix dereference
+            # operator, not a binary expression operator. The grammar structure
+            # already enforces its binding. Including it caused conflicts with
+            # operators inside subscripts like $ref->[1 + 2].
             { assoc => 'nonassoc', ops => ['++', '--'] },  # postfix
             { assoc => 'right',   ops => ['**'] },
             { assoc => 'right',   ops => ['!', '~', '\\', 'unary +', 'unary -'] },
@@ -61,10 +65,18 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
             rules => $semantic_rules
         );
 
-        # Composite: Boolean + Precedence + SemanticValidation
+        # Filter 4: TypeInference - Type checking during parsing
+        # Uses tropical semiring (join/meet) for type lattice operations
+        my $type_sr = Chalk::Semiring::TypeInference->new();
+
+        # Composite: Precedence + Boolean + SemanticValidation + TypeInference
         # Pure validation - returns boolean success/failure
+        # NOTE: Precedence must be first - Composite.add() uses the first semiring
+        # as the "leader" that decides between alternative parses. When Precedence
+        # rejects an invalid parse (e.g., wrong operator precedence), Composite
+        # should use the valid alternative instead.
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$bool_sr, $precedence_sr, $semantic_sr]
+            semirings => [$precedence_sr, $bool_sr, $semantic_sr, $type_sr]
         );
     }
 
@@ -86,6 +98,11 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
     # Delegate on_scan() to composite
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         $composite->on_scan($item, $element, $pos, $matched_value, $pattern_name)
+    }
+
+    # Delegate set_diagnostic_context to composite (which propagates to children)
+    method set_diagnostic_context($ctx) {
+        $composite->set_diagnostic_context($ctx);
     }
 }
 

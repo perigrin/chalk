@@ -18,11 +18,16 @@ use_ok('Chalk::IR::Node::GE');
 use_ok('Chalk::IR::Node::Not');
 use_ok('Chalk::IR::Node::Constant');
 use_ok('Chalk::IR::Type::Bool');
+use_ok('Chalk::IR::Type::Integer');
 
 # Helper to create constant nodes for testing
 sub make_const {
     my ($val) = @_;
-    return Chalk::IR::Node::Constant->new(value => $val, type => 'Int');
+    use Chalk::IR::Type::Integer;
+    return Chalk::IR::Node::Constant->new(
+        value => $val,
+        type => Chalk::IR::Type::Integer->constant($val)
+    );
 }
 
 # Test 9: GT node should implement op() method
@@ -138,8 +143,14 @@ sub make_const {
 
 # Native bool tests for GT
 subtest 'GT execute() returns native bool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 10,
+        type => Chalk::IR::Type::Integer->constant(10)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
 
@@ -154,8 +165,14 @@ subtest 'GT execute() returns native bool' => sub {
 };
 
 subtest 'GT execute() returns native false' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
 
@@ -170,8 +187,14 @@ subtest 'GT execute() returns native false' => sub {
 };
 
 subtest 'GT compute() returns TypeBool for constant inputs' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 10,
+        type => Chalk::IR::Type::Integer->constant(10)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
 
@@ -182,22 +205,34 @@ subtest 'GT compute() returns TypeBool for constant inputs' => sub {
 };
 
 subtest 'GT peephole() folds to Bool Constant' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 10,
+        type => Chalk::IR::Type::Integer->constant(10)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
 
     my $result = $gt->peephole();
     ok($result isa Chalk::IR::Node::Constant, 'GT peephole() returns Constant');
-    is($result->type, 'Bool', 'GT peephole() returns Bool type');
+    ok($result->type isa Chalk::IR::Type::Bool, 'GT peephole() returns Bool type');
     ok(is_bool($result->value), 'GT peephole() value is native bool');
     ok($result->value, 'GT peephole() 10 > 5 is true');
 };
 
 # LT native bool tests
 subtest 'LT execute() returns native bool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $lt = Chalk::IR::Node::LT->new(left => $left, right => $right);
 
@@ -212,8 +247,14 @@ subtest 'LT execute() returns native bool' => sub {
 };
 
 subtest 'LT compute() returns TypeBool for constant inputs' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $lt = Chalk::IR::Node::LT->new(left => $left, right => $right);
 
@@ -223,21 +264,33 @@ subtest 'LT compute() returns TypeBool for constant inputs' => sub {
 };
 
 subtest 'LT peephole() folds to Bool Constant' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $lt = Chalk::IR::Node::LT->new(left => $left, right => $right);
 
     my $result = $lt->peephole();
     ok($result isa Chalk::IR::Node::Constant, 'LT peephole() returns Constant');
-    is($result->type, 'Bool', 'LT peephole() returns Bool type');
+    ok($result->type isa Chalk::IR::Type::Bool, 'LT peephole() returns Bool type');
     ok($result->value, 'LT peephole() 3 < 5 is true');
 };
 
 # EQ tests
 subtest 'EQ execute() returns native bool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $eq = Chalk::IR::Node::EQ->new(left => $left, right => $right);
 
@@ -252,8 +305,14 @@ subtest 'EQ execute() returns native bool' => sub {
 };
 
 subtest 'EQ compute() returns TypeBool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $eq = Chalk::IR::Node::EQ->new(left => $left, right => $right);
 
@@ -263,21 +322,33 @@ subtest 'EQ compute() returns TypeBool' => sub {
 };
 
 subtest 'EQ peephole() folds to Bool Constant' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $eq = Chalk::IR::Node::EQ->new(left => $left, right => $right);
 
     my $result = $eq->peephole();
     ok($result isa Chalk::IR::Node::Constant, 'EQ peephole() returns Constant');
-    is($result->type, 'Bool', 'EQ peephole() returns Bool type');
+    ok($result->type isa Chalk::IR::Type::Bool, 'EQ peephole() returns Bool type');
     ok($result->value, 'EQ peephole() 5 == 5 is true');
 };
 
 # NE tests
 subtest 'NE execute() returns native bool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
+    );
 
     my $ne = Chalk::IR::Node::NE->new(left => $left, right => $right);
 
@@ -292,8 +363,14 @@ subtest 'NE execute() returns native bool' => sub {
 };
 
 subtest 'NE compute() returns TypeBool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
+    );
 
     my $ne = Chalk::IR::Node::NE->new(left => $left, right => $right);
 
@@ -303,21 +380,33 @@ subtest 'NE compute() returns TypeBool' => sub {
 };
 
 subtest 'NE peephole() folds to Bool Constant' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
+    );
 
     my $ne = Chalk::IR::Node::NE->new(left => $left, right => $right);
 
     my $result = $ne->peephole();
     ok($result isa Chalk::IR::Node::Constant, 'NE peephole() returns Constant');
-    is($result->type, 'Bool', 'NE peephole() returns Bool type');
+    ok($result->type isa Chalk::IR::Type::Bool, 'NE peephole() returns Bool type');
     ok($result->value, 'NE peephole() 5 != 3 is true');
 };
 
 # LE tests
 subtest 'LE execute() returns native bool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $le = Chalk::IR::Node::LE->new(left => $left, right => $right);
 
@@ -332,8 +421,14 @@ subtest 'LE execute() returns native bool' => sub {
 };
 
 subtest 'LE compute() returns TypeBool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $le = Chalk::IR::Node::LE->new(left => $left, right => $right);
 
@@ -343,21 +438,33 @@ subtest 'LE compute() returns TypeBool' => sub {
 };
 
 subtest 'LE peephole() folds to Bool Constant' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $le = Chalk::IR::Node::LE->new(left => $left, right => $right);
 
     my $result = $le->peephole();
     ok($result isa Chalk::IR::Node::Constant, 'LE peephole() returns Constant');
-    is($result->type, 'Bool', 'LE peephole() returns Bool type');
+    ok($result->type isa Chalk::IR::Type::Bool, 'LE peephole() returns Bool type');
     ok($result->value, 'LE peephole() 5 <= 5 is true');
 };
 
 # GE tests
 subtest 'GE execute() returns native bool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $ge = Chalk::IR::Node::GE->new(left => $left, right => $right);
 
@@ -372,8 +479,14 @@ subtest 'GE execute() returns native bool' => sub {
 };
 
 subtest 'GE compute() returns TypeBool' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $ge = Chalk::IR::Node::GE->new(left => $left, right => $right);
 
@@ -383,20 +496,29 @@ subtest 'GE compute() returns TypeBool' => sub {
 };
 
 subtest 'GE peephole() folds to Bool Constant' => sub {
-    my $left = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $right = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
+    );
 
     my $ge = Chalk::IR::Node::GE->new(left => $left, right => $right);
 
     my $result = $ge->peephole();
     ok($result isa Chalk::IR::Node::Constant, 'GE peephole() returns Constant');
-    is($result->type, 'Bool', 'GE peephole() returns Bool type');
+    ok($result->type isa Chalk::IR::Type::Bool, 'GE peephole() returns Bool type');
     ok($result->value, 'GE peephole() 5 >= 5 is true');
 };
 
 # Not tests
 subtest 'Not execute() returns native bool' => sub {
-    my $operand = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+    my $operand = Chalk::IR::Node::Constant->new(
+        value => 0,
+        type => Chalk::IR::Type::Integer->constant(0)
+    );
 
     my $not = Chalk::IR::Node::Not->new(operand => $operand);
 
@@ -410,7 +532,10 @@ subtest 'Not execute() returns native bool' => sub {
 };
 
 subtest 'Not execute() negates truthy value' => sub {
-    my $operand = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
+    my $operand = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type => Chalk::IR::Type::Integer->constant(1)
+    );
 
     my $not = Chalk::IR::Node::Not->new(operand => $operand);
 
@@ -424,7 +549,10 @@ subtest 'Not execute() negates truthy value' => sub {
 };
 
 subtest 'Not compute() returns TypeBool' => sub {
-    my $operand = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+    my $operand = Chalk::IR::Node::Constant->new(
+        value => 0,
+        type => Chalk::IR::Type::Integer->constant(0)
+    );
 
     my $not = Chalk::IR::Node::Not->new(operand => $operand);
 
@@ -435,13 +563,16 @@ subtest 'Not compute() returns TypeBool' => sub {
 };
 
 subtest 'Not peephole() folds to Bool Constant' => sub {
-    my $operand = Chalk::IR::Node::Constant->new(value => 0, type => 'Integer');
+    my $operand = Chalk::IR::Node::Constant->new(
+        value => 0,
+        type => Chalk::IR::Type::Integer->constant(0)
+    );
 
     my $not = Chalk::IR::Node::Not->new(operand => $operand);
 
     my $result = $not->peephole();
     ok($result isa Chalk::IR::Node::Constant, 'Not peephole() returns Constant');
-    is($result->type, 'Bool', 'Not peephole() returns Bool type');
+    ok($result->type isa Chalk::IR::Type::Bool, 'Not peephole() returns Bool type');
     ok($result->value, 'Not peephole() !0 is true');
 };
 

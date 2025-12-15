@@ -21,7 +21,7 @@ open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
 my $bnf_content = do { local $/; <$fh> };
 close $fh;
 
-my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program');
+my $grammar = Chalk::Grammar->build_from_bnf($bnf_content, 'Program', 'Chalk');
 my $semiring = Chalk::Semiring::Boolean->new();
 
 sub parses_ok {
@@ -145,9 +145,7 @@ parses_ok(q{
     }
 }, 'nested class declaration (parses but semantics TBD)');
 
-# Test: Package declaration (currently parses for backward compat)
-# Note: Goal is to remove package support in final chalk.bnf
-parses_ok(q{
-    package Foo;
-    use 5.42.0;
-}, 'package declaration (temporary backward compat)');
+# Test: Package declaration - REMOVED
+# Note: Package support has been intentionally removed from chalk.bnf
+# Chalk uses classes only, no packages (see grammar/chalk.bnf line 7)
+# This test was removed as the feature is no longer supported

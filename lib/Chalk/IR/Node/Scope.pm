@@ -168,8 +168,8 @@ class Chalk::IR::Node::Scope {
 
         # Get all variable names from both scopes
         my %all_vars;
-        $all_vars{$_} = 1 for keys %{$scope_a->all_bindings};
-        $all_vars{$_} = 1 for keys %{$scope_b->all_bindings};
+        $all_vars{$_} = 1 for keys($scope_a->all_bindings->%*);
+        $all_vars{$_} = 1 for keys($scope_b->all_bindings->%*);
 
         for my $var (keys %all_vars) {
             # $ctrl is control flow, not data - just copy, don't create Phi

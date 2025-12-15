@@ -8,8 +8,7 @@ use Chalk::IR::Type;
 class Chalk::IR::Type::Bottom :isa(Chalk::IR::Type) {
     my $BOTTOM;
 
-    sub BOTTOM {
-        my $class = shift // __PACKAGE__;
+    sub BOTTOM ($class) {
         $BOTTOM //= $class->new();
     }
 

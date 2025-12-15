@@ -5,10 +5,6 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::ReferenceConstructor :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::NewArray;
-    use Chalk::IR::Node::NewHash;
-    use Chalk::IR::Node::HashSet;
-    use Chalk::IR::Node;
     
 
     method evaluate($context) {

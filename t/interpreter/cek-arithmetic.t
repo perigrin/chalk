@@ -11,13 +11,14 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Multiply;
 use Chalk::IR::Node::Return;
+use Chalk::IR::Type::Integer;
 use Chalk::Interpreter::CEKDataflow;
 
 # Test simple constant execution
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $const = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $const = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
         value => $const,
@@ -36,8 +37,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
-    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
+    my $c1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
+    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->TOP());
     my $add = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
@@ -59,8 +60,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
     my $mul = Chalk::IR::Node::Multiply->new(left => $c2, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
@@ -82,9 +83,9 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
-    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $c1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
+    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
     my $add = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
     my $mul = Chalk::IR::Node::Multiply->new(left => $add, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
@@ -109,8 +110,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
 
     require Chalk::IR::Node::Subtract;
     my $sub = Chalk::IR::Node::Subtract->new(left => $c10, right => $c3);
@@ -134,8 +135,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c20 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
-    my $c4 = Chalk::IR::Node::Constant->new(value => 4, type => 'int');
+    my $c20 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
+    my $c4 = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->TOP());
 
     require Chalk::IR::Node::Divide;
     my $div = Chalk::IR::Node::Divide->new(left => $c20, right => $c4);
@@ -159,8 +160,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c_neg5 = Chalk::IR::Node::Constant->new(value => -5, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $c_neg5 = Chalk::IR::Node::Constant->new(value => -5, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
     my $add = Chalk::IR::Node::Add->new(left => $c_neg5, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
@@ -182,8 +183,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-    my $c5 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+    my $c5 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $add = Chalk::IR::Node::Add->new(left => $c0, right => $c5);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
@@ -205,8 +206,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
-    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
+    my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
+    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
     my $mul = Chalk::IR::Node::Multiply->new(left => $c0, right => $c10);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
@@ -228,8 +229,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c_neg2 = Chalk::IR::Node::Constant->new(value => -2, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $c_neg2 = Chalk::IR::Node::Constant->new(value => -2, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
     my $mul = Chalk::IR::Node::Multiply->new(left => $c_neg2, right => $c3);
     my $ret = Chalk::IR::Node::Return->new(
         control => $start,
@@ -251,8 +252,8 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $c0 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
 
     require Chalk::IR::Node::Divide;
     my $div = Chalk::IR::Node::Divide->new(left => $c10, right => $c0);
@@ -284,10 +285,10 @@ use Chalk::Interpreter::CEKDataflow;
 {
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
-    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
-    my $c4 = Chalk::IR::Node::Constant->new(value => 4, type => 'int');
-    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
+    my $c2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
+    my $c4 = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->TOP());
+    my $c10 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
 
     my $add = Chalk::IR::Node::Add->new(left => $c2, right => $c3);
     my $mul = Chalk::IR::Node::Multiply->new(left => $add, right => $c4);

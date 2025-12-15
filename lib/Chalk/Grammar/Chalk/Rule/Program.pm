@@ -3,13 +3,10 @@
 
 use 5.42.0;
 use experimental 'class';
+use Chalk::Grammar::Chalk::Type::Undef;
 
 
 class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Start;
-    use Chalk::IR::Node::Return;
-    use Chalk::IR::Node::Stop;
-    use Chalk::IR::Node::Constant;
 
     method evaluate($context) {
         # Get scope from environment
@@ -138,8 +135,8 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
 
         # Default return value (undef constant)
         $return_value //= Chalk::IR::Node::Constant->new(
-            type  => 'Undef',
-            value => 'undef',
+            type  => Chalk::Grammar::Chalk::Type::Undef->new(),
+            value => undef,
         );
 
         # Create Return node

@@ -10,9 +10,11 @@ use Test::Deep;
 
 # Load required modules
 use_ok('Chalk::IR::Node');
+use_ok('Chalk::IR::Node::Constant');
 use_ok('Chalk::IR::Graph');
 use_ok('Chalk::IR::Optimizer::GVN');
 use_ok('Chalk::IR::OptimizerPipeline');
+use Chalk::IR::Type::Integer;
 
 # Test 1: Empty pipeline passes graph through unchanged
 subtest 'Empty pipeline' => sub {
@@ -27,11 +29,9 @@ subtest 'Empty pipeline' => sub {
     );
     $graph->add_node($start);
 
-    my $const = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Constant',
-        inputs => [],
-        attributes => { value => 42, type => 'Int' }
+    my $const = Chalk::IR::Node::Constant->new(
+        value => 42,
+        type => Chalk::IR::Type::Integer->constant(42)
     );
     $graph->add_node($const);
 
@@ -59,19 +59,15 @@ subtest 'Single optimizer pipeline' => sub {
     );
     $graph->add_node($start);
 
-    my $const_x = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Constant',
-        inputs => [],
-        attributes => { value => 3, type => 'Int' }
+    my $const_x = Chalk::IR::Node::Constant->new(
+        value => 3,
+        type => Chalk::IR::Type::Integer->constant(3)
     );
     $graph->add_node($const_x);
 
-    my $const_y = Chalk::IR::Node->new(
-        id => 'node_2',
-        op => 'Constant',
-        inputs => [],
-        attributes => { value => 5, type => 'Int' }
+    my $const_y = Chalk::IR::Node::Constant->new(
+        value => 5,
+        type => Chalk::IR::Type::Integer->constant(5)
     );
     $graph->add_node($const_y);
 
@@ -130,11 +126,9 @@ subtest 'Multiple optimizer pipeline' => sub {
     );
     $graph->add_node($start);
 
-    my $const = Chalk::IR::Node->new(
-        id => 'node_1',
-        op => 'Constant',
-        inputs => [],
-        attributes => { value => 10, type => 'Int' }
+    my $const = Chalk::IR::Node::Constant->new(
+        value => 10,
+        type => Chalk::IR::Type::Integer->constant(10)
     );
     $graph->add_node($const);
 

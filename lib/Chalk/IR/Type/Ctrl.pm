@@ -11,8 +11,8 @@ class Chalk::IR::Type::Ctrl :isa(Chalk::IR::Type) {
     method is_constant() { return 1; }
     method value() { return undef; }
 
-    sub CTRL {
-        state $singleton = __PACKAGE__->new();
+    sub CTRL ($class) {
+        state $singleton = $class->new();
         return $singleton;
     }
 
@@ -23,7 +23,7 @@ class Chalk::IR::Type::Ctrl :isa(Chalk::IR::Type) {
         # Handle global Top type - we're the result
         return $self if $other isa Chalk::IR::Type::Top;
         # Ctrl meet Ctrl = Ctrl (singleton)
-        return $self if $other isa __PACKAGE__;
+        return $self if $other isa blessed($self);
         # Cross-type meet = Top
         return Chalk::IR::Type::Top->top();
     }

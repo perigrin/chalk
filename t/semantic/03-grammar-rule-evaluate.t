@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # ABOUTME: Tests for GrammarRule evaluate() method for semantic actions
-# ABOUTME: Validates default implementation returns child values as array
+# ABOUTME: Validates that rules require explicit evaluate() implementation
 
 use 5.42.0;
 use warnings;
@@ -11,6 +11,19 @@ use lib 't/lib';
 use Test::Chalk::Grammar;
 use Chalk::Grammar;
 use Chalk::EvalContext;
+
+# Define a test rule class with default pass-through behavior
+package TestPassThroughRule {
+    use 5.42.0;
+    use experimental 'class';
+
+    class TestPassThroughRule :isa(Chalk::GrammarRule) {
+        # Default pass-through: return array of child values
+        method evaluate($context) {
+            return [ map { $_->extract } $context->children->@* ];
+        }
+    }
+}
 
 # Test that GrammarRule has evaluate method
 {
@@ -24,7 +37,7 @@ use Chalk::EvalContext;
     ok($rule->can('evaluate'), 'GrammarRule has evaluate method');
 }
 
-# Test default evaluate implementation with no children
+# Test that base GrammarRule dies without explicit evaluate
 {
     my $grammar = Test::Chalk::Grammar->build_grammar(
         rules => [
@@ -44,20 +57,38 @@ use Chalk::EvalContext;
         rule => $rule
     );
 
+    eval { $rule->evaluate($ctx) };
+    like($@, qr/has no evaluate\(\) method/, 'base GrammarRule dies with helpful message');
+}
+
+# Test pass-through evaluate implementation with no children
+{
+    my $rule = TestPassThroughRule->new(
+        lhs => 'S',
+        rhs => []
+    );
+
+    my $ctx = Chalk::EvalContext->new(
+        focus => undef,
+        children => [],
+        start_pos => 0,
+        end_pos => 0,
+        env => {},
+        grammar => undef,
+        rule => $rule
+    );
+
     my $result = $rule->evaluate($ctx);
 
     is_deeply($result, [], 'evaluate returns empty array for no children');
 }
 
-# Test default evaluate implementation with children
+# Test pass-through evaluate implementation with children
 {
-    my $grammar = Test::Chalk::Grammar->build_grammar(
-        rules => [
-            ['S' => ['a', 'b', 'c']],
-        ]
+    my $rule = TestPassThroughRule->new(
+        lhs => 'S',
+        rhs => ['a', 'b', 'c']
     );
-
-    my $rule = $grammar->rules->{'S'}->[0];
 
     # Create child contexts with values
     my $child1 = Chalk::EvalContext->new(
@@ -66,7 +97,7 @@ use Chalk::EvalContext;
         start_pos => 0,
         end_pos => 5,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => undef
     );
 
@@ -76,7 +107,7 @@ use Chalk::EvalContext;
         start_pos => 5,
         end_pos => 11,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => undef
     );
 
@@ -86,7 +117,7 @@ use Chalk::EvalContext;
         start_pos => 11,
         end_pos => 16,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => undef
     );
 
@@ -96,7 +127,7 @@ use Chalk::EvalContext;
         start_pos => 0,
         end_pos => 16,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => $rule
     );
 
@@ -108,13 +139,10 @@ use Chalk::EvalContext;
 
 # Test evaluate can access rule information
 {
-    my $grammar = Test::Chalk::Grammar->build_grammar(
-        rules => [
-            ['Expression' => ['Number', '+', 'Number']],
-        ]
+    my $rule = TestPassThroughRule->new(
+        lhs => 'Expression',
+        rhs => ['Number', '+', 'Number']
     );
-
-    my $rule = $grammar->rules->{'Expression'}->[0];
 
     my $child1 = Chalk::EvalContext->new(
         focus => 5,
@@ -122,7 +150,7 @@ use Chalk::EvalContext;
         start_pos => 0,
         end_pos => 1,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => undef
     );
 
@@ -132,7 +160,7 @@ use Chalk::EvalContext;
         start_pos => 1,
         end_pos => 2,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => undef
     );
 
@@ -142,7 +170,7 @@ use Chalk::EvalContext;
         start_pos => 2,
         end_pos => 3,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => undef
     );
 
@@ -152,7 +180,7 @@ use Chalk::EvalContext;
         start_pos => 0,
         end_pos => 3,
         env => {},
-        grammar => $grammar,
+        grammar => undef,
         rule => $rule
     );
 

@@ -185,7 +185,20 @@ class Chalk::EarleyChart {
 
             my $element = $self->get_element($item);
             if ($element) {
+                # DEBUG: Log goal elements
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    if ($element->can('valid')) {
+                        warn "GOAL: found element valid=" . $element->valid . " op=" . ($element->operator // 'undef') . " for " . $item->rule->lhs . "\n";
+                    } elsif ($element->can('elements')) {
+                        my $prec = $element->elements->[0];
+                        warn "GOAL: found composite element prec.valid=" . ($prec->valid // '?') . " prec.op=" . ($prec->operator // 'undef') . " for " . $item->rule->lhs . "\n";
+                    }
+                }
+                my $old_result = $result;
                 $result = $result + $element;
+                if ($ENV{DEBUG_PRECEDENCE} && $result->can('valid')) {
+                    warn "GOAL: after add, result.valid=" . $result->valid . " op=" . ($result->operator // 'undef') . "\n";
+                }
 
                 # Early termination for Boolean semiring: we only need to know
                 # IF a parse exists, not enumerate ALL parses. This prevents
@@ -212,10 +225,26 @@ class Chalk::Parser {
     field $grammar    :param;
     field $preprocess :param = [];    # Arrayref of preprocessor class names
     field $input_string;              # Store input string for semantic actions
+    field @last_errors;               # Errors from last parse attempt
+    field $diagnostic_context;        # Shared context for furthest-failure error tracking
 
     method parse_string($input) {
         $input_string = $input;       # Store for semantic actions
-                                      # Apply preprocessors in sequence
+        @last_errors = ();            # Clear errors from previous parse
+
+        # Initialize diagnostic context for furthest-failure error tracking
+        $diagnostic_context = {
+            furthest_pos => 0,
+            furthest_errors => [],
+            input_string => $input,
+        };
+
+        # Pass diagnostic context to semiring if it supports it
+        if ($semiring->can('set_diagnostic_context')) {
+            $semiring->set_diagnostic_context($diagnostic_context);
+        }
+
+        # Apply preprocessors in sequence
         for my $preprocessor_class ( $preprocess->@* ) {
             next unless defined $preprocessor_class;
 
@@ -278,6 +307,11 @@ class Chalk::Parser {
 
         my $result =
           $chart->goal_value( $grammar->start_symbol, $input_length );
+
+        # Collect errors from the result if available
+        if ($result) {
+            $self->_collect_errors_from_element($result);
+        }
 
         # Show where parsing actually stopped if it failed
         if ( !$result && $last_active_pos < $input_length ) {
@@ -363,7 +397,119 @@ class Chalk::Parser {
                   . "\n" );
         }
 
+        # Check for semantic/type errors in the result
+        if (!$result) {
+            # Try to get errors from any failed parse elements
+            $self->_display_semantic_errors($input);
+        } elsif ($result && $result->can('has_errors') && $result->has_errors()) {
+            # Parse succeeded but had warnings
+            warn("⚠️  SEMANTIC WARNINGS:\n" . $result->format_errors($input) . "\n");
+        } elsif ($result && $result->can('errors') && scalar($result->errors->@*) > 0) {
+            # Result has errors array directly
+            $self->_format_and_display_errors($result->errors, $input);
+        }
+
         return $result;
+    }
+
+    method _display_semantic_errors($input) {
+        # First priority: Display furthest-failure errors from diagnostic context
+        # These are the most relevant since they represent where parsing actually got stuck
+        if ($diagnostic_context && scalar($diagnostic_context->{furthest_errors}->@*) > 0) {
+            my $pos = $diagnostic_context->{furthest_pos};
+            warn("🔍 SEMANTIC ERRORS at furthest position $pos:\n");
+            $self->_format_and_display_errors($diagnostic_context->{furthest_errors}, $input);
+            return;  # Furthest errors are most relevant, skip others
+        }
+
+        # Display any errors collected during parsing
+        if (@last_errors) {
+            $self->_format_and_display_errors(\@last_errors, $input);
+        }
+
+        # Try to get errors from the semiring itself
+        if ($semiring->can('collected_errors')) {
+            my @errors = $semiring->collected_errors();
+            if (@errors) {
+                $self->_format_and_display_errors(\@errors, $input);
+            }
+        }
+
+        # Also try to extract errors from composite semiring elements
+        if ($semiring->can('semirings')) {
+            for my $child_sr ($semiring->semirings->@*) {
+                # Check for collected_errors method
+                if ($child_sr->can('collected_errors')) {
+                    my @errors = $child_sr->collected_errors();
+                    if (@errors) {
+                        $self->_format_and_display_errors(\@errors, $input);
+                    }
+                }
+                # Also check add_id for errors
+                if ($child_sr->can('add_id')) {
+                    my $add_id = $child_sr->add_id;
+                    if ($add_id->can('errors') && scalar($add_id->errors->@*) > 0) {
+                        $self->_format_and_display_errors($add_id->errors, $input);
+                    }
+                }
+            }
+        }
+    }
+
+    # Get errors from last parse attempt
+    method last_errors() {
+        return @last_errors;
+    }
+
+    # Add an error to the error list
+    method _add_error($error) {
+        push @last_errors, $error;
+    }
+
+    # Collect errors from an element
+    method _collect_errors_from_element($element) {
+        return unless defined $element;
+        if ($element->can('errors')) {
+            my $errors = $element->errors;
+            push @last_errors, $errors->@* if $errors && scalar($errors->@*) > 0;
+        }
+        # For composite elements, collect from children
+        if ($element->can('elements')) {
+            for my $child ($element->elements->@*) {
+                $self->_collect_errors_from_element($child);
+            }
+        }
+    }
+
+    method _format_and_display_errors($errors, $input) {
+        return unless $errors && scalar($errors->@*) > 0;
+
+        my @lines;
+        for my $err ($errors->@*) {
+            my $msg = $err->{message} // 'Unknown semantic error';
+            my $pos = $err->{start_pos} // 0;
+
+            # Calculate line/column from position
+            if (defined $input && $pos > 0) {
+                my $line = 1;
+                my $col = 1;
+                for my $i (0 .. $pos - 1) {
+                    if (substr($input, $i, 1) eq "\n") {
+                        $line++;
+                        $col = 1;
+                    } else {
+                        $col++;
+                    }
+                }
+                push @lines, "  Line $line, Col $col: $msg";
+            } else {
+                push @lines, "  Position $pos: $msg";
+            }
+        }
+
+        if (@lines) {
+            warn("⚠️  SEMANTIC ERRORS:\n" . join("\n", @lines) . "\n");
+        }
     }
 
     method process_position_string( $pos, $chart, $input_string ) {
@@ -517,7 +663,8 @@ class Chalk::Parser {
             );
 
             # Always merge element (for disambiguation), only add to agenda if new
-            if ( $chart->has_item($new_item) ) {
+            my $has_existing = $chart->has_item($new_item);
+            if ( $has_existing ) {
                 my $old_element = $chart->get_element($new_item);
 
                 # For complete items, call on_complete() on the new derivation BEFORE merging
@@ -530,33 +677,63 @@ class Chalk::Parser {
 
                 my $merged = $chart->merge_element( $new_item, $combined_element );
 
-                # If precedence filtering changed which derivation wins, propagate to parent items
-                # Parents may have already advanced with the old (invalid) derivation's value
-                if ( $new_item->complete && $merged->can('elements') && $old_element->can('elements') ) {
-                    my $old_prec = $old_element->elements->[0];
-                    my $new_prec = $combined_element->elements->[0];
+                # If precedence filtering changed which derivation wins, we need to propagate
+                # For complete items: propagate to parent items waiting for LHS
+                # For incomplete items: re-add to agenda so it advances with valid element
 
-                    # Check if the merge changed validity (invalid→valid transition)
-                    # Only check if both elements support the valid() method (Precedence semiring)
-                    if ($old_prec->can('valid') && $new_prec->can('valid') && !$old_prec->valid && $new_prec->valid) {
-                        # Propagate the valid parse up to parent items
-                        my $lhs = $new_item->rule->lhs;
-                        my @parent_waiting = $chart->items_waiting_for( $lhs, $new_item->start_pos );
-                        for my $parent_item (@parent_waiting) {
-                            my $parent_element = $chart->get_element($parent_item);
-                            next unless $parent_element;
-                            my $parent_combined = $parent_element * $combined_element;
-                            my $parent_new_item = Chalk::EarleyItem->new(
-                                start_pos => $parent_item->start_pos,
-                                rule      => $parent_item->rule,
-                                dot_pos   => $parent_item->dot_pos + 1,
-                                end_pos   => $new_item->end_pos
-                            );
-                            $chart->merge_element( $parent_new_item, $parent_combined );
-                            # Add to agenda if not already there
-                            unless ( $chart->has_completed($parent_new_item) ) {
-                                push( $agenda->@*, $parent_new_item );
-                            }
+                # Extract precedence elements from either Composite or direct Precedence
+                my ($old_prec, $new_prec);
+                if ($merged->can('elements') && $old_element->can('elements')) {
+                    # Composite semiring case - precedence is first element
+                    $old_prec = $old_element->elements->[0];
+                    $new_prec = $combined_element->elements->[0];
+                } elsif ($old_element->can('valid')) {
+                    # Direct PrecedenceElement case
+                    $old_prec = $old_element;
+                    $new_prec = $combined_element;
+                }
+
+                # Check for invalid→valid transition
+                my $validity_changed = $old_prec && $new_prec &&
+                    $old_prec->can('valid') && $new_prec->can('valid') &&
+                    !$old_prec->valid && $new_prec->valid;
+
+                # For INCOMPLETE items with invalid→valid transition, re-add to agenda
+                # This ensures they advance with the valid element, updating downstream items
+                if ( !$new_item->complete && $validity_changed ) {
+                    if ($ENV{DEBUG_PRECEDENCE}) {
+                        warn "REQUEUE: " . $new_item->rule->lhs . "(" . $new_item->start_pos . "-" . $new_item->end_pos .
+                             ") dot=" . $new_item->dot_pos . " for re-processing with valid element\n";
+                    }
+                    push( $agenda->@*, $new_item );
+                }
+
+                if ( $new_item->complete && $validity_changed ) {
+                    # DEBUG
+                    if ($ENV{DEBUG_PRECEDENCE}) {
+                        warn "PROPAGATE: invalid→valid transition for " . $new_item->rule->lhs .
+                             " at " . $new_item->start_pos . "-" . $new_item->end_pos . "\n";
+                    }
+                    # Propagate the valid parse up to parent items
+                    my $lhs = $new_item->rule->lhs;
+                    my @parent_waiting = $chart->items_waiting_for( $lhs, $new_item->start_pos );
+                    if ($ENV{DEBUG_PRECEDENCE}) {
+                        warn "  Looking for parents waiting for $lhs at pos " . $new_item->start_pos . ": found " . scalar(@parent_waiting) . "\n";
+                    }
+                    for my $parent_item (@parent_waiting) {
+                        my $parent_element = $chart->get_element($parent_item);
+                        next unless $parent_element;
+                        my $parent_combined = $parent_element * $combined_element;
+                        my $parent_new_item = Chalk::EarleyItem->new(
+                            start_pos => $parent_item->start_pos,
+                            rule      => $parent_item->rule,
+                            dot_pos   => $parent_item->dot_pos + 1,
+                            end_pos   => $new_item->end_pos
+                        );
+                        $chart->merge_element( $parent_new_item, $parent_combined );
+                        # Add to agenda if not already there
+                        unless ( $chart->has_completed($parent_new_item) ) {
+                            push( $agenda->@*, $parent_new_item );
                         }
                     }
                 }
@@ -599,30 +776,36 @@ class Chalk::Parser {
     method predict( $item, $nonterminal, $chart, $agenda ) {
         my $pos = $item->end_pos;
 
-# Check if we've already predicted this nonterminal from this rule at this position
-# Multiple rules can predict the same nonterminal, so we track by rule origin
-        return if $chart->has_predicted( $nonterminal, $pos, $item->rule->id );
-        $chart->mark_predicted( $nonterminal, $pos, $item->rule->id );
+        # Check if we've already predicted this nonterminal from this rule at this position
+        # Multiple rules can predict the same nonterminal, so we track by rule origin
+        # NOTE: We only skip adding prediction items, NOT the nullable advancement below!
+        unless ( $chart->has_predicted( $nonterminal, $pos, $item->rule->id ) ) {
+            $chart->mark_predicted( $nonterminal, $pos, $item->rule->id );
 
-        for my $rule ( $grammar->rules_for($nonterminal) ) {
-            my $predicted_item = Chalk::EarleyItem->new(
-                start_pos => $pos,
-                rule      => $rule,
-                dot_pos   => 0,
-                end_pos   => $pos
-            );
+            for my $rule ( $grammar->rules_for($nonterminal) ) {
+                my $predicted_item = Chalk::EarleyItem->new(
+                    start_pos => $pos,
+                    rule      => $rule,
+                    dot_pos   => 0,
+                    end_pos   => $pos
+                );
 
-            # Only add if not already in chart
-            unless ( $chart->has_item($predicted_item) ) {
-                my $rule_element =
-                  $semiring->init_element_from_rule( $rule, $pos, $pos );
-                $chart->add_element( $predicted_item, $rule_element );
-                push( $agenda->@*, $predicted_item );
+                # Only add if not already in chart
+                unless ( $chart->has_item($predicted_item) ) {
+                    my $rule_element =
+                      $semiring->init_element_from_rule( $rule, $pos, $pos );
+                    $chart->add_element( $predicted_item, $rule_element );
+                    push( $agenda->@*, $predicted_item );
+                }
             }
         }
 
         # Aycock-Horspool optimization: if the nonterminal is nullable,
-        # we can also advance the dot past it immediately
+        # we can also advance the dot past it immediately.
+        # CRITICAL: This MUST happen unconditionally, even if we've already
+        # predicted this nonterminal. The same nullable symbol (e.g., WS_OPT)
+        # may appear multiple times in a rule (e.g., Block -> '{' WS_OPT StatementList WS_OPT '}')
+        # and each occurrence must advance the dot past it.
         if ( $grammar->is_nullable($nonterminal) ) {
             my $advanced_item = Chalk::EarleyItem->new(
                 start_pos => $item->start_pos,
@@ -631,10 +814,31 @@ class Chalk::Parser {
                 end_pos   => $item->end_pos
             );
 
-            # Only add if not already present
-            unless ( $chart->has_item($advanced_item) ) {
-                my $current_element = $chart->get_element($item);
-                if ($current_element) {
+            # Get current element for this item (may have been updated by merge)
+            my $current_element = $chart->get_element($item);
+            if ($current_element) {
+                if ( $chart->has_item($advanced_item) ) {
+                    # Item exists - merge in case we have a better element
+                    my $old_element = $chart->get_element($advanced_item);
+                    my $merged = $chart->merge_element( $advanced_item, $current_element );
+
+                    # Only re-add to agenda if merge changed validity (invalid→valid)
+                    # This prevents infinite loops while still propagating valid elements
+                    my ($old_prec, $new_prec);
+                    if ($merged->can('elements') && $old_element->can('elements')) {
+                        $old_prec = $old_element->elements->[0];
+                        $new_prec = $current_element->elements->[0];
+                    } elsif ($old_element->can('valid')) {
+                        $old_prec = $old_element;
+                        $new_prec = $current_element;
+                    }
+                    if ($old_prec && $new_prec &&
+                        $old_prec->can('valid') && $new_prec->can('valid') &&
+                        !$old_prec->valid && $new_prec->valid) {
+                        push( $agenda->@*, $advanced_item );
+                    }
+                } else {
+                    # New item
                     $chart->add_element( $advanced_item, $current_element );
                     push( $agenda->@*, $advanced_item );
                 }

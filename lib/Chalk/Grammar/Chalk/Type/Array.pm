@@ -2,7 +2,7 @@
 # ABOUTME: Implements Array <: List <: Any subtyping chain with element_type parameter
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Array :isa(Chalk::Grammar::Chalk::Type) {
     # Array represents array values
@@ -15,9 +15,13 @@ class Chalk::Grammar::Chalk::Type::Array :isa(Chalk::Grammar::Chalk::Type) {
         # Array <: Array (reflexive)
         # Array <: List
         # Array <: Any (transitive)
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::Array' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::List' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::Array',
+            'Chalk::Grammar::Chalk::Type::List',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 
     method meet($other) {
@@ -26,7 +30,7 @@ class Chalk::Grammar::Chalk::Type::Array :isa(Chalk::Grammar::Chalk::Type) {
         return $self if $other->is_top();
 
         # Array meet Array: covariant element types
-        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Array') {
+        if (            $other isa Chalk::Grammar::Chalk::Type::Array) {
             my $elem_meet = $element_type->meet($other->element_type);
             return Chalk::Grammar::Chalk::Type::Array->new(element_type => $elem_meet);
         }
@@ -41,7 +45,7 @@ class Chalk::Grammar::Chalk::Type::Array :isa(Chalk::Grammar::Chalk::Type) {
         return $other if $other->is_top();
 
         # Array join Array: covariant element types
-        if (ref($other) eq 'Chalk::Grammar::Chalk::Type::Array') {
+        if (            $other isa Chalk::Grammar::Chalk::Type::Array) {
             my $elem_join = $element_type->join($other->element_type);
             return Chalk::Grammar::Chalk::Type::Array->new(element_type => $elem_join);
         }

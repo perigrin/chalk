@@ -1,6 +1,6 @@
-# ABOUTME: GitHub Actions workflow to run self-hosting test on PRs and pu merges
-# ABOUTME: Validates that Chalk can successfully parse its own source code
-name: Self-Hosting Test
+# ABOUTME: GitHub Actions workflow to run all tests on PRs and pu merges
+# ABOUTME: Validates Chalk's grammar, semiring, interpreter, and self-hosting capabilities
+name: Test Suite
 
 on:
   pull_request:
@@ -25,9 +25,9 @@ jobs:
 
     - name: Install Perl dependencies
       run: |
-        cpanm --notest Test2::V0
+        cpanm --notest Test2::V0 Test::Deep
 
-    - name: Run self-hosting test
+    - name: Run test suite
       run: |
-        prove -v t/self-hosting.t
+        prove -lr t/
 

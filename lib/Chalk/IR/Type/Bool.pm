@@ -12,18 +12,17 @@ class Chalk::IR::Type::Bool :isa(Chalk::IR::Type) {
 
     method is_constant() { return 1; }
 
-    sub TRUE {
-        state $singleton = __PACKAGE__->new(value => true);
+    sub TRUE ($class) {
+        state $singleton = $class->new(value => true);
         return $singleton;
     }
 
-    sub FALSE {
-        state $singleton = __PACKAGE__->new(value => false);
+    sub FALSE ($class) {
+        state $singleton = $class->new(value => false);
         return $singleton;
     }
 
-    sub constant {
-        my ($class, $val) = @_;
+    sub constant ($class, $val) {
         return $val ? $class->TRUE : $class->FALSE;
     }
 
@@ -35,7 +34,7 @@ class Chalk::IR::Type::Bool :isa(Chalk::IR::Type) {
         return $self if $other isa Chalk::IR::Type::Top;
 
         # Same boolean = that boolean
-        if ($other isa __PACKAGE__) {
+        if ($other isa blessed($self)) {
             return $self if $value == $other->value;
             # Different booleans = Top (unknown which)
             return Chalk::IR::Type::Top->top();

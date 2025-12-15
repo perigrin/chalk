@@ -2,10 +2,10 @@
 # ABOUTME: Implements List <: Any subtyping chain, parent of Array and Hash types
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
+use Chalk::Grammar::Chalk::Type::Any;
 use Chalk::Grammar::Chalk::Type::Array;
 use Chalk::Grammar::Chalk::Type::Hash;
-use Chalk::Grammar::Chalk::Type::Any;
 use Chalk::Grammar::Chalk::Type::Exception;
 
 class Chalk::Grammar::Chalk::Type::List :isa(Chalk::Grammar::Chalk::Type) {
@@ -19,8 +19,8 @@ class Chalk::Grammar::Chalk::Type::List :isa(Chalk::Grammar::Chalk::Type) {
     method is_subtype_of($other) {
         # List <: List (reflexive)
         # List <: Any
-        return blessed($other) eq 'Chalk::Grammar::Chalk::Type::List' ||
-               blessed($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        return $other isa Chalk::Grammar::Chalk::Type::List ||
+               $other isa Chalk::Grammar::Chalk::Type::Any;
     }
 
     method convert_to_target($target_sigil) {

@@ -3,11 +3,10 @@
 
 use 5.42.0;
 use experimental 'class';
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Float;
 
 class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Constant;
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Float;
 
     method evaluate($context) {
         # Number -> %INTEGER% | %FLOAT%

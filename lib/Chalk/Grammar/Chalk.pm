@@ -70,24 +70,14 @@ use Chalk::Grammar::Chalk::Rule::WS_OPT;
 use Chalk::Grammar::Chalk::Rule::YaddaYadda;
 
 class Chalk::Grammar::Chalk {
-    field $grammar :reader;
+    field $grammar :reader :param;
 
-    ADJUST {
-        # This will be populated with chalk.bnf rules + semantic actions
-        # For now, just initialize the structure
-        $grammar = Chalk::Grammar->new(
-            rules => {
-                # Semantic action rules will be added here
-                ReturnStatement => [
-                    # return constant
-                    Chalk::Grammar::Chalk::Rule::ReturnStatement->new(
-                        lhs => 'ReturnStatement',
-                        rhs => ['return', 'WS_OPT', 'Expression']
-                    ),
-                ],
-            }
-        );
-    }
+    # Delegate methods to inner grammar object
+    method start_symbol() { $grammar->start_symbol }
+    method rules_for($symbol) { $grammar->rules_for($symbol) }
+    method is_nullable($symbol) { $grammar->is_nullable($symbol) }
+    method is_nonterminal($symbol) { $grammar->is_nonterminal($symbol) }
+    method rules_waiting_for($symbol) { $grammar->rules_waiting_for($symbol) }
 }
 
 1;

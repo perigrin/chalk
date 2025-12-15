@@ -14,6 +14,8 @@ use_ok('Chalk::Grammar');
 use_ok('Chalk::Grammar::Chalk');
 use_ok('Chalk::Semiring::ChalkIR');
 use_ok('Chalk::IR::Node::Scope');
+use_ok('Chalk::IR::Type::Bool');
+use_ok('Chalk::IR::Type::Integer');
 
 # Helper to create parser for testing
 sub make_parser {
@@ -294,7 +296,7 @@ subtest 'Parse: Comparison == with equal constants' => sub {
 
     # Should have boolean true constant
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @trues = grep { $_->type eq 'Bool' && $_->value } @constants;
+    my @trues = grep { $_->type isa Chalk::IR::Type::Bool && $_->value } @constants;
     is(scalar(@trues), 1, 'Has Constant(true) from folded 3 == 3');
 };
 
@@ -317,7 +319,7 @@ subtest 'Parse: Comparison == with unequal constants' => sub {
 
     # Should have boolean false constant
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @falses = grep { $_->type eq 'Bool' && !$_->value } @constants;
+    my @falses = grep { $_->type isa Chalk::IR::Type::Bool && !$_->value } @constants;
     is(scalar(@falses), 1, 'Has Constant(false) from folded 3 == 4');
 };
 
@@ -340,7 +342,7 @@ subtest 'Parse: Comparison != with equal constants' => sub {
 
     # Should have boolean false constant
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @falses = grep { $_->type eq 'Bool' && !$_->value } @constants;
+    my @falses = grep { $_->type isa Chalk::IR::Type::Bool && !$_->value } @constants;
     is(scalar(@falses), 1, 'Has Constant(false) from folded 3 != 3');
 };
 
@@ -363,7 +365,7 @@ subtest 'Parse: Comparison != with unequal constants' => sub {
 
     # Should have boolean true constant
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @trues = grep { $_->type eq 'Bool' && $_->value } @constants;
+    my @trues = grep { $_->type isa Chalk::IR::Type::Bool && $_->value } @constants;
     is(scalar(@trues), 1, 'Has Constant(true) from folded 3 != 4');
 };
 
@@ -384,7 +386,7 @@ subtest 'Parse: Comparison < with constants' => sub {
     is(scalar(@lts), 0, 'LT node folded away');
 
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @trues = grep { $_->type eq 'Bool' && $_->value } @constants;
+    my @trues = grep { $_->type isa Chalk::IR::Type::Bool && $_->value } @constants;
     is(scalar(@trues), 1, 'Has Constant(true) from folded 3 < 5');
 };
 
@@ -405,7 +407,7 @@ subtest 'Parse: Comparison > with constants' => sub {
     is(scalar(@gts), 0, 'GT node folded away');
 
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @trues = grep { $_->type eq 'Bool' && $_->value } @constants;
+    my @trues = grep { $_->type isa Chalk::IR::Type::Bool && $_->value } @constants;
     is(scalar(@trues), 1, 'Has Constant(true) from folded 5 > 3');
 };
 
@@ -426,7 +428,7 @@ subtest 'Parse: Comparison <= with constants' => sub {
     is(scalar(@les), 0, 'LE node folded away');
 
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @trues = grep { $_->type eq 'Bool' && $_->value } @constants;
+    my @trues = grep { $_->type isa Chalk::IR::Type::Bool && $_->value } @constants;
     is(scalar(@trues), 1, 'Has Constant(true) from folded 3 <= 3');
 };
 
@@ -447,7 +449,7 @@ subtest 'Parse: Comparison >= with constants' => sub {
     is(scalar(@ges), 0, 'GE node folded away');
 
     my @constants = grep { $_->op eq 'Constant' } @nodes;
-    my @trues = grep { $_->type eq 'Bool' && $_->value } @constants;
+    my @trues = grep { $_->type isa Chalk::IR::Type::Bool && $_->value } @constants;
     is(scalar(@trues), 1, 'Has Constant(true) from folded 5 >= 3');
 };
 

@@ -12,13 +12,14 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Graph;
 use Chalk::IR::Optimizer::IterPeeps;
+use Chalk::IR::Type::Integer;
 
 subtest 'GVN deduplicates identical constants during peephole' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     # Two identical Constant(5) nodes
-    my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
 
     $graph->add_node($const1);
     $graph->add_node($const2);
@@ -37,8 +38,8 @@ subtest 'GVN deduplicates identical constants during peephole' => sub {
 subtest 'GVN deduplicates identical Add operations' => sub {
     my $graph = Chalk::IR::Graph->new();
 
-    my $x = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $y = Chalk::IR::Node::Constant->new(value => 7, type => 'Integer');
+    my $x = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $y = Chalk::IR::Node::Constant->new(value => 7, type => Chalk::IR::Type::Integer->constant(7));
 
     # Two identical Add(x, y) operations
     my $add1 = Chalk::IR::Node::Add->new(left => $x, right => $y);
@@ -67,9 +68,9 @@ subtest 'peephole creates node already in GVN table' => sub {
     # After peephole: 1+2 -> 3, GVN should find existing Constant(3)
     my $graph = Chalk::IR::Graph->new();
 
-    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $const3 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
     my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 
     $graph->add_node($const1);

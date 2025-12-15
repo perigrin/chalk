@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Ctrl;
 
 class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
     method op() { 'Region' }
@@ -70,7 +71,9 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
             if ($input_node->op eq 'Constant') {
                 my $value = $input_node->attributes->{value} // $input_node->value;
                 my $type = $input_node->attributes->{type} // $input_node->type;
-                if ($type eq 'Control' && $value eq '~Ctrl') {
+                # Type can be a Chalk::IR::Type::Ctrl object or the string 'Control'
+                my $is_ctrl_type = ($type isa Chalk::IR::Type::Ctrl) || ($type eq 'Control');
+                if ($is_ctrl_type && $value eq '~Ctrl') {
                     $is_dead = 1;
                 }
             }
@@ -109,7 +112,9 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node::Base) {
             if ($input_node->op eq 'Constant') {
                 my $value = $input_node->attributes->{value} // $input_node->value;
                 my $type = $input_node->attributes->{type} // $input_node->type;
-                if ($type eq 'Control' && $value eq '~Ctrl') {
+                # Type can be a Chalk::IR::Type::Ctrl object or the string 'Control'
+                my $is_ctrl_type = ($type isa Chalk::IR::Type::Ctrl) || ($type eq 'Control');
+                if ($is_ctrl_type && $value eq '~Ctrl') {
                     $is_dead = 1;
                 }
             }

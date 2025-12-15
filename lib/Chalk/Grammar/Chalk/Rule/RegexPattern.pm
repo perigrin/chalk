@@ -5,7 +5,6 @@ use 5.42.0;
 use experimental 'class';
 
 class Chalk::Grammar::Chalk::Rule::RegexPattern :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Constant;
 
     method evaluate($context) {
         # RegexPattern -> 'qr' '/' RegexContent '/' RegexFlags

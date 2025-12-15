@@ -2,7 +2,7 @@
 # ABOUTME: Implements ArrayRef <: Ref <: Scalar <: Any subtyping chain
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::ArrayRef :isa(Chalk::Grammar::Chalk::Type) {
     # ArrayRef represents array references
@@ -13,10 +13,14 @@ class Chalk::Grammar::Chalk::Type::ArrayRef :isa(Chalk::Grammar::Chalk::Type) {
         # ArrayRef <: Ref
         # ArrayRef <: Scalar (transitive)
         # ArrayRef <: Any (transitive)
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::ArrayRef' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Ref' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::ArrayRef',
+            'Chalk::Grammar::Chalk::Type::Ref',
+            'Chalk::Grammar::Chalk::Type::Scalar',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 }
 

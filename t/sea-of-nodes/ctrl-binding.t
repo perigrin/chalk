@@ -14,6 +14,8 @@ use_ok('Chalk::IR::Node::Region');
 use_ok('Chalk::IR::Node::Loop');
 use_ok('Chalk::IR::Node::Phi');
 use_ok('Chalk::IR::Node::Constant');
+use_ok('Chalk::IR::Type::Bool');
+use_ok('Chalk::IR::Type::Integer');
 
 # =============================================================================
 # Phase 1: Core Infrastructure - $ctrl binding at program start
@@ -54,7 +56,7 @@ subtest '$ctrl accessible via scope lookup' => sub {
 
 subtest '$ctrl bound to IfTrue Proj in true branch' => sub {
     my $start = Chalk::IR::Node::Start->new(label => 'main');
-    my $condition = Chalk::IR::Node::Constant->new(value => 1, type => 'Bool');
+    my $condition = Chalk::IR::Node::Constant->new(value => true, type => Chalk::IR::Type::Bool->constant(true));
 
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$start->id, $condition->id],
@@ -87,7 +89,7 @@ subtest '$ctrl bound to IfTrue Proj in true branch' => sub {
 
 subtest '$ctrl bound to IfFalse Proj in false branch' => sub {
     my $start = Chalk::IR::Node::Start->new(label => 'main');
-    my $condition = Chalk::IR::Node::Constant->new(value => 0, type => 'Bool');
+    my $condition = Chalk::IR::Node::Constant->new(value => false, type => Chalk::IR::Type::Bool->constant(false));
 
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$start->id, $condition->id],
@@ -192,7 +194,7 @@ subtest '$ctrl excluded from Phi generation in merge_scopes' => sub {
     my $start = Chalk::IR::Node::Start->new(label => 'main');
 
     # Create If structure
-    my $condition = Chalk::IR::Node::Constant->new(value => 1, type => 'Bool');
+    my $condition = Chalk::IR::Node::Constant->new(value => true, type => Chalk::IR::Type::Bool->constant(true));
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$start->id, $condition->id],
         condition_id => $condition->id,
@@ -222,19 +224,19 @@ subtest '$ctrl excluded from Phi generation in merge_scopes' => sub {
     my $pre_scope = Chalk::IR::Node::Scope->new()
         ->with_control($start)
         ->with_binding('$ctrl', $start)
-        ->with_binding('$x', Chalk::IR::Node::Constant->new(value => 0, type => 'Integer'));
+        ->with_binding('$x', Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->constant(0)));
 
     # True branch: $ctrl at IfTrue, $x = 1
     my $true_scope = $pre_scope->child_scope()
         ->with_control($if_true->id)
         ->with_binding('$ctrl', $if_true)
-        ->with_binding('$x', Chalk::IR::Node::Constant->new(value => 1, type => 'Integer'));
+        ->with_binding('$x', Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1)));
 
     # False branch: $ctrl at IfFalse, $x = 2
     my $false_scope = $pre_scope->child_scope()
         ->with_control($if_false->id)
         ->with_binding('$ctrl', $if_false)
-        ->with_binding('$x', Chalk::IR::Node::Constant->new(value => 2, type => 'Integer'));
+        ->with_binding('$x', Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2)));
 
     # Merge scopes
     my $merged = $pre_scope->merge_scopes($true_scope, $false_scope, $region);
@@ -291,7 +293,7 @@ subtest 'Integration: $ctrl tracks through nested control flow' => sub {
     is($scope->lookup('$ctrl')->op, 'Start', 'Initial $ctrl is Start');
 
     # Enter if statement
-    my $condition = Chalk::IR::Node::Constant->new(value => 1, type => 'Bool');
+    my $condition = Chalk::IR::Node::Constant->new(value => true, type => Chalk::IR::Type::Bool->constant(true));
     my $if_node = Chalk::IR::Node::If->new(
         inputs => [$start->id, $condition->id],
         condition_id => $condition->id,

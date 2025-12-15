@@ -62,7 +62,7 @@
 %COMMENT% = /#[^\n]*/
 # Reserved keywords excluded from barewords via negative lookahead
 # Note: method/sub NOT reserved - they can be method names and need special grammar handling
-%BAREWORD% = /(?!(?:class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+%BAREWORD% = /(?!(?:class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp|true|false|__FILE__|__LINE__)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 %BAREWORD_ANY% = /[a-zA-Z_][a-zA-Z0-9_]*/
 %SPECIAL_IDENTIFIER% = /[0-9]+|[&`'+@!$-]|^[A-Z]|\{[^}]+\}/
 %INTEGER% = /[0-9]+/
@@ -297,6 +297,8 @@ ComparisonOp -> Expression WS_OPT %STRING_COMPARE_OP% WS_OPT Expression
 ComparisonOp -> Expression WS_OPT 'isa' WS_OPT QualifiedIdentifier
 ComparisonOp -> Expression WS_OPT 'isa' WS_OPT Expression
 ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT Expression
+# Bare regex match: $x =~ /pattern/flags (shorthand for m/pattern/flags)
+ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT '/' RegexContent '/' RegexFlags
 
 # String concatenation operator (left-associative)
 ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
@@ -341,17 +343,21 @@ YaddaYadda -> '...'
 FunctionCall -> Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Function call
 FunctionCall -> Identifier '(' WS_OPT ')'  # Function call with no args
 FunctionCall -> Identifier WS_ELEMENT Expression  # Function call without parens: foo 1, 2
-FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
-FunctionCall -> QualifiedIdentifier '->' Identifier '(' WS_OPT ')'  # Class method call with no args
+FunctionCall -> QualifiedIdentifier WS_OPT '->' Identifier WS_OPT '(' WS_OPT ExpressionList WS_OPT ')'  # Class method call
+FunctionCall -> QualifiedIdentifier WS_OPT '->' WS_OPT Identifier '(' WS_OPT ')'  # Class method call with no args
 FunctionCall -> Variable '->' '(' WS_OPT ExpressionList WS_OPT ')'  # Coderef call: $coderef->($arg)
 FunctionCall -> Variable '->' '(' WS_OPT ')'  # Coderef call with no args
 FunctionCall -> MethodCall  # Delegate to instance method calls
 
 # Method calls - can be invoked on any expression that returns an object reference
 # Examples: $obj->method, ($a || $b)->foo, foo()->bar, $obj->m1->m2
-MethodCall -> Expression '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->method($args)
-MethodCall -> Expression '->' Identifier '(' WS_OPT ')'  # expr->method() (empty parens)
-MethodCall -> Expression '->' Identifier  # expr->method (without parens)
+MethodCall -> Expression WS_OPT '->' WS_OPT Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->method($args)
+MethodCall -> Expression WS_OPT '->' WS_OPT Identifier '(' WS_OPT ')'  # expr->method() (empty parens)
+MethodCall -> Expression WS_OPT '->' WS_OPT Identifier  # expr->method (without parens)
+# Qualified method calls - for SUPER::method, Package::method patterns
+# Examples: $self->SUPER::method(), $obj->Some::Package::method()
+MethodCall -> Expression WS_OPT '->' WS_OPT QualifiedIdentifier '(' WS_OPT ExpressionList WS_OPT ')'  # expr->Package::method($args)
+MethodCall -> Expression WS_OPT '->' WS_OPT QualifiedIdentifier '(' WS_OPT ')'  # expr->Package::method()
 
 # Postfix dereference operators - can apply to any expression returning a reference
 # Examples: $var->@*, $obj->method->@*, foo()->@*, ($x || $y)->@*, $var->@*->%*
@@ -468,6 +474,10 @@ Literal -> RegexPattern
 Literal -> RegexSubstitution
 Literal -> EmptyList
 Literal -> 'undef'
+Literal -> 'true'
+Literal -> 'false'
+Literal -> '__FILE__'
+Literal -> '__LINE__'
 
 EmptyList -> '(' WS_OPT ')'
 

@@ -3,13 +3,14 @@
 
 use 5.42.0;
 use experimental 'class';
+use Chalk::Grammar::Chalk::Type::Str;
 
 class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
-    use Chalk::IR::Node::Constant;
 
     method evaluate($context) {
         # String -> %STRING%  (double-quoted string literal)
         # String -> %SQSTRING%  (single-quoted string literal)
+        # String -> %VERSION% (version number like 5.42.0)
         # Child [0] contains the matched string literal with quotes
 
         my $string_with_quotes = $context->child(0);
@@ -17,13 +18,13 @@ class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
 
         # Strip surrounding quotes - see issue #201 for proper interpolation handling
         my $value = "$string_with_quotes";
-        if (length($value) >= 2) {
+        if (length($value) >= 2 && $value =~ m/^['"]/) {
             $value = substr($value, 1, length($value) - 2);
         }
 
-        # Create Constant node directly (content-addressable ID)
+        # Create Constant node with proper Type object
         return Chalk::IR::Node::Constant->new(
-            type  => 'String',
+            type  => Chalk::Grammar::Chalk::Type::Str->new(),
             value => $value,
         );
     }

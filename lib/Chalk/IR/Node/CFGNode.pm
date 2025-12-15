@@ -3,9 +3,9 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Graph;
 
 class Chalk::IR::Node::CFGNode {
-    use Chalk::IR::Graph;
 
     # CFG marker method - returns true for all CFG nodes
     method isCFG() { return 1; }

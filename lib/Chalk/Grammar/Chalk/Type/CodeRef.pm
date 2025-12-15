@@ -2,7 +2,7 @@
 # ABOUTME: Implements CodeRef <: Ref <: Scalar <: Any subtyping chain
 
 use 5.042;
-use experimental qw(class);
+use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::CodeRef :isa(Chalk::Grammar::Chalk::Type) {
     # CodeRef represents code references
@@ -13,10 +13,14 @@ class Chalk::Grammar::Chalk::Type::CodeRef :isa(Chalk::Grammar::Chalk::Type) {
         # CodeRef <: Ref
         # CodeRef <: Scalar (transitive)
         # CodeRef <: Any (transitive)
-        return ref($other) eq 'Chalk::Grammar::Chalk::Type::CodeRef' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Ref' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Scalar' ||
-               ref($other) eq 'Chalk::Grammar::Chalk::Type::Any';
+        
+return any { $other isa $_ } (
+            'Chalk::Grammar::Chalk::Type::CodeRef',
+            'Chalk::Grammar::Chalk::Type::Ref',
+            'Chalk::Grammar::Chalk::Type::Scalar',
+            'Chalk::Grammar::Chalk::Type::Any',
+            
+        );
     }
 }
 

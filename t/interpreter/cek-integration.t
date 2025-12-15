@@ -21,6 +21,8 @@ use Chalk::IR::Node::ArrayLoad;
 use Chalk::IR::Node::NewHash;
 use Chalk::IR::Node::HashStore;
 use Chalk::IR::Node::HashLoad;
+use Chalk::IR::Type::Integer;
+use Chalk::Grammar::Chalk::Type::Str;
 use Chalk::Interpreter::CEKDataflow;
 use Chalk::Interpreter::ExecutionLog;
 
@@ -29,10 +31,10 @@ use Chalk::Interpreter::ExecutionLog;
     my $graph = Chalk::IR::Graph->new();
     my $start = Chalk::IR::Node::Start->new(function_name => 'test', params => []);
 
-    my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $c2 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
-    my $c3 = Chalk::IR::Node::Constant->new(value => 8, type => 'int');
-    my $c4 = Chalk::IR::Node::Constant->new(value => 3, type => 'int');
+    my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $c2 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
+    my $c3 = Chalk::IR::Node::Constant->new(value => 8, type => Chalk::IR::Type::Integer->TOP());
+    my $c4 = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->TOP());
 
     my $add = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
     my $sub = Chalk::IR::Node::Subtract->new(left => $c3, right => $c4);
@@ -81,11 +83,11 @@ use Chalk::Interpreter::ExecutionLog;
     my $arr = Chalk::IR::Node::NewArray->new(
         inputs => [],
     );
-    my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => 'int');
-    my $c2 = Chalk::IR::Node::Constant->new(value => 5, type => 'int');
+    my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->TOP());
+    my $c2 = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->TOP());
     my $sum = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
 
-    my $idx0 = Chalk::IR::Node::Constant->new(value => 0, type => 'int');
+    my $idx0 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->TOP());
     my $store1 = Chalk::IR::Node::ArrayStore->new(
         inputs => [$arr->id, $idx0->id, $sum->id],
         array_id => $arr->id,
@@ -95,7 +97,7 @@ use Chalk::Interpreter::ExecutionLog;
 
     my $product = Chalk::IR::Node::Multiply->new(left => $c1, right => $c2);
 
-    my $idx1 = Chalk::IR::Node::Constant->new(value => 1, type => 'int');
+    my $idx1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->TOP());
     my $store2 = Chalk::IR::Node::ArrayStore->new(
         inputs => [$store1->id, $idx1->id, $product->id],
         array_id => $store1->id,
@@ -179,9 +181,9 @@ use Chalk::Interpreter::ExecutionLog;
         inputs => [],
     );
 
-    my $key1 = Chalk::IR::Node::Constant->new(value => 'sum', type => 'string');
-    my $c1 = Chalk::IR::Node::Constant->new(value => 20, type => 'int');
-    my $c2 = Chalk::IR::Node::Constant->new(value => 15, type => 'int');
+    my $key1 = Chalk::IR::Node::Constant->new(value => 'sum', type => Chalk::Grammar::Chalk::Type::Str->new());
+    my $c1 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->TOP());
+    my $c2 = Chalk::IR::Node::Constant->new(value => 15, type => Chalk::IR::Type::Integer->TOP());
     my $sum = Chalk::IR::Node::Add->new(left => $c1, right => $c2);
 
     my $store1 = Chalk::IR::Node::HashStore->new(
@@ -191,7 +193,7 @@ use Chalk::Interpreter::ExecutionLog;
         value_id => $sum->id,
     );
 
-    my $key2 = Chalk::IR::Node::Constant->new(value => 'diff', type => 'string');
+    my $key2 = Chalk::IR::Node::Constant->new(value => 'diff', type => Chalk::Grammar::Chalk::Type::Str->new());
     my $diff = Chalk::IR::Node::Subtract->new(left => $c1, right => $c2);
 
     my $store2 = Chalk::IR::Node::HashStore->new(

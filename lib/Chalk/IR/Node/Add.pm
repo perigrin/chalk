@@ -5,10 +5,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Node::Add {
-    use Chalk::IR::Type::Integer;
-    use Chalk::IR::Type::Top;
-    use Chalk::IR::Node::Constant;
-    use Chalk::IR::Node::Multiply;
 
     field $left :param :reader;
     field $right :param :reader;
@@ -71,7 +67,7 @@ class Chalk::IR::Node::Add {
         if ($type->is_constant) {
             return Chalk::IR::Node::Constant->new(
                 value => $type->value,
-                type  => 'Integer',
+                type  => $type,
             );
         }
 
@@ -122,7 +118,7 @@ class Chalk::IR::Node::Add {
         if ($left->id eq $right->id) {
             return Chalk::IR::Node::Multiply->new(
                 left  => $left,
-                right => Chalk::IR::Node::Constant->new(value => 2, type => 'Integer'),
+                right => Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2)),
             );
         }
 
@@ -167,9 +163,10 @@ class Chalk::IR::Node::Add {
             if ($right_type->is_constant) {
                 # Case 1: (x + c1) + c2 -> x + (c1 + c2) - inner already normalized
                 if ($lhs_inner_right_type->is_constant) {
+                    my $combined_value = $lhs_inner_right_type->value + $right_type->value;
                     my $combined = Chalk::IR::Node::Constant->new(
-                        value => $lhs_inner_right_type->value + $right_type->value,
-                        type  => 'Integer',
+                        value => $combined_value,
+                        type  => Chalk::IR::Type::Integer->constant($combined_value),
                     );
                     return Chalk::IR::Node::Add->new(
                         left  => $left->left,
@@ -179,9 +176,10 @@ class Chalk::IR::Node::Add {
 
                 # Case 2: (c1 + x) + c2 -> x + (c1 + c2) - inner not yet normalized
                 if ($lhs_inner_left_type->is_constant) {
+                    my $combined_value = $lhs_inner_left_type->value + $right_type->value;
                     my $combined = Chalk::IR::Node::Constant->new(
-                        value => $lhs_inner_left_type->value + $right_type->value,
-                        type  => 'Integer',
+                        value => $combined_value,
+                        type  => Chalk::IR::Type::Integer->constant($combined_value),
                     );
                     return Chalk::IR::Node::Add->new(
                         left  => $left->right,

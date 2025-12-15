@@ -29,7 +29,8 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
 
         # For alternatives (choice), prefer non-zero value
         # If self has value 0 (is add_id), return other
-        if ( $value == 0 ) {
+        # Use string comparison to avoid numeric coercion warnings
+        if ( !defined($value) || (defined($value) && "$value" eq '0') ) {
             return $other;
         }
 
@@ -134,6 +135,13 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
 
     # Return value (0 for add_id, 1 for others) for Parser's numeric comparisons
         return defined($value) ? "$value" : '1';
+    }
+
+    # Convenience method to extract focus from context
+    # Delegates to context->extract() for comonad-style extraction
+    method extract() {
+        return $context->extract if defined $context;
+        return undef;
     }
 }
 

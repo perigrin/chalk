@@ -12,6 +12,8 @@ use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Graph;
 use Chalk::IR::Optimizer::IterPeeps;
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Ctrl;
 
 subtest 'dependents added to worklist when node changes' => sub {
     # This test verifies the mechanism, not a specific peephole
@@ -19,8 +21,8 @@ subtest 'dependents added to worklist when node changes' => sub {
 
     my $graph = Chalk::IR::Graph->new();
 
-    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
+    my $const1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $const2 = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
     my $add = Chalk::IR::Node::Add->new(left => $const1, right => $const2);
 
     $graph->add_node($const1);
@@ -48,7 +50,7 @@ subtest 'dependents added to worklist when node changes' => sub {
 subtest 'multiple dependencies handled' => sub {
     my $graph = Chalk::IR::Graph->new();
 
-    my $const = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
+    my $const = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
     my $add1 = Chalk::IR::Node::Add->new(left => $const, right => $const);
     my $add2 = Chalk::IR::Node::Add->new(left => $const, right => $const);
 
@@ -83,9 +85,9 @@ subtest 'Add.idealize registers dependency on right child when checking op' => s
     # it should register a dependency so if right changes, we re-optimize
     my $graph = Chalk::IR::Graph->new();
 
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $c = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
 
     # Build: a + (b + c) - this triggers right-association check
     my $inner_add = Chalk::IR::Node::Add->new(left => $b, right => $c);
@@ -112,9 +114,9 @@ subtest 'Add.idealize registers dependency on left child grandchildren' => sub {
     # it should register dependencies on those grandchildren
     my $graph = Chalk::IR::Graph->new();
 
-    my $x = Chalk::IR::Node::Constant->new(value => 5, type => 'Integer');
-    my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => 'Integer');
-    my $c2 = Chalk::IR::Node::Constant->new(value => 20, type => 'Integer');
+    my $x = Chalk::IR::Node::Constant->new(value => 5, type => Chalk::IR::Type::Integer->constant(5));
+    my $c1 = Chalk::IR::Node::Constant->new(value => 10, type => Chalk::IR::Type::Integer->constant(10));
+    my $c2 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->constant(20));
 
     # Build: (x + c1) + c2 - this triggers constant combining check
     my $inner_add = Chalk::IR::Node::Add->new(left => $x, right => $c1);
@@ -147,15 +149,15 @@ subtest 'Phi.idealize registers dependencies on data input nodes' => sub {
     my $graph = Chalk::IR::Graph->new();
 
     # Create a region with two control inputs
-    my $ctrl1 = Chalk::IR::Node::Constant->new(value => 1, type => 'Control');
-    my $ctrl2 = Chalk::IR::Node::Constant->new(value => 1, type => 'Control');
+    my $ctrl1 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Ctrl->CTRL());
+    my $ctrl2 = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Ctrl->CTRL());
     my $region = Chalk::IR::Node::Region->new(inputs => [$ctrl1->id, $ctrl2->id]);
 
     # Create two Add nodes that the Phi will select between
-    my $a = Chalk::IR::Node::Constant->new(value => 1, type => 'Integer');
-    my $b = Chalk::IR::Node::Constant->new(value => 2, type => 'Integer');
-    my $c = Chalk::IR::Node::Constant->new(value => 3, type => 'Integer');
-    my $d = Chalk::IR::Node::Constant->new(value => 4, type => 'Integer');
+    my $a = Chalk::IR::Node::Constant->new(value => 1, type => Chalk::IR::Type::Integer->constant(1));
+    my $b = Chalk::IR::Node::Constant->new(value => 2, type => Chalk::IR::Type::Integer->constant(2));
+    my $c = Chalk::IR::Node::Constant->new(value => 3, type => Chalk::IR::Type::Integer->constant(3));
+    my $d = Chalk::IR::Node::Constant->new(value => 4, type => Chalk::IR::Type::Integer->constant(4));
 
     my $add1 = Chalk::IR::Node::Add->new(left => $a, right => $b);
     my $add2 = Chalk::IR::Node::Add->new(left => $c, right => $d);

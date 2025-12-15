@@ -6,8 +6,6 @@ use experimental qw(class);
 use utf8;
 
 class Chalk::IR::Optimizer::IterPeeps {
-    use Chalk::IR::Graph;
-    use Chalk::IR::Node;
 
     # Instance method for pipeline compatibility
     # Returns optimized graph (not a hashref)
@@ -25,7 +23,22 @@ class Chalk::IR::Optimizer::IterPeeps {
         if ($op eq 'Constant') {
             my $value = $attrs->{value} // '';
             my $type = $attrs->{type} // '';
-            return "Constant:$value:$type";
+            # Extract meaningful type info instead of stringifying object
+            # Type objects stringify to address, which breaks GVN matching
+            my $type_str;
+            if (ref($type) && $type->can('value')) {
+                # For constant types like Integer->constant(10)
+                my $type_class = ref($type);
+                my $type_val = $type->value // '';
+                $type_str = "$type_class:$type_val";
+            } elsif (ref($type)) {
+                # For other type objects, use class name
+                $type_str = ref($type);
+            } else {
+                # For string types
+                $type_str = "$type";
+            }
+            return "Constant:$value:$type_str";
         }
 
         # Special case: Proj nodes (include index)
@@ -109,7 +122,7 @@ class Chalk::IR::Optimizer::IterPeeps {
         my %node_to_value;
 
         # Initialize worklist with all node IDs
-        my @worklist = keys %{$graph->nodes};
+        my @worklist = keys($graph->nodes->%*);
         my %in_worklist = map { $_ => 1 } @worklist;
 
         # Pre-populate GVN table with existing nodes
@@ -224,7 +237,7 @@ class Chalk::IR::Optimizer::IterPeeps {
 
         # Build new graph with updated references
         my $new_graph = Chalk::IR::Graph->new();
-        my @node_ids = sort keys %{$graph->nodes};
+        my @node_ids = sort keys($graph->nodes->%*);
 
         for my $node_id (@node_ids) {
             # Skip nodes that were replaced (unless they're the final destination)
