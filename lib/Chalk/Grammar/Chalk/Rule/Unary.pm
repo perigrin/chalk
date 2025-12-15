@@ -11,6 +11,8 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         use Chalk::IR::Node::Not;
         use Chalk::IR::Node::PreIncrement;
         use Chalk::IR::Node::PreDecrement;
+        use Chalk::IR::Node::PostIncrement;
+        use Chalk::IR::Node::PostDecrement;
 
         # Unary -> Primary (pass-through)
         # Unary -> '!' WS_OPT Unary (prefix operators)
@@ -30,10 +32,14 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
             my $last_child = $children[-1]->extract;
             if (defined($last_child)) {
                 my $str_val = "$last_child";  # Stringify (Token or string)
-                if ($str_val eq '++' || $str_val eq '--') {
-                    # This is postfix: Variable '++' or Variable '--'
-                    # See issue #189 for wiring up PostIncrement/PostDecrement nodes
-                    return $context->child(0);
+                if ($str_val eq '++') {
+                    # Postfix increment: Variable '++'
+                    my $operand = $context->child(0);
+                    return Chalk::IR::Node::PostIncrement->new(operand => $operand)->peephole();
+                } elsif ($str_val eq '--') {
+                    # Postfix decrement: Variable '--'
+                    my $operand = $context->child(0);
+                    return Chalk::IR::Node::PostDecrement->new(operand => $operand)->peephole();
                 }
             }
         }
