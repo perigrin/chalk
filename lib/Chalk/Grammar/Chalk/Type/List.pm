@@ -3,6 +3,10 @@
 
 use 5.042;
 use experimental qw(class keyword_any);
+use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Type::Hash;
+use Chalk::Grammar::Chalk::Type::Exception;
 
 class Chalk::Grammar::Chalk::Type::List :isa(Chalk::Grammar::Chalk::Type) {
     # List represents ephemeral list values
