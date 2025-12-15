@@ -53,7 +53,9 @@ my @precedence_table = (
 sub make_parser {
     my $bool_sr = Chalk::Semiring::Boolean->new();
     my $prec_sr = Chalk::Semiring::Precedence->new(precedence_table => \@precedence_table);
-    my $composite = Chalk::Semiring::Composite->new(semirings => [$bool_sr, $prec_sr]);
+    # NOTE: Precedence must be first - Composite.add() uses index 0 as the "leader"
+    # that decides between alternative parses when precedence filtering applies
+    my $composite = Chalk::Semiring::Composite->new(semirings => [$prec_sr, $bool_sr]);
     return Chalk::Parser->new(grammar => $grammar, semiring => $composite);
 }
 

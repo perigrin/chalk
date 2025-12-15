@@ -158,13 +158,14 @@ subtest 'Extract operator from binary operation rule' => sub {
 
     my $plus_rule = ($grammar->rules_for('E'))[0];
 
-    # When we create an element from a binary operation rule,
-    # it should extract and store the operator
+    # init_element_from_rule creates a plain valid element without operator info
+    # Operators are extracted during on_scan when the actual token is scanned
     my $elem = $semiring->init_element_from_rule($plus_rule, 0, 5);
 
-    # The element should identify this as a + operator
-    is $elem->operator, '+', 'Extracts + operator from rule';
-    is $elem->precedence_level, 0, 'Looks up precedence level for +';
+    # The element starts valid but doesn't have operator info yet
+    # (operators are set during on_scan, not init_element_from_rule)
+    is $elem->operator, undef, 'init_element_from_rule does not extract operator (done in on_scan)';
+    is $elem->precedence_level, undef, 'Precedence level set during on_scan';
     is $elem->valid, 1, 'Element starts as valid';
 };
 
@@ -179,26 +180,44 @@ subtest 'Multiply validates precedence - left associativity' => sub {
     );
 
     # Create elements representing operators
-    my $plus_elem = Chalk::Semiring::PrecedenceElement->new(
+    # is_active => 1 means "current rule's operator" (parent)
+    # is_active => 0 means "from sub-expression" (child)
+    my $plus_active = Chalk::Semiring::PrecedenceElement->new(
         valid => 1,
         operator => '+',
-        precedence_level => 0
+        precedence_level => 0,
+        is_active => 1  # + is the current rule's operator
     );
 
-    my $or_elem = Chalk::Semiring::PrecedenceElement->new(
+    my $or_passive = Chalk::Semiring::PrecedenceElement->new(
         valid => 1,
         operator => '||',
-        precedence_level => 1
+        precedence_level => 1,
+        is_active => 0  # || is from a completed sub-expression
+    );
+
+    my $plus_passive = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '+',
+        precedence_level => 0,
+        is_active => 0  # + is from a completed sub-expression
+    );
+
+    my $or_active = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '||',
+        precedence_level => 1,
+        is_active => 1  # || is the current rule's operator
     );
 
     # VALID: Higher precedence (+) can be nested inside lower precedence (||)
-    # Pattern: (a + b) || c
-    my $result1 = $or_elem->multiply($plus_elem);
+    # Pattern: (a + b) || c - || is active (parent), + is passive (child)
+    my $result1 = $or_active->multiply($plus_passive);
     is $result1->valid, 1, 'Higher precedence inside lower is valid';
 
     # INVALID: Lower precedence (||) cannot be nested inside higher precedence (+)
-    # Pattern: (a || b) + c
-    my $result2 = $plus_elem->multiply($or_elem);
+    # Pattern: (a || b) + c - + is active (parent), || is passive (child)
+    my $result2 = $plus_active->multiply($or_passive);
     is $result2->valid, 0, 'Lower precedence inside higher is invalid';
 };
 
@@ -212,33 +231,49 @@ subtest 'Multiply validates precedence - right associativity' => sub {
         precedence_table => \@precedence_table
     );
 
-    # Create elements
-    my $power_elem = Chalk::Semiring::PrecedenceElement->new(
+    # Create elements with active/passive status
+    my $power_active = Chalk::Semiring::PrecedenceElement->new(
         valid => 1,
         operator => '**',
-        precedence_level => 0
+        precedence_level => 0,
+        is_active => 1  # ** is current rule's operator
     );
 
-    my $plus_elem = Chalk::Semiring::PrecedenceElement->new(
+    my $plus_passive = Chalk::Semiring::PrecedenceElement->new(
         valid => 1,
         operator => '+',
-        precedence_level => 1
+        precedence_level => 1,
+        is_active => 0  # + is from sub-expression
+    );
+
+    my $power_passive = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '**',
+        precedence_level => 0,
+        is_active => 0  # ** from sub-expression
+    );
+
+    my $plus_active = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '+',
+        precedence_level => 1,
+        is_active => 1  # + is current rule's operator
     );
 
     # VALID: Higher precedence (**) inside lower precedence (+)
-    # Pattern: (a ** b) + c
-    my $result1 = $plus_elem->multiply($power_elem);
+    # Pattern: (a ** b) + c - + is active (parent), ** is passive (child)
+    my $result1 = $plus_active->multiply($power_passive);
     is $result1->valid, 1, 'Higher precedence inside lower is valid';
 
     # INVALID: Lower precedence (+) inside higher precedence (**)
-    # Pattern: (a + b) ** c
-    my $result2 = $power_elem->multiply($plus_elem);
+    # Pattern: (a + b) ** c - ** is active (parent), + is passive (child)
+    my $result2 = $power_active->multiply($plus_passive);
     is $result2->valid, 0, 'Lower precedence inside higher is invalid';
 
     # VALID: Same precedence for right-associative operator
     # Pattern: a ** (b ** c) - right associativity allows this
     # Note: This test currently just checks basic precedence, not associativity rules
-    my $result3 = $power_elem->multiply($power_elem);
+    my $result3 = $power_active->multiply($power_passive);
     is $result3->valid, 1, 'Same precedence is valid (basic check)';
 };
 

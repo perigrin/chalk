@@ -300,13 +300,13 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         return 0 unless ($is_active // 0) == ($other->is_active // 0);
         return 1;
     }
-}
 
-# Helper: Determine operator direction for chained comparison validation
-sub _operator_direction($op) {
-    return 'less' if $op =~ m/^(<|<=|lt|le)$/;
-    return 'greater' if $op =~ m/^(>|>=|gt|ge)$/;
-    return undef;
+    # Helper: Determine operator direction for chained comparison validation
+    sub _operator_direction($op) {
+        return 'less' if $op =~ m/^(<|<=|lt|le)$/;
+        return 'greater' if $op =~ m/^(>|>=|gt|ge)$/;
+        return undef;
+    }
 }
 
 class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
