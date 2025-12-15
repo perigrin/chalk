@@ -69,10 +69,14 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
         # Uses tropical semiring (join/meet) for type lattice operations
         my $type_sr = Chalk::Semiring::TypeInference->new();
 
-        # Composite: Boolean + Precedence + SemanticValidation + TypeInference
+        # Composite: Precedence + Boolean + SemanticValidation + TypeInference
         # Pure validation - returns boolean success/failure
+        # NOTE: Precedence must be first - Composite.add() uses the first semiring
+        # as the "leader" that decides between alternative parses. When Precedence
+        # rejects an invalid parse (e.g., wrong operator precedence), Composite
+        # should use the valid alternative instead.
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$bool_sr, $precedence_sr, $semantic_sr, $type_sr]
+            semirings => [$precedence_sr, $bool_sr, $semantic_sr, $type_sr]
         );
     }
 

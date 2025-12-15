@@ -18,7 +18,7 @@ class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
 
         # Strip surrounding quotes - see issue #201 for proper interpolation handling
         my $value = "$string_with_quotes";
-        if (length($value) >= 2 && $value =~ /^['"]/) {
+        if (length($value) >= 2 && $value =~ m/^['"]/) {
             $value = substr($value, 1, length($value) - 2);
         }
 

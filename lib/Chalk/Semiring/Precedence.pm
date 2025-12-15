@@ -58,6 +58,14 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         return $self unless defined $other;
         return $self unless ref($other) && $other->can('valid');
 
+        # DEBUG: Log add() calls when valid/invalid differs
+        if ($ENV{DEBUG_PRECEDENCE_VERBOSE} && $valid != $other->valid) {
+            my $sop = $operator // 'undef';
+            my $oop = $other->operator // 'undef';
+            warn "PREC add: self($sop,v$valid) + other($oop,v" . $other->valid . ") => " .
+                 ($valid ? "self" : "other") . " wins\n";
+        }
+
         # If self is already invalid (add_id), return other
         return $other if !$valid;
 
@@ -145,14 +153,34 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         my $self_active = $is_active;
         my $other_active = $other->is_active;
 
+        # DEBUG: Log operator combinations when DEBUG_PRECEDENCE is set
+        if ($ENV{DEBUG_PRECEDENCE} && (defined($self_op) || defined($other_op))) {
+            my $sa = $self_active ? '*' : '';
+            my $oa = $other_active ? '*' : '';
+            my $sop = $self_op // 'undef';
+            my $oop = $other_op // 'undef';
+            my $slv = $self_level // '?';
+            my $olv = $other_level // '?';
+            warn "PREC multiply: $sop$sa(L$slv) x $oop$oa(L$olv)\n";
+        }
+
         # Determine which is the "current rule" (active) operator
         if ($self_active && !$other_active) {
             # self is the current rule's operator, other is from sub-expression
             # Valid if self (parent) has lower or equal precedence than other (child)
             # Invalid if self (parent) has higher precedence - the child should have bound first
-            if ($self_level < $other_level) {
+            #
+            # EXCEPTION: When =~ or !~ is the active operator and / is passive,
+            # this is likely a regex match like `$x =~ m/pattern/`. The / is a regex
+            # delimiter, not division, so don't enforce precedence checks.
+            my $is_regex_match_context = ($self_op eq '=~' || $self_op eq '!~') && $other_op eq '/';
+
+            if ($self_level < $other_level && !$is_regex_match_context) {
                 # Parent has higher precedence than child - INVALID
                 # Example: `*` trying to contain `+` result
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    warn "PREC REJECT: $self_op*(L$self_level) cannot contain $other_op(L$other_level) - parent has higher precedence\n";
+                }
                 return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
             }
             # Parent has lower or equal precedence - VALID
@@ -171,6 +199,9 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
             if ($other_level < $self_level) {
                 # Parent has higher precedence than child - INVALID
                 # Example: `*` trying to contain `+` result
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    warn "PREC REJECT: $other_op*(L$other_level) cannot contain $self_op(L$self_level) - parent has higher precedence\n";
+                }
                 return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
             }
             # Parent has lower or equal precedence - VALID
@@ -218,6 +249,9 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         if (defined($self_assoc) && $self_assoc eq 'nonassoc') {
             # nonassoc operators at same level cannot chain
             if ($self_op eq $other_op) {
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    warn "PREC REJECT: nonassoc $self_op cannot chain with $other_op\n";
+                }
                 return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
             }
         }
@@ -342,12 +376,31 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         if (defined($matched_value)) {
             my $token_str = "$matched_value";
 
+            # DEBUG: Log scanned tokens when DEBUG_PRECEDENCE is set
+            if ($ENV{DEBUG_PRECEDENCE} && $self->lookup_operator($token_str)) {
+                warn "SCAN: token='$token_str' pattern='$pattern_name' found operator\n";
+            }
+
             # Don't treat identifiers or attribute tokens as operators
-            my $is_identifier = defined($pattern_name) && $pattern_name eq 'IDENTIFIER';
+            # BAREWORD, BAREWORD_ANY, and IDENTIFIER patterns are all identifier-like tokens
+            # that should never be treated as operators even if they match an operator string
+            # (e.g., the 'x' in variable $x should not be treated as string repetition operator)
+            my $is_identifier = defined($pattern_name) &&
+                ($pattern_name eq 'IDENTIFIER' || $pattern_name eq 'BAREWORD' || $pattern_name eq 'BAREWORD_ANY');
             # Attributes are : followed by word chars (not ::)
             my $is_attribute = $token_str =~ m/^:\w/ && $token_str ne '::';
 
-            if (!$is_identifier && !$is_attribute) {
+            # Don't treat certain tokens as operators when matched as literal terminals
+            # pattern_name tells us HOW the token was matched:
+            # - 'ARITHMETIC_OP' means it matched via the operator pattern (it's truly an operator)
+            # - empty/undef means it matched a literal terminal (context-dependent)
+            # Filter cases:
+            # - '/' as literal: regex delimiter, not division
+            # - '.' as literal: part of '..', method call separator, or qw delimiter - not concat
+            my $is_empty_pattern = !defined($pattern_name) || $pattern_name eq '';
+            my $is_literal_terminal = $is_empty_pattern && ($token_str eq '/' || $token_str eq '.');
+
+            if (!$is_identifier && !$is_attribute && !$is_literal_terminal) {
                 my $op_info = $self->lookup_operator($token_str);
 
                 if ($op_info) {
@@ -379,6 +432,16 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     method on_complete($completed_item, $completed_element, $metadata_element = undef) {
         # Get the rule name to check if we should clear operator context
         my $rule_name = $completed_item->rule->lhs // '';
+
+        # DEBUG: Log on_complete
+        if ($ENV{DEBUG_PRECEDENCE} && $rule_name =~ /Expression|Statement|Program/) {
+            my $v = $completed_element->can('valid') ? $completed_element->valid : '?';
+            my $op = $completed_element->can('operator') ? ($completed_element->operator // 'undef') : '?';
+            my $rhs_str = join(' ', $completed_item->rule->rhs->@*);
+            my $start = $completed_item->start_pos;
+            my $end = $completed_item->end_pos // '?';
+            warn "PREC on_complete: $rule_name($start-$end) valid=$v op=$op rule=$rhs_str\n";
+        }
 
         # CRITICAL: Preserve invalid state if the completed element was invalid
         # This prevents wiping out precedence validation results

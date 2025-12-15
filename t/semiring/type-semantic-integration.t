@@ -6,6 +6,7 @@ use Test2::V0;
 use Scalar::Util qw(blessed);
 use FindBin qw($RealBin);
 use File::Spec;
+use lib "$RealBin/../../lib";
 use experimental qw(defer);
 defer { done_testing() }
 

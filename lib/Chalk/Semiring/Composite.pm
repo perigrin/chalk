@@ -53,8 +53,10 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
         my $use_self = refaddr($prec_result) == refaddr($prec_self);
         my $use_other = refaddr($prec_result) == refaddr($prec_other);
 
-        # DEBUG: Uncomment to trace coordination decisions
-        # warn "COORD: self(v" . $prec_self->valid . ") vs other(v" . $prec_other->valid . ") => use_self=$use_self, use_other=$use_other";
+        # DEBUG: Trace coordination decisions
+        if ($ENV{DEBUG_PRECEDENCE}) {
+            warn "COORD: self(v" . $prec_self->valid . ") vs other(v" . $prec_other->valid . ") => use_self=$use_self, use_other=$use_other\n";
+        }
 
         # Only let Precedence be the leader when it makes a MEANINGFUL choice
         # (i.e., one element is valid and the other is invalid).
