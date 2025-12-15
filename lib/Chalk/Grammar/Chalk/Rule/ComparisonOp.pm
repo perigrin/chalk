@@ -13,6 +13,7 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         use Chalk::IR::Node::LE;
         use Chalk::IR::Node::GT;
         use Chalk::IR::Node::GE;
+        use Chalk::IR::Node::ISA;
 
         # Grammar: ComparisonOp -> Expression WS_OPT %COMPARE_OP% WS_OPT Expression
         # But WS_OPT may be filtered out, so we get either 3 or 5 children
@@ -121,11 +122,9 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
             # For now, just pass through left side
             return $left;
         }
-        # isa operator
-        # TODO: implement when isa IR node is available
+        # isa operator - type checking
         elsif ($operator eq 'isa') {
-            # For now, just pass through left side
-            return $left;
+            return Chalk::IR::Node::ISA->new(left => $left, right => $right)->peephole();
         }
 
         # If we get here, we found an operator but didn't handle it - this is a bug
