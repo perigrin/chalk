@@ -1,6 +1,29 @@
 #!/usr/bin/env perl
 # ABOUTME: Generate expected JSON AST output for corpus test .chalk files
 # ABOUTME: Parses .chalk files and writes corresponding .json expected output
+#
+# USAGE:
+#   ./generate-corpus-json.pl t/corpus/*.chalk
+#   ./generate-corpus-json.pl path/to/specific/file.chalk
+#
+# PURPOSE:
+#   This is a developer tool for maintaining the corpus test suite. When you
+#   add new .chalk test files to t/corpus/, run this script to generate the
+#   corresponding .json files containing the expected AST output.
+#
+#   The corpus tests (t/corpus.t) compare parsed AST output against these
+#   .json files to verify the parser produces correct results.
+#
+# WORKFLOW:
+#   1. Create a new .chalk file with the syntax you want to test
+#   2. Run: ./generate-corpus-json.pl path/to/new/file.chalk
+#   3. Review the generated .json to ensure it matches expected AST
+#   4. Commit both .chalk and .json files together
+#
+# NOTE:
+#   If parsing fails, the script warns and continues to the next file.
+#   Always verify generated JSON is correct before committing.
+
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
