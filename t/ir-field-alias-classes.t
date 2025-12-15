@@ -10,13 +10,15 @@ use Chalk::IR::Node::FieldLoad;
 use Chalk::IR::Node::FieldStore;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Memory;
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Top;
 
 # Test 1: FieldStore compute() returns Memory type with alias_class
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $value = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::IR::Type::Top->top());
+    my $value = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 
     # Field "x" assigned alias_class 1
     my $store = Chalk::IR::Node::FieldStore->new(
@@ -41,8 +43,8 @@ use Chalk::IR::Type::Memory;
 # Test 2: FieldLoad compute() returns Memory type with alias_class
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field = Chalk::IR::Node::Constant->new(value => 'y', type => 'string');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field = Chalk::IR::Node::Constant->new(value => 'y', type => Chalk::IR::Type::Top->top());
 
     # Field "y" assigned alias_class 2
     my $load = Chalk::IR::Node::FieldLoad->new(
@@ -65,10 +67,10 @@ use Chalk::IR::Type::Memory;
 # Test 3: Different fields have different alias classes
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field_x = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $field_y = Chalk::IR::Node::Constant->new(value => 'y', type => 'string');
-    my $value = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field_x = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::IR::Type::Top->top());
+    my $field_y = Chalk::IR::Node::Constant->new(value => 'y', type => Chalk::IR::Type::Top->top());
+    my $value = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 
     my $store_x = Chalk::IR::Node::FieldStore->new(
         inputs => [$new_obj->id, $field_x->id, $value->id],
@@ -104,9 +106,9 @@ use Chalk::IR::Type::Memory;
 # Test 4: Same field across operations uses same alias class
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $value = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::IR::Type::Top->top());
+    my $value = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 
     my $store = Chalk::IR::Node::FieldStore->new(
         inputs => [$new_obj->id, $field->id, $value->id],
@@ -140,9 +142,9 @@ use Chalk::IR::Type::Memory;
 # Test 5: Missing alias_class defaults to undefined (TOP)
 {
     my $graph = Chalk::IR::Graph->new();
-    my $new_obj = Chalk::IR::Node::NewObject->new(inputs => []);
-    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => 'string');
-    my $value = Chalk::IR::Node::Constant->new(value => 42, type => 'int');
+    my $new_obj = Chalk::IR::Node::NewObject->new();
+    my $field = Chalk::IR::Node::Constant->new(value => 'x', type => Chalk::IR::Type::Top->top());
+    my $value = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->TOP());
 
     # No alias_class specified
     my $store = Chalk::IR::Node::FieldStore->new(
