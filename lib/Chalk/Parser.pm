@@ -664,16 +664,6 @@ class Chalk::Parser {
 
             # Always merge element (for disambiguation), only add to agenda if new
             my $has_existing = $chart->has_item($new_item);
-            # DEBUG: Track merge vs new for Expression items
-            if ($ENV{DEBUG_PRECEDENCE} && $new_item->rule->lhs =~ /^Expression|ForStatement/) {
-                my $lhs = $new_item->rule->lhs // 'undef';
-                my $start = $new_item->start_pos // '?';
-                my $end = $new_item->end_pos // '?';
-                my $rhs_str = join(' ', $new_item->rule->rhs->@*);
-                my $key = $new_item->key // 'no-key';
-                my $dot = $new_item->dot_pos // '?';
-                warn "" . ($has_existing ? "EXISTING" : "NEW") . ": $lhs($start-$end) dot=$dot key=$key\n";
-            }
             if ( $has_existing ) {
                 my $old_element = $chart->get_element($new_item);
 
