@@ -3,6 +3,8 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Float;
 
 class Chalk::IR::Node::Divide {
 
@@ -100,6 +102,13 @@ class Chalk::IR::Node::Divide {
         }
 
         return Chalk::IR::Type::Top->top();
+    }
+
+    # Compute result type from operand types
+    method compute_type() {
+        # Division always returns Float since it can produce decimal results
+        # (e.g., 5 / 2 = 2.5)
+        return Chalk::IR::Type::Float->TOP();
     }
 
     # Algebraic simplification for division
