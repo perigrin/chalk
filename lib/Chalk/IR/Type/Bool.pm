@@ -10,8 +10,8 @@ use Chalk::IR::Type::Bottom;
 class Chalk::IR::Type::Bool :isa(Chalk::IR::Type) {
     field $value :param :reader = undef;
 
-    method is_constant() { defined($value) ? 1 : 0 }
-    method is_top()      { !defined($value) ? 1 : 0 }
+    method is_constant() { defined($value) ? true : false }
+    method is_top()      { !defined($value) ? true : false }
 
     sub TOP ($class) {
         state $singleton = $class->new();
