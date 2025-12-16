@@ -37,7 +37,7 @@ class Chalk::IR::Node::Call {
         my @inputs;
         push @inputs, $callee->id if defined $callee && $callee->can('id');
         push @inputs, $receiver->id if defined $receiver && $receiver->can('id');
-        for my $arg (@$args) {
+        for my $arg ($args->@*) {
             push @inputs, $arg->id if defined $arg && $arg->can('id');
         }
         return \@inputs;
@@ -48,7 +48,7 @@ class Chalk::IR::Node::Call {
     method to_hash() {
         my $callee_id = (defined $callee && $callee->can('id')) ? $callee->id : undef;
         my $receiver_id = (defined $receiver && $receiver->can('id')) ? $receiver->id : undef;
-        my @arg_ids = map { $_->id } grep { defined $_ && $_->can('id') } @$args;
+        my @arg_ids = map { $_->id } grep { defined $_ && $_->can('id') } $args->@*;
 
         return {
             id     => $self->id,
@@ -69,7 +69,7 @@ class Chalk::IR::Node::Call {
 
         # Get evaluated arguments
         my @evaluated_args;
-        for my $arg (@$args) {
+        for my $arg ($args->@*) {
             push @evaluated_args, $context->("node:" . $arg->id);
         }
 

@@ -24,7 +24,7 @@ class Chalk::IR::Node::InterpolatedString {
 
     method inputs() {
         my @inputs;
-        for my $part (@$parts) {
+        for my $part ($parts->@*) {
             push @inputs, $part->id if defined $part && $part->can('id');
         }
         return \@inputs;
@@ -34,7 +34,7 @@ class Chalk::IR::Node::InterpolatedString {
 
     method to_hash() {
         my @part_ids;
-        for my $part (@$parts) {
+        for my $part ($parts->@*) {
             push @part_ids, $part->id if defined $part && $part->can('id');
         }
 
