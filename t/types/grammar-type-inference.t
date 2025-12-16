@@ -83,6 +83,14 @@ subtest 'String concatenation yields Str' => sub {
     # Num . Str = Str
     my $num_concat_str = $inference->infer_binary_op('.', $num, $str);
     isa_ok($num_concat_str, 'Chalk::Grammar::Chalk::Type::Str', 'Num . Str = Str');
+
+    # Str . Int = Str (Int coerces to Str)
+    my $str_concat_int = $inference->infer_binary_op('.', $str, $int);
+    isa_ok($str_concat_int, 'Chalk::Grammar::Chalk::Type::Str', 'Str . Int = Str');
+
+    # Int . Int = Str (both Ints coerce to Str)
+    my $int_concat_int = $inference->infer_binary_op('.', $int, $int);
+    isa_ok($int_concat_int, 'Chalk::Grammar::Chalk::Type::Str', 'Int . Int = Str (stringifies)');
 };
 
 subtest 'Comparison operators yield Boolean' => sub {
