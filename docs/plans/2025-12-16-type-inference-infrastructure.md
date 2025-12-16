@@ -594,14 +594,16 @@ Closes #300."
 
 ## Summary
 
-| Task | Description | Files |
-|------|-------------|-------|
-| 1 | Add compute_type() to Add | Add.pm, node-types.t |
-| 2 | Float support in Add | Add.pm, node-types.t |
-| 3 | compute_type for Sub/Mul/Div | 3 node files, tests |
-| 4 | compute_type for comparisons | GT/LT/EQ.pm, tests |
-| 5 | TypeInference grammar module | TypeInference.pm, tests |
-| 6 | String/comparison tests | tests |
-| 7 | Full test suite verification | all |
+| Task | Description | Files | Status |
+|------|-------------|-------|--------|
+| 1 | Add compute_type() to Add | Add.pm, node-types.t | Done |
+| 2 | Float support in Add | Add.pm, node-types.t | Done |
+| 3 | compute_type for Sub/Mul/Div | 3 node files, tests | Done |
+| 4 | compute_type for comparisons | GT/LT/EQ/NE/LE/GE.pm, tests | Done |
+| 5 | TypeInference grammar module | ~~TypeInference.pm~~ | **SKIPPED** - already in TypeLattice |
+| 6 | String/comparison tests | ~~tests~~ | **SKIPPED** - covered by TypeLattice |
+| 7 | Full test suite verification | all | Done |
+
+**Note:** Tasks 5-6 were removed because `Chalk::Grammar::Chalk::TypeLattice->infer_type_from_operation()` already provides the same functionality.
 
 **Next:** After completing this plan, proceed to #336 (Chapter 14: Narrow primitive types) for sub-word integer support.
