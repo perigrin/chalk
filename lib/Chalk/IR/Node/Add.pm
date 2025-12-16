@@ -4,6 +4,7 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Float;
 
 class Chalk::IR::Node::Add {
 
@@ -105,13 +106,18 @@ class Chalk::IR::Node::Add {
         my $left_type = $left->can('compute_type') ? $left->compute_type() : $left->type;
         my $right_type = $right->can('compute_type') ? $right->compute_type() : $right->type;
 
+        # If either operand is Float, result is Float
+        if ($left_type isa Chalk::IR::Type::Float || $right_type isa Chalk::IR::Type::Float) {
+            return Chalk::IR::Type::Float->TOP();
+        }
+
         # Integer + Integer = Integer
         if ($left_type isa Chalk::IR::Type::Integer && $right_type isa Chalk::IR::Type::Integer) {
             return Chalk::IR::Type::Integer->TOP();
         }
 
-        # Default to Integer for now
-        return Chalk::IR::Type::Integer->TOP();
+        # Default to Float for numeric operations
+        return Chalk::IR::Type::Float->TOP();
     }
 
     # Algebraic simplification for addition
