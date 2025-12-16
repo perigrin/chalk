@@ -8,9 +8,15 @@ use Chalk::IR::Type::Top;
 use Chalk::IR::Type::Bottom;
 
 class Chalk::IR::Type::Bool :isa(Chalk::IR::Type) {
-    field $value :param :reader;
+    field $value :param :reader = undef;
 
-    method is_constant() { return 1; }
+    method is_constant() { defined($value) ? 1 : 0 }
+    method is_top()      { !defined($value) ? 1 : 0 }
+
+    sub TOP ($class) {
+        state $singleton = $class->new();
+        return $singleton;
+    }
 
     sub TRUE ($class) {
         state $singleton = $class->new(value => true);
@@ -33,14 +39,17 @@ class Chalk::IR::Type::Bool :isa(Chalk::IR::Type) {
         # Handle global Top type - we're the result
         return $self if $other isa Chalk::IR::Type::Top;
 
-        # Same boolean = that boolean
-        if ($other isa blessed($self)) {
+        # BoolTop is identity for meet within bool domain
+        return $other if $self->is_top && $other isa blessed($self);
+        return $self if $other isa blessed($self) && $other->is_top;
+
+        # Two constants: same value = that constant, different = BoolTop
+        if ($self->is_constant && $other isa blessed($self) && $other->is_constant) {
             return $self if $value == $other->value;
-            # Different booleans = Top (unknown which)
-            return Chalk::IR::Type::Top->top();
+            return blessed($self)->TOP();
         }
 
-        # Cross-type meet = Top
+        # Cross-type meet = global Top
         return Chalk::IR::Type::Top->top();
     }
 }

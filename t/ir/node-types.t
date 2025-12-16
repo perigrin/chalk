@@ -10,8 +10,15 @@ use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Subtract;
 use Chalk::IR::Node::Multiply;
 use Chalk::IR::Node::Divide;
+use Chalk::IR::Node::EQ;
+use Chalk::IR::Node::NE;
+use Chalk::IR::Node::LT;
+use Chalk::IR::Node::LE;
+use Chalk::IR::Node::GT;
+use Chalk::IR::Node::GE;
 use Chalk::IR::Type::Integer;
 use Chalk::IR::Type::Float;
+use Chalk::IR::Type::Bool;
 
 subtest 'Add node computes type from operands' => sub {
     my $left = Chalk::IR::Node::Constant->new(
@@ -186,6 +193,96 @@ subtest 'Divide with Float operand yields Float' => sub {
 
     my $result_type = $divide->compute_type();
     isa_ok($result_type, 'Chalk::IR::Type::Float', 'Float / Int yields Float');
+};
+
+subtest 'EQ node yields Bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+
+    my $eq = Chalk::IR::Node::EQ->new(left => $left, right => $right);
+    ok($eq->can('compute_type'), 'EQ has compute_type method');
+    isa_ok($eq->compute_type(), 'Chalk::IR::Type::Bool', 'EQ yields Bool');
+};
+
+subtest 'NE node yields Bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => Chalk::IR::Type::Integer->constant(2),
+    );
+
+    my $ne = Chalk::IR::Node::NE->new(left => $left, right => $right);
+    ok($ne->can('compute_type'), 'NE has compute_type method');
+    isa_ok($ne->compute_type(), 'Chalk::IR::Type::Bool', 'NE yields Bool');
+};
+
+subtest 'LT node yields Bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => Chalk::IR::Type::Integer->constant(2),
+    );
+
+    my $lt = Chalk::IR::Node::LT->new(left => $left, right => $right);
+    ok($lt->can('compute_type'), 'LT has compute_type method');
+    isa_ok($lt->compute_type(), 'Chalk::IR::Type::Bool', 'LT yields Bool');
+};
+
+subtest 'LE node yields Bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+
+    my $le = Chalk::IR::Node::LE->new(left => $left, right => $right);
+    ok($le->can('compute_type'), 'LE has compute_type method');
+    isa_ok($le->compute_type(), 'Chalk::IR::Type::Bool', 'LE yields Bool');
+};
+
+subtest 'GT node yields Bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 2,
+        type  => Chalk::IR::Type::Integer->constant(2),
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+
+    my $gt = Chalk::IR::Node::GT->new(left => $left, right => $right);
+    ok($gt->can('compute_type'), 'GT has compute_type method');
+    isa_ok($gt->compute_type(), 'Chalk::IR::Type::Bool', 'GT yields Bool');
+};
+
+subtest 'GE node yields Bool' => sub {
+    my $left = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+    my $right = Chalk::IR::Node::Constant->new(
+        value => 1,
+        type  => Chalk::IR::Type::Integer->constant(1),
+    );
+
+    my $ge = Chalk::IR::Node::GE->new(left => $left, right => $right);
+    ok($ge->can('compute_type'), 'GE has compute_type method');
+    isa_ok($ge->compute_type(), 'Chalk::IR::Type::Bool', 'GE yields Bool');
 };
 
 done_testing();
