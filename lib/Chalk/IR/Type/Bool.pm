@@ -43,10 +43,11 @@ class Chalk::IR::Type::Bool :isa(Chalk::IR::Type) {
         return $other if $self->is_top && $other isa blessed($self);
         return $self if $other isa blessed($self) && $other->is_top;
 
-        # Two constants: same value = that constant, different = BoolTop
+        # Two constants: same value = that constant, different = global Top
         if ($self->is_constant && $other isa blessed($self) && $other->is_constant) {
             return $self if $value == $other->value;
-            return blessed($self)->TOP();
+            # Different boolean values meet to global Top (preserves existing semantics)
+            return Chalk::IR::Type::Top->top();
         }
 
         # Cross-type meet = global Top
