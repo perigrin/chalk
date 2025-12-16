@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Integer;
 
 class Chalk::IR::Node::Add {
 
@@ -97,6 +98,20 @@ class Chalk::IR::Node::Add {
         }
 
         return Chalk::IR::Type::Top->top();
+    }
+
+    # Compute result type from operand types
+    method compute_type() {
+        my $left_type = $left->can('compute_type') ? $left->compute_type() : $left->type;
+        my $right_type = $right->can('compute_type') ? $right->compute_type() : $right->type;
+
+        # Integer + Integer = Integer
+        if ($left_type isa Chalk::IR::Type::Integer && $right_type isa Chalk::IR::Type::Integer) {
+            return Chalk::IR::Type::Integer->TOP();
+        }
+
+        # Default to Integer for now
+        return Chalk::IR::Type::Integer->TOP();
     }
 
     # Algebraic simplification for addition
