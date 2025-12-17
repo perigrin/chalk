@@ -5,6 +5,9 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
+use Chalk::IR::Node;
+use Chalk::IR::Graph;
+
 class Chalk::IR::Optimizer::GVN {
 
     # Instance method for pipeline compatibility
