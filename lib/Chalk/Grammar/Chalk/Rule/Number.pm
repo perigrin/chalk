@@ -48,6 +48,15 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
             if $token isa Chalk::Grammar::Token::Float;
         return Chalk::Grammar::Chalk::Type::Int->new();
     }
+
+    # TypeInference semiring: infer type from element
+    # Check token type to determine Int vs Num
+    method infer_type($semiring, $element) {
+        # The element's type_obj is already set by TypeInference.on_scan()
+        # based on the token type (Int for INTEGER, Num for FLOAT)
+        # Just return the element unchanged since type is already correct
+        return $element;
+    }
 }
 
 1;
