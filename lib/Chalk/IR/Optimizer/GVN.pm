@@ -26,8 +26,9 @@ class Chalk::IR::Optimizer::GVN {
         # Redirection map: duplicate_node_id => canonical_node_id
         my $redirections = {};
 
-        # Get all nodes in a consistent order (we'll process them by ID order)
-        my @node_ids = sort keys($graph->nodes->%*);
+        # Get all nodes in topological order (inputs before nodes that use them)
+        # This ensures when cloning a node, its inputs are already in new_graph
+        my @node_ids = $class->_topological_sort($graph);
 
         # Phase 1: Compute value numbers for all nodes
         for my $node_id (@node_ids) {
@@ -57,6 +58,9 @@ class Chalk::IR::Optimizer::GVN {
         # Track which nodes have been copied to new graph
         my %copied;
 
+        # Track old ID -> new node mapping (needed for polymorphic nodes with refaddr IDs)
+        my %old_to_new_node;
+
         # Copy nodes that aren't redirected, applying redirections to inputs
         for my $node_id (@node_ids) {
             # Skip nodes that are being redirected away
@@ -83,17 +87,26 @@ class Chalk::IR::Optimizer::GVN {
                 $redirections
             );
 
-            # Reconstruct node preserving polymorphic type, source_info, and transform_chain
-            # Use from_hash() factory to create correct node class
-            my $chain = $old_node->transform_chain // [];
-            my $new_node = Chalk::IR::Node->from_hash({
-                id              => $node_id,
-                op              => $old_node->op,
-                inputs          => \@new_inputs,
-                attributes      => $new_attributes,
-                source_info     => $old_node->source_info,
-                transform_chain => $chain,
-            });
+            # Reconstruct node preserving polymorphic type via clone_with_inputs()
+            # Pass old_to_new_node mapping so polymorphic nodes can find their input nodes
+            # Fall back to generic Node for classes without clone_with_inputs
+            my $new_node;
+            if ($old_node->can('clone_with_inputs')) {
+                $new_node = $old_node->clone_with_inputs(\@new_inputs, \%old_to_new_node, $new_attributes);
+            } else {
+                # Fallback: create generic Node (loses polymorphic type)
+                $new_node = Chalk::IR::Node->new(
+                    id              => $node_id,
+                    op              => $old_node->op,
+                    inputs          => \@new_inputs,
+                    attributes      => $new_attributes,
+                    source_info     => $old_node->source_info,
+                    transform_chain => $old_node->transform_chain // [],
+                );
+            }
+
+            # Track old->new mapping for polymorphic node lookup
+            $old_to_new_node{$node_id} = $new_node;
 
             # Record GVN optimization if node's inputs were redirected
             my $had_redirections = 0;
@@ -272,6 +285,50 @@ class Chalk::IR::Optimizer::GVN {
         }
 
         return \%new_attrs;
+    }
+
+    # Topological sort: return node IDs in dependency order (inputs before users)
+    # Uses Kahn's algorithm for stable, linear-time sorting
+    sub _topological_sort($class, $graph) {
+        my %in_degree;     # node_id => number of unprocessed inputs
+        my %dependents;    # node_id => [list of nodes that depend on this one]
+
+        # Initialize in-degrees and build dependency graph
+        for my $node_id (keys $graph->nodes->%*) {
+            my $node = $graph->get_node($node_id);
+            next unless $node;
+
+            $in_degree{$node_id} //= 0;
+
+            for my $input_id ($node->inputs->@*) {
+                next unless defined $input_id;
+                # Track that $node_id depends on $input_id
+                push $dependents{$input_id}->@*, $node_id;
+                $in_degree{$node_id}++;
+            }
+        }
+
+        # Start with nodes that have no dependencies (in_degree == 0)
+        my @queue = sort grep { $in_degree{$_} == 0 } keys %in_degree;
+        my @sorted;
+
+        while (@queue) {
+            my $node_id = shift @queue;
+            push @sorted, $node_id;
+
+            # Reduce in-degree of dependents
+            for my $dependent_id ($dependents{$node_id}->@*) {
+                $in_degree{$dependent_id}--;
+                if ($in_degree{$dependent_id} == 0) {
+                    # Insert in sorted position for stability
+                    my $i = 0;
+                    $i++ while $i < @queue && $queue[$i] lt $dependent_id;
+                    splice @queue, $i, 0, $dependent_id;
+                }
+            }
+        }
+
+        return @sorted;
     }
 }
 

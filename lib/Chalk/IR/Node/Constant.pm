@@ -75,6 +75,18 @@ class Chalk::IR::Node::Constant {
         return;
     }
 
+    # Clone with new inputs, preserving polymorphic Constant type
+    # Used by GVN optimizer to reconstruct nodes
+    # $node_map unused for Constant since no inputs, but kept for API consistency
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        # Constant has no inputs, just clone with same value/type
+        return Chalk::IR::Node::Constant->new(
+            value       => $new_attributes->{value} // $value,
+            type        => $new_attributes->{type} // $type,
+            source_info => $source_info,
+        );
+    }
+
 }
 
 1;

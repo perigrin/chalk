@@ -251,6 +251,23 @@ class Chalk::IR::Node::Add {
         return;
     }
 
+    # Clone with new inputs from node_map, preserving polymorphic Add type
+    # Used by GVN optimizer to reconstruct nodes
+    # $node_map is old_id -> new_node mapping
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        my $new_left = $node_map->{$new_inputs->[0]};
+        my $new_right = $node_map->{$new_inputs->[1]};
+
+        die "Left operand not found in node_map: $new_inputs->[0]" unless $new_left;
+        die "Right operand not found in node_map: $new_inputs->[1]" unless $new_right;
+
+        return Chalk::IR::Node::Add->new(
+            left        => $new_left,
+            right       => $new_right,
+            source_info => $source_info,
+        );
+    }
+
 }
 
 1;
