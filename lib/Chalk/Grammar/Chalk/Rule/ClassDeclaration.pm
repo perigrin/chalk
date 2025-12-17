@@ -3,6 +3,9 @@
 use 5.42.0;
 use experimental 'class';
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
+use Chalk::Grammar::Chalk::Type::Class;
+use Chalk::Grammar::Chalk::Type::Any;
+use Chalk::Grammar::Chalk::TypeRegistry;
 
 class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 

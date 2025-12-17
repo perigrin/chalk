@@ -1,7 +1,7 @@
 # ABOUTME: Int type representing integer values in the Chalk type system
 # ABOUTME: Implements Int <: Num <: Str <: Scalar <: Any subtyping chain
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Int :isa(Chalk::Grammar::Chalk::Type) {

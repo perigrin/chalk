@@ -1,7 +1,7 @@
 # ABOUTME: CodeRef type representing code references in the Chalk type system
 # ABOUTME: Implements CodeRef <: Ref <: Scalar <: Any subtyping chain
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::CodeRef :isa(Chalk::Grammar::Chalk::Type) {

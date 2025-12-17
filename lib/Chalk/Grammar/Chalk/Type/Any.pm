@@ -1,7 +1,7 @@
 # ABOUTME: Top type in the Chalk type lattice - all types are subtypes of Any
 # ABOUTME: Implements is_top() and accepts all types as subtypes
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Type::Any :isa(Chalk::Grammar::Chalk::Type) {

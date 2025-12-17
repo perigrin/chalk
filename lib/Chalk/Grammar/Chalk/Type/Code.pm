@@ -1,7 +1,7 @@
 # ABOUTME: Code type representing code/subroutine values in the Chalk type system
 # ABOUTME: Implements Code <: Any subtyping chain (not a Scalar subtype)
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Code :isa(Chalk::Grammar::Chalk::Type) {

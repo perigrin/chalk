@@ -1,7 +1,7 @@
 # ABOUTME: Maybe type for nullable references (T or undef) in Chalk type system
 # ABOUTME: Wrapper type supporting covariant subtyping: Maybe[T] <: Maybe[U] if T <: U
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Type::Maybe :isa(Chalk::Grammar::Chalk::Type) {

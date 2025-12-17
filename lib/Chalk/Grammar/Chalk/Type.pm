@@ -1,7 +1,7 @@
 # ABOUTME: Base class for the Chalk grammar type system implementing the latent type lattice
 # ABOUTME: Provides common type operations like subtyping, compatibility, and type names
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Type {

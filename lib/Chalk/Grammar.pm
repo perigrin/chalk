@@ -4,6 +4,8 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
+use Chalk::Grammar::Chalk::Type::Any;
+
 class Chalk::GrammarRule {
 
     # Supports both exact token matching and lexeme/regex patterns for terminals
@@ -82,7 +84,6 @@ class Chalk::GrammarRule {
     # Rules that produce typed values should override this method
     # Used by ClassDeclaration for field type narrowing
     method grammar_type($context) {
-        require Chalk::Grammar::Chalk::Type::Any;
         return Chalk::Grammar::Chalk::Type::Any->new();
     }
 }

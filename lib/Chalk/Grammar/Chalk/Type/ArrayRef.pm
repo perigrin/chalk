@@ -1,7 +1,7 @@
 # ABOUTME: ArrayRef type representing array references in the Chalk type system
 # ABOUTME: Implements ArrayRef <: Ref <: Scalar <: Any subtyping chain
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::ArrayRef :isa(Chalk::Grammar::Chalk::Type) {
