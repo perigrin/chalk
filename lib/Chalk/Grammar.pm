@@ -77,6 +77,14 @@ class Chalk::GrammarRule {
             "Either create lib/Chalk/Grammar/*/Rule/${rule_name}.pm with an evaluate() method,\n" .
             "or if this rule should just pass through child(0), add a simple pass-through evaluate().\n";
     }
+
+    # Default Grammar type inference: returns Any
+    # Rules that produce typed values should override this method
+    # Used by ClassDeclaration for field type narrowing
+    method grammar_type($context) {
+        require Chalk::Grammar::Chalk::Type::Any;
+        return Chalk::Grammar::Chalk::Type::Any->new();
+    }
 }
 
 class Chalk::Grammar {

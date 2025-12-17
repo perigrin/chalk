@@ -5,6 +5,8 @@ use 5.42.0;
 use experimental 'class';
 use Chalk::IR::Type::Integer;
 use Chalk::IR::Type::Float;
+use Chalk::Grammar::Chalk::Type::Int;
+use Chalk::Grammar::Chalk::Type::Num;
 
 class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
 
@@ -36,6 +38,15 @@ class Chalk::Grammar::Chalk::Rule::Number :isa(Chalk::GrammarRule) {
             my $desc = ref($token) || (defined $token ? "'$token'" : 'undef');
             die "Number::evaluate expected Token::Int or Token::Float, got: $desc";
         }
+    }
+
+    # Grammar type inference for field type narrowing
+    # Returns Int for integer literals, Num for float literals
+    method grammar_type($context) {
+        my $token = $context->child(0);
+        return Chalk::Grammar::Chalk::Type::Num->new()
+            if $token isa Chalk::Grammar::Token::Float;
+        return Chalk::Grammar::Chalk::Type::Int->new();
     }
 }
 

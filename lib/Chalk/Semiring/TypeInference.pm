@@ -235,7 +235,7 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
 
         # Check if matched_value is a Token with type information
         if (defined $matched_value && ref($matched_value)) {
-            my $type_obj;
+            my $type_obj = $element->type_obj;  # Default to current type
 
             # Token::Int → Int type
             if ($matched_value->isa('Chalk::Grammar::Token::Int')) {
@@ -246,21 +246,19 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
                 $type_obj = $lattice->type_from_name('Num');
             }
 
-            # If we extracted a type, return element with that type and stored token
-            if (defined $type_obj) {
-                return Chalk::Semiring::TypeInferenceElement->new(
-                    type_obj => $type_obj,
-                    type_env => {},
-                    children => [],
-                    token => $matched_value,  # Store token for later extraction
-                    errors => [],
-                    start_pos => $pos,
-                    end_pos => $end_pos
-                );
-            }
+            # Always store the token for later extraction (e.g., class names)
+            return Chalk::Semiring::TypeInferenceElement->new(
+                type_obj => $type_obj,
+                type_env => $element->type_env,
+                children => $element->children,
+                token => $matched_value,  # Store token for extraction by infer_type
+                errors => $element->errors,
+                start_pos => $pos,
+                end_pos => $end_pos
+            );
         }
 
-        # No type information extracted - return element with updated positions
+        # Non-token value - return element with updated positions
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $element->type_obj,
             type_env => $element->type_env,
