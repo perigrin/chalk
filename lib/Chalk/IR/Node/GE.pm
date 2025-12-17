@@ -65,6 +65,11 @@ class Chalk::IR::Node::GE {
         return Chalk::IR::Type::Top->top();
     }
 
+    method compute_type() {
+        # Comparisons always return Bool
+        return Chalk::IR::Type::Bool->TOP();
+    }
+
     method peephole($graph = undef) {
         # Step 1: Constant folding via compute()
         my $type = $self->compute();

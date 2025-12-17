@@ -3,6 +3,8 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Float;
 
 class Chalk::IR::Node::Subtract {
 
@@ -97,6 +99,17 @@ class Chalk::IR::Node::Subtract {
         }
 
         return Chalk::IR::Type::Top->top();
+    }
+
+    # Compute result type from operand types using widen+meet for numeric promotion
+    method compute_type() {
+        my $left_type = $left->can('compute_type') ? $left->compute_type() : $left->type;
+        my $right_type = $right->can('compute_type') ? $right->compute_type() : $right->type;
+
+        # Use widen() for numeric type promotion, then meet()
+        my $widened_left = $left_type->can('widen') ? $left_type->widen($right_type) : $left_type;
+        my $widened_right = $right_type->can('widen') ? $right_type->widen($left_type) : $right_type;
+        return $widened_left->meet($widened_right);
     }
 
     # Algebraic simplification for subtraction
