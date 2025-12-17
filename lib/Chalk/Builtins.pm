@@ -1,7 +1,7 @@
 # ABOUTME: Built-in function type signatures for Chalk's latent type system
 # ABOUTME: Provides type information for Perl built-in functions used in type checking
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 use Chalk::Grammar::Chalk::Type::Any;
 use Chalk::Grammar::Chalk::Type::Array;

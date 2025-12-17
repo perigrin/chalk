@@ -1,7 +1,7 @@
 # ABOUTME: Num type representing numeric values in the Chalk type system
 # ABOUTME: Implements Num <: Str <: Scalar <: Any chain (numbers round-trip through strings)
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Num :isa(Chalk::Grammar::Chalk::Type) {

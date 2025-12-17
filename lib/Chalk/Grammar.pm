@@ -4,6 +4,8 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 
+use Chalk::Grammar::Chalk::Type::Any;
+
 class Chalk::GrammarRule {
 
     # Supports both exact token matching and lexeme/regex patterns for terminals
@@ -76,6 +78,13 @@ class Chalk::GrammarRule {
         die "Rule '$rule_name' has no evaluate() method - all grammar rules used with semantic evaluation must implement evaluate().\n" .
             "Either create lib/Chalk/Grammar/*/Rule/${rule_name}.pm with an evaluate() method,\n" .
             "or if this rule should just pass through child(0), add a simple pass-through evaluate().\n";
+    }
+
+    # Default Grammar type inference: returns Any
+    # Rules that produce typed values should override this method
+    # Used by ClassDeclaration for field type narrowing
+    method grammar_type($context) {
+        return Chalk::Grammar::Chalk::Type::Any->new();
     }
 }
 

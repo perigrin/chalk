@@ -1,7 +1,7 @@
 # ABOUTME: List type representing ephemeral list values in the Chalk type system
 # ABOUTME: Implements List <: Any subtyping chain, parent of Array and Hash types
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 use Chalk::Grammar::Chalk::Type::Any;
 use Chalk::Grammar::Chalk::Type::Array;

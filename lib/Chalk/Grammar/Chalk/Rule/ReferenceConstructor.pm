@@ -3,6 +3,9 @@
 
 use 5.42.0;
 use experimental 'class';
+use Chalk::Grammar::Chalk::Type::ArrayRef;
+use Chalk::Grammar::Chalk::Type::HashRef;
+use Chalk::Grammar::Chalk::Type::Any;
 
 class Chalk::Grammar::Chalk::Rule::ReferenceConstructor :isa(Chalk::GrammarRule) {
     
@@ -94,6 +97,78 @@ class Chalk::Grammar::Chalk::Rule::ReferenceConstructor :isa(Chalk::GrammarRule)
         }
 
         die "ReferenceConstructor: expected '[' or '{' bracket, got '$bracket' - grammar bug";
+    }
+
+    # Grammar type inference for field type narrowing
+    # Returns ArrayRef for [] and HashRef for {}
+    method grammar_type($context) {
+        my $first_child = $context->child(0);
+        return Chalk::Grammar::Chalk::Type::Any->new() unless defined $first_child;
+
+        my $bracket = "$first_child";
+        if ($bracket eq '[') {
+            return Chalk::Grammar::Chalk::Type::ArrayRef->new();
+        }
+        elsif ($bracket eq '{') {
+            return Chalk::Grammar::Chalk::Type::HashRef->new();
+        }
+
+        return Chalk::Grammar::Chalk::Type::Any->new();
+    }
+
+    # Type inference for TypeInference semiring
+    # Returns element with ArrayRef or HashRef type based on bracket
+    method infer_type($semiring, $element) {
+        # Determine bracket type from element token or children
+        # For empty constructors [], the element may have token=']' with no children
+        # For constructors with content, children include the opening bracket
+        my $bracket;
+
+        # First check children for opening bracket
+        my @children = $element->children->@*;
+        for my $child (@children) {
+            if ($child->can('token') && defined $child->token) {
+                my $val = $child->token->value // '';
+                if ($val eq '[' || $val eq '{') {
+                    $bracket = $val;
+                    last;
+                }
+            }
+        }
+
+        # If not found in children, infer from closing bracket in element's token
+        unless (defined $bracket) {
+            if ($element->can('token') && defined $element->token) {
+                my $tok_val = $element->token->value // '';
+                if ($tok_val eq ']') {
+                    $bracket = '[';  # Closing ] means array
+                }
+                elsif ($tok_val eq '}') {
+                    $bracket = '{';  # Closing } means hash
+                }
+            }
+        }
+
+        my $type_obj;
+        if (defined $bracket && $bracket eq '[') {
+            $type_obj = Chalk::Grammar::Chalk::Type::ArrayRef->new();
+        }
+        elsif (defined $bracket && $bracket eq '{') {
+            $type_obj = Chalk::Grammar::Chalk::Type::HashRef->new();
+        }
+        else {
+            $type_obj = Chalk::Grammar::Chalk::Type::Any->new();
+        }
+
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj  => $type_obj,
+            type_env  => $element->type_env,
+            children  => $element->children,
+            token     => $element->token,
+            errors    => $element->errors,
+            start_pos => $element->start_pos,
+            end_pos   => $element->end_pos
+        );
     }
 }
 

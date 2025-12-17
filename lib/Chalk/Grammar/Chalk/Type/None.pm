@@ -1,7 +1,7 @@
 # ABOUTME: Bottom type in the Chalk type lattice - None is a subtype of all types
 # ABOUTME: Implements is_bottom() and is subtype of everything
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 
 class Chalk::Grammar::Chalk::Type::None :isa(Chalk::Grammar::Chalk::Type) {

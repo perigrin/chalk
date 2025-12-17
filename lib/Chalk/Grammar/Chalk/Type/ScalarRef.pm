@@ -1,7 +1,7 @@
 # ABOUTME: ScalarRef type representing scalar references in the Chalk type system
 # ABOUTME: Implements ScalarRef <: Ref <: Scalar <: Any subtyping chain
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::ScalarRef :isa(Chalk::Grammar::Chalk::Type) {

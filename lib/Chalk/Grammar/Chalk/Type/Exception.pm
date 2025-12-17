@@ -1,7 +1,7 @@
 # ABOUTME: Exception class for type-related errors in the Chalk type system
 # ABOUTME: Provides detailed, user-friendly error messages for type mismatches and coercion failures
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 use Chalk::Grammar::Chalk::Type::Scalar;
 

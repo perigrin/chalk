@@ -1,6 +1,6 @@
 # ABOUTME: Singleton registry managing class type namespace for forward references
 # ABOUTME: Maps qualified class names to Class type instances, supporting lazy resolution
-use 5.042;
+use 5.42.0;
 use experimental qw(class);
 use Chalk::Grammar::Chalk::Type::Class;
 

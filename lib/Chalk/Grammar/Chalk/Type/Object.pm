@@ -1,7 +1,7 @@
 # ABOUTME: Object type representing blessed references in the Chalk type system
 # ABOUTME: Implements Object <: Ref <: Scalar <: Any subtyping chain
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Object :isa(Chalk::Grammar::Chalk::Type) {

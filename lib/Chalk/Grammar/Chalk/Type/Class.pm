@@ -1,7 +1,7 @@
 # ABOUTME: Class type representing user-defined class instances in Chalk type system
 # ABOUTME: Supports forward references via placeholders and auto-deepening for lazy resolution
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 use Chalk::Grammar::Chalk::TypeRegistry;
 

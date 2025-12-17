@@ -1,7 +1,7 @@
 # ABOUTME: Hash type representing hash values with parameterized value type
 # ABOUTME: Implements Hash <: List <: Any subtyping chain with value_type parameter
 
-use 5.042;
+use 5.42.0;
 use experimental qw(class keyword_any);
 
 class Chalk::Grammar::Chalk::Type::Hash :isa(Chalk::Grammar::Chalk::Type) {
