@@ -4,7 +4,6 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
-use Scalar::Util qw(refaddr);
 
 class Chalk::IR::Type::Union {
     field $members :param :reader;  # ArrayRef of type objects
