@@ -315,6 +315,20 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     method on_complete( $completed_item, $completed_element, $metadata_element = undef ) {
         my $ctx = $completed_element->context;
 
+        # Extract type_env from TypeInference element if available in CompositeElement
+        # This enables Semantic to access type information during evaluation
+        my $env_with_types = $ctx->env;
+        if ($metadata_element && $metadata_element->can('element_at')) {
+            my $type_elem = $metadata_element->element_at(0);  # TypeInference is first
+            if ($type_elem && $type_elem->can('type_env')) {
+                my $type_env = $type_elem->type_env;
+                if ($type_env && keys %$type_env) {
+                    # Merge type_env into a copy of env
+                    $env_with_types = { %{$ctx->env}, type_env => $type_env };
+                }
+            }
+        }
+
         # Set metadata_element on context so rule.evaluate() can access precedence metadata
         if ($metadata_element && !$ctx->metadata_element) {
             $ctx = Chalk::EvalContext->new(
@@ -322,7 +336,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
                 children  => $ctx->children,
                 start_pos => $ctx->start_pos,
                 end_pos   => $ctx->end_pos,
-                env       => $ctx->env,
+                env       => $env_with_types,
                 grammar   => $ctx->grammar,
                 rule      => $ctx->rule,
                 type      => $ctx->type,

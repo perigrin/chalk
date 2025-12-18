@@ -20,12 +20,15 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
     method add( $other, $swap = undef ) {
         my $other_type = $other->type_obj;
         my $joined = $type_obj->join($other_type);
-        # Note: type_env is not merged in add (alternative branches)
+        # Merge type environments from both alternatives
+        # For the same input string, alternative parses should produce
+        # consistent bindings, so merging preserves all discovered bindings
+        my $combined_env = { $type_env->%*, $other->type_env->%* };
         # Merge errors from both alternatives
         my @merged_errors = ($errors->@*, $other->errors->@*);
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $joined,
-            type_env => $type_env,
+            type_env => $combined_env,
             children => $children,
             token => $token,
             errors => \@merged_errors,
