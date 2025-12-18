@@ -4,6 +4,9 @@ use 5.42.0;
 use experimental qw(class);
 use utf8;
 
+use Chalk::IR::Type::Union;
+use Chalk::IR::Type::Top;
+
 class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
     field $region_id :param :reader;
 
@@ -221,6 +224,56 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node::Base) {
         $graph->add_node($new_op);
 
         return $new_op;
+    }
+
+    # Compute type of Phi node by unioning incoming types
+    # At control flow merge points, the type is the union of all possible incoming values
+    method compute_type($graph) {
+        my @inputs = $self->inputs->@*;
+
+        # Skip the first input (region_id) to get data inputs
+        return Chalk::IR::Type::Top->top() unless @inputs > 1;
+
+        my @data_inputs = @inputs[1..$#inputs];
+        return Chalk::IR::Type::Top->top() unless @data_inputs;
+
+        # Collect types from all data inputs
+        my @types;
+        for my $input_id (@data_inputs) {
+            next unless defined $input_id;
+            my $input_node = $graph->get_node($input_id);
+            next unless $input_node;
+
+            my $t = $input_node->can('compute_type') ? $input_node->compute_type($graph) :
+                    $input_node->can('type') ? $input_node->type :
+                    Chalk::IR::Type::Top->top();
+            push @types, $t;
+        }
+
+        return Chalk::IR::Type::Top->top() unless @types;
+        return $types[0] if @types == 1;
+
+        # Check if all types are the same class
+        my $first_class = ref($types[0]);
+        my $all_same = 1;
+        for my $t (@types[1..$#types]) {
+            if (ref($t) ne $first_class) {
+                $all_same = 0;
+                last;
+            }
+        }
+
+        # Same type class: meet them
+        if ($all_same) {
+            my $result = $types[0];
+            for my $t (@types[1..$#types]) {
+                $result = $result->meet($t);
+            }
+            return $result;
+        }
+
+        # Different types: create union
+        return Chalk::IR::Type::Union->new(members => \@types);
     }
 }
 

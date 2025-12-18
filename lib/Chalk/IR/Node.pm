@@ -34,6 +34,7 @@ use Chalk::IR::Node::ArraySet;
 use Chalk::IR::Node::HashGet;
 use Chalk::IR::Node::HashSet;
 use Chalk::IR::Node::Cast;
+use Chalk::IR::Type::Top;
 
 class Chalk::IR::Node {
     field $id             :param :reader;
@@ -42,6 +43,7 @@ class Chalk::IR::Node {
     field $attributes     :param :reader;
     field $source_info    :param :reader = undef;
     field $transform_chain :param :reader = undef;
+    field $type           :param :reader = Chalk::IR::Type::Top->top();
 
     # Dependency tracking for peephole re-optimization
     # When a peephole inspects a remote node and fails, it registers a dependency
@@ -54,6 +56,11 @@ class Chalk::IR::Node {
 
     method get_deps() {
         return $_deps->@*;  # Return copy (list context)
+    }
+
+    # Return type for this node - subclasses override for inference
+    method compute_type() {
+        return $type;
     }
 
     method to_hash() {
