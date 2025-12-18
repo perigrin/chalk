@@ -3,7 +3,6 @@
 
 use 5.42.0;
 use experimental 'class';
-use Scalar::Util 'blessed';
 
 class Chalk::Grammar::Chalk::Rule::ListOp :isa(Chalk::GrammarRule) {
     method evaluate($context) {

@@ -113,31 +113,18 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         # Assignment has children built up through multiply() during parsing
         my @children = $element->children->@*;
 
-        # Assignment -> Ternary (pass-through, no binding)
-        # Assignment -> Ternary WS_OPT '=' WS_OPT Assignment
-        # So if we have fewer than 3 children, this is a pass-through
-        return $element if scalar(@children) < 3;
-
-        # Find the '=' operator to identify this as an assignment
-        my $has_assignment = 0;
-        my $equals_index = -1;
-        for my $i (0..$#children) {
-            my $child = $children[$i];
-            # Check if this child has a token that is '='
-            if (defined $child->token) {
-                my $token_val = $child->token->value;
-                if (defined($token_val) && "$token_val" eq '=') {
-                    $has_assignment = 1;
-                    $equals_index = $i;
-                    last;
-                }
-            }
-        }
-
-        # Not an assignment, just pass through
-        return $element unless $has_assignment;
+        # Assignment variants:
+        # - Assignment -> Ternary (pass-through, no binding) - few children
+        # - Assignment -> Expression WS_OPT '=' WS_OPT Expression - 4+ children
+        # - Assignment -> VariableDeclaration WS_OPT '=' WS_OPT Expression - 4+ children
+        #
+        # Note: The '=' terminal doesn't appear as a child element in TypeInference
+        # because multiply() preserves it in the parent's token field, not as a child.
+        # So we detect assignments by child count rather than looking for '=' token.
+        return $element if scalar(@children) < 4;
 
         # Extract variable name from LHS (child 0) using BFS through parse tree
+        # Look for BAREWORD_ANY or IDENTIFIER pattern tokens
         my $var_name;
         my @queue = ($children[0]);
         while (@queue && !defined($var_name)) {
@@ -147,9 +134,11 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
             # Check if this element has a token with variable name
             if (defined $elem->token) {
                 my $token = $elem->token;
-                # Look for IDENTIFIER pattern or similar
                 if ($token->can('pattern_name') && defined $token->pattern_name) {
-                    if ($token->pattern_name eq 'IDENTIFIER') {
+                    my $pattern = $token->pattern_name;
+                    # BAREWORD_ANY is used for variable names in scalar context
+                    # IDENTIFIER is an alternative pattern name
+                    if ($pattern eq 'BAREWORD_ANY' || $pattern eq 'IDENTIFIER') {
                         # Found variable name, prepend sigil
                         $var_name = '$' . $token->value;
                         last;
@@ -166,11 +155,8 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         # If we didn't find a variable name, just return element unchanged
         return $element unless defined($var_name);
 
-        # Get RHS type (after '=' + WS_OPT)
-        my $rhs_index = $equals_index + 2;
-        return $element unless $rhs_index < scalar(@children);
-
-        my $rhs_element = $children[$rhs_index];
+        # Get RHS type from last child (the Expression after '=' WS_OPT)
+        my $rhs_element = $children[-1];
         my $rhs_type = $rhs_element->type_obj;
 
         # Create new element with updated type_env
