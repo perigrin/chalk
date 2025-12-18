@@ -24,6 +24,9 @@ nytprof/
 local/
 build/
 
+# Git worktrees
+.worktrees/
+
 # Editor files
 .vscode/
 .idea/

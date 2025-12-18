@@ -118,6 +118,23 @@ class Chalk::IR::Node {
         );
     }
 
+    # Clone node with new inputs, preserving polymorphic class type
+    # Used by GVN optimizer to reconstruct nodes while maintaining Add, Multiply, etc. types
+    # Base implementation for ID-based nodes; polymorphic subclasses override
+    # $node_map is old_id -> new_node mapping for looking up input nodes
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        my $class = blessed($self);
+
+        return $class->new(
+            id              => $id,
+            op              => $op,
+            inputs          => $new_inputs,
+            attributes      => $new_attributes // $attributes,
+            source_info     => $source_info,
+            transform_chain => $transform_chain,
+        );
+    }
+
     # Placeholder for peephole optimization - returns self by default
     # Polymorphic node subclasses (Phi, Region, etc.) override this
     method peephole($graph = undef) {
