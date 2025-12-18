@@ -87,6 +87,11 @@ class Chalk::IR::Node::Negate {
         return Chalk::IR::Type::Top->top();
     }
 
+    # Compute result type from operand type (preserves type)
+    method compute_type() {
+        return $operand->can('compute_type') ? $operand->compute_type() : $operand->type;
+    }
+
     # Algebraic simplification for negation - no optimizations in chapter04
     method idealize() {
         return;
