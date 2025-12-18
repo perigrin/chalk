@@ -1,8 +1,9 @@
 # ABOUTME: Test that IR nodes have a type field with proper default
 # ABOUTME: Validates type field infrastructure for type system integration
 
-use lib 'lib';
 use v5.42;
+use FindBin;
+use lib "$FindBin::Bin/../../lib";
 use Test::More;
 
 use Chalk::IR::Node;
