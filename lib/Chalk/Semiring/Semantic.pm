@@ -322,7 +322,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
             my $type_elem = $metadata_element->element_at(0);  # TypeInference is first
             if ($type_elem && $type_elem->can('type_env')) {
                 my $type_env = $type_elem->type_env;
-                if ($type_env && keys %$type_env) {
+                if ($type_env && keys $type_env->%*) {
                     # Merge type_env into a copy of env
                     $env_with_types = { %{$ctx->env}, type_env => $type_env };
                 }
