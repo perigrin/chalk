@@ -50,6 +50,10 @@ class Chalk::IR::Node::Not {
         return $self->to_hash()->{attributes};
     }
 
+    method compute_type() {
+        return Chalk::IR::Type::Bool->TOP();
+    }
+
     method compute() {
         my $operand_type = $operand->compute();
         if ($operand_type->is_constant) {
