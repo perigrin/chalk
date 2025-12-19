@@ -123,7 +123,8 @@ class Chalk::Grammar::Chalk::Rule::MethodCall :isa(Chalk::GrammarRule) {
             my $i = 0;
             while ($i < @args) {
                 my $key_node = $args[$i];
-                my $value_node = $args[$i + 1] // last;
+                last unless defined $args[$i + 1];
+                my $value_node = $args[$i + 1];
 
                 # Key should be a constant (bareword or string)
                 my $key;
