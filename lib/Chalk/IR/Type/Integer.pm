@@ -10,6 +10,8 @@ use Chalk::IR::Type::Bottom;
 class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
     field $value :param :reader = undef;
     field $is_bottom :param :reader = 0;
+    field $bits   :param :reader = 64;
+    field $signed :param :reader = 1;
 
     method is_constant() { (defined($value) && !$is_bottom) ? 1 : 0 }
     method is_top()      { (!defined($value) && !$is_bottom) ? 1 : 0 }
@@ -94,6 +96,36 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
         # No widening needed for same type
         return $self;
     }
+
+    # Narrow integer type support
+    method min() {
+        return 0 unless $signed;
+        return -(1 << ($bits - 1));
+    }
+
+    method max() {
+        return (1 << $bits) - 1 unless $signed;
+        return (1 << ($bits - 1)) - 1;
+    }
+
+    method mask() {
+        return (1 << $bits) - 1;
+    }
+
+    method sign_bit() {
+        return 1 << ($bits - 1);
+    }
+
+    # Convenience constructors
+    sub i8  ($class) { $class->new(bits => 8,  signed => 1) }
+    sub i16 ($class) { $class->new(bits => 16, signed => 1) }
+    sub i32 ($class) { $class->new(bits => 32, signed => 1) }
+    sub i64 ($class) { $class->new(bits => 64, signed => 1) }
+    sub u8  ($class) { $class->new(bits => 8,  signed => 0) }
+    sub u16 ($class) { $class->new(bits => 16, signed => 0) }
+    sub u32 ($class) { $class->new(bits => 32, signed => 0) }
+    sub u64 ($class) { $class->new(bits => 64, signed => 0) }
+    sub bool ($class) { $class->new(bits => 1, signed => 0) }
 }
 
 1;
