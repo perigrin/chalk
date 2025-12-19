@@ -8,6 +8,7 @@ use lib 'lib';
 use Chalk::IR::Node::BitAnd;
 use Chalk::IR::Node::BitOr;
 use Chalk::IR::Node::BitXor;
+use Chalk::IR::Node::BitNot;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Integer;
 
@@ -82,6 +83,16 @@ subtest 'BitXor identity x ^ 0 = x' => sub {
     my $result = $xor->peephole();
 
     is($result->value, 42, 'x ^ 0 = x');
+};
+
+subtest 'BitNot constant folding' => sub {
+    my $x = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->i64());
+
+    my $not = Chalk::IR::Node::BitNot->new(operand => $x);
+    my $result = $not->peephole();
+
+    ok($result->isa('Chalk::IR::Node::Constant'), 'BitNot folds to constant');
+    is($result->value, -1, '~0 = -1');
 };
 
 done_testing();
