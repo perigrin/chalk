@@ -62,7 +62,7 @@ class Chalk::IR::Node::Constructor {
         my $param_fields = $class_type->can('param_fields') ? $class_type->param_fields : [];
 
         # Initialize fields from args or defaults
-        for my $param (@$param_fields) {
+        for my $param ($param_fields->@*) {
             my $field_name = $param->{name};
             my $required = $param->{required};
             my $default_node = $param->{default};
@@ -85,7 +85,7 @@ class Chalk::IR::Node::Constructor {
 
         # Also store any extra args not in param_fields (for flexibility)
         for my $field_name (keys $args->%*) {
-            my $is_param_field = grep { $_->{name} eq $field_name } @$param_fields;
+            my $is_param_field = grep { $_->{name} eq $field_name } $param_fields->@*;
             unless ($is_param_field) {
                 my $arg_node = $args->{$field_name};
                 my $value = $context->("node:" . $arg_node->id);
@@ -95,10 +95,10 @@ class Chalk::IR::Node::Constructor {
 
         # Execute ADJUST blocks after field initialization
         my $adjust_blocks = $class_type->can('adjust_blocks') ? $class_type->adjust_blocks : [];
-        for my $adjust (@$adjust_blocks) {
+        for my $adjust ($adjust_blocks->@*) {
             # Each ADJUST block has 'assigns' mapping field names to IR nodes
             my $assigns = $adjust->{assigns} // {};
-            for my $field_name (keys %$assigns) {
+            for my $field_name (keys $assigns->%*) {
                 my $node = $assigns->{$field_name};
                 my $value = $context->("node:" . $node->id);
                 $env->store_heap($heap_id, $field_name, $value);
