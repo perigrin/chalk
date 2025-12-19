@@ -42,8 +42,8 @@ class Chalk::IR::Node::BitXor {
     }
 
     method peephole($graph = undef) {
-        if ($left isa Chalk::IR::Node::Constant &&
-            $right isa Chalk::IR::Node::Constant) {
+        if ($left->isa('Chalk::IR::Node::Constant') &&
+            $right->isa('Chalk::IR::Node::Constant')) {
 
             my $lval = $left->value;
             my $rval = $right->value;

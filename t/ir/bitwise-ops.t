@@ -7,6 +7,7 @@ use lib 'lib';
 
 use Chalk::IR::Node::BitAnd;
 use Chalk::IR::Node::BitOr;
+use Chalk::IR::Node::BitXor;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Integer;
 
@@ -60,6 +61,27 @@ subtest 'BitOr identity x | 0 = x' => sub {
     my $result = $or->peephole();
 
     is($result->value, 42, 'x | 0 = x');
+};
+
+subtest 'BitXor constant folding' => sub {
+    my $a = Chalk::IR::Node::Constant->new(value => 0b11110000, type => Chalk::IR::Type::Integer->i64());
+    my $b = Chalk::IR::Node::Constant->new(value => 0b10101010, type => Chalk::IR::Type::Integer->i64());
+
+    my $xor = Chalk::IR::Node::BitXor->new(left => $a, right => $b);
+    my $result = $xor->peephole();
+
+    ok($result->isa('Chalk::IR::Node::Constant'), 'BitXor folds to constant');
+    is($result->value, 0b01011010, 'BitXor computed correctly');
+};
+
+subtest 'BitXor identity x ^ 0 = x' => sub {
+    my $x = Chalk::IR::Node::Constant->new(value => 42, type => Chalk::IR::Type::Integer->i64());
+    my $zero = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->i64());
+
+    my $xor = Chalk::IR::Node::BitXor->new(left => $x, right => $zero);
+    my $result = $xor->peephole();
+
+    is($result->value, 42, 'x ^ 0 = x');
 };
 
 done_testing();
