@@ -22,9 +22,9 @@ class Chalk::IR::Node::ArrayLength :isa(Chalk::IR::Node::Base) {
 
     method peephole($graph = undef) {
         # Constant folding: if array is NewArray with constant length, fold
-        if ($array->isa('Chalk::IR::Node::NewArray') && defined($array->length)) {
+        if ($array isa Chalk::IR::Node::NewArray && defined($array->length)) {
             my $len_node = $array->length;
-            if ($len_node->isa('Chalk::IR::Node::Constant')) {
+            if ($len_node isa Chalk::IR::Node::Constant) {
                 use Chalk::IR::Node::Constant;
                 use Chalk::IR::Type::Integer;
                 return Chalk::IR::Node::Constant->new(

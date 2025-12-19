@@ -30,10 +30,10 @@ class Chalk::IR::Node::ArrayLoad :isa(Chalk::IR::Node::Base) {
         # Bounds check elimination/conversion
         if ($bounds_check && defined($array) && defined($index)) {
             # Check if both array length and index are constant
-            if ($array->isa('Chalk::IR::Node::NewArray') && defined($array->length)) {
+            if ($array isa Chalk::IR::Node::NewArray && defined($array->length)) {
                 my $len_node = $array->length;
-                if ($len_node->isa('Chalk::IR::Node::Constant') &&
-                    $index->isa('Chalk::IR::Node::Constant')) {
+                if ($len_node isa Chalk::IR::Node::Constant &&
+                    $index isa Chalk::IR::Node::Constant) {
 
                     my $len = $len_node->value;
                     my $idx = $index->value;
