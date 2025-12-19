@@ -56,11 +56,41 @@ class Chalk::IR::Node::Constructor {
         # Allocate a new heap ID for this object
         my $heap_id = $env->allocate_heap();
 
-        # Initialize fields from args
+        # Look up param_fields from the class type
+        my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
+        my $class_type = $registry->lookup($class_name);
+        my $param_fields = $class_type->can('param_fields') ? $class_type->param_fields : [];
+
+        # Initialize fields from args or defaults
+        for my $param (@$param_fields) {
+            my $field_name = $param->{name};
+            my $required = $param->{required};
+            my $default_node = $param->{default};
+
+            if (exists $args->{$field_name}) {
+                # Use provided arg
+                my $arg_node = $args->{$field_name};
+                my $value = $context->("node:" . $arg_node->id);
+                $env->store_heap($heap_id, $field_name, $value);
+            } elsif (defined $default_node) {
+                # Use default
+                my $value = $context->("node:" . $default_node->id);
+                $env->store_heap($heap_id, $field_name, $value);
+            } elsif ($required) {
+                # Missing required parameter
+                die "Constructor error: Missing required parameter '$field_name' for class '$class_name'";
+            }
+            # else: optional without default, leave uninitialized
+        }
+
+        # Also store any extra args not in param_fields (for flexibility)
         for my $field_name (keys $args->%*) {
-            my $arg_node = $args->{$field_name};
-            my $value = $context->("node:" . $arg_node->id);
-            $env->store_heap($heap_id, $field_name, $value);
+            my $is_param_field = grep { $_->{name} eq $field_name } @$param_fields;
+            unless ($is_param_field) {
+                my $arg_node = $args->{$field_name};
+                my $value = $context->("node:" . $arg_node->id);
+                $env->store_heap($heap_id, $field_name, $value);
+            }
         }
 
         # Return the heap ID - this is the "object reference"
