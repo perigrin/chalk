@@ -12,6 +12,9 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
     # Hashref {field_name => Type} or undef for placeholders
     field $fields :param :reader = undef;
 
+    # Arrayref of param field info: [{ name => '$x', required => 1, default => ... }, ...]
+    field $param_fields :param :reader = [];
+
     method is_complete() {
         return defined $fields;
     }

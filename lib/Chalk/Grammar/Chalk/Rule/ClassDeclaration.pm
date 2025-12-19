@@ -9,7 +9,8 @@ use Chalk::Grammar::Chalk::TypeRegistry;
 
 class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
-    # Helper to extract field name from VariableDeclaration context
+    # Helper to extract field name and attributes from VariableDeclaration context
+    # Returns: { name => $field_name, attributes => \@attr_list } or undef
     sub _extract_field_from_vardecl {
         my ($ctx) = @_;
 
@@ -29,6 +30,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         return undef unless @children > 2;
 
         my $var_ctx = $children[2];
+        my $field_name;
 
         # Get Variable rule and extract the variable name
         if ($var_ctx->can('rule') && $var_ctx->rule &&
@@ -39,16 +41,66 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
                 $var_val->{type} eq 'scalar_var' &&
                 exists $var_val->{name}) {
                 # Prepend sigil to name for field storage
-                my $field_name = $var_val->{sigil} . $var_val->{name};
-                return $field_name;
+                $field_name = $var_val->{sigil} . $var_val->{name};
             }
         }
 
-        return undef;
+        return undef unless defined $field_name;
+
+        # Extract attributes if present (index 4 or later: Variable WS_OPT AttributeList)
+        my @attributes;
+        for my $i (3 .. $#children) {
+            my $child = $children[$i];
+            next unless $child->can('rule') && $child->rule;
+
+            # Check for AttributeList
+            if ($child->rule->isa('Chalk::Grammar::Chalk::Rule::AttributeList')) {
+                push @attributes, _extract_attributes_from_list($child);
+            }
+            # Check for single Attribute
+            elsif ($child->rule->isa('Chalk::Grammar::Chalk::Rule::Attribute')) {
+                my $attr = $child->extract();
+                push @attributes, "$attr" if defined $attr;
+            }
+        }
+
+        return { name => $field_name, attributes => \@attributes };
+    }
+
+    # Helper to extract attribute names from AttributeList context
+    sub _extract_attributes_from_list {
+        my ($ctx) = @_;
+        my @attrs;
+
+        return @attrs unless defined $ctx;
+
+        # AttributeList -> Attribute | Attribute WS_OPT AttributeList
+        my @children = $ctx->children->@*;
+
+        for my $child (@children) {
+            next unless $child->can('rule') && $child->rule;
+
+            if ($child->rule->isa('Chalk::Grammar::Chalk::Rule::Attribute')) {
+                my $attr = $child->extract();
+                push @attrs, "$attr" if defined $attr;
+            }
+            elsif ($child->rule->isa('Chalk::Grammar::Chalk::Rule::AttributeList')) {
+                push @attrs, _extract_attributes_from_list($child);
+            }
+        }
+
+        # Also check if this context itself is an Attribute
+        if ($ctx->can('rule') && $ctx->rule &&
+            $ctx->rule->isa('Chalk::Grammar::Chalk::Rule::Attribute')) {
+            my $attr = $ctx->extract();
+            push @attrs, "$attr" if defined $attr;
+        }
+
+        return @attrs;
     }
 
     # Helper to recursively extract field declarations from parse tree contexts
-    # Returns array of hashrefs: { name => $field_name, type => $type_obj }
+    # Returns array of hashrefs: { name => $field_name, type => $type_obj, attributes => \@attrs, has_default => bool }
     sub _extract_fields_from_context {
         my ($ctx) = @_;
         my @fields;
@@ -56,22 +108,16 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         return @fields unless defined $ctx;
         return @fields unless blessed($ctx);
 
+        my $skip_children = 0;
+
         # Check if this context's rule is a VariableDeclaration or Assignment
         if ($ctx->can('rule') && $ctx->rule) {
             my $rule = $ctx->rule;
 
-            # Pattern 1: Standalone VariableDeclaration with 'field' declarator
-            # Example: field $x;
-            if ($rule->isa('Chalk::Grammar::Chalk::Rule::VariableDeclaration')) {
-                my $field_name = _extract_field_from_vardecl($ctx);
-                if (defined $field_name) {
-                    # No initializer, type is Any
-                    push @fields, { name => $field_name, type => undef };
-                }
-            }
             # Pattern 2: Assignment where LHS is VariableDeclaration with 'field'
             # Example: field $count = 0;
-            elsif ($rule->isa('Chalk::Grammar::Chalk::Rule::Assignment')) {
+            # Check this FIRST to avoid double-counting the nested VariableDeclaration
+            if ($rule->isa('Chalk::Grammar::Chalk::Rule::Assignment')) {
                 # Get the LHS (first child, before '=')
                 my @children = $ctx->children->@*;
                 if (@children > 0) {
@@ -80,21 +126,44 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
                     # Check if LHS is a VariableDeclaration
                     if ($lhs_ctx->can('rule') && $lhs_ctx->rule &&
                         $lhs_ctx->rule->isa('Chalk::Grammar::Chalk::Rule::VariableDeclaration')) {
-                        my $field_name = _extract_field_from_vardecl($lhs_ctx);
-                        if (defined $field_name) {
+                        my $field_info = _extract_field_from_vardecl($lhs_ctx);
+                        if (defined $field_info) {
                             # Type inference deferred to issue #332 (Chalk type system integration)
                             # For now, all field types default to Any
-                            push @fields, { name => $field_name, type => undef };
+                            push @fields, {
+                                name => $field_info->{name},
+                                type => undef,
+                                attributes => $field_info->{attributes},
+                                has_default => 1,
+                            };
+                            # Don't recurse into this Assignment's children to avoid double-counting
+                            $skip_children = 1;
                         }
                     }
                 }
             }
+            # Pattern 1: Standalone VariableDeclaration with 'field' declarator
+            # Example: field $x;
+            elsif ($rule->isa('Chalk::Grammar::Chalk::Rule::VariableDeclaration')) {
+                my $field_info = _extract_field_from_vardecl($ctx);
+                if (defined $field_info) {
+                    # No initializer, type is Any
+                    push @fields, {
+                        name => $field_info->{name},
+                        type => undef,
+                        attributes => $field_info->{attributes},
+                        has_default => 0,
+                    };
+                }
+            }
         }
 
-        # Recursively check all children
-        if ($ctx->can('children')) {
-            for my $child ($ctx->children->@*) {
-                push @fields, _extract_fields_from_context($child);
+        # Recursively check all children (unless we found a field in an Assignment)
+        unless ($skip_children) {
+            if ($ctx->can('children')) {
+                for my $child ($ctx->children->@*) {
+                    push @fields, _extract_fields_from_context($child);
+                }
             }
         }
 
@@ -135,23 +204,35 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         my $block_ctx = $child_contexts[$#child_contexts];
 
         # Extract field declarations from the block context (not the evaluated block)
-        # Returns array of hashrefs: { name => $field_name, type => $type_obj }
+        # Returns array of hashrefs: { name => $field_name, type => $type_obj, attributes => \@attrs, has_default => bool }
         my @field_info = _extract_fields_from_context($block_ctx);
 
         # Build field hash: field_name => Type (use inferred type or default to Any)
+        # Also build param_fields array for :param fields
         my %fields;
+        my @param_fields;
         my $any_type = Chalk::Grammar::Chalk::Type::Any->new();
         for my $info (@field_info) {
             my $field_name = $info->{name};
             my $field_type = $info->{type} // $any_type;
             # Field names come as scalars like '$x', '$y', etc.
             $fields{$field_name} = $field_type;
+
+            # Check if field has :param attribute
+            my @attrs = ($info->{attributes} // [])->@*;
+            if (grep { $_ eq ':param' } @attrs) {
+                push @param_fields, {
+                    name => $field_name,
+                    required => !$info->{has_default},
+                };
+            }
         }
 
         # Create Class type object
         my $class_type = Chalk::Grammar::Chalk::Type::Class->new(
             class_name => $class_name,
-            fields     => \%fields
+            fields     => \%fields,
+            param_fields => \@param_fields,
         );
 
         # Register in TypeRegistry
