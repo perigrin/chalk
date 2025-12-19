@@ -90,7 +90,7 @@ class Chalk::IR::Node::ArrayStore :isa(Chalk::IR::Node::Base) {
             }
         }
 
-        $env->store_heap($heap_id, $idx, $val);
+        $env->set_heap($heap_id, $idx, $val);
         return $val;
     }
 }
