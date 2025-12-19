@@ -9,6 +9,7 @@ use lib "$FindBin::Bin/../../lib";
 use Chalk::IR::Node::NewArray;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Type::Integer;
+use Chalk::IR::Node::ArrayLength;
 
 subtest 'NewArray with length' => sub {
     my $len = Chalk::IR::Node::Constant->new(
@@ -39,6 +40,45 @@ subtest 'NewArray with element_type' => sub {
 
     ok($arr->can('element_type'), 'NewArray has element_type accessor');
     ok($arr->element_type->isa('Chalk::IR::Type::Integer'), 'element_type is Integer');
+};
+
+subtest 'ArrayLength basic' => sub {
+    my $len = Chalk::IR::Node::Constant->new(
+        value => 10,
+        type => Chalk::IR::Type::Integer->TOP()
+    );
+
+    my $arr = Chalk::IR::Node::NewArray->new(
+        inputs => [$len->id],
+        length => $len
+    );
+    my $arr_len = Chalk::IR::Node::ArrayLength->new(
+        inputs => [$arr->id],
+        array => $arr
+    );
+
+    is($arr_len->op, 'ArrayLength', 'ArrayLength op is correct');
+    ok($arr_len->can('array'), 'ArrayLength has array accessor');
+};
+
+subtest 'ArrayLength constant folding' => sub {
+    my $len = Chalk::IR::Node::Constant->new(
+        value => 42,
+        type => Chalk::IR::Type::Integer->TOP()
+    );
+
+    my $arr = Chalk::IR::Node::NewArray->new(
+        inputs => [$len->id],
+        length => $len
+    );
+    my $arr_len = Chalk::IR::Node::ArrayLength->new(
+        inputs => [$arr->id],
+        array => $arr
+    );
+
+    my $result = $arr_len->peephole();
+    ok($result->isa('Chalk::IR::Node::Constant'), 'ArrayLength folds to constant');
+    is($result->value, 42, 'Folded length is 42');
 };
 
 done_testing();
