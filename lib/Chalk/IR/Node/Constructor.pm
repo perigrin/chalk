@@ -93,6 +93,18 @@ class Chalk::IR::Node::Constructor {
             }
         }
 
+        # Execute ADJUST blocks after field initialization
+        my $adjust_blocks = $class_type->can('adjust_blocks') ? $class_type->adjust_blocks : [];
+        for my $adjust (@$adjust_blocks) {
+            # Each ADJUST block has 'assigns' mapping field names to IR nodes
+            my $assigns = $adjust->{assigns} // {};
+            for my $field_name (keys %$assigns) {
+                my $node = $assigns->{$field_name};
+                my $value = $context->("node:" . $node->id);
+                $env->store_heap($heap_id, $field_name, $value);
+            }
+        }
+
         # Return the heap ID - this is the "object reference"
         return $heap_id;
     }

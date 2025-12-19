@@ -183,6 +183,41 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         return (undef, -1);
     }
 
+    # Helper to extract ADJUST blocks from parse tree context
+    # Returns array of hashrefs: { statements => [...], assigns => { '$field' => node } }
+    sub _extract_adjust_blocks_from_context {
+        my ($ctx) = @_;
+        my @adjusts;
+
+        return @adjusts unless defined $ctx;
+        return @adjusts unless blessed($ctx);
+
+        # Check if this context is an AdjustBlock
+        if ($ctx->can('rule') && $ctx->rule) {
+            my $rule = $ctx->rule;
+
+            if ($rule->isa('Chalk::Grammar::Chalk::Rule::AdjustBlock')) {
+                # Evaluate the ADJUST block to get its statements
+                my $adjust_result = $ctx->extract();
+                if (ref($adjust_result) eq 'HASH' && $adjust_result->{type} eq 'adjust') {
+                    push @adjusts, {
+                        statements => $adjust_result->{statements} // [],
+                        assigns => {},  # Will be populated by later analysis
+                    };
+                }
+            }
+        }
+
+        # Recursively check all children
+        if ($ctx->can('children')) {
+            for my $child ($ctx->children->@*) {
+                push @adjusts, _extract_adjust_blocks_from_context($child);
+            }
+        }
+
+        return @adjusts;
+    }
+
     method evaluate($context) {
         # ClassDeclaration -> 'class' WS_OPT QualifiedIdentifier WS_OPT Block
         # ClassDeclaration -> 'class' WS_OPT QualifiedIdentifier WS_OPT AttributeList WS_OPT Block
@@ -228,11 +263,15 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
             }
         }
 
+        # Extract ADJUST blocks from the class body
+        my @adjust_blocks = _extract_adjust_blocks_from_context($block_ctx);
+
         # Create Class type object
         my $class_type = Chalk::Grammar::Chalk::Type::Class->new(
             class_name => $class_name,
             fields     => \%fields,
             param_fields => \@param_fields,
+            adjust_blocks => \@adjust_blocks,
         );
 
         # Register in TypeRegistry

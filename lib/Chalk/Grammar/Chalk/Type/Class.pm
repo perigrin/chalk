@@ -15,6 +15,9 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
     # Arrayref of param field info: [{ name => '$x', required => 1, default => ... }, ...]
     field $param_fields :param :reader = [];
 
+    # Arrayref of ADJUST block info: [{ statements => [...], assigns => { '$field' => node } }, ...]
+    field $adjust_blocks :param :reader = [];
+
     method is_complete() {
         return defined $fields;
     }
