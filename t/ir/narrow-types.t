@@ -6,6 +6,7 @@ use Test2::V0;
 use lib 'lib';
 
 use Chalk::IR::Type::Integer;
+use Chalk::IR::Type::Float;
 
 subtest 'Integer type constructors' => sub {
     my $i8 = Chalk::IR::Type::Integer->i8();
@@ -33,6 +34,14 @@ subtest 'Integer mask calculation' => sub {
 
     my $u16 = Chalk::IR::Type::Integer->u16();
     is($u16->mask, 0xFFFF, 'u16 mask is 0xFFFF');
+};
+
+subtest 'Float type constructors' => sub {
+    my $f32 = Chalk::IR::Type::Float->f32();
+    is($f32->bits, 32, 'f32 has 32 bits');
+
+    my $f64 = Chalk::IR::Type::Float->f64();
+    is($f64->bits, 64, 'f64 has 64 bits');
 };
 
 done_testing();

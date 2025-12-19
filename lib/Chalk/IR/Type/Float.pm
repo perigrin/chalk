@@ -10,6 +10,7 @@ use Chalk::IR::Type::Bottom;
 class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
     field $value :param :reader = undef;
     field $is_bottom :param :reader = 0;
+    field $bits :param :reader = 64;
 
     method is_constant() { (defined($value) && !$is_bottom) ? 1 : 0 }
     method is_top()      { (!defined($value) && !$is_bottom) ? 1 : 0 }
@@ -83,6 +84,10 @@ class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
         # Float doesn't widen further - it's the widest numeric type
         return $self;
     }
+
+    # Convenience constructors
+    sub f32 ($class) { $class->new(bits => 32) }
+    sub f64 ($class) { $class->new(bits => 64) }
 }
 
 1;
