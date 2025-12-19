@@ -1,5 +1,5 @@
 # ABOUTME: Semantic action for MethodCall - instance and class method invocations
-# ABOUTME: Generates Call/CallEnd IR nodes with receiver for $obj->method() calls
+# ABOUTME: Generates Constructor for ClassName->new() or Call/CallEnd for other methods
 
 use 5.42.0;
 use experimental 'class';
@@ -9,7 +9,9 @@ class Chalk::Grammar::Chalk::Rule::MethodCall :isa(Chalk::GrammarRule) {
         use Chalk::IR::Node::Call;
         use Chalk::IR::Node::CallEnd;
         use Chalk::IR::Node::Constant;
+        use Chalk::IR::Node::Constructor;
         use Chalk::Grammar::Chalk::Type::Str;
+        use Chalk::Grammar::Chalk::TypeRegistry;
 
         # MethodCall -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'
         # MethodCall -> Variable '->' Identifier  # Without parens
@@ -89,6 +91,59 @@ class Chalk::Grammar::Chalk::Rule::MethodCall :isa(Chalk::GrammarRule) {
                 next if defined($receiver) && $child->id eq $receiver->id;
                 push @args, $child;
             }
+        }
+
+        # Check if this is a constructor call (ClassName->new())
+        # Conditions: receiver is a string constant containing a registered class name,
+        # and method name is 'new'
+        my $is_constructor = 0;
+        my $class_name;
+
+        if (blessed($receiver) && $receiver isa Chalk::IR::Node::Constant) {
+            my $potential_class = $receiver->value;
+            if (defined($potential_class) && !ref($potential_class)) {
+                my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
+                if ($registry->has_class($potential_class)) {
+                    # Check if method is 'new'
+                    my $method_name;
+                    if (blessed($callee) && $callee isa Chalk::IR::Node::Constant) {
+                        $method_name = $callee->value;
+                    }
+                    if (defined($method_name) && $method_name eq 'new') {
+                        $is_constructor = 1;
+                        $class_name = $potential_class;
+                    }
+                }
+            }
+        }
+
+        if ($is_constructor) {
+            # Parse args as named pairs (key => value)
+            my %ctor_args;
+            my $i = 0;
+            while ($i < @args) {
+                my $key_node = $args[$i];
+                my $value_node = $args[$i + 1] // last;
+
+                # Key should be a constant (bareword or string)
+                my $key;
+                if (blessed($key_node) && $key_node isa Chalk::IR::Node::Constant) {
+                    $key = $key_node->value;
+                }
+
+                if (defined($key)) {
+                    # Prepend $ to make it a field name
+                    my $field_name = '$' . $key;
+                    $ctor_args{$field_name} = $value_node;
+                }
+
+                $i += 2;
+            }
+
+            return Chalk::IR::Node::Constructor->new(
+                class_name => $class_name,
+                args => \%ctor_args,
+            );
         }
 
         # Create Call node with receiver
