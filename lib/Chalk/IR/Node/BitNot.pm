@@ -39,7 +39,7 @@ class Chalk::IR::Node::BitNot {
 
     method peephole($graph = undef) {
         # Constant folding
-        if ($operand->isa('Chalk::IR::Node::Constant')) {
+        if ($operand isa Chalk::IR::Node::Constant) {
             my $val = $operand->value;
             my $result;
             {
@@ -54,7 +54,7 @@ class Chalk::IR::Node::BitNot {
         }
 
         # Double negation: ~~x = x
-        if ($operand->isa('Chalk::IR::Node::BitNot')) {
+        if ($operand isa Chalk::IR::Node::BitNot) {
             return $operand->operand;
         }
 

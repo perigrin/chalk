@@ -43,7 +43,7 @@ class Chalk::IR::Node::Truncate {
 
     method peephole($graph = undef) {
         # Constant folding
-        if ($operand->isa('Chalk::IR::Node::Constant')) {
+        if ($operand isa Chalk::IR::Node::Constant) {
             my $val = $operand->value;
             my $mask = $target_type->mask;
             my $truncated = $val & $mask;

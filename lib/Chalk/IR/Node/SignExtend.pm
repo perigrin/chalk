@@ -42,7 +42,7 @@ class Chalk::IR::Node::SignExtend {
 
     method peephole($graph = undef) {
         # Constant folding - sign extension preserves value for constants
-        if ($operand->isa('Chalk::IR::Node::Constant')) {
+        if ($operand isa Chalk::IR::Node::Constant) {
             use Chalk::IR::Node::Constant;
             return Chalk::IR::Node::Constant->new(
                 value => $operand->value,  # Perl handles sign correctly

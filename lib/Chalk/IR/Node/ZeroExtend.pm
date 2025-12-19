@@ -42,7 +42,7 @@ class Chalk::IR::Node::ZeroExtend {
 
     method peephole($graph = undef) {
         # Constant folding
-        if ($operand->isa('Chalk::IR::Node::Constant')) {
+        if ($operand isa Chalk::IR::Node::Constant) {
             my $val = $operand->value;
             # Mask to source type's range to ensure positive
             my $source_type = $operand->type;
