@@ -1,5 +1,5 @@
 # ABOUTME: Semantic action for Unary - handles both prefix and postfix unary operators
-# ABOUTME: Phase 4: Flattened from Unary + Postfix - handles prefix (!, -, +, \, ++, --) and postfix (++, --)
+# ABOUTME: Phase 4: Flattened from Unary + Postfix - handles prefix (!, ~, -, +, \, ++, --) and postfix (++, --)
 
 use 5.42.0;
 use experimental 'class';
@@ -8,6 +8,7 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
     method evaluate($context) {
         use Chalk::IR::Node::Negate;
         use Chalk::IR::Node::Not;
+        use Chalk::IR::Node::BitNot;
         use Chalk::IR::Node::PreIncrement;
         use Chalk::IR::Node::PreDecrement;
         use Chalk::IR::Node::PostIncrement;
@@ -79,6 +80,8 @@ class Chalk::Grammar::Chalk::Rule::Unary :isa(Chalk::GrammarRule) {
         } elsif ($operator eq '+') {
             # Unary + is a no-op, just pass through
             return $operand;
+        } elsif ($operator eq '~') {
+            return Chalk::IR::Node::BitNot->new(operand => $operand)->peephole();
         } elsif ($operator eq '\\') {
             # Reference node exists but needs wiring up here
             # For now, just pass through
