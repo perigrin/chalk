@@ -78,6 +78,10 @@
 %REGEX_MATCH_OP% = /=~|!~/
 %ASSIGN_OP% = /\/\/=|\|\|=|\+=|-=|\.=/
 %ARITHMETIC_OP% = /[+\-*\/]/
+%BITWISE_AND_OP% = /&(?!&)/
+%BITWISE_OR_OP% = /\|(?!\|)/
+%BITWISE_XOR_OP% = /\^/
+%SHIFT_OP% = /<<|>>/
 %ISA_COMPARE_OP% = /\bisa\b/
 
 # ============================================================================
@@ -270,6 +274,10 @@ Expression -> ComparisonOp
 Expression -> ConcatenationOp
 Expression -> RangeOp
 Expression -> ArithmeticOp
+Expression -> BitwiseAndOp
+Expression -> BitwiseOrOp
+Expression -> BitwiseXorOp
+Expression -> ShiftOp
 Expression -> Unary
 Expression -> Postfix
 
@@ -311,6 +319,13 @@ RangeOp -> Expression WS_OPT '..' WS_OPT Expression
 # Precedence handled by Precedence semiring
 ArithmeticOp -> Expression WS_OPT %ARITHMETIC_OP% WS_OPT Expression
 
+# Bitwise operators (left-associative)
+# Precedence handled by Precedence semiring: shift > and > xor > or
+BitwiseAndOp -> Expression WS_OPT %BITWISE_AND_OP% WS_OPT Expression
+BitwiseOrOp -> Expression WS_OPT %BITWISE_OR_OP% WS_OPT Expression
+BitwiseXorOp -> Expression WS_OPT %BITWISE_XOR_OP% WS_OPT Expression
+ShiftOp -> Expression WS_OPT %SHIFT_OP% WS_OPT Expression
+
 # Unary prefix operators (right-associative)
 Unary -> '!' WS_OPT Expression
 Unary -> 'not' WS_OPT Expression
@@ -319,6 +334,7 @@ Unary -> '+' WS_OPT Expression
 Unary -> '++' WS_OPT Expression
 Unary -> '--' WS_OPT Expression
 Unary -> '\\' WS_OPT Expression  # Reference operator: \$var, \@array, \%hash
+Unary -> '~' WS_OPT Expression   # Bitwise NOT operator
 
 # Postfix operators
 Postfix -> Variable '++'
