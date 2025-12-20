@@ -248,6 +248,12 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             elsif ($matched_value->isa('Chalk::Grammar::Token::Float')) {
                 $type_obj = $lattice->type_from_name('Num');
             }
+            # String literals (SINGLE_QUOTED_STRING, DOUBLE_QUOTED_STRING) → Str type
+            elsif ($matched_value->isa('Chalk::Grammar::Token') &&
+                   defined($pattern_name) &&
+                   ($pattern_name eq 'SINGLE_QUOTED_STRING' || $pattern_name eq 'DOUBLE_QUOTED_STRING')) {
+                $type_obj = $lattice->type_from_name('Str');
+            }
 
             # Always store the token for later extraction (e.g., class names)
             return Chalk::Semiring::TypeInferenceElement->new(
@@ -280,6 +286,14 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     method on_complete($item, $element, $completed_element = undef) {
         my $rule = $item->rule;
 
+        # DEBUG: Log rule completion
+        if ($ENV{DEBUG_TYPE_INFERENCE} && defined $rule) {
+            my $rule_class = ref($rule);
+            my $rule_lhs = $rule->lhs if $rule->can('lhs');
+            warn "TypeInference::on_complete() for rule: $rule_class (", ($rule_lhs // 'unknown'), ")\n";
+            warn "  Rule can infer_type: ", ($rule->can('infer_type') ? "YES" : "NO"), "\n";
+        }
+
         # Emit any type errors accumulated in the element to diagnostic context
         if ($element->can('errors') && $element->errors->@*) {
             for my $error ($element->errors->@*) {
@@ -294,6 +308,10 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         }
 
         # Default: preserve element unchanged (no type inference for this rule)
+        # Note: Rule-specific type inference (like ArithmeticOp::infer_type) is
+        # currently only called when the rule class directly implements infer_type().
+        # Dynamic loading of semantic action classes was removed due to Composite
+        # semiring coordination issues (#332).
         return $element;
     }
 
