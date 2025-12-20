@@ -33,7 +33,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
         # Get Variable rule and extract the variable name
         if ($var_ctx->can('rule') && $var_ctx->rule &&
-            $var_ctx->rule->isa('Chalk::Grammar::Chalk::Rule::Variable')) {
+            $var_ctx->rule isa Chalk::Grammar::Chalk::Rule::Variable) {
             # Variable returns a hash with type and name
             my $var_val = $var_ctx->extract();
             if (ref($var_val) eq 'HASH' &&
@@ -53,11 +53,11 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
             next unless $child->can('rule') && $child->rule;
 
             # Check for AttributeList
-            if ($child->rule->isa('Chalk::Grammar::Chalk::Rule::AttributeList')) {
+            if ($child->rule isa Chalk::Grammar::Chalk::Rule::AttributeList) {
                 push @attributes, _extract_attributes_from_list($child);
             }
             # Check for single Attribute
-            elsif ($child->rule->isa('Chalk::Grammar::Chalk::Rule::Attribute')) {
+            elsif ($child->rule isa Chalk::Grammar::Chalk::Rule::Attribute) {
                 my $attr = $child->extract();
                 push @attributes, "$attr" if defined $attr;
             }
@@ -78,18 +78,18 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         for my $child (@children) {
             next unless $child->can('rule') && $child->rule;
 
-            if ($child->rule->isa('Chalk::Grammar::Chalk::Rule::Attribute')) {
+            if ($child->rule isa Chalk::Grammar::Chalk::Rule::Attribute) {
                 my $attr = $child->extract();
                 push @attrs, "$attr" if defined $attr;
             }
-            elsif ($child->rule->isa('Chalk::Grammar::Chalk::Rule::AttributeList')) {
+            elsif ($child->rule isa Chalk::Grammar::Chalk::Rule::AttributeList) {
                 push @attrs, _extract_attributes_from_list($child);
             }
         }
 
         # Also check if this context itself is an Attribute
         if ($ctx->can('rule') && $ctx->rule &&
-            $ctx->rule->isa('Chalk::Grammar::Chalk::Rule::Attribute')) {
+            $ctx->rule isa Chalk::Grammar::Chalk::Rule::Attribute) {
             my $attr = $ctx->extract();
             push @attrs, "$attr" if defined $attr;
         }
@@ -114,7 +114,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
             # Pattern 2: Assignment where LHS is VariableDeclaration with 'field'
             # Example: field $count = 0;
             # Check this FIRST to avoid double-counting the nested VariableDeclaration
-            if ($rule->isa('Chalk::Grammar::Chalk::Rule::Assignment')) {
+            if ($rule isa Chalk::Grammar::Chalk::Rule::Assignment) {
                 # Get the LHS (first child, before '=')
                 my @children = $ctx->children->@*;
                 if (@children > 0) {
@@ -122,7 +122,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
                     # Check if LHS is a VariableDeclaration
                     if ($lhs_ctx->can('rule') && $lhs_ctx->rule &&
-                        $lhs_ctx->rule->isa('Chalk::Grammar::Chalk::Rule::VariableDeclaration')) {
+                        $lhs_ctx->rule isa Chalk::Grammar::Chalk::Rule::VariableDeclaration) {
                         my $field_info = _extract_field_from_vardecl($lhs_ctx);
                         if (defined $field_info) {
                             # Type inference deferred to issue #332 (Chalk type system integration)
@@ -141,7 +141,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
             }
             # Pattern 1: Standalone VariableDeclaration with 'field' declarator
             # Example: field $x;
-            elsif ($rule->isa('Chalk::Grammar::Chalk::Rule::VariableDeclaration')) {
+            elsif ($rule isa Chalk::Grammar::Chalk::Rule::VariableDeclaration) {
                 my $field_info = _extract_field_from_vardecl($ctx);
                 if (defined $field_info) {
                     # No initializer, type is Any
@@ -191,7 +191,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         if ($ctx->can('rule') && $ctx->rule) {
             my $rule = $ctx->rule;
 
-            if ($rule->isa('Chalk::Grammar::Chalk::Rule::AdjustBlock')) {
+            if ($rule isa Chalk::Grammar::Chalk::Rule::AdjustBlock) {
                 # Evaluate the ADJUST block to get its statements
                 my $adjust_result = $ctx->extract();
                 if (ref($adjust_result) eq 'HASH' && $adjust_result->{type} eq 'adjust') {
@@ -507,11 +507,11 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
             return Chalk::Grammar::Chalk::Type::Str->new() if $name eq 'Str';
 
             # Return as-is if it's already a Grammar type
-            return $type if $type->isa('Chalk::Grammar::Chalk::Type::Int');
-            return $type if $type->isa('Chalk::Grammar::Chalk::Type::Num');
-            return $type if $type->isa('Chalk::Grammar::Chalk::Type::Str');
-            return $type if $type->isa('Chalk::Grammar::Chalk::Type::ArrayRef');
-            return $type if $type->isa('Chalk::Grammar::Chalk::Type::HashRef');
+            return $type if $type isa Chalk::Grammar::Chalk::Type::Int;
+            return $type if $type isa Chalk::Grammar::Chalk::Type::Num;
+            return $type if $type isa Chalk::Grammar::Chalk::Type::Str;
+            return $type if $type isa Chalk::Grammar::Chalk::Type::ArrayRef;
+            return $type if $type isa Chalk::Grammar::Chalk::Type::HashRef;
         }
 
         # Recurse through children to find a typed element
