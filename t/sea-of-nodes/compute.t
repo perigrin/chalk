@@ -389,9 +389,9 @@ subtest 'Negate node compute() with unknown integer returns IntTop' => sub {
     ok($type->is_top, 'Result is IntTop (unknown integer)');
 };
 
-# IntBot propagation tests - document current behavior
-# TODO(#220): Revisit IntBot arithmetic semantics with automatic coercion
-subtest 'Add node compute() with IntBot operand returns IntTop (current behavior)' => sub {
+# IntBot propagation tests - error state propagates through arithmetic
+# Fixed in #220: IntBot now correctly propagates (absorbs) through arithmetic operations
+subtest 'Add node compute() with IntBot operand propagates error' => sub {
     # Create a node that returns IntBot (division by zero)
     my $const20 = Chalk::IR::Node::Constant->new(value => 20, type => Chalk::IR::Type::Integer->constant(20));
     my $const0 = Chalk::IR::Node::Constant->new(value => 0, type => Chalk::IR::Type::Integer->constant(0));
@@ -407,9 +407,8 @@ subtest 'Add node compute() with IntBot operand returns IntTop (current behavior
 
     my $result = $add->compute();
     ok($result isa Chalk::IR::Type::Integer, 'IntBot + constant returns TypeInteger');
-    # Current behavior: IntBot isa TypeInteger, so returns IntTop
-    # Future consideration: should IntBot propagate (IntBot + x = IntBot)?
-    ok($result->is_top, 'Current behavior: IntBot + constant = IntTop');
+    # Correct behavior: IntBot propagates through arithmetic (error absorption)
+    ok($result->is_bottom, 'IntBot + constant = IntBot (error propagation)');
 };
 
 done_testing();

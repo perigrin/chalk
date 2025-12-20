@@ -86,6 +86,14 @@ class Chalk::IR::Node::Divide {
         my $left_type = $left->compute();
         my $right_type = $right->compute();
 
+        # Error propagation: IntBot absorbs through arithmetic
+        if ($left_type isa Chalk::IR::Type::Integer && $left_type->is_bottom) {
+            return Chalk::IR::Type::Integer->BOTTOM();
+        }
+        if ($right_type isa Chalk::IR::Type::Integer && $right_type->is_bottom) {
+            return Chalk::IR::Type::Integer->BOTTOM();
+        }
+
         if ($left_type->is_constant && $right_type->is_constant) {
             my $divisor = $right_type->value;
             # Division by zero yields IntBot (error state)
