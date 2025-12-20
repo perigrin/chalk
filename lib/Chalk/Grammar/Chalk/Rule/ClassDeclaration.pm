@@ -11,8 +11,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
     # Helper to extract field name and attributes from VariableDeclaration context
     # Returns: { name => $field_name, attributes => \@attr_list } or undef
-    sub _extract_field_from_vardecl {
-        my ($ctx) = @_;
+    sub _extract_field_from_vardecl($ctx) {
 
         # Get the children to find LexicalDeclarator and Variable
         my @children = $ctx->children->@*;
@@ -68,8 +67,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to extract attribute names from AttributeList context
-    sub _extract_attributes_from_list {
-        my ($ctx) = @_;
+    sub _extract_attributes_from_list($ctx) {
         my @attrs;
 
         return @attrs unless defined $ctx;
@@ -101,8 +99,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
     # Helper to recursively extract field declarations from parse tree contexts
     # Returns array of hashrefs: { name => $field_name, type => $type_obj, attributes => \@attrs, has_default => bool }
-    sub _extract_fields_from_context {
-        my ($ctx) = @_;
+    sub _extract_fields_from_context($ctx) {
         my @fields;
 
         return @fields unless defined $ctx;
@@ -171,8 +168,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to find children matching a condition
-    sub _find_child_matching {
-        my ($context, $predicate) = @_;
+    sub _find_child_matching($context, $predicate) {
         my @children = $context->children->@*;
 
         for my $i (0..$#children) {
@@ -185,8 +181,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
     # Helper to extract ADJUST blocks from parse tree context
     # Returns array of hashrefs: { statements => [...], assigns => { '$field' => node } }
-    sub _extract_adjust_blocks_from_context {
-        my ($ctx) = @_;
+    sub _extract_adjust_blocks_from_context($ctx) {
         my @adjusts;
 
         return @adjusts unless defined $ctx;
@@ -340,8 +335,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to extract class name from QualifiedIdentifier element
-    sub _extract_class_name_from_element {
-        my ($elem) = @_;
+    sub _extract_class_name_from_element($elem) {
         return undef unless defined $elem;
 
         # Check if this element has a token with the identifier
@@ -375,8 +369,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
     # Helper to extract field declarations from TypeInferenceElement tree
     # Returns array of hashrefs: { name => $field_name, type => $type_obj }
-    sub _extract_fields_from_element {
-        my ($elem) = @_;
+    sub _extract_fields_from_element($elem) {
         my @fields;
 
         return @fields unless defined $elem;
@@ -420,8 +413,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to extract field name from LHS of assignment
-    sub _extract_field_name_from_lhs {
-        my ($elem) = @_;
+    sub _extract_field_name_from_lhs($elem) {
         return undef unless defined $elem;
 
         # BFS to find 'field' token followed by variable identifier
@@ -455,8 +447,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to extract standalone field name (field without initializer)
-    sub _extract_standalone_field_name {
-        my ($elem) = @_;
+    sub _extract_standalone_field_name($elem) {
         return undef unless defined $elem;
 
         # Look for pattern: 'field' WS '$' Identifier ';'
@@ -481,8 +472,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to find identifier token in element tree
-    sub _find_identifier_in_element {
-        my ($elem) = @_;
+    sub _find_identifier_in_element($elem) {
         return undef unless defined $elem;
 
         if ($elem->can('token') && defined $elem->token) {
@@ -503,8 +493,7 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
     }
 
     # Helper to infer type from element
-    sub _infer_type_from_element {
-        my ($elem) = @_;
+    sub _infer_type_from_element($elem) {
         return Chalk::Grammar::Chalk::Type::Any->new() unless defined $elem;
 
         # First check if the element has a type_obj
