@@ -6,8 +6,11 @@ use experimental qw(class);
 use utf8;
 use Chalk::Grammar::Chalk::Type::Any;
 use Chalk::Grammar::Chalk::Type::Array;
+use Chalk::Grammar::Chalk::Type::ArrayRef;
 use Chalk::Grammar::Chalk::Type::Boolean;
+use Chalk::Grammar::Chalk::Type::CodeRef;
 use Chalk::Grammar::Chalk::Type::Hash;
+use Chalk::Grammar::Chalk::Type::HashRef;
 use Chalk::Grammar::Chalk::Type::Int;
 use Chalk::Grammar::Chalk::Type::List;
 use Chalk::Grammar::Chalk::Type::Num;
@@ -168,6 +171,9 @@ class Chalk::Grammar::Chalk::TypeLattice {
         return Chalk::Grammar::Chalk::Type::Undef->new() if $name eq 'Undef';
         return Chalk::Grammar::Chalk::Type::Any->new() if $name eq 'Any';
         return Chalk::Grammar::Chalk::Type::Object->new() if $name =~ qr/^Object/;
+        return Chalk::Grammar::Chalk::Type::CodeRef->new() if $name eq 'CodeRef' || $name eq 'Code';
+        return Chalk::Grammar::Chalk::Type::ArrayRef->new() if $name eq 'ArrayRef';
+        return Chalk::Grammar::Chalk::Type::HashRef->new() if $name eq 'HashRef';
 
         # Unknown type defaults to Any
         return Chalk::Grammar::Chalk::Type::Any->new();
