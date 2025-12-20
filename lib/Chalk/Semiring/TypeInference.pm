@@ -307,11 +307,16 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             return $rule->infer_type($self, $element);
         }
 
+        # NOTE: Container type inference (ArrayRef, HashRef, ArrayVar, HashVar, ScalarVar)
+        # is NOT implemented here because the TypeInference semiring uses meet() for
+        # multiply(), which causes Bottom when container types are combined with scalar
+        # types (e.g., meet(Int, ArrayRef) = Bottom). This breaks multi-statement programs.
+        # Proper handling requires either:
+        #   1. A more sophisticated type system with parametric types, or
+        #   2. Statement-level type isolation (don't meet() across statements)
+        # For now, container expressions keep the default top type (Any).
+
         # Default: preserve element unchanged (no type inference for this rule)
-        # Note: Rule-specific type inference (like ArithmeticOp::infer_type) is
-        # currently only called when the rule class directly implements infer_type().
-        # Dynamic loading of semantic action classes was removed due to Composite
-        # semiring coordination issues (#332).
         return $element;
     }
 
