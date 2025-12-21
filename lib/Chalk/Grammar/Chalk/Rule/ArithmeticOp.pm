@@ -185,101 +185,82 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
     }
 
     # Type inference for TypeInference semiring
-    # Infers result type based on operator and operand types
+    # Infers result type based on operand types
+    # Uses simplified approach: first and last typed children are operands
     method infer_type( $semiring, $element ) {
         use Chalk::Semiring::TypeInference;    # For TypeInferenceElement
+        use Chalk::Grammar::Chalk::TypeLattice;
 
         # Element tree structure mirrors parse tree
         # ArithmeticOp has children built up through multiply() during parsing
         my @children = $element->children->@*;
 
-        # ArithmeticOp -> Expression (pass-through)
-        # ArithmeticOp -> Expression WS_OPT OPERATOR WS_OPT Expression
-        # Need at least 3 children for binary operation
-        return $element if scalar(@children) < 3;
+        # ArithmeticOp -> Expression (pass-through with 1 child)
+        # ArithmeticOp -> Expression WS_OPT OPERATOR WS_OPT Expression (binary)
+        # Need at least 2 typed children for binary operation
+        return $element if scalar(@children) < 2;
 
-        # Find the operator token
-        my $operator;
-        my $operator_idx;
-        for my $i ( 0 .. $#children ) {
-            my $child = $children[$i];
-
-            # Check if this child has a token that is an arithmetic operator
-            if ( defined $child->token ) {
-                my $token_val = $child->token->value;
-                if (
-                    defined($token_val)
-                    && (   $token_val eq '+'
-                        || $token_val eq '-'
-                        || $token_val eq '*'
-                        || $token_val eq '/' )
-                  )
-                {
-                    $operator     = $token_val;
-                    $operator_idx = $i;
-                    last;
-                }
-            }
-        }
-
-        # Not a binary operation, pass through
-        return $element unless defined($operator);
-
-        # Extract left operand type (first element before operator with type)
-        my $left_type;
-        for my $i ( 0 .. $operator_idx - 1 ) {
-            my $elem = $children[$i];
-            if ( defined $elem->type_obj ) {
-                $left_type = $elem->type_obj;
-                last;
-            }
-        }
-
-        # Extract right operand type (first element after operator with type)
-        my $right_type;
-        for my $i ( $operator_idx + 1 .. $#children ) {
-            my $elem = $children[$i];
-            if ( defined $elem->type_obj ) {
-                $right_type = $elem->type_obj;
-                last;
-            }
-        }
-
-        # If we can't find operand types, pass through element unchanged
-        return $element unless ( defined($left_type) && defined($right_type) );
-
-        # Apply operator-specific type inference rules
-        my $result_type;
-
-        # Get type lattice for bottom type
+        # Simplified approach: find first and last children with non-top types
+        # These correspond to left and right operands in binary expression
+        my ($left_type, $right_type);
         my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+        my $top_name = $lattice->top_type()->name();
 
-        # Arithmetic operations require numeric types
-        # Int ⊗ Int → Int
-        # Num ⊗ Num → Num
-        # Str ⊗ Str → ⊥ (for *, -, /)
-        # Incompatible types → ⊥
+        # Find first non-top typed child (left operand)
+        for my $child (@children) {
+            next unless $child->can('type_obj') && defined($child->type_obj);
+            my $type = $child->type_obj;
+            next if $type->name() eq $top_name;
+            $left_type = $type;
+            last;
+        }
 
-        my $left_name  = $left_type->name();
+        # Find last non-top typed child (right operand)
+        for my $child (reverse @children) {
+            next unless $child->can('type_obj') && defined($child->type_obj);
+            my $type = $child->type_obj;
+            next if $type->name() eq $top_name;
+            $right_type = $type;
+            last;
+        }
+
+        # If both left and right are the same (single operand), pass through
+        # This happens in pass-through cases where there's only one typed child
+        if (defined($left_type) && defined($right_type) &&
+            $left_type == $right_type) {
+            return $element;
+        }
+
+        # If we can't find both operand types, pass through element unchanged
+        return $element unless defined($left_type) && defined($right_type);
+
+        my $left_name = $left_type->name();
         my $right_name = $right_type->name();
 
         # Check for numeric types (Int, Num)
-        my $left_is_numeric  = ( $left_name eq 'Int'  || $left_name eq 'Num' );
-        my $right_is_numeric = ( $right_name eq 'Int' || $right_name eq 'Num' );
+        my $left_is_numeric  = ($left_name eq 'Int' || $left_name eq 'Num');
+        my $right_is_numeric = ($right_name eq 'Int' || $right_name eq 'Num');
 
-        if ( $left_is_numeric && $right_is_numeric ) {
+        my @new_errors = $element->errors->@*;
+        my $result_type;
 
-            # Both numeric - result is the meet (more specific type)
-            $result_type = $left_type->meet($right_type);
-        }
-        elsif ( $operator eq '+' ) {
-
-            # Special case: string concatenation via + (some languages)
-            # For now, treat non-numeric + as type error
-            $result_type = $lattice->bottom_type();
-        }
-        else {
-            # Non-numeric operands with -, *, / → bottom (type error)
+        if ($left_is_numeric && $right_is_numeric) {
+            # Both numeric - result is the join (widened type)
+            # Int + Int -> Int, Int + Num -> Num, Num + Num -> Num
+            $result_type = $left_type->join($right_type);
+        } else {
+            # Type error: non-numeric operands for arithmetic
+            push @new_errors, {
+                type => 'type_error',
+                message => "Type error: Cannot apply arithmetic operator to " .
+                           $left_name . " and " . $right_name .
+                           " (expected numeric types)",
+                start_pos => $element->start_pos,
+                end_pos => $element->end_pos,
+                left_type => $left_name,
+                right_type => $right_name,
+            };
+            # Result type is bottom (type error)
             $result_type = $lattice->bottom_type();
         }
 
@@ -287,7 +268,10 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
             type_obj => $result_type,
             type_env => $element->type_env,
             children => $element->children,
-            token    => $element->token
+            token    => $element->token,
+            errors   => \@new_errors,
+            start_pos => $element->start_pos,
+            end_pos => $element->end_pos,
         );
     }
 }

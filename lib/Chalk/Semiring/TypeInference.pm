@@ -248,6 +248,12 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             elsif ($matched_value->isa('Chalk::Grammar::Token::Float')) {
                 $type_obj = $lattice->type_from_name('Num');
             }
+            # String literals (SINGLE_QUOTED_STRING, DOUBLE_QUOTED_STRING) → Str type
+            elsif ($matched_value->isa('Chalk::Grammar::Token') &&
+                   defined($pattern_name) &&
+                   ($pattern_name eq 'SINGLE_QUOTED_STRING' || $pattern_name eq 'DOUBLE_QUOTED_STRING')) {
+                $type_obj = $lattice->type_from_name('Str');
+            }
 
             # Always store the token for later extraction (e.g., class names)
             return Chalk::Semiring::TypeInferenceElement->new(
@@ -280,6 +286,14 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     method on_complete($item, $element, $completed_element = undef) {
         my $rule = $item->rule;
 
+        # DEBUG: Log rule completion
+        if ($ENV{DEBUG_TYPE_INFERENCE} && defined $rule) {
+            my $rule_class = ref($rule);
+            my $rule_lhs = $rule->lhs if $rule->can('lhs');
+            warn "TypeInference::on_complete() for rule: $rule_class (", ($rule_lhs // 'unknown'), ")\n";
+            warn "  Rule can infer_type: ", ($rule->can('infer_type') ? "YES" : "NO"), "\n";
+        }
+
         # Emit any type errors accumulated in the element to diagnostic context
         if ($element->can('errors') && $element->errors->@*) {
             for my $error ($element->errors->@*) {
@@ -292,6 +306,15 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         if (defined $rule && $rule->can('infer_type')) {
             return $rule->infer_type($self, $element);
         }
+
+        # NOTE: Container type inference (ArrayRef, HashRef, ArrayVar, HashVar, ScalarVar)
+        # is NOT implemented here because the TypeInference semiring uses meet() for
+        # multiply(), which causes Bottom when container types are combined with scalar
+        # types (e.g., meet(Int, ArrayRef) = Bottom). This breaks multi-statement programs.
+        # Proper handling requires either:
+        #   1. A more sophisticated type system with parametric types, or
+        #   2. Statement-level type isolation (don't meet() across statements)
+        # For now, container expressions keep the default top type (Any).
 
         # Default: preserve element unchanged (no type inference for this rule)
         return $element;
