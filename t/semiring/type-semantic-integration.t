@@ -150,3 +150,45 @@ subtest 'Multiple variable type bindings flow to Semantic' => sub {
         fail('Semantic sees $y as Num');
     }
 };
+
+# Test 3: ClassDeclaration field type integration
+# When using Composite with ClassDeclaration:
+# - TypeInference should register class with proper field types first
+# - Semantic should skip re-registration (avoid conflict)
+# - The TypeRegistry should have the TypeInference-inferred types
+subtest 'ClassDeclaration field types via Composite integration' => sub {
+    use Chalk::Grammar::Chalk::TypeRegistry;
+
+    # Reset registry for this test
+    my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
+    $registry->reset();
+
+    my $code = q{class Counter { field $count = 0; }};
+
+    my $type_sr = Chalk::Semiring::TypeInference->new();
+    my $sem_sr = Chalk::Semiring::Semantic->new(grammar => $chalk_grammar);
+    my $composite = Chalk::Semiring::Composite->new(
+        semirings => [$type_sr, $sem_sr]
+    );
+
+    my $parser = Chalk::Parser->new(
+        grammar => $chalk_grammar,
+        semiring => $composite
+    );
+
+    my $element = $parser->parse_string($code);
+    ok(defined($element), 'Parsing with Composite succeeded');
+
+    # Verify class was registered
+    ok($registry->has_class('Counter'), 'Counter class is registered');
+    ok($registry->is_complete('Counter'), 'Counter class is complete');
+
+    # Get the class type and check field type
+    my $counter_type = $registry->lookup('Counter');
+    my $count_type = $counter_type->field_type('$count');
+
+    # The key assertion: field type should be Int (from TypeInference), not Any
+    ok(defined $count_type, 'Field $count has a type');
+    is($count_type->name, 'Int',
+        'Field $count has Int type (from TypeInference, not default Any)');
+};
