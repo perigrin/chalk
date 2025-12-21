@@ -161,6 +161,60 @@ class Chalk::Grammar::Chalk::Rule::MethodCall :isa(Chalk::GrammarRule) {
 
         return $call_end;
     }
+
+    # TypeInference semiring: infer type from method/constructor calls
+    # Constructors (Class->new()) return Object type
+    # Other method calls also return Object type (conservative estimate)
+    method infer_type($semiring, $element) {
+        use Chalk::Grammar::Chalk::Type::Object;
+        use Chalk::Grammar::Chalk::TypeRegistry;
+
+        # Detect if this is a constructor call by examining children
+        # Look for pattern: ClassName (Constant) -> 'new' (Constant)
+        my @children = $element->children->@*;
+        my ($receiver_elem, $method_elem);
+
+        for my $child (@children) {
+            next unless $child->can('token');
+            my $token = $child->token;
+            next unless defined $token;
+
+            # Try to identify receiver and method
+            if (!defined $receiver_elem && $token->can('value')) {
+                my $val = $token->value;
+                # Check if this looks like a class name (registered class)
+                if (defined $val && !ref($val)) {
+                    my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
+                    if ($registry->has_class($val)) {
+                        $receiver_elem = $child;
+                        next;
+                    }
+                }
+            }
+
+            # Look for method name token
+            if (!defined $method_elem && $token->can('value')) {
+                my $val = $token->value;
+                if (defined $val && $val eq 'new') {
+                    $method_elem = $child;
+                }
+            }
+        }
+
+        # If this is a constructor call (Class->new()), return Object type
+        # For all other method calls, also return Object (methods typically return objects)
+        my $type_obj = Chalk::Grammar::Chalk::Type::Object->new();
+
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj  => $type_obj,
+            type_env  => $element->type_env,
+            children  => $element->children,
+            token     => $element->token,
+            errors    => $element->errors,
+            start_pos => $element->start_pos,
+            end_pos   => $element->end_pos
+        );
+    }
 }
 
 1;
