@@ -3,6 +3,7 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Node::Proj;
 
 class Chalk::IR::Node::CallEnd {
     field $call :param :reader;         # The Call node this completes
@@ -11,6 +12,11 @@ class Chalk::IR::Node::CallEnd {
 
     # Dependency tracking for peephole re-optimization
     field $_deps = [];
+
+    # Cached projection nodes
+    field $_ctrl_proj = undef;
+    field $_mem_proj = undef;
+    field $_ret_proj = undef;
 
     method add_dep($dependent_node_id) {
         push $_deps->@*, $dependent_node_id;
@@ -68,21 +74,39 @@ class Chalk::IR::Node::CallEnd {
         return;
     }
 
-    # Projection accessors (for future use)
-    # These would create Proj nodes for control, memory, and return value
+    # Projection accessors for control, memory, and return value
+    # Returns cached Proj nodes (created on first access)
     method ctrl_proj() {
-        # Returns a Proj node for control flow continuation
-        return undef;  # Placeholder
+        return $_ctrl_proj if defined $_ctrl_proj;
+        $_ctrl_proj = Chalk::IR::Node::Proj->new(
+            inputs => [ $self->id ],
+            index  => 0,
+            label  => 'ctrl',
+            source => $self,
+        );
+        return $_ctrl_proj;
     }
 
     method mem_proj() {
-        # Returns a Proj node for memory state
-        return undef;  # Placeholder
+        return $_mem_proj if defined $_mem_proj;
+        $_mem_proj = Chalk::IR::Node::Proj->new(
+            inputs => [ $self->id ],
+            index  => 1,
+            label  => 'mem',
+            source => $self,
+        );
+        return $_mem_proj;
     }
 
     method ret_proj() {
-        # Returns a Proj node for return value
-        return undef;  # Placeholder
+        return $_ret_proj if defined $_ret_proj;
+        $_ret_proj = Chalk::IR::Node::Proj->new(
+            inputs => [ $self->id ],
+            index  => 2,
+            label  => 'ret',
+            source => $self,
+        );
+        return $_ret_proj;
     }
 }
 
