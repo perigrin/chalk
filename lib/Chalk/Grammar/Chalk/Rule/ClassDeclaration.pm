@@ -230,6 +230,14 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
                 (ref($class_name_token) || (defined $class_name_token ? "'$class_name_token'" : 'undef'));
         }
 
+        # Check if TypeInference already registered this class (Composite mode)
+        # In Composite mode, TypeInference runs first and registers with proper field types
+        # We skip re-registration to avoid conflict and preserve the inferred types
+        my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
+        if ($registry->is_complete($class_name)) {
+            return undef;
+        }
+
         # Find the Block context (last child)
         my $block_ctx = $child_contexts[$#child_contexts];
 
@@ -237,14 +245,19 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         # Returns array of hashrefs: { name => $field_name, type => $type_obj, attributes => \@attrs, has_default => bool }
         my @field_info = _extract_fields_from_context($block_ctx);
 
-        # Build field hash: field_name => Type (use inferred type or default to Any)
+        # Get type_env from context (set by TypeInference via Composite integration)
+        # This allows us to use inferred field types instead of defaulting to Any
+        my $type_env = $context->env->{type_env} // {};
+
+        # Build field hash: field_name => Type (use type_env or default to Any)
         # Also build param_fields array for :param fields
         my %fields;
         my @param_fields;
         my $any_type = Chalk::Grammar::Chalk::Type::Any->new();
         for my $info (@field_info) {
             my $field_name = $info->{name};
-            my $field_type = $info->{type} // $any_type;
+            # First try type_env (from TypeInference), then field info, then Any
+            my $field_type = $type_env->{$field_name} // $info->{type} // $any_type;
             # Field names come as scalars like '$x', '$y', etc.
             $fields{$field_name} = $field_type;
 
@@ -270,7 +283,6 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         );
 
         # Register in TypeRegistry
-        my $registry = Chalk::Grammar::Chalk::TypeRegistry->instance();
         $registry->register($class_name, $class_type);
 
         # Return undef for now (we don't need IR generation for type registration)
