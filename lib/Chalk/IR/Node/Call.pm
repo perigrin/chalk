@@ -79,9 +79,20 @@ class Chalk::IR::Node::Call {
             $recv_value = $context->("node:" . $receiver->id);
         }
 
-        # Actual function dispatch would happen here
-        # For now, return undef - CallEnd handles return value
-        return undef;
+        # Return call descriptor for CallEnd to process
+        # This contains all information needed for function dispatch
+        my $descriptor = {
+            func_name => $func_name,
+            args      => \@evaluated_args,
+            rpc       => $rpc,
+        };
+
+        # Include receiver for method calls
+        if (defined $recv_value) {
+            $descriptor->{receiver} = $recv_value;
+        }
+
+        return $descriptor;
     }
 
     method attributes() {
