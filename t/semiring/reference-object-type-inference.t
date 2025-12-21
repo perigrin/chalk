@@ -45,6 +45,16 @@ sub parse_and_get_type {
     return $element->element_at(0);  # TypeInference element
 }
 
+# ===== Known Bug: Composite semiring multi-statement parsing (#437) =====
+
+subtest 'BUG #437: Composite semiring multi-statement with array constructor' => sub {
+    todo 'Composite semiring bug #437: array constructor in first statement breaks multi-statement parsing' => sub {
+        my $code = q{my $arr = [1, 2, 3]; my $x = 1;};
+        my $type_elem = parse_and_get_type($code);
+        ok(defined($type_elem), 'Multi-statement with array constructor in first statement parses');
+    };
+};
+
 # ===== Array Reference Type Inference Tests =====
 
 subtest 'ArrayRef: Reference constructor [] infers ArrayRef type' => sub {
