@@ -44,16 +44,17 @@ subtest 'Valid string coercion: Num to Str' => sub {
     is($result2, "3.14", "Float coercion produces correct string value");
 };
 
-subtest 'CodeRef to Num coerces to memory address' => sub {
+subtest 'CodeRef to Num fails (not meaningful)' => sub {
     my $coderef_type = $lattice->type_from_name('CodeRef');
     my $dummy_coderef = sub { };
 
+    # CodeRef cannot coerce to Num - this is almost never meaningful
     my $result = eval { $coercion->to_num($dummy_coderef, $coderef_type) };
     my $error = $@;
 
-    ok(!$error, "CodeRef coercion to Num succeeds");
-    ok(defined($result), "Result is defined");
-    ok($result > 0, "Coercion produces memory address");
+    ok($error, "CodeRef coercion to Num throws error");
+    ok(!defined($result), "No result returned");
+    like($error, qr/Cannot coerce.*CodeRef.*Num/i, "Error indicates coercion failure");
 };
 
 subtest 'Undef coercion to Num' => sub {
