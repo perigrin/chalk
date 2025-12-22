@@ -31,8 +31,8 @@ class Chalk::IR::TypeValidator {
         }
 
         return {
-            valid => (scalar(@$errors) == 0),
-            errors => [@$errors],  # Return copy
+            valid => (scalar($errors->@*) == 0),
+            errors => [$errors->@*],  # Return copy
         };
     }
 
@@ -44,7 +44,7 @@ class Chalk::IR::TypeValidator {
         # Check that node has a type
         my $node_type = $type_map->{$node_id};
         unless (defined $node_type) {
-            push @$errors, "Node $node_id (op=$op) has no type information";
+            push $errors->@*, "Node $node_id (op=$op) has no type information";
             return;
         }
 
@@ -67,7 +67,7 @@ class Chalk::IR::TypeValidator {
         my $inputs = $node->inputs;
         return unless defined $inputs;
 
-        for my $input_id (@$inputs) {
+        for my $input_id ($inputs->@*) {
             my $input_type = $type_map->{$input_id};
             next unless defined $input_type;
 
@@ -76,7 +76,7 @@ class Chalk::IR::TypeValidator {
                 # In Perl, everything can coerce to a number, so this is a warning not error
                 # We'll be permissive here - only error on Bottom types
                 if ($input_type isa Chalk::IR::Type::Bottom) {
-                    push @$errors, sprintf(
+                    push $errors->@*, sprintf(
                         "Node %d (op=%s) has Bottom type operand at input %d",
                         $node->id, $node->op, $input_id
                     );
@@ -92,12 +92,12 @@ class Chalk::IR::TypeValidator {
         return unless defined $inputs;
 
         # In Perl, everything is stringifiable, so we only check for Bottom
-        for my $input_id (@$inputs) {
+        for my $input_id ($inputs->@*) {
             my $input_type = $type_map->{$input_id};
             next unless defined $input_type;
 
             if ($input_type isa Chalk::IR::Type::Bottom) {
-                push @$errors, sprintf(
+                push $errors->@*, sprintf(
                     "Node %d (op=%s) has Bottom type operand at input %d",
                     $node->id, $node->op, $input_id
                 );
@@ -112,7 +112,7 @@ class Chalk::IR::TypeValidator {
         return unless defined $inputs;
 
         # Phi nodes: first input is control, rest are values
-        my @value_inputs = @$inputs[1..$#$inputs];
+        my @value_inputs = $inputs->@[1..$inputs->$#*];
         return unless @value_inputs;
 
         # Get the result type
@@ -124,7 +124,7 @@ class Chalk::IR::TypeValidator {
         for my $input_id (@value_inputs) {
             my $input_type = $type_map->{$input_id};
             unless (defined $input_type) {
-                push @$errors, sprintf(
+                push $errors->@*, sprintf(
                     "Phi node %d has input %d with no type",
                     $node->id, $input_id
                 );
@@ -137,7 +137,7 @@ class Chalk::IR::TypeValidator {
         for my $i (0..$#incoming_types) {
             my $type = $incoming_types[$i];
             if ($type isa Chalk::IR::Type::Bottom) {
-                push @$errors, sprintf(
+                push $errors->@*, sprintf(
                     "Phi node %d has Bottom type at input %d",
                     $node->id, $value_inputs[$i]
                 );
@@ -159,7 +159,7 @@ class Chalk::IR::TypeValidator {
             # If types differ, result should be Union or Top
             unless ($all_same) {
                 unless ($phi_type isa Chalk::IR::Type::Union || $phi_type isa Chalk::IR::Type::Top) {
-                    push @$errors, sprintf(
+                    push $errors->@*, sprintf(
                         "Phi node %d has differing input types but result is not Union/Top: %s",
                         $node->id, ref($phi_type)
                     );
@@ -186,7 +186,7 @@ class Chalk::IR::TypeValidator {
 
     # Get validation errors
     method get_errors() {
-        return [@$errors];  # Return copy
+        return [$errors->@*];  # Return copy
     }
 }
 
