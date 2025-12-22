@@ -38,11 +38,27 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
 
         # Extract variable name from metadata hashref
         my $var_name;
-        if (ref($var) eq 'HASH' && $var->{type} && $var->{type} eq 'scalar_var') {
-            $var_name = $var->{name};
+        my $var_type;
+        if (ref($var) eq 'HASH' && $var->{type}) {
+            $var_type = $var->{type};
+            my $name = $var->{name};
+            my $sigil = $var->{sigil};
+
+            if ($var_type eq 'scalar_var') {
+                # Scalars are stored without sigil for backward compatibility
+                $var_name = $name;
+            } elsif ($var_type eq 'array_var') {
+                # Arrays are stored with @ sigil
+                $var_name = '@' . $name;
+            } elsif ($var_type eq 'hash_var') {
+                # Hashes are stored with % sigil
+                $var_name = '%' . $name;
+            } else {
+                die "VariableDeclaration: unknown variable type: $var_type";
+            }
         } else {
             my $desc = ref($var) || (defined $var ? "'$var'" : 'undef');
-            die "VariableDeclaration: expected scalar_var hashref, got: $desc";
+            die "VariableDeclaration: expected variable hashref, got: $desc";
         }
 
         # Get the expression value (child after '=' + WS_OPT)
