@@ -4,6 +4,9 @@
 use 5.42.0;
 use experimental qw(class);
 use utf8;
+use Chalk::IR::Type::Top;
+use Chalk::IR::Type::Bottom;
+use Chalk::IR::Type::Union;
 
 class Chalk::IR::TypePropagation {
     field $graph :param :reader;
@@ -14,10 +17,14 @@ class Chalk::IR::TypePropagation {
     # Worklist for iterative propagation
     field $worklist = [];
 
+    # Conflict tracking: node_id => { old_type => Type, new_type => Type, reason => String }
+    field $conflicts = {};
+
     # Initialize the type map with known types from nodes
     method _initialize() {
         $type_map = {};
         $worklist = [];
+        $conflicts = {};
 
         # Visit all nodes and initialize types
         for my $node_id (keys $graph->nodes->%*) {
@@ -118,7 +125,20 @@ class Chalk::IR::TypePropagation {
             }
 
             if ($changed) {
-                $type_map->{$node_id} = $new_type;
+                # Detect type conflict: if old_type exists and types are incompatible
+                if (defined $old_type && !$self->_types_compatible($old_type, $new_type)) {
+                    # Record the conflict
+                    $conflicts->{$node_id} = {
+                        old_type => $old_type,
+                        new_type => $new_type,
+                        reason => "Type changed from " . ref($old_type) . " to " . ref($new_type),
+                    };
+
+                    # Fall back to Top type (Any/SV*) for safety
+                    $type_map->{$node_id} = Chalk::IR::Type::Top->top();
+                } else {
+                    $type_map->{$node_id} = $new_type;
+                }
 
                 # Add users to worklist since type changed
                 push $worklist->@*, $self->_get_users($node_id)->@*;
@@ -140,6 +160,32 @@ class Chalk::IR::TypePropagation {
     # Get all type mappings
     method get_type_map() {
         return { $type_map->%* };  # Return copy
+    }
+
+    # Get all conflicts detected during propagation
+    method get_conflicts() {
+        return { $conflicts->%* };  # Return copy
+    }
+
+    # Check if two types are compatible for iterative refinement
+    # Types are compatible if they are the same class or one is a subtype
+    # Union types and Top are always compatible (they can absorb other types)
+    method _types_compatible($type1, $type2) {
+        # Top and Bottom are compatible with everything
+        return 1 if $type1 isa Chalk::IR::Type::Top;
+        return 1 if $type2 isa Chalk::IR::Type::Top;
+        return 1 if $type1 isa Chalk::IR::Type::Bottom;
+        return 1 if $type2 isa Chalk::IR::Type::Bottom;
+
+        # Union types are compatible (they merge other types)
+        return 1 if $type1 isa Chalk::IR::Type::Union;
+        return 1 if $type2 isa Chalk::IR::Type::Union;
+
+        # Same class = compatible
+        return 1 if ref($type1) eq ref($type2);
+
+        # Different concrete types = incompatible
+        return 0;
     }
 }
 
