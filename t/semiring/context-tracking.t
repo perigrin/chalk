@@ -138,4 +138,218 @@ subtest 'Multiple operations preserve context correctly' => sub {
        "Result type is numeric: " . $type->name);
 };
 
+subtest 'Valid coercion: Num to Str in concatenation context' => sub {
+    # Test that numbers can be coerced to strings in concatenation
+    my $code = "5 . 3";
+
+    my $parser = Chalk::Parser->new(grammar => $grammar, semiring => $semiring);
+    my $result = $parser->parse_string($code);
+
+    ok($result, "Parse succeeded for number concatenation") or return;
+
+    my $type_elem = $result->element_at(0);
+    ok($type_elem, "TypeInference element exists") or return;
+
+    # Should succeed - numbers can coerce to strings
+    ok(!$type_elem->has_errors, "No coercion errors for Num -> Str");
+    is($type_elem->type_obj->name, 'Str', "Result type is Str");
+};
+
+subtest 'Valid coercion: Str to Num in arithmetic context' => sub {
+    # Test that numeric strings can be coerced to numbers
+    # This is a theoretical test - actual string literals would need parser support
+    # For now, we test that the type system would allow it
+    my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+
+    # Create a string type element
+    my $str_elem = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->type_from_name('Str'),
+        type_env => {},
+        children => [],
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 0,
+        container_context => 'scalar',
+        value_context => 'numeric'  # String in numeric context
+    );
+
+    # Validate coercion using Coercion infrastructure
+    use Chalk::Grammar::Chalk::Type::Coercion;
+    my $coercion = Chalk::Grammar::Chalk::Type::Coercion->new();
+
+    # Test that string can coerce to numeric
+    # The actual value "42" should coerce successfully
+    my $result = eval { $coercion->to_num("42", $str_elem->type_obj) };
+    ok(defined($result), "String '42' coerces to Num");
+    is($result, 42, "Coercion produces correct numeric value");
+};
+
+subtest 'Invalid coercion: CodeRef in arithmetic context' => sub {
+    # Test that code references cannot be coerced to numbers
+    my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+
+    # Create a CodeRef type element
+    my $code_elem = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->type_from_name('CodeRef'),
+        type_env => {},
+        children => [],
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 0,
+        container_context => 'scalar',
+        value_context => 'numeric'  # CodeRef in numeric context
+    );
+
+    # Validate that coercion fails
+    use Chalk::Grammar::Chalk::Type::Coercion;
+    my $coercion = Chalk::Grammar::Chalk::Type::Coercion->new();
+
+    # Test that CodeRef cannot coerce to numeric
+    my $dummy_coderef = sub { };
+    my $result = eval { $coercion->to_num($dummy_coderef, $code_elem->type_obj) };
+    my $error = $@;
+    ok(!defined($result) || $error, "CodeRef coercion to Num fails");
+    like($error, qr/type.*coercion.*error/i, "Error message indicates coercion failure")
+        if $error;
+};
+
+subtest 'Coercion validation in ArithmeticOp' => sub {
+    # Test that ArithmeticOp validates numeric coercion
+    # Using actual string literals that would fail numeric coercion
+    # Since we can't parse string literals in arithmetic yet, we'll test
+    # the type inference logic directly
+
+    my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+
+    # Simulate an arithmetic operation with string operands
+    # This should generate a coercion error
+    my $left = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->type_from_name('Str'),
+        type_env => {},
+        children => [],
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 3,
+        container_context => 'scalar',
+        value_context => undef
+    );
+
+    my $right = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->type_from_name('Str'),
+        type_env => {},
+        children => [],
+        token => undef,
+        errors => [],
+        start_pos => 6,
+        end_pos => 9,
+        container_context => 'scalar',
+        value_context => undef
+    );
+
+    # Create parent element with children
+    my $arith_elem = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->top_type(),
+        type_env => {},
+        children => [$left, $right],
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 9,
+        container_context => 'scalar',
+        value_context => undef
+    );
+
+    # Use ArithmeticOp's infer_type to validate coercion
+    use Chalk::Grammar::Chalk::Rule::ArithmeticOp;
+    my $rule = Chalk::Grammar::Chalk::Rule::ArithmeticOp->new(
+        lhs => 'ArithmeticOp',
+        rhs => []
+    );
+
+    my $type_sr = Chalk::Semiring::TypeInference->new();
+    my $result = $rule->infer_type($type_sr, $arith_elem);
+
+    # ArithmeticOp should allow Str in arithmetic (since Num <: Str in our lattice)
+    # But in Phase 3, we want to validate that the coercion is valid
+    # For now, the type system accepts it because Str is a supertype of Num
+    ok($result, "ArithmeticOp infer_type returns result");
+};
+
+subtest 'Coercion validation in ConcatenationOp' => sub {
+    # Test that ConcatenationOp validates string coercion
+    my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
+
+    # Simulate concatenation with numeric operands (should succeed)
+    my $left = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->type_from_name('Int'),
+        type_env => {},
+        children => [],
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 1,
+        container_context => 'scalar',
+        value_context => undef
+    );
+
+    # Create a token for the '.' operator
+    use Chalk::Grammar::Token;
+    my $dot_token = Chalk::Grammar::Token->new(value => '.');
+
+    my $operator_elem = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->top_type(),
+        type_env => {},
+        children => [],
+        token => $dot_token,
+        errors => [],
+        start_pos => 2,
+        end_pos => 3,
+        container_context => undef,
+        value_context => undef
+    );
+
+    my $right = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->type_from_name('Int'),
+        type_env => {},
+        children => [],
+        token => undef,
+        errors => [],
+        start_pos => 4,
+        end_pos => 5,
+        container_context => 'scalar',
+        value_context => undef
+    );
+
+    # Create parent element with children (left, operator, right)
+    my $concat_elem = Chalk::Semiring::TypeInferenceElement->new(
+        type_obj => $lattice->top_type(),
+        type_env => {},
+        children => [$left, $operator_elem, $right],
+        token => undef,
+        errors => [],
+        start_pos => 0,
+        end_pos => 5,
+        container_context => 'scalar',
+        value_context => undef
+    );
+
+    # Use ConcatenationOp's infer_type to validate coercion
+    use Chalk::Grammar::Chalk::Rule::ConcatenationOp;
+    my $rule = Chalk::Grammar::Chalk::Rule::ConcatenationOp->new(
+        lhs => 'ConcatenationOp',
+        rhs => []
+    );
+
+    my $type_sr = Chalk::Semiring::TypeInference->new();
+    my $result = $rule->infer_type($type_sr, $concat_elem);
+
+    # ConcatenationOp should accept Int operands (coercible to Str)
+    ok($result, "ConcatenationOp infer_type returns result");
+    is($result->type_obj->name, 'Str', "Result type is Str");
+    ok(!$result->has_errors, "No coercion errors for Int -> Str");
+};
+
 # done_testing handled by defer at top

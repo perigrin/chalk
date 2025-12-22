@@ -184,6 +184,23 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 "ArithmeticOp found unrecognized operator '$operator' - expected one of +, -, *, /";
     }
 
+    # Helper method to check if a type can coerce to numeric
+    # Based on Coercion.pm's to_num() implementation
+    method can_coerce_to_num($type) {
+        my $type_name = $type->name();
+
+        # These types can coerce to Num per Coercion.pm
+        return 1 if $type_name eq 'Int';
+        return 1 if $type_name eq 'Num';
+        return 1 if $type_name eq 'Str';
+        return 1 if $type_name eq 'Undef';
+        return 1 if $type_name =~ /Ref$/;  # ArrayRef, HashRef, CodeRef, etc.
+        return 1 if $type_name eq 'Object';
+        return 1 if $type_name eq 'Any';  # Top type - could be anything
+
+        return 0;  # Type cannot coerce to Num
+    }
+
     # Type inference for TypeInference semiring
     # Infers result type based on operand types
     # Uses simplified approach: first and last typed children are operands
@@ -273,19 +290,35 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
             # Int + Int -> Int, Int + Num -> Num, Num + Num -> Num
             $result_type = $left_type->join($right_type);
         } else {
-            # Type error: non-numeric operands for arithmetic
-            push @new_errors, {
-                type => 'type_error',
-                message => "Type error: Cannot apply arithmetic operator to " .
-                           $left_name . " and " . $right_name .
-                           " (expected numeric types)",
-                start_pos => $element->start_pos,
-                end_pos => $element->end_pos,
-                left_type => $left_name,
-                right_type => $right_name,
-            };
-            # Result type is bottom (type error)
-            $result_type = $lattice->bottom_type();
+            # Phase 3: Validate coercion to numeric context
+            # Check if non-numeric types can coerce to Num
+            my $left_can_coerce = $self->can_coerce_to_num($left_type);
+            my $right_can_coerce = $self->can_coerce_to_num($right_type);
+
+            if ($left_can_coerce && $right_can_coerce) {
+                # Both operands can coerce to numeric - allow with coercion
+                # Result type is Num (most general numeric type after coercion)
+                $result_type = $lattice->type_from_name('Num');
+            } else {
+                # Type error: operands cannot coerce to numeric
+                my @invalid_types;
+                push @invalid_types, $left_name unless $left_can_coerce;
+                push @invalid_types, $right_name unless $right_can_coerce;
+
+                push @new_errors, {
+                    type => 'coercion_error',
+                    message => "Coercion error: Cannot coerce " .
+                               join(" and ", @invalid_types) .
+                               " to numeric type (required for arithmetic)",
+                    start_pos => $element->start_pos,
+                    end_pos => $element->end_pos,
+                    left_type => $left_name,
+                    right_type => $right_name,
+                    invalid_types => \@invalid_types,
+                };
+                # Result type is bottom (type error)
+                $result_type = $lattice->bottom_type();
+            }
         }
 
         return Chalk::Semiring::TypeInferenceElement->new(

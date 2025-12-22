@@ -78,6 +78,23 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         return Chalk::IR::Node::StrConcat->new( left => $left, right => $right );
     }
 
+    # Helper method to check if a type can coerce to string
+    # Based on Coercion.pm's to_str() implementation
+    method can_coerce_to_str($type) {
+        my $type_name = $type->name();
+
+        # These types can coerce to Str per Coercion.pm
+        return 1 if $type_name eq 'Str';
+        return 1 if $type_name eq 'Num';
+        return 1 if $type_name eq 'Int';
+        return 1 if $type_name eq 'Undef';
+        return 1 if $type_name =~ /Ref$/;  # ArrayRef, HashRef, CodeRef, etc.
+        return 1 if $type_name eq 'Object';
+        return 1 if $type_name eq 'Any';  # Top type - could be anything
+
+        return 0;  # Type cannot coerce to Str
+    }
+
     # Type inference for TypeInference semiring
     # String concatenation coerces operands to strings
     # Sets string value context on operands
@@ -158,24 +175,38 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         # Get type lattice
         my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
 
-        # String concatenation type rules:
-        # Most types can stringify → Str
-        # CodeRef, ArrayRef, HashRef typically can't be meaningfully concatenated → ⊥
-
         my $left_name = $left_type->name();
         my $right_name = $right_type->name();
 
-        # Check for reference types that can't be meaningfully concatenated
-        my $left_is_ref = any { $left_name eq $_ } qw(CodeRef ArrayRef HashRef);
-        my $right_is_ref = any { $right_name eq $_ } qw(CodeRef ArrayRef HashRef);
+        # Phase 3: Validate coercion to string context
+        my $left_can_coerce = $self->can_coerce_to_str($left_type);
+        my $right_can_coerce = $self->can_coerce_to_str($right_type);
 
+        my @new_errors = $element->errors->@*;
         my $result_type;
-        if ($left_is_ref || $right_is_ref) {
-            # Reference types can't be meaningfully concatenated
-            $result_type = $lattice->bottom_type();
-        } else {
-            # Most types can be coerced to strings
+
+        if ($left_can_coerce && $right_can_coerce) {
+            # Both operands can coerce to string - concatenation succeeds
             $result_type = $lattice->type_from_name('Str');
+        } else {
+            # Type error: operands cannot coerce to string
+            my @invalid_types;
+            push @invalid_types, $left_name unless $left_can_coerce;
+            push @invalid_types, $right_name unless $right_can_coerce;
+
+            push @new_errors, {
+                type => 'coercion_error',
+                message => "Coercion error: Cannot coerce " .
+                           join(" and ", @invalid_types) .
+                           " to string type (required for concatenation)",
+                start_pos => $element->start_pos,
+                end_pos => $element->end_pos,
+                left_type => $left_name,
+                right_type => $right_name,
+                invalid_types => \@invalid_types,
+            };
+            # Result type is bottom (type error)
+            $result_type = $lattice->bottom_type();
         }
 
         return Chalk::Semiring::TypeInferenceElement->new(
@@ -183,7 +214,7 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
             type_env => $element->type_env,
             children => \@children,  # Use updated children with string context
             token => $element->token,
-            errors => $element->errors,
+            errors => \@new_errors,  # Use updated errors with coercion validation
             start_pos => $element->start_pos,
             end_pos => $element->end_pos,
             container_context => $element->container_context,
