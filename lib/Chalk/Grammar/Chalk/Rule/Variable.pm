@@ -186,7 +186,9 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
             token     => $element->token,
             errors    => $element->errors,
             start_pos => $element->start_pos,
-            end_pos   => $element->end_pos
+            end_pos   => $element->end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 

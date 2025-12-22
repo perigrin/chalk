@@ -80,6 +80,7 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
 
     # Type inference for TypeInference semiring
     # String concatenation coerces operands to strings
+    # Sets string value context on operands
     method infer_type($semiring, $element) {
         use Chalk::Semiring::TypeInference;  # For TypeInferenceElement
 
@@ -90,6 +91,29 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         # ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
         # Need at least 3 children for binary operation
         return $element if scalar(@children) < 3;
+
+        # Mark operand children with string value context
+        # This propagates context information for downstream coercion
+        my @updated_children;
+        for my $child (@children) {
+            if ($child->can('type_obj') && defined($child->type_obj)) {
+                # Create new element with string context
+                push @updated_children, Chalk::Semiring::TypeInferenceElement->new(
+                    type_obj => $child->type_obj,
+                    type_env => $child->type_env,
+                    children => $child->children,
+                    token => $child->token,
+                    errors => $child->errors,
+                    start_pos => $child->start_pos,
+                    end_pos => $child->end_pos,
+                    container_context => $child->container_context,
+                    value_context => 'string'  # Set string context for concatenation
+                );
+            } else {
+                push @updated_children, $child;
+            }
+        }
+        @children = @updated_children;
 
         # Find the '.' operator token
         my $operator_idx;
@@ -157,8 +181,13 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $result_type,
             type_env => $element->type_env,
-            children => $element->children,
-            token => $element->token
+            children => \@children,  # Use updated children with string context
+            token => $element->token,
+            errors => $element->errors,
+            start_pos => $element->start_pos,
+            end_pos => $element->end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 }

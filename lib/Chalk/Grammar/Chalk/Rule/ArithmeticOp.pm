@@ -187,6 +187,7 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
     # Type inference for TypeInference semiring
     # Infers result type based on operand types
     # Uses simplified approach: first and last typed children are operands
+    # Sets numeric value context on operands
     method infer_type( $semiring, $element ) {
         use Chalk::Semiring::TypeInference;    # For TypeInferenceElement
         use Chalk::Grammar::Chalk::TypeLattice;
@@ -199,6 +200,29 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         # ArithmeticOp -> Expression WS_OPT OPERATOR WS_OPT Expression (binary)
         # Need at least 2 typed children for binary operation
         return $element if scalar(@children) < 2;
+
+        # Mark operand children with numeric value context
+        # This propagates context information for downstream coercion
+        my @updated_children;
+        for my $child (@children) {
+            if ($child->can('type_obj') && defined($child->type_obj)) {
+                # Create new element with numeric context
+                push @updated_children, Chalk::Semiring::TypeInferenceElement->new(
+                    type_obj => $child->type_obj,
+                    type_env => $child->type_env,
+                    children => $child->children,
+                    token => $child->token,
+                    errors => $child->errors,
+                    start_pos => $child->start_pos,
+                    end_pos => $child->end_pos,
+                    container_context => $child->container_context,
+                    value_context => 'numeric'  # Set numeric context for arithmetic
+                );
+            } else {
+                push @updated_children, $child;
+            }
+        }
+        @children = @updated_children;
 
         # Simplified approach: find first and last children with non-top types
         # These correspond to left and right operands in binary expression
@@ -267,11 +291,13 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $result_type,
             type_env => $element->type_env,
-            children => $element->children,
+            children => \@children,  # Use updated children with numeric context
             token    => $element->token,
             errors   => \@new_errors,
             start_pos => $element->start_pos,
             end_pos => $element->end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 }
