@@ -1,5 +1,5 @@
-# ABOUTME: Semantic action for ArrayVar rule in Chalk grammar
-# ABOUTME: Passes through array variable tokens (@var or @_)
+# ABOUTME: Semantic action for ArrayVar - extracts variable name from array syntax
+# ABOUTME: ArrayVar handles @identifier and returns the variable name as metadata
 use 5.42.0;
 use experimental 'class';
 
@@ -7,8 +7,26 @@ class Chalk::Grammar::Chalk::Rule::ArrayVar :isa(Chalk::GrammarRule) {
     method evaluate($context) {
         # ArrayVar -> '@' Identifier
         # ArrayVar -> '@' %SPECIAL_IDENTIFIER%
-        # Pass through first child (the @ sigil)
-        return $context->child(0);
+
+        # Child 0 is '@', child 1 is the identifier
+        my $identifier_node = $context->child(1);
+
+        # Extract the actual string - Identifier returns an array of characters
+        my $identifier;
+        if (ref($identifier_node) eq 'ARRAY') {
+            # Join array elements to get the identifier string
+            $identifier = join('', $identifier_node->@*);
+        } else {
+            $identifier = $identifier_node;
+        }
+
+        # Return a hashref with metadata about this variable
+        # This will be used by Variable and VariableDeclaration
+        return {
+            type => 'array_var',
+            name => $identifier,
+            sigil => '@'
+        };
     }
 }
 
