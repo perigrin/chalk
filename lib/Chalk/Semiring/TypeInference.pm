@@ -286,6 +286,23 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     method on_complete($item, $element, $completed_element = undef) {
         my $rule = $item->rule;
 
+        # When running under Composite semiring, the $item->rule is the base GrammarRule
+        # but the Semantic element has the custom semantic action class with infer_type()
+        # Try to get the custom rule from the Semantic element's context
+        if ($completed_element && $completed_element->can('element_at')) {
+            # CompositeElement: try to get Semantic element (index 1)
+            my $semantic_elem = $completed_element->element_at(1);
+            if ($semantic_elem && $semantic_elem->can('context')) {
+                my $ctx = $semantic_elem->context;
+                if ($ctx && $ctx->can('rule')) {
+                    my $semantic_rule = $ctx->rule;
+                    if ($semantic_rule && $semantic_rule->can('infer_type')) {
+                        $rule = $semantic_rule;
+                    }
+                }
+            }
+        }
+
         # DEBUG: Log rule completion
         if ($ENV{DEBUG_TYPE_INFERENCE} && defined $rule) {
             my $rule_class = ref($rule);

@@ -114,6 +114,125 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         # For other variable types, pass through the metadata
         return $var_metadata;
     }
+
+    # TypeInference semiring: infer types for variable access patterns
+    # - Array dereference $x->[0] infers $x is ArrayRef
+    # - Hash dereference $x->{key} infers $x is HashRef
+    # - Array variable @arr adds @arr -> Array to type_env
+    # - Hash variable %hash adds %hash -> Hash to type_env
+    method infer_type($semiring, $element) {
+        use Chalk::Grammar::Chalk::Type::ArrayRef;
+        use Chalk::Grammar::Chalk::Type::HashRef;
+        use Chalk::Grammar::Chalk::Type::Array;
+        use Chalk::Grammar::Chalk::Type::Hash;
+
+        my @children = $element->children->@*;
+        my $type_env = { $element->type_env->%* };  # Clone existing type_env
+
+        # Detect subscript/dereference patterns by scanning all tokens in the tree
+        # Look for closing brackets ']' or '}' as the semiring stores the last matched token
+        # Patterns:
+        #   Direct:   ScalarVar '[' Expression ']' / ScalarVar '{' Expression '}'
+        #   Arrow:    Variable '->' '[' Expression ']' / Variable '->' '{' Expression '}'
+        my $is_array_subscript = 0;
+        my $is_hash_subscript = 0;
+        my $var_name;
+
+        # Recursively collect all tokens to detect pattern
+        my @all_tokens;
+        $self->_collect_tokens($element, \@all_tokens);
+
+        for my $token (@all_tokens) {
+            my $val;
+
+            # Extract value from token (either string or Token object)
+            if (!ref($token)) {
+                $val = $token;
+            } elsif ($token->can('value')) {
+                $val = $token->value;
+            }
+
+            next unless defined $val;
+
+            # Look for closing brackets to detect subscript patterns
+            if ($val eq ']') {
+                $is_array_subscript = 1;
+            } elsif ($val eq '}') {
+                $is_hash_subscript = 1;
+            }
+
+            # Extract variable name (first non-bracket value)
+            if (!defined $var_name && $val !~ /^[\[\]\{\}0-9]$/ && $val ne '->') {
+                $var_name = $val;
+            }
+        }
+
+        # For subscript/dereference access, infer the reference type
+        if ($is_array_subscript && defined $var_name) {
+            # $x[0] or $x->[0] implies $x is ArrayRef
+            my $full_name = '$' . $var_name;
+            $type_env->{$full_name} = Chalk::Grammar::Chalk::Type::ArrayRef->new();
+        } elsif ($is_hash_subscript && defined $var_name) {
+            # $x{key} or $x->{key} implies $x is HashRef
+            my $full_name = '$' . $var_name;
+            $type_env->{$full_name} = Chalk::Grammar::Chalk::Type::HashRef->new();
+        }
+
+        # Return element with updated type_env
+        return Chalk::Semiring::TypeInferenceElement->new(
+            type_obj  => $element->type_obj,  # Preserve the type
+            type_env  => $type_env,
+            children  => $element->children,
+            token     => $element->token,
+            errors    => $element->errors,
+            start_pos => $element->start_pos,
+            end_pos   => $element->end_pos
+        );
+    }
+
+    # Helper to recursively collect all tokens from element tree
+    method _collect_tokens($element, $tokens) {
+        return unless defined $element;
+
+        if ($element->can('token')) {
+            my $token = $element->token;
+            if (defined $token) {
+                push @$tokens, $token;
+            }
+        }
+
+        if ($element->can('children') && $element->children->@*) {
+            for my $child ($element->children->@*) {
+                $self->_collect_tokens($child, $tokens);
+            }
+        }
+    }
+
+    # Helper to recursively extract variable name from nested elements
+    method _extract_var_name($element) {
+        return undef unless defined $element;
+
+        # Check if this element has a token with a variable name
+        if ($element->can('token')) {
+            my $token = $element->token;
+            if (defined $token && ref($token) && $token->can('value')) {
+                my $val = $token->value;
+                if (defined $val && !ref($val)) {
+                    return $val;
+                }
+            }
+        }
+
+        # Recursively check children
+        if ($element->can('children')) {
+            for my $child ($element->children->@*) {
+                my $name = $self->_extract_var_name($child);
+                return $name if defined $name;
+            }
+        }
+
+        return undef;
+    }
 }
 
 1;
