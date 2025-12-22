@@ -55,15 +55,17 @@ subtest 'Numeric coercion (to_num) - undef to number' => sub {
        'undef coerces to 0');
 };
 
-subtest 'Numeric coercion (to_num) - reference to number' => sub {
+subtest 'Numeric coercion (to_num) - reference to number fails' => sub {
     my $coercer = Chalk::Grammar::Chalk::Type::Coercion->new();
 
-    # References coerce to memory addresses (implementation-dependent)
-    # We'll test that it returns a number, not the exact value
+    # References cannot coerce to numbers - this would be almost never meaningful
+    # The type system should catch this at compile time
     my $arr_ref = [];
-    my $result = $coercer->to_num($arr_ref, Chalk::Grammar::Chalk::Type::ArrayRef->new());
+    my $result = eval { $coercer->to_num($arr_ref, Chalk::Grammar::Chalk::Type::ArrayRef->new()) };
+    my $error = $@;
 
-    like($result, qr/^\d+$/, 'ArrayRef coerces to numeric address');
+    ok(!defined($result), 'ArrayRef does not coerce to Num');
+    like($error, qr/Cannot coerce.*ArrayRef.*Num/i, 'Error indicates coercion failure');
 };
 
 subtest 'String coercion (to_str) - identity cases' => sub {
@@ -94,14 +96,17 @@ subtest 'String coercion (to_str) - undef to string' => sub {
        'undef coerces to empty string');
 };
 
-subtest 'String coercion (to_str) - reference to string' => sub {
+subtest 'String coercion (to_str) - reference to string fails' => sub {
     my $coercer = Chalk::Grammar::Chalk::Type::Coercion->new();
 
+    # ArrayRef/HashRef/CodeRef cannot coerce to string - "TYPE(0x...)" is not meaningful
+    # Object can coerce to string (might have overload)
     my $arr_ref = [];
-    my $result = $coercer->to_str($arr_ref, Chalk::Grammar::Chalk::Type::ArrayRef->new());
+    my $result = eval { $coercer->to_str($arr_ref, Chalk::Grammar::Chalk::Type::ArrayRef->new()) };
+    my $error = $@;
 
-    like($result, qr/^ARRAY\(0x[0-9a-fA-F]+\)$/,
-         'ArrayRef coerces to "ARRAY(0x...)"');
+    ok(!defined($result), 'ArrayRef does not coerce to Str');
+    like($error, qr/Cannot coerce.*ArrayRef.*Str/i, 'Error indicates coercion failure');
 };
 
 subtest 'Boolean coercion (to_bool) - identity cases' => sub {

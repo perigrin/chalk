@@ -12,7 +12,8 @@ class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Co
     use Scalar::Util qw(looks_like_number);
 
     # Numeric coercion: to_num
-    # Per spec: numbers stay, valid numeric strings parse, invalid to 0, refs to address
+    # Per spec: numbers stay, valid numeric strings parse, invalid to 0
+    # Refs/Object cannot coerce to Num - almost never meaningful
     method to_num($value, $source_type) {
         # Undef coerces to 0
         if (blessed($source_type) eq 'Chalk::Grammar::Chalk::Type::Undef') {
@@ -45,11 +46,8 @@ class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Co
             return 0;
         }
 
-        # References coerce to memory addresses
-        # Check by type name prefix since our Ref types use is_subtype_of not Perl inheritance
-        if ($type_name =~ qr/^Chalk::Grammar::Chalk::Type::(?:Ref|.*Ref|Object)$/) {
-            return refaddr($value);
-        }
+        # Refs/Object cannot coerce to Num - coercing to memory address is almost never meaningful
+        # Use explicit refaddr() if you really need this behavior
 
         my $target = Chalk::Grammar::Chalk::Type::Num->new();
         my $exception = Chalk::Grammar::Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "numeric coercion");
@@ -57,7 +55,8 @@ class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Co
     }
 
     # String coercion: to_str
-    # Per spec: strings stay, numbers stringify, refs show type+address, undef to empty
+    # Per spec: strings stay, numbers stringify, Object may have overload, undef to empty
+    # ArrayRef/HashRef/CodeRef cannot coerce to Str - "TYPE(0x...)" is not meaningful
     method to_str($value, $source_type) {
         # Undef coerces to empty string
         if (blessed($source_type) eq 'Chalk::Grammar::Chalk::Type::Undef') {
@@ -75,12 +74,13 @@ class Chalk::Grammar::Chalk::Type::Coercion :isa(Chalk::Grammar::Chalk::Type::Co
             return "$value";  # Stringify to ensure string context
         }
 
-        # References stringify to TYPE(0x...)
-        # Check by type name prefix since our Ref types use is_subtype_of not Perl inheritance
-        if ($type_name =~ qr/^Chalk::Grammar::Chalk::Type::(?:Ref|.*Ref|Object)$/) {
-            # Let Perl handle reference stringification
+        # Object can have meaningful stringification via overload
+        if ($type_name eq 'Chalk::Grammar::Chalk::Type::Object') {
             return "$value";
         }
+
+        # ArrayRef/HashRef/CodeRef cannot coerce to Str
+        # "ARRAY(0x...)" output is almost never meaningful - likely a bug
 
         my $target = Chalk::Grammar::Chalk::Type::Str->new();
         my $exception = Chalk::Grammar::Chalk::Type::Exception->type_coercion_error($source_type, $target, $value, "string coercion");

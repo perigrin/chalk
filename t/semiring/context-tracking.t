@@ -210,9 +210,8 @@ subtest 'Invalid coercion: CodeRef in arithmetic context' => sub {
     my $dummy_coderef = sub { };
     my $result = eval { $coercion->to_num($dummy_coderef, $code_elem->type_obj) };
     my $error = $@;
-    ok(!defined($result) || $error, "CodeRef coercion to Num fails");
-    like($error, qr/type.*coercion.*error/i, "Error message indicates coercion failure")
-        if $error;
+    ok(!defined($result) && $error, "CodeRef coercion to Num fails");
+    like($error, qr/Cannot coerce.*CodeRef.*Num/i, "Error message indicates coercion failure");
 };
 
 subtest 'Coercion validation in ArithmeticOp' => sub {
