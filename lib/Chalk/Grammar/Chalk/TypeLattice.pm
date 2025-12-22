@@ -248,7 +248,6 @@ class Chalk::Grammar::Chalk::TypeLattice {
 
     # Check if a type can coerce to string context
     # Based on Coercion.pm's to_str() implementation
-    # Note: Ref/Object types CAN coerce to string - "ARRAY(0x...)" is valid output
     method can_coerce_to_str($type) {
         my $type_name = $type->name();
 
@@ -265,14 +264,15 @@ class Chalk::Grammar::Chalk::TypeLattice {
         # Undef coerces to empty string
         return 1 if $type_name eq 'Undef';
 
-        # References stringify to "TYPE(0x...)" - this IS meaningful for debugging/logging
-        return 1 if $type_name =~ /Ref$/;  # ArrayRef, HashRef, CodeRef, etc.
+        # Object can have meaningful stringification via overload
         return 1 if $type_name eq 'Object';
 
         # Top type - could be anything, allow it
         return 1 if $type_name eq 'Any';
 
-        return 0;  # Type cannot coerce to Str
+        # Ref types (ArrayRef, HashRef, CodeRef) produce "TYPE(0x...)"
+        # which is almost never meaningful - likely a bug
+        return 0;
     }
 
     # Get the top type (Any)
