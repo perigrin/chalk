@@ -216,6 +216,65 @@ class Chalk::Grammar::Chalk::TypeLattice {
         return !$meet->is_bottom();
     }
 
+    # Check if a type can coerce to numeric context
+    # Based on Coercion.pm's to_num() implementation
+    # Note: Ref/Object types are explicitly excluded - while Perl allows
+    # coercing refs to their memory address, this is almost never meaningful
+    # and is usually a bug. Use explicit refaddr() if you need this.
+    method can_coerce_to_num($type) {
+        my $type_name = $type->name();
+
+        # Numeric types - no coercion needed
+        return 1 if $type_name eq 'Int';
+        return 1 if $type_name eq 'Num';
+
+        # Bool coerces to 0/1
+        return 1 if $type_name eq 'Bool' || $type_name eq 'Boolean';
+
+        # Strings can coerce to numbers (Perl's looks_like_number)
+        return 1 if $type_name eq 'Str';
+
+        # Undef coerces to 0
+        return 1 if $type_name eq 'Undef';
+
+        # Top type - could be anything, allow it
+        return 1 if $type_name eq 'Any';
+
+        # Ref types (ArrayRef, HashRef, CodeRef, Object) intentionally excluded
+        # Coercing refs to memory addresses is almost never meaningful
+
+        return 0;  # Type cannot coerce to Num
+    }
+
+    # Check if a type can coerce to string context
+    # Based on Coercion.pm's to_str() implementation
+    # Note: Ref/Object types CAN coerce to string - "ARRAY(0x...)" is valid output
+    method can_coerce_to_str($type) {
+        my $type_name = $type->name();
+
+        # String type - no coercion needed
+        return 1 if $type_name eq 'Str';
+
+        # Numeric types stringify naturally
+        return 1 if $type_name eq 'Num';
+        return 1 if $type_name eq 'Int';
+
+        # Bool stringifies to "1" or ""
+        return 1 if $type_name eq 'Bool' || $type_name eq 'Boolean';
+
+        # Undef coerces to empty string
+        return 1 if $type_name eq 'Undef';
+
+        # References stringify to "TYPE(0x...)" - this IS meaningful for debugging/logging
+        return 1 if $type_name =~ /Ref$/;  # ArrayRef, HashRef, CodeRef, etc.
+        return 1 if $type_name eq 'Object';
+
+        # Top type - could be anything, allow it
+        return 1 if $type_name eq 'Any';
+
+        return 0;  # Type cannot coerce to Str
+    }
+
     # Get the top type (Any)
     method top_type() {
         return Chalk::Grammar::Chalk::Type::Any->new();

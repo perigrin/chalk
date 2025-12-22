@@ -184,23 +184,6 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
 "ArithmeticOp found unrecognized operator '$operator' - expected one of +, -, *, /";
     }
 
-    # Helper method to check if a type can coerce to numeric
-    # Based on Coercion.pm's to_num() implementation
-    method can_coerce_to_num($type) {
-        my $type_name = $type->name();
-
-        # These types can coerce to Num per Coercion.pm
-        return 1 if $type_name eq 'Int';
-        return 1 if $type_name eq 'Num';
-        return 1 if $type_name eq 'Str';
-        return 1 if $type_name eq 'Undef';
-        return 1 if $type_name =~ /Ref$/;  # ArrayRef, HashRef, CodeRef, etc.
-        return 1 if $type_name eq 'Object';
-        return 1 if $type_name eq 'Any';  # Top type - could be anything
-
-        return 0;  # Type cannot coerce to Num
-    }
-
     # Type inference for TypeInference semiring
     # Infers result type based on operand types
     # Uses simplified approach: first and last typed children are operands
@@ -292,8 +275,8 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         } else {
             # Phase 3: Validate coercion to numeric context
             # Check if non-numeric types can coerce to Num
-            my $left_can_coerce = $self->can_coerce_to_num($left_type);
-            my $right_can_coerce = $self->can_coerce_to_num($right_type);
+            my $left_can_coerce = $lattice->can_coerce_to_num($left_type);
+            my $right_can_coerce = $lattice->can_coerce_to_num($right_type);
 
             if ($left_can_coerce && $right_can_coerce) {
                 # Both operands can coerce to numeric - allow with coercion

@@ -78,23 +78,6 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         return Chalk::IR::Node::StrConcat->new( left => $left, right => $right );
     }
 
-    # Helper method to check if a type can coerce to string
-    # Based on Coercion.pm's to_str() implementation
-    method can_coerce_to_str($type) {
-        my $type_name = $type->name();
-
-        # These types can coerce to Str per Coercion.pm
-        return 1 if $type_name eq 'Str';
-        return 1 if $type_name eq 'Num';
-        return 1 if $type_name eq 'Int';
-        return 1 if $type_name eq 'Undef';
-        return 1 if $type_name =~ /Ref$/;  # ArrayRef, HashRef, CodeRef, etc.
-        return 1 if $type_name eq 'Object';
-        return 1 if $type_name eq 'Any';  # Top type - could be anything
-
-        return 0;  # Type cannot coerce to Str
-    }
-
     # Type inference for TypeInference semiring
     # String concatenation coerces operands to strings
     # Sets string value context on operands
@@ -179,8 +162,8 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         my $right_name = $right_type->name();
 
         # Phase 3: Validate coercion to string context
-        my $left_can_coerce = $self->can_coerce_to_str($left_type);
-        my $right_can_coerce = $self->can_coerce_to_str($right_type);
+        my $left_can_coerce = $lattice->can_coerce_to_str($left_type);
+        my $right_can_coerce = $lattice->can_coerce_to_str($right_type);
 
         my @new_errors = $element->errors->@*;
         my $result_type;
