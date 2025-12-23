@@ -9,6 +9,7 @@ use Chalk::Semiring::Precedence;
 use Chalk::Semiring::SemanticValidation;
 use Chalk::Semiring::TypeInference;
 use Chalk::Grammar::Chalk::SemanticRules;
+use Chalk::Grammar::Chalk::PrecedenceTable;
 use Chalk::Semiring::Composite;
 
 class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
@@ -22,37 +23,8 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
         my $bool_sr = Chalk::Semiring::Boolean->new();
 
         # Filter 2: Precedence - Operator precedence validation
-        # Reference: perldoc perlop - Operator Precedence and Associativity
-        my @perl_precedence_table = (
-            # Index 0 - Highest precedence
-            # NOTE: '->' removed from precedence table - it's a postfix dereference
-            # operator, not a binary expression operator. The grammar structure
-            # already enforces its binding. Including it caused conflicts with
-            # operators inside subscripts like $ref->[1 + 2].
-            { assoc => 'nonassoc', ops => ['++', '--'] },  # postfix
-            { assoc => 'right',   ops => ['**'] },
-            { assoc => 'right',   ops => ['!', '~', '\\', 'unary +', 'unary -'] },
-            { assoc => 'left',    ops => ['=~', '!~'] },
-            { assoc => 'left',    ops => ['*', '/', '%', 'x'] },
-            { assoc => 'left',    ops => ['+', '-', '.'] },
-            { assoc => 'left',    ops => ['<<', '>>'] },
-            { assoc => 'nonassoc', ops => ['named unary'] },
-            { assoc => 'nonassoc', ops => ['isa'] },
-            { assoc => 'chained', ops => ['<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'] },
-            { assoc => 'chain/na', ops => ['==', '!=', 'eq', 'ne', '<=>', 'cmp', '~~'] },
-            { assoc => 'left',    ops => ['&'] },
-            { assoc => 'left',    ops => ['|', '^'] },
-            { assoc => 'left',    ops => ['&&'] },
-            { assoc => 'left',    ops => ['||', '^^', '//'] },
-            { assoc => 'nonassoc', ops => ['..', '...'] },
-            { assoc => 'right',   ops => ['?:'] },
-            { assoc => 'right',   ops => ['=', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '.=', '<<=', '>>=', '&&=', '||=', '//='] },
-            { assoc => 'left',    ops => [',', '=>'] },
-            { assoc => 'right',   ops => ['not'] },
-            { assoc => 'left',    ops => ['and'] },
-            { assoc => 'left',    ops => ['or', 'xor'] },
-            # Index 22 - Lowest precedence
-        );
+        # Get precedence table from centralized PrecedenceTable class
+        my @perl_precedence_table = Chalk::Grammar::Chalk::PrecedenceTable->get_table();
 
         my $precedence_sr = Chalk::Semiring::Precedence->new(
             precedence_table => \@perl_precedence_table
