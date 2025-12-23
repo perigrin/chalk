@@ -9,16 +9,15 @@ use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
 use Chalk::Grammar::Chalk;  # Load all Chalk Rule classes for semantic actions
+use Chalk::FunctionRegistry;
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
-    field $scope :reader;
+    field $scope :reader = Chalk::IR::Node::Scope->new();
+    field $function_registry :reader = Chalk::FunctionRegistry->new();
     field $composite :reader;
 
     ADJUST {
-        # Create Scope for variable tracking (replaces Builder)
-        $scope = Chalk::IR::Node::Scope->new();
-
         # Create Precedence semiring with full Perl operator precedence table
         # Reference: perldoc perlop - Operator Precedence and Associativity
         my @perl_precedence_table = (
@@ -53,10 +52,10 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
             precedence_table => \@perl_precedence_table
         );
 
-        # Create Semantic semiring with scope in environment (no Builder needed)
+        # Create Semantic semiring with scope and function registry in environment
         my $semantic_sr = Chalk::Semiring::Semantic->new(
             grammar => $grammar,
-            env => { scope => $scope }
+            env => { scope => $scope, function_registry => $function_registry }
         );
 
         # Use Composite with Precedence and Semantic

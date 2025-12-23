@@ -345,7 +345,11 @@ if ( !caller ) {
 
                         # Execute with CEK interpreter
                         require Chalk::Interpreter::CEKDataflow;
-                        my $cek = Chalk::Interpreter::CEKDataflow->new(graph => $graph);
+                        my $func_registry = $semiring->can('function_registry') ? $semiring->function_registry : undef;
+                        my $cek = Chalk::Interpreter::CEKDataflow->new(
+                            graph => $graph,
+                            function_registry => $func_registry,
+                        );
                         my $execution_result = eval { $cek->execute() };
                         if ($@) {
                             print(STDERR "Execution error: $@\n");

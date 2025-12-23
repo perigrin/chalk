@@ -8,6 +8,7 @@ use Chalk::Interpreter::Environment;
 
 class Chalk::Interpreter::CEKDataflow {
     field $graph :param :reader;
+    field $function_registry :param :reader = undef;  # Registry for function dispatch
     field $max_iterations :param = 10000;  # Safety limit for loop iterations
 
     # Architecture: CESK-style machine with dataflow scheduling
@@ -119,6 +120,9 @@ class Chalk::Interpreter::CEKDataflow {
                 }
                 elsif ($key eq 'graph:') {
                     return $graph;
+                }
+                elsif ($key eq 'function_registry:') {
+                    return $function_registry;
                 }
                 return undef;
             };
@@ -429,6 +433,9 @@ class Chalk::Interpreter::CEKDataflow {
             }
             elsif ($key eq 'graph:') {
                 return $graph;
+            }
+            elsif ($key eq 'function_registry:') {
+                return $function_registry;
             }
             return undef;
         };

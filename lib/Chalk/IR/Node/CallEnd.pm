@@ -55,10 +55,103 @@ class Chalk::IR::Node::CallEnd {
         # - Memory: memory state after call
         # - Return value: the function's return value
 
-        # Get the call node's evaluation result
-        # In practice, this would coordinate with the function dispatch
-        # For now, return undef as a placeholder
-        return undef;
+        # Get the Call node's descriptor (func_name, args, rpc)
+        my $call_result = $context->("node:" . $call->id);
+        return undef unless defined $call_result && ref($call_result) eq 'HASH';
+
+        my $func_name = $call_result->{func_name};
+        return undef unless defined $func_name;
+
+        # Look up function in registry
+        my $registry = $context->("function_registry:");
+        return undef unless defined $registry;
+
+        my $func_def = $registry->lookup($func_name);
+        return undef unless defined $func_def;
+
+        # Get function parameters and body
+        my $parameters = $func_def->parameters // [];
+        my $body_node = $func_def->body_node;
+        return undef unless defined $body_node;
+
+        # Get argument values from call descriptor
+        my $args = $call_result->{args} // [];
+
+        # Get environment for variable binding
+        my $env = $context->("env:");
+        return undef unless defined $env;
+
+        # Bind parameters to arguments in environment
+        for my $i (0 .. $#$parameters) {
+            my $param_name = $parameters->[$i];
+            my $arg_value = $args->[$i];
+            $env->set_variable($param_name, $arg_value);
+        }
+
+        # Execute the function body
+        # The body_node should be a Return or block node
+        # For now, use simple recursive evaluation
+        return $self->_evaluate_node($body_node, $context, $env);
+    }
+
+    method _evaluate_node($node, $context, $env) {
+        # Recursively evaluate a node tree
+        return undef unless defined $node;
+
+        # Handle hash refs (e.g., from Block semantic action returning children)
+        if (ref($node) eq 'HASH') {
+            # Try to find an IR node in the hash
+            if (exists $node->{_body_node}) {
+                return $self->_evaluate_node($node->{_body_node}, $context, $env);
+            }
+            # Block with statements array
+            if ($node->{type} eq 'block' && exists $node->{statements}) {
+                my $result;
+                for my $stmt ($node->{statements}->@*) {
+                    $result = $self->_evaluate_node($stmt, $context, $env);
+                }
+                return $result;
+            }
+            # Return the hash as-is if it's a result
+            return $node;
+        }
+
+        # Handle array refs
+        if (ref($node) eq 'ARRAY') {
+            # Evaluate each element and return the last result
+            my $result;
+            for my $elem ($node->@*) {
+                $result = $self->_evaluate_node($elem, $context, $env);
+            }
+            return $result;
+        }
+
+        # Handle scalar values
+        return $node unless ref($node) && blessed($node) && $node->can('execute');
+
+        # Handle IR nodes
+        my $op = $node->can('op') ? $node->op : '';
+
+        # Return nodes return their value
+        if ($op eq 'Return') {
+            my $value_node = $node->can('value_node') ? $node->value_node : $node->can('value') ? $node->value : undef;
+            return $self->_evaluate_node($value_node, $context, $env);
+        }
+
+        # Constant nodes return their value
+        if ($op eq 'Constant') {
+            return $node->execute();
+        }
+
+        # VariableRead nodes look up variables
+        if ($op eq 'VariableRead') {
+            my $var_name = $node->can('name') ? $node->name : undef;
+            return $env->lookup_variable($var_name) if defined $var_name;
+            return $node->execute($context);
+        }
+
+        # For other nodes, try to execute them directly
+        return $node->execute($context);
     }
 
     method attributes() {
