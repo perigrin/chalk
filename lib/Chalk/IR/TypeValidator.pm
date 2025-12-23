@@ -112,7 +112,8 @@ class Chalk::IR::TypeValidator {
         return unless defined $inputs;
 
         # Phi nodes: first input is control, rest are values
-        my @value_inputs = $inputs->@[1..$inputs->$#*];
+        my @value_inputs = $inputs->@*;
+        shift @value_inputs;  # Remove control input (first element)
         return unless @value_inputs;
 
         # Get the result type
