@@ -13,17 +13,11 @@ use Chalk::FunctionRegistry;
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
-    field $scope :reader;
-    field $function_registry :reader;
+    field $scope :reader = Chalk::IR::Node::Scope->new();
+    field $function_registry :reader = Chalk::FunctionRegistry->new();
     field $composite :reader;
 
     ADJUST {
-        # Create Scope for variable tracking (replaces Builder)
-        $scope = Chalk::IR::Node::Scope->new();
-
-        # Create FunctionRegistry for storing function definitions
-        $function_registry = Chalk::FunctionRegistry->new();
-
         # Create Precedence semiring with full Perl operator precedence table
         # Reference: perldoc perlop - Operator Precedence and Associativity
         my @perl_precedence_table = (
