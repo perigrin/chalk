@@ -150,3 +150,43 @@ subtest 'Parse subroutine with parameters' => sub {
         }
     }
 };
+
+subtest 'Functions registered in FunctionRegistry during parsing' => sub {
+    use Chalk::Grammar;
+    use Chalk::Grammar::Chalk;
+    use Chalk::Parser;
+    use Chalk::Semiring::ChalkIR;
+
+    my $bnf_file = "grammar/chalk.bnf";
+    open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
+    my $content = do { local $/; <$fh> };
+    close $fh;
+
+    my $grammar = Chalk::Grammar->build_from_bnf($content, 'Program', 'Chalk');
+    my $semiring = Chalk::Semiring::ChalkIR->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => $semiring,
+    );
+
+    # Parse two subroutine declarations
+    my $code = 'sub foo() { return 1; } sub bar($x) { return 2; } return 0;';
+    my $result = $parser->parse_string($code);
+
+    ok $result, 'Parse succeeded';
+
+    # Check if functions were registered
+    my $registry = $semiring->function_registry;
+    ok $registry, 'Got function registry from semiring';
+
+    ok $registry->has('foo'), 'Function foo is registered';
+    ok $registry->has('bar'), 'Function bar is registered';
+
+    my $foo_def = $registry->lookup('foo');
+    is $foo_def->name, 'foo', 'foo has correct name';
+    is $foo_def->parameters, [], 'foo has no parameters';
+
+    my $bar_def = $registry->lookup('bar');
+    is $bar_def->name, 'bar', 'bar has correct name';
+    # Note: parameters may or may not be collected depending on implementation
+};

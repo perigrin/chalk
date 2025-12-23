@@ -8,11 +8,17 @@ class Chalk::IR::Node::FunctionDef {
     field $name :param :reader;                   # Function name (string)
     field $parameters :param :reader = [];        # Parameter names (array of strings)
     field $body_graph :param :reader = undef;     # IR graph for function body
+    field $body_node :param :reader = undef;      # Raw body IR node (before graph extraction)
     field $source_info :param :reader = undef;
     field $transform_chain :reader = [];
 
     # Dependency tracking for peephole re-optimization
     field $_deps = [];
+
+    # Set body node after construction
+    method set_body_node($node) {
+        $body_node = $node;
+    }
 
     method add_dep($dependent_node_id) {
         push $_deps->@*, $dependent_node_id;
