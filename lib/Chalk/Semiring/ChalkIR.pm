@@ -1,11 +1,11 @@
 # ABOUTME: Specialized composite semiring for Chalk IR generation
-# ABOUTME: Combines precedence validation and semantic IR building
+# ABOUTME: Combines syntax validation (via ChalkSyntax) and semantic IR building
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
 use Chalk::IR::Node::Scope;
-use Chalk::Semiring::Precedence;
+use Chalk::Semiring::ChalkSyntax;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
 use Chalk::Grammar::Chalk;  # Load all Chalk Rule classes for semantic actions
@@ -18,38 +18,10 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $composite :reader;
 
     ADJUST {
-        # Create Precedence semiring with full Perl operator precedence table
-        # Reference: perldoc perlop - Operator Precedence and Associativity
-        my @perl_precedence_table = (
-            # Index 0 - Highest precedence
-            { assoc => 'left',    ops => ['->'] },
-            { assoc => 'nonassoc', ops => ['++', '--'] },  # postfix
-            { assoc => 'right',   ops => ['**'] },
-            { assoc => 'right',   ops => ['!', '~', '\\', 'unary +', 'unary -'] },
-            { assoc => 'left',    ops => ['=~', '!~'] },
-            { assoc => 'left',    ops => ['*', '/', '%', 'x'] },
-            { assoc => 'left',    ops => ['+', '-', '.'] },
-            { assoc => 'left',    ops => ['<<', '>>'] },
-            { assoc => 'nonassoc', ops => ['named unary'] },
-            { assoc => 'nonassoc', ops => ['isa'] },
-            { assoc => 'chained', ops => ['<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'] },
-            { assoc => 'chain/na', ops => ['==', '!=', 'eq', 'ne', '<=>', 'cmp', '~~'] },
-            { assoc => 'left',    ops => ['&'] },
-            { assoc => 'left',    ops => ['|', '^'] },
-            { assoc => 'left',    ops => ['&&'] },
-            { assoc => 'left',    ops => ['||', '^^', '//'] },
-            { assoc => 'nonassoc', ops => ['..', '...'] },
-            { assoc => 'right',   ops => ['?:'] },
-            { assoc => 'right',   ops => ['=', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '.=', '<<=', '>>=', '&&=', '||=', '//='] },
-            { assoc => 'left',    ops => [',', '=>'] },
-            { assoc => 'right',   ops => ['not'] },
-            { assoc => 'left',    ops => ['and'] },
-            { assoc => 'left',    ops => ['or', 'xor'] },
-            # Index 22 - Lowest precedence
-        );
-
-        my $precedence_sr = Chalk::Semiring::Precedence->new(
-            precedence_table => \@perl_precedence_table
+        # Create ChalkSyntax semiring for validation
+        # Includes precedence, boolean, semantic validation, and type inference
+        my $chalksyntax_sr = Chalk::Semiring::ChalkSyntax->new(
+            grammar => $grammar
         );
 
         # Create Semantic semiring with scope and function registry in environment
@@ -58,12 +30,11 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
             env => { scope => $scope, function_registry => $function_registry }
         );
 
-        # Use Composite with Precedence and Semantic
-        # Precedence validates operator precedence during parsing (returns invalid for bad parses)
+        # Use Composite with ChalkSyntax and Semantic
+        # ChalkSyntax validates syntax (precedence, types, semantics)
         # Semantic builds IR via Rule classes creating nodes directly
-        # Precedence.add() prefers valid over invalid, so invalid parses are automatically filtered
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$precedence_sr, $semantic_sr]
+            semirings => [$chalksyntax_sr, $semantic_sr]
         );
     }
 
