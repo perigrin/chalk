@@ -62,11 +62,24 @@ class Chalk::IR::Node::CallEnd {
         my $func_name = $call_result->{func_name};
         return undef unless defined $func_name;
 
-        # Look up function in registry
-        my $registry = $context->("function_registry:");
-        return undef unless defined $registry;
+        # Look up function in graph's scope
+        # Functions are stored in scope with '&' prefix
+        my $graph = $context->("graph:");
+        return undef unless defined $graph;
 
-        my $func_def = $registry->lookup($func_name);
+        # Find a Scope node in the graph
+        my $nodes = $graph->nodes;
+        my $scope;
+        for my $node (values $nodes->%*) {
+            if (blessed($node) && $node->can('op') && $node->op eq 'Scope') {
+                $scope = $node;
+                last;
+            }
+        }
+        return undef unless defined $scope;
+
+        # Look up function in scope (with '&' prefix)
+        my $func_def = $scope->lookup("&$func_name");
         return undef unless defined $func_def;
 
         # Get function parameters and body

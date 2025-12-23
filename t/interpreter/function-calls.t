@@ -78,11 +78,9 @@ sub run_chalk($code) {
     # input references in Call nodes. This is a separate bug to fix.
     # TODO: Issue for GVN input reference update
 
-    # Execute with function registry
-    my $func_registry = $semiring->function_registry;
+    # Execute (functions are stored in the graph's scope)
     my $cek = Chalk::Interpreter::CEKDataflow->new(
         graph => $graph,
-        function_registry => $func_registry,
     );
 
     return $cek->execute();
@@ -109,7 +107,7 @@ subtest 'Multiple function definitions' => sub {
     is $result, 0, 'Program returns 0 (not calling functions)';
 };
 
-subtest 'Function registry is populated' => sub {
+subtest 'Functions are stored in scope' => sub {
     my $bnf_file = "grammar/chalk.bnf";
     open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
     my $content = do { local $/; <$fh> };
@@ -127,14 +125,14 @@ subtest 'Function registry is populated' => sub {
 
     ok $result, 'Parse succeeded';
 
-    my $registry = $semiring->function_registry;
-    ok $registry->has('alpha'), 'alpha is registered';
-    ok $registry->has('beta'), 'beta is registered';
+    # Functions are stored in scope with '&' prefix
+    my $scope = $semiring->scope;
+    my $alpha = $scope->lookup('&alpha');
+    ok defined($alpha), 'alpha is in scope';
+    is $alpha->name, 'alpha', 'alpha has correct name' if defined($alpha);
+    is $alpha->parameters, [], 'alpha has no parameters' if defined($alpha);
 
-    my $alpha = $registry->lookup('alpha');
-    is $alpha->name, 'alpha', 'alpha has correct name';
-    is $alpha->parameters, [], 'alpha has no parameters';
-
-    my $beta = $registry->lookup('beta');
-    is $beta->name, 'beta', 'beta has correct name';
+    my $beta = $scope->lookup('&beta');
+    ok defined($beta), 'beta is in scope';
+    is $beta->name, 'beta', 'beta has correct name' if defined($beta);
 };

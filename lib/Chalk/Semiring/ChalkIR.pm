@@ -9,12 +9,10 @@ use Chalk::Semiring::ChalkSyntax;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
 use Chalk::Grammar::Chalk;  # Load all Chalk Rule classes for semantic actions
-use Chalk::FunctionRegistry;
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
     field $scope :reader = Chalk::IR::Node::Scope->new();
-    field $function_registry :reader = Chalk::FunctionRegistry->new();
     field $composite :reader;
 
     ADJUST {
@@ -24,10 +22,11 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
             grammar => $grammar
         );
 
-        # Create Semantic semiring with scope and function registry in environment
+        # Create Semantic semiring with scope in environment
+        # Functions are tracked in scope (with '&' prefix) alongside variables
         my $semantic_sr = Chalk::Semiring::Semantic->new(
             grammar => $grammar,
-            env => { scope => $scope, function_registry => $function_registry }
+            env => { scope => $scope }
         );
 
         # Use Composite with ChalkSyntax and Semantic
