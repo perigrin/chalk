@@ -88,7 +88,7 @@ class Chalk::Interpreter::CEKDataflow {
                     if ($region_node && $region_node->op eq 'Loop') {
                         # For Loop Phis, only wait for region and entry value (first 2 inputs)
                         # Skip backedge value (input[2] and beyond)
-                        my @init_deps = @$inputs[0..1];  # region_id and entry value
+                        my @init_deps = $inputs->@[0..1];  # region_id and entry value
                         $waiting{$node_id} = { map { $_ => 1 } @init_deps };
                     } else {
                         # Regular Phi (non-Loop), wait for all inputs

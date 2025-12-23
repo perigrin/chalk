@@ -47,7 +47,7 @@ class Chalk::Grammar::Chalk::Rule::StatementList :isa(Chalk::GrammarRule) {
 
         # If rest_list has statements, add them
         if (ref($rest_list) eq 'ARRAY') {
-            push @statements, @$rest_list;
+            push @statements, $rest_list->@*;
         } elsif (blessed($rest_list) && $rest_list->can('id')) {
             push @statements, $rest_list;
         }

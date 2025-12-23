@@ -199,7 +199,7 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         if ($element->can('token')) {
             my $token = $element->token;
             if (defined $token) {
-                push @$tokens, $token;
+                push $tokens->@*, $token;
             }
         }
 
