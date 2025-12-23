@@ -187,6 +187,7 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
     # Type inference for TypeInference semiring
     # Infers result type based on operand types
     # Uses simplified approach: first and last typed children are operands
+    # Sets numeric value context on operands
     method infer_type( $semiring, $element ) {
         use Chalk::Semiring::TypeInference;    # For TypeInferenceElement
         use Chalk::Grammar::Chalk::TypeLattice;
@@ -199,6 +200,29 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
         # ArithmeticOp -> Expression WS_OPT OPERATOR WS_OPT Expression (binary)
         # Need at least 2 typed children for binary operation
         return $element if scalar(@children) < 2;
+
+        # Mark operand children with numeric value context
+        # This propagates context information for downstream coercion
+        my @updated_children;
+        for my $child (@children) {
+            if ($child->can('type_obj') && defined($child->type_obj)) {
+                # Create new element with numeric context
+                push @updated_children, Chalk::Semiring::TypeInferenceElement->new(
+                    type_obj => $child->type_obj,
+                    type_env => $child->type_env,
+                    children => $child->children,
+                    token => $child->token,
+                    errors => $child->errors,
+                    start_pos => $child->start_pos,
+                    end_pos => $child->end_pos,
+                    container_context => $child->container_context,
+                    value_context => 'numeric'  # Set numeric context for arithmetic
+                );
+            } else {
+                push @updated_children, $child;
+            }
+        }
+        @children = @updated_children;
 
         # Simplified approach: find first and last children with non-top types
         # These correspond to left and right operands in binary expression
@@ -249,29 +273,47 @@ class Chalk::Grammar::Chalk::Rule::ArithmeticOp :isa(Chalk::GrammarRule) {
             # Int + Int -> Int, Int + Num -> Num, Num + Num -> Num
             $result_type = $left_type->join($right_type);
         } else {
-            # Type error: non-numeric operands for arithmetic
-            push @new_errors, {
-                type => 'type_error',
-                message => "Type error: Cannot apply arithmetic operator to " .
-                           $left_name . " and " . $right_name .
-                           " (expected numeric types)",
-                start_pos => $element->start_pos,
-                end_pos => $element->end_pos,
-                left_type => $left_name,
-                right_type => $right_name,
-            };
-            # Result type is bottom (type error)
-            $result_type = $lattice->bottom_type();
+            # Phase 3: Validate coercion to numeric context
+            # Check if non-numeric types can coerce to Num
+            my $left_can_coerce = $lattice->can_coerce_to_num($left_type);
+            my $right_can_coerce = $lattice->can_coerce_to_num($right_type);
+
+            if ($left_can_coerce && $right_can_coerce) {
+                # Both operands can coerce to numeric - allow with coercion
+                # Result type is Num (most general numeric type after coercion)
+                $result_type = $lattice->type_from_name('Num');
+            } else {
+                # Type error: operands cannot coerce to numeric
+                my @invalid_types;
+                push @invalid_types, $left_name unless $left_can_coerce;
+                push @invalid_types, $right_name unless $right_can_coerce;
+
+                push @new_errors, {
+                    type => 'coercion_error',
+                    message => "Coercion error: Cannot coerce " .
+                               join(" and ", @invalid_types) .
+                               " to numeric type (required for arithmetic)",
+                    start_pos => $element->start_pos,
+                    end_pos => $element->end_pos,
+                    left_type => $left_name,
+                    right_type => $right_name,
+                    invalid_types => \@invalid_types,
+                };
+                # Result type is bottom (type error)
+                $result_type = $lattice->bottom_type();
+            }
         }
 
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $result_type,
             type_env => $element->type_env,
-            children => $element->children,
+            children => \@children,  # Use updated children with numeric context
             token    => $element->token,
             errors   => \@new_errors,
             start_pos => $element->start_pos,
             end_pos => $element->end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 }

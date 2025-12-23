@@ -15,6 +15,8 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
     field $errors :param :reader = [];    # Accumulated error messages (arrayref)
     field $start_pos :param :reader = 0;  # Start position for error reporting
     field $end_pos :param :reader = 0;    # End position for error reporting
+    field $container_context :param :reader = undef;  # Container context: 'list', 'scalar', 'void', or undef
+    field $value_context :param :reader = undef;      # Value context: 'numeric', 'string', 'boolean', or undef
 
     # Tropical semiring addition: join (∨) - "could be either type"
     method add( $other, $swap = undef ) {
@@ -33,7 +35,9 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
             token => $token,
             errors => \@merged_errors,
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            container_context => $container_context,
+            value_context => $value_context
         );
     }
 
@@ -77,7 +81,9 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
             token => $token,  # Preserve token from left element
             errors => \@new_errors,
             start_pos => $new_start,
-            end_pos => $new_end
+            end_pos => $new_end,
+            container_context => $container_context,  # Preserve from left element
+            value_context => $value_context           # Preserve from left element
         );
     }
 
@@ -152,7 +158,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         token => undef,
         errors => [],
         start_pos => 0,
-        end_pos => 0
+        end_pos => 0,
+        container_context => undef,
+        value_context => undef
     );
     field $mul_id :reader = Chalk::Semiring::TypeInferenceElement->new(
         type_obj => $lattice->top_type(),
@@ -161,7 +169,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         token => undef,
         errors => [],
         start_pos => 0,
-        end_pos => 0
+        end_pos => 0,
+        container_context => undef,
+        value_context => undef
     );
 
     # Shared context for SPPF integration (optional)
@@ -186,7 +196,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             token => undef,
             errors => [],
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            container_context => undef,
+            value_context => undef
         );
     }
 
@@ -200,7 +212,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             token => undef,
             errors => [],
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            container_context => undef,
+            value_context => undef
         );
     }
 
@@ -214,7 +228,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             token => undef,
             errors => [],
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            container_context => undef,
+            value_context => undef
         );
     }
 
@@ -263,7 +279,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
                 token => $matched_value,  # Store token for extraction by infer_type
                 errors => $element->errors,
                 start_pos => $pos,
-                end_pos => $end_pos
+                end_pos => $end_pos,
+                container_context => $element->container_context,
+                value_context => $element->value_context
             );
         }
 
@@ -275,7 +293,9 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             token => $element->token,
             errors => $element->errors,
             start_pos => $pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 

@@ -142,27 +142,15 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         # Element tree structure mirrors parse tree
         my @children = $element->children->@*;
 
-        # ComparisonOp -> Expression (pass-through)
+        # ComparisonOp -> Expression (pass-through to StringOp)
         # ComparisonOp -> Expression WS_OPT OPERATOR WS_OPT Expression
         # Single child means pass-through
         return $element if scalar(@children) < 2;
 
-        # Find the comparison operator token
-        my $operator;
-        my $operator_idx;
-        for my $i (0..$#children) {
-            my $child = $children[$i];
-            # Check if this child has a token that is a comparison operator
-            # Grammar has already validated it's a valid comparison operator
-            if (defined $child->token && $child->token isa Chalk::Grammar::Token::Operator) {
-                $operator = $child->token->value;
-                $operator_idx = $i;
-                last;
-            }
-        }
-
-        # Not a comparison operation, pass through
-        return $element unless defined($operator);
+        # If we have multiple children, this is a comparison operation
+        # Grammar: ComparisonOp -> Expression WS_OPT OPERATOR WS_OPT Expression
+        # The grammar has already validated that this is a valid comparison,
+        # so we don't need to check for the operator token
 
         # Get type lattice
         my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
@@ -173,10 +161,15 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         my $result_type = $lattice->type_from_name('Bool');
 
         return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $result_type,
-            type_env => $element->type_env,
-            children => $element->children,
-            token => $element->token
+            type_obj  => $result_type,
+            type_env  => $element->type_env,
+            children  => $element->children,
+            token     => $element->token,
+            errors    => $element->errors,
+            start_pos => $element->start_pos,
+            end_pos   => $element->end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 }

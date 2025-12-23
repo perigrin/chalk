@@ -166,7 +166,12 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
             type_obj => $element->type_obj,
             type_env => $new_type_env,
             children => $element->children,
-            token => $element->token
+            token => $element->token,
+            errors => $element->errors,
+            start_pos => $element->start_pos,
+            end_pos => $element->end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 }

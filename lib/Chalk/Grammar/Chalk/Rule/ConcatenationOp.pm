@@ -80,6 +80,7 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
 
     # Type inference for TypeInference semiring
     # String concatenation coerces operands to strings
+    # Sets string value context on operands
     method infer_type($semiring, $element) {
         use Chalk::Semiring::TypeInference;  # For TypeInferenceElement
 
@@ -90,6 +91,29 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         # ConcatenationOp -> Expression WS_OPT '.' WS_OPT Expression
         # Need at least 3 children for binary operation
         return $element if scalar(@children) < 3;
+
+        # Mark operand children with string value context
+        # This propagates context information for downstream coercion
+        my @updated_children;
+        for my $child (@children) {
+            if ($child->can('type_obj') && defined($child->type_obj)) {
+                # Create new element with string context
+                push @updated_children, Chalk::Semiring::TypeInferenceElement->new(
+                    type_obj => $child->type_obj,
+                    type_env => $child->type_env,
+                    children => $child->children,
+                    token => $child->token,
+                    errors => $child->errors,
+                    start_pos => $child->start_pos,
+                    end_pos => $child->end_pos,
+                    container_context => $child->container_context,
+                    value_context => 'string'  # Set string context for concatenation
+                );
+            } else {
+                push @updated_children, $child;
+            }
+        }
+        @children = @updated_children;
 
         # Find the '.' operator token
         my $operator_idx;
@@ -134,31 +158,50 @@ class Chalk::Grammar::Chalk::Rule::ConcatenationOp :isa(Chalk::GrammarRule) {
         # Get type lattice
         my $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
 
-        # String concatenation type rules:
-        # Most types can stringify → Str
-        # CodeRef, ArrayRef, HashRef typically can't be meaningfully concatenated → ⊥
-
         my $left_name = $left_type->name();
         my $right_name = $right_type->name();
 
-        # Check for reference types that can't be meaningfully concatenated
-        my $left_is_ref = any { $left_name eq $_ } qw(CodeRef ArrayRef HashRef);
-        my $right_is_ref = any { $right_name eq $_ } qw(CodeRef ArrayRef HashRef);
+        # Phase 3: Validate coercion to string context
+        my $left_can_coerce = $lattice->can_coerce_to_str($left_type);
+        my $right_can_coerce = $lattice->can_coerce_to_str($right_type);
 
+        my @new_errors = $element->errors->@*;
         my $result_type;
-        if ($left_is_ref || $right_is_ref) {
-            # Reference types can't be meaningfully concatenated
-            $result_type = $lattice->bottom_type();
-        } else {
-            # Most types can be coerced to strings
+
+        if ($left_can_coerce && $right_can_coerce) {
+            # Both operands can coerce to string - concatenation succeeds
             $result_type = $lattice->type_from_name('Str');
+        } else {
+            # Type error: operands cannot coerce to string
+            my @invalid_types;
+            push @invalid_types, $left_name unless $left_can_coerce;
+            push @invalid_types, $right_name unless $right_can_coerce;
+
+            push @new_errors, {
+                type => 'coercion_error',
+                message => "Coercion error: Cannot coerce " .
+                           join(" and ", @invalid_types) .
+                           " to string type (required for concatenation)",
+                start_pos => $element->start_pos,
+                end_pos => $element->end_pos,
+                left_type => $left_name,
+                right_type => $right_name,
+                invalid_types => \@invalid_types,
+            };
+            # Result type is bottom (type error)
+            $result_type = $lattice->bottom_type();
         }
 
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $result_type,
             type_env => $element->type_env,
-            children => $element->children,
-            token => $element->token
+            children => \@children,  # Use updated children with string context
+            token => $element->token,
+            errors => \@new_errors,  # Use updated errors with coercion validation
+            start_pos => $element->start_pos,
+            end_pos => $element->end_pos,
+            container_context => $element->container_context,
+            value_context => $element->value_context
         );
     }
 }

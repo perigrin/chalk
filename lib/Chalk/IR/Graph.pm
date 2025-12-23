@@ -222,7 +222,7 @@ class Chalk::IR::Graph {
 
                 # Also remove from other nodes' use lists
                 for my $use_list (values(%{$uses})) {
-                    @$use_list = grep { $_ ne $node_id } @$use_list;
+                    $use_list->@* = grep { $_ ne $node_id } $use_list->@*;
                 }
             }
         }

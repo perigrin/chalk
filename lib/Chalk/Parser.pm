@@ -377,7 +377,7 @@ class Chalk::Parser {
 
                     # Convert array ref to string representation
                     if ( ref($next_symbol) eq 'ARRAY' ) {
-                        $expected_tokens{ join( '|', @$next_symbol ) } = 1;
+                        $expected_tokens{ join( '|', $next_symbol->@* ) } = 1;
                     }
                     else {
                         $expected_tokens{$next_symbol} = 1;
