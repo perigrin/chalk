@@ -2,7 +2,6 @@
 # ABOUTME: Extracts function name, parameters, and body to create function definition
 use 5.42.0;
 use experimental 'class';
-use Scalar::Util 'blessed';
 
 class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule) {
     method evaluate($context) {
