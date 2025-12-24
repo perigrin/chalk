@@ -2,6 +2,17 @@
 # ABOUTME: Verifies BinaryOp AST node generation and emission for binary arithmetic operations
 use 5.42.0;
 use Test::More;
+
+# Set lib path at compile time using abs_path on $0 for worktree compatibility
+BEGIN {
+    use Cwd qw(abs_path);
+    use File::Spec;
+    my $test_file = abs_path($0);
+    my ($vol, $dir, $file) = File::Spec->splitpath($test_file);
+    my $lib_dir = abs_path(File::Spec->catdir($vol, $dir, '..', '..', 'lib'));
+    unshift @INC, $lib_dir;
+}
+
 use Chalk::Target::XS;
 use Chalk::Target::XS::AST::BinaryOp;
 use Chalk::IR::Node::Add;
