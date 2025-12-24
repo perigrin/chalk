@@ -50,16 +50,26 @@ use Test::More;
     ok($ir_root, 'Parse result has IR focus');
     ok($ir_root->can('op'), 'IR root is a node object');
 
-    # Program should return a Return node
-    is($ir_root->op, 'Return', 'Program produces Return node');
+    # Per Chapter 18: Program returns Stop which collects all returns
+    is($ir_root->op, 'Stop', 'Program produces Stop node');
+
+    # Stop should have return nodes
+    ok($ir_root->can('return_nodes'), 'Stop has return_nodes method');
+    my $returns = $ir_root->return_nodes;
+    ok(@$returns > 0, 'Stop has at least one return');
+
+    # Get the first (and only) Return node
+    my $return_node = $returns->[0];
+    ok($return_node, 'Got Return node from Stop');
+    is($return_node->op, 'Return', 'Return node has correct op');
 
     # Return node should have numeric ID (refaddr)
-    my $id = $ir_root->id;
+    my $id = $return_node->id;
     ok($id, 'Return node has id');
     like($id, qr/^\d+$/, 'Return node ID is numeric (refaddr)');
 
     # Verify control chain is established
-    my $control = $ir_root->control;
+    my $control = $return_node->control;
     ok($control, 'Return has control input');
     ok($control->can('op'), 'Control input is a node');
 
@@ -80,7 +90,7 @@ use Test::More;
     like($use_inputs->[0], qr/start/i, 'UseStatement control input traces to Start');
 
     # Verify value chain
-    my $return_value = $ir_root->value;
+    my $return_value = $return_node->value;
     ok($return_value, 'Return has value');
     is($return_value->op, 'Constant', 'Return value is Constant');
     is($return_value->value, 42, 'Constant value is 42');

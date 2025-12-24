@@ -1,5 +1,5 @@
 # ABOUTME: Stop node representing program termination point in the IR graph
-# ABOUTME: Collects all Return nodes to mark where the function exits
+# ABOUTME: Collects all Return nodes to mark where the function exits (per Chapter 18)
 use 5.42.0;
 use experimental qw(class);
 use utf8;
@@ -9,6 +9,14 @@ class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
     field $returns :param :reader = [];
 
     method op() { 'Stop' }
+
+    # Add a Return node to this Stop (per Chapter 18: STOP.addDef(ret))
+    # Called when building the graph to connect returns to Stop
+    method add_return($return_node) {
+        return unless defined $return_node;
+        push $returns->@*, $return_node;
+        push $self->inputs->@*, $return_node->id;
+    }
 
     # Provide accessor for Return node objects
     # Used by graph traversal to follow object references

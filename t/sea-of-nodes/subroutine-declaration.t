@@ -138,14 +138,19 @@ subtest 'Parse subroutine with parameters' => sub {
 
     ok $winning_node, 'Got winning node';
 
-    # The winning node should be a Return containing a CallEnd
+    # Per Chapter 18: Program returns Stop which collects all returns
     if ($winning_node && $winning_node->can('op')) {
-        is $winning_node->op, 'Return', 'Program returns a Return node';
-        # The return value should be a CallEnd (from the function call)
-        if ($winning_node->can('value') && $winning_node->value) {
-            my $value = $winning_node->value;
-            if ($value->can('op')) {
-                is $value->op, 'CallEnd', 'Return value is CallEnd from function call';
+        is $winning_node->op, 'Stop', 'Program returns a Stop node (per Chapter 18)';
+        # Get the Return from Stop's return_nodes
+        if ($winning_node->can('return_nodes')) {
+            my $returns = $winning_node->return_nodes;
+            ok @$returns > 0, 'Stop has return nodes';
+            my $return_node = $returns->[-1];  # Last return
+            if ($return_node && $return_node->can('value') && $return_node->value) {
+                my $value = $return_node->value;
+                if ($value->can('op')) {
+                    is $value->op, 'CallEnd', 'Return value is CallEnd from function call';
+                }
             }
         }
     }
