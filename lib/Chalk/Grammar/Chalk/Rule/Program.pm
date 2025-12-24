@@ -109,6 +109,14 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
             $stop->add_return($early_ret);
         }
 
+        # Collect FunctionDef nodes and add to Stop for graph traversal
+        # This makes function bodies reachable for XS code generation
+        for my $stmt (@statements) {
+            if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'FunctionDef') {
+                $stop->add_function($stmt);
+            }
+        }
+
         # Get last statement for return value
         my $last_stmt = @statements ? $statements[-1] : undef;
         my $return_value;
