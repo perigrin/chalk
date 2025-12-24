@@ -5,7 +5,7 @@ use 5.42.0;
 use experimental 'class';
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 use Chalk::IR::Node::List;
-use Scalar::Util 'blessed';
+# Note: blessed is auto-imported by use 5.42.0
 
 class Chalk::Grammar::Chalk::Rule::ExpressionList :isa(Chalk::GrammarRule) {
     method evaluate($context) {
