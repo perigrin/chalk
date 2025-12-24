@@ -332,10 +332,9 @@ if ( !caller ) {
                         }
                     }
 
-                    # Run GVN optimizer
-                    require Chalk::IR::Optimizer::GVN;
-                    my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
-                    $graph = $gvn_result->{graph};
+                    # Run optimization pipeline (IterPeeps -> DCE -> GCM)
+                    require Chalk::IR::Optimizer;
+                    $graph = Chalk::IR::Optimizer->optimize($graph);
 
                     # Generate XS code
                     my $xs_module_name = $module_name // 'ChalkModule';
@@ -449,10 +448,9 @@ if ( !caller ) {
                             }
                         }
 
-                        # Run GVN optimizer
-                        require Chalk::IR::Optimizer::GVN;
-                        my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
-                        $graph = $gvn_result->{graph};
+                        # Run optimization pipeline (IterPeeps -> DCE -> GCM)
+                        require Chalk::IR::Optimizer;
+                        $graph = Chalk::IR::Optimizer->optimize($graph);
 
                         # Execute with CEK interpreter
                         require Chalk::Interpreter::CEKDataflow;
