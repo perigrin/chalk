@@ -9,11 +9,17 @@ class Chalk::Target::XS::AST::Literal :isa(Chalk::Target::XS::AST::Node) {
 
     method emit() {
         # If value is a number, emit as-is
-        # If value is a string, emit with double quotes
+        # If value is a string, emit with double quotes and escape special characters
         if (Scalar::Util::looks_like_number($value)) {
             return "$value";
         } else {
-            return qq("$value");
+            # Escape special characters for C string literals
+            my $escaped = $value;
+            $escaped =~ s/\\/\\\\/g;  # Escape backslashes first
+            $escaped =~ s/"/\\"/g;    # Escape double quotes
+            $escaped =~ s/\n/\\n/g;   # Escape newlines
+            $escaped =~ s/\t/\\t/g;   # Escape tabs
+            return qq("$escaped");
         }
     }
 }

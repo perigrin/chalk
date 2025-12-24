@@ -5,6 +5,16 @@ use 5.42.0;
 use Test::More;
 use experimental qw(class);
 
+# Set lib path at compile time using abs_path on $0 for worktree compatibility
+BEGIN {
+    use Cwd qw(abs_path);
+    use File::Spec;
+    my $test_file = abs_path($0);
+    my ($vol, $dir, $file) = File::Spec->splitpath($test_file);
+    my $lib_dir = abs_path(File::Spec->catdir($vol, $dir, '..', '..', 'lib'));
+    unshift @INC, $lib_dir;
+}
+
 # Test Node base class
 {
     use_ok('Chalk::Target::XS::AST::Node') or BAIL_OUT("Cannot load Node");
@@ -30,6 +40,37 @@ use experimental qw(class);
     # Floating point literal
     my $float_lit = Chalk::Target::XS::AST::Literal->new(value => 3.14);
     is($float_lit->emit(), '3.14', 'Float literal emits correctly');
+
+    # Edge case: String literal with quotes (verify escaping works)
+    my $quoted_str = Chalk::Target::XS::AST::Literal->new(value => 'say "hello"');
+    is($quoted_str->emit(), '"say \"hello\""', 'String literal with quotes escapes correctly');
+
+    # Edge case: String with backslashes
+    my $backslash_str = Chalk::Target::XS::AST::Literal->new(value => 'path\\to\\file');
+    is($backslash_str->emit(), '"path\\\\to\\\\file"', 'String literal with backslashes escapes correctly');
+
+    # Edge case: String with newlines
+    my $newline_str = Chalk::Target::XS::AST::Literal->new(value => "line1\nline2");
+    is($newline_str->emit(), '"line1\\nline2"', 'String literal with newlines escapes correctly');
+
+    # Edge case: String with tabs
+    my $tab_str = Chalk::Target::XS::AST::Literal->new(value => "col1\tcol2");
+    is($tab_str->emit(), '"col1\\tcol2"', 'String literal with tabs escapes correctly');
+
+    # Edge case: String with multiple special characters
+    my $complex_str = Chalk::Target::XS::AST::Literal->new(value => "say \"hello\"\npath\\here");
+    is($complex_str->emit(), '"say \\"hello\\"\\npath\\\\here"', 'String with mixed special chars escapes correctly');
+
+    # Edge case: Empty string literal
+    my $empty_str = Chalk::Target::XS::AST::Literal->new(value => '');
+    is($empty_str->emit(), '""', 'Empty string literal emits correctly');
+
+    # Edge case: Negative numbers
+    my $neg_int = Chalk::Target::XS::AST::Literal->new(value => -42);
+    is($neg_int->emit(), '-42', 'Negative integer emits correctly');
+
+    my $neg_float = Chalk::Target::XS::AST::Literal->new(value => -3.14);
+    is($neg_float->emit(), '-3.14', 'Negative float emits correctly');
 }
 
 # Test VarDecl node
@@ -103,6 +144,21 @@ use experimental qw(class);
     like($output, qr/RETVAL = a \+ b;/, 'XSUB body emits correctly');
     like($output, qr/OUTPUT:/, 'XSUB has OUTPUT section');
     like($output, qr/RETVAL/, 'XSUB outputs RETVAL');
+
+    # Edge case: XSUB with no parameters
+    my $xsub_no_params = Chalk::Target::XS::AST::XSUB->new(
+        name => 'get_constant',
+        params => [],
+        body => [
+            Chalk::Target::XS::AST::Return->new(expr => '42')
+        ]
+    );
+
+    my $no_params_output = $xsub_no_params->emit();
+    like($no_params_output, qr/NV\s+get_constant/, 'XSUB with no params has return type and name');
+    like($no_params_output, qr/CODE:/, 'XSUB with no params has CODE section');
+    like($no_params_output, qr/RETVAL = 42;/, 'XSUB with no params body emits correctly');
+    like($no_params_output, qr/OUTPUT:/, 'XSUB with no params has OUTPUT section');
 }
 
 done_testing();
