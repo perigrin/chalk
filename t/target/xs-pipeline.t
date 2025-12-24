@@ -7,8 +7,8 @@ use FindBin;
 use lib "$FindBin::Bin/../../lib";
 use lib "$FindBin::Bin/../../tools";
 
-# Use plenv to ensure correct Perl version
-my $perl = "$ENV{HOME}/.plenv/versions/5.42.0/bin/perl";
+# Use the current Perl interpreter (works on both local plenv and CI)
+my $perl = $^X;
 
 # Test 1: Verify --target=xs flag is recognized without error
 {
