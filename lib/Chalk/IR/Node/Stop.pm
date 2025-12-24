@@ -21,13 +21,13 @@ class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
         push $self->inputs->@*, $return_node->id;
     }
 
-    # Add a FunctionDef node to this Stop for graph traversal
-    # This makes function bodies reachable from Stop for XS code generation
+    # Add a FunctionDef node to this Stop for XS code generation
+    # Note: FunctionDefs are NOT added to inputs because they're stored in
+    # FunctionRegistry, not the main graph. XS generator accesses them via
+    # function_defs() method instead of graph traversal.
     method add_function($func_def) {
         return unless defined $func_def;
         push $functions->@*, $func_def;
-        # Add to inputs so graph traversal can reach function bodies
-        push $self->inputs->@*, $func_def->id;
     }
 
     # Provide accessor for Return node objects

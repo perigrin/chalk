@@ -129,6 +129,13 @@ sub collect_nodes {
             my $val = $node->value;
             push @queue, $val if $val && ref($val);
         }
+
+        # Traverse return_nodes for Stop (per Chapter 18)
+        if ($node->can('return_nodes') && $node->return_nodes) {
+            for my $ret ($node->return_nodes->@*) {
+                push @queue, $ret if $ret && ref($ret);
+            }
+        }
     }
 
     return \%nodes;
@@ -158,13 +165,14 @@ sub count_node_types {
     ok($ir_root, 'ChalkIR: IR root exists after parsing constant');
 
     if ($ir_root) {
-        is($ir_root->op, 'Return', 'ChalkIR: root is Return node');
+        # Per Chapter 18: Program always returns Stop which collects all returns
+        is($ir_root->op, 'Stop', 'ChalkIR: root is Stop node (per Chapter 18)');
 
         my $nodes = collect_nodes($ir_root);
         my $node_count = scalar(keys %$nodes);
         ok($node_count > 0, "ChalkIR: collected nodes (found $node_count)");
 
-        my $counts = count_node_types($nodes, 'Constant', 'Return', 'Start');
+        my $counts = count_node_types($nodes, 'Constant', 'Return', 'Start', 'Stop');
         ok($counts->{Constant} > 0, "ChalkIR: has Constant node");
         ok($counts->{Return} > 0, "ChalkIR: has Return node");
         ok($counts->{Start} > 0, "ChalkIR: has Start node");
@@ -180,13 +188,14 @@ sub count_node_types {
     ok($ir_root, 'ChalkIR: IR root exists after parsing variable');
 
     if ($ir_root) {
-        is($ir_root->op, 'Return', 'ChalkIR: root is Return node');
+        # Per Chapter 18: Program always returns Stop which collects all returns
+        is($ir_root->op, 'Stop', 'ChalkIR: root is Stop node (per Chapter 18)');
 
         my $nodes = collect_nodes($ir_root);
         my $node_count = scalar(keys %$nodes);
         ok($node_count > 0, "ChalkIR: collected nodes for variable (found $node_count)");
 
-        my $counts = count_node_types($nodes, 'Constant', 'Store', 'Start');
+        my $counts = count_node_types($nodes, 'Constant', 'Store', 'Start', 'Stop');
         ok($counts->{Constant} > 0, "ChalkIR: has Constant node for value");
         ok($counts->{Store} > 0, "ChalkIR: has Store node for variable");
     }

@@ -75,11 +75,12 @@ class Chalk::IR::Node::FunctionDef {
 
     method id() { refaddr($self) }
 
-    # FunctionDef exposes its body statements for graph traversal
-    # This allows XS code generation to reach function bodies from Stop
+    # FunctionDef has no data inputs for graph validation purposes
+    # Body statements are accessed via body_statements() for XS code generation
+    # Note: We don't expose body through inputs() because body statements
+    # aren't added to the main graph - they form a separate subgraph
     method inputs() {
-        $_body_input_ids //= $self->_compute_body_input_ids();
-        return $_body_input_ids;
+        return [];
     }
 
     method op() { 'FunctionDef' }
