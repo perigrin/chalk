@@ -132,10 +132,21 @@ class Chalk::IR::Node {
     method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
         my $class = blessed($self);
 
+        # Translate old input IDs to new node IDs using node_map
+        # This ensures the cloned node references the new cloned inputs
+        my @translated_inputs;
+        for my $input_id (@$new_inputs) {
+            if (defined($input_id) && exists($node_map->{$input_id})) {
+                push @translated_inputs, $node_map->{$input_id}->id;
+            } else {
+                push @translated_inputs, $input_id;
+            }
+        }
+
         return $class->new(
             id              => $id,
             op              => $op,
-            inputs          => $new_inputs,
+            inputs          => \@translated_inputs,
             attributes      => $new_attributes // $attributes,
             source_info     => $source_info,
             transform_chain => $transform_chain,

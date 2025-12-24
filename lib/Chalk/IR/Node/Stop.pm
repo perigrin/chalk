@@ -51,6 +51,29 @@ class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
         };
     }
 
+    # Clone with new inputs for GVN optimizer
+    # Translates old input IDs to new node IDs using node_map
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        # Translate old input IDs to new return nodes using node_map
+        my @new_returns;
+        my @translated_inputs;
+        for my $input_id (@$new_inputs) {
+            if (defined($input_id) && exists($node_map->{$input_id})) {
+                my $new_node = $node_map->{$input_id};
+                push @new_returns, $new_node;
+                push @translated_inputs, $new_node->id;
+            }
+        }
+
+        # Create new Stop with translated returns
+        # Functions are preserved as-is (they're in registry, not graph)
+        return Chalk::IR::Node::Stop->new(
+            inputs    => \@translated_inputs,
+            returns   => \@new_returns,
+            functions => $functions,
+        );
+    }
+
     method execute($context) {
         # Stop node collects all returns and executes the one from the active path
         # Returns are connected as inputs to Stop

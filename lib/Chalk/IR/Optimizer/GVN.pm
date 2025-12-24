@@ -72,18 +72,14 @@ class Chalk::IR::Optimizer::GVN {
             my $old_node = $graph->get_node($node_id);
             next unless defined($old_node);
 
-            # Apply redirections to input list, then update to new node IDs
+            # Apply redirections to input list
+            # Note: We pass OLD IDs here; clone_with_inputs translates them using node_map
             my @new_inputs;
             for my $input_id ($old_node->inputs->@*) {
                 if (defined($input_id)) {
                     # Follow redirection chain if this input was redirected
                     my $final_id = $class->_follow_redirections($input_id, $redirections);
-                    # If the input node was cloned, use the new node's ID
-                    if (exists $old_to_new_node{$final_id}) {
-                        push @new_inputs, $old_to_new_node{$final_id}->id;
-                    } else {
-                        push @new_inputs, $final_id;
-                    }
+                    push @new_inputs, $final_id;
                 } else {
                     push @new_inputs, undef;
                 }
