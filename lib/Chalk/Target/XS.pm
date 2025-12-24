@@ -59,8 +59,19 @@ class Chalk::Target::XS {
     method visit($node) {
         my $type = ref($node);
         $type =~ s/.*:://;  # Extract class name without namespace
-        my $method = "visit_$type";
-        return $self->$method($node);
+
+        # Explicit dispatch table (Chalk parser doesn't support $self->$method syntax)
+        return $self->visit_Start($node) if $type eq 'Start';
+        return $self->visit_Stop($node) if $type eq 'Stop';
+        return $self->visit_Constant($node) if $type eq 'Constant';
+        return $self->visit_Return($node) if $type eq 'Return';
+        return $self->visit_Add($node) if $type eq 'Add';
+        return $self->visit_Subtract($node) if $type eq 'Subtract';
+        return $self->visit_Multiply($node) if $type eq 'Multiply';
+        return $self->visit_Divide($node) if $type eq 'Divide';
+
+        # Unknown node type - return undef
+        return undef;
     }
 
     # Schedule emission order using topological sort from graph
@@ -84,8 +95,10 @@ class Chalk::Target::XS {
             next if $type eq 'Stop';
 
             # Check if we have a visitor for this node type
-            my $method = "visit_$type";
-            if ($self->can($method)) {
+            # Explicit list since Chalk parser doesn't support dynamic method names
+            if ($type eq 'Constant' || $type eq 'Return' ||
+                $type eq 'Add' || $type eq 'Subtract' ||
+                $type eq 'Multiply' || $type eq 'Divide') {
                 push @emittable, $node;
             }
         }
@@ -157,7 +170,7 @@ class Chalk::Target::XS {
         return Chalk::Target::XS::AST::VarDecl->new(
             type => $c_type,
             name => $var,
-            init => Chalk::Target::XS::AST::Literal->new(value => $value),
+            init => Chalk::Target::XS::AST::Literal->new(value => $value, c_type => $c_type),
         );
     }
 
