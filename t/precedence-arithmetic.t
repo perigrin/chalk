@@ -36,9 +36,19 @@ sub extract_result {
     my $winning_node = $ctx->focus;
     return undef unless blessed($winning_node) && $winning_node->can('id');
 
-    # For Return nodes, extract the value
-    if ($winning_node->op eq 'Return' && $winning_node->can('value')) {
-        my $val = $winning_node->value;
+    # Per Chapter 18: Program returns Stop which collects all returns
+    # Get the Return node from Stop's return_nodes
+    my $return_node;
+    if ($winning_node->op eq 'Stop' && $winning_node->can('return_nodes')) {
+        my $returns = $winning_node->return_nodes;
+        $return_node = $returns->[-1] if $returns && @$returns;
+    } elsif ($winning_node->op eq 'Return') {
+        $return_node = $winning_node;
+    }
+
+    # Extract the value from Return node
+    if ($return_node && $return_node->can('value')) {
+        my $val = $return_node->value;
         if ($val && $val->can('op') && $val->op eq 'Constant' && $val->can('value')) {
             return $val->value;
         }
