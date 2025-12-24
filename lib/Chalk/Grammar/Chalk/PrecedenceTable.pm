@@ -8,7 +8,7 @@ class Chalk::Grammar::Chalk::PrecedenceTable {
     # Class method to get the Perl precedence table
     # Returns array of precedence levels (highest to lowest)
     # Each level is { assoc => 'left'|'right'|'nonassoc'|'chained'|'chain/na', ops => [...] }
-    method get_table() {
+    sub get_table {
         return (
             # Index 0 - Highest precedence
             # NOTE: '->' removed from precedence table - it's a postfix dereference
