@@ -107,6 +107,48 @@ class Chalk::IR::Node::Call {
     method record_transform(@args) {
         return;
     }
+
+    # Clone with new inputs from node_map, preserving polymorphic Call type
+    # Used by GVN optimizer to reconstruct nodes
+    # $node_map is old_id -> new_node mapping
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        my $new_callee;
+        my $new_receiver;
+        my @new_args;
+
+        # Reconstruct field references from new_inputs array
+        # Input order: callee, receiver (if present), args...
+        my $idx = 0;
+
+        # First input is always callee (if it exists)
+        if (defined $new_inputs->[$idx] && exists $node_map->{$new_inputs->[$idx]}) {
+            $new_callee = $node_map->{$new_inputs->[$idx]};
+            $idx++;
+        }
+
+        # Second input is receiver (if original had one)
+        if (defined $receiver) {
+            if (defined $new_inputs->[$idx] && exists $node_map->{$new_inputs->[$idx]}) {
+                $new_receiver = $node_map->{$new_inputs->[$idx]};
+                $idx++;
+            }
+        }
+
+        # Remaining inputs are args
+        while ($idx < scalar($new_inputs->@*)) {
+            if (defined $new_inputs->[$idx] && exists $node_map->{$new_inputs->[$idx]}) {
+                push @new_args, $node_map->{$new_inputs->[$idx]};
+            }
+            $idx++;
+        }
+
+        return Chalk::IR::Node::Call->new(
+            callee      => $new_callee,
+            args        => \@new_args,
+            receiver    => $new_receiver,
+            source_info => $source_info,
+        );
+    }
 }
 
 1;

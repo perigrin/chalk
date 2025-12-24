@@ -167,6 +167,23 @@ class Chalk::IR::Node::CallEnd {
         return;
     }
 
+    # Clone with new inputs from node_map, preserving polymorphic CallEnd type
+    # Used by GVN optimizer to reconstruct nodes
+    # $node_map is old_id -> new_node mapping
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        my $new_call;
+
+        # First input is the Call node
+        if (defined $new_inputs->[0] && exists $node_map->{$new_inputs->[0]}) {
+            $new_call = $node_map->{$new_inputs->[0]};
+        }
+
+        return Chalk::IR::Node::CallEnd->new(
+            call        => $new_call,
+            source_info => $source_info,
+        );
+    }
+
     # Projection accessors for control, memory, and return value
     # Returns cached Proj nodes (created on first access)
     method ctrl_proj() {

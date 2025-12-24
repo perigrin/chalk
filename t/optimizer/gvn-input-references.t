@@ -2,8 +2,9 @@
 # ABOUTME: Tests for GVN optimizer input reference updates
 # ABOUTME: Issue #443 - GVN doesn't update input references when replacing nodes
 
-use lib 'lib';
 use 5.42.0;
+use FindBin qw($RealBin);
+use lib "$RealBin/../../lib";
 use Test2::V0;
 use experimental qw(defer);
 defer { done_testing() }
@@ -80,8 +81,7 @@ subtest 'GVN maintains input reference integrity' => sub {
     my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
     $graph = $gvn_result->{graph};
 
-    # TODO: Issue #443 - GVN should update input references when replacing nodes
-    # Currently this fails because Call.inputs references the old Constant node ID
+    # Issue #443: GVN should update input references when replacing nodes
     my $all_valid_after = 1;
     my @broken_refs;
     for my $id (keys $graph->nodes->%*) {
@@ -89,13 +89,11 @@ subtest 'GVN maintains input reference integrity' => sub {
         for my $input_id ($node->inputs->@*) {
             unless (exists $graph->nodes->{$input_id}) {
                 $all_valid_after = 0;
-                push @broken_refs, { node => $node->op, missing_input => $input_id };
+                push @broken_refs, { node => $node->op, node_id => $id, missing_input => $input_id };
             }
         }
     }
 
-    todo 'Issue #443: GVN should update input references when replacing nodes' => sub {
-        ok $all_valid_after, 'All input references valid after GVN';
-        is scalar(@broken_refs), 0, 'No broken references after GVN';
-    };
+    ok $all_valid_after, 'All input references valid after GVN';
+    is scalar(@broken_refs), 0, 'No broken references after GVN';
 };
