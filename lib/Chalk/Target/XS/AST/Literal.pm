@@ -8,6 +8,9 @@ class Chalk::Target::XS::AST::Literal :isa(Chalk::Target::XS::AST::Node) {
     field $value :param :reader;
 
     method emit() {
+        # Handle undef as empty string
+        return '""' unless defined $value;
+
         # If value is a number, emit as-is
         # If value is a string, emit with double quotes and escape special characters
         if (Scalar::Util::looks_like_number($value)) {

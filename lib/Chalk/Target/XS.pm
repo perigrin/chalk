@@ -7,6 +7,7 @@ use utf8;
 class Chalk::Target::XS {
     use Chalk::IR::Context;
     use Chalk::Target::XS::AST::Module;
+    use Chalk::Target::XS::AST::CompositeNode;
 
     field $graph :param :reader;
     field $module_name :param :reader;
@@ -62,29 +63,74 @@ class Chalk::Target::XS {
         return $self->$method($node);
     }
 
-    # Schedule emission order using reverse postorder from Return nodes
+    # Schedule emission order using topological sort from graph
+    # Returns nodes in dependency order (inputs before uses)
     method schedule_emission() {
-        # For now, return empty list - will implement graph traversal
-        # when we have actual IR graphs to work with
-        return ();
+        # Check if graph is a blessed object with linearize method
+        return () unless $graph && ref($graph) && blessed($graph) && $graph->can('linearize');
+
+        # Get all nodes in topological order
+        my @ordered = $graph->linearize();
+
+        # Filter to nodes we can actually emit
+        # Skip Start/Stop CFG nodes (they don't produce XS output)
+        my @emittable;
+        for my $node (@ordered) {
+            my $type = ref($node);
+            $type =~ s/.*:://;
+
+            # Skip nodes that don't produce output
+            next if $type eq 'Start';
+            next if $type eq 'Stop';
+
+            # Check if we have a visitor for this node type
+            my $method = "visit_$type";
+            if ($self->can($method)) {
+                push @emittable, $node;
+            }
+        }
+
+        return @emittable;
     }
 
     # Generate XS AST from IR graph
     method generate() {
-        # 1. Build emission order (reverse postorder from Return nodes)
+        use Chalk::Target::XS::AST::XSUB;
+
+        # 1. Build emission order (topological sort)
         my @order = $self->schedule_emission();
 
-        # 2. Visit each node, building XS AST
+        # 2. Visit each node, building XS AST statements
         my @statements;
         for my $node (@order) {
             my $xs_node = $self->visit($node);
             push @statements, $xs_node if defined $xs_node;
         }
 
-        # 3. Wrap in module structure
-        return Chalk::Target::XS::AST::Module->new(
+        # 3. Create XSUB wrapper if we have statements
+        my @xsubs;
+        if (@statements) {
+            # For now, create a single XSUB named after the module
+            # TODO: Extract function name from IR (when we have function boundaries)
+            my $xsub = Chalk::Target::XS::AST::XSUB->new(
+                name => 'generated',
+                params => [],
+                body => \@statements,
+            );
+            push @xsubs, $xsub;
+        }
+
+        # 4. Wrap in module structure
+        # Note: Module.pm currently only emits MODULE/PACKAGE line
+        # The XSUBs are emitted separately after
+        my $module = Chalk::Target::XS::AST::Module->new(
             module => $module_name,
             package => $module_name,
+        );
+
+        # Return a composite structure that emits both
+        return Chalk::Target::XS::AST::CompositeNode->new(
+            children => [$module, @xsubs],
         );
     }
 
