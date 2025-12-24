@@ -1,39 +1,43 @@
 # ABOUTME: Specialized composite semiring for Chalk IR generation
-# ABOUTME: Combines syntax validation (via ChalkSyntax) and semantic IR building
+# ABOUTME: Combines precedence validation and semantic IR building
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
 use Chalk::IR::Node::Scope;
-use Chalk::Semiring::ChalkSyntax;
+use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
 use Chalk::Grammar::Chalk;  # Load all Chalk Rule classes for semantic actions
+use Chalk::Grammar::Chalk::PrecedenceTable;
+use Chalk::FunctionRegistry;
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $grammar :param :reader;
     field $scope :reader = Chalk::IR::Node::Scope->new();
+    field $function_registry :reader = Chalk::FunctionRegistry->new();
     field $composite :reader;
 
     ADJUST {
-        # Create ChalkSyntax semiring for validation
-        # Includes precedence, boolean, semantic validation, and type inference
-        my $chalksyntax_sr = Chalk::Semiring::ChalkSyntax->new(
-            grammar => $grammar
+        # Get precedence table from centralized PrecedenceTable class
+        my @perl_precedence_table = Chalk::Grammar::Chalk::PrecedenceTable->get_table();
+
+        my $precedence_sr = Chalk::Semiring::Precedence->new(
+            precedence_table => \@perl_precedence_table
         );
 
-        # Create Semantic semiring with scope in environment
-        # Functions are tracked in scope (with '&' prefix) alongside variables
+        # Create Semantic semiring with scope and function registry in environment
         my $semantic_sr = Chalk::Semiring::Semantic->new(
             grammar => $grammar,
-            env => { scope => $scope }
+            env => { scope => $scope, function_registry => $function_registry }
         );
 
-        # Use Composite with ChalkSyntax and Semantic
-        # ChalkSyntax validates syntax (precedence, types, semantics)
+        # Use Composite with Precedence and Semantic
+        # Precedence validates operator precedence during parsing (returns invalid for bad parses)
         # Semantic builds IR via Rule classes creating nodes directly
+        # Precedence.add() prefers valid over invalid, so invalid parses are automatically filtered
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$chalksyntax_sr, $semantic_sr]
+            semirings => [$precedence_sr, $semantic_sr]
         );
     }
 

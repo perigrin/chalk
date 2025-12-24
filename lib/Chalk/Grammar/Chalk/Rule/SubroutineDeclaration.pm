@@ -73,15 +73,11 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         # (hash dereference doesn't work with new Perl class syntax)
         $func_def->set_body_node($body_node);
 
-        # Register function in Scope (functions are bindings like variables)
+        # Register function in context if function registry is available
         my $env = $context->env;
-        my $scope = $env ? $env->{scope} : undef;
-        if ($scope) {
-            # Store function in scope with special prefix to distinguish from variables
-            # This allows Scope to track both variables and functions
-            my $updated_scope = $scope->with_binding("&$func_name", $func_def);
-            # Update environment with new scope
-            $env->{scope} = $updated_scope;
+        my $registry = $env ? $env->{function_registry} : undef;
+        if ($registry) {
+            $registry->register($func_name, $func_def);
         }
 
         return $func_def;

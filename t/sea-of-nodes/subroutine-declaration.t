@@ -151,7 +151,7 @@ subtest 'Parse subroutine with parameters' => sub {
     }
 };
 
-subtest 'Functions stored in Scope during parsing' => sub {
+subtest 'Functions registered in FunctionRegistry during parsing' => sub {
     use Chalk::Grammar;
     use Chalk::Grammar::Chalk;
     use Chalk::Parser;
@@ -175,16 +175,18 @@ subtest 'Functions stored in Scope during parsing' => sub {
 
     ok $result, 'Parse succeeded';
 
-    # Check if functions are in scope (with '&' prefix)
-    my $scope = $semiring->scope;
-    ok $scope, 'Got scope from semiring';
+    # Check if functions were registered
+    my $registry = $semiring->function_registry;
+    ok $registry, 'Got function registry from semiring';
 
-    my $foo_def = $scope->lookup('&foo');
-    ok defined($foo_def), 'Function foo is in scope';
-    is $foo_def->name, 'foo', 'foo has correct name' if defined($foo_def);
-    is $foo_def->parameters, [], 'foo has no parameters' if defined($foo_def);
+    ok $registry->has('foo'), 'Function foo is registered';
+    ok $registry->has('bar'), 'Function bar is registered';
 
-    my $bar_def = $scope->lookup('&bar');
-    ok defined($bar_def), 'Function bar is in scope';
-    is $bar_def->name, 'bar', 'bar has correct name' if defined($bar_def);
+    my $foo_def = $registry->lookup('foo');
+    is $foo_def->name, 'foo', 'foo has correct name';
+    is $foo_def->parameters, [], 'foo has no parameters';
+
+    my $bar_def = $registry->lookup('bar');
+    is $bar_def->name, 'bar', 'bar has correct name';
+    # Note: parameters may or may not be collected depending on implementation
 };
