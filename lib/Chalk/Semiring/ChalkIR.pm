@@ -9,6 +9,7 @@ use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
 use Chalk::Semiring::Composite;
 use Chalk::Grammar::Chalk;  # Load all Chalk Rule classes for semantic actions
+use Chalk::Grammar::Chalk::PrecedenceTable;
 use Chalk::FunctionRegistry;
 
 class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
@@ -18,35 +19,8 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $composite :reader;
 
     ADJUST {
-        # Create Precedence semiring with full Perl operator precedence table
-        # Reference: perldoc perlop - Operator Precedence and Associativity
-        my @perl_precedence_table = (
-            # Index 0 - Highest precedence
-            { assoc => 'left',    ops => ['->'] },
-            { assoc => 'nonassoc', ops => ['++', '--'] },  # postfix
-            { assoc => 'right',   ops => ['**'] },
-            { assoc => 'right',   ops => ['!', '~', '\\', 'unary +', 'unary -'] },
-            { assoc => 'left',    ops => ['=~', '!~'] },
-            { assoc => 'left',    ops => ['*', '/', '%', 'x'] },
-            { assoc => 'left',    ops => ['+', '-', '.'] },
-            { assoc => 'left',    ops => ['<<', '>>'] },
-            { assoc => 'nonassoc', ops => ['named unary'] },
-            { assoc => 'nonassoc', ops => ['isa'] },
-            { assoc => 'chained', ops => ['<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'] },
-            { assoc => 'chain/na', ops => ['==', '!=', 'eq', 'ne', '<=>', 'cmp', '~~'] },
-            { assoc => 'left',    ops => ['&'] },
-            { assoc => 'left',    ops => ['|', '^'] },
-            { assoc => 'left',    ops => ['&&'] },
-            { assoc => 'left',    ops => ['||', '^^', '//'] },
-            { assoc => 'nonassoc', ops => ['..', '...'] },
-            { assoc => 'right',   ops => ['?:'] },
-            { assoc => 'right',   ops => ['=', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '.=', '<<=', '>>=', '&&=', '||=', '//='] },
-            { assoc => 'left',    ops => [',', '=>'] },
-            { assoc => 'right',   ops => ['not'] },
-            { assoc => 'left',    ops => ['and'] },
-            { assoc => 'left',    ops => ['or', 'xor'] },
-            # Index 22 - Lowest precedence
-        );
+        # Get precedence table from centralized PrecedenceTable class
+        my @perl_precedence_table = Chalk::Grammar::Chalk::PrecedenceTable->get_table();
 
         my $precedence_sr = Chalk::Semiring::Precedence->new(
             precedence_table => \@perl_precedence_table
