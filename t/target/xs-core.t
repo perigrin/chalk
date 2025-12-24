@@ -169,11 +169,10 @@ use Chalk::IR::Type;
         type => Chalk::IR::Type::Integer->TOP()
     );
 
-    # visit() should dispatch to visit_Constant
-    # For now, we expect visit_Constant to die (not implemented yet)
-    eval { $xs->visit($const_node) };
-    like($@, qr/visit_Constant|not implemented|Can't locate object method/i,
-         'visit() dispatches to visit_Constant (not implemented yet)');
+    # visit() should dispatch to visit_Constant and return a VarDecl
+    my $result = $xs->visit($const_node);
+    isa_ok($result, 'Chalk::Target::XS::AST::VarDecl',
+           'visit() dispatches to visit_Constant');
 }
 
 # Test schedule_emission - basic structure

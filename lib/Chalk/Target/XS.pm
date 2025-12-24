@@ -90,12 +90,40 @@ class Chalk::Target::XS {
 
     # Visitor methods (added incrementally via TDD)
     # These will be implemented as tests require them
+
+    # Start and Stop nodes produce no XS output
+    method visit_Start($node) {
+        return undef;
+    }
+
+    method visit_Stop($node) {
+        return undef;
+    }
+
     method visit_Constant($node) {
-        die "visit_Constant not implemented yet";
+        use Chalk::Target::XS::AST::VarDecl;
+        use Chalk::Target::XS::AST::Literal;
+
+        my $value = $node->value;
+        my $var = $self->alloc_temp($node->id);
+        my $c_type = $self->get_c_type($node);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => $c_type,
+            name => $var,
+            init => Chalk::Target::XS::AST::Literal->new(value => $value),
+        );
     }
 
     method visit_Return($node) {
-        die "visit_Return not implemented yet";
+        use Chalk::Target::XS::AST::Return;
+
+        my $input_id = $node->value->id;
+        my $var = $self->get_var($input_id);
+
+        return Chalk::Target::XS::AST::Return->new(
+            expr => $var,
+        );
     }
 }
 
