@@ -126,7 +126,8 @@ class Chalk::Target::XS {
         );
     }
 
-    method visit_Add($node) {
+    # Helper for binary operations - extracts common pattern
+    method _visit_binary_op($node, $operator) {
         use Chalk::Target::XS::AST::VarDecl;
         use Chalk::Target::XS::AST::BinaryOp;
 
@@ -142,77 +143,16 @@ class Chalk::Target::XS {
             name => $result_var,
             init => Chalk::Target::XS::AST::BinaryOp->new(
                 left => $left_var,
-                operator => '+',
+                operator => $operator,
                 right => $right_var,
             ),
         );
     }
 
-    method visit_Subtract($node) {
-        use Chalk::Target::XS::AST::VarDecl;
-        use Chalk::Target::XS::AST::BinaryOp;
-
-        my ($left_id, $right_id) = $node->inputs->@*;
-        my $left_var = $self->get_var($left_id);
-        my $right_var = $self->get_var($right_id);
-
-        my $result_var = $self->alloc_temp($node->id);
-        my $c_type = $self->get_c_type($node);
-
-        return Chalk::Target::XS::AST::VarDecl->new(
-            type => $c_type,
-            name => $result_var,
-            init => Chalk::Target::XS::AST::BinaryOp->new(
-                left => $left_var,
-                operator => '-',
-                right => $right_var,
-            ),
-        );
-    }
-
-    method visit_Multiply($node) {
-        use Chalk::Target::XS::AST::VarDecl;
-        use Chalk::Target::XS::AST::BinaryOp;
-
-        my ($left_id, $right_id) = $node->inputs->@*;
-        my $left_var = $self->get_var($left_id);
-        my $right_var = $self->get_var($right_id);
-
-        my $result_var = $self->alloc_temp($node->id);
-        my $c_type = $self->get_c_type($node);
-
-        return Chalk::Target::XS::AST::VarDecl->new(
-            type => $c_type,
-            name => $result_var,
-            init => Chalk::Target::XS::AST::BinaryOp->new(
-                left => $left_var,
-                operator => '*',
-                right => $right_var,
-            ),
-        );
-    }
-
-    method visit_Divide($node) {
-        use Chalk::Target::XS::AST::VarDecl;
-        use Chalk::Target::XS::AST::BinaryOp;
-
-        my ($left_id, $right_id) = $node->inputs->@*;
-        my $left_var = $self->get_var($left_id);
-        my $right_var = $self->get_var($right_id);
-
-        my $result_var = $self->alloc_temp($node->id);
-        my $c_type = $self->get_c_type($node);
-
-        return Chalk::Target::XS::AST::VarDecl->new(
-            type => $c_type,
-            name => $result_var,
-            init => Chalk::Target::XS::AST::BinaryOp->new(
-                left => $left_var,
-                operator => '/',
-                right => $right_var,
-            ),
-        );
-    }
+    method visit_Add($node) { $self->_visit_binary_op($node, '+'); }
+    method visit_Subtract($node) { $self->_visit_binary_op($node, '-'); }
+    method visit_Multiply($node) { $self->_visit_binary_op($node, '*'); }
+    method visit_Divide($node) { $self->_visit_binary_op($node, '/'); }
 }
 
 1;
