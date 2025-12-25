@@ -1,5 +1,6 @@
-# ABOUTME: Semantic action for Program - creates Start/Return control flow nodes
+# ABOUTME: Semantic action for Program - creates Start/Stop control flow nodes
 # ABOUTME: Wraps entire program with proper CFG entry/exit points for Sea of Nodes IR
+# ABOUTME: Per Chapter 18: Program always returns Stop which collects all returns
 
 use 5.42.0;
 use experimental 'class';
@@ -98,6 +99,24 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
         @statements = @rewired_statements;
         my $final_control = $current_ctrl;
 
+        # Per Chapter 18: Always create Stop to collect all returns
+        # This ensures proper graph traversal for XS target and other backends
+        use Chalk::IR::Node::Stop;
+        my $stop = Chalk::IR::Node::Stop->new(inputs => [], returns => []);
+
+        # Add early returns to Stop first
+        for my $early_ret (@early_returns) {
+            $stop->add_return($early_ret);
+        }
+
+        # Collect FunctionDef nodes and add to Stop for graph traversal
+        # This makes function bodies reachable for XS code generation
+        for my $stmt (@statements) {
+            if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'FunctionDef') {
+                $stop->add_function($stmt);
+            }
+        }
+
         # Get last statement for return value
         my $last_stmt = @statements ? $statements[-1] : undef;
         my $return_value;
@@ -106,23 +125,9 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
             my $op = $last_stmt->op;
 
             if ($op eq 'Return') {
-                # Last statement is already a Return
-                # Issue #195: If we have early returns, create Stop node with all returns
-                if (@early_returns) {
-                    my @all_returns = (@early_returns, $last_stmt);
-                    my $stop = Chalk::IR::Node::Stop->new(
-                        inputs  => [ map { $_->id } @all_returns ],
-                        returns => \@all_returns,
-                    );
-                    $stop->record_transform(
-                        'ir_construction',
-                        'Program::evaluate',
-                        context => "return_inputs=" . join(", ", map { $_->id } @all_returns)
-                    );
-                    return $stop;
-                }
-                # No early returns - just return the single Return
-                return $last_stmt;
+                # Last statement is already a Return - add to Stop
+                $stop->add_return($last_stmt);
+                return $stop;
             } elsif ($op eq 'Store') {
                 # Last statement is a Store - return the stored value
                 $return_value = $last_stmt->value;
@@ -139,28 +144,16 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
             value => undef,
         );
 
-        # Create Return node
+        # Create implicit Return node for expressions/stores
         my $final_return = Chalk::IR::Node::Return->new(
             control => $final_control,
             value   => $return_value,
         );
 
-        # Issue #195: If we have early returns, create Stop node with all returns
-        if (@early_returns) {
-            my @all_returns = (@early_returns, $final_return);
-            my $stop = Chalk::IR::Node::Stop->new(
-                inputs  => [ map { $_->id } @all_returns ],
-                returns => \@all_returns,
-            );
-            $stop->record_transform(
-                'ir_construction',
-                'Program::evaluate',
-                context => "return_inputs=" . join(", ", map { $_->id } @all_returns)
-            );
-            return $stop;
-        }
+        # Add implicit return to Stop
+        $stop->add_return($final_return);
 
-        return $final_return;
+        return $stop;
     }
 }
 

@@ -20,6 +20,8 @@ if ( !caller ) {
     my $syntax_check_mode = 0;    # -c flag for syntax checking
     my $compile_module_mode = 0;  # --compile-module flag
     my $module_to_compile;        # module name for compilation
+    my $target_type;              # --target flag (e.g., 'xs')
+    my $module_name;              # --module flag for XS module name
     my $preprocess = ['Chalk::Preprocessor::Heredoc'];  # default to Heredoc
     my @remaining_args;
 
@@ -42,6 +44,18 @@ if ( !caller ) {
             $i += 2;
         } elsif ($ARGV[$i] eq '--preprocess') {
             $preprocess = ['Chalk::Preprocessor::Heredoc'];  # Enable heredoc preprocessing
+            $i++;
+        } elsif ($ARGV[$i] eq '--target' && $i < $#ARGV) {
+            $target_type = $ARGV[$i + 1];
+            $i += 2;
+        } elsif ($ARGV[$i] =~ /^--target=(.+)$/) {
+            $target_type = $1;
+            $i++;
+        } elsif ($ARGV[$i] eq '--module' && $i < $#ARGV) {
+            $module_name = $ARGV[$i + 1];
+            $i += 2;
+        } elsif ($ARGV[$i] =~ /^--module=(.+)$/) {
+            $module_name = $1;
             $i++;
         } else {
             push @remaining_args, $ARGV[$i];
@@ -239,6 +253,102 @@ if ( !caller ) {
             if ($syntax_check_mode) {
                 print("$ARGV[0] syntax OK\n") if @ARGV;
                 print("syntax OK\n") unless @ARGV;
+            } elsif ($target_type && $target_type eq 'xs') {
+                # XS target mode: parse → IR → optimize → XS generate → emit
+                require Chalk::IR::Graph;
+                require Chalk::Target::XS;
+
+                # Get winning IR node from parse result
+                my $winning_node;
+                if ($result->can('context')) {
+                    my $ctx = $result->context;
+                    if ($ctx->can('focus')) {
+                        $winning_node = $ctx->focus;
+                    }
+                }
+
+                # Build graph from IR node
+                if ($winning_node && blessed($winning_node) && $winning_node->can('id')) {
+                    my $graph = Chalk::IR::Graph->new();
+                    my %visited;
+                    my @queue = ($winning_node);
+
+                    while (@queue) {
+                        my $node = shift @queue;
+                        next unless blessed($node) && $node->can('id');
+                        my $node_id = $node->id;
+                        next if $visited{$node_id}++;
+
+                        # Add node to graph
+                        $graph->add_node($node);
+
+                        # Traverse via object references (same as IR mode)
+                        if ($node->can('value_node')) {
+                            my $val = $node->value_node;
+                            push @queue, $val if blessed($val) && $val->can('id') && !$visited{$val->id};
+                        }
+                        if ($node->can('value') && $node->can('op') && $node->op ne 'Constant') {
+                            my $val = $node->value;
+                            push @queue, $val if blessed($val) && $val->can('id') && !$visited{$val->id};
+                        }
+                        if ($node->can('control') && $node->control) {
+                            my $ctrl = $node->control;
+                            push @queue, $ctrl if blessed($ctrl) && $ctrl->can('id') && !$visited{$ctrl->id};
+                        }
+                        if ($node->can('left')) {
+                            my $left = $node->left;
+                            push @queue, $left if blessed($left) && $left->can('id') && !$visited{$left->id};
+                        }
+                        if ($node->can('right')) {
+                            my $right = $node->right;
+                            push @queue, $right if blessed($right) && $right->can('id') && !$visited{$right->id};
+                        }
+                        if ($node->can('operand')) {
+                            my $op = $node->operand;
+                            push @queue, $op if blessed($op) && $op->can('id') && !$visited{$op->id};
+                        }
+                        if ($node->can('condition')) {
+                            my $cond = $node->condition;
+                            push @queue, $cond if blessed($cond) && $cond->can('id') && !$visited{$cond->id};
+                        }
+                        if ($node->can('source') && $node->source) {
+                            my $src = $node->source;
+                            push @queue, $src if blessed($src) && $src->can('id') && !$visited{$src->id};
+                        }
+                        if ($node->can('branches') && $node->branches) {
+                            for my $branch ($node->branches->@*) {
+                                push @queue, $branch if blessed($branch) && $branch->can('id') && !$visited{$branch->id};
+                            }
+                        }
+                        if ($node->can('control_users') && $node->control_users) {
+                            for my $user ($node->control_users->@*) {
+                                push @queue, $user if blessed($user) && $user->can('id') && !$visited{$user->id};
+                            }
+                        }
+                        if ($node->can('returns') && $node->returns) {
+                            for my $ret ($node->returns->@*) {
+                                push @queue, $ret if blessed($ret) && $ret->can('id') && !$visited{$ret->id};
+                            }
+                        }
+                    }
+
+                    # Run optimization pipeline (IterPeeps -> DCE -> GCM)
+                    require Chalk::IR::Optimizer;
+                    $graph = Chalk::IR::Optimizer->optimize($graph);
+
+                    # Generate XS code
+                    my $xs_module_name = $module_name // 'ChalkModule';
+                    my $xs_target = Chalk::Target::XS->new(
+                        graph => $graph,
+                        module_name => $xs_module_name,
+                    );
+
+                    my $xs_ast = $xs_target->generate();
+                    my $xs_code = $xs_ast->emit();
+                    print($xs_code);
+                } else {
+                    print("Parse successful but no IR node produced\n");
+                }
             } else {
                 # IR mode: build graph from winning IR node and execute
                 if ($generate_ir) {
@@ -338,10 +448,9 @@ if ( !caller ) {
                             }
                         }
 
-                        # Run GVN optimizer
-                        require Chalk::IR::Optimizer::GVN;
-                        my $gvn_result = Chalk::IR::Optimizer::GVN->run_gvn($graph);
-                        $graph = $gvn_result->{graph};
+                        # Run optimization pipeline (IterPeeps -> DCE -> GCM)
+                        require Chalk::IR::Optimizer;
+                        $graph = Chalk::IR::Optimizer->optimize($graph);
 
                         # Execute with CEK interpreter
                         require Chalk::Interpreter::CEKDataflow;

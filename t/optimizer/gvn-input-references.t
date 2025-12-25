@@ -62,6 +62,13 @@ subtest 'GVN maintains input reference integrity' => sub {
             next unless blessed($ref) && $ref->can('id') && !$visited{$ref->id};
             push @queue, $ref;
         }
+
+        # Traverse return_nodes from Stop (per Chapter 18)
+        if ($node->can('return_nodes') && $node->return_nodes) {
+            for my $ret ($node->return_nodes->@*) {
+                push @queue, $ret if blessed($ret) && $ret->can('id') && !$visited{$ret->id};
+            }
+        }
     }
 
     # Verify all inputs are valid BEFORE GVN

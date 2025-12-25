@@ -73,6 +73,7 @@ class Chalk::IR::Optimizer::GVN {
             next unless defined($old_node);
 
             # Apply redirections to input list
+            # Note: We pass OLD IDs here; clone_with_inputs translates them using node_map
             my @new_inputs;
             for my $input_id ($old_node->inputs->@*) {
                 if (defined($input_id)) {

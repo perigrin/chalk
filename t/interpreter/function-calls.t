@@ -71,6 +71,13 @@ sub run_chalk($code) {
                 push @queue, $ref;
             }
         }
+
+        # Traverse return_nodes for Stop (per Chapter 18)
+        if ($node->can('return_nodes') && $node->return_nodes) {
+            for my $ret ($node->return_nodes->@*) {
+                push @queue, $ret if blessed($ret) && $ret->can('id') && !$visited{$ret->id};
+            }
+        }
     }
 
     # NOTE: Skipping GVN optimizer for function call tests
