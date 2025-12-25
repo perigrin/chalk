@@ -117,25 +117,73 @@ class Chalk::Target::XS {
         return undef;
     }
 
+    # Recursively visit a node and all its dependencies
+    # Returns list of XS AST nodes in dependency order
+    method visit_with_deps($node, $visited, $statements, $params) {
+        return unless blessed($node) && $node->can('id');
+        return if $visited->{$node->id}++;
+
+        my $op = $node->can('op') ? $node->op : '';
+
+        # Handle parameter references - bind to parameter name, no XS output
+        if ($op eq 'Load' || $op eq 'Phi') {
+            # These might reference parameters - check if we have a name
+            if ($node->can('name') && $node->name) {
+                my $name = $node->name;
+                # Check if it's a parameter (remove sigil for comparison)
+                my $bare_name = $name;
+                $bare_name =~ s/^\$//;
+                for my $param (@$params) {
+                    my $param_bare = $param;
+                    $param_bare =~ s/^\$//;
+                    if ($bare_name eq $param_bare) {
+                        # Bind this node to the parameter variable
+                        $self->bind_var($node->id, $param_bare);
+                        return;
+                    }
+                }
+            }
+        }
+
+        # Visit dependencies first (in correct order)
+        # Binary ops: left, right
+        if ($node->can('left') && $node->left) {
+            $self->visit_with_deps($node->left, $visited, $statements, $params);
+        }
+        if ($node->can('right') && $node->right) {
+            $self->visit_with_deps($node->right, $visited, $statements, $params);
+        }
+        # Return: value
+        if ($node->can('value') && $node->value && $op ne 'Constant') {
+            $self->visit_with_deps($node->value, $visited, $statements, $params);
+        }
+        # Unary ops: operand
+        if ($node->can('operand') && $node->operand) {
+            $self->visit_with_deps($node->operand, $visited, $statements, $params);
+        }
+
+        # Now visit this node
+        my $xs_node = $self->visit($node);
+        push @$statements, $xs_node if defined $xs_node;
+    }
+
     # Generate XS code for a single function's body statements
     method generate_function_body($func_def) {
         my @statements;
         my $body_stmts = $func_def->body_statements // [];
+        my $params = $func_def->parameters // [];
+        my %visited;
+
+        # Bind parameters to their names upfront
+        # Parameters in XS are available directly by name
+        for my $param (@$params) {
+            my $bare_name = $param;
+            $bare_name =~ s/^\$//;
+            # We'll bind parameter nodes when we encounter them
+        }
 
         for my $stmt (@$body_stmts) {
-            # Process dependencies (inputs) BEFORE the statement itself
-            # This ensures proper variable allocation order
-            if (blessed($stmt) && $stmt->can('value') && $stmt->can('op') && $stmt->op eq 'Return') {
-                my $value = $stmt->value;
-                if (blessed($value) && $value->can('id')) {
-                    my $value_xs = $self->visit($value);
-                    push @statements, $value_xs if defined $value_xs;
-                }
-            }
-
-            # Now process the statement itself
-            my $xs_node = $self->visit($stmt);
-            push @statements, $xs_node if defined $xs_node;
+            $self->visit_with_deps($stmt, \%visited, \@statements, $params);
         }
 
         return @statements;

@@ -25,12 +25,18 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
             next unless defined $child;
-            if (!ref($child) && $child eq '(') {
+
+            # Extract token value if it's a Token object
+            my $value = $child;
+            if (blessed($child) && $child->can('value')) {
+                $value = $child->value;
+            }
+
+            if (defined($value) && !ref($value) && $value eq '(') {
                 $has_parens = 1;
                 last;
             }
         }
-
         if ($has_parens) {
             # Form 1: sub name(params) block
             # Find ParameterList child (between '(' and ')')
@@ -39,9 +45,16 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             for my $i (0 .. $#children) {
                 my $child = $context->child($i);
                 next unless defined $child;
-                if (!ref($child) && $child eq '(') {
+
+                # Extract token value if it's a Token object
+                my $value = $child;
+                if (blessed($child) && $child->can('value')) {
+                    $value = $child->value;
+                }
+
+                if (defined($value) && !ref($value) && $value eq '(') {
                     $paren_open_idx = $i;
-                } elsif (!ref($child) && $child eq ')') {
+                } elsif (defined($value) && !ref($value) && $value eq ')') {
                     $paren_close_idx = $i;
                 }
             }
@@ -108,6 +121,14 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         # Skip non-ref nodes (tokens like ',')
         return if !ref($node);
 
+        # ParameterList returns an array of Variable metadata hashes
+        if (ref($node) eq 'ARRAY') {
+            for my $item (@$node) {
+                $self->_collect_parameters($item, $params);
+            }
+            return;
+        }
+
         # Variable metadata hash: { type => 'scalar_var', name => 'x', sigil => '$' }
         if (ref($node) eq 'HASH' && $node->{type}) {
             my $sigil = $node->{sigil} // '';
@@ -118,11 +139,6 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
 
         # IR nodes (skip - these are from evaluated expressions)
         if (blessed($node) && $node->can('id')) {
-            return;
-        }
-
-        # Arrays (from Identifier which returns array of chars)
-        if (ref($node) eq 'ARRAY') {
             return;
         }
     }
