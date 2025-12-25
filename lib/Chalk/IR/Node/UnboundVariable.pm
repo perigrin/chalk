@@ -39,10 +39,12 @@ class Chalk::IR::Node::UnboundVariable {
         return $self->to_hash()->{attributes};
     }
 
-    # Type is unknown until resolved
+    # Type is Top (unknown) until resolved
+    # Actual type determined after variable resolution and optimization/narrowing
+    # Returns IR type (not Grammar type) per #478 type flow architecture
     method type() {
-        use Chalk::Grammar::Chalk::Type::Any;
-        return Chalk::Grammar::Chalk::Type::Any->new();
+        use Chalk::IR::Type::Top;
+        return Chalk::IR::Type::Top->top();
     }
 
     method compute_type() {

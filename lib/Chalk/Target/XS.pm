@@ -36,8 +36,11 @@ class Chalk::Target::XS {
     }
 
     # Map IR types to C types for Perl API
+    # Prefer compute() (peephole type lattice) over compute_type() (semantic types)
+    # because peephole inference propagates types through operations correctly
     method get_c_type($node) {
-        my $ir_type = $node->can('compute_type') ? $node->compute_type() : $node->type;
+        my $ir_type = $node->can('compute') ? $node->compute()
+                    : ($node->can('compute_type') ? $node->compute_type() : $node->type);
         my $type_class = ref($ir_type);
 
         # Handle IR types
