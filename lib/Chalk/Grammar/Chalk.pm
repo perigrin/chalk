@@ -23,6 +23,7 @@ use Chalk::Grammar::Chalk::Rule::ConcatenationOp;
 use Chalk::Grammar::Chalk::Rule::ConditionalKeyword;
 use Chalk::Grammar::Chalk::Rule::ConditionalStatement;
 use Chalk::Grammar::Chalk::Rule::ContinueStatement;
+use Chalk::Grammar::Chalk::Rule::DeclaredVariable;
 use Chalk::Grammar::Chalk::Rule::DoubleQuotedString;
 use Chalk::Grammar::Chalk::Rule::EmptyList;
 use Chalk::Grammar::Chalk::Rule::Expression;

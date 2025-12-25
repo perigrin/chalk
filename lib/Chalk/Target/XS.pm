@@ -78,6 +78,7 @@ class Chalk::Target::XS {
         return $self->visit_Start($node) if $type eq 'Start';
         return $self->visit_Stop($node) if $type eq 'Stop';
         return $self->visit_Constant($node) if $type eq 'Constant';
+        return $self->visit_Parm($node) if $type eq 'Parm';
         return $self->visit_Return($node) if $type eq 'Return';
         return $self->visit_Add($node) if $type eq 'Add';
         return $self->visit_Subtract($node) if $type eq 'Subtract';
@@ -286,6 +287,15 @@ class Chalk::Target::XS {
 
     method visit_Stop($node) {
         return undef;
+    }
+
+    # Parm nodes represent function parameters - bind to parameter name
+    method visit_Parm($node) {
+        my $name = $node->name;
+        my $bare_name = $name;
+        $bare_name =~ s/^\$//;  # Remove sigil for XS variable name
+        $self->bind_var($node->id, $bare_name);
+        return undef;  # No XS statement needed
     }
 
     method visit_Constant($node) {

@@ -252,10 +252,14 @@ AnonymousSub -> 'sub' WS_OPT Block
 # Precedence ladder eliminated - Expression directly references all semantic groups
 # Semantic groupings preserved for polymorphic dispatch in semantic actions
 
+# DeclaredVariable - variable that must exist in scope (for expressions)
+# Variable returns metadata, DeclaredVariable does scope lookup or fails
+DeclaredVariable -> Variable
+
 # Expression entry point - directly references all semantic groupings
 # Atomic values and base cases
 Expression -> Literal
-Expression -> Variable
+Expression -> DeclaredVariable
 Expression -> Identifier  # Bareword (can be function name, method name, or string in context)
 Expression -> YaddaYadda
 Expression -> FunctionCall

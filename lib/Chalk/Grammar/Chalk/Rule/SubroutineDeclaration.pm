@@ -2,6 +2,9 @@
 # ABOUTME: Extracts function name, parameters, and body to create function definition
 use 5.42.0;
 use experimental 'class';
+use Chalk::IR::Node::Parm;
+use Chalk::IR::Node::Return;
+use Chalk::IR::Node::Call;
 
 class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule) {
     method evaluate($context) {
@@ -75,6 +78,21 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             $body_node = $context->child($#children);
         }
 
+        # Create Parm nodes for each parameter and replace UnboundVariable refs in body
+        my %param_map;
+        for my $i (0 .. $#parameters) {
+            my $param_name = $parameters[$i];
+            $param_map{$param_name} = Chalk::IR::Node::Parm->new(
+                name  => $param_name,
+                index => $i,
+            );
+        }
+
+        # Replace UnboundVariable nodes in body with corresponding Parm nodes
+        if (%param_map && defined $body_node) {
+            $body_node = $self->_replace_unbound_variables($body_node, \%param_map);
+        }
+
         # Create FunctionDef node
         my $func_def = Chalk::IR::Node::FunctionDef->new(
             name       => $func_name,
@@ -141,6 +159,134 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         if (blessed($node) && $node->can('id')) {
             return;
         }
+    }
+
+    # Replace UnboundVariable nodes with Parm nodes for matching parameter names
+    # Walks the IR tree recursively, rebuilding nodes when children change
+    method _replace_unbound_variables($node, $param_map) {
+        return $node unless defined $node;
+
+        # Handle UnboundVariable directly - this is our target
+        if (blessed($node) && $node->can('op') && $node->op eq 'UnboundVariable') {
+            my $name = $node->name;
+            if (exists $param_map->{$name}) {
+                return $param_map->{$name};
+            }
+            return $node;  # Not a parameter, keep as unbound
+        }
+
+        # Handle block structure: { type => 'block', statements => [...] }
+        if (ref($node) eq 'HASH' && $node->{statements}) {
+            my @new_stmts;
+            my $changed = 0;
+            for my $stmt ($node->{statements}->@*) {
+                my $new_stmt = $self->_replace_unbound_variables($stmt, $param_map);
+                push @new_stmts, $new_stmt;
+                $changed = 1 if refaddr($new_stmt) != refaddr($stmt);
+            }
+            if ($changed) {
+                return { %$node, statements => \@new_stmts };
+            }
+            return $node;
+        }
+
+        # Handle arrays
+        if (ref($node) eq 'ARRAY') {
+            my @new_items;
+            my $changed = 0;
+            for my $item (@$node) {
+                my $new_item = $self->_replace_unbound_variables($item, $param_map);
+                push @new_items, $new_item;
+                $changed = 1 if defined($new_item) && defined($item) && refaddr($new_item) != refaddr($item);
+            }
+            return $changed ? \@new_items : $node;
+        }
+
+        # Handle IR nodes - need to rebuild if children change
+        if (blessed($node) && $node->can('op')) {
+            return $self->_rebuild_node_with_replacements($node, $param_map);
+        }
+
+        return $node;
+    }
+
+    # Rebuild an IR node if any of its child nodes need replacement
+    method _rebuild_node_with_replacements($node, $param_map) {
+        my $op = $node->op;
+
+        # Handle binary operators (left/right pattern)
+        if ($node->can('left') && $node->can('right')) {
+            my $left = $node->left;
+            my $right = $node->right;
+            my $new_left = $self->_replace_unbound_variables($left, $param_map);
+            my $new_right = $self->_replace_unbound_variables($right, $param_map);
+
+            if (refaddr($new_left) != refaddr($left) || refaddr($new_right) != refaddr($right)) {
+                # Rebuild using the node's class
+                my $class = ref($node);
+                my %attrs = (left => $new_left, right => $new_right);
+                $attrs{source_info} = $node->source_info if $node->can('source_info');
+                return $class->new(%attrs);
+            }
+            return $node;
+        }
+
+        # Handle Return nodes (control/value pattern)
+        if ($op eq 'Return') {
+            my $control = $node->control;
+            my $value = $node->value;
+            my $new_control = defined($control) ? $self->_replace_unbound_variables($control, $param_map) : $control;
+            my $new_value = defined($value) ? $self->_replace_unbound_variables($value, $param_map) : $value;
+
+            my $ctrl_changed = defined($control) && defined($new_control) && refaddr($new_control) != refaddr($control);
+            my $val_changed = defined($value) && defined($new_value) && refaddr($new_value) != refaddr($value);
+
+            if ($ctrl_changed || $val_changed) {
+                return Chalk::IR::Node::Return->new(
+                    control     => $new_control,
+                    value       => $new_value,
+                    source_info => $node->can('source_info') ? $node->source_info : undef,
+                );
+            }
+            return $node;
+        }
+
+        # Handle unary operators (value pattern for Negate, Not, etc.)
+        if ($node->can('value') && !$node->can('control')) {
+            my $value = $node->value;
+            my $new_value = $self->_replace_unbound_variables($value, $param_map);
+
+            if (defined($value) && defined($new_value) && refaddr($new_value) != refaddr($value)) {
+                my $class = ref($node);
+                my %attrs = (value => $new_value);
+                $attrs{source_info} = $node->source_info if $node->can('source_info');
+                return $class->new(%attrs);
+            }
+            return $node;
+        }
+
+        # Handle Call nodes (func_name + arguments)
+        if ($op eq 'Call' && $node->can('arguments')) {
+            my $args = $node->arguments // [];
+            my @new_args;
+            my $changed = 0;
+            for my $arg (@$args) {
+                my $new_arg = $self->_replace_unbound_variables($arg, $param_map);
+                push @new_args, $new_arg;
+                $changed = 1 if defined($arg) && defined($new_arg) && refaddr($new_arg) != refaddr($arg);
+            }
+            if ($changed) {
+                return Chalk::IR::Node::Call->new(
+                    func_name   => $node->func_name,
+                    arguments   => \@new_args,
+                    source_info => $node->can('source_info') ? $node->source_info : undef,
+                );
+            }
+            return $node;
+        }
+
+        # Nodes without children or unhandled patterns - return unchanged
+        return $node;
     }
 }
 
