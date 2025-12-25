@@ -5,8 +5,6 @@ use 5.42.0;
 use experimental qw(class);
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 use Chalk::IR::Node::Store;
-use Chalk::IR::Node::UnboundVariable;
-use Chalk::IR::Node::Proj;
 
 class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
 
@@ -41,16 +39,9 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         return $context->child(0) unless $scope;
 
         # Extract variable name from evaluated LHS
-        my $var_name;
+        # Any node with name() can be used for binding (duck typing)
         my $lhs = $context->child(0);
-
-        if ($lhs isa Chalk::IR::Node::UnboundVariable) {
-            # Variable not yet in scope - use its name for binding
-            $var_name = $lhs->name;
-        } elsif ($lhs isa Chalk::IR::Node::Proj) {
-            # Function parameter projection
-            $var_name = $lhs->label;
-        }
+        my $var_name = $lhs && $lhs->can('name') ? $lhs->name : undef;
 
         unless (defined($var_name)) {
             return $context->child(0);

@@ -18,6 +18,9 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node::Base) {
 
     method op() { 'Proj' }
 
+    # Alias for label - allows uniform interface with UnboundVariable
+    method name() { $label }
+
     method to_hash() {
         return {
             id     => $self->id,
