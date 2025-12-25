@@ -1,5 +1,5 @@
 # ABOUTME: Tests for VariableDeclaration semantic action with arrays and hashes
-# ABOUTME: Verifies VariableDeclaration generates proper IR nodes for @arr and %hash
+# ABOUTME: Verifies VariableDeclaration creates bindings in scope for @arr and %hash
 
 use v5.42;
 use Test::More;
@@ -8,14 +8,9 @@ use FindBin qw($RealBin);
 use lib "$RealBin/../../lib";
 use Chalk::Grammar;  # Must be loaded first to define Chalk::GrammarRule
 use Chalk::Grammar::Chalk::Rule::VariableDeclaration;
-use Chalk::IR::Node::NewArray;
-use Chalk::IR::Node::NewHash;
-use Chalk::IR::Node::Store;
+use Chalk::IR::Node::UnboundVariable;
 use Chalk::IR::Node::Scope;
 use Chalk::IR::Node::Start;
-use Chalk::IR::Node::List;
-use Chalk::IR::Node::Constant;
-use Chalk::Grammar::Chalk::Type::Int;
 use Chalk::EvalContext;
 use Scalar::Util 'blessed';
 
@@ -32,11 +27,12 @@ sub make_scope {
 }
 
 # Helper to create a context for VariableDeclaration
-# VariableDeclaration -> LexicalDeclarator WS_OPT Variable WS_OPT '=' WS_OPT Expression
+# VariableDeclaration -> LexicalDeclarator WS_OPT Variable
+# (No '=' - that's handled by Assignment)
 sub make_decl_context {
-    my ($var_metadata, $value_node, $scope) = @_;
+    my ($unbound_var, $scope) = @_;
 
-    # Children: 'my', WS, Variable, WS, '=', WS, Expression
+    # Children: 'my', WS, Variable (which evaluates to UnboundVariable)
     my @child_contexts = (
         # Child 0: 'my' (LexicalDeclarator)
         Chalk::EvalContext->new(
@@ -58,52 +54,12 @@ sub make_decl_context {
             grammar => undef,
             rule => undef
         ),
-        # Child 2: Variable (returns metadata hash)
+        # Child 2: Variable (evaluates to UnboundVariable)
         Chalk::EvalContext->new(
-            focus => $var_metadata,
+            focus => $unbound_var,
             children => [],
             start_pos => 3,
             end_pos => 7,
-            env => {},
-            grammar => undef,
-            rule => undef
-        ),
-        # Child 3: WS_OPT
-        Chalk::EvalContext->new(
-            focus => ' ',
-            children => [],
-            start_pos => 7,
-            end_pos => 8,
-            env => {},
-            grammar => undef,
-            rule => undef
-        ),
-        # Child 4: '='
-        Chalk::EvalContext->new(
-            focus => '=',
-            children => [],
-            start_pos => 8,
-            end_pos => 9,
-            env => {},
-            grammar => undef,
-            rule => undef
-        ),
-        # Child 5: WS_OPT
-        Chalk::EvalContext->new(
-            focus => ' ',
-            children => [],
-            start_pos => 9,
-            end_pos => 10,
-            env => {},
-            grammar => undef,
-            rule => undef
-        ),
-        # Child 6: Expression (the value IR node)
-        Chalk::EvalContext->new(
-            focus => $value_node,
-            children => [],
-            start_pos => 10,
-            end_pos => 15,
             env => {},
             grammar => undef,
             rule => undef
@@ -116,7 +72,7 @@ sub make_decl_context {
         children => \@child_contexts,
         focus => undef,
         start_pos => 0,
-        end_pos => 15,
+        end_pos => 7,
         env => $env,
         grammar => undef,
         rule => undef
@@ -126,18 +82,10 @@ sub make_decl_context {
 subtest 'VariableDeclaration handles scalar_var' => sub {
     my $scope = make_scope();
 
-    my $var_metadata = {
-        type => 'scalar_var',
-        name => 'x',
-        sigil => '$'
-    };
+    # Variable evaluates to UnboundVariable when not in scope
+    my $unbound_var = Chalk::IR::Node::UnboundVariable->new(name => '$x');
 
-    my $value = Chalk::IR::Node::Constant->new(
-        value => 42,
-        type => Chalk::Grammar::Chalk::Type::Int->new()
-    );
-
-    my $context = make_decl_context($var_metadata, $value, $scope);
+    my $context = make_decl_context($unbound_var, $scope);
 
     my $rule = Chalk::Grammar::Chalk::Rule::VariableDeclaration->new(
         lhs => 'VariableDeclaration',
@@ -145,26 +93,24 @@ subtest 'VariableDeclaration handles scalar_var' => sub {
     );
     my $result = $rule->evaluate($context);
 
-    ok(blessed($result), 'Result is blessed');
-    is($result->op, 'Store', 'Returns a Store node');
-    is($result->var, '$x', 'Variable name includes sigil for scalars');
+    # VariableDeclaration returns the UnboundVariable for Assignment to use
+    isa_ok($result, 'Chalk::IR::Node::UnboundVariable', 'Returns UnboundVariable');
+    is($result->name, '$x', 'Variable name is preserved');
+
+    # Binding was created in scope
+    my $new_scope = $context->env->{scope};
+    my $bound_value = $new_scope->lookup('$x');
+    ok(defined($bound_value), 'Scalar variable is bound in scope');
+    is($bound_value->name, '$x', 'Bound value is the UnboundVariable');
 };
 
 subtest 'VariableDeclaration handles array_var' => sub {
     my $scope = make_scope();
 
-    my $var_metadata = {
-        type => 'array_var',
-        name => 'arr',
-        sigil => '@'
-    };
+    # Variable evaluates to UnboundVariable for arrays
+    my $unbound_var = Chalk::IR::Node::UnboundVariable->new(name => '@arr');
 
-    # For array declaration, the value is a NewArray node
-    my $value = Chalk::IR::Node::NewArray->new(
-        inputs => []
-    );
-
-    my $context = make_decl_context($var_metadata, $value, $scope);
+    my $context = make_decl_context($unbound_var, $scope);
 
     my $rule = Chalk::Grammar::Chalk::Rule::VariableDeclaration->new(
         lhs => 'VariableDeclaration',
@@ -172,26 +118,24 @@ subtest 'VariableDeclaration handles array_var' => sub {
     );
     my $result = $rule->evaluate($context);
 
-    ok(blessed($result), 'Result is blessed');
-    is($result->op, 'Store', 'Returns a Store node');
-    is($result->var, '@arr', 'Variable name includes sigil for arrays');
+    # VariableDeclaration returns the UnboundVariable
+    isa_ok($result, 'Chalk::IR::Node::UnboundVariable', 'Returns UnboundVariable');
+    is($result->name, '@arr', 'Array name includes sigil');
+
+    # Binding was created in scope
+    my $new_scope = $context->env->{scope};
+    my $bound_value = $new_scope->lookup('@arr');
+    ok(defined($bound_value), 'Array variable is bound in scope');
+    is($bound_value->name, '@arr', 'Bound value is the UnboundVariable');
 };
 
 subtest 'VariableDeclaration handles hash_var' => sub {
     my $scope = make_scope();
 
-    my $var_metadata = {
-        type => 'hash_var',
-        name => 'hash',
-        sigil => '%'
-    };
+    # Variable evaluates to UnboundVariable for hashes
+    my $unbound_var = Chalk::IR::Node::UnboundVariable->new(name => '%hash');
 
-    # For hash declaration, the value is a NewHash node
-    my $value = Chalk::IR::Node::NewHash->new(
-        inputs => []
-    );
-
-    my $context = make_decl_context($var_metadata, $value, $scope);
+    my $context = make_decl_context($unbound_var, $scope);
 
     my $rule = Chalk::Grammar::Chalk::Rule::VariableDeclaration->new(
         lhs => 'VariableDeclaration',
@@ -199,65 +143,122 @@ subtest 'VariableDeclaration handles hash_var' => sub {
     );
     my $result = $rule->evaluate($context);
 
-    ok(blessed($result), 'Result is blessed');
-    is($result->op, 'Store', 'Returns a Store node');
-    is($result->var, '%hash', 'Variable name includes sigil for hashes');
-};
+    # VariableDeclaration returns the UnboundVariable
+    isa_ok($result, 'Chalk::IR::Node::UnboundVariable', 'Returns UnboundVariable');
+    is($result->name, '%hash', 'Hash name includes sigil');
 
-subtest 'VariableDeclaration updates scope with array binding' => sub {
-    my $scope = make_scope();
-
-    my $var_metadata = {
-        type => 'array_var',
-        name => 'data',
-        sigil => '@'
-    };
-
-    my $value = Chalk::IR::Node::NewArray->new(
-        inputs => []
-    );
-
-    my $context = make_decl_context($var_metadata, $value, $scope);
-
-    my $rule = Chalk::Grammar::Chalk::Rule::VariableDeclaration->new(
-        lhs => 'VariableDeclaration',
-        rhs => []
-    );
-    $rule->evaluate($context);
-
-    # Check that scope was updated
+    # Binding was created in scope
     my $new_scope = $context->env->{scope};
-    my $bound_value = $new_scope->lookup('@data');
-    ok(defined($bound_value), 'Array variable is bound in scope');
-    is($bound_value->id, $value->id, 'Bound value matches the NewArray node');
-};
-
-subtest 'VariableDeclaration updates scope with hash binding' => sub {
-    my $scope = make_scope();
-
-    my $var_metadata = {
-        type => 'hash_var',
-        name => 'config',
-        sigil => '%'
-    };
-
-    my $value = Chalk::IR::Node::NewHash->new(
-        inputs => []
-    );
-
-    my $context = make_decl_context($var_metadata, $value, $scope);
-
-    my $rule = Chalk::Grammar::Chalk::Rule::VariableDeclaration->new(
-        lhs => 'VariableDeclaration',
-        rhs => []
-    );
-    $rule->evaluate($context);
-
-    # Check that scope was updated
-    my $new_scope = $context->env->{scope};
-    my $bound_value = $new_scope->lookup('%config');
+    my $bound_value = $new_scope->lookup('%hash');
     ok(defined($bound_value), 'Hash variable is bound in scope');
-    is($bound_value->id, $value->id, 'Bound value matches the NewHash node');
+    is($bound_value->name, '%hash', 'Bound value is the UnboundVariable');
+};
+
+subtest 'VariableDeclaration returns undef without scope' => sub {
+    # Variable evaluates to UnboundVariable
+    my $unbound_var = Chalk::IR::Node::UnboundVariable->new(name => '$x');
+
+    # Create context without scope
+    my @child_contexts = (
+        Chalk::EvalContext->new(
+            focus => 'my',
+            children => [],
+            start_pos => 0,
+            end_pos => 2,
+            env => {},
+            grammar => undef,
+            rule => undef
+        ),
+        Chalk::EvalContext->new(
+            focus => ' ',
+            children => [],
+            start_pos => 2,
+            end_pos => 3,
+            env => {},
+            grammar => undef,
+            rule => undef
+        ),
+        Chalk::EvalContext->new(
+            focus => $unbound_var,
+            children => [],
+            start_pos => 3,
+            end_pos => 7,
+            env => {},
+            grammar => undef,
+            rule => undef
+        ),
+    );
+
+    my $context = Chalk::EvalContext->new(
+        children => \@child_contexts,
+        focus => undef,
+        start_pos => 0,
+        end_pos => 7,
+        env => {},  # No scope
+        grammar => undef,
+        rule => undef
+    );
+
+    my $rule = Chalk::Grammar::Chalk::Rule::VariableDeclaration->new(
+        lhs => 'VariableDeclaration',
+        rhs => []
+    );
+    my $result = $rule->evaluate($context);
+
+    is($result, undef, 'Returns undef when no scope available');
+};
+
+subtest 'VariableDeclaration returns undef for non-name node' => sub {
+    my $scope = make_scope();
+
+    # Pass a string instead of an object with name()
+    my @child_contexts = (
+        Chalk::EvalContext->new(
+            focus => 'my',
+            children => [],
+            start_pos => 0,
+            end_pos => 2,
+            env => {},
+            grammar => undef,
+            rule => undef
+        ),
+        Chalk::EvalContext->new(
+            focus => ' ',
+            children => [],
+            start_pos => 2,
+            end_pos => 3,
+            env => {},
+            grammar => undef,
+            rule => undef
+        ),
+        Chalk::EvalContext->new(
+            focus => 'not_an_object',  # String, not object with name()
+            children => [],
+            start_pos => 3,
+            end_pos => 7,
+            env => {},
+            grammar => undef,
+            rule => undef
+        ),
+    );
+
+    my $context = Chalk::EvalContext->new(
+        children => \@child_contexts,
+        focus => undef,
+        start_pos => 0,
+        end_pos => 7,
+        env => { scope => $scope },
+        grammar => undef,
+        rule => undef
+    );
+
+    my $rule = Chalk::Grammar::Chalk::Rule::VariableDeclaration->new(
+        lhs => 'VariableDeclaration',
+        rhs => []
+    );
+    my $result = $rule->evaluate($context);
+
+    is($result, undef, 'Returns undef when child lacks name() method');
 };
 
 done_testing();

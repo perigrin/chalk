@@ -291,9 +291,10 @@ subtest 'Variable passes through metadata for undeclared array' => sub {
     );
     my $result = $rule->evaluate($context);
 
-    is(ref($result), 'HASH', 'Returns metadata for undeclared variable');
-    is($result->{type}, 'array_var', 'Preserves array_var type');
-    is($result->{name}, 'undefined_arr', 'Preserves name');
+    # Variable now returns UnboundVariable for undeclared variables
+    # This allows duck-typed access via name() method
+    isa_ok($result, 'Chalk::IR::Node::UnboundVariable', 'Returns UnboundVariable for undeclared variable');
+    is($result->name, '@undefined_arr', 'UnboundVariable has correct full name with sigil');
 };
 
 done_testing();
