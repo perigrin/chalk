@@ -5,6 +5,8 @@ use 5.42.0;
 use experimental qw(class);
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 use Chalk::IR::Node::Store;
+use Chalk::IR::Node::UnboundVariable;
+use Chalk::IR::Node::Proj;
 
 class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
 
@@ -38,37 +40,16 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         my $scope = $context->env->{scope};
         return $context->child(0) unless $scope;
 
-        # Extract variable name from raw parse tree BEFORE semantic evaluation
+        # Extract variable name from evaluated LHS
         my $var_name;
-        my $lhs_context = $context->children->[0];
+        my $lhs = $context->child(0);
 
-        # Breadth-first search through parse tree for scalar_var metadata
-        my @queue = ($lhs_context);
-        while (@queue && !defined($var_name)) {
-            my $ctx = shift @queue;
-            next unless defined($ctx);
-
-            if (blessed($ctx) && $ctx->can('extract')) {
-                my $val = $ctx->extract;
-                if (ref($val) eq 'HASH' && $val->{type} && $val->{type} eq 'scalar_var') {
-                    # Include sigil in var_name to match Variable lookup
-                    my $sigil = $val->{sigil} // '$';
-                    $var_name = $sigil . $val->{name};
-                    last;
-                }
-            }
-
-            if (blessed($ctx) && $ctx->can('children')) {
-                push @queue, $ctx->children->@*;
-            }
-        }
-
-        # If BFS didn't find scalar_var, check if LHS evaluates to a Proj node
-        unless (defined($var_name)) {
-            my $lhs = $context->child(0);
-            if (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
-                $var_name = $lhs->label;
-            }
+        if ($lhs isa Chalk::IR::Node::UnboundVariable) {
+            # Variable not yet in scope - use its name for binding
+            $var_name = $lhs->name;
+        } elsif ($lhs isa Chalk::IR::Node::Proj) {
+            # Function parameter projection
+            $var_name = $lhs->label;
         }
 
         unless (defined($var_name)) {
