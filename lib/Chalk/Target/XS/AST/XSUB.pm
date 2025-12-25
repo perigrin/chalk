@@ -13,7 +13,9 @@ class Chalk::Target::XS::AST::XSUB :isa(Chalk::Target::XS::AST::Node) {
         my $output = "";
 
         # Function signature: RETURN_TYPE function_name(PARAMS)
-        my $params_str = join(', ', $params->@*);
+        # Strip Perl sigils from parameter names for C/XS
+        my @bare_params = map { s/^\$//r } $params->@*;
+        my $params_str = join(', ', @bare_params);
         $output .= "$return_type $name($params_str)\n";
 
         # CODE section

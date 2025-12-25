@@ -256,7 +256,12 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             my $value = $node->value;
             my $new_value = $self->_replace_unbound_variables($value, $param_map);
 
-            if (defined($value) && defined($new_value) && refaddr($new_value) != refaddr($value)) {
+            # Compare by refaddr only if both are references
+            my $changed = 0;
+            if (defined($value) && defined($new_value) && ref($value) && ref($new_value)) {
+                $changed = refaddr($new_value) != refaddr($value);
+            }
+            if ($changed) {
                 my $class = ref($node);
                 my %attrs = (value => $new_value);
                 $attrs{source_info} = $node->source_info if $node->can('source_info');
