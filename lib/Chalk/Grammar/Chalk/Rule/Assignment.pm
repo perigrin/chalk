@@ -51,7 +51,9 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
             if (blessed($ctx) && $ctx->can('extract')) {
                 my $val = $ctx->extract;
                 if (ref($val) eq 'HASH' && $val->{type} && $val->{type} eq 'scalar_var') {
-                    $var_name = $val->{name};
+                    # Include sigil in var_name to match Variable/DeclaredVariable lookup
+                    my $sigil = $val->{sigil} // '$';
+                    $var_name = $sigil . $val->{name};
                     last;
                 }
             }

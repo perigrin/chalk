@@ -45,8 +45,8 @@ class Chalk::Grammar::Chalk::Rule::VariableDeclaration :isa(Chalk::GrammarRule) 
             my $sigil = $var->{sigil};
 
             if ($var_type eq 'scalar_var') {
-                # Scalars are stored without sigil for backward compatibility
-                $var_name = $name;
+                # Scalars are stored with $ sigil to match Variable/DeclaredVariable lookup
+                $var_name = '$' . $name;
             } elsif ($var_type eq 'array_var') {
                 # Arrays are stored with @ sigil
                 $var_name = '@' . $name;
