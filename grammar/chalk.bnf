@@ -61,8 +61,8 @@
 %WS% = /[ \t\r\n]+/
 %COMMENT% = /#[^\n]*/
 # Reserved keywords excluded from barewords via negative lookahead
-# Note: method/sub NOT reserved - they can be method names and need special grammar handling
-%BAREWORD% = /(?!(?:class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp|true|false|__FILE__|__LINE__)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+# Note: sub/method are reserved to prevent FunctionCall from matching SubroutineDeclaration
+%BAREWORD% = /(?!(?:sub|method|class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp|true|false|__FILE__|__LINE__)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 %BAREWORD_ANY% = /[a-zA-Z_][a-zA-Z0-9_]*/
 %SPECIAL_IDENTIFIER% = /[0-9]+|[&`'+@!$-]|^[A-Z]|\{[^}]+\}/
 %INTEGER% = /[0-9]+/

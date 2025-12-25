@@ -55,6 +55,20 @@ class Chalk::Target::XS {
         return 'SV*';  # Conservative fallback
     }
 
+    # Compute return type from function body by finding Return node
+    method compute_return_type($func_def) {
+        my $body_stmts = $func_def->body_statements // [];
+
+        for my $stmt (@$body_stmts) {
+            next unless blessed($stmt) && $stmt->can('op');
+            if ($stmt->op eq 'Return' && $stmt->can('value') && $stmt->value) {
+                return $self->get_c_type($stmt->value);
+            }
+        }
+
+        return 'SV*';  # Default fallback
+    }
+
     # Visit a node, dispatching to the appropriate visit_* method
     method visit($node) {
         my $type = ref($node);
@@ -209,6 +223,9 @@ class Chalk::Target::XS {
                 my $func_name = $func_def->name // 'anonymous';
                 my $params = $func_def->parameters // [];
 
+                # Compute return type from function body
+                my $return_type = $self->compute_return_type($func_def);
+
                 # Generate body statements for this function
                 my @body_statements = $self->generate_function_body($func_def);
 
@@ -216,6 +233,7 @@ class Chalk::Target::XS {
                     name => $func_name,
                     params => $params,
                     body => \@body_statements,
+                    return_type => $return_type,
                 );
                 push @xsubs, $xsub;
             }
