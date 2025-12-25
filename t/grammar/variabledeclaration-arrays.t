@@ -147,7 +147,7 @@ subtest 'VariableDeclaration handles scalar_var' => sub {
 
     ok(blessed($result), 'Result is blessed');
     is($result->op, 'Store', 'Returns a Store node');
-    is($result->var, 'x', 'Variable name is correct');
+    is($result->var, '$x', 'Variable name includes sigil for scalars');
 };
 
 subtest 'VariableDeclaration handles array_var' => sub {

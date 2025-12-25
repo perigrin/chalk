@@ -5,6 +5,7 @@ use 5.42.0;
 use experimental 'class';
 use Chalk::IR::Node::ArrayGet;
 use Chalk::IR::Node::HashGet;
+use Chalk::IR::Node::UnboundVariable;
 # Note: blessed is auto-imported by use 5.42.0
 
 class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
@@ -106,8 +107,10 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
                     }
                 }
 
-                # Not yet defined - return metadata (for VariableDeclaration to extract name)
-                return $var_metadata;
+                # Variable not found in scope - return UnboundVariable
+                # This preserves the name for later resolution (e.g., function parameters)
+                # or for strict mode error reporting
+                return Chalk::IR::Node::UnboundVariable->new(name => $full_name);
             }
         }
 
