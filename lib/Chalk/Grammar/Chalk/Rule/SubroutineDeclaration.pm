@@ -94,7 +94,9 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         }
 
         # Create FunctionDef node
+        # inputs => [] required by Base; actual inputs computed from body_node
         my $func_def = Chalk::IR::Node::FunctionDef->new(
+            inputs     => [],
             name       => $func_name,
             parameters => \@parameters,
             body_graph => undef,  # Will be set up during execution

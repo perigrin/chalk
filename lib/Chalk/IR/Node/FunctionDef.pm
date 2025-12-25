@@ -1,20 +1,14 @@
 # ABOUTME: FunctionDef node representing function/subroutine definitions
-# ABOUTME: Stores function name, parameters, and body IR graph for dispatch
-# ABOUTME: Exposes body statements via inputs() for graph traversal
+# ABOUTME: Extends Base to integrate with graph traversal; body nodes are inputs
 use 5.42.0;
 use experimental qw(class);
 use utf8;
 
-class Chalk::IR::Node::FunctionDef {
+class Chalk::IR::Node::FunctionDef :isa(Chalk::IR::Node::Base) {
     field $name :param :reader;                   # Function name (string)
     field $parameters :param :reader = [];        # Parameter names (array of strings)
     field $body_graph :param :reader = undef;     # IR graph for function body
     field $body_node :param :reader = undef;      # Raw body IR node (before graph extraction)
-    field $source_info :param :reader = undef;
-    field $transform_chain :reader = [];
-
-    # Dependency tracking for peephole re-optimization
-    field $_deps = [];
 
     # Cached body statement IDs for graph traversal
     field $_body_input_ids = undef;
@@ -65,22 +59,11 @@ class Chalk::IR::Node::FunctionDef {
         return [];
     }
 
-    method add_dep($dependent_node_id) {
-        push $_deps->@*, $dependent_node_id;
-    }
-
-    method get_deps() {
-        return $_deps->@*;
-    }
-
-    method id() { refaddr($self) }
-
-    # FunctionDef has no data inputs for graph validation purposes
-    # Body statements are accessed via body_statements() for XS code generation
-    # Note: We don't expose body through inputs() because body statements
-    # aren't added to the main graph - they form a separate subgraph
+    # Override inputs() to expose body statements for graph traversal
+    # This makes function bodies reachable during graph operations
     method inputs() {
-        return [];
+        $_body_input_ids //= $self->_compute_body_input_ids();
+        return $_body_input_ids;
     }
 
     method op() { 'FunctionDef' }
@@ -89,7 +72,7 @@ class Chalk::IR::Node::FunctionDef {
         return {
             id     => $self->id,
             op     => 'FunctionDef',
-            inputs => [],
+            inputs => $self->inputs,
             attributes => {
                 name       => $name,
                 parameters => $parameters,
@@ -108,18 +91,20 @@ class Chalk::IR::Node::FunctionDef {
         };
     }
 
+    # Override to include FunctionDef-specific attributes
     method attributes() {
         return $self->to_hash()->{attributes};
     }
 
+    # FunctionDef cannot be optimized away
     method peephole($graph = undef) {
-        # FunctionDef cannot be optimized away
         return $self;
     }
 
-    method record_transform(@args) {
-        return;
-    }
+    # FunctionDef is not part of CFG dominator tree - it defines a function
+    # Return undef for dominator-related methods
+    method idom() { return undef; }
+    method idepth() { return 0; }
 }
 
 1;
