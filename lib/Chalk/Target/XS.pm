@@ -106,31 +106,94 @@ class Chalk::Target::XS {
         return @emittable;
     }
 
+    # Find the Stop node in the graph (contains function_defs)
+    method find_stop_node() {
+        return undef unless $graph && ref($graph) && blessed($graph) && $graph->can('nodes');
+        # nodes() returns a hashref of id => node
+        my $nodes_hash = $graph->nodes;
+        for my $node (values %$nodes_hash) {
+            return $node if blessed($node) && $node->can('op') && $node->op eq 'Stop';
+        }
+        return undef;
+    }
+
+    # Generate XS code for a single function's body statements
+    method generate_function_body($func_def) {
+        my @statements;
+        my $body_stmts = $func_def->body_statements // [];
+
+        for my $stmt (@$body_stmts) {
+            # Process dependencies (inputs) BEFORE the statement itself
+            # This ensures proper variable allocation order
+            if (blessed($stmt) && $stmt->can('value') && $stmt->can('op') && $stmt->op eq 'Return') {
+                my $value = $stmt->value;
+                if (blessed($value) && $value->can('id')) {
+                    my $value_xs = $self->visit($value);
+                    push @statements, $value_xs if defined $value_xs;
+                }
+            }
+
+            # Now process the statement itself
+            my $xs_node = $self->visit($stmt);
+            push @statements, $xs_node if defined $xs_node;
+        }
+
+        return @statements;
+    }
+
     # Generate XS AST from IR graph
     method generate() {
         use Chalk::Target::XS::AST::XSUB;
 
-        # 1. Build emission order (topological sort)
-        my @order = $self->schedule_emission();
+        my @xsubs;
 
-        # 2. Visit each node, building XS AST statements
-        my @statements;
-        for my $node (@order) {
-            my $xs_node = $self->visit($node);
-            push @statements, $xs_node if defined $xs_node;
+        # Find Stop node which contains function definitions
+        my $stop = $self->find_stop_node();
+
+        if ($stop && $stop->can('function_defs')) {
+            # Generate one XSUB per function definition
+            my $funcs = $stop->function_defs // [];
+            for my $func_def (@$funcs) {
+                # Reset temp counter for each function
+                $temp_counter = 0;
+                $ctx = Chalk::IR::Context->empty_context();
+
+                my $func_name = $func_def->name // 'anonymous';
+                my $params = $func_def->parameters // [];
+
+                # Generate body statements for this function
+                my @body_statements = $self->generate_function_body($func_def);
+
+                my $xsub = Chalk::Target::XS::AST::XSUB->new(
+                    name => $func_name,
+                    params => $params,
+                    body => \@body_statements,
+                );
+                push @xsubs, $xsub;
+            }
         }
 
-        # 3. Create XSUB wrapper if we have statements
-        my @xsubs;
-        if (@statements) {
-            # For now, create a single XSUB named after the module
-            # TODO: Extract function name from IR (when we have function boundaries)
-            my $xsub = Chalk::Target::XS::AST::XSUB->new(
-                name => 'generated',
-                params => [],
-                body => \@statements,
-            );
-            push @xsubs, $xsub;
+        # Fallback: if no functions found, use legacy behavior with main program flow
+        if (!@xsubs) {
+            # 1. Build emission order (topological sort)
+            my @order = $self->schedule_emission();
+
+            # 2. Visit each node, building XS AST statements
+            my @statements;
+            for my $node (@order) {
+                my $xs_node = $self->visit($node);
+                push @statements, $xs_node if defined $xs_node;
+            }
+
+            # 3. Create XSUB wrapper if we have statements
+            if (@statements) {
+                my $xsub = Chalk::Target::XS::AST::XSUB->new(
+                    name => 'generated',
+                    params => [],
+                    body => \@statements,
+                );
+                push @xsubs, $xsub;
+            }
         }
 
         # 4. Wrap in module structure
