@@ -141,7 +141,7 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
 
         # ParameterList returns an array of Variable metadata hashes
         if (ref($node) eq 'ARRAY') {
-            for my $item (@$node) {
+            for my $item ($node->@*) {
                 $self->_collect_parameters($item, $params);
             }
             return;
@@ -194,7 +194,7 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         if (ref($node) eq 'ARRAY') {
             my @new_items;
             my $changed = 0;
-            for my $item (@$node) {
+            for my $item ($node->@*) {
                 my $new_item = $self->_replace_unbound_variables($item, $param_map);
                 push @new_items, $new_item;
                 $changed = 1 if defined($new_item) && defined($item) && refaddr($new_item) != refaddr($item);
@@ -275,7 +275,7 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             my $args = $node->arguments // [];
             my @new_args;
             my $changed = 0;
-            for my $arg (@$args) {
+            for my $arg ($args->@*) {
                 my $new_arg = $self->_replace_unbound_variables($arg, $param_map);
                 push @new_args, $new_arg;
                 $changed = 1 if defined($arg) && defined($new_arg) && refaddr($new_arg) != refaddr($arg);
