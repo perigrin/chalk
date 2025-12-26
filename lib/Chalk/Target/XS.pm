@@ -62,7 +62,7 @@ class Chalk::Target::XS {
     method compute_return_type($func_def) {
         my $body_stmts = $func_def->body_statements // [];
 
-        for my $stmt (@$body_stmts) {
+        for my $stmt ($body_stmts->@*) {
             next unless blessed($stmt) && $stmt->can('op');
             if ($stmt->op eq 'Return' && $stmt->can('value') && $stmt->value) {
                 return $self->get_c_type($stmt->value);
@@ -151,7 +151,7 @@ class Chalk::Target::XS {
                 # Check if it's a parameter (remove sigil for comparison)
                 my $bare_name = $name;
                 $bare_name =~ s/^\$//;
-                for my $param (@$params) {
+                for my $param ($params->@*) {
                     my $param_bare = $param;
                     $param_bare =~ s/^\$//;
                     if ($bare_name eq $param_bare) {
@@ -182,7 +182,7 @@ class Chalk::Target::XS {
 
         # Now visit this node
         my $xs_node = $self->visit($node);
-        push @$statements, $xs_node if defined $xs_node;
+        push $statements->@*, $xs_node if defined $xs_node;
     }
 
     # Generate XS code for a single function's body statements
@@ -194,13 +194,13 @@ class Chalk::Target::XS {
 
         # Bind parameters to their names upfront
         # Parameters in XS are available directly by name
-        for my $param (@$params) {
+        for my $param ($params->@*) {
             my $bare_name = $param;
             $bare_name =~ s/^\$//;
             # We'll bind parameter nodes when we encounter them
         }
 
-        for my $stmt (@$body_stmts) {
+        for my $stmt ($body_stmts->@*) {
             $self->visit_with_deps($stmt, \%visited, \@statements, $params);
         }
 
@@ -219,7 +219,7 @@ class Chalk::Target::XS {
         if ($stop && $stop->can('function_defs')) {
             # Generate one XSUB per function definition
             my $funcs = $stop->function_defs // [];
-            for my $func_def (@$funcs) {
+            for my $func_def ($funcs->@*) {
                 # Reset temp counter for each function
                 $temp_counter = 0;
                 $ctx = Chalk::IR::Context->empty_context();
