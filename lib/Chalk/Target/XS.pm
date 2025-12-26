@@ -129,7 +129,7 @@ class Chalk::Target::XS {
         return undef unless $graph && ref($graph) && blessed($graph) && $graph->can('nodes');
         # nodes() returns a hashref of id => node
         my $nodes_hash = $graph->nodes;
-        for my $node (values %$nodes_hash) {
+        for my $node (values $nodes_hash->%*) {
             return $node if blessed($node) && $node->can('op') && $node->op eq 'Stop';
         }
         return undef;
