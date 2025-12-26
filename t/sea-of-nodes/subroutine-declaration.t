@@ -18,6 +18,7 @@ subtest 'FunctionRegistry basic operations' => sub {
     # Create a mock function definition
     use Chalk::IR::Node::FunctionDef;
     my $func = Chalk::IR::Node::FunctionDef->new(
+        inputs => [],
         name => 'foo',
         parameters => ['x'],
     );

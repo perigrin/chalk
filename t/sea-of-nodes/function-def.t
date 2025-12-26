@@ -14,6 +14,7 @@ subtest 'FunctionDef basic structure' => sub {
     use Chalk::IR::Node::FunctionDef;
 
     my $func = Chalk::IR::Node::FunctionDef->new(
+        inputs => [],
         name => 'add',
         parameters => ['a', 'b'],
     );
@@ -47,6 +48,7 @@ subtest 'FunctionDef with body graph' => sub {
     $body_graph->add_node($ret);
 
     my $func = Chalk::IR::Node::FunctionDef->new(
+        inputs => [],
         name => 'answer',
         parameters => [],
         body_graph => $body_graph,
@@ -61,6 +63,7 @@ subtest 'FunctionDef to_hash serialization' => sub {
     use Chalk::IR::Node::FunctionDef;
 
     my $func = Chalk::IR::Node::FunctionDef->new(
+        inputs => [],
         name => 'greet',
         parameters => ['name'],
     );
@@ -75,11 +78,13 @@ subtest 'FunctionDef inputs (no data dependencies)' => sub {
     use Chalk::IR::Node::FunctionDef;
 
     my $func = Chalk::IR::Node::FunctionDef->new(
+        inputs => [],
         name => 'standalone',
         parameters => [],
     );
 
-    is $func->inputs, [], 'FunctionDef has no inputs (it defines, not uses)';
+    # FunctionDef.inputs() returns body statement IDs (empty if no body set)
+    is $func->inputs, [], 'FunctionDef has no inputs when no body set';
 };
 
 subtest 'FunctionDef execute returns function descriptor' => sub {
@@ -88,6 +93,7 @@ subtest 'FunctionDef execute returns function descriptor' => sub {
 
     my $body_graph = Chalk::IR::Graph->new();
     my $func = Chalk::IR::Node::FunctionDef->new(
+        inputs => [],
         name => 'test_func',
         parameters => ['x', 'y'],
         body_graph => $body_graph,
