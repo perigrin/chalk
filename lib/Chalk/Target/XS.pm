@@ -36,8 +36,11 @@ class Chalk::Target::XS {
     }
 
     # Map IR types to C types for Perl API
+    # Prefer compute() (peephole type lattice) over compute_type() (semantic types)
+    # because peephole inference propagates types through operations correctly
     method get_c_type($node) {
-        my $ir_type = $node->can('compute_type') ? $node->compute_type() : $node->type;
+        my $ir_type = $node->can('compute') ? $node->compute()
+                    : ($node->can('compute_type') ? $node->compute_type() : $node->type);
         my $type_class = ref($ir_type);
 
         # Handle IR types
@@ -55,6 +58,20 @@ class Chalk::Target::XS {
         return 'SV*';  # Conservative fallback
     }
 
+    # Compute return type from function body by finding Return node
+    method compute_return_type($func_def) {
+        my $body_stmts = $func_def->body_statements // [];
+
+        for my $stmt ($body_stmts->@*) {
+            next unless blessed($stmt) && $stmt->can('op');
+            if ($stmt->op eq 'Return' && $stmt->can('value') && $stmt->value) {
+                return $self->get_c_type($stmt->value);
+            }
+        }
+
+        return 'SV*';  # Default fallback
+    }
+
     # Visit a node, dispatching to the appropriate visit_* method
     method visit($node) {
         my $type = ref($node);
@@ -64,6 +81,7 @@ class Chalk::Target::XS {
         return $self->visit_Start($node) if $type eq 'Start';
         return $self->visit_Stop($node) if $type eq 'Stop';
         return $self->visit_Constant($node) if $type eq 'Constant';
+        return $self->visit_Parm($node) if $type eq 'Parm';
         return $self->visit_Return($node) if $type eq 'Return';
         return $self->visit_Add($node) if $type eq 'Add';
         return $self->visit_Subtract($node) if $type eq 'Subtract';
@@ -106,31 +124,146 @@ class Chalk::Target::XS {
         return @emittable;
     }
 
+    # Find the Stop node in the graph (contains function_defs)
+    method find_stop_node() {
+        return undef unless $graph && ref($graph) && blessed($graph) && $graph->can('nodes');
+        # nodes() returns a hashref of id => node
+        my $nodes_hash = $graph->nodes;
+        for my $node (values $nodes_hash->%*) {
+            return $node if blessed($node) && $node->can('op') && $node->op eq 'Stop';
+        }
+        return undef;
+    }
+
+    # Recursively visit a node and all its dependencies
+    # Returns list of XS AST nodes in dependency order
+    method visit_with_deps($node, $visited, $statements, $params) {
+        return unless blessed($node) && $node->can('id');
+        return if $visited->{$node->id}++;
+
+        my $op = $node->can('op') ? $node->op : '';
+
+        # Handle parameter references - bind to parameter name, no XS output
+        if ($op eq 'Load' || $op eq 'Phi') {
+            # These might reference parameters - check if we have a name
+            if ($node->can('name') && $node->name) {
+                my $name = $node->name;
+                # Check if it's a parameter (remove sigil for comparison)
+                my $bare_name = $name;
+                $bare_name =~ s/^\$//;
+                for my $param ($params->@*) {
+                    my $param_bare = $param;
+                    $param_bare =~ s/^\$//;
+                    if ($bare_name eq $param_bare) {
+                        # Bind this node to the parameter variable
+                        $self->bind_var($node->id, $param_bare);
+                        return;
+                    }
+                }
+            }
+        }
+
+        # Visit dependencies first (in correct order)
+        # Binary ops: left, right
+        if ($node->can('left') && $node->left) {
+            $self->visit_with_deps($node->left, $visited, $statements, $params);
+        }
+        if ($node->can('right') && $node->right) {
+            $self->visit_with_deps($node->right, $visited, $statements, $params);
+        }
+        # Return: value
+        if ($node->can('value') && $node->value && $op ne 'Constant') {
+            $self->visit_with_deps($node->value, $visited, $statements, $params);
+        }
+        # Unary ops: operand
+        if ($node->can('operand') && $node->operand) {
+            $self->visit_with_deps($node->operand, $visited, $statements, $params);
+        }
+
+        # Now visit this node
+        my $xs_node = $self->visit($node);
+        push $statements->@*, $xs_node if defined $xs_node;
+    }
+
+    # Generate XS code for a single function's body statements
+    method generate_function_body($func_def) {
+        my @statements;
+        my $body_stmts = $func_def->body_statements // [];
+        my $params = $func_def->parameters // [];
+        my %visited;
+
+        # Bind parameters to their names upfront
+        # Parameters in XS are available directly by name
+        for my $param ($params->@*) {
+            my $bare_name = $param;
+            $bare_name =~ s/^\$//;
+            # We'll bind parameter nodes when we encounter them
+        }
+
+        for my $stmt ($body_stmts->@*) {
+            $self->visit_with_deps($stmt, \%visited, \@statements, $params);
+        }
+
+        return @statements;
+    }
+
     # Generate XS AST from IR graph
     method generate() {
         use Chalk::Target::XS::AST::XSUB;
 
-        # 1. Build emission order (topological sort)
-        my @order = $self->schedule_emission();
+        my @xsubs;
 
-        # 2. Visit each node, building XS AST statements
-        my @statements;
-        for my $node (@order) {
-            my $xs_node = $self->visit($node);
-            push @statements, $xs_node if defined $xs_node;
+        # Find Stop node which contains function definitions
+        my $stop = $self->find_stop_node();
+
+        if ($stop && $stop->can('function_defs')) {
+            # Generate one XSUB per function definition
+            my $funcs = $stop->function_defs // [];
+            for my $func_def ($funcs->@*) {
+                # Reset temp counter for each function
+                $temp_counter = 0;
+                $ctx = Chalk::IR::Context->empty_context();
+
+                my $func_name = $func_def->name // 'anonymous';
+                my $params = $func_def->parameters // [];
+
+                # Compute return type from function body
+                my $return_type = $self->compute_return_type($func_def);
+
+                # Generate body statements for this function
+                my @body_statements = $self->generate_function_body($func_def);
+
+                my $xsub = Chalk::Target::XS::AST::XSUB->new(
+                    name => $func_name,
+                    params => $params,
+                    body => \@body_statements,
+                    return_type => $return_type,
+                );
+                push @xsubs, $xsub;
+            }
         }
 
-        # 3. Create XSUB wrapper if we have statements
-        my @xsubs;
-        if (@statements) {
-            # For now, create a single XSUB named after the module
-            # TODO: Extract function name from IR (when we have function boundaries)
-            my $xsub = Chalk::Target::XS::AST::XSUB->new(
-                name => 'generated',
-                params => [],
-                body => \@statements,
-            );
-            push @xsubs, $xsub;
+        # Fallback: if no functions found, use legacy behavior with main program flow
+        if (!@xsubs) {
+            # 1. Build emission order (topological sort)
+            my @order = $self->schedule_emission();
+
+            # 2. Visit each node, building XS AST statements
+            my @statements;
+            for my $node (@order) {
+                my $xs_node = $self->visit($node);
+                push @statements, $xs_node if defined $xs_node;
+            }
+
+            # 3. Create XSUB wrapper if we have statements
+            if (@statements) {
+                my $xsub = Chalk::Target::XS::AST::XSUB->new(
+                    name => 'generated',
+                    params => [],
+                    body => \@statements,
+                );
+                push @xsubs, $xsub;
+            }
         }
 
         # 4. Wrap in module structure
@@ -157,6 +290,15 @@ class Chalk::Target::XS {
 
     method visit_Stop($node) {
         return undef;
+    }
+
+    # Parm nodes represent function parameters - bind to parameter name
+    method visit_Parm($node) {
+        my $name = $node->name;
+        my $bare_name = $name;
+        $bare_name =~ s/^\$//;  # Remove sigil for XS variable name
+        $self->bind_var($node->id, $bare_name);
+        return undef;  # No XS statement needed
     }
 
     method visit_Constant($node) {

@@ -330,6 +330,22 @@ if ( !caller ) {
                                 push @queue, $ret if blessed($ret) && $ret->can('id') && !$visited{$ret->id};
                             }
                         }
+
+                        # Issue #473 fix: Stop node functions (FunctionDef nodes for XS code generation)
+                        # This makes function bodies reachable for graph traversal
+                        if ($node->can('functions') && $node->functions) {
+                            for my $func ($node->functions->@*) {
+                                push @queue, $func if blessed($func) && $func->can('id') && !$visited{$func->id};
+                            }
+                        }
+
+                        # Issue #473 fix: FunctionDef body_statements (IR nodes in function body)
+                        # This includes function body nodes in the graph
+                        if ($node->can('body_statements') && $node->body_statements) {
+                            for my $stmt ($node->body_statements->@*) {
+                                push @queue, $stmt if blessed($stmt) && $stmt->can('id') && !$visited{$stmt->id};
+                            }
+                        }
                     }
 
                     # Run optimization pipeline (IterPeeps -> DCE -> GCM)
@@ -444,6 +460,22 @@ if ( !caller ) {
                             if ($node->can('returns') && $node->returns) {
                                 for my $ret ($node->returns->@*) {
                                     push @queue, $ret if blessed($ret) && $ret->can('id') && !$visited{$ret->id};
+                                }
+                            }
+
+                            # Issue #473 fix: Stop node functions (FunctionDef nodes for XS code generation)
+                            # This makes function bodies reachable for graph traversal
+                            if ($node->can('functions') && $node->functions) {
+                                for my $func ($node->functions->@*) {
+                                    push @queue, $func if blessed($func) && $func->can('id') && !$visited{$func->id};
+                                }
+                            }
+
+                            # Issue #473 fix: FunctionDef body_statements (IR nodes in function body)
+                            # This includes function body nodes in the graph
+                            if ($node->can('body_statements') && $node->body_statements) {
+                                for my $stmt ($node->body_statements->@*) {
+                                    push @queue, $stmt if blessed($stmt) && $stmt->can('id') && !$visited{$stmt->id};
                                 }
                             }
                         }

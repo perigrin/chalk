@@ -38,35 +38,16 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         my $scope = $context->env->{scope};
         return $context->child(0) unless $scope;
 
-        # Extract variable name from raw parse tree BEFORE semantic evaluation
+        # Extract variable name from evaluated LHS
+        # Load, UnboundVariable, and Proj all have name() or label()
+        my $lhs = $context->child(0);
         my $var_name;
-        my $lhs_context = $context->children->[0];
 
-        # Breadth-first search through parse tree for scalar_var metadata
-        my @queue = ($lhs_context);
-        while (@queue && !defined($var_name)) {
-            my $ctx = shift @queue;
-            next unless defined($ctx);
-
-            if (blessed($ctx) && $ctx->can('extract')) {
-                my $val = $ctx->extract;
-                if (ref($val) eq 'HASH' && $val->{type} && $val->{type} eq 'scalar_var') {
-                    $var_name = $val->{name};
-                    last;
-                }
-            }
-
-            if (blessed($ctx) && $ctx->can('children')) {
-                push @queue, $ctx->children->@*;
-            }
-        }
-
-        # If BFS didn't find scalar_var, check if LHS evaluates to a Proj node
-        unless (defined($var_name)) {
-            my $lhs = $context->child(0);
-            if (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
-                $var_name = $lhs->label;
-            }
+        if ($lhs && $lhs->can('name')) {
+            $var_name = $lhs->name;
+        } elsif ($lhs && $lhs->can('label')) {
+            # Proj node uses label() instead of name()
+            $var_name = $lhs->label;
         }
 
         unless (defined($var_name)) {

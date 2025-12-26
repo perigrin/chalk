@@ -204,7 +204,8 @@ subtest 'Variable handles array_var metadata' => sub {
     my $result = $rule->evaluate($context);
 
     ok(blessed($result), 'Variable returns IR node for array');
-    is($result->id, $array_node->id, 'Returns the correct array node');
+    is($result->op, 'Load', 'Returns Load node wrapping array');
+    is($result->value->id, $array_node->id, 'Load wraps the correct array node');
 };
 
 subtest 'Variable handles hash_var metadata' => sub {
@@ -251,7 +252,8 @@ subtest 'Variable handles hash_var metadata' => sub {
     my $result = $rule->evaluate($context);
 
     ok(blessed($result), 'Variable returns IR node for hash');
-    is($result->id, $hash_node->id, 'Returns the correct hash node');
+    is($result->op, 'Load', 'Returns Load node wrapping hash');
+    is($result->value->id, $hash_node->id, 'Load wraps the correct hash node');
 };
 
 subtest 'Variable passes through metadata for undeclared array' => sub {
@@ -291,9 +293,10 @@ subtest 'Variable passes through metadata for undeclared array' => sub {
     );
     my $result = $rule->evaluate($context);
 
-    is(ref($result), 'HASH', 'Returns metadata for undeclared variable');
-    is($result->{type}, 'array_var', 'Preserves array_var type');
-    is($result->{name}, 'undefined_arr', 'Preserves name');
+    # Variable now returns UnboundVariable for undeclared variables
+    # This allows duck-typed access via name() method
+    isa_ok($result, 'Chalk::IR::Node::UnboundVariable', 'Returns UnboundVariable for undeclared variable');
+    is($result->name, '@undefined_arr', 'UnboundVariable has correct full name with sigil');
 };
 
 done_testing();

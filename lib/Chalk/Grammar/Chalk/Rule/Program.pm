@@ -38,6 +38,18 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
             }
         }
 
+        # Fallback: if no statements from focus, check direct child evaluation
+        # This handles cases where StatementList result is accessed via child()
+        if (@statements == 0) {
+            for my $i (0 .. $#children) {
+                my $child = $context->child($i);
+                if (ref($child) eq 'ARRAY') {
+                    @statements = @$child;
+                    last;
+                }
+            }
+        }
+
         # CRITICAL FIX for Issue #195: Wire up control flow for ALL statements sequentially
         # Due to bottom-up parsing, child statements may have been created with incorrect control.
         # We need to rewire controls so each statement uses the previous statement's output as control.

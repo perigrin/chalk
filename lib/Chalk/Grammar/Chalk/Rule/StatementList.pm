@@ -26,6 +26,11 @@ class Chalk::Grammar::Chalk::Rule::StatementList :isa(Chalk::GrammarRule) {
             if (ref($child_focus) eq 'ARRAY') {
                 return $child_focus;  # Already evaluated, pass it through
             }
+            # Single IR node child - return as single-element array
+            if (blessed($child_focus) && $child_focus->can('id')) {
+                return [$child_focus];
+            }
+            return [];
         }
 
         # Get the first statement

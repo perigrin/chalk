@@ -34,13 +34,11 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         # Get Variable rule and extract the variable name
         if ($var_ctx->can('rule') && $var_ctx->rule &&
             $var_ctx->rule isa Chalk::Grammar::Chalk::Rule::Variable) {
-            # Variable returns a hash with type and name
+            # Variable returns UnboundVariable with name() method
             my $var_val = $var_ctx->extract();
-            if (ref($var_val) eq 'HASH' &&
-                $var_val->{type} eq 'scalar_var' &&
-                exists $var_val->{name}) {
-                # Prepend sigil to name for field storage
-                $field_name = $var_val->{sigil} . $var_val->{name};
+            if ($var_val && $var_val->can('name')) {
+                # name() returns full name with sigil (e.g., '$x')
+                $field_name = $var_val->name;
             }
         }
 

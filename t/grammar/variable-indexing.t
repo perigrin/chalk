@@ -260,7 +260,8 @@ subtest 'Variable still works for simple variable lookup' => sub {
     my $result = $rule->evaluate($context);
 
     ok(blessed($result), 'Result is blessed');
-    is($result->id, $array_node->id, 'Returns the array node from scope');
+    is($result->op, 'Load', 'Returns Load node wrapping array');
+    is($result->value->id, $array_node->id, 'Load wraps the correct array node');
 };
 
 done_testing();
