@@ -38,48 +38,16 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
         my $scope = $context->env->{scope};
         return $context->child(0) unless $scope;
 
-        # Extract variable name - try multiple approaches:
-        # 1. Duck-typed name() from evaluated LHS (UnboundVariable, Proj)
-        # 2. BFS through parse tree for variable metadata (when LHS is already bound)
-        my $var_name;
+        # Extract variable name from evaluated LHS
+        # Load, UnboundVariable, and Proj all have name() or label()
         my $lhs = $context->child(0);
+        my $var_name;
 
-        # Try duck-typed name() first
         if ($lhs && $lhs->can('name')) {
             $var_name = $lhs->name;
-        }
-
-        # Fall back to BFS through parse tree for variable metadata
-        unless (defined($var_name)) {
-            my $lhs_context = $context->children->[0];
-            my @queue = ($lhs_context);
-            while (@queue && !defined($var_name)) {
-                my $ctx = shift @queue;
-                next unless defined($ctx);
-
-                if (blessed($ctx) && $ctx->can('extract')) {
-                    my $val = $ctx->extract;
-                    if (ref($val) eq 'HASH' && $val->{type}) {
-                        my $type = $val->{type};
-                        if ($type eq 'scalar_var' || $type eq 'array_var' || $type eq 'hash_var') {
-                            my $sigil = $val->{sigil} // '';
-                            $var_name = $sigil . $val->{name};
-                            last;
-                        }
-                    }
-                }
-
-                if (blessed($ctx) && $ctx->can('children')) {
-                    push @queue, $ctx->children->@*;
-                }
-            }
-        }
-
-        # Final fallback: check for Proj node (field access)
-        unless (defined($var_name)) {
-            if (blessed($lhs) && $lhs->can('op') && $lhs->op eq 'Proj') {
-                $var_name = $lhs->label;
-            }
+        } elsif ($lhs && $lhs->can('label')) {
+            # Proj node uses label() instead of name()
+            $var_name = $lhs->label;
         }
 
         unless (defined($var_name)) {

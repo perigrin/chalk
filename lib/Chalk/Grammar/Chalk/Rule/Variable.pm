@@ -5,6 +5,7 @@ use 5.42.0;
 use experimental 'class';
 use Chalk::IR::Node::ArrayGet;
 use Chalk::IR::Node::HashGet;
+use Chalk::IR::Node::Load;
 use Chalk::IR::Node::UnboundVariable;
 # Note: blessed is auto-imported by use 5.42.0
 
@@ -102,8 +103,12 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
                 if ($scope) {
                     my $node = $scope->lookup($full_name);
                     if (defined($node) && ref($node) && $node->can('id')) {
-                        # Return the node object directly
-                        return $node;
+                        # Return Load node wrapping the value - preserves name for lvalue
+                        return Chalk::IR::Node::Load->new(
+                            inputs => [$node->id],
+                            name   => $full_name,
+                            value  => $node,
+                        );
                     }
                 }
 
