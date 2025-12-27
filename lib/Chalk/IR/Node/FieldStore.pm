@@ -9,6 +9,7 @@ class Chalk::IR::Node::FieldStore :isa(Chalk::IR::Node::Base) {
     field $object_id :param :reader;
     field $field_id :param :reader;
     field $value_id :param :reader;
+    field $field_index :param :reader = undef;  # For XS ObjectFIELDS[index] access
     field $alias_class :param :reader = undef;
 
     method op() { 'FieldStore' }
@@ -20,6 +21,7 @@ class Chalk::IR::Node::FieldStore :isa(Chalk::IR::Node::Base) {
             value_id => $value_id,
         );
         $attrs{mem_id} = $mem_id if defined $mem_id;
+        $attrs{field_index} = $field_index if defined $field_index;
         $attrs{alias_class} = $alias_class if defined $alias_class;
 
         return {
