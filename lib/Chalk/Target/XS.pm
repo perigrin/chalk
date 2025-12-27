@@ -107,6 +107,10 @@ class Chalk::Target::XS {
         return $self->visit_Call($node) if $type eq 'Call';
         return $self->visit_CallEnd($node) if $type eq 'CallEnd';
 
+        # Class-related nodes
+        return $self->visit_ClassDef($node) if $type eq 'ClassDef';
+        return $self->visit_Field($node) if $type eq 'Field';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -296,6 +300,15 @@ class Chalk::Target::XS {
             }
         }
 
+        # Generate XSUBs for class methods
+        if ($stop && $stop->can('class_defs')) {
+            my $classes = $stop->class_defs // [];
+            for my $class_def ($classes->@*) {
+                my $class_xsubs = $self->generate_class_xsubs($class_def);
+                push @xsubs, $class_xsubs->@*;
+            }
+        }
+
         # Fallback: if no functions found, use legacy behavior with main program flow
         if (!@xsubs) {
             # 1. Build emission order (topological sort)
@@ -331,6 +344,53 @@ class Chalk::Target::XS {
         return Chalk::Target::XS::AST::CompositeNode->new(
             children => [$module, @xsubs],
         );
+    }
+
+    # Generate XSUBs for class methods
+    # Each method becomes an XSUB with implicit $self parameter
+    method generate_class_xsubs($class_def) {
+        use Chalk::Target::XS::AST::XSUB;
+
+        my @xsubs;
+        my $methods = $class_def->methods // [];
+
+        for my $method_def ($methods->@*) {
+            # Reset temp counter for each method
+            $temp_counter = 0;
+            $ctx = Chalk::IR::Context->empty_context();
+
+            my $method_name = $method_def->name // 'anonymous';
+            my $params = $method_def->parameters // [];
+
+            # MethodDeclaration already adds $self as first parameter
+            # Convert to XS format: $self → SV* self, others → bare names
+            my @method_params;
+            for my $param ($params->@*) {
+                if ($param eq '$self') {
+                    # Convert $self to C type declaration
+                    push @method_params, 'SV* self';
+                } else {
+                    # Other params keep sigil (stripped by XSUB emit)
+                    push @method_params, $param;
+                }
+            }
+
+            # Compute return type from method body
+            my $return_type = $self->compute_return_type($method_def);
+
+            # Generate body statements for this method
+            my @body_statements = $self->generate_function_body($method_def);
+
+            my $xsub = Chalk::Target::XS::AST::XSUB->new(
+                name => $method_name,
+                params => \@method_params,
+                body => \@body_statements,
+                return_type => $return_type,
+            );
+            push @xsubs, $xsub;
+        }
+
+        return \@xsubs;
     }
 
     # Visitor methods (added incrementally via TDD)
@@ -487,6 +547,22 @@ class Chalk::Target::XS {
             $self->bind_var($node->id, $call_var);
         }
         return undef;  # No XS output, just binding
+    }
+
+    # ClassDef nodes are handled by generate_class_xsubs, not visit()
+    # This visitor is for cases where ClassDef appears in normal traversal
+    method visit_ClassDef($node) {
+        # ClassDef is processed separately via class_defs collection
+        # No direct XS output from visiting
+        return undef;
+    }
+
+    # Field nodes define class fields - used for accessor generation
+    # XS output handled by constructor generation and FieldLoad/FieldStore
+    method visit_Field($node) {
+        # Field metadata used by constructor and accessor generation
+        # No direct XS output from visiting
+        return undef;
     }
 }
 
