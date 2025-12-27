@@ -202,6 +202,18 @@ class Chalk::Target::XS {
         if ($node->can('operand') && $node->operand) {
             $self->visit_with_deps($node->operand, $visited, $statements, $params);
         }
+        # CallEnd: visit the underlying Call node first
+        if ($op eq 'CallEnd' && $node->can('call') && $node->call) {
+            $self->visit_with_deps($node->call, $visited, $statements, $params);
+        }
+        # Call: visit args only (callee is the function name, not a value)
+        if ($op eq 'Call') {
+            if ($node->can('args') && $node->args) {
+                for my $arg ($node->args->@*) {
+                    $self->visit_with_deps($arg, $visited, $statements, $params);
+                }
+            }
+        }
 
         # Now visit this node
         my $xs_node = $self->visit($node);
@@ -210,6 +222,8 @@ class Chalk::Target::XS {
 
     # Generate XS code for a single function's body statements
     method generate_function_body($func_def) {
+        use Chalk::Target::XS::AST::Return;
+
         my @statements;
         my $body_stmts = $func_def->body_statements // [];
         my $params = $func_def->parameters // [];
@@ -223,8 +237,24 @@ class Chalk::Target::XS {
             # We'll bind parameter nodes when we encounter them
         }
 
+        # Check if there's an explicit Return node in the body
+        my $has_return = 0;
+        my $last_stmt;
+        for my $stmt ($body_stmts->@*) {
+            $last_stmt = $stmt;
+            if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'Return') {
+                $has_return = 1;
+            }
+        }
+
         for my $stmt ($body_stmts->@*) {
             $self->visit_with_deps($stmt, \%visited, \@statements, $params);
+        }
+
+        # If no explicit return, add implicit return for last expression
+        if (!$has_return && defined($last_stmt) && blessed($last_stmt) && $last_stmt->can('id')) {
+            my $var = $self->get_var($last_stmt->id);
+            push @statements, Chalk::Target::XS::AST::Return->new(expr => $var);
         }
 
         return @statements;
@@ -447,9 +477,16 @@ class Chalk::Target::XS {
         );
     }
 
-    # CallEnd is a projection node - the actual call is handled by visit_Call
+    # CallEnd is a projection node - bind to the Call's result variable
     method visit_CallEnd($node) {
-        return undef;
+        # The Call node should have been visited first, allocating a temp
+        # Bind this CallEnd to the same variable
+        if ($node->can('call') && $node->call) {
+            my $call = $node->call;
+            my $call_var = $self->get_var($call->id);
+            $self->bind_var($node->id, $call_var);
+        }
+        return undef;  # No XS output, just binding
     }
 }
 
