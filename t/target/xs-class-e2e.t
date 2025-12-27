@@ -195,4 +195,79 @@ subtest 'Method with field access via ObjectFIELDS' => sub {
         like($xs, qr/ObjectFIELDS\s*\(\s*self\s*\)\s*\[\s*\d+\s*\]/, 'Accesses field via ObjectFIELDS[index]');
     };
 
+# ===== Test 5: Multi-file output generates .xs and .pmc =====
+subtest 'Multi-file output generates .xs and .pmc' => sub {
+        my $code = 'class Counter { field $count = 0; method inc { $count += 1; return $count; } }';
+
+        # Reset TypeRegistry
+        Chalk::Grammar::Chalk::TypeRegistry->instance->reset();
+
+        my $bnf_file = "grammar/chalk.bnf";
+        open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
+        my $content = do { local $/; <$fh> };
+        close $fh;
+
+        my $grammar = Chalk::Grammar->build_from_bnf($content, 'Program', 'Chalk');
+        my $semiring = Chalk::Semiring::ChalkIR->new(grammar => $grammar);
+        my $parser = Chalk::Parser->new(
+            grammar => $grammar,
+            semiring => $semiring,
+        );
+
+        my $result = $parser->parse_string($code);
+        ok(defined $result, 'Parsed successfully');
+
+        my $winning_node = $result->context->focus;
+
+        # Build graph (same as generate_xs helper)
+        my $graph = Chalk::IR::Graph->new();
+        my %visited;
+        my @queue = ($winning_node);
+        while (@queue) {
+            my $node = shift @queue;
+            next unless blessed($node) && $node->can('id');
+            next if $visited{$node->id}++;
+            $graph->add_node($node);
+            # Traverse references
+            for my $method (qw(value_node value control left right operand condition source call callee)) {
+                next unless $node->can($method);
+                my $ref = $node->$method;
+                push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+            }
+            for my $method (qw(branches control_users args return_nodes function_defs class_defs fields methods)) {
+                next unless $node->can($method) && $node->$method;
+                for my $ref ($node->$method->@*) {
+                    push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+                }
+            }
+        }
+
+        # Generate multi-file output
+        my $xs_target = Chalk::Target::XS->new(
+            graph => $graph,
+            module_name => 'Counter',
+        );
+
+        # New API: generate_files() returns hashref with xs and pmc content
+        my $files = $xs_target->generate_files();
+
+        ok(ref($files) eq 'HASH', 'generate_files returns hashref');
+        ok(exists $files->{xs}, 'Has xs key');
+        ok(exists $files->{pmc}, 'Has pmc key');
+
+        # Verify XS content
+        my $xs = $files->{xs};
+        like($xs, qr/MODULE = Counter/, 'XS has MODULE declaration');
+        like($xs, qr/new\s*\(/, 'XS has constructor');
+
+        # Verify PMC content
+        my $pmc = $files->{pmc};
+        like($pmc, qr/package Counter;/, 'PMC has package declaration');
+        like($pmc, qr/use XSLoader/, 'PMC uses XSLoader');
+        like($pmc, qr/XSLoader::load/, 'PMC calls XSLoader::load');
+
+        diag "Generated XS:\n$xs" if $ENV{TEST_VERBOSE};
+        diag "Generated PMC:\n$pmc" if $ENV{TEST_VERBOSE};
+    };
+
 done_testing();
