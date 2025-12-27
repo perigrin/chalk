@@ -335,7 +335,96 @@ subtest 'Namespaced class generates correct file paths' => sub {
         like($files->{pmc}, qr/package Foo::Bar::Baz;/, 'PMC has full namespace package');
     };
 
-# ===== Test 7: E2E compilation test (TODO) =====
+# ===== Test 7: Multiple classes with same method name =====
+subtest 'Multiple classes with same method name generate distinct XSUBs' => sub {
+        # This tests that Counter::inc and Timer::inc don't collide
+        my $code = <<'CHALK';
+class Counter {
+    field $count = 0;
+    method inc { $count += 1; return $count; }
+}
+class Timer {
+    field $elapsed = 0;
+    method inc { $elapsed += 10; return $elapsed; }
+}
+CHALK
+
+        # Reset TypeRegistry
+        Chalk::Grammar::Chalk::TypeRegistry->instance->reset();
+
+        my $bnf_file = "grammar/chalk.bnf";
+        open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
+        my $content = do { local $/; <$fh> };
+        close $fh;
+
+        my $grammar = Chalk::Grammar->build_from_bnf($content, 'Program', 'Chalk');
+        my $semiring = Chalk::Semiring::ChalkIR->new(grammar => $grammar);
+        my $parser = Chalk::Parser->new(
+            grammar => $grammar,
+            semiring => $semiring,
+        );
+
+        my $result = $parser->parse_string($code);
+        ok(defined $result, 'Parsed successfully');
+
+        my $winning_node = $result->context->focus;
+
+        # Build graph
+        my $graph = Chalk::IR::Graph->new();
+        my %visited;
+        my @queue = ($winning_node);
+        while (@queue) {
+            my $node = shift @queue;
+            next unless blessed($node) && $node->can('id');
+            next if $visited{$node->id}++;
+            $graph->add_node($node);
+            for my $method (qw(value_node value control left right operand condition source call callee)) {
+                next unless $node->can($method);
+                my $ref = $node->$method;
+                push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+            }
+            for my $method (qw(branches control_users args return_nodes function_defs class_defs fields methods)) {
+                next unless $node->can($method) && $node->$method;
+                for my $ref ($node->$method->@*) {
+                    push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+                }
+            }
+        }
+
+        # The winning_node is the Stop node
+        my $stop = $winning_node;
+        ok(blessed($stop) && $stop->can('op') && $stop->op eq 'Stop', 'Winning node is Stop');
+        my $class_defs = $stop->class_defs // [];
+        is(scalar($class_defs->@*), 2, 'Two classes registered');
+
+        # Verify both classes have their inc method
+        my %class_methods;
+        for my $class_def ($class_defs->@*) {
+            my $class_name = $class_def->class_name;
+            my $methods = $class_def->methods // [];
+            for my $method ($methods->@*) {
+                $class_methods{$class_name}{$method->name} = 1;
+            }
+        }
+
+        ok(exists $class_methods{Counter}{inc}, 'Counter has inc method');
+        ok(exists $class_methods{Timer}{inc}, 'Timer has inc method');
+
+        # Generate XS for each class
+        for my $class_def ($class_defs->@*) {
+            my $class_name = $class_def->class_name;
+            my $xs_target = Chalk::Target::XS->new(
+                graph => $graph,
+                module_name => $class_name,
+            );
+            my $files = $xs_target->generate_files();
+
+            like($files->{xs}, qr/MODULE = $class_name/, "$class_name XS has correct MODULE");
+            like($files->{xs}, qr/inc\s*\(/, "$class_name XS has inc method");
+        }
+    };
+
+# ===== Test 8: E2E compilation test (TODO) =====
 TODO: {
     local $TODO = 'Full XS compilation requires C compiler and XS infrastructure';
 
