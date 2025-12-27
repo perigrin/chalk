@@ -1,11 +1,13 @@
 # ABOUTME: Semantic action for ClassDeclaration rule in Chalk grammar
-# ABOUTME: Extracts class name and fields, registers Class type in TypeRegistry
+# ABOUTME: Extracts class name and fields, registers Class type, returns ClassDef IR node
 use 5.42.0;
 use experimental 'class';
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
 use Chalk::Grammar::Chalk::Type::Class;
 use Chalk::Grammar::Chalk::Type::Any;
 use Chalk::Grammar::Chalk::TypeRegistry;
+use Chalk::IR::Node::ClassDef;
+use Chalk::IR::Node::Field;
 
 class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
 
@@ -283,9 +285,53 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         # Register in TypeRegistry
         $registry->register($class_name, $class_type);
 
-        # Return undef for now (we don't need IR generation for type registration)
-        # This is called during type analysis phase, not IR generation
-        return undef;
+        # Create Field IR nodes with indices
+        my @field_nodes;
+        for my $i (0 .. $#field_info) {
+            my $info = $field_info[$i];
+            my $field_type = $type_env->{$info->{name}} // $info->{type};
+
+            # Convert attribute names to hash for Field node
+            my %attr_hash;
+            for my $attr (($info->{attributes} // [])->@*) {
+                # Strip leading colon from attribute names
+                my $attr_name = $attr;
+                $attr_name =~ s/^://;
+                $attr_hash{$attr_name} = 1;
+            }
+
+            push @field_nodes, Chalk::IR::Node::Field->new(
+                name             => $info->{name},
+                index            => $i,
+                field_type       => $field_type,
+                field_attributes => \%attr_hash,
+            );
+        }
+
+        # Set current_class in env for method declarations
+        my $env = $context->env // {};
+        $env->{current_class} = $class_name;
+
+        # Evaluate the Block to get method declarations
+        my $block_result = $block_ctx->extract();
+
+        # Collect FunctionDef nodes from block statements
+        my @method_nodes;
+        if (ref($block_result) eq 'HASH' && $block_result->{statements}) {
+            for my $stmt ($block_result->{statements}->@*) {
+                if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'FunctionDef') {
+                    push @method_nodes, $stmt;
+                }
+            }
+        }
+
+        # Create and return ClassDef IR node
+        return Chalk::IR::Node::ClassDef->new(
+            class_name   => $class_name,
+            fields       => \@field_nodes,
+            methods      => \@method_nodes,
+            parent_class => undef,  # TODO: Extract from :isa() attribute
+        );
     }
 
     # Type inference for TypeInference semiring
