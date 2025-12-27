@@ -157,7 +157,13 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             return;
         }
 
-        # IR nodes (skip - these are from evaluated expressions)
+        # Handle UnboundVariable nodes (parameters parsed as variable references)
+        if (blessed($node) && $node->can('op') && $node->op eq 'UnboundVariable') {
+            push $params->@*, $node->name if $node->name;
+            return;
+        }
+
+        # Other IR nodes (skip - these are from evaluated expressions that aren't parameters)
         if (blessed($node) && $node->can('id')) {
             return;
         }
@@ -272,20 +278,35 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             return $node;
         }
 
-        # Handle Call nodes (func_name + arguments)
-        if ($op eq 'Call' && $node->can('arguments')) {
-            my $args = $node->arguments // [];
+        # Handle Call nodes (callee + args)
+        if ($op eq 'Call' && $node->can('args')) {
+            my $call_args = $node->args // [];
             my @new_args;
             my $changed = 0;
-            for my $arg ($args->@*) {
+            for my $arg ($call_args->@*) {
                 my $new_arg = $self->_replace_unbound_variables($arg, $param_map);
                 push @new_args, $new_arg;
                 $changed = 1 if defined($arg) && defined($new_arg) && refaddr($new_arg) != refaddr($arg);
             }
             if ($changed) {
                 return Chalk::IR::Node::Call->new(
-                    func_name   => $node->func_name,
-                    arguments   => \@new_args,
+                    callee      => $node->callee,
+                    args        => \@new_args,
+                    receiver    => $node->can('receiver') ? $node->receiver : undef,
+                    source_info => $node->can('source_info') ? $node->source_info : undef,
+                );
+            }
+            return $node;
+        }
+
+        # Handle CallEnd nodes (wrap inner Call)
+        if ($op eq 'CallEnd' && $node->can('call')) {
+            my $inner_call = $node->call;
+            my $new_call = $self->_replace_unbound_variables($inner_call, $param_map);
+            if (defined($inner_call) && defined($new_call) && refaddr($new_call) != refaddr($inner_call)) {
+                use Chalk::IR::Node::CallEnd;
+                return Chalk::IR::Node::CallEnd->new(
+                    call        => $new_call,
                     source_info => $node->can('source_info') ? $node->source_info : undef,
                 );
             }

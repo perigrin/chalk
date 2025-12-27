@@ -145,11 +145,7 @@ subtest 'Function with parameters' => sub {
     diag "Generated XS:\n$xs" if $ENV{TEST_VERBOSE};
 
     # Parameters should appear in signature
-    # TODO: This test documents expected behavior - currently broken
-    TODO: {
-        local $TODO = 'Parameter handling in XS signature not implemented';
-        like($xs, qr/add\s*\([^)]*x[^)]*y[^)]*\)/, 'Parameters in signature');
-    }
+    like($xs, qr/add\s*\([^)]*x[^)]*y[^)]*\)/, 'Parameters in signature');
 
     # Should have addition operation
     like($xs, qr/\+/, 'Has addition operator');
@@ -178,10 +174,7 @@ subtest 'Function with comparison' => sub {
 
     like($xs, qr/is_positive/, 'Function named correctly');
     # Should have comparison operator
-    TODO: {
-        local $TODO = 'Comparison in function body may not be fully working';
-        like($xs, qr/>/, 'Has greater-than operator');
-    }
+    like($xs, qr/>/, 'Has greater-than operator');
 };
 
 # ===== Test 6: Function call =====
@@ -196,10 +189,7 @@ subtest 'Function with function call' => sub {
     like($xs, qr/quad/, 'Has quad function');
 
     # Should have function call
-    TODO: {
-        local $TODO = 'Nested function calls may not be fully working';
-        like($xs, qr/double\([^)]+\)/, 'Has function call to double');
-    }
+    like($xs, qr/double\([^)]+\)/, 'Has function call to double');
 };
 
 # ===== Test 7: Implicit return (last expression) =====
@@ -213,10 +203,7 @@ subtest 'Function with implicit return' => sub {
     like($xs, qr/compute/, 'Function named correctly');
 
     # Implicit return should still set RETVAL
-    TODO: {
-        local $TODO = 'Implicit return (no explicit return statement) may not set RETVAL';
-        like($xs, qr/RETVAL\s*=/, 'Has RETVAL assignment for implicit return');
-    }
+    like($xs, qr/RETVAL\s*=/, 'Has RETVAL assignment for implicit return');
 };
 
 done_testing();
