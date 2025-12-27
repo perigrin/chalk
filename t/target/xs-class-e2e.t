@@ -18,6 +18,7 @@ BEGIN {
 
 use Chalk::Grammar;
 use Chalk::Grammar::Chalk;
+use Chalk::Grammar::Chalk::TypeRegistry;
 use Chalk::Parser;
 use Chalk::Semiring::ChalkIR;
 use Chalk::IR::Graph;
@@ -27,6 +28,10 @@ use Chalk::Target::XS;
 sub generate_xs {
     my ($code, $class_name) = @_;
     $class_name //= 'TestClass';
+
+    # Reset TypeRegistry to avoid state leaking between tests
+    # (e.g., Test 2 uses Counter, Test 4 also uses Counter with method)
+    Chalk::Grammar::Chalk::TypeRegistry->instance->reset();
 
     my $bnf_file = "grammar/chalk.bnf";
     open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";

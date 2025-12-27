@@ -13,6 +13,20 @@ class Chalk::Target::XS {
     field $module_name :param :reader;
     field $ctx = Chalk::IR::Context->empty_context();
     field $temp_counter = 0;
+    field $current_class_def = undef;  # For field access during method generation
+
+    # Look up field index by name in current class
+    # Returns undef if not a field
+    method get_field_index($name) {
+        return undef unless defined $current_class_def;
+        my $fields = $current_class_def->fields // [];
+        for my $field ($fields->@*) {
+            if ($field->name eq $name) {
+                return $field->index;
+            }
+        }
+        return undef;
+    }
 
     # Context management - bind a variable name to a node ID
     method bind_var($node_id, $var_name) {
@@ -170,9 +184,9 @@ class Chalk::Target::XS {
 
         my $op = $node->can('op') ? $node->op : '';
 
-        # Handle parameter references - bind to parameter name, no XS output
+        # Handle parameter and field references
         if ($op eq 'Load' || $op eq 'Phi') {
-            # These might reference parameters - check if we have a name
+            # These might reference parameters or fields - check if we have a name
             if ($node->can('name') && $node->name) {
                 my $name = $node->name;
                 # Check if it's a parameter (remove sigil for comparison)
@@ -186,6 +200,20 @@ class Chalk::Target::XS {
                         $self->bind_var($node->id, $param_bare);
                         return;
                     }
+                }
+
+                # Not a parameter - check if it's a field reference
+                my $field_index = $self->get_field_index($name);
+                if (defined $field_index) {
+                    # Field access: generate ObjectFIELDS(self)[index]
+                    use Chalk::Target::XS::AST::VarDecl;
+                    my $tmp = $self->alloc_temp($node->id);
+                    push $statements->@*, Chalk::Target::XS::AST::VarDecl->new(
+                        type => 'SV*',
+                        name => $tmp,
+                        init => "ObjectFIELDS(self)[$field_index]",
+                    );
+                    return;
                 }
             }
         }
@@ -350,6 +378,9 @@ class Chalk::Target::XS {
     # Each method becomes an XSUB with implicit $self parameter
     method generate_class_xsubs($class_def) {
         use Chalk::Target::XS::AST::XSUB;
+
+        # Store class def for field resolution during method body generation
+        $current_class_def = $class_def;
 
         my @xsubs;
         my $methods = $class_def->methods // [];

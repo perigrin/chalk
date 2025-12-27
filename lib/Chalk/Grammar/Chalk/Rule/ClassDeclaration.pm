@@ -312,6 +312,14 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         my $env = $context->env // {};
         $env->{current_class} = $class_name;
 
+        # Store field name to index mapping for MethodDeclaration to create FieldLoad/FieldStore
+        # This allows methods to recognize field references and generate proper IR
+        my %class_fields;
+        for my $i (0 .. $#field_info) {
+            $class_fields{ $field_info[$i]->{name} } = $i;
+        }
+        $env->{class_fields} = \%class_fields;
+
         # Evaluate the Block to get method declarations
         my $block_result = $block_ctx->extract();
 
