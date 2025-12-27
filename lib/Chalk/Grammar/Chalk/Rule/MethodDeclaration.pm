@@ -111,11 +111,11 @@ class Chalk::Grammar::Chalk::Rule::MethodDeclaration :isa(Chalk::GrammarRule) {
         # Store the body node for execution using the setter method
         $func_def->set_body_node($body_node);
 
-        # Register method in context if function registry is available
-        my $registry = $env ? $env->{function_registry} : undef;
-        if ($registry) {
-            $registry->register($method_name, $func_def);
-        }
+        # Note: Methods are NOT registered in the global FunctionRegistry.
+        # Instead, they are stored in ClassDef.methods via ClassDeclaration.
+        # This prevents namespace collisions (e.g., Counter::inc vs Timer::inc).
+        # XS generation uses ClassDef.methods directly, not FunctionRegistry.
+        # Interpreter method dispatch should use receiver's class to find methods.
 
         return $func_def;
     }
