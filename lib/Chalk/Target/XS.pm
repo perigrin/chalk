@@ -390,7 +390,98 @@ class Chalk::Target::XS {
             push @xsubs, $xsub;
         }
 
+        # Generate constructor for class with fields
+        my $constructor = $self->generate_constructor($class_def);
+        unshift @xsubs, $constructor if $constructor;
+
         return \@xsubs;
+    }
+
+    # Generate new() constructor XSUB for a class
+    # Creates SVt_PVOBJ, sets up ObjectFIELDS, initializes defaults
+    method generate_constructor($class_def) {
+        use Chalk::Target::XS::AST::XSUB;
+        use Chalk::Target::XS::AST::VarDecl;
+        use Chalk::Target::XS::AST::Statement;
+        use Chalk::Target::XS::AST::Return;
+
+        my @fields = $class_def->fields->@*;
+        my $field_count = scalar @fields;
+
+        my @body;
+
+        # Allocate object: SV* obj = newSV_type(SVt_PVOBJ);
+        push @body, Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => 'obj',
+            init => 'newSV_type(SVt_PVOBJ)',
+        );
+
+        # Set up field storage if class has fields
+        if ($field_count > 0) {
+            # ObjectMAXFIELD(obj) = field_count - 1;
+            my $max_field = $field_count - 1;
+            push @body, Chalk::Target::XS::AST::Statement->new(
+                code => "ObjectMAXFIELD(obj) = $max_field",
+            );
+
+            # Newxz(ObjectFIELDS(obj), field_count, SV*);
+            push @body, Chalk::Target::XS::AST::Statement->new(
+                code => "Newxz(ObjectFIELDS(obj), $field_count, SV*)",
+            );
+
+            # Initialize fields with default values
+            for my $field (@fields) {
+                my $idx = $field->index;
+                my $default = $field->default;
+
+                if (defined $default) {
+                    # Get the default value (constant folding should have resolved it)
+                    my $default_val;
+                    if ($default->can('value')) {
+                        $default_val = $default->value;
+                    }
+
+                    if (defined $default_val) {
+                        # Determine the right newSV* call based on type
+                        my $sv_init;
+                        if (!defined $default_val) {
+                            $sv_init = '&PL_sv_undef';
+                        } elsif ($default_val =~ /^-?\d+$/) {
+                            $sv_init = "newSViv($default_val)";
+                        } elsif ($default_val =~ /^-?\d+\.?\d*$/) {
+                            $sv_init = "newSVnv($default_val)";
+                        } else {
+                            # String - escape for C
+                            my $escaped = $default_val;
+                            $escaped =~ s/\\/\\\\/g;
+                            $escaped =~ s/"/\\"/g;
+                            $sv_init = "newSVpv(\"$escaped\", 0)";
+                        }
+                        push @body, Chalk::Target::XS::AST::Statement->new(
+                            code => "ObjectFIELDS(obj)[$idx] = $sv_init",
+                        );
+                    }
+                } else {
+                    # No default - initialize to undef
+                    push @body, Chalk::Target::XS::AST::Statement->new(
+                        code => "ObjectFIELDS(obj)[$idx] = &PL_sv_undef",
+                    );
+                }
+            }
+        }
+
+        # Return the object
+        push @body, Chalk::Target::XS::AST::Return->new(
+            expr => 'obj',
+        );
+
+        return Chalk::Target::XS::AST::XSUB->new(
+            name => 'new',
+            params => ['SV* class'],
+            body => \@body,
+            return_type => 'SV*',
+        );
     }
 
     # Visitor methods (added incrementally via TDD)
