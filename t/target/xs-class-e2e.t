@@ -335,4 +335,104 @@ subtest 'Namespaced class generates correct file paths' => sub {
         like($files->{pmc}, qr/package Foo::Bar::Baz;/, 'PMC has full namespace package');
     };
 
+# ===== Test 7: E2E compilation test (TODO) =====
+TODO: {
+    local $TODO = 'Full XS compilation requires C compiler and XS infrastructure';
+
+    subtest 'Generated XS compiles and loads correctly' => sub {
+        # This test verifies the full pipeline:
+        # 1. Generate .xs and .pmc files
+        # 2. Compile .xs to .so using ExtUtils::CBuilder
+        # 3. Load .pmc which loads the .so
+        # 4. Call methods and verify behavior
+
+        my $code = 'class TestCompile { field $value = 42; method get_value { return $value; } }';
+
+        # Reset TypeRegistry
+        Chalk::Grammar::Chalk::TypeRegistry->instance->reset();
+
+        my $bnf_file = "grammar/chalk.bnf";
+        open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
+        my $content = do { local $/; <$fh> };
+        close $fh;
+
+        my $grammar = Chalk::Grammar->build_from_bnf($content, 'Program', 'Chalk');
+        my $semiring = Chalk::Semiring::ChalkIR->new(grammar => $grammar);
+        my $parser = Chalk::Parser->new(
+            grammar => $grammar,
+            semiring => $semiring,
+        );
+
+        my $result = $parser->parse_string($code);
+        ok(defined $result, 'Parsed successfully');
+
+        my $winning_node = $result->context->focus;
+
+        # Build graph
+        my $graph = Chalk::IR::Graph->new();
+        my %visited;
+        my @queue = ($winning_node);
+        while (@queue) {
+            my $node = shift @queue;
+            next unless blessed($node) && $node->can('id');
+            next if $visited{$node->id}++;
+            $graph->add_node($node);
+            for my $method (qw(value_node value control left right operand condition source call callee)) {
+                next unless $node->can($method);
+                my $ref = $node->$method;
+                push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+            }
+            for my $method (qw(branches control_users args return_nodes function_defs class_defs fields methods)) {
+                next unless $node->can($method) && $node->$method;
+                for my $ref ($node->$method->@*) {
+                    push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+                }
+            }
+        }
+
+        my $xs_target = Chalk::Target::XS->new(
+            graph => $graph,
+            module_name => 'TestCompile',
+        );
+
+        my $files = $xs_target->generate_files();
+        ok(defined $files->{xs}, 'XS content generated');
+        ok(defined $files->{pmc}, 'PMC content generated');
+
+        # Write files to temp directory
+        my $tempdir = tempdir(CLEANUP => 1);
+        my $xs_file = File::Spec->catfile($tempdir, 'TestCompile.xs');
+        my $pmc_file = File::Spec->catfile($tempdir, 'TestCompile.pmc');
+
+        open my $xs_fh, '>', $xs_file or die "Cannot write $xs_file: $!";
+        print $xs_fh $files->{xs};
+        close $xs_fh;
+
+        open my $pmc_fh, '>', $pmc_file or die "Cannot write $pmc_file: $!";
+        print $pmc_fh $files->{pmc};
+        close $pmc_fh;
+
+        ok(-f $xs_file, 'XS file written');
+        ok(-f $pmc_file, 'PMC file written');
+
+        # Attempt to compile XS to .so
+        my $so_file = compile_xs($xs_file, 'TestCompile');
+        ok(defined $so_file && -f $so_file, 'XS compiled to shared object');
+
+        # Attempt to load and test
+        SKIP: {
+            skip 'XS compilation failed', 2 unless defined $so_file && -f $so_file;
+
+            # Add tempdir to @INC and try to load
+            unshift @INC, $tempdir;
+            eval { require TestCompile };
+            ok(!$@, 'Module loaded successfully') or diag("Load error: $@");
+
+            # Test method call
+            my $obj = eval { TestCompile->new() };
+            ok(defined $obj, 'Object created');
+        }
+    };
+}
+
 done_testing();
