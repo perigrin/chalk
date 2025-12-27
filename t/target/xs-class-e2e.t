@@ -270,4 +270,69 @@ subtest 'Multi-file output generates .xs and .pmc' => sub {
         diag "Generated PMC:\n$pmc" if $ENV{TEST_VERBOSE};
     };
 
+# ===== Test 6: Namespaced class generates correct file paths =====
+subtest 'Namespaced class generates correct file paths' => sub {
+        my $code = 'class Foo::Bar::Baz { field $x = 1; }';
+
+        # Reset TypeRegistry
+        Chalk::Grammar::Chalk::TypeRegistry->instance->reset();
+
+        my $bnf_file = "grammar/chalk.bnf";
+        open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
+        my $content = do { local $/; <$fh> };
+        close $fh;
+
+        my $grammar = Chalk::Grammar->build_from_bnf($content, 'Program', 'Chalk');
+        my $semiring = Chalk::Semiring::ChalkIR->new(grammar => $grammar);
+        my $parser = Chalk::Parser->new(
+            grammar => $grammar,
+            semiring => $semiring,
+        );
+
+        my $result = $parser->parse_string($code);
+        ok(defined $result, 'Parsed successfully');
+
+        my $winning_node = $result->context->focus;
+
+        # Build graph
+        my $graph = Chalk::IR::Graph->new();
+        my %visited;
+        my @queue = ($winning_node);
+        while (@queue) {
+            my $node = shift @queue;
+            next unless blessed($node) && $node->can('id');
+            next if $visited{$node->id}++;
+            $graph->add_node($node);
+            for my $method (qw(value_node value control left right operand condition source call callee)) {
+                next unless $node->can($method);
+                my $ref = $node->$method;
+                push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+            }
+            for my $method (qw(branches control_users args return_nodes function_defs class_defs fields methods)) {
+                next unless $node->can($method) && $node->$method;
+                for my $ref ($node->$method->@*) {
+                    push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+                }
+            }
+        }
+
+        # Generate with namespace
+        my $xs_target = Chalk::Target::XS->new(
+            graph => $graph,
+            module_name => 'Foo::Bar::Baz',
+        );
+
+        # Test file path generation
+        my $xs_path = $xs_target->file_path('xs');
+        my $pmc_path = $xs_target->file_path('pmc');
+
+        is($xs_path, 'lib/Foo/Bar/Baz.xs', 'XS path converts :: to /');
+        is($pmc_path, 'lib/Foo/Bar/Baz.pmc', 'PMC path converts :: to /');
+
+        # Verify MODULE declaration uses full namespace
+        my $files = $xs_target->generate_files();
+        like($files->{xs}, qr/MODULE = Foo::Bar::Baz/, 'XS has full namespace MODULE');
+        like($files->{pmc}, qr/package Foo::Bar::Baz;/, 'PMC has full namespace package');
+    };
+
 done_testing();
