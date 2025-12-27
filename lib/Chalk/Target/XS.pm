@@ -425,6 +425,9 @@ class Chalk::Target::XS {
         my $constructor = $self->generate_constructor($class_def);
         unshift @xsubs, $constructor if $constructor;
 
+        # Reset class context to avoid state leakage to non-method code
+        $current_class_def = undef;
+
         return \@xsubs;
     }
 

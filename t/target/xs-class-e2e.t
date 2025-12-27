@@ -143,10 +143,7 @@ sub compile_xs {
 }
 
 # ===== Test 1: Empty class generates valid XS structure =====
-TODO: {
-    local $TODO = 'ClassDef IR node not yet implemented';
-
-    subtest 'Empty class generates XS module' => sub {
+subtest 'Empty class generates XS module' => sub {
         my $code = 'class Empty { }';
         my $xs = generate_xs($code, 'Empty');
 
@@ -156,13 +153,9 @@ TODO: {
         like($xs, qr/MODULE = Empty/, 'Has MODULE declaration');
         like($xs, qr/PACKAGE = Empty/, 'Has PACKAGE declaration');
     };
-}
 
 # ===== Test 2: Class with field generates constructor =====
-TODO: {
-    local $TODO = 'ClassDef and Field IR nodes not yet implemented';
-
-    subtest 'Class with field generates constructor' => sub {
+subtest 'Class with field generates constructor' => sub {
         my $code = 'class Counter { field $count = 0; }';
         my $xs = generate_xs($code, 'Counter');
 
@@ -174,13 +167,9 @@ TODO: {
         like($xs, qr/ObjectFIELDS/, 'Uses ObjectFIELDS for field storage');
         like($xs, qr/ObjectMAXFIELD/, 'Sets ObjectMAXFIELD');
     };
-}
 
 # ===== Test 3: Class with method generates XSUB =====
-TODO: {
-    local $TODO = 'ClassDef IR node and method handling not yet implemented';
-
-    subtest 'Class with method generates callable XSUB' => sub {
+subtest 'Class with method generates callable XSUB' => sub {
         my $code = 'class Greeter { method hello { return "Hello"; } }';
         my $xs = generate_xs($code, 'Greeter');
 
@@ -192,13 +181,9 @@ TODO: {
         like($xs, qr/SV\*\s+self/, 'Method has $self parameter');
         like($xs, qr/RETVAL/, 'Method has RETVAL');
     };
-}
 
 # ===== Test 4: Method with field access =====
-TODO: {
-    local $TODO = 'FieldLoad/FieldStore IR nodes and XS generation not yet implemented';
-
-    subtest 'Method with field access via ObjectFIELDS' => sub {
+subtest 'Method with field access via ObjectFIELDS' => sub {
         my $code = 'class Counter { field $count = 0; method inc { $count += 1; return $count; } }';
         my $xs = generate_xs($code, 'Counter');
 
@@ -209,6 +194,5 @@ TODO: {
         like($xs, qr/inc\s*\(/, 'Has inc method');
         like($xs, qr/ObjectFIELDS\s*\(\s*self\s*\)\s*\[\s*\d+\s*\]/, 'Accesses field via ObjectFIELDS[index]');
     };
-}
 
 done_testing();
