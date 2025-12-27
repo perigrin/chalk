@@ -40,7 +40,9 @@ class Chalk::Target::XS {
     # because peephole inference propagates types through operations correctly
     method get_c_type($node) {
         my $ir_type = $node->can('compute') ? $node->compute()
-                    : ($node->can('compute_type') ? $node->compute_type() : $node->type);
+                    : ($node->can('compute_type') ? $node->compute_type()
+                    : ($node->can('type') ? $node->type : undef));
+        return 'SV*' unless defined $ir_type;  # Fallback for nodes without type info
         my $type_class = ref($ir_type);
 
         # Handle IR types
