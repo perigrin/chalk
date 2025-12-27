@@ -406,6 +406,14 @@ XSLoader::load(__PACKAGE__, \$VERSION);
 PMC
     }
 
+    # Generate file path for output file based on module name
+    # Converts Foo::Bar to lib/Foo/Bar.$extension
+    method file_path($extension) {
+        my $path = $module_name;
+        $path =~ s/::/\//g;
+        return "lib/$path.$extension";
+    }
+
     # Generate XSUBs for class methods
     # Each method becomes an XSUB with implicit $self parameter
     method generate_class_xsubs($class_def) {
