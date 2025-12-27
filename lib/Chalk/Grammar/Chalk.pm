@@ -37,6 +37,7 @@ use Chalk::Grammar::Chalk::Rule::Literal;
 use Chalk::Grammar::Chalk::Rule::LogicalOp;
 use Chalk::Grammar::Chalk::Rule::LoopControl;
 use Chalk::Grammar::Chalk::Rule::MethodCall;
+use Chalk::Grammar::Chalk::Rule::MethodDeclaration;
 use Chalk::Grammar::Chalk::Rule::Number;
 use Chalk::Grammar::Chalk::Rule::ParameterList;
 use Chalk::Grammar::Chalk::Rule::Postfix;
