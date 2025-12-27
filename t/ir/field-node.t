@@ -18,7 +18,6 @@ my $graph = Chalk::IR::Graph->new();
 
 subtest 'Field node basic structure' => sub {
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'my_field',
         index => 0,
     );
@@ -26,12 +25,15 @@ subtest 'Field node basic structure' => sub {
     ok(defined($field), 'Field node is defined');
     ok(blessed($field), 'Field node is blessed');
     ok($field->isa('Chalk::IR::Node::Field'), 'Field node has correct type');
-    ok($field->isa('Chalk::IR::Node::Base'), 'Field node inherits from Base');
+    # Field implements IR node interface directly like Constant/Add, not via inheritance
+    ok($field->can('id'), 'Field node has id() method');
+    ok($field->can('op'), 'Field node has op() method');
+    ok($field->can('inputs'), 'Field node has inputs() method');
+    ok($field->can('to_hash'), 'Field node has to_hash() method');
 };
 
 subtest 'Field node op method' => sub {
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'test_field',
         index => 0,
     );
@@ -41,7 +43,6 @@ subtest 'Field node op method' => sub {
 
 subtest 'Field node accessors' => sub {
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'my_field',
         index => 2,
         field_type => Chalk::Grammar::Chalk::Type::Int->new(),
@@ -62,7 +63,6 @@ subtest 'Field node with default value' => sub {
     );
 
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [$default->id],
         name => 'counter',
         index => 0,
         field_type => Chalk::Grammar::Chalk::Type::Int->new(),
@@ -70,11 +70,12 @@ subtest 'Field node with default value' => sub {
     );
 
     is($field->default, $default, 'default accessor works');
+    # Verify inputs() is dynamically computed from default
+    is_deeply($field->inputs, [$default->id], 'inputs() computed from default');
 };
 
 subtest 'Field node inputs() with no default' => sub {
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'simple_field',
         index => 0,
     );
@@ -83,34 +84,32 @@ subtest 'Field node inputs() with no default' => sub {
     is_deeply($inputs, [], 'inputs() returns empty array when no default');
 };
 
-subtest 'Field node inputs() with default value' => sub {
+subtest 'Field node inputs() with default value (dynamic computation)' => sub {
     my $default = Chalk::IR::Node::Constant->new(
         value => 'hello',
         type => Chalk::Grammar::Chalk::Type::Str->new()
     );
 
+    # Note: NOT passing inputs parameter - testing dynamic computation
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [$default->id],
         name => 'greeting',
         index => 1,
         default => $default,
     );
 
     my $inputs = $field->inputs();
-    is(scalar(@$inputs), 1, 'inputs() returns array with one element');
+    is(scalar(@$inputs), 1, 'inputs() dynamically computes array with one element');
     is($inputs->[0], $default->id, 'inputs() contains default node id');
 };
 
 subtest 'Field node is_param() method' => sub {
     my $param_field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'param_field',
         index => 0,
         field_attributes => { param => 1 },
     );
 
     my $non_param_field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'normal_field',
         index => 1,
     );
@@ -121,14 +120,12 @@ subtest 'Field node is_param() method' => sub {
 
 subtest 'Field node is_reader() method' => sub {
     my $reader_field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'reader_field',
         index => 0,
         field_attributes => { reader => 1 },
     );
 
     my $non_reader_field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'private_field',
         index => 1,
     );
@@ -143,8 +140,8 @@ subtest 'Field node to_hash' => sub {
         type => Chalk::Grammar::Chalk::Type::Int->new()
     );
 
+    # Note: NOT passing inputs - testing that to_hash uses dynamic inputs()
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [$default->id],
         name => 'value',
         index => 3,
         field_type => Chalk::Grammar::Chalk::Type::Int->new(),
@@ -165,8 +162,8 @@ subtest 'Field node to_hash' => sub {
 };
 
 subtest 'Field node to_hash without optional fields' => sub {
+    # Note: NOT passing inputs - testing that to_hash uses dynamic inputs()
     my $field = Chalk::IR::Node::Field->new(
-        inputs => [],
         name => 'simple',
         index => 0,
     );
