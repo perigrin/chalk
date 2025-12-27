@@ -88,6 +88,23 @@ class Chalk::Target::XS {
         return $self->visit_Multiply($node) if $type eq 'Multiply';
         return $self->visit_Divide($node) if $type eq 'Divide';
 
+        # Comparison operators
+        return $self->visit_LT($node) if $type eq 'LT';
+        return $self->visit_LE($node) if $type eq 'LE';
+        return $self->visit_GT($node) if $type eq 'GT';
+        return $self->visit_GE($node) if $type eq 'GE';
+        return $self->visit_EQ($node) if $type eq 'EQ';
+        return $self->visit_NE($node) if $type eq 'NE';
+
+        # Control flow nodes
+        return $self->visit_If($node) if $type eq 'If';
+        return $self->visit_Region($node) if $type eq 'Region';
+        return $self->visit_Phi($node) if $type eq 'Phi';
+
+        # Function call nodes
+        return $self->visit_Call($node) if $type eq 'Call';
+        return $self->visit_CallEnd($node) if $type eq 'CallEnd';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -116,7 +133,11 @@ class Chalk::Target::XS {
             # Explicit list since Chalk parser doesn't support dynamic method names
             if ($type eq 'Constant' || $type eq 'Return' ||
                 $type eq 'Add' || $type eq 'Subtract' ||
-                $type eq 'Multiply' || $type eq 'Divide') {
+                $type eq 'Multiply' || $type eq 'Divide' ||
+                $type eq 'LT' || $type eq 'LE' ||
+                $type eq 'GT' || $type eq 'GE' ||
+                $type eq 'EQ' || $type eq 'NE' ||
+                $type eq 'Call') {
                 push @emittable, $node;
             }
         }
@@ -354,6 +375,80 @@ class Chalk::Target::XS {
     method visit_Subtract($node) { $self->_visit_binary_op($node, '-'); }
     method visit_Multiply($node) { $self->_visit_binary_op($node, '*'); }
     method visit_Divide($node) { $self->_visit_binary_op($node, '/'); }
+
+    # Comparison visitors - produce boolean (IV 0 or 1) results
+    method visit_LT($node) { $self->_visit_binary_op($node, '<'); }
+    method visit_LE($node) { $self->_visit_binary_op($node, '<='); }
+    method visit_GT($node) { $self->_visit_binary_op($node, '>'); }
+    method visit_GE($node) { $self->_visit_binary_op($node, '>='); }
+    method visit_EQ($node) { $self->_visit_binary_op($node, '=='); }
+    method visit_NE($node) { $self->_visit_binary_op($node, '!='); }
+
+    # Control flow visitors
+    # If nodes require control flow restructuring to generate proper if/else
+    # For now, we return undef - full implementation needs graph analysis
+    # TODO: Implement control flow restructuring for If/Region/Phi patterns
+    method visit_If($node) {
+        # Full control flow generation requires analyzing the CFG structure
+        # to identify if/then/else patterns and reconstruct structured code.
+        # This is non-trivial for Sea of Nodes IR.
+        return undef;
+    }
+
+    # Region nodes are CFG merge points - they don't emit XS code directly
+    method visit_Region($node) {
+        return undef;
+    }
+
+    # Phi nodes select values based on control flow path
+    # In XS, this becomes variable assignment in each branch
+    # TODO: Implement when full control flow restructuring is done
+    method visit_Phi($node) {
+        return undef;
+    }
+
+    # Function call visitors
+    method visit_Call($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+        use Chalk::Target::XS::AST::FunctionCall;
+
+        # Get the function name from the callee node
+        my $callee = $node->callee;
+        my $func_name;
+        if ($callee && $callee->can('value')) {
+            $func_name = $callee->value;
+        } elsif ($callee && $callee->can('name')) {
+            $func_name = $callee->name;
+        } else {
+            $func_name = 'unknown';
+        }
+
+        # Get argument variable names
+        my @arg_vars;
+        my $args = $node->args // [];
+        for my $arg ($args->@*) {
+            if ($arg && $arg->can('id')) {
+                push @arg_vars, $self->get_var($arg->id);
+            }
+        }
+
+        # Allocate result variable and create VarDecl with FunctionCall init
+        my $result_var = $self->alloc_temp($node->id);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'IV',  # TODO: infer return type
+            name => $result_var,
+            init => Chalk::Target::XS::AST::FunctionCall->new(
+                name => $func_name,
+                args => \@arg_vars,
+            ),
+        );
+    }
+
+    # CallEnd is a projection node - the actual call is handled by visit_Call
+    method visit_CallEnd($node) {
+        return undef;
+    }
 }
 
 1;
