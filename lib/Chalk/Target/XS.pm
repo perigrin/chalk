@@ -6,6 +6,7 @@ use utf8;
 
 class Chalk::Target::XS {
     use Chalk::IR::Context;
+    use Chalk::IR::Type::Convert;
     use Chalk::Target::XS::AST::Module;
     use Chalk::Target::XS::AST::CompositeNode;
 
@@ -49,29 +50,42 @@ class Chalk::Target::XS {
         return $var;
     }
 
+    # IR type → C type mapping for Perl API
+    my %IR_TO_C = (
+        # Numeric
+        'Chalk::IR::Type::Integer' => 'IV',
+        'Chalk::IR::Type::Float'   => 'NV',
+        'Chalk::IR::Type::Bool'    => 'bool',
+
+        # Perl values
+        'Chalk::IR::Type::String'  => 'SV*',
+        'Chalk::IR::Type::Array'   => 'AV*',
+        'Chalk::IR::Type::Hash'    => 'HV*',
+        'Chalk::IR::Type::Code'    => 'CV*',
+        'Chalk::IR::Type::Ref'     => 'SV*',
+        'Chalk::IR::Type::Object'  => 'SV*',
+        'Chalk::IR::Type::Scalar'  => 'SV*',
+
+        # Special
+        'Chalk::IR::Type::Undef'   => 'SV*',
+        'Chalk::IR::Type::Top'     => 'SV*',
+        'Chalk::IR::Type::Bottom'  => 'void',
+    );
+
     # Map IR types to C types for Perl API
     # Prefer compute() (peephole type lattice) over compute_type() (semantic types)
     # because peephole inference propagates types through operations correctly
     method get_c_type($node) {
-        my $ir_type = $node->can('compute') ? $node->compute()
-                    : ($node->can('compute_type') ? $node->compute_type()
-                    : ($node->can('type') ? $node->type : undef));
-        return 'SV*' unless defined $ir_type;  # Fallback for nodes without type info
-        my $type_class = ref($ir_type);
+        my $type = $node->can('compute') ? $node->compute()
+                 : ($node->can('compute_type') ? $node->compute_type()
+                 : ($node->can('type') ? $node->type : undef));
+        return 'SV*' unless defined $type;  # Fallback for nodes without type info
 
-        # Handle IR types
-        return 'IV' if $type_class eq 'Chalk::IR::Type::Integer';
-        return 'NV' if $type_class eq 'Chalk::IR::Type::Float';
+        # Ensure we're working with an IR type (convert Grammar types if needed)
+        my $ir_type = Chalk::IR::Type::Convert->ensure_ir_type($type);
+        my $type_class = blessed($ir_type);
 
-        # Handle Grammar types
-        return 'IV' if $type_class eq 'Chalk::Grammar::Chalk::Type::Int';
-        return 'NV' if $type_class eq 'Chalk::Grammar::Chalk::Type::Num';
-        return 'SV*' if $type_class eq 'Chalk::Grammar::Chalk::Type::Str';
-        return 'AV*' if $type_class eq 'Chalk::Grammar::Chalk::Type::Array';
-        return 'AV*' if $type_class eq 'Chalk::Grammar::Chalk::Type::ArrayRef';
-        return 'HV*' if $type_class eq 'Chalk::Grammar::Chalk::Type::Hash';
-
-        return 'SV*';  # Conservative fallback
+        return $IR_TO_C{$type_class} // 'SV*';
     }
 
     # Compute return type from function body by finding Return node
