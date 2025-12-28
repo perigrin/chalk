@@ -72,6 +72,33 @@ class Chalk::Target::XS {
         'Chalk::IR::Type::Bottom'  => 'void',
     );
 
+    # Perl built-in function -> C API mapping
+    my %BUILTIN_TO_C_API = (
+        # Array operations
+        'push'    => 'av_push',
+        'pop'     => 'av_pop',
+        'shift'   => 'av_shift',
+        'unshift' => 'av_unshift',
+
+        # Hash operations
+        'exists' => 'hv_exists_ent',
+        'delete' => 'hv_delete_ent',
+
+        # Scalar operations
+        'defined' => 'SvOK',
+        'length'  => 'sv_len',
+    );
+
+    # Check if a function name is a Perl built-in with C API mapping
+    method is_builtin($func_name) {
+        return exists $BUILTIN_TO_C_API{$func_name};
+    }
+
+    # Get the C API function for a Perl built-in
+    method get_builtin_c_api($func_name) {
+        return $BUILTIN_TO_C_API{$func_name};
+    }
+
     # Map IR types to C types for Perl API
     # Prefer compute() (peephole type lattice) over compute_type() (semantic types)
     # because peephole inference propagates types through operations correctly
@@ -703,14 +730,33 @@ class Chalk::Target::XS {
             }
         }
 
+        # Check if this is a Perl built-in with a C API mapping
+        my $c_func_name = $func_name;
+        my $return_type = 'IV';  # Default return type
+        if ($self->is_builtin($func_name)) {
+            $c_func_name = $self->get_builtin_c_api($func_name);
+
+            # Set appropriate return type based on the builtin
+            if ($func_name eq 'defined') {
+                $return_type = 'bool';
+            } elsif ($func_name eq 'pop' || $func_name eq 'shift' || $func_name eq 'delete') {
+                $return_type = 'SV*';
+            } elsif ($func_name eq 'exists') {
+                $return_type = 'bool';
+            } elsif ($func_name eq 'length') {
+                $return_type = 'STRLEN';
+            }
+            # push/unshift don't return meaningful values (return count)
+        }
+
         # Allocate result variable and create VarDecl with FunctionCall init
         my $result_var = $self->alloc_temp($node->id);
 
         return Chalk::Target::XS::AST::VarDecl->new(
-            type => 'IV',  # TODO: infer return type
+            type => $return_type,
             name => $result_var,
             init => Chalk::Target::XS::AST::FunctionCall->new(
-                name => $func_name,
+                name => $c_func_name,
                 args => \@arg_vars,
             ),
         );
