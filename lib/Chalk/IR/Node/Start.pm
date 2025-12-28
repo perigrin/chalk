@@ -102,6 +102,19 @@ class Chalk::IR::Node::Start :isa(Chalk::IR::Node::CFGNode) {
         return;
     }
 
+    # Clone with new inputs, preserving polymorphic Start type
+    # Start has no inputs (entry point), but method needed for uniform interface
+    # Used by GVN optimizer for polymorphic node reconstruction
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        return Chalk::IR::Node::Start->new(
+            function_name => $new_attributes->{function_name} // $function_name,
+            params        => $new_attributes->{params} // $params,
+            label         => $new_attributes->{label} // $label,
+            arg_value     => $new_attributes->{arg_value} // $arg_value,
+            source_info   => $source_info,
+        );
+    }
+
 }
 
 1;
