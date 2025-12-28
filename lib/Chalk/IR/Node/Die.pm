@@ -82,6 +82,28 @@ class Chalk::IR::Node::Die :isa(Chalk::IR::Node::CFGNode) {
         return;
     }
 
+    # Clone with new inputs from node_map, preserving polymorphic Die type
+    # Used by GVN optimizer to reconstruct nodes
+    # $node_map is old_id -> new_node mapping
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        my $new_control;
+        my $new_message;
+
+        # Input order: control, message
+        if (defined $new_inputs->[0] && exists $node_map->{$new_inputs->[0]}) {
+            $new_control = $node_map->{$new_inputs->[0]};
+        }
+        if (defined $new_inputs->[1] && exists $node_map->{$new_inputs->[1]}) {
+            $new_message = $node_map->{$new_inputs->[1]};
+        }
+
+        return Chalk::IR::Node::Die->new(
+            control     => $new_control,
+            message     => $new_message,
+            source_info => $source_info,
+        );
+    }
+
     # Immutable reconstruction with new control edge
     method with_control($new_control) {
         return Chalk::IR::Node::Die->new(

@@ -131,6 +131,33 @@ class Chalk::IR::Node::Base {
 
         return join("\n", @lines);
     }
+
+    # Clone node with new inputs, preserving polymorphic class type
+    # Used by GVN optimizer to reconstruct nodes while maintaining Phi, Region, etc. types
+    # $node_map is old_id -> new_node mapping for looking up input nodes
+    # $new_attributes allows passing subclass-specific attributes for reconstruction
+    method clone_with_inputs($new_inputs, $node_map, $new_attributes = {}) {
+        my $class = blessed($self);
+
+        # Translate old input IDs to new node IDs using node_map
+        my @translated_inputs;
+        for my $input_id (@$new_inputs) {
+            if (defined($input_id) && exists($node_map->{$input_id})) {
+                push @translated_inputs, $node_map->{$input_id}->id;
+            } else {
+                push @translated_inputs, $input_id;
+            }
+        }
+
+        # Build constructor args: inputs is required, merge in new_attributes
+        my %args = (
+            inputs      => \@translated_inputs,
+            source_info => $source_info,
+            %$new_attributes,
+        );
+
+        return $class->new(%args);
+    }
 }
 
 1;
