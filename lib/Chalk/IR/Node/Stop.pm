@@ -1,6 +1,6 @@
 # ABOUTME: Stop node representing program termination point in the IR graph
-# ABOUTME: Collects all Return nodes to mark where the function exits (per Chapter 18)
-# ABOUTME: Also collects FunctionDef nodes to make function bodies graph-traversable
+# ABOUTME: Collects all Return nodes, FunctionDef nodes, and ClassDef nodes
+# ABOUTME: Makes function bodies and class definitions available to XS generator
 use 5.42.0;
 use experimental qw(class);
 use utf8;
@@ -10,6 +10,8 @@ class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
     field $returns :param :reader = [];
     # Object references to FunctionDef nodes (for XS code generation)
     field $functions :param :reader = [];
+    # Object references to ClassDef nodes (for XS class generation)
+    field $class_defs :param :reader = [];
 
     method op() { 'Stop' }
 
@@ -30,6 +32,13 @@ class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
         push $functions->@*, $func_def;
     }
 
+    # Add a ClassDef node to this Stop for XS class generation
+    # ClassDefs define object structure and are emitted as separate XS modules
+    method add_class($class_def) {
+        return unless defined $class_def;
+        push $class_defs->@*, $class_def;
+    }
+
     # Provide accessor for Return node objects
     # Used by graph traversal to follow object references
     method return_nodes() {
@@ -47,7 +56,9 @@ class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
             id     => $self->id,
             op     => 'Stop',
             inputs => $self->inputs,
-            attributes => {},
+            attributes => {
+                class_defs => [map { $_->id } $class_defs->@*],
+            },
         };
     }
 
@@ -66,11 +77,12 @@ class Chalk::IR::Node::Stop :isa(Chalk::IR::Node::Base) {
         }
 
         # Create new Stop with translated returns
-        # Functions are preserved as-is (they're in registry, not graph)
+        # Functions and class_defs are preserved as-is (they're in registry, not graph)
         return Chalk::IR::Node::Stop->new(
-            inputs    => \@translated_inputs,
-            returns   => \@new_returns,
-            functions => $functions,
+            inputs     => \@translated_inputs,
+            returns    => \@new_returns,
+            functions  => $functions,
+            class_defs => $class_defs,
         );
     }
 

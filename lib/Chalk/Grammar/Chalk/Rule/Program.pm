@@ -129,6 +129,14 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
             }
         }
 
+        # Collect ClassDef nodes and add to Stop for XS class generation
+        # This makes class definitions reachable for XS target
+        for my $stmt (@statements) {
+            if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'ClassDef') {
+                $stop->add_class($stmt);
+            }
+        }
+
         # Get last statement for return value
         my $last_stmt = @statements ? $statements[-1] : undef;
         my $return_value;

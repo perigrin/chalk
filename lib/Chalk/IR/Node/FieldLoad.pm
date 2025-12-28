@@ -8,6 +8,7 @@ class Chalk::IR::Node::FieldLoad :isa(Chalk::IR::Node::Base) {
     field $mem_id :param :reader = undef;  # Previous memory state (for peephole optimization)
     field $object_id :param :reader;
     field $field_id :param :reader;
+    field $field_index :param :reader = undef;  # For XS ObjectFIELDS[index] access
     field $alias_class :param :reader = undef;
 
     method op() { 'FieldLoad' }
@@ -18,6 +19,7 @@ class Chalk::IR::Node::FieldLoad :isa(Chalk::IR::Node::Base) {
             field_id => $field_id,
         );
         $attrs{mem_id} = $mem_id if defined $mem_id;
+        $attrs{field_index} = $field_index if defined $field_index;
         $attrs{alias_class} = $alias_class if defined $alias_class;
 
         return {
