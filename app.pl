@@ -23,11 +23,15 @@ if ( !caller ) {
     my $target_type;              # --target flag (e.g., 'xs')
     my $module_name;              # --module flag for XS module name
     my $preprocess = ['Chalk::Preprocessor::Heredoc'];  # default to Heredoc
+    my $show_help = 0;            # -h/--help flag
     my @remaining_args;
 
     my $i = 0;
     while ($i <= $#ARGV) {
-        if ($ARGV[$i] eq '-g' && $i < $#ARGV) {
+        if ($ARGV[$i] eq '-h' || $ARGV[$i] eq '--help') {
+            $show_help = 1;
+            $i++;
+        } elsif ($ARGV[$i] eq '-g' && $i < $#ARGV) {
             $grammar_module = $ARGV[$i + 1];
             $i += 2; # skip both -g and the grammar module name
         } elsif ($ARGV[$i] eq '--semiring' && $i < $#ARGV) {
@@ -63,6 +67,40 @@ if ( !caller ) {
         }
     }
     @ARGV = @remaining_args;
+
+    # Display help if requested
+    if ($show_help) {
+        print <<"HELP";
+Usage: chalk [OPTIONS] [FILE]
+
+Chalk compiler - compile Perl feature classes to XS
+
+Options:
+  -h, --help              Show this help message
+  -g GRAMMAR              Use specified grammar (default: Chalk)
+  -c                      Syntax check only, no execution
+  --target=xs             Generate XS code (creates Build.PL, .pm, .xs)
+  --module=NAME           Module name for XS output (default: ChalkModule)
+  --compile-module=NAME   Compile a module
+  --semiring=TYPE         Semiring type (Boolean, Position, SPPF)
+  --preprocess            Enable heredoc preprocessing
+
+Examples:
+  chalk lib/Point.pm                    # Parse and execute
+  chalk -c lib/Point.pm                 # Syntax check only
+  chalk --target=xs --module=Point lib/Point.pm
+                                        # Generate XS distribution
+
+XS Output:
+  When using --target=xs, generates:
+    Build.PL        Module::Build::Tiny configuration
+    lib/Module.pm   XSLoader stub
+    lib/Module.xs   Generated XS code
+
+  Then run: perl Build.PL && ./Build
+HELP
+        exit 0;
+    }
 
     # Build grammar from BNF file
     use Chalk::Grammar;
@@ -352,16 +390,37 @@ if ( !caller ) {
                     require Chalk::IR::Optimizer;
                     $graph = Chalk::IR::Optimizer->optimize($graph);
 
-                    # Generate XS code
+                    # Generate XS distribution
                     my $xs_module_name = $module_name // 'ChalkModule';
                     my $xs_target = Chalk::Target::XS->new(
                         graph => $graph,
                         module_name => $xs_module_name,
                     );
 
-                    my $xs_ast = $xs_target->generate();
-                    my $xs_code = $xs_ast->emit();
-                    print($xs_code);
+                    # Generate complete distribution (Build.PL, .pm, .xs)
+                    my $dist = $xs_target->generate_distribution();
+
+                    # Write files to disk
+                    require File::Path;
+                    require File::Basename;
+
+                    for my $path (sort keys %$dist) {
+                        my $content = $dist->{$path};
+                        my $dir = File::Basename::dirname($path);
+
+                        # Create directory if needed
+                        if ($dir && $dir ne '.') {
+                            File::Path::make_path($dir) unless -d $dir;
+                        }
+
+                        # Write file
+                        open(my $fh, '>', $path) or die "Cannot write $path: $!";
+                        print $fh $content;
+                        close($fh);
+                        print("Generated: $path\n");
+                    }
+
+                    print("\nRun: perl Build.PL && ./Build\n");
                 } else {
                     print("Parse successful but no IR node produced\n");
                 }
