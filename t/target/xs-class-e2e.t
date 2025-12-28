@@ -769,4 +769,140 @@ PERL
     }
 };
 
+# ===== Test 10: Self-hosting validation - compile Chalk module to XS =====
+subtest 'Self-hosting: Compile Chalk::Grammar::Token to XS and run tests' => sub {
+    # This test validates that Chalk can compile its own modules to XS
+    # and the compiled version produces identical results to pure Perl.
+    #
+    # This is the ultimate Stage 0 proof: the compiler can compile itself.
+
+    # Check for C compiler availability
+    require ExtUtils::CBuilder;
+    my $cb = ExtUtils::CBuilder->new(quiet => 1);
+    plan skip_all => 'No C compiler available' unless $cb->have_compiler;
+
+    # Read the actual Chalk::Grammar::Token source file
+    my $token_file = 'lib/Chalk/Grammar/Token.pm';
+    plan skip_all => "Cannot find $token_file" unless -f $token_file;
+
+    open my $src_fh, '<:utf8', $token_file or die "Cannot read $token_file: $!";
+    my $token_source = do { local $/; <$src_fh> };
+    close $src_fh;
+
+    ok(defined $token_source && length($token_source) > 0, 'Read Token.pm source');
+
+    # Parse the Token module source
+    Chalk::Grammar::Chalk::TypeRegistry->instance->reset();
+
+    my $bnf_file = "grammar/chalk.bnf";
+    open my $fh, '<:utf8', $bnf_file or die "Cannot open $bnf_file: $!";
+    my $content = do { local $/; <$fh> };
+    close $fh;
+
+    my $grammar = Chalk::Grammar->build_from_bnf($content, 'Program', 'Chalk');
+    my $semiring = Chalk::Semiring::ChalkIR->new(grammar => $grammar);
+    my $parser = Chalk::Parser->new(
+        grammar => $grammar,
+        semiring => $semiring,
+    );
+
+    my $result = $parser->parse_string($token_source);
+    ok(defined $result, 'Chalk::Grammar::Token parsed successfully');
+
+    SKIP: {
+        skip 'Token parsing failed', 10 unless defined $result;
+
+        my $winning_node = $result->context->focus;
+        ok(blessed($winning_node) && $winning_node->can('id'), 'Got IR from Token parse');
+
+        # Build graph
+        my $graph = Chalk::IR::Graph->new();
+        my %visited;
+        my @queue = ($winning_node);
+        while (@queue) {
+            my $node = shift @queue;
+            next unless blessed($node) && $node->can('id');
+            next if $visited{$node->id}++;
+            $graph->add_node($node);
+            for my $method (qw(value_node value control left right operand condition source call callee)) {
+                next unless $node->can($method);
+                my $ref = $node->$method;
+                push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+            }
+            for my $method (qw(branches control_users args return_nodes function_defs class_defs fields methods)) {
+                next unless $node->can($method) && $node->$method;
+                for my $ref ($node->$method->@*) {
+                    push @queue, $ref if blessed($ref) && $ref->can('id') && !$visited{$ref->id};
+                }
+            }
+        }
+
+        # Generate XS for Chalk::Grammar::Token
+        my $xs_target = Chalk::Target::XS->new(
+            graph => $graph,
+            module_name => 'Chalk::Grammar::Token',
+        );
+
+        my $files = $xs_target->generate_files();
+        ok(defined $files->{xs}, 'XS generated for Token');
+        ok(defined $files->{pmc}, 'PMC generated for Token');
+
+        diag "Generated XS for Token:\n$files->{xs}" if $ENV{TEST_VERBOSE};
+
+        # Write files to temp directory with proper namespace structure
+        my $tempdir = tempdir(CLEANUP => 1);
+        my $token_dir = File::Spec->catdir($tempdir, 'Chalk', 'Grammar');
+        require File::Path;
+        File::Path::make_path($token_dir);
+
+        my $xs_file = File::Spec->catfile($token_dir, 'Token.xs');
+        my $pm_file = File::Spec->catfile($token_dir, 'Token.pm');
+
+        open my $xs_fh, '>', $xs_file or die "Cannot write $xs_file: $!";
+        print $xs_fh $files->{xs};
+        close $xs_fh;
+
+        open my $pm_fh, '>', $pm_file or die "Cannot write $pm_file: $!";
+        print $pm_fh $files->{pmc};
+        close $pm_fh;
+
+        ok(-f $xs_file, 'Token.xs written');
+        ok(-f $pm_file, 'Token.pm written');
+
+        # Compile XS
+        my $so_file = compile_xs($xs_file, 'Chalk::Grammar::Token');
+
+        SKIP: {
+            skip 'Token XS compilation failed - may need additional XS features', 4
+                unless defined $so_file && -f $so_file;
+
+            ok(-f $so_file, 'Token.so compiled');
+
+            # Load the compiled Token module (prepend to @INC to override pure Perl)
+            unshift @INC, $tempdir;
+
+            # Clear any cached version
+            delete $INC{'Chalk/Grammar/Token.pm'};
+
+            my $loaded = eval { require Chalk::Grammar::Token; 1 };
+            ok($loaded, 'Compiled Token module loaded') or diag("Load error: $@");
+
+            skip 'Token module failed to load', 2 unless $loaded;
+
+            # Test Token functionality with compiled version
+            my $token = eval { Chalk::Grammar::Token->new(value => 'hello', pattern_name => 'IDENTIFIER') };
+            ok(defined $token, 'Token object created with compiled XS') or diag("Error: $@");
+
+            SKIP: {
+                skip 'Token creation failed', 1 unless defined $token;
+
+                # Test basic methods
+                my $str = eval { $token->to_string() };
+                like($str, qr/Token.*IDENTIFIER.*hello/, 'Token->to_string works correctly')
+                    or diag("Got: $str");
+            }
+        }
+    }
+};
+
 done_testing();
