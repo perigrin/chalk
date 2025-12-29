@@ -166,6 +166,10 @@ class Chalk::Target::XS {
         return $self->visit_ClassDef($node) if $type eq 'ClassDef';
         return $self->visit_Field($node) if $type eq 'Field';
 
+        # Variable operation nodes
+        return $self->visit_Store($node) if $type eq 'Store';
+        return $self->visit_Load($node) if $type eq 'Load';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -815,6 +819,45 @@ class Chalk::Target::XS {
     method visit_Field($node) {
         # Field metadata used by constructor and accessor generation
         # No direct XS output from visiting
+        return undef;
+    }
+
+    # Variable operation visitors
+    # Store: assigns a value to a variable
+    method visit_Store($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $var_name = $node->var;
+        $var_name =~ s/^\$//;  # Remove sigil for C variable name
+
+        my $value = $node->value;
+        my $value_var = $self->get_var($value->id);
+
+        # Get the type from the value node
+        my $c_type = $self->get_c_type($value);
+
+        # Bind the Store node to the variable name for later references
+        $self->bind_var($node->id, $var_name);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => $c_type,
+            name => $var_name,
+            init => $value_var,
+        );
+    }
+
+    # Load: reads a variable's value
+    method visit_Load($node) {
+        my $value = $node->value;
+
+        # Bind the Load node to the same temp as its underlying value
+        # This way, any node referencing the Load gets the value's temp
+        if ($value && $value->can('id')) {
+            my $value_var = $self->get_var($value->id);
+            $self->bind_var($node->id, $value_var);
+        }
+
+        # Load doesn't emit a statement - it's just a binding
         return undef;
     }
 }
