@@ -88,18 +88,12 @@ subtest 'for/foreach statement modifiers' => sub {
         ok($parser->parse_string($test), "Should parse: $test");
     }
 
-    # TODO #171, #172: Range operators and compound assignment not fully supported yet
-    TODO: {
-        local $TODO = "range operator in for modifier not yet supported (#171)";
-        ok($parser->parse_string("print \$_ for 1..10"),
-           "Should parse: print \$_ for 1..10");
-    }
+    # Range operators and compound assignment now supported (#171, #172)
+    ok($parser->parse_string("print \$_ for 1..10"),
+       "Should parse: print \$_ for 1..10");
 
-    TODO: {
-        local $TODO = "compound assignment with for modifier not yet supported (#172)";
-        ok($parser->parse_string("\$sum += \$_ for \@numbers"),
-           "Should parse: \$sum += \$_ for \@numbers");
-    }
+    ok($parser->parse_string("\$sum += \$_ for \@numbers"),
+       "Should parse: \$sum += \$_ for \@numbers");
 };
 
 # Test when statement modifiers (for given/when constructs)
