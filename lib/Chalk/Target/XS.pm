@@ -170,6 +170,9 @@ class Chalk::Target::XS {
         return $self->visit_Store($node) if $type eq 'Store';
         return $self->visit_Load($node) if $type eq 'Load';
 
+        # Unary operation nodes
+        return $self->visit_Negate($node) if $type eq 'Negate';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -859,6 +862,23 @@ class Chalk::Target::XS {
 
         # Load doesn't emit a statement - it's just a binding
         return undef;
+    }
+
+    # Unary negation visitor
+    method visit_Negate($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $operand = $node->operand;
+        my $operand_var = $self->get_var($operand->id);
+
+        my $result_var = $self->alloc_temp($node->id);
+        my $c_type = $self->get_c_type($node);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => $c_type,
+            name => $result_var,
+            init => "-$operand_var",
+        );
     }
 }
 
