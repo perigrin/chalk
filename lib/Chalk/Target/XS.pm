@@ -172,6 +172,12 @@ class Chalk::Target::XS {
 
         # Unary operation nodes
         return $self->visit_Negate($node) if $type eq 'Negate';
+        return $self->visit_Not($node) if $type eq 'Not';
+
+        # Logical operation nodes
+        return $self->visit_And($node) if $type eq 'And';
+        return $self->visit_Or($node) if $type eq 'Or';
+        return $self->visit_DefinedOr($node) if $type eq 'DefinedOr';
 
         # Unknown node type - return undef
         return undef;
@@ -878,6 +884,81 @@ class Chalk::Target::XS {
             type => $c_type,
             name => $result_var,
             init => "-$operand_var",
+        );
+    }
+
+    # Logical operator visitors
+    # And: $a && $b - short-circuit, returns left if false, right if true
+    method visit_And($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $left = $node->left;
+        my $right = $node->right;
+        my $left_var = $self->get_var($left->id);
+        my $right_var = $self->get_var($right->id);
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # SvTRUE(left) ? right : left
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "SvTRUE($left_var) ? $right_var : $left_var",
+        );
+    }
+
+    # Or: $a || $b - short-circuit, returns left if true, right if false
+    method visit_Or($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $left = $node->left;
+        my $right = $node->right;
+        my $left_var = $self->get_var($left->id);
+        my $right_var = $self->get_var($right->id);
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # SvTRUE(left) ? left : right
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "SvTRUE($left_var) ? $left_var : $right_var",
+        );
+    }
+
+    # Not: !$a - logical negation
+    method visit_Not($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $operand = $node->operand;
+        my $operand_var = $self->get_var($operand->id);
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # SvTRUE(operand) ? &PL_sv_no : &PL_sv_yes
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "SvTRUE($operand_var) ? &PL_sv_no : &PL_sv_yes",
+        );
+    }
+
+    # DefinedOr: $a // $b - returns left if defined, right otherwise
+    method visit_DefinedOr($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $left = $node->left;
+        my $right = $node->right;
+        my $left_var = $self->get_var($left->id);
+        my $right_var = $self->get_var($right->id);
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # SvOK(left) ? left : right
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "SvOK($left_var) ? $left_var : $right_var",
         );
     }
 }
