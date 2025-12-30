@@ -1,0 +1,77 @@
+# ABOUTME: GitHub Action to benchmark self-hosting.t using perf stat
+# ABOUTME: Compares Perl 5.42 with and without threads using official Docker images
+name: Performance Benchmark
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - name: "no-threads"
+            image: "perl:5.42"
+          - name: "threaded"
+            image: "perl:5.42-threaded"
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install perf tools
+        run: |
+          apt-get update
+          apt-get install -y linux-perf procps || apt-get install -y linux-tools-generic || true
+
+      - name: Verify Perl version and config
+        run: |
+          perl -v
+          perl -V:usethreads
+
+      - name: Run perf stat on self-hosting.t
+        run: |
+          echo "## Perf Stats (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          perf stat perl t/self-hosting.t 2>&1 | tee perf-output.txt || \
+          /usr/bin/time -v perl t/self-hosting.t 2>&1 | tee perf-output.txt
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat perf-output.txt >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload perf results
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results-${{ matrix.name }}
+          path: perf-output.txt
+
+  compare:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all perf results
+        uses: actions/download-artifact@v4
+        with:
+          path: results
+
+      - name: Compare results
+        run: |
+          echo "## Performance Comparison: Perl 5.42 Threads vs No-Threads" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### No Threads" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat results/perf-results-no-threads/perf-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### With Threads" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat results/perf-results-threaded/perf-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
