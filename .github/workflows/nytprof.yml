@@ -47,18 +47,13 @@ jobs:
 
           echo "HTML report generated" >> $GITHUB_STEP_SUMMARY
 
-      - name: Generate text summary
+      - name: Cleanup raw profiling data
         run: |
-          nytprofcsv
-
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          head -50 nytprof/calls.csv >> $GITHUB_STEP_SUMMARY || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          rm -f nytprof.out
+          echo "Cleaned up raw profiling data to save disk space" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload NYTProf report
         uses: actions/upload-artifact@v4
         with:
           name: nytprof-report-${{ matrix.name }}
-          path: |
-            nytprof-report/
-            nytprof.out
+          path: nytprof-report/
