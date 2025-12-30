@@ -165,6 +165,8 @@ class Chalk::Target::XS {
         # Class-related nodes
         return $self->visit_ClassDef($node) if $type eq 'ClassDef';
         return $self->visit_Field($node) if $type eq 'Field';
+        return $self->visit_FieldLoad($node) if $type eq 'FieldLoad';
+        return $self->visit_FieldStore($node) if $type eq 'FieldStore';
 
         # Variable operation nodes
         return $self->visit_Store($node) if $type eq 'Store';
@@ -1043,6 +1045,39 @@ class Chalk::Target::XS {
             type => 'SV*',
             name => $result_var,
             init => $init,
+        );
+    }
+
+    # FieldLoad: read a field from ObjectFIELDS array
+    method visit_FieldLoad($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $field_index = $node->field_index;
+        return undef unless defined $field_index;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "ObjectFIELDS(self)[$field_index]",
+        );
+    }
+
+    # FieldStore: write a field to ObjectFIELDS array
+    method visit_FieldStore($node) {
+        use Chalk::Target::XS::AST::Statement;
+
+        my $field_index = $node->field_index;
+        return undef unless defined $field_index;
+
+        my $value_id = $node->value_id;
+        my $value_var = $self->get_var($value_id);
+
+        # Decref old value first to prevent memory leak on reassignment
+        # (safe even if slot contains &PL_sv_undef which is immortal)
+        return Chalk::Target::XS::AST::Statement->new(
+            code => "SvREFCNT_dec(ObjectFIELDS(self)[$field_index]); ObjectFIELDS(self)[$field_index] = newSVsv($value_var)",
         );
     }
 }
