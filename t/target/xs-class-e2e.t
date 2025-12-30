@@ -565,27 +565,25 @@ subtest 'Generated XS compiles and loads correctly' => sub {
     # Attempt to compile XS to .so
     my $so_file = compile_xs($xs_file, 'TestCompile');
 
-    SKIP: {
-        skip 'XS compilation failed - generated XS may have syntax errors', 3
-            unless defined $so_file && -f $so_file;
+    # Use TODO instead of SKIP so we're alerted when compilation starts working
+    my $compilation_ok = defined $so_file && -f $so_file;
+    TODO: {
+        local $TODO = 'XS compilation incomplete - missing visitors' unless $compilation_ok;
 
         ok(-f $so_file, 'XS compiled to shared object');
 
         # Add tempdir to @INC and try to load
-        unshift @INC, $tempdir;
-        my $loaded = eval { require TestCompile; 1 };
+        unshift @INC, $tempdir if $compilation_ok;
+        my $loaded = $compilation_ok ? eval { require TestCompile; 1 } : 0;
         ok($loaded, 'Module loaded successfully') or diag("Load error: $@");
 
         # Test method call
-        my $obj = eval { TestCompile->new() };
+        my $obj = $loaded ? eval { TestCompile->new() } : undef;
         ok(defined $obj, 'Object created') or diag("Constructor error: $@");
 
         # Test get_value method
-        SKIP: {
-            skip 'Object creation failed', 1 unless defined $obj;
-            my $val = eval { $obj->get_value() };
-            is($val, 42, 'get_value returns correct value') or diag("Method error: $@");
-        }
+        my $val = $obj ? eval { $obj->get_value() } : undef;
+        is($val, 42, 'get_value returns correct value') or diag("Method error: $@");
     }
 };
 
@@ -713,21 +711,25 @@ PERL
     # Compile XS
     my $so_file = compile_xs($xs_file, 'BenchPoint');
 
-    SKIP: {
-        skip 'XS compilation failed - cannot benchmark', 3
-            unless defined $so_file && -f $so_file;
+    # Use TODO instead of SKIP so we're alerted when compilation starts working
+    my $compilation_ok = defined $so_file && -f $so_file;
+    TODO: {
+        local $TODO = 'XS compilation incomplete - cannot benchmark' unless $compilation_ok;
+
+        ok($compilation_ok, 'XS compiled to shared object for benchmark');
 
         # Load XS module
-        unshift @INC, $tempdir;
-        my $loaded = eval { require BenchPoint; 1 };
+        unshift @INC, $tempdir if $compilation_ok;
+        my $loaded = $compilation_ok ? eval { require BenchPoint; 1 } : 0;
         ok($loaded, 'XS module loaded for benchmark') or diag("Load error: $@");
 
-        skip 'XS module failed to load', 2 unless $loaded;
+        local $TODO = 'XS module failed to load' unless $loaded;
 
-        # Run benchmark
+        # Run benchmark (only if module loaded)
         my $iterations = 10000;
+        my ($perl_time, $xs_time, $speedup) = (0, 0, 0);
 
-        # Pure Perl benchmark
+        # Pure Perl benchmark (always runs)
         my $perl_start = Benchmark::timeit(1, sub {
             for (1..$iterations) {
                 my $p = PurePoint->new(x => 3, y => 4);
@@ -736,31 +738,34 @@ PERL
                 my $d = $p->distance();
             }
         });
+        $perl_time = $perl_start->[1] + $perl_start->[2];  # user + system
 
-        # XS benchmark
-        my $xs_start = Benchmark::timeit(1, sub {
-            for (1..$iterations) {
-                my $p = BenchPoint->new(x => 3, y => 4);
-                $p->set_x(5);
-                $p->set_y(12);
-                my $d = $p->distance();
-            }
-        });
+        # XS benchmark (only if loaded)
+        if ($loaded) {
+            my $xs_start = Benchmark::timeit(1, sub {
+                for (1..$iterations) {
+                    my $p = BenchPoint->new(x => 3, y => 4);
+                    $p->set_x(5);
+                    $p->set_y(12);
+                    my $d = $p->distance();
+                }
+            });
+            $xs_time = $xs_start->[1] + $xs_start->[2];
 
-        my $perl_time = $perl_start->[1] + $perl_start->[2];  # user + system
-        my $xs_time = $xs_start->[1] + $xs_start->[2];
+            # Avoid division by zero
+            $speedup = $xs_time > 0 ? $perl_time / $xs_time : 0;
 
-        # Avoid division by zero
-        my $speedup = $xs_time > 0 ? $perl_time / $xs_time : 0;
-
-        diag sprintf("Pure Perl: %.4fs, XS: %.4fs, Speedup: %.2fx",
-            $perl_time, $xs_time, $speedup);
+            diag sprintf("Pure Perl: %.4fs, XS: %.4fs, Speedup: %.2fx",
+                $perl_time, $xs_time, $speedup);
+        }
 
         # Verify XS produces correct results
-        my $xs_obj = BenchPoint->new(x => 3, y => 4);
-        $xs_obj->set_x(5);
-        $xs_obj->set_y(12);
-        is($xs_obj->distance(), 169, 'XS produces correct result (5^2 + 12^2 = 169)');
+        my $xs_obj = $loaded ? eval { BenchPoint->new(x => 3, y => 4) } : undef;
+        if ($xs_obj) {
+            $xs_obj->set_x(5);
+            $xs_obj->set_y(12);
+        }
+        is($xs_obj ? $xs_obj->distance() : undef, 169, 'XS produces correct result (5^2 + 12^2 = 169)');
 
         # Performance target: XS should be at least 2x faster
         # (Being conservative since compile_xs overhead may vary)
@@ -872,35 +877,34 @@ subtest 'Self-hosting: Compile Chalk::Grammar::Token to XS and run tests' => sub
         # Compile XS
         my $so_file = compile_xs($xs_file, 'Chalk::Grammar::Token');
 
-        SKIP: {
-            skip 'Token XS compilation failed - may need additional XS features', 4
-                unless defined $so_file && -f $so_file;
+        # Use TODO instead of SKIP so we're alerted when compilation starts working
+        my $compilation_ok = defined $so_file && -f $so_file;
+        TODO: {
+            local $TODO = 'Token XS compilation incomplete - may need additional XS features' unless $compilation_ok;
 
-            ok(-f $so_file, 'Token.so compiled');
+            ok($compilation_ok, 'Token.so compiled');
 
             # Load the compiled Token module (prepend to @INC to override pure Perl)
-            unshift @INC, $tempdir;
+            unshift @INC, $tempdir if $compilation_ok;
 
             # Clear any cached version
-            delete $INC{'Chalk/Grammar/Token.pm'};
+            delete $INC{'Chalk/Grammar/Token.pm'} if $compilation_ok;
 
-            my $loaded = eval { require Chalk::Grammar::Token; 1 };
+            my $loaded = $compilation_ok ? eval { require Chalk::Grammar::Token; 1 } : 0;
             ok($loaded, 'Compiled Token module loaded') or diag("Load error: $@");
 
-            skip 'Token module failed to load', 2 unless $loaded;
+            local $TODO = 'Token module failed to load' unless $loaded;
 
             # Test Token functionality with compiled version
-            my $token = eval { Chalk::Grammar::Token->new(value => 'hello', pattern_name => 'IDENTIFIER') };
+            my $token = $loaded ? eval { Chalk::Grammar::Token->new(value => 'hello', pattern_name => 'IDENTIFIER') } : undef;
             ok(defined $token, 'Token object created with compiled XS') or diag("Error: $@");
 
-            SKIP: {
-                skip 'Token creation failed', 1 unless defined $token;
+            local $TODO = 'Token creation failed' unless defined $token;
 
-                # Test basic methods
-                my $str = eval { $token->to_string() };
-                like($str, qr/Token.*IDENTIFIER.*hello/, 'Token->to_string works correctly')
-                    or diag("Got: $str");
-            }
+            # Test basic methods
+            my $str = $token ? eval { $token->to_string() } : undef;
+            like($str // '', qr/Token.*IDENTIFIER.*hello/, 'Token->to_string works correctly')
+                or diag("Got: " . ($str // 'undef'));
         }
     }
 };
