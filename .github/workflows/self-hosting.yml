@@ -18,16 +18,35 @@ jobs:
       with:
         fetch-depth: 0  # Fetch full history for git merge-base to work
 
+    - name: Check for code changes
+      uses: dorny/paths-filter@v3
+      id: changes
+      with:
+        filters: |
+          code:
+            - 'lib/**'
+            - 't/**'
+            - 'app.pl'
+            - 'grammar/**'
+            - 'expected-ir/**'
+            - 'perl-tests/**'
+
+    - name: Skip message
+      if: steps.changes.outputs.code != 'true'
+      run: echo "No code changes detected, skipping tests"
+
     - name: Set up Perl
+      if: steps.changes.outputs.code == 'true'
       uses: shogo82148/actions-setup-perl@v1
       with:
         perl-version: '5.42'
 
     - name: Install Perl dependencies
+      if: steps.changes.outputs.code == 'true'
       run: |
         cpanm --notest Test2::V0 Test::Deep
 
     - name: Run test suite
+      if: steps.changes.outputs.code == 'true'
       run: |
         prove -lr t/
-
