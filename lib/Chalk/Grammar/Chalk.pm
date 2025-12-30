@@ -50,6 +50,7 @@ use Chalk::Grammar::Chalk::Rule::ReferenceConstructor;
 use Chalk::Grammar::Chalk::Rule::RegexContent;
 use Chalk::Grammar::Chalk::Rule::RegexFlags;
 use Chalk::Grammar::Chalk::Rule::RegexPattern;
+use Chalk::Grammar::Chalk::Rule::RegexSubstitution;
 use Chalk::Grammar::Chalk::Rule::ReturnStatement;
 use Chalk::Grammar::Chalk::Rule::ScalarVar;
 use Chalk::Grammar::Chalk::Rule::SingleQuotedString;
