@@ -179,6 +179,10 @@ class Chalk::Target::XS {
         return $self->visit_Or($node) if $type eq 'Or';
         return $self->visit_DefinedOr($node) if $type eq 'DefinedOr';
 
+        # String operation nodes
+        return $self->visit_StrConcat($node) if $type eq 'StrConcat';
+        return $self->visit_InterpolatedString($node) if $type eq 'InterpolatedString';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -959,6 +963,86 @@ class Chalk::Target::XS {
             type => 'SV*',
             name => $result_var,
             init => "SvOK($left_var) ? $left_var : $right_var",
+        );
+    }
+
+    # String concatenation: $a . $b
+    method visit_StrConcat($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $left = $node->left;
+        my $right = $node->right;
+        my $left_var = $self->get_var($left->id);
+        my $right_var = $self->get_var($right->id);
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # Create new SV, copy left, concatenate right
+        # sv_catsv concatenates right onto left (mutates left)
+        # So we need: result = newSVsv(left); sv_catsv(result, right);
+        # Using a compound expression in the init
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "(sv_catsv($result_var = newSVsv($left_var), $right_var), $result_var)",
+        );
+    }
+
+    # Interpolated string: "Hello $name" with multiple parts
+    method visit_InterpolatedString($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $parts = $node->parts // [];
+        my $result_var = $self->alloc_temp($node->id);
+
+        if ($parts->@* == 0) {
+            # Empty string
+            return Chalk::Target::XS::AST::VarDecl->new(
+                type => 'SV*',
+                name => $result_var,
+                init => 'newSVpvn("", 0)',
+            );
+        }
+
+        # Get variable names for all parts
+        my @part_vars;
+        for my $part ($parts->@*) {
+            if ($part && $part->can('id')) {
+                push @part_vars, $self->get_var($part->id);
+            }
+        }
+
+        if (@part_vars == 0) {
+            # No valid parts
+            return Chalk::Target::XS::AST::VarDecl->new(
+                type => 'SV*',
+                name => $result_var,
+                init => 'newSVpvn("", 0)',
+            );
+        }
+
+        if (@part_vars == 1) {
+            # Single part - just copy it
+            return Chalk::Target::XS::AST::VarDecl->new(
+                type => 'SV*',
+                name => $result_var,
+                init => "newSVsv($part_vars[0])",
+            );
+        }
+
+        # Multiple parts - concatenate all
+        # Start with copy of first, then catsv each remaining
+        my $first = shift @part_vars;
+        my $init = "$result_var = newSVsv($first)";
+        for my $pv (@part_vars) {
+            $init .= ", sv_catsv($result_var, $pv)";
+        }
+        $init = "($init, $result_var)";
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => $init,
         );
     }
 }
