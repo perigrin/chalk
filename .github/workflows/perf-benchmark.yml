@@ -1,4 +1,4 @@
-# ABOUTME: GitHub Action to benchmark self-hosting.t using perf stat
+# ABOUTME: GitHub Action to benchmark self-hosting.t using hyperfine
 # ABOUTME: Compares Perl 5.42 with and without threads using official Docker images
 name: Performance Benchmark
 
@@ -24,38 +24,53 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install perf tools
+      - name: Install benchmark tools
         run: |
           apt-get update
-          apt-get install -y linux-perf procps || apt-get install -y linux-tools-generic || true
+          apt-get install -y hyperfine time
 
       - name: Verify Perl version and config
         run: |
           perl -v
           perl -V:usethreads
 
-      - name: Run perf stat on self-hosting.t
+      - name: Run hyperfine benchmark
         run: |
-          echo "## Perf Stats (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
+          echo "## Timing Benchmark (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-          perf stat perl t/self-hosting.t 2>&1 | tee perf-output.txt || \
-          /usr/bin/time -v perl t/self-hosting.t 2>&1 | tee perf-output.txt
+          hyperfine --warmup 1 --runs 2 'perl t/self-hosting.t' \
+            --export-json benchmark.json \
+            2>&1 | tee benchmark-output.txt
 
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat perf-output.txt >> $GITHUB_STEP_SUMMARY
+          cat benchmark-output.txt >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload perf results
+      - name: Run resource stats
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Resource Stats (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          /usr/bin/time -v perl t/self-hosting.t 2>&1 | tee resource-stats.txt
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat resource-stats.txt >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
-          name: perf-results-${{ matrix.name }}
-          path: perf-output.txt
+          name: benchmark-${{ matrix.name }}
+          path: |
+            benchmark-output.txt
+            benchmark.json
+            resource-stats.txt
 
   compare:
     needs: benchmark
     runs-on: ubuntu-latest
     steps:
-      - name: Download all perf results
+      - name: Download all benchmark results
         uses: actions/download-artifact@v4
         with:
           path: results
@@ -65,13 +80,29 @@ jobs:
           echo "## Performance Comparison: Perl 5.42 Threads vs No-Threads" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo "### No Threads" >> $GITHUB_STEP_SUMMARY
+          echo "### No Threads - Timing" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat results/perf-results-no-threads/perf-output.txt >> $GITHUB_STEP_SUMMARY
+          cat results/benchmark-no-threads/benchmark-output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### With Threads" >> $GITHUB_STEP_SUMMARY
+          echo "### No Threads - Resources" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat results/perf-results-threaded/perf-output.txt >> $GITHUB_STEP_SUMMARY
+          cat results/benchmark-no-threads/resource-stats.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### With Threads - Timing" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat results/benchmark-threaded/benchmark-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### With Threads - Resources" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat results/benchmark-threaded/resource-stats.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### JSON Results" >> $GITHUB_STEP_SUMMARY
+          echo "See artifacts for detailed JSON data" >> $GITHUB_STEP_SUMMARY
