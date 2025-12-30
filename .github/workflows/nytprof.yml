@@ -1,0 +1,64 @@
+# ABOUTME: GitHub Action to profile self-hosting.t using Devel::NYTProf
+# ABOUTME: Generates HTML reports comparing Perl 5.42 with and without threads
+name: NYTProf Profiling
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - name: "no-threads"
+            image: "perl:5.42"
+          - name: "threaded"
+            image: "perl:5.42-threaded"
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Devel::NYTProf
+        run: |
+          cpan -T Devel::NYTProf
+
+      - name: Verify Perl version and config
+        run: |
+          perl -v
+          perl -V:usethreads
+
+      - name: Run self-hosting.t under NYTProf
+        run: |
+          echo "## NYTProf (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
+
+          perl -d:NYTProf t/self-hosting.t
+
+          echo "Profile data generated" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate HTML report
+        run: |
+          nytprofhtml --out nytprof-report
+
+          echo "HTML report generated" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate text summary
+        run: |
+          nytprofcsv
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          head -50 nytprof/calls.csv >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload NYTProf report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nytprof-report-${{ matrix.name }}
+          path: |
+            nytprof-report/
+            nytprof.out
