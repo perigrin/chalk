@@ -1,8 +1,11 @@
 # ABOUTME: Semantic action for RegexPattern - builds Constant IR node for qr// regex patterns
-# ABOUTME: Converts qr// regex patterns to Constant nodes with type 'Regex'
+# ABOUTME: Converts qr// regex patterns to Constant nodes with Regex type
 
 use 5.42.0;
 use experimental 'class';
+
+use Chalk::IR::Node::Constant;
+use Chalk::Grammar::Chalk::Type::Regex;
 
 class Chalk::Grammar::Chalk::Rule::RegexPattern :isa(Chalk::GrammarRule) {
 
@@ -18,9 +21,9 @@ class Chalk::Grammar::Chalk::Rule::RegexPattern :isa(Chalk::GrammarRule) {
         # Full regex engine implementation is tracked in issue #157
         my $pattern = "qr/$content/$flags";
 
-        # Create Constant node directly (content-addressable ID)
+        # Create Constant node with proper Regex type
         return Chalk::IR::Node::Constant->new(
-            type  => 'Regex',
+            type  => Chalk::Grammar::Chalk::Type::Regex->new(),
             value => $pattern,
         );
     }

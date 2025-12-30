@@ -14,7 +14,7 @@ class Chalk::Grammar::Chalk::Rule::Literal :isa(Chalk::GrammarRule) {
         # Literal -> String (String builds Constant node)
         # Literal -> QuotedWordList (pass through)
         # Literal -> RegexPattern (RegexPattern builds Constant node)
-        # Literal -> RegexSubstitution (TODO: implement)
+        # Literal -> RegexSubstitution (RegexSubstitution builds Constant node)
         # Literal -> EmptyList (pass through)
         # Literal -> 'undef' (handled below)
         # Literal -> 'true' (handled below)
