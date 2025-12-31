@@ -185,6 +185,20 @@ class Chalk::Target::XS {
         return $self->visit_StrConcat($node) if $type eq 'StrConcat';
         return $self->visit_InterpolatedString($node) if $type eq 'InterpolatedString';
 
+        # Array operation nodes
+        return $self->visit_NewArray($node) if $type eq 'NewArray';
+        return $self->visit_ArrayLoad($node) if $type eq 'ArrayLoad';
+        return $self->visit_ArrayStore($node) if $type eq 'ArrayStore';
+        return $self->visit_ArrayLength($node) if $type eq 'ArrayLength';
+
+        # Hash operation nodes
+        return $self->visit_NewHash($node) if $type eq 'NewHash';
+        return $self->visit_HashLoad($node) if $type eq 'HashLoad';
+        return $self->visit_HashStore($node) if $type eq 'HashStore';
+
+        # Function definition nodes
+        return $self->visit_FunctionDef($node) if $type eq 'FunctionDef';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -362,29 +376,11 @@ class Chalk::Target::XS {
         my $stop = $self->find_stop_node();
 
         if ($stop && $stop->can('function_defs')) {
-            # Generate one XSUB per function definition
+            # Generate one XSUB per function definition using visitor
             my $funcs = $stop->function_defs // [];
             for my $func_def ($funcs->@*) {
-                # Reset temp counter for each function
-                $temp_counter = 0;
-                $ctx = Chalk::IR::Context->empty_context();
-
-                my $func_name = $func_def->name // 'anonymous';
-                my $params = $func_def->parameters // [];
-
-                # Compute return type from function body
-                my $return_type = $self->compute_return_type($func_def);
-
-                # Generate body statements for this function
-                my @body_statements = $self->generate_function_body($func_def);
-
-                my $xsub = Chalk::Target::XS::AST::XSUB->new(
-                    name => $func_name,
-                    params => $params,
-                    body => \@body_statements,
-                    return_type => $return_type,
-                );
-                push @xsubs, $xsub;
+                my $xsub = $self->visit_FunctionDef($func_def);
+                push @xsubs, $xsub if defined $xsub;
             }
         }
 
@@ -1078,6 +1074,169 @@ class Chalk::Target::XS {
         # (safe even if slot contains &PL_sv_undef which is immortal)
         return Chalk::Target::XS::AST::Statement->new(
             code => "SvREFCNT_dec(ObjectFIELDS(self)[$field_index]); ObjectFIELDS(self)[$field_index] = newSVsv($value_var)",
+        );
+    }
+
+    # NewArray: create a new empty Perl array (AV*)
+    method visit_NewArray($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'AV*',
+            name => $result_var,
+            init => 'newAV()',
+        );
+    }
+
+    # ArrayLoad: read an element from an array using av_fetch
+    method visit_ArrayLoad($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        # Support both legacy (array_id) and new (array) patterns
+        my $array_id = $node->array_id // ($node->array ? $node->array->id : undef);
+        my $index_id = $node->index_id // ($node->index ? $node->index->id : undef);
+
+        my $array_var = $self->get_var($array_id);
+        my $index_var = $self->get_var($index_id);
+
+        return undef unless defined $array_var && defined $index_var;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # av_fetch returns SV** (pointer to SV*), returns NULL if not found
+        # We dereference if found, otherwise use &PL_sv_undef
+        # Note: av_fetch returns borrowed reference; caller must SvREFCNT_inc if storing
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "({ SV** elem = av_fetch($array_var, SvIV($index_var), 0); elem ? *elem : &PL_sv_undef; })",
+        );
+    }
+
+    # ArrayStore: write an element to an array using av_store
+    method visit_ArrayStore($node) {
+        use Chalk::Target::XS::AST::Statement;
+
+        # Support both legacy (array_id) and new (array) patterns
+        my $array_id = $node->array_id // ($node->array ? $node->array->id : undef);
+        my $index_id = $node->index_id // ($node->index ? $node->index->id : undef);
+        my $value_id = $node->value_id // ($node->value ? $node->value->id : undef);
+
+        my $array_var = $self->get_var($array_id);
+        my $index_var = $self->get_var($index_id);
+        my $value_var = $self->get_var($value_id);
+
+        return undef unless defined $array_var && defined $index_var && defined $value_var;
+
+        # av_store takes ownership of the SV, so we copy with newSVsv
+        return Chalk::Target::XS::AST::Statement->new(
+            code => "av_store($array_var, SvIV($index_var), newSVsv($value_var))",
+        );
+    }
+
+    # ArrayLength: get the length of an array using av_len
+    method visit_ArrayLength($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        # ArrayLength only has $array (node reference), not array_id
+        my $array_id = $node->array ? $node->array->id : undef;
+        my $array_var = $self->get_var($array_id);
+
+        return undef unless defined $array_var;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # av_len returns highest index (-1 for empty), so add 1 for length
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "newSViv(av_len($array_var) + 1)",
+        );
+    }
+
+    # NewHash: create a new empty Perl hash (HV*)
+    method visit_NewHash($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'HV*',
+            name => $result_var,
+            init => 'newHV()',
+        );
+    }
+
+    # HashLoad: read an element from a hash using hv_fetch
+    method visit_HashLoad($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $hash_id = $node->hash_id;
+        my $key_id = $node->key_id;
+
+        my $hash_var = $self->get_var($hash_id);
+        my $key_var = $self->get_var($key_id);
+
+        return undef unless defined $hash_var && defined $key_var;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # hv_fetch with SvPV to get key string and length
+        # Negate klen for UTF-8 keys as required by Perl hash API
+        # Note: hv_fetch returns borrowed reference; caller must SvREFCNT_inc if storing
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "({ STRLEN klen; const char* key = SvPV($key_var, klen); if (SvUTF8($key_var)) klen = -klen; SV** elem = hv_fetch($hash_var, key, klen, 0); elem ? *elem : &PL_sv_undef; })",
+        );
+    }
+
+    # HashStore: write an element to a hash using hv_store
+    method visit_HashStore($node) {
+        use Chalk::Target::XS::AST::Statement;
+
+        my $hash_id = $node->hash_id;
+        my $key_id = $node->key_id;
+        my $value_id = $node->value_id;
+
+        my $hash_var = $self->get_var($hash_id);
+        my $key_var = $self->get_var($key_id);
+        my $value_var = $self->get_var($value_id);
+
+        return undef unless defined $hash_var && defined $key_var && defined $value_var;
+
+        # hv_store takes ownership of the SV, so we copy with newSVsv
+        # Use SvPV to get key string and length; negate klen for UTF-8 keys
+        return Chalk::Target::XS::AST::Statement->new(
+            code => "{ STRLEN klen; const char* key = SvPV($key_var, klen); if (SvUTF8($key_var)) klen = -klen; hv_store($hash_var, key, klen, newSVsv($value_var), 0); }",
+        );
+    }
+
+    # FunctionDef: generate XSUB for standalone function
+    # Unlike methods, functions have no implicit $self parameter
+    method visit_FunctionDef($node) {
+        use Chalk::Target::XS::AST::XSUB;
+
+        # Reset temp counter for this function
+        $temp_counter = 0;
+        $ctx = Chalk::IR::Context->empty_context();
+
+        my $func_name = $node->name // 'anonymous';
+        my $params = $node->parameters // [];
+
+        # Compute return type from function body
+        my $return_type = $self->compute_return_type($node);
+
+        # Generate body statements for this function
+        my @body_statements = $self->generate_function_body($node);
+
+        return Chalk::Target::XS::AST::XSUB->new(
+            name        => $func_name,
+            params      => $params,
+            body        => \@body_statements,
+            return_type => $return_type,
         );
     }
 }
