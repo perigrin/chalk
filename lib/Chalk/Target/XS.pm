@@ -196,6 +196,9 @@ class Chalk::Target::XS {
         return $self->visit_HashLoad($node) if $type eq 'HashLoad';
         return $self->visit_HashStore($node) if $type eq 'HashStore';
 
+        # Function definition nodes
+        return $self->visit_FunctionDef($node) if $type eq 'FunctionDef';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -373,29 +376,11 @@ class Chalk::Target::XS {
         my $stop = $self->find_stop_node();
 
         if ($stop && $stop->can('function_defs')) {
-            # Generate one XSUB per function definition
+            # Generate one XSUB per function definition using visitor
             my $funcs = $stop->function_defs // [];
             for my $func_def ($funcs->@*) {
-                # Reset temp counter for each function
-                $temp_counter = 0;
-                $ctx = Chalk::IR::Context->empty_context();
-
-                my $func_name = $func_def->name // 'anonymous';
-                my $params = $func_def->parameters // [];
-
-                # Compute return type from function body
-                my $return_type = $self->compute_return_type($func_def);
-
-                # Generate body statements for this function
-                my @body_statements = $self->generate_function_body($func_def);
-
-                my $xsub = Chalk::Target::XS::AST::XSUB->new(
-                    name => $func_name,
-                    params => $params,
-                    body => \@body_statements,
-                    return_type => $return_type,
-                );
-                push @xsubs, $xsub;
+                my $xsub = $self->visit_FunctionDef($func_def);
+                push @xsubs, $xsub if defined $xsub;
             }
         }
 
@@ -1226,6 +1211,32 @@ class Chalk::Target::XS {
         # Use SvPV to get key string and length; negate klen for UTF-8 keys
         return Chalk::Target::XS::AST::Statement->new(
             code => "{ STRLEN klen; const char* key = SvPV($key_var, klen); if (SvUTF8($key_var)) klen = -klen; hv_store($hash_var, key, klen, newSVsv($value_var), 0); }",
+        );
+    }
+
+    # FunctionDef: generate XSUB for standalone function
+    # Unlike methods, functions have no implicit $self parameter
+    method visit_FunctionDef($node) {
+        use Chalk::Target::XS::AST::XSUB;
+
+        # Reset temp counter for this function
+        $temp_counter = 0;
+        $ctx = Chalk::IR::Context->empty_context();
+
+        my $func_name = $node->name // 'anonymous';
+        my $params = $node->parameters // [];
+
+        # Compute return type from function body
+        my $return_type = $self->compute_return_type($node);
+
+        # Generate body statements for this function
+        my @body_statements = $self->generate_function_body($node);
+
+        return Chalk::Target::XS::AST::XSUB->new(
+            name        => $func_name,
+            params      => $params,
+            body        => \@body_statements,
+            return_type => $return_type,
         );
     }
 }
