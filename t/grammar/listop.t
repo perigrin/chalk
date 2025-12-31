@@ -12,6 +12,8 @@ use Chalk::Grammar::Token;
 use Chalk::Grammar::Chalk::Rule::ListOp;
 use Chalk::IR::Node::Map;
 use Chalk::IR::Node::Filter;
+use Chalk::IR::Node::All;
+use Chalk::IR::Node::Any;
 use Chalk::IR::Node::Constant;
 use Chalk::Grammar::Chalk::Type::Str;
 use Chalk::EvalContext;
@@ -129,6 +131,72 @@ subtest 'Map node has correct block and list' => sub {
     ok($result->isa('Chalk::IR::Node::Map'), 'Result is Map');
     ok(defined($result->block), 'Map has block');
     ok(defined($result->list), 'Map has list');
+};
+
+subtest 'ListOp generates All node for all keyword' => sub {
+    my $block = make_identifier('block_placeholder');
+    my $list = make_identifier('list_placeholder');
+    my $context = mock_listop_context('all', $block, $list);
+
+    my $rule = Chalk::Grammar::Chalk::Rule::ListOp->new(
+        lhs => 'ListOp',
+        rhs => []
+    );
+    my $result = $rule->evaluate($context);
+
+    ok(defined($result), 'Result is defined');
+    ok(blessed($result), 'Result is blessed');
+    ok($result->isa('Chalk::IR::Node::All'),
+       'Result is All node for all keyword') or diag "Got: " . (ref($result) || "'$result'");
+};
+
+subtest 'ListOp generates Any node for any keyword' => sub {
+    my $block = make_identifier('block_placeholder');
+    my $list = make_identifier('list_placeholder');
+    my $context = mock_listop_context('any', $block, $list);
+
+    my $rule = Chalk::Grammar::Chalk::Rule::ListOp->new(
+        lhs => 'ListOp',
+        rhs => []
+    );
+    my $result = $rule->evaluate($context);
+
+    ok(defined($result), 'Result is defined');
+    ok(blessed($result), 'Result is blessed');
+    ok($result->isa('Chalk::IR::Node::Any'),
+       'Result is Any node for any keyword') or diag "Got: " . (ref($result) || "'$result'");
+};
+
+subtest 'All node has correct block and list' => sub {
+    my $block = make_identifier('my_block');
+    my $list = make_identifier('my_list');
+    my $context = mock_listop_context('all', $block, $list);
+
+    my $rule = Chalk::Grammar::Chalk::Rule::ListOp->new(
+        lhs => 'ListOp',
+        rhs => []
+    );
+    my $result = $rule->evaluate($context);
+
+    ok($result->isa('Chalk::IR::Node::All'), 'Result is All');
+    ok(defined($result->block), 'All has block');
+    ok(defined($result->list), 'All has list');
+};
+
+subtest 'Any node has correct block and list' => sub {
+    my $block = make_identifier('my_block');
+    my $list = make_identifier('my_list');
+    my $context = mock_listop_context('any', $block, $list);
+
+    my $rule = Chalk::Grammar::Chalk::Rule::ListOp->new(
+        lhs => 'ListOp',
+        rhs => []
+    );
+    my $result = $rule->evaluate($context);
+
+    ok($result->isa('Chalk::IR::Node::Any'), 'Result is Any');
+    ok(defined($result->block), 'Any has block');
+    ok(defined($result->list), 'Any has list');
 };
 
 done_testing();
