@@ -8,6 +8,8 @@ class Chalk::Grammar::Chalk::Rule::ListOp :isa(Chalk::GrammarRule) {
     method evaluate($context) {
         use Chalk::IR::Node::Map;
         use Chalk::IR::Node::Filter;
+        use Chalk::IR::Node::All;
+        use Chalk::IR::Node::Any;
         use Chalk::IR::Node::Constant;
         use Chalk::Grammar::Chalk::Type::Str;
 
@@ -74,9 +76,20 @@ class Chalk::Grammar::Chalk::Rule::ListOp :isa(Chalk::GrammarRule) {
                 list  => $list,
             );
         }
+        elsif ($keyword eq 'all') {
+            return Chalk::IR::Node::All->new(
+                block => $block,
+                list  => $list,
+            );
+        }
+        elsif ($keyword eq 'any') {
+            return Chalk::IR::Node::Any->new(
+                block => $block,
+                list  => $list,
+            );
+        }
         else {
-            # For 'all', 'any' - pass through for now (future enhancement)
-            # Return a Map as placeholder
+            # Unknown list operation - return Map as fallback
             return Chalk::IR::Node::Map->new(
                 block => $block,
                 list  => $list,
