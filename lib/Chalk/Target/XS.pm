@@ -153,6 +153,10 @@ class Chalk::Target::XS {
         return $self->visit_EQ($node) if $type eq 'EQ';
         return $self->visit_NE($node) if $type eq 'NE';
 
+        # Regex match operators
+        return $self->visit_Match($node) if $type eq 'Match';
+        return $self->visit_NotMatch($node) if $type eq 'NotMatch';
+
         # Control flow nodes
         return $self->visit_If($node) if $type eq 'If';
         return $self->visit_Region($node) if $type eq 'Region';
@@ -726,6 +730,24 @@ class Chalk::Target::XS {
     method visit_GE($node) { $self->_visit_binary_op($node, '>='); }
     method visit_EQ($node) { $self->_visit_binary_op($node, '=='); }
     method visit_NE($node) { $self->_visit_binary_op($node, '!='); }
+
+    # Regex match visitors
+    # Match and NotMatch nodes perform regex pattern matching
+    # Full implementation requires Perl's regex C API (pregcomp/regexec)
+    # TODO: Implement regex matching using Perl C API when regex literal support is complete
+    method visit_Match($node) {
+        # Stub: Regex matching in XS requires pattern compilation and match execution
+        # For now, return undef to avoid "unknown node type" errors
+        # Future implementation will use Perl's pregcomp() and regexec() C API
+        return undef;
+    }
+
+    method visit_NotMatch($node) {
+        # Stub: Negated regex matching in XS requires pattern compilation and match execution
+        # For now, return undef to avoid "unknown node type" errors
+        # Future implementation will use Perl's pregcomp() and regexec() C API with negation
+        return undef;
+    }
 
     # Control flow visitors
     # If nodes require control flow restructuring to generate proper if/else
