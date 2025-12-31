@@ -191,6 +191,11 @@ class Chalk::Target::XS {
         return $self->visit_ArrayStore($node) if $type eq 'ArrayStore';
         return $self->visit_ArrayLength($node) if $type eq 'ArrayLength';
 
+        # Hash operation nodes
+        return $self->visit_NewHash($node) if $type eq 'NewHash';
+        return $self->visit_HashLoad($node) if $type eq 'HashLoad';
+        return $self->visit_HashStore($node) if $type eq 'HashStore';
+
         # Unknown node type - return undef
         return undef;
     }
@@ -1163,6 +1168,64 @@ class Chalk::Target::XS {
             type => 'SV*',
             name => $result_var,
             init => "newSViv(av_len($array_var) + 1)",
+        );
+    }
+
+    # NewHash: create a new empty Perl hash (HV*)
+    method visit_NewHash($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'HV*',
+            name => $result_var,
+            init => 'newHV()',
+        );
+    }
+
+    # HashLoad: read an element from a hash using hv_fetch
+    method visit_HashLoad($node) {
+        use Chalk::Target::XS::AST::VarDecl;
+
+        my $hash_id = $node->hash_id;
+        my $key_id = $node->key_id;
+
+        my $hash_var = $self->get_var($hash_id);
+        my $key_var = $self->get_var($key_id);
+
+        return undef unless defined $hash_var && defined $key_var;
+
+        my $result_var = $self->alloc_temp($node->id);
+
+        # hv_fetch with SvPV to get key string and length
+        # Negate klen for UTF-8 keys as required by Perl hash API
+        # Note: hv_fetch returns borrowed reference; caller must SvREFCNT_inc if storing
+        return Chalk::Target::XS::AST::VarDecl->new(
+            type => 'SV*',
+            name => $result_var,
+            init => "({ STRLEN klen; const char* key = SvPV($key_var, klen); if (SvUTF8($key_var)) klen = -klen; SV** elem = hv_fetch($hash_var, key, klen, 0); elem ? *elem : &PL_sv_undef; })",
+        );
+    }
+
+    # HashStore: write an element to a hash using hv_store
+    method visit_HashStore($node) {
+        use Chalk::Target::XS::AST::Statement;
+
+        my $hash_id = $node->hash_id;
+        my $key_id = $node->key_id;
+        my $value_id = $node->value_id;
+
+        my $hash_var = $self->get_var($hash_id);
+        my $key_var = $self->get_var($key_id);
+        my $value_var = $self->get_var($value_id);
+
+        return undef unless defined $hash_var && defined $key_var && defined $value_var;
+
+        # hv_store takes ownership of the SV, so we copy with newSVsv
+        # Use SvPV to get key string and length; negate klen for UTF-8 keys
+        return Chalk::Target::XS::AST::Statement->new(
+            code => "{ STRLEN klen; const char* key = SvPV($key_var, klen); if (SvUTF8($key_var)) klen = -klen; hv_store($hash_var, key, klen, newSVsv($value_var), 0); }",
         );
     }
 }
