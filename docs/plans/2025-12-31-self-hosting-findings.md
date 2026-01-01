@@ -44,27 +44,37 @@ Successfully created incremental self-hosting test suite with 7 modules across 3
 
 ### XS Compilation to .so
 
-**Consistent error pattern across all modules:**
+**Previous error (FIXED in #551):**
+
+~~Missing XS C headers - `dVAR`, `dXSARGS`, `SV*` undefined~~
+✅ Fixed by adding `#include "EXTERN.h"`, `#include "perl.h"`, `#include "XSUB.h"` to XS output
+
+**Current error pattern (as of #551 fix):**
 
 ```
-error: use of undeclared identifier 'dVAR'
-error: use of undeclared identifier 'dXSARGS'
-error: use of undeclared identifier 'items'
-error: use of undeclared identifier 'SV'
-error: use of undeclared identifier 'RETVAL'
+warning: call to undeclared function 'blessed'
+warning: call to undeclared function 'isa'
+warning: call to undeclared function 'unknown'
+error: incompatible pointer types initializing 'SV*' with 'char[N]'
+warning: duplicate function definition 'new' detected (multi-class modules)
 ```
 
 ### Root Cause Analysis
 
-**Missing XS headers/macros:**
-- `dVAR`, `dXSARGS` - Standard XS macros for XSUB argument handling
-- `SV*`, `RETVAL` - Perl C API types
-- `items`, `cv`, `ST(n)` - XSUB argument access
+**Unimplemented Perl built-in functions:**
+- `blessed()` - Need to emit C API call to `sv_derived_from()` or similar
+- `isa()` - Need proper inheritance checking via Perl C API
+- `unknown()` - Placeholder from unimplemented IR nodes
 
-**Likely causes:**
-1. **Missing `#include "EXTERN.h"`** - Perl C API external declarations
-2. **Missing `#include "perl.h"`** - Core Perl C API
-3. **Missing `#include "XSUB.h"`** - XS subsystem macros
+**Type conversion issues:**
+- String literals need `newSVpv("...", len)` wrapper, not bare `"..."`
+- Current: `SV* tmp = "hello"` (wrong)
+- Correct: `SV* tmp = newSVpv("hello", 5)` (right)
+
+**Multi-class module issues:**
+- Modules like Token.pm with 4 classes generate 4 `new()` constructors
+- XS doesn't support duplicate XSUB names in same package
+- Need namespacing: `XS_Chalk__Grammar__Token_new`, `XS_Chalk__Grammar__Token__Operator_new`, etc.
 
 ### Pattern Discovery
 
@@ -150,10 +160,14 @@ Test 10 in `t/target/xs-class-e2e.t` compiles simple classes successfully.
 - #548 ✅ Tier 1 tests (Types)
 - #549 ✅ Tier 2 tests (Nodes)
 - #550 ✅ Tier 3 test (Graph)
+- #551 ✅ Fix XS header generation (CLOSED - headers added)
 
 ## Issues to Create
 
-- #551 🆕 Fix XS header generation (add EXTERN.h, perl.h, XSUB.h includes)
+- 🆕 Fix Literal->emit() to wrap strings in newSVpv()
+- 🆕 Implement blessed() and isa() C API calls
+- 🆕 Handle multi-class modules (namespace XSUBs per class)
+- 🆕 Implement missing IR->XS visitors (placeholders emitting `unknown()`)
 
 ## Conclusion
 
@@ -162,8 +176,18 @@ The self-hosting test infrastructure is **complete and working**. We've proven:
 1. ✅ Grammar can parse real Chalk modules
 2. ✅ IR generation works for complex dependencies
 3. ✅ XS generation produces structurally correct output
-4. 📍 **XS compilation blocked by missing C headers** (fixable)
+4. ✅ **XS C headers now included** (#551 FIXED - commit 52572a74df)
+5. 📍 **XS compilation now blocked by implementation gaps** (4 specific issues identified)
 
-The gap is **narrow and well-defined** - we're not missing major features or visitors. We just need to emit the standard XS boilerplate includes. Once fixed, we should be able to compile and load all tested modules.
+**Progress since initial findings:**
+- ~~Missing C headers~~ → **FIXED**
+- Now seeing actual implementation issues (good sign!)
+- Errors are specific and actionable (blessed, isa, string literals, multi-class)
 
-**Bottom line:** We're very close to self-hosting success.
+The gaps are **narrow and well-defined** - we're not missing major features or architecture. We need:
+1. String literal wrapper in Literal->emit()
+2. blessed()/isa() C API implementations
+3. Multi-class XSUB namespacing
+4. Fill in `unknown()` placeholders
+
+**Bottom line:** We've moved from "missing infrastructure" to "missing implementations". Each remaining issue is small and fixable. We're making concrete progress toward self-hosting.
