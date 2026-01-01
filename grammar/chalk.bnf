@@ -62,7 +62,7 @@
 %COMMENT% = /#[^\n]*/
 # Reserved keywords excluded from barewords via negative lookahead
 # Note: sub/method are reserved to prevent FunctionCall from matching SubroutineDeclaration
-%BAREWORD% = /(?!(?:sub|method|class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp|true|false|__FILE__|__LINE__)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+%BAREWORD% = /(?!(?:sub|method|class|field|if|unless|elsif|else|while|until|for|foreach|return|last|next|redo|my|our|state|use|no|require|and|or|not|eq|ne|lt|gt|le|ge|cmp|isa|true|false|__FILE__|__LINE__)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 %BAREWORD_ANY% = /[a-zA-Z_][a-zA-Z0-9_]*/
 %SPECIAL_IDENTIFIER% = /[0-9]+|[&`'+@!$-]|^[A-Z]|\{[^}]+\}/
 %INTEGER% = /[0-9]+/
@@ -302,8 +302,8 @@ LogicalOp -> Expression WS_OPT 'and' WS_OPT Expression
 # Precedence handled by Precedence semiring
 ComparisonOp -> Expression WS_OPT %NUM_COMPARE_OP% WS_OPT Expression
 ComparisonOp -> Expression WS_OPT %STRING_COMPARE_OP% WS_OPT Expression
-ComparisonOp -> Expression WS_OPT 'isa' WS_OPT QualifiedIdentifier
-ComparisonOp -> Expression WS_OPT 'isa' WS_OPT Expression
+ComparisonOp -> Expression WS_OPT %ISA_COMPARE_OP% WS_OPT QualifiedIdentifier
+ComparisonOp -> Expression WS_OPT %ISA_COMPARE_OP% WS_OPT Expression
 ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT Expression
 # Bare regex match: $x =~ /pattern/flags (shorthand for m/pattern/flags)
 ComparisonOp -> Expression WS_OPT %REGEX_MATCH_OP% WS_OPT '/' RegexContent '/' RegexFlags
