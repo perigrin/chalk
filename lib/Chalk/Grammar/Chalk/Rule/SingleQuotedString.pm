@@ -17,7 +17,7 @@ class Chalk::Grammar::Chalk::Rule::SingleQuotedString :isa(Chalk::GrammarRule) {
 
         # Strip surrounding single quotes
         my $value = "$string_with_quotes";
-        if (length($value) >= 2 && substr($value, 0, 1) eq q{'}) {
+        if (length($value) >= 2 && substr($value, 0, 1) eq "'") {
             $value = substr($value, 1, length($value) - 2);
         }
 
