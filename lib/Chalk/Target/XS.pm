@@ -441,6 +441,12 @@ class Chalk::Target::XS {
         my $xs_ast = $self->generate();
         my $xs_content = $xs_ast->emit();
 
+        # Prepend standard XS C headers required for Perl C API
+        my $headers = "#include \"EXTERN.h\"\n";
+        $headers .= "#include \"perl.h\"\n";
+        $headers .= "#include \"XSUB.h\"\n\n";
+        $xs_content = $headers . $xs_content;
+
         # Generate PMC stub with XSLoader
         my $pmc_content = $self->generate_pmc();
 

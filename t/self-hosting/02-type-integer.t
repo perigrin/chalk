@@ -5,7 +5,8 @@
 use 5.42.0;
 use Test::More;
 use FindBin qw($RealBin);
-use lib "$RealBin/../lib";
+use lib "$RealBin/../lib";        # For Test::Chalk::CompileHelper
+use lib "$RealBin/../../lib";     # For Chalk modules
 use Test::Chalk::CompileHelper qw(compile_module);
 
 # Skip if no C compiler
