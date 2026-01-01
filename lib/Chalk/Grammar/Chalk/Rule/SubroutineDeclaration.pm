@@ -187,7 +187,8 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         if (ref($node) eq 'HASH' && $node->{statements}) {
             my @new_stmts;
             my $changed = 0;
-            for my $stmt ($node->{statements}->@*) {
+            for my $i (0 .. $#{$node->{statements}}) {
+                my $stmt = $node->{statements}[$i];
                 my $new_stmt = $self->_replace_unbound_variables($stmt, $param_map);
                 push @new_stmts, $new_stmt;
                 $changed = 1 if refaddr($new_stmt) != refaddr($stmt);
@@ -259,6 +260,30 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             return $node;
         }
 
+        # Handle Load nodes (name/value pattern)
+        if ($op eq 'Load' && $node->can('name') && $node->can('value')) {
+            my $value = $node->value;
+            my $new_value = defined($value) ? $self->_replace_unbound_variables($value, $param_map) : $value;
+
+            my $val_changed = defined($value) && defined($new_value) && refaddr($new_value) != refaddr($value);
+
+            if ($val_changed) {
+                use Chalk::IR::Node::Load;
+                # Compute inputs from the new value
+                my $inputs = [];
+                if (defined($new_value) && ref($new_value) && $new_value->can('id')) {
+                    $inputs = [$new_value->id];
+                }
+                return Chalk::IR::Node::Load->new(
+                    inputs      => $inputs,
+                    name        => $node->name,
+                    value       => $new_value,
+                    source_info => $node->can('source_info') ? $node->source_info : undef,
+                );
+            }
+            return $node;
+        }
+
         # Handle unary operators (value pattern for Negate, Not, etc.)
         if ($node->can('value') && !$node->can('control')) {
             my $value = $node->value;
@@ -271,28 +296,38 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
             }
             if ($changed) {
                 my $class = ref($node);
+                warn "DEBUG: Rebuilding unary node type: $class, op: ", $node->op, "\n" if $ENV{CHALK_DEBUG};
                 my %attrs = (value => $new_value);
                 $attrs{source_info} = $node->source_info if $node->can('source_info');
+                # Add inputs if the node has it (for nodes inheriting from Base)
+                $attrs{inputs} = $node->inputs if $node->can('inputs');
                 return $class->new(%attrs);
             }
             return $node;
         }
 
-        # Handle Call nodes (callee + args)
+        # Handle Call nodes (callee + args + receiver)
         if ($op eq 'Call' && $node->can('args')) {
+            use Scalar::Util qw(blessed refaddr);
             my $call_args = $node->args // [];
             my @new_args;
-            my $changed = 0;
+            my $args_changed = 0;
             for my $arg ($call_args->@*) {
                 my $new_arg = $self->_replace_unbound_variables($arg, $param_map);
                 push @new_args, $new_arg;
-                $changed = 1 if defined($arg) && defined($new_arg) && refaddr($new_arg) != refaddr($arg);
+                $args_changed = 1 if defined($arg) && defined($new_arg) && refaddr($new_arg) != refaddr($arg);
             }
-            if ($changed) {
+
+            # Also process the receiver (for method calls)
+            my $receiver = $node->can('receiver') ? $node->receiver : undef;
+            my $new_receiver = defined($receiver) ? $self->_replace_unbound_variables($receiver, $param_map) : undef;
+            my $receiver_changed = defined($receiver) && defined($new_receiver) && refaddr($new_receiver) != refaddr($receiver);
+
+            if ($args_changed || $receiver_changed) {
                 return Chalk::IR::Node::Call->new(
                     callee      => $node->callee,
                     args        => \@new_args,
-                    receiver    => $node->can('receiver') ? $node->receiver : undef,
+                    receiver    => $new_receiver,
                     source_info => $node->can('source_info') ? $node->source_info : undef,
                 );
             }
@@ -307,6 +342,32 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
                 use Chalk::IR::Node::CallEnd;
                 return Chalk::IR::Node::CallEnd->new(
                     call        => $new_call,
+                    source_info => $node->can('source_info') ? $node->source_info : undef,
+                );
+            }
+            return $node;
+        }
+
+        # Handle Store nodes (for state variables with parameter references)
+        # Store has: control (IR node), var (string), value (IR node)
+        if ($op eq 'Store' && $node->can('control') && $node->can('value')) {
+            my $control = $node->control;
+            my $value = $node->value;
+
+            # Recursively process both control and value
+            my $new_control = $self->_replace_unbound_variables($control, $param_map);
+            my $new_value = $self->_replace_unbound_variables($value, $param_map);
+
+            # Check if anything changed
+            my $ctrl_changed = refaddr($new_control) != refaddr($control);
+            my $val_changed = refaddr($new_value) != refaddr($value);
+
+            if ($ctrl_changed || $val_changed) {
+                use Chalk::IR::Node::Store;
+                return Chalk::IR::Node::Store->new(
+                    control     => $new_control,
+                    var         => $node->var,
+                    value       => $new_value,
                     source_info => $node->can('source_info') ? $node->source_info : undef,
                 );
             }

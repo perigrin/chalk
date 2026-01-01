@@ -477,6 +477,7 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
             ArithmeticOp ComparisonOp LogicalOp
             ConcatenationOp RangeOp
             Unary Postfix
+            Assignment MethodCall FunctionCall
         );
 
         my $is_expression = grep { $rule_name eq $_ } @expression_rules;

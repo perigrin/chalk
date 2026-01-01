@@ -84,8 +84,14 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
     }
 
     method _handle_simple_variable($context) {
-        # Get the variable metadata from child (ScalarVar, ArrayVar, or HashVar)
+        # Get the variable metadata from child (ScalarVar, ArrayVar, HashVar, or VariableDeclaration)
         my $var_metadata = $context->child(0);
+
+        # If child is a VariableDeclaration result (UnboundVariable), pass it through
+        # VariableDeclaration.evaluate() already created the scope binding
+        if (blessed($var_metadata) && $var_metadata->can('op') && $var_metadata->op eq 'UnboundVariable') {
+            return $var_metadata;
+        }
 
         # Handle all variable types that return metadata hashes
         if (ref($var_metadata) eq 'HASH') {

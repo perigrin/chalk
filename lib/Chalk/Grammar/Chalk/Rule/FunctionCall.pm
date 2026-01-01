@@ -18,6 +18,14 @@ class Chalk::Grammar::Chalk::Rule::FunctionCall :isa(Chalk::GrammarRule) {
 
         my @children = $context->children->@*;
 
+        # Check if this is a MethodCall delegation
+        if (scalar(@children) == 1) {
+            my $child = $context->child(0);
+            if (blessed($child) && $child->can('op')) {
+                return $child;
+            }
+        }
+
         # Get function name/callee - first child is Identifier
         my $callee = $context->child(0);
 

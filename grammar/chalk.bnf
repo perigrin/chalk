@@ -284,7 +284,7 @@ Expression -> Postfix
 # Assignment operators (right-associative)
 Assignment -> Expression WS_OPT '=' WS_OPT Expression
 Assignment -> Expression WS_OPT %ASSIGN_OP% WS_OPT Expression
-Assignment -> VariableDeclaration WS_OPT '=' WS_OPT Expression  # my $x = 1
+# Removed: Assignment -> VariableDeclaration '=' Expression (now handled via Variable -> VariableDeclaration)
 
 # Ternary operator (right-associative)
 Ternary -> Expression WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Expression
@@ -432,6 +432,7 @@ Variable -> ScalarVar
 Variable -> ArrayVar
 Variable -> HashVar
 Variable -> ArraySize
+Variable -> VariableDeclaration  # my $x, state $y, our $z can be used as variables
 
 # Variable names allow keywords (e.g., $class, $if, $while are valid in Perl)
 ScalarVar -> '$' %BAREWORD_ANY%
@@ -471,8 +472,9 @@ Variable -> Variable '->' '%' '*'                     # $var->%* (hash postfix d
 
 # Method calls on Variables become Variables to allow further dereferencing
 # This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
-Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
-Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
+# DISABLED: Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
+# DISABLED: Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
+# These rules create ambiguity with MethodCall - Variable.pm doesn't implement them anyway
 
 # Subscript access on function/method call results (for patterns like foo()->{key}, $obj->method()->{key})
 # These rules enable chained access: $self->to_hash()->{attributes}, Class->new()->[0]
