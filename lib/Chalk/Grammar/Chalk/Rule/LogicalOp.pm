@@ -35,10 +35,16 @@ class Chalk::Grammar::Chalk::Rule::LogicalOp :isa(Chalk::GrammarRule) {
 
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
-            if ($child isa Chalk::Grammar::Token::Operator) {
-                $operator = "$child";  # Stringify to get operator value
-                $operator_idx = $i;
-                last;
+            # Check for any Token (not just Token::Operator) since grammar uses
+            # literal strings '&&', '||', etc. instead of token patterns
+            if (blessed($child) && $child->isa('Chalk::Grammar::Token')) {
+                my $value = "$child";  # Stringify to get token value
+                # Only accept logical operator tokens
+                if ($value =~ /^(&&|and|\|\||or|\/\/)$/) {
+                    $operator = $value;
+                    $operator_idx = $i;
+                    last;
+                }
             }
         }
 
