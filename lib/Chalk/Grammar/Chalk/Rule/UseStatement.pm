@@ -122,15 +122,117 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
         # If we can't find a module name, that's a grammar bug
         die "UseStatement: could not find module name - grammar bug" unless defined($module_name);
 
+        # Get current control flow from scope
+        my $current_control = $scope->current_control;
+        die "UseStatement: no current_control in scope - grammar bug" unless $current_control;
+
+        # Special handling for 'use overload'
+        if ($module_name eq 'overload') {
+            warn "DEBUG: Detected use overload, module_index=$module_index\n" if $ENV{DEBUG_OVERLOAD};
+            # Extract operator => method mappings from ExpressionList
+            my %mappings;
+            my $fallback = 0;
+
+            # Debug: print all children
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "DEBUG: Total children: " . scalar(@children) . "\n";
+                for my $i ( 0 .. $#children ) {
+                    my $child = $children[$i]->extract;
+                    my $child_str = defined($child) ? (ref($child) ? ref($child) : "'$child'") : 'undef';
+                    warn "DEBUG:   children[$i] = $child_str\n";
+                }
+            }
+
+            # Alternative approach: look at the raw children structure
+            # ExpressionList children should contain the fat comma pairs
+            my @expr_children = @children[$module_index + 1 .. $#children];
+            my $i = 0;
+            while ($i < @expr_children) {
+                my $left = $expr_children[$i]->extract if $i < @expr_children;
+                my $arrow = $expr_children[$i + 1]->extract if $i + 1 < @expr_children;
+                my $right = $expr_children[$i + 2]->extract if $i + 2 < @expr_children;
+
+                warn "DEBUG: Checking triple[$i]: left=$left, arrow=$arrow, right=$right\n" if $ENV{DEBUG_OVERLOAD};
+
+                # Skip if we don't have a complete triple
+                last unless defined($left) && defined($arrow) && defined($right);
+
+                # Check if this is a fat comma pair (left => right)
+                if (defined($arrow) && $arrow eq '=>') {
+                    # Extract the operator (left side)
+                    my $operator = $left;
+                    if (ref($left) && $left->can('op') && $left->op eq 'Constant') {
+                        $operator = $left->value;
+                    }
+
+                    # Extract the method name (right side)
+                    my $method = $right;
+                    if (ref($right) && $right->can('op') && $right->op eq 'Constant') {
+                        $method = $right->value;
+                    }
+
+                    warn "DEBUG: Found pair: $operator => $method\n" if $ENV{DEBUG_OVERLOAD};
+
+                    # Handle fallback specially
+                    if ($operator eq 'fallback') {
+                        $fallback = $method;
+                    } else {
+                        $mappings{$operator} = $method;
+                    }
+
+                    # Skip past this pair (operator, =>, method)
+                    $i += 3;
+
+                    # Skip comma if present
+                    if ($i < @expr_children) {
+                        my $maybe_comma = $expr_children[$i]->extract;
+                        if (defined($maybe_comma) && $maybe_comma eq ',') {
+                            $i++;
+                        }
+                    }
+                } else {
+                    # Not a fat comma, skip this element
+                    $i++;
+                }
+            }
+
+            warn "DEBUG: Extracted mappings: " . join(", ", map { "$_ => $mappings{$_}" } keys %mappings) . ", fallback=$fallback\n" if $ENV{DEBUG_OVERLOAD};
+
+            # Create overload directive node
+            my $attributes = {
+                type     => 'overload_directive',
+                module   => 'overload',
+                mappings => \%mappings,
+                fallback => $fallback,
+            };
+
+            my $node_id  = "use_overload_directive";
+            my $use_stmt = Chalk::IR::Node->new(
+                id         => $node_id,
+                op         => 'UseStatement',
+                inputs     => [$current_control],
+                attributes => $attributes,
+            );
+
+            $use_stmt->record_transform(
+                'ir_construction',
+                'UseStatement::evaluate',
+                context => "type=overload_directive, mappings=" . join(", ", map { "$_ => $mappings{$_}" } keys %mappings)
+            );
+
+            # Update scope's control to thread UseStatement into control flow
+            my $new_scope = $scope->with_control($use_stmt);
+            $context->env->{scope} = $new_scope;
+
+            return $use_stmt;
+        }
+
+        # Regular use statement (not overload)
         # Categorize the use statement
         my $type = _categorize_use_statement($module_name);
 
         # Extract import list if present
         my $imports = _extract_imports( $context, $module_index + 1 );
-
-        # Get current control flow from scope
-        my $current_control = $scope->current_control;
-        die "UseStatement: no current_control in scope - grammar bug" unless $current_control;
 
         # Create UseStatement IR node directly
         my $attributes = {
