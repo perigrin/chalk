@@ -128,14 +128,10 @@ sub extract_overload_from_ir {
         $actual_ir = $ir->value;
     }
 
-    # Debug: show what we have
-    use Data::Dumper; $Data::Dumper::Maxdepth = 3;
-    diag("IR type: " . (ref($actual_ir) || 'scalar'));
-    diag("IR value: " . Dumper($actual_ir)) if $ENV{DEBUG_TEST};
 
     my $overload_nodes = extract_overload_from_ir($actual_ir);
 
-    todo 'Semantic action verification will be tested in Phase 2 (IR Integration)' => sub {
+    todo 'Full semantic verification will be tested in Phase 2 (IR Integration)' => sub {
         is(scalar(@$overload_nodes), 1, 'Found one overload directive');
 
         if (@$overload_nodes) {
@@ -176,7 +172,7 @@ sub extract_overload_from_ir {
 
     my $overload_nodes = extract_overload_from_ir($actual_ir);
 
-    todo 'Semantic action not yet implemented' => sub {
+    todo 'Full semantic verification will be tested in Phase 2 (IR Integration)' => sub {
         is(scalar(@$overload_nodes), 1, 'Found one overload directive');
 
         if (@$overload_nodes) {
@@ -219,7 +215,7 @@ sub extract_overload_from_ir {
 
     my $overload_nodes = extract_overload_from_ir($actual_ir);
 
-    todo 'Semantic action not yet implemented' => sub {
+    todo 'Full semantic verification will be tested in Phase 2 (IR Integration)' => sub {
         is(scalar(@$overload_nodes), 1, 'Found one overload directive');
 
         if (@$overload_nodes) {
