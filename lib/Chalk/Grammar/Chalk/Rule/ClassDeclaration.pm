@@ -167,18 +167,6 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         return @fields;
     }
 
-    # Helper to find children matching a condition
-    sub _find_child_matching($context, $predicate) {
-        my @children = $context->children->@*;
-
-        for my $i (0..$#children) {
-            my $child = $context->child($i);
-            return ($child, $i) if $predicate->($child, $i);
-        }
-
-        return (undef, -1);
-    }
-
     # Helper to extract ADJUST blocks from parse tree context
     # Returns array of hashrefs: { statements => [...], assigns => { '$field' => node } }
     sub _extract_adjust_blocks_from_context($ctx) {
@@ -320,25 +308,56 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         }
         $env->{class_fields} = \%class_fields;
 
-        # Evaluate the Block to get method declarations
-        my $block_result = $block_ctx->extract();
-
-        # Collect FunctionDef nodes from block statements
+        # Collect FunctionDef and UseStatement nodes by iterating through child contexts
+        # The ChalkIR semiring stores child results that we can access via $context->child($i)->extract
         my @method_nodes;
-        if (ref($block_result) eq 'HASH' && $block_result->{statements}) {
-            for my $stmt ($block_result->{statements}->@*) {
-                if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'FunctionDef') {
-                    push @method_nodes, $stmt;
+        my %overload_mappings;
+
+        for my $i (0 .. $#child_contexts) {
+            my $child = $child_contexts[$i]->extract;
+            next unless defined $child;
+
+            # Check if this is an IR node with an op
+            if (blessed($child) && $child->can('op')) {
+                my $op = $child->op;
+
+                if ($op eq 'UseStatement') {
+                    # Check if this is an overload directive
+                    my $attrs = $child->attributes;
+                    if ($attrs && $attrs->{type} eq 'overload_directive') {
+                        # Merge the mappings from this use overload statement
+                        my $mappings = $attrs->{mappings} // {};
+                        %overload_mappings = (%overload_mappings, %$mappings);
+                    }
+                }
+            }
+            # Also check hash structures (for block results)
+            elsif (ref($child) eq 'HASH' && $child->{statements}) {
+                for my $stmt ($child->{statements}->@*) {
+                    if (blessed($stmt) && $stmt->can('op')) {
+                        my $op = $stmt->op;
+                        if ($op eq 'FunctionDef') {
+                            push @method_nodes, $stmt;
+                        }
+                        elsif ($op eq 'UseStatement') {
+                            my $attrs = $stmt->attributes;
+                            if ($attrs && $attrs->{type} eq 'overload_directive') {
+                                my $mappings = $attrs->{mappings} // {};
+                                %overload_mappings = (%overload_mappings, %$mappings);
+                            }
+                        }
+                    }
                 }
             }
         }
 
         # Create and return ClassDef IR node
         return Chalk::IR::Node::ClassDef->new(
-            class_name   => $class_name,
-            fields       => \@field_nodes,
-            methods      => \@method_nodes,
-            parent_class => undef,  # TODO: Extract from :isa() attribute
+            class_name        => $class_name,
+            fields            => \@field_nodes,
+            methods           => \@method_nodes,
+            parent_class      => undef,  # TODO: Extract from :isa() attribute
+            overload_mappings => \%overload_mappings,
         );
     }
 

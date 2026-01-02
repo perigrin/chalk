@@ -16,6 +16,12 @@ class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
         my $string_with_quotes = $context->child(0);
         die "String: expected string token at child(0), got undefined - grammar bug" unless defined $string_with_quotes;
 
+        # If child(0) is already a Constant node (from a previous semiring evaluation),
+        # return it directly instead of re-evaluating and stringifying it
+        if (blessed($string_with_quotes) && $string_with_quotes->isa('Chalk::IR::Node::Constant')) {
+            return $string_with_quotes;
+        }
+
         # Strip surrounding quotes - see issue #201 for proper interpolation handling
         my $value = "$string_with_quotes";
         if (length($value) >= 2 && $value =~ m/^['"]/) {

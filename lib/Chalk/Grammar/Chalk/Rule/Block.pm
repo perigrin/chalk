@@ -11,16 +11,22 @@ class Chalk::Grammar::Chalk::Rule::Block :isa(Chalk::GrammarRule) {
         my ($value) = @_;
         my @results;
 
+        warn "DEBUG Block::_flatten_to_nodes: value type=" . (blessed($value) // ref($value) // 'scalar') . "\n";
         if (blessed($value) && $value->can('id')) {
             # This is an IR node - return it
+            warn "DEBUG Block::_flatten_to_nodes: Found IR node with op=" . ($value->can('op') ? $value->op : 'unknown') . "\n";
             return ($value);
         } elsif (ref($value) eq 'ARRAY') {
             # Recursively flatten array
+            warn "DEBUG Block::_flatten_to_nodes: Recursing into array with " . scalar(@$value) . " elements\n";
             for my $elem ($value->@*) {
                 push @results, _flatten_to_nodes($elem);
             }
         }
         # Scalars, undefs, etc. are ignored
+        else {
+            warn "DEBUG Block::_flatten_to_nodes: Ignoring value (scalar/undef/non-node)\n";
+        }
 
         return @results;
     }
