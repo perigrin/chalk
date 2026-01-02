@@ -123,23 +123,54 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
         die "UseStatement: could not find module name - grammar bug" unless defined($module_name);
 
         # Get current control flow from scope
+        # For use overload directives in class bodies, current_control may not be set yet
+        # since class bodies don't have a control flow context during parsing
         my $current_control = $scope->current_control;
-        die "UseStatement: no current_control in scope - grammar bug" unless $current_control;
 
         # Special handling for 'use overload'
         if ($module_name eq 'overload') {
+            warn "DEBUG UseStatement: Processing use overload, current_control=" . (defined $current_control ? "defined" : "undef") . "\n" if $ENV{DEBUG_OVERLOAD};
             # Extract operator => method mappings from ExpressionList
             my %mappings;
             my $fallback = 0;
 
-            # Alternative approach: look at the raw children structure
-            # ExpressionList children should contain the fat comma pairs
-            my @expr_children = @children[$module_index + 1 .. $#children];
+            # Find the ExpressionList child (after WS following the module name)
+            # UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT ExpressionList
+            my $expression_list;
+            for my $i ($module_index + 1 .. $#children) {
+                my $child = $children[$i]->extract;
+                if (ref($child) && $child->can('op') && $child->op eq 'List') {
+                    $expression_list = $child;
+                    last;
+                }
+            }
+
+            unless ($expression_list) {
+                # Return empty mappings
+                my $attributes = {
+                    type     => 'overload_directive',
+                    module   => 'overload',
+                    mappings => {},
+                    fallback => 0,
+                };
+                my $node_id  = "use_overload_directive";
+                my $use_stmt = Chalk::IR::Node->new(
+                    id         => $node_id,
+                    op         => 'UseStatement',
+                    inputs     => $current_control ? [$current_control] : [],
+                    attributes => $attributes,
+                );
+                return $use_stmt;
+            }
+
+            # ExpressionList is represented as a List IR node with elements
+            my $elements = $expression_list->elements || [];
+
             my $i = 0;
-            while ($i < @expr_children) {
-                my $left = $expr_children[$i]->extract if $i < @expr_children;
-                my $arrow = $expr_children[$i + 1]->extract if $i + 1 < @expr_children;
-                my $right = $expr_children[$i + 2]->extract if $i + 2 < @expr_children;
+            while ($i < @$elements) {
+                my $left = $elements->[$i];
+                my $arrow = $elements->[$i + 1];
+                my $right = $elements->[$i + 2];
 
                 # Skip if we don't have a complete triple
                 last unless defined($left) && defined($arrow) && defined($right);
@@ -169,8 +200,8 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                     $i += 3;
 
                     # Skip comma if present
-                    if ($i < @expr_children) {
-                        my $maybe_comma = $expr_children[$i]->extract;
+                    if ($i < @$elements) {
+                        my $maybe_comma = $elements->[$i];
                         if (defined($maybe_comma) && $maybe_comma eq ',') {
                             $i++;
                         }
@@ -196,12 +227,15 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             };
 
             my $node_id  = "use_overload_directive";
+            # If we have current_control, create a proper IR node with control flow
+            # Otherwise, create a metadata-only node for class-level use overload
             my $use_stmt = Chalk::IR::Node->new(
                 id         => $node_id,
                 op         => 'UseStatement',
-                inputs     => [$current_control],
+                inputs     => $current_control ? [$current_control] : [],
                 attributes => $attributes,
             );
+
 
             $use_stmt->record_transform(
                 'ir_construction',
@@ -209,9 +243,11 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                 context => "type=overload_directive, mappings=" . join(", ", map { "$_ => $mappings{$_}" } keys %mappings)
             );
 
-            # Update scope's control to thread UseStatement into control flow
-            my $new_scope = $scope->with_control($use_stmt);
-            $context->env->{scope} = $new_scope;
+            # Update scope's control to thread UseStatement into control flow (if we have control)
+            if ($current_control) {
+                my $new_scope = $scope->with_control($use_stmt);
+                $context->env->{scope} = $new_scope;
+            }
 
             return $use_stmt;
         }
@@ -229,6 +265,11 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             module  => $module_name,
             imports => $imports
         };
+
+        # If we don't have current_control, this means we're in a class body or similar context
+        # For now, we'll return undef for non-overload use statements in such contexts
+        # (they don't affect class structure)
+        return undef unless $current_control;
 
         my $node_id  = "use_${type}_${module_name}";
         my $use_stmt = Chalk::IR::Node->new(

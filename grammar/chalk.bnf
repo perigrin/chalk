@@ -99,9 +99,9 @@ StatementList -> Statement WS_OPT
 StatementList ->
 
 # Statements
+Statement -> UseStatement
 Statement -> ExpressionList
 Statement -> Block
-Statement -> UseStatement
 Statement -> VariableDeclaration
 Statement -> ReturnStatement
 Statement -> LoopControl
