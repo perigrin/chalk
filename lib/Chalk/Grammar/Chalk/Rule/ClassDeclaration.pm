@@ -323,22 +323,36 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         # Evaluate the Block to get method declarations
         my $block_result = $block_ctx->extract();
 
-        # Collect FunctionDef nodes from block statements
+        # Collect FunctionDef nodes and overload directives from block statements
         my @method_nodes;
+        my %overload_map;
         if (ref($block_result) eq 'HASH' && $block_result->{statements}) {
             for my $stmt ($block_result->{statements}->@*) {
-                if (blessed($stmt) && $stmt->can('op') && $stmt->op eq 'FunctionDef') {
-                    push @method_nodes, $stmt;
+                warn "DEBUG: stmt = " . (blessed($stmt) ? blessed($stmt) . " op=" . ($stmt->can('op') ? $stmt->op : 'N/A') : ref($stmt)) . "\n" if $ENV{DEBUG_OVERLOAD};
+                if (blessed($stmt) && $stmt->can('op')) {
+                    if ($stmt->op eq 'FunctionDef') {
+                        push @method_nodes, $stmt;
+                    }
+                    elsif ($stmt->op eq 'UseStatement') {
+                        my $attrs = $stmt->attributes;
+                        warn "DEBUG: Found UseStatement, attrs=" . (defined $attrs ? "defined" : "undef") . "\n" if $ENV{DEBUG_OVERLOAD};
+                        if ($attrs && $attrs->{type} eq 'overload_directive') {
+                            my $mappings = $attrs->{mappings} // {};
+                            warn "DEBUG: Overload directive found, mappings=" . join(",", map { "$_=>$mappings->{$_}" } keys %$mappings) . "\n" if $ENV{DEBUG_OVERLOAD};
+                            %overload_map = (%overload_map, %$mappings);
+                        }
+                    }
                 }
             }
         }
 
         # Create and return ClassDef IR node
         return Chalk::IR::Node::ClassDef->new(
-            class_name   => $class_name,
-            fields       => \@field_nodes,
-            methods      => \@method_nodes,
-            parent_class => undef,  # TODO: Extract from :isa() attribute
+            class_name        => $class_name,
+            fields            => \@field_nodes,
+            methods           => \@method_nodes,
+            parent_class      => undef,  # TODO: Extract from :isa() attribute
+            overload_mappings => \%overload_map,
         );
     }
 

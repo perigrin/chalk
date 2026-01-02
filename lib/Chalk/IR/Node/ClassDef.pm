@@ -11,6 +11,7 @@ class Chalk::IR::Node::ClassDef {
     field $methods :param :reader = [];
     field $parent_class :param :reader = undef;
     field $source_info :param :reader = undef;
+    field $overload_mappings :param :reader = {};  # operator => method_name map
     field $transform_chain :reader = [];
 
     # Dependency tracking for peephole re-optimization
