@@ -4,6 +4,7 @@ use 5.42.0;
 use experimental qw(class);
 
 class Chalk::Target::XS::AST::XSUB :isa(Chalk::Target::XS::AST::Node) {
+    use Chalk::Target::XS::Util qw(perl_to_c_identifier);
     field $name :param :reader;
     field $params :param :reader = [];
     field $body :param :reader = [];
@@ -13,8 +14,8 @@ class Chalk::Target::XS::AST::XSUB :isa(Chalk::Target::XS::AST::Node) {
         my $output = "";
 
         # Function signature: RETURN_TYPE function_name(PARAMS)
-        # Strip Perl sigils from parameter names for C/XS
-        my @bare_params = map { s/^\$//r } $params->@*;
+        # Strip Perl sigils from parameter names and sanitize C/C++ keywords
+        my @bare_params = map { perl_to_c_identifier($_) } $params->@*;
         my $params_str = join(', ', @bare_params);
         $output .= "$return_type $name($params_str)\n";
 
