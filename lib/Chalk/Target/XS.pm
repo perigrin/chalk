@@ -799,10 +799,20 @@ class Chalk::Target::XS {
             }
         }
 
+        # Check if func_name looks like a package name (Class::method() pattern)
+        # Package names contain :: or start with uppercase letter
+        my $is_package_name = ($func_name =~ /::|^[A-Z]/);
+
         # Check if this is a Perl built-in with a C API mapping
         my $c_func_name = $func_name;
         my $return_type = 'IV';  # Default return type
-        if ($self->is_builtin($func_name)) {
+        if ($is_package_name) {
+            # Package method call: Class->method()
+            # This is currently not fully supported - emit placeholder
+            # TODO #561: Implement proper Perl C API method dispatch
+            $c_func_name = 'PLACEHOLDER_METHOD_CALL';
+            $return_type = 'SV*';  # Method calls return SVs
+        } elsif ($self->is_builtin($func_name)) {
             $c_func_name = $self->get_builtin_c_api($func_name);
 
             # Set appropriate return type based on the builtin
