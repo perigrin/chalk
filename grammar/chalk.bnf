@@ -284,7 +284,7 @@ Expression -> Postfix
 # Assignment operators (right-associative)
 Assignment -> Expression WS_OPT '=' WS_OPT Expression
 Assignment -> Expression WS_OPT %ASSIGN_OP% WS_OPT Expression
-# Removed: Assignment -> VariableDeclaration '=' Expression (now handled via Variable -> VariableDeclaration)
+Assignment -> VariableDeclaration WS_OPT '=' WS_OPT Expression  # my $x = 1, field $y = 0 (for declarations with defaults)
 
 # Ternary operator (right-associative)
 Ternary -> Expression WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Expression

@@ -120,10 +120,40 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
                 if (@children > 0) {
                     my $lhs_ctx = $children[0];
 
-                    # Check if LHS is a VariableDeclaration
-                    if ($lhs_ctx->can('rule') && $lhs_ctx->rule &&
-                        $lhs_ctx->rule isa Chalk::Grammar::Chalk::Rule::VariableDeclaration) {
-                        my $field_info = _extract_field_from_vardecl($lhs_ctx);
+                    # LHS might be VariableDeclaration directly or wrapped in Expression
+                    # Grammar: Assignment -> Expression WS_OPT '=' WS_OPT Expression
+                    #          Assignment -> VariableDeclaration WS_OPT '=' WS_OPT Expression
+                    my $vardecl_ctx;
+                    if ($lhs_ctx->can('rule') && $lhs_ctx->rule) {
+                        if ($lhs_ctx->rule isa Chalk::Grammar::Chalk::Rule::VariableDeclaration) {
+                            $vardecl_ctx = $lhs_ctx;
+                        } elsif ($lhs_ctx->rule isa Chalk::Grammar::Chalk::Rule::Expression) {
+                            # Expression -> Variable -> VariableDeclaration
+                            # Drill down to find VariableDeclaration
+                            my @lhs_children = $lhs_ctx->children->@*;
+                            for my $expr_child (@lhs_children) {
+                                if ($expr_child->can('rule') && $expr_child->rule) {
+                                    if ($expr_child->rule isa Chalk::Grammar::Chalk::Rule::VariableDeclaration) {
+                                        $vardecl_ctx = $expr_child;
+                                        last;
+                                    } elsif ($expr_child->rule isa Chalk::Grammar::Chalk::Rule::Variable) {
+                                        # Check Variable's children for VariableDeclaration
+                                        my @var_children = $expr_child->children->@*;
+                                        for my $var_child (@var_children) {
+                                            if ($var_child->can('rule') && $var_child->rule &&
+                                                $var_child->rule isa Chalk::Grammar::Chalk::Rule::VariableDeclaration) {
+                                                $vardecl_ctx = $var_child;
+                                                last;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (defined $vardecl_ctx) {
+                        my $field_info = _extract_field_from_vardecl($vardecl_ctx);
                         if (defined $field_info) {
                             # Type inference deferred to issue #332 (Chalk type system integration)
                             # For now, all field types default to Any
