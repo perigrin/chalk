@@ -8,8 +8,10 @@ class Chalk::Target::XS::AST::Literal :isa(Chalk::Target::XS::AST::Node) {
     field $c_type :param :reader;  # C type from IR (IV, NV, SV*, etc.) - required
 
     method emit() {
-        # Handle undef as empty string
-        return '""' unless defined $value;
+        # Handle undef as empty string wrapped in newSVpvn for SV* types
+        unless (defined $value) {
+            return $c_type =~ /^SV\b/ ? 'newSVpvn("", 0)' : '""';
+        }
 
         # Determine formatting based on c_type from IR type system
         # Numeric types: IV (integer), NV (floating point), bool
@@ -25,7 +27,14 @@ class Chalk::Target::XS::AST::Literal :isa(Chalk::Target::XS::AST::Node) {
             $escaped =~ s/"/\\"/g;    # Escape double quotes
             $escaped =~ s/\n/\\n/g;   # Escape newlines
             $escaped =~ s/\t/\\t/g;   # Escape tabs
-            return qq("$escaped");
+
+            # For Perl SV types, wrap in newSVpv() to create proper SV*
+            # For C string types (char*), use bare quoted string
+            if ($c_type =~ /^SV\b/) {
+                return qq(newSVpv("$escaped", 0));
+            } else {
+                return qq("$escaped");
+            }
         }
     }
 }
