@@ -128,20 +128,9 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 
         # Special handling for 'use overload'
         if ($module_name eq 'overload') {
-            warn "DEBUG: Detected use overload, module_index=$module_index\n" if $ENV{DEBUG_OVERLOAD};
             # Extract operator => method mappings from ExpressionList
             my %mappings;
             my $fallback = 0;
-
-            # Debug: print all children
-            if ($ENV{DEBUG_OVERLOAD}) {
-                warn "DEBUG: Total children: " . scalar(@children) . "\n";
-                for my $i ( 0 .. $#children ) {
-                    my $child = $children[$i]->extract;
-                    my $child_str = defined($child) ? (ref($child) ? ref($child) : "'$child'") : 'undef';
-                    warn "DEBUG:   children[$i] = $child_str\n";
-                }
-            }
 
             # Alternative approach: look at the raw children structure
             # ExpressionList children should contain the fat comma pairs
@@ -151,8 +140,6 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                 my $left = $expr_children[$i]->extract if $i < @expr_children;
                 my $arrow = $expr_children[$i + 1]->extract if $i + 1 < @expr_children;
                 my $right = $expr_children[$i + 2]->extract if $i + 2 < @expr_children;
-
-                warn "DEBUG: Checking triple[$i]: left=$left, arrow=$arrow, right=$right\n" if $ENV{DEBUG_OVERLOAD};
 
                 # Skip if we don't have a complete triple
                 last unless defined($left) && defined($arrow) && defined($right);
@@ -170,8 +157,6 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                     if (ref($right) && $right->can('op') && $right->op eq 'Constant') {
                         $method = $right->value;
                     }
-
-                    warn "DEBUG: Found pair: $operator => $method\n" if $ENV{DEBUG_OVERLOAD};
 
                     # Handle fallback specially
                     if ($operator eq 'fallback') {
@@ -196,7 +181,11 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                 }
             }
 
-            warn "DEBUG: Extracted mappings: " . join(", ", map { "$_ => $mappings{$_}" } keys %mappings) . ", fallback=$fallback\n" if $ENV{DEBUG_OVERLOAD};
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "DEBUG: use overload - extracted " . scalar(keys %mappings) . " mappings: "
+                    . join(", ", map { "$_ => $mappings{$_}" } sort keys %mappings)
+                    . ", fallback=$fallback\n";
+            }
 
             # Create overload directive node
             my $attributes = {
