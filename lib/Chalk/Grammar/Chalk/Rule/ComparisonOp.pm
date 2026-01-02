@@ -59,12 +59,26 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
             }
         }
 
-        # Extract right operand (first IR node after operator)
+        # Extract right operand (first IR node or non-whitespace token after operator)
+        # For isa operator with QualifiedIdentifier, we get a Token/string, not an IR node
         my $right;
         for my $i ($operator_idx + 1 .. $#children) {
             my $child = $context->child($i);
+            # Skip undef (filtered whitespace)
+            next unless defined $child;
+
             if (blessed($child) && $child->can('id')) {
+                # IR node - use directly
                 $right = $child;
+                last;
+            } elsif (blessed($child) || !ref($child)) {
+                # Token or string (e.g., from QualifiedIdentifier) - wrap in Constant
+                use Chalk::IR::Node::Constant;
+                use Chalk::IR::Type::String;
+                $right = Chalk::IR::Node::Constant->new(
+                    value => "$child",
+                    type => Chalk::IR::Type::String->new()
+                );
                 last;
             }
         }
