@@ -72,6 +72,16 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
     }
 
     method evaluate($context) {
+        if ($ENV{DEBUG_OVERLOAD}) {
+        warn "UNCONDITIONAL: UseStatement.evaluate() CALLED\n";
+            my @ch = $context->children->@*;
+            warn "DEBUG UseStatement.evaluate() START - children: " . scalar(@ch) . "\n";
+            for my $i (0 .. $#ch) {
+                my $ext = $ch[$i]->extract;
+                my $d = !defined($ext) ? "undef" : ref($ext) ? (blessed($ext) ? blessed($ext) : ref($ext)) : "scalar";
+                warn "  child[$i]: $d\n";
+            }
+        }
 
 # UseStatement grammar rules:
 # UseStatement -> 'use' WS_OPT Number                                    # use 5.42.0
@@ -102,6 +112,10 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                 # extract the value from its attributes
                 if ( ref($child) && $child->can('op') && $child->op eq 'Constant' ) {
                     $module_name = $child->value;
+                    # Unwrap nested Constant objects
+                    while (ref($module_name) && $module_name->can("value")) {
+                        $module_name = $module_name->value;
+                    }
                 } else {
                     $module_name = $child;
                 }
