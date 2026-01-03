@@ -133,6 +133,20 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 
         # Special handling for 'use overload'
         if ($module_name eq 'overload') {
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "DEBUG UseStatement: module_index=$module_index, children count=" . scalar(@children) . "\n";
+                warn "DEBUG UseStatement: Context rule: " . (ref($context->rule) || 'no-rule') . "\n";
+                for my $i (0 .. $#children) {
+                    my $child = $children[$i]->extract;
+                    my $child_ctx = $children[$i];
+                    my $child_rule = $child_ctx->can('rule') ? $child_ctx->rule : undef;
+                    my $rule_desc = $child_rule ? ref($child_rule) : 'no-rule';
+                    my $desc = !defined($child) ? 'undef' :
+                               ref($child) ? (blessed($child) ? blessed($child) . " op=" . ($child->can('op') ? $child->op : 'N/A') : ref($child)) :
+                               "'$child'";
+                    warn "DEBUG UseStatement: child[$i] = $desc (rule=$rule_desc)\n";
+                }
+            }
             # Extract operator => method mappings from ExpressionList
             my %mappings;
             my $fallback = 0;
@@ -142,6 +156,20 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             my $expression_list;
             for my $i ($module_index + 1 .. $#children) {
                 my $child = $children[$i]->extract;
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    my $desc = !defined($child) ? 'undef' :
+                               ref($child) ? (blessed($child) ? blessed($child) . " op=" . ($child->can('op') ? $child->op : 'N/A') : ref($child)) :
+                               "'$child'";
+                    warn "DEBUG UseStatement: Checking child[$i] for ExpressionList: $desc\n";
+                    if (ref($child) && blessed($child)) {
+                        warn "DEBUG UseStatement:   blessed check: " . (blessed($child) ? "YES" : "NO") . "\n";
+                        warn "DEBUG UseStatement:   can('op'): " . ($child->can('op') ? "YES" : "NO") . "\n";
+                        if ($child->can('op')) {
+                            warn "DEBUG UseStatement:   op value: '" . $child->op . "'\n";
+                            warn "DEBUG UseStatement:   op eq 'List': " . ($child->op eq 'List' ? "YES" : "NO") . "\n";
+                        }
+                    }
+                }
                 if (ref($child) && $child->can('op') && $child->op eq 'List') {
                     $expression_list = $child;
                     last;
@@ -149,6 +177,9 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             }
 
             unless ($expression_list) {
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    warn "DEBUG UseStatement: No ExpressionList found, returning empty mappings\n";
+                }
                 # Return empty mappings
                 my $attributes = {
                     type     => 'overload_directive',
@@ -171,10 +202,25 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             # The '=>' token is filtered out by ExpressionList.evaluate()
             my $elements = $expression_list->elements || [];
 
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "DEBUG UseStatement: ExpressionList has " . scalar(@$elements) . " elements\n";
+                for my $i (0 .. $#$elements) {
+                    my $elem = $elements->[$i];
+                    my $desc = ref($elem) ? (blessed($elem) ? blessed($elem) . " op=" . ($elem->can('op') ? $elem->op : 'N/A') : ref($elem)) : "'$elem'";
+                    warn "DEBUG UseStatement:   element[$i]: $desc\n";
+                }
+            }
+
             # Iterate through elements in pairs (operator, method)
             for (my $i = 0; $i < @$elements; $i += 2) {
                 my $left = $elements->[$i];
                 my $right = $elements->[$i + 1];
+
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    my $left_desc = !defined($left) ? 'undef' : (ref($left) ? blessed($left) : "'$left'");
+                    my $right_desc = !defined($right) ? 'undef' : (ref($right) ? blessed($right) : "'$right'");
+                    warn "DEBUG UseStatement: Pair $i: left=$left_desc, right=$right_desc\n";
+                }
 
                 # Skip incomplete pairs
                 last unless defined($left) && defined($right);
@@ -218,8 +264,15 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                 # Handle fallback specially
                 if ($operator eq 'fallback') {
                     $fallback = $method;
+                    if ($ENV{DEBUG_OVERLOAD}) {
+                        warn "DEBUG UseStatement: Set fallback=$method\n";
+                    }
                 } else {
                     $mappings{$operator} = $method;
+                    if ($ENV{DEBUG_OVERLOAD}) {
+                        warn "DEBUG UseStatement: Added mapping: '$operator' => '$method'\n";
+                        warn "DEBUG UseStatement: Total mappings now: " . scalar(keys %mappings) . "\n";
+                    }
                 }
             }
 
@@ -231,7 +284,10 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
                 fallback => $fallback,
             };
 
-            my $node_id  = "use_overload_directive";
+            my $node_id  = "use_overload_directive_" . scalar(keys %mappings) . "_mappings";
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "DEBUG UseStatement: Creating node with id=$node_id\n";
+            }
             # If we have current_control, create a proper IR node with control flow
             # Otherwise, create a metadata-only node for class-level use overload
             my $use_stmt = Chalk::IR::Node->new(
@@ -297,6 +353,55 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
         $context->env->{scope} = $new_scope;
 
         return $use_stmt;
+    }
+
+    # Type inference: UseStatement is a compile-time directive, not a runtime expression
+    # Skip type checking entirely - return element unchanged
+    method infer_type($semiring, $element) {
+        return $element;
+    }
+
+    # Semantic validation: UseStatement must be properly terminated
+    # UseStatement is a statement, not an expression, so it must end with:
+    # - Semicolon (statement terminator)
+    # - Closing brace (end of block)
+    # - NOT another expression (which would indicate incomplete ExpressionList)
+    method validate($semiring, $element, $input_text) {
+        my $end_pos = $element->end_pos;
+
+        # Get remaining input after this UseStatement
+        my $remaining = substr($input_text, $end_pos);
+
+        # Skip whitespace
+        $remaining =~ s/^\s+//;
+
+        if ($ENV{DEBUG_OVERLOAD}) {
+            my $preview = substr($remaining, 0, 20);
+            $preview =~ s/\n/\\n/g;
+            warn "VALIDATION: UseStatement at $end_pos, next 20 chars: '$preview'\n";
+        }
+
+        # Check what comes next
+        if ($remaining =~ /^['"]/) {
+            # Starts with a string literal - likely another fat-comma pair
+            # This means the ExpressionList stopped early (trailing comma)
+            # and should have consumed more
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "VALIDATION ERROR: UseStatement at $end_pos followed by string literal - ExpressionList incomplete\n";
+            }
+            return 0;  # Invalid
+        }
+
+        if ($remaining =~ /^=>/) {
+            # Starts with fat comma - this is part of an incomplete key => value pair
+            # The ExpressionList should have consumed the full pair
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "VALIDATION ERROR: UseStatement at $end_pos followed by '=>' - ExpressionList incomplete\n";
+            }
+            return 0;  # Invalid
+        }
+
+        return 1;  # Valid
     }
 }
 

@@ -1,12 +1,14 @@
 # ABOUTME: Specialized composite semiring for Chalk IR generation
-# ABOUTME: Combines precedence validation and semantic IR building
+# ABOUTME: Combines longest match disambiguation, precedence validation, and semantic IR building
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
 use Chalk::IR::Node::Scope;
+use Chalk::Semiring::LongestMatch;
 use Chalk::Semiring::Precedence;
 use Chalk::Semiring::Semantic;
+use Chalk::Semiring::ChalkSyntax;
 use Chalk::Semiring::Composite;
 use Chalk::Grammar::Chalk;  # Load all Chalk Rule classes for semantic actions
 use Chalk::Grammar::Chalk::PrecedenceTable;
@@ -19,11 +21,10 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     field $composite :reader;
 
     ADJUST {
-        # Get precedence table from centralized PrecedenceTable class
-        my @perl_precedence_table = Chalk::Grammar::Chalk::PrecedenceTable->get_table();
-
-        my $precedence_sr = Chalk::Semiring::Precedence->new(
-            precedence_table => \@perl_precedence_table
+        # Create ChalkSyntax semiring for comprehensive validation
+        # Includes LongestMatch, Precedence, Boolean, SemanticValidation, TypeInference
+        my $syntax_sr = Chalk::Semiring::ChalkSyntax->new(
+            grammar => $grammar
         );
 
         # Create Semantic semiring with scope and function registry in environment
@@ -32,12 +33,12 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
             env => { scope => $scope, function_registry => $function_registry }
         );
 
-        # Use Composite with Precedence and Semantic
-        # Precedence validates operator precedence during parsing (returns invalid for bad parses)
+        # Use Composite with ChalkSyntax and Semantic
+        # ChalkSyntax validates syntax and disambiguates parses (via LongestMatch + Precedence + ...)
         # Semantic builds IR via Rule classes creating nodes directly
-        # Precedence.add() prefers valid over invalid, so invalid parses are automatically filtered
+        # ChalkSyntax.add() filters invalid parses and prefers longer matches
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$precedence_sr, $semantic_sr]
+            semirings => [$syntax_sr, $semantic_sr]
         );
     }
 
@@ -59,6 +60,25 @@ class Chalk::Semiring::ChalkIR :isa(Chalk::Semiring) {
     # Delegate on_scan() to composite (which delegates to wrapped semirings)
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         $composite->on_scan($item, $element, $pos, $matched_value, $pattern_name)
+    }
+
+    # Set input_text on the wrapped Semantic semiring (for validation)
+    method set_input_text($input_text) {
+        # Find the Semantic semiring in the composite and set its input_text
+        for my $sr ($composite->semirings->@*) {
+            if ($sr->isa('Chalk::Semiring::Semantic')) {
+                $sr->set_input_text($input_text);
+                last;
+            } elsif ($sr->can('semirings')) {
+                # Nested composite - search recursively
+                for my $nested_sr ($sr->semirings->@*) {
+                    if ($nested_sr->isa('Chalk::Semiring::Semantic')) {
+                        $nested_sr->set_input_text($input_text);
+                        last;
+                    }
+                }
+            }
+        }
     }
 }
 

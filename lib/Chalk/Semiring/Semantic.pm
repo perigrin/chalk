@@ -52,11 +52,153 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
         my $self_span  = $self->context->end_pos - $self->context->start_pos;
         my $other_span = $other->context->end_pos - $other->context->start_pos;
 
+        if ($ENV{DEBUG_OVERLOAD}) {
+            my $self_rule = $self->context->rule ? $self->context->rule->lhs : 'NORULE';
+            my $other_rule = $other->context->rule ? $other->context->rule->lhs : 'NORULE';
+            if (($self_rule =~ /ClassDeclaration|UseStatement/ || $other_rule =~ /ClassDeclaration|UseStatement/) && $self_span != $other_span) {
+                warn "SEMANTIC.add(): $self_rule (span=$self_span) vs $other_rule (span=$other_span)\n";
+            }
+        }
+
         if ( $other_span > $self_span ) {
+            if ($ENV{DEBUG_OVERLOAD}) {
+                my $self_rule = $self->context->rule ? $self->context->rule->lhs : 'NORULE';
+                warn "SEMANTIC.add(): Choosing other (longer span) over $self_rule\n";
+            }
             return $other;    # Other consumed more input, prefer it
         }
         if ( $self_span > $other_span ) {
+            if ($ENV{DEBUG_OVERLOAD}) {
+                my $other_rule = $other->context->rule ? $other->context->rule->lhs : 'NORULE';
+                warn "SEMANTIC.add(): Choosing self (longer span) over $other_rule\n";
+            }
             return $self;     # Self consumed more input, prefer it
+        }
+
+     # If spans are equal, prefer the alternative with better IR structure
+     # Special case: For ClassDeclaration, prefer the one with more overload mappings
+        if ($ENV{DEBUG_OVERLOAD}) {
+            my $self_rule = $self->context->rule ? $self->context->rule->lhs : 'NORULE';
+            my $other_rule = $other->context->rule ? $other->context->rule->lhs : 'NORULE';
+            if ($self_rule eq 'ClassDeclaration' && $other_rule eq 'ClassDeclaration') {
+                my $self_has_focus = defined($self_focus) ? 'YES' : 'NO';
+                my $other_has_focus = defined($other_focus) ? 'YES' : 'NO';
+                warn "SEMANTIC.add(): ClassDeclaration vs ClassDeclaration - self focus=$self_has_focus, other focus=$other_has_focus\n";
+
+                if (defined($self_focus)) {
+                    my $self_blessed = blessed($self_focus) ? blessed($self_focus) : 'NOT BLESSED';
+                    my $self_op = ($self_blessed ne 'NOT BLESSED' && $self_focus->can('op')) ? $self_focus->op : 'NO OP';
+                    warn "  self focus: blessed=$self_blessed, op=$self_op\n";
+                }
+                if (defined($other_focus)) {
+                    my $other_blessed = blessed($other_focus) ? blessed($other_focus) : 'NOT BLESSED';
+                    my $other_op = ($other_blessed ne 'NOT BLESSED' && $other_focus->can('op')) ? $other_focus->op : 'NO OP';
+                    warn "  other focus: blessed=$other_blessed, op=$other_op\n";
+                }
+            }
+        }
+
+        my $both_classdef = (defined($self_focus) && blessed($self_focus) && $self_focus->can('op') && $self_focus->op eq 'ClassDef' &&
+            defined($other_focus) && blessed($other_focus) && $other_focus->can('op') && $other_focus->op eq 'ClassDef');
+
+        if ($ENV{DEBUG_OVERLOAD} && $self->context->rule && $self->context->rule->lhs eq 'ClassDeclaration' && $other->context->rule && $other->context->rule->lhs eq 'ClassDeclaration') {
+            if (defined($self_focus) && blessed($self_focus) && $self_focus->can('op') && $self_focus->op eq 'ClassDef') {
+                if (defined($other_focus) && blessed($other_focus) && $other_focus->can('op') && $other_focus->op eq 'ClassDef') {
+                    warn "  both_classdef check result: $both_classdef\n";
+                }
+            }
+        }
+
+        if ($both_classdef) {
+            my $self_mappings = scalar(keys %{$self_focus->overload_mappings // {}});
+            my $other_mappings = scalar(keys %{$other_focus->overload_mappings // {}});
+
+            if ($ENV{DEBUG_OVERLOAD}) {
+                warn "SEMANTIC.add(): ClassDef comparison - self has $self_mappings mappings, other has $other_mappings mappings\n";
+            }
+
+            if ($ENV{DEBUG_OVERLOAD} && $self_mappings != $other_mappings) {
+                warn "  Mappings differ!\n";
+            }
+
+            if ($other_mappings > $self_mappings) {
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    warn "SEMANTIC.add(): Choosing other ClassDef (more overload mappings)\n";
+                }
+                return $other;
+            }
+            if ($self_mappings > $other_mappings) {
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    warn "SEMANTIC.add(): Choosing self ClassDef (more overload mappings)\n";
+                }
+                return $self;
+            }
+        }
+
+     # If spans are equal, look at children's rightmost position to prefer longer internal matches
+     # This handles the case where outer structures have equal spans (ending at closing brace)
+     # but different internal parsing (UseStatement ending at 166 vs 241)
+        my $self_rule = $self->context->rule ? $self->context->rule->lhs : '';
+        my $other_rule = $other->context->rule ? $other->context->rule->lhs : '';
+
+        # Only apply this for rules that can contain varying-length children
+        if ($self_rule && $self_rule eq $other_rule && $self_rule eq 'StatementList') {
+            my $self_children_count = scalar(@{$self->context->children});
+            my $other_children_count = scalar(@{$other->context->children});
+
+            # Only compare if at least one has children
+            if ($self_children_count > 0 || $other_children_count > 0) {
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    warn "SEMANTIC.add(): Checking $self_rule children for max end position\n";
+                    warn "  self has $self_children_count children, other has $other_children_count children\n";
+                }
+
+                # Find the rightmost (latest ending) child in each alternative
+                my $self_max_end = $self->context->start_pos;  # Default to start if no children
+                for my $i (0 .. $#{$self->context->children}) {
+                    my $child = $self->context->children->[$i];
+                    if ($ENV{DEBUG_OVERLOAD} && $self_children_count <= 5) {
+                        my $type = ref($child) || 'SCALAR';
+                        my $end = ($child && $child->can('end_pos')) ? $child->end_pos : 'N/A';
+                        warn "  self child[$i]: type=$type, end=$end\n";
+                    }
+                    if ($child && $child->can('end_pos')) {
+                        my $end = $child->end_pos;
+                        $self_max_end = $end if $end > $self_max_end;
+                    }
+                }
+
+                my $other_max_end = $other->context->start_pos;  # Default to start if no children
+                for my $i (0 .. $#{$other->context->children}) {
+                    my $child = $other->context->children->[$i];
+                    if ($ENV{DEBUG_OVERLOAD} && $other_children_count <= 5) {
+                        my $type = ref($child) || 'SCALAR';
+                        my $end = ($child && $child->can('end_pos')) ? $child->end_pos : 'N/A';
+                        warn "  other child[$i]: type=$type, end=$end\n";
+                    }
+                    if ($child && $child->can('end_pos')) {
+                        my $end = $child->end_pos;
+                        $other_max_end = $end if $end > $other_max_end;
+                    }
+                }
+
+                if ($ENV{DEBUG_OVERLOAD} && $self_max_end != $other_max_end) {
+                    warn "SEMANTIC.add(): $self_rule - self max child end=$self_max_end, other max=$other_max_end\n";
+                }
+
+                if ($other_max_end > $self_max_end) {
+                    if ($ENV{DEBUG_OVERLOAD}) {
+                        warn "SEMANTIC.add(): Choosing other $self_rule (child extends further)\n";
+                    }
+                    return $other;
+                }
+                if ($self_max_end > $other_max_end) {
+                    if ($ENV{DEBUG_OVERLOAD}) {
+                        warn "SEMANTIC.add(): Choosing self $self_rule (child extends further)\n";
+                    }
+                    return $self;
+                }
+            }
         }
 
      # If spans are equal, prefer the alternative with more children
@@ -66,8 +208,6 @@ class Chalk::Semiring::SemanticElement :isa(Chalk::Element) {
 
         # DEBUG: Log all equal-span disambiguations
         if ($ENV{DEBUG_STMTLIST_DISAMBIG}) {
-            my $self_rule = $self->context->rule ? $self->context->rule->lhs : 'NORULE';
-            my $other_rule = $other->context->rule ? $other->context->rule->lhs : 'NORULE';
             warn "[DISAMBIG] $self_rule vs $other_rule: self=$self_children children, other=$other_children children\n";
 
             if ($self_rule eq 'StatementList' && $other_rule eq 'StatementList') {
@@ -151,6 +291,7 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     field $shared_context :param :reader = undef;
     field $type_env       :param :reader =
       {};    # Maps variable names to Chalk::Type objects
+    field $input_text     :reader :writer = undef;    # Full input being parsed (for validation)
 
     field $mul_id :reader = Chalk::Semiring::SemanticElement->new(
         value   => 1,                         # mul_id has value 1
@@ -347,6 +488,39 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         # Evaluate the rule's semantic action if it has one
         my $rule = $ctx->rule;
         if ( $rule && $rule->can('evaluate') ) {
+            if ($ENV{DEBUG_OVERLOAD}) {
+                my $rule_lhs = $rule->can('lhs') ? $rule->lhs : 'unknown';
+                my $num_children = scalar(@{$ctx->children});
+                my $start = $ctx->start_pos;
+                my $end = $ctx->end_pos;
+                my $span = $end - $start;
+                warn "SEMANTIC.on_complete(): $rule_lhs with $num_children children, span=$span ($start-$end)\n";
+            }
+
+            # Semantic validation: Call rule's validate() method if available and input_text is set
+            # This allows rules to reject semantically invalid parses
+            my $rule_lhs = $rule->can('lhs') ? $rule->lhs : '';
+            if ($rule_lhs eq 'UseStatement') {
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    my $end_pos = $ctx->end_pos;
+                    warn "SEMANTIC VALIDATION: Checking UseStatement at $end_pos (input_text=" . (defined($input_text) ? "SET" : "UNSET") . ", has_validate=" . ($rule->can('validate') ? "YES" : "NO") . ")\n";
+                }
+                if ($input_text && $rule->can('validate')) {
+                    my $end_pos = $ctx->end_pos;
+                    my $is_valid = $rule->validate($self, $ctx, $input_text);
+                    if (!$is_valid) {
+                        if ($ENV{DEBUG_OVERLOAD}) {
+                            warn "SEMANTIC VALIDATION: UseStatement at $end_pos failed validation (ExpressionList incomplete), rejecting parse\n";
+                        }
+                        return $add_id;
+                    } else {
+                        if ($ENV{DEBUG_OVERLOAD}) {
+                            warn "SEMANTIC VALIDATION: UseStatement at $end_pos PASSED validation\n";
+                        }
+                    }
+                }
+            }
+
             my $result;
             try {
                 $result = $rule->evaluate($ctx);
@@ -354,6 +528,10 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
                 # Semantic action failed - return add_id to signal parse failure
                 # This allows the parser to backtrack and try other alternatives
                 warn "[SEMANTIC] evaluate() failed: $e" if $ENV{CHALK_DEBUG_SEMANTIC};
+                if ($ENV{DEBUG_OVERLOAD}) {
+                    my $rule_lhs = $rule->can('lhs') ? $rule->lhs : 'unknown';
+                    warn "SEMANTIC.on_complete(): $rule_lhs evaluation FAILED, returning add_id\n";
+                }
                 return $add_id;
             }
 

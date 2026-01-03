@@ -207,6 +207,12 @@ HELP
 
             # Parse the module
             print("Parsing $module ($file_path)... ");
+
+            # Set input text on semiring for validation (if supported)
+            if ($semiring->can('set_input_text')) {
+                $semiring->set_input_text($content);
+            }
+
             my $result = $parser->parse_string($content);
 
             if ($result) {
@@ -282,6 +288,11 @@ HELP
             semiring => $semiring,
             preprocess => $preprocess
         );
+
+        # Set input text on semiring for validation (if supported)
+        if ($semiring->can('set_input_text')) {
+            $semiring->set_input_text($input);
+        }
 
         # Parse the input
         my $result = $parser->parse_string($input);
