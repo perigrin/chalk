@@ -471,9 +471,8 @@ Variable -> Variable '->' '%' '*'                     # $var->%* (hash postfix d
 
 # Method calls on Variables become Variables to allow further dereferencing
 # This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
-# DISABLED: Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
-# DISABLED: Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
-# These rules create ambiguity with MethodCall - Variable.pm doesn't implement them anyway
+Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
+Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
 
 # Subscript access on function/method call results (for patterns like foo()->{key}, $obj->method()->{key})
 # These rules enable chained access: $self->to_hash()->{attributes}, Class->new()->[0]
