@@ -676,6 +676,28 @@ class Chalk::Target::XS {
         use Chalk::Target::XS::AST::Literal;
 
         my $value = $node->value;
+
+        # If the value is itself a node object, delegate to its visitor
+        if ($value isa Chalk::IR::Node::InterpolatedString) {
+            my $result = $self->visit_InterpolatedString($value);
+            # Bind the result variable to this node's ID so Return can find it
+            if ($result && $value->can('id')) {
+                my $inner_var = $self->get_var($value->id);
+                $self->bind_var($node->id, $inner_var) if $inner_var;
+            }
+            return $result;
+        }
+        elsif ($value isa Chalk::IR::Node::Constant) {
+            # Recursively visit nested Constant
+            my $result = $self->visit_Constant($value);
+            # Bind the result variable to this node's ID so Return can find it
+            if ($result && $value->can('id')) {
+                my $inner_var = $self->get_var($value->id);
+                $self->bind_var($node->id, $inner_var) if $inner_var;
+            }
+            return $result;
+        }
+
         my $var = $self->alloc_temp($node->id);
         my $c_type = $self->get_c_type($node);
 

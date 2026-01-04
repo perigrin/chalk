@@ -4,20 +4,28 @@
 use 5.42.0;
 use experimental 'class';
 use Chalk::Grammar::Chalk::Type::Str;
+use Chalk::IR::Node;
 
 class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
 
     method evaluate($context) {
-        # String -> %STRING%  (double-quoted string literal)
-        # String -> %SQSTRING%  (single-quoted string literal)
+        # String -> DoubleQuotedString (may return IR node)
+        # String -> SingleQuotedString (may return IR node)
         # String -> %VERSION% (version number like 5.42.0)
-        # Child [0] contains the matched string literal with quotes
+        # Child [0] contains either a token or an IR node
 
-        my $string_with_quotes = $context->child(0);
-        die "String: expected string token at child(0), got undefined - grammar bug" unless defined $string_with_quotes;
+        my $child = $context->child(0);
+        die "String: expected string token at child(0), got undefined - grammar bug" unless defined $child;
 
-        # Strip surrounding quotes - see issue #201 for proper interpolation handling
-        my $value = "$string_with_quotes";
+        # If child is already an IR node (from DoubleQuotedString/SingleQuotedString), pass through
+        # This handles InterpolatedString nodes and Constant nodes from those rules
+        # Check if it has an 'id' method which all IR nodes have
+        if (ref($child) && $child->can('id')) {
+            return $child;
+        }
+
+        # Otherwise, child is a token - strip quotes and create Constant
+        my $value = "$child";
         if (length($value) >= 2 && $value =~ m/^['"]/) {
             $value = substr($value, 1, length($value) - 2);
         }
