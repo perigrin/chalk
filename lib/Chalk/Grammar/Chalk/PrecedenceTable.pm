@@ -11,11 +11,10 @@ class Chalk::Grammar::Chalk::PrecedenceTable {
     sub get_table {
         return (
             # Index 0 - Highest precedence
-            # NOTE: '->' needs to be in precedence table to prevent wrong parses like
-            # (state $x = $obj)->method() where assignment (low precedence) is nested
-            # inside method call (high precedence). The MethodCall grammar rule
-            # uses Expression as receiver, so we need precedence validation.
-            { assoc => 'left', ops => ['->'] },  # method call, array/hash deref
+            # NOTE: '->' removed from precedence table - it's a postfix dereference
+            # operator, not a binary expression operator. The grammar structure
+            # already enforces its binding. Including it caused conflicts with
+            # operators inside subscripts like $ref->[1 + 2].
             { assoc => 'nonassoc', ops => ['++', '--'] },  # postfix
             { assoc => 'right',   ops => ['**'] },
             { assoc => 'right',   ops => ['!', '~', '\\', 'unary +', 'unary -'] },

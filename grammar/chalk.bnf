@@ -432,7 +432,6 @@ Variable -> ScalarVar
 Variable -> ArrayVar
 Variable -> HashVar
 Variable -> ArraySize
-Variable -> VariableDeclaration  # my $x, state $y, our $z can be used as variables
 
 # Variable names allow keywords (e.g., $class, $if, $while are valid in Perl)
 ScalarVar -> '$' %BAREWORD_ANY%
