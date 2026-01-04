@@ -662,11 +662,11 @@ class Chalk::Target::XS {
 
     # Parm nodes represent function parameters - bind to parameter name
     method visit_Parm($node) {
-        use Chalk::Target::XS::Util qw(perl_to_c_identifier);
+        use Chalk::Target::XS::Util;
 
         my $name = $node->name;
         # Convert Perl parameter name to C identifier, sanitizing keywords
-        my $c_name = perl_to_c_identifier($name);
+        my $c_name = Chalk::Target::XS::Util->perl_to_c_identifier($name);
         $self->bind_var($node->id, $c_name);
         return undef;  # No XS statement needed
     }
