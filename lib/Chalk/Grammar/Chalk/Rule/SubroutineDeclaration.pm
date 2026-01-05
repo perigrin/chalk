@@ -187,8 +187,9 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
         if (ref($node) eq 'HASH' && $node->{statements}) {
             my @new_stmts;
             my $changed = 0;
-            for my $i (0 .. $#{$node->{statements}}) {
-                my $stmt = $node->{statements}[$i];
+            my $statements = $node->{statements};
+            for my $i (0 .. $#$statements) {
+                my $stmt = $statements->[$i];
                 my $new_stmt = $self->_replace_unbound_variables($stmt, $param_map);
                 push @new_stmts, $new_stmt;
                 $changed = 1 if refaddr($new_stmt) != refaddr($stmt);
