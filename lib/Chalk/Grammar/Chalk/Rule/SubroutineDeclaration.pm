@@ -308,7 +308,6 @@ class Chalk::Grammar::Chalk::Rule::SubroutineDeclaration :isa(Chalk::GrammarRule
 
         # Handle Call nodes (callee + args + receiver)
         if ($op eq 'Call' && $node->can('args')) {
-            use Scalar::Util qw(blessed refaddr);
             my $call_args = $node->args // [];
             my @new_args;
             my $args_changed = 0;
