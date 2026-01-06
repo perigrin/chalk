@@ -16,9 +16,20 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         # Variable -> HashVar (lookup hash in context)
         # Variable -> ScalarVar '[' Expression ']' (array element access)
         # Variable -> ScalarVar '{' Expression '}' (hash element access)
+        # Variable -> Variable '->' Identifier (method call without parens)
+        # Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')' (method call)
         # Variable -> ArraySize (TODO)
 
         my @children = $context->children->@*;
+
+        # Check for method call: Variable '->' Identifier ...
+        # Look for '->' in children
+        for my $i (1 .. $#children) {
+            my $child = $context->child($i);
+            if (defined($child) && !ref($child) && $child eq '->') {
+                return $self->_handle_method_call($context);
+            }
+        }
 
         # Check for subscripting: ScalarVar '[' Expression ']' or ScalarVar '{' Expression '}'
         if (@children == 4) {
@@ -127,6 +138,90 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
 
         # For other variable types, pass through the metadata
         return $var_metadata;
+    }
+
+    method _handle_method_call($context) {
+        use Chalk::IR::Node::Call;
+        use Chalk::IR::Node::CallEnd;
+        use Chalk::IR::Node::Constant;
+        use Chalk::Grammar::Chalk::Type::Str;
+
+        # Variable -> Variable '->' Identifier
+        # Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'
+
+        my @children = $context->children->@*;
+
+        # Get receiver (first child)
+        my $receiver = $context->child(0);
+
+        # If receiver is not an IR node, wrap as Constant
+        unless (blessed($receiver) && $receiver->can('id')) {
+            my $name = defined($receiver) ? "$receiver" : 'unknown';
+            $receiver = Chalk::IR::Node::Constant->new(
+                value => $name,
+                type => Chalk::Grammar::Chalk::Type::Str->new(),
+            );
+        }
+
+        # Find method name (after '->')
+        my $callee;
+        my $found_arrow = 0;
+        for my $i (0 .. $#children) {
+            my $child = $context->child($i);
+
+            # Skip until we find '->'
+            if (!$found_arrow) {
+                if (defined($child) && !ref($child) && $child eq '->') {
+                    $found_arrow = 1;
+                }
+                next;
+            }
+
+            # Next non-whitespace child is the method name
+            if (defined($child) && $child ne '' && !ref($child)) {
+                $callee = $child;
+                last;
+            }
+        }
+
+        unless (defined $callee) {
+            # Couldn't find method name, return receiver
+            return $receiver;
+        }
+
+        # Get arguments (if any) - look for ExpressionList after '('
+        my @args;
+        my $found_paren = 0;
+        for my $i (0 .. $#children) {
+            my $child = $context->child($i);
+
+            if (!$found_paren) {
+                if (defined($child) && !ref($child) && $child eq '(') {
+                    $found_paren = 1;
+                }
+                next;
+            }
+
+            # Found opening paren, next child should be ExpressionList or ')'
+            if (ref($child) eq 'ARRAY') {
+                @args = @$child;
+                last;
+            } elsif (blessed($child) && $child->can('id')) {
+                # Single expression argument
+                @args = ($child);
+                last;
+            }
+        }
+
+        # Create Call node
+        my $call = Chalk::IR::Node::Call->new(
+            callee   => $callee,
+            args     => \@args,
+            receiver => $receiver,
+        );
+
+        # Wrap in CallEnd
+        return Chalk::IR::Node::CallEnd->new(call => $call);
     }
 
     # TypeInference semiring: infer types for variable access patterns
