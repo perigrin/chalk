@@ -17,11 +17,12 @@ class Chalk::Grammar::Chalk::Rule::ExpressionList :isa(Chalk::GrammarRule) {
         }
 
         # Filter to only IR nodes (skip comma tokens and other non-IR children)
+        # Use $context->child($i) to get evaluate semiring result, not ->focus which returns Scope value
         my @ir_nodes;
-        for my $child_ctx (@children) {
-            my $focus = $child_ctx->focus;
-            if (blessed($focus) && $focus->can('id')) {
-                push @ir_nodes, $focus;
+        for my $i (0 .. $#children) {
+            my $child_result = $context->child($i);
+            if (blessed($child_result) && $child_result->can('id')) {
+                push @ir_nodes, $child_result;
             }
         }
 

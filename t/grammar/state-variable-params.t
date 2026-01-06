@@ -40,12 +40,12 @@ class Test1_Constant {
     my $method = $methods->[0];
 
     my $stmts = $method->body_statements;
-    is(scalar(@$stmts), 2, 'Has 2 statements (Store, Return)');
+    is(scalar(@$stmts), 2, 'Has 2 statements (Constant, Return)');
 
-    my $store = $stmts->[0];
-    is($store->op, 'Store', 'First statement is Store');
-    is($store->var, '$x', 'Store variable is $x');
-    is($store->value->op, 'Constant', 'Store value is Constant node');
+    # In SSA, assignments return their RHS value, not Store statements
+    my $constant = $stmts->[0];
+    is($constant->op, 'Constant', 'First statement is Constant (assignment RHS)');
+    is($constant->value, 42, 'Constant value is 42');
 };
 
 subtest 'State variable with parameter reference' => sub {
@@ -79,15 +79,13 @@ class Test2_Parameter {
     my $method = $methods->[0];
 
     my $stmts = $method->body_statements;
-    is(scalar(@$stmts), 2, 'Has 2 statements (Store, Return)');
+    is(scalar(@$stmts), 2, 'Has 2 statements (Parm, Return)');
 
-    my $store = $stmts->[0];
-    is($store->op, 'Store', 'First statement is Store');
-    is($store->var, '$x', 'Store variable is $x');
-
+    # In SSA, assignments return their RHS value
     # THIS IS THE KEY TEST - should be Parm, not UnboundVariable
-    is($store->value->op, 'Parm', 'Store value is Parm node (not UnboundVariable)');
-    is($store->value->name, '$class', 'Parm name is $class');
+    my $parm = $stmts->[0];
+    is($parm->op, 'Parm', 'First statement is Parm (assignment RHS, not UnboundVariable)');
+    is($parm->name, '$class', 'Parm name is $class');
 };
 
 subtest 'State variable with method call on parameter (Type::String BOTTOM case)' => sub {
@@ -121,20 +119,19 @@ class Test3_MethodCall {
     my $method = $methods->[0];
 
     my $stmts = $method->body_statements;
-    is(scalar(@$stmts), 2, 'Has 2 statements (Store, Return)');
+    is(scalar(@$stmts), 2, 'Has 2 statements (CallEnd, Return)');
 
-    my $store = $stmts->[0];
-    is($store->op, 'Store', 'First statement is Store');
-    is($store->var, '$singleton', 'Store variable is $singleton');
+    # In SSA, assignments are expressions that return values, not Store statements
+    # The first statement is the CallEnd from the assignment expression
+    my $call_end = $stmts->[0];
+    is($call_end->op, 'CallEnd', 'First statement is CallEnd');
 
-    # The value should be CallEnd wrapping a Call
-    is($store->value->op, 'CallEnd', 'Store value is CallEnd node');
-
-    my $call = $store->value->call;
+    my $call = $call_end->call;
     ok($call, 'CallEnd has call field');
     is($call->op, 'Call', 'Inner node is Call');
 
     # The receiver of the method call should be a Parm node, not UnboundVariable
+    # This verifies that parameter replacement worked correctly
     my $receiver = $call->receiver;
     ok($receiver, 'Call has receiver');
     is($receiver->op, 'Parm', 'Receiver is Parm node (not UnboundVariable)');

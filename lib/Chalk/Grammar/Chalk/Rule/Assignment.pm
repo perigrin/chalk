@@ -1,10 +1,9 @@
 # ABOUTME: Semantic action for Assignment - binds variables to IR nodes using SSA
-# ABOUTME: Assignment handles simple assignment (=) with direct data flow
+# ABOUTME: Returns RHS value for expression chaining, updates Scope with binding
 
 use 5.42.0;
 use experimental qw(class);
 use Chalk::Grammar;  # Provides Chalk::GrammarRule base class
-use Chalk::IR::Node::Store;
 
 class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
 
@@ -63,28 +62,16 @@ class Chalk::Grammar::Chalk::Rule::Assignment :isa(Chalk::GrammarRule) {
             return $context->child(0);
         }
 
-        # Get current control from scope
-        my $current_control = $scope->current_control;
-        unless (defined($current_control)) {
-            return $context->child(0);
-        }
-
-        # Create Store node directly (content-addressable ID)
-        my $store = Chalk::IR::Node::Store->new(
-            control => $current_control,
-            var     => $var_name,
-            value   => $rhs,
-        );
-
-        # Update scope immutably: create new scope with binding and control
+        # Update scope immutably: create new scope with binding to RHS value
+        # In SSA, assignments are expressions that return values, not statements with Store nodes
+        # Store nodes are only for memory (heap) operations, not variable bindings
         my $new_scope = $scope->with_binding($var_name, $rhs);
-        $new_scope = $new_scope->with_control($store);
 
         # Update env's scope reference to the new immutable scope
         $context->env->{scope} = $new_scope;
 
-        # Return Store node so control flow can be wired through it
-        return $store;
+        # Return RHS value (enables expression chaining: my $foo = my $bar = 5)
+        return $rhs;
     }
 
     # Type inference for TypeInference semiring

@@ -469,11 +469,6 @@ Variable -> Variable '{' %BAREWORD_ANY% '}'           # $ref->{key1}{class} - ba
 Variable -> Variable '->' '@' '*'                     # $var->@* (array postfix deref)
 Variable -> Variable '->' '%' '*'                     # $var->%* (hash postfix deref)
 
-# Method calls on Variables become Variables to allow further dereferencing
-# This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
-Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
-Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
-
 # Subscript access on function/method call results (for patterns like foo()->{key}, $obj->method()->{key})
 # These rules enable chained access: $self->to_hash()->{attributes}, Class->new()->[0]
 Variable -> FunctionCall '->' '{' Expression '}'         # foo()->{key}, $obj->method()->{key}
