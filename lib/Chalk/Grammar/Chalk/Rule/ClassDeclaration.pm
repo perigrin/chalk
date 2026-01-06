@@ -229,26 +229,6 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         # Find the Block context (last child)
         my $block_ctx = $child_contexts[$#child_contexts];
 
-        # DEBUG: Let's inspect the Block's children to see if UseStatement is there
-        warn "DEBUG: Block context has " . scalar($block_ctx->children->@*) . " children\n";
-        for my $i (0 .. scalar($block_ctx->children->@*) - 1) {
-            my $block_child = $block_ctx->child($i);
-            warn "DEBUG: Block child[$i] = " . (blessed($block_child) // ref($block_child) // (defined $block_child ? "'$block_child'" : 'undef')) . "\n";
-            if (blessed($block_child) && $block_child->can('op')) {
-                warn "DEBUG: Block child[$i] op = " . $block_child->op . "\n";
-            }
-            elsif (ref($block_child) eq 'ARRAY') {
-                warn "DEBUG: Block child[$i] is array with " . scalar(@$block_child) . " elements\n";
-                for my $j (0 .. $#$block_child) {
-                    my $elem = $block_child->[$j];
-                    warn "DEBUG: Block child[$i][$j] = " . (blessed($elem) // ref($elem) // 'scalar') . "\n";
-                    if (blessed($elem) && $elem->can('op')) {
-                        warn "DEBUG: Block child[$i][$j] op = " . $elem->op . "\n";
-                    }
-                }
-            }
-        }
-
         # Extract field declarations from the block context (not the evaluated block)
         # Returns array of hashrefs: { name => $field_name, type => $type_obj, attributes => \@attrs, has_default => bool }
         my @field_info = _extract_fields_from_context($block_ctx);
@@ -333,11 +313,9 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
         my @method_nodes;
         my %overload_mappings;
 
-        warn "DEBUG ClassDeclaration: Checking " . scalar(@child_contexts) . " child contexts\n" if $ENV{DEBUG_OVERLOAD};
         for my $i (0 .. $#child_contexts) {
             my $child = $child_contexts[$i]->extract;
             next unless defined $child;
-            warn "DEBUG ClassDeclaration: child[$i] = " . (blessed($child) ? blessed($child) . " op=" . ($child->can('op') ? $child->op : 'N/A') : ref($child)) . "\n" if $ENV{DEBUG_OVERLOAD};
 
             # Check if this is an IR node with an op
             if (blessed($child) && $child->can('op')) {
@@ -350,6 +328,27 @@ class Chalk::Grammar::Chalk::Rule::ClassDeclaration :isa(Chalk::GrammarRule) {
                         # Merge the mappings from this use overload statement
                         my $mappings = $attrs->{mappings} // {};
                         %overload_mappings = (%overload_mappings, %$mappings);
+                    }
+                }
+                elsif ($op eq 'FunctionDef') {
+                    push @method_nodes, $child;
+                }
+            }
+            # Check array structures (for block results)
+            elsif (ref($child) eq 'ARRAY') {
+                for my $stmt (@$child) {
+                    if (blessed($stmt) && $stmt->can('op')) {
+                        my $op = $stmt->op;
+                        if ($op eq 'FunctionDef') {
+                            push @method_nodes, $stmt;
+                        }
+                        elsif ($op eq 'UseStatement') {
+                            my $attrs = $stmt->attributes;
+                            if ($attrs && $attrs->{type} eq 'overload_directive') {
+                                my $mappings = $attrs->{mappings} // {};
+                                %overload_mappings = (%overload_mappings, %$mappings);
+                            }
+                        }
                     }
                 }
             }

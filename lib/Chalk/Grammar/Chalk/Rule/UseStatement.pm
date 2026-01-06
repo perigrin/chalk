@@ -72,17 +72,6 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
     }
 
     method evaluate($context) {
-        if ($ENV{DEBUG_OVERLOAD}) {
-        warn "UNCONDITIONAL: UseStatement.evaluate() CALLED\n";
-            my @ch = $context->children->@*;
-            warn "DEBUG UseStatement.evaluate() START - children: " . scalar(@ch) . "\n";
-            for my $i (0 .. $#ch) {
-                my $ext = $ch[$i]->extract;
-                my $d = !defined($ext) ? "undef" : ref($ext) ? (blessed($ext) ? blessed($ext) : ref($ext)) : "scalar";
-                warn "  child[$i]: $d\n";
-            }
-        }
-
 # UseStatement grammar rules:
 # UseStatement -> 'use' WS_OPT Number                                    # use 5.42.0
 # UseStatement -> 'use' WS_OPT QualifiedIdentifier                       # use Module
@@ -143,7 +132,6 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
 
         # Special handling for 'use overload'
         if ($module_name eq 'overload') {
-            warn "DEBUG UseStatement: Processing use overload, current_control=" . (defined $current_control ? "defined" : "undef") . "\n" if $ENV{DEBUG_OVERLOAD};
             # Extract operator => method mappings from ExpressionList
             my %mappings;
             my $fallback = 0;
@@ -180,56 +168,37 @@ class Chalk::Grammar::Chalk::Rule::UseStatement :isa(Chalk::GrammarRule) {
             # ExpressionList is represented as a List IR node with elements
             my $elements = $expression_list->elements || [];
 
+            # ExpressionList with fat comma (=>) produces pairs: [operator, method, operator, method, ...]
+            # The fat comma itself is removed by the ExpressionList parser
             my $i = 0;
             while ($i < @$elements) {
                 my $left = $elements->[$i];
-                my $arrow = $elements->[$i + 1];
-                my $right = $elements->[$i + 2];
+                my $right = $elements->[$i + 1];
 
-                # Skip if we don't have a complete triple
-                last unless defined($left) && defined($arrow) && defined($right);
+                # Skip if we don't have a complete pair
+                last unless defined($left) && defined($right);
 
-                # Check if this is a fat comma pair (left => right)
-                if (defined($arrow) && $arrow eq '=>') {
-                    # Extract the operator (left side)
-                    my $operator = $left;
-                    if (ref($left) && $left->can('op') && $left->op eq 'Constant') {
-                        $operator = $left->value;
-                    }
-
-                    # Extract the method name (right side)
-                    my $method = $right;
-                    if (ref($right) && $right->can('op') && $right->op eq 'Constant') {
-                        $method = $right->value;
-                    }
-
-                    # Handle fallback specially
-                    if ($operator eq 'fallback') {
-                        $fallback = $method;
-                    } else {
-                        $mappings{$operator} = $method;
-                    }
-
-                    # Skip past this pair (operator, =>, method)
-                    $i += 3;
-
-                    # Skip comma if present
-                    if ($i < @$elements) {
-                        my $maybe_comma = $elements->[$i];
-                        if (defined($maybe_comma) && $maybe_comma eq ',') {
-                            $i++;
-                        }
-                    }
-                } else {
-                    # Not a fat comma, skip this element
-                    $i++;
+                # Extract the operator (left side)
+                my $operator = $left;
+                if (ref($left) && $left->can('op') && $left->op eq 'Constant') {
+                    $operator = $left->value;
                 }
-            }
 
-            if ($ENV{DEBUG_OVERLOAD}) {
-                warn "DEBUG: use overload - extracted " . scalar(keys %mappings) . " mappings: "
-                    . join(", ", map { "$_ => $mappings{$_}" } sort keys %mappings)
-                    . ", fallback=$fallback\n";
+                # Extract the method name (right side)
+                my $method = $right;
+                if (ref($right) && $right->can('op') && $right->op eq 'Constant') {
+                    $method = $right->value;
+                }
+
+                # Handle fallback specially
+                if ($operator eq 'fallback') {
+                    $fallback = $method;
+                } else {
+                    $mappings{$operator} = $method;
+                }
+
+                # Move to next pair
+                $i += 2;
             }
 
             # Create overload directive node
