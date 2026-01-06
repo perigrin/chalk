@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # ABOUTME: Test IR structure for assignment statements
-# ABOUTME: Verifies that assignments create proper Store nodes with correct values
+# ABOUTME: Verifies that assignments return RHS values (SSA semantics)
 
 use 5.42.0;
 use Test::More;
@@ -69,7 +69,7 @@ sub get_method_body_statements {
     return undef;
 }
 
-subtest 'Simple variable assignment creates Store node' => sub {
+subtest 'Simple variable assignment returns RHS value' => sub {
     my $source = q{
 class Test1_Simple {
     sub test($param) {
@@ -84,18 +84,15 @@ class Test1_Simple {
 
     my $stmts = get_method_body_statements($ir);
     ok($stmts, 'Got method body statements');
-    is(scalar(@$stmts), 2, 'Has 2 statements (Store, Return)');
+    is(scalar(@$stmts), 2, 'Has 2 statements (Parm, Return)');
 
-    my $store = $stmts->[0];
-    is($store->op, 'Store', 'First statement is Store');
-    is($store->var, '$x', 'Store variable is $x');
-
-    # The value should be UnboundVariable for $param (before parameter replacement)
-    ok($store->value->can('op'), 'Store value is an IR node');
-    diag("Store.value op: " . $store->value->op);
+    # In SSA, assignments are expressions returning RHS values
+    my $parm = $stmts->[0];
+    is($parm->op, 'Parm', 'First statement is Parm (RHS value)');
+    is($parm->name, '$param', 'Parm name is $param');
 };
 
-subtest 'State variable with constant creates Store node' => sub {
+subtest 'State variable with constant returns RHS value' => sub {
     my $source = q{
 class Test2_Constant {
     sub test($param) {
@@ -111,16 +108,16 @@ class Test2_Constant {
     my $stmts = get_method_body_statements($ir);
     ok($stmts, 'Got method body statements') or return;
     ok(ref($stmts) eq 'ARRAY', 'stmts is array ref') or return;
-    is(scalar(@$stmts), 2, 'Has 2 statements (Store, Return)') or return;
+    is(scalar(@$stmts), 2, 'Has 2 statements (Constant, Return)') or return;
 
-    my $store = $stmts->[0];
-    ok($store, 'First statement exists') or return;
-    is($store->op, 'Store', 'First statement is Store') or return;
-    is($store->var, '$x', 'Store variable is $x');
-    is($store->value->op, 'Constant', 'Store value is Constant node');
+    # In SSA, assignments are expressions returning RHS values
+    my $constant = $stmts->[0];
+    ok($constant, 'First statement exists') or return;
+    is($constant->op, 'Constant', 'First statement is Constant (RHS value)') or return;
+    is($constant->value, 42, 'Constant value is 42');
 };
 
-subtest 'State variable with parameter creates Store node' => sub {
+subtest 'State variable with parameter returns RHS value' => sub {
     my $source = q{
 class Test3_Parameter {
     sub test($param) {
@@ -135,18 +132,15 @@ class Test3_Parameter {
 
     my $stmts = get_method_body_statements($ir);
     ok($stmts, 'Got method body statements');
-    is(scalar(@$stmts), 2, 'Has 2 statements (Store, Return)');
+    is(scalar(@$stmts), 2, 'Has 2 statements (Parm, Return)');
 
-    my $store = $stmts->[0];
-    is($store->op, 'Store', 'First statement is Store');
-    is($store->var, '$x', 'Store variable is $x');
-
-    # Before parameter replacement, should be UnboundVariable
-    ok($store->value->can('op'), 'Store value is an IR node');
-    diag("Store.value op: " . $store->value->op);
+    # In SSA, assignments are expressions returning RHS values
+    my $parm = $stmts->[0];
+    is($parm->op, 'Parm', 'First statement is Parm (RHS value)');
+    is($parm->name, '$param', 'Parm name is $param');
 };
 
-subtest 'State variable with method call creates Store node' => sub {
+subtest 'State variable with method call returns RHS value' => sub {
     my $source = q{
 class Test4_MethodCall {
     sub test($class) {
@@ -168,38 +162,23 @@ class Test4_MethodCall {
         return;
     };
 
-    diag("Number of statements: " . scalar(@$stmts));
-    for my $i (0 .. $#$stmts) {
-        my $stmt = $stmts->[$i];
-        diag("  stmt[$i]: " . ($stmt->can('op') ? $stmt->op : ref($stmt)));
-    }
+    is(scalar(@$stmts), 2, 'Has 2 statements (CallEnd, Return)') or return;
 
-    is(scalar(@$stmts), 2, 'Has 2 statements (Store, Return)') or return;
-
-    my $store = $stmts->[0];
-    is($store->op, 'Store', 'First statement is Store') or do {
-        diag("First statement is not Store, it's: " . $store->op);
+    # In SSA, assignments are expressions returning RHS values
+    my $call_end = $stmts->[0];
+    is($call_end->op, 'CallEnd', 'First statement is CallEnd (RHS value)') or do {
+        diag("First statement is not CallEnd, it's: " . $call_end->op);
         return;
     };
 
-    is($store->var, '$singleton', 'Store variable is $singleton');
+    my $call = $call_end->call;
+    ok($call, 'CallEnd has call field');
+    is($call->op, 'Call', 'Inner node is Call');
 
-    # The critical test: value should be CallEnd, not just UnboundVariable
-    is($store->value->op, 'CallEnd', 'Store value is CallEnd node') or do {
-        diag("Store.value op: " . $store->value->op);
-        diag("Expected: CallEnd");
-        diag("This is the bug - assignment to method call result is not creating Store with CallEnd");
-    };
-
-    if ($store->value->op eq 'CallEnd') {
-        my $call = $store->value->call;
-        ok($call, 'CallEnd has call field');
-        is($call->op, 'Call', 'Inner node is Call');
-
-        my $receiver = $call->receiver;
-        ok($receiver, 'Call has receiver');
-        diag("Receiver op: " . ($receiver->can('op') ? $receiver->op : 'N/A'));
-    }
+    my $receiver = $call->receiver;
+    ok($receiver, 'Call has receiver');
+    is($receiver->op, 'Parm', 'Receiver is Parm (parameter replacement worked)');
+    is($receiver->name, '$class', 'Receiver name is $class');
 };
 
 done_testing();

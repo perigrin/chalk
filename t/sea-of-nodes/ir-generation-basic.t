@@ -69,22 +69,19 @@ use Test::More;
     like($id, qr/^\d+$/, 'Return node ID is numeric (refaddr)');
 
     # Verify control chain is established
+    # In SSA, assignments don't create Store nodes - they just bind values in scope
+    # Control chain: Start -> UseStatement -> Return (no Store)
     my $control = $return_node->control;
     ok($control, 'Return has control input');
     ok($control->can('op'), 'Control input is a node');
 
-    # Control should be Store (from variable declaration)
-    is($control->op, 'Store', 'Control input is Store node');
-
-    # Store should have control pointing to UseStatement (from 'use 5.42.0;')
-    # Control chain: Start -> UseStatement -> Store -> Return
-    my $store_control = $control->control;
-    ok($store_control, 'Store has control input');
-    is($store_control->op, 'UseStatement', 'Store control is UseStatement node');
+    # Control should be UseStatement (from 'use 5.42.0;')
+    # Note: Assignment doesn't create Store nodes in new SSA architecture
+    is($control->op, 'UseStatement', 'Control input is UseStatement node');
 
     # UseStatement (generic Chalk::IR::Node) uses inputs array, not control method
     # First input is the control predecessor - verify it exists and traces back to Start
-    my $use_inputs = $store_control->inputs;
+    my $use_inputs = $control->inputs;
     ok($use_inputs && @$use_inputs > 0, 'UseStatement has inputs');
     # The first input should be the Start node's ID
     like($use_inputs->[0], qr/start/i, 'UseStatement control input traces to Start');

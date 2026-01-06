@@ -86,9 +86,15 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
                     $current_ctrl = $rewired;
                 }
             } elsif (blessed($stmt) && $stmt->can('id')) {
-                # Node without with_control() - just add it and use it as control
+                # Node without with_control() - just add it
                 push @rewired_statements, $stmt;
-                $current_ctrl = $stmt;
+
+                # Only update control for actual control/statement nodes, not value expressions
+                # Value nodes (Constant, Parm, etc.) don't affect control flow
+                my $op = $stmt->can('op') ? $stmt->op : '';
+                unless ($op eq 'Constant' || $op eq 'Parm' || $op eq 'UnboundVariable') {
+                    $current_ctrl = $stmt;
+                }
 
                 # Issue #195: Also check for early returns on non-rewired nodes
                 if ($stmt->can('early_returns') && $stmt->early_returns) {
@@ -148,12 +154,9 @@ class Chalk::Grammar::Chalk::Rule::Program :isa(Chalk::GrammarRule) {
                 # Last statement is already a Return - add to Stop
                 $stop->add_return($last_stmt);
                 return $stop;
-            } elsif ($op eq 'Store') {
-                # Last statement is a Store - return the stored value
-                $return_value = $last_stmt->value;
-                $final_control = $last_stmt;
             } else {
-                # Other expression - use as return value
+                # Expression statement - use as return value
+                # In SSA, assignments return RHS values (no Store nodes)
                 $return_value = $last_stmt;
             }
         }
