@@ -460,6 +460,11 @@ Variable -> Variable '->' '[' Expression ']'          # $ref->[0]
 Variable -> Variable '->' '{' Expression '}'          # $ref->{key}
 Variable -> Variable '->' '{' %BAREWORD_ANY% '}'      # $ref->{class} - bareword key (auto-quoted, allows keywords)
 
+# Method calls on Variables become Variables to allow further dereferencing
+# This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
+Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
+Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
+
 # Chained subscripts without arrows (Perl allows omitting arrows between subscripts)
 Variable -> Variable '[' Expression ']'               # $ref->[0][1] or $ref->[0]{key}
 Variable -> Variable '{' Expression '}'               # $ref->{key1}{key2} or $array->[0]{key}
