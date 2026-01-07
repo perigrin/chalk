@@ -26,7 +26,14 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         # Look for '->' in children
         for my $i (1 .. $#children) {
             my $child = $context->child($i);
-            if (defined($child) && !ref($child) && $child eq '->') {
+
+            # Extract value from Token objects (same pattern as MethodDeclaration.pm)
+            my $value = $child;
+            if (blessed($child) && $child->can('value')) {
+                $value = $child->value;
+            }
+
+            if (defined($value) && !ref($value) && $value eq '->') {
                 return $self->_handle_method_call($context);
             }
         }
@@ -169,17 +176,23 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
 
+            # Extract value from Token objects
+            my $value = $child;
+            if (blessed($child) && $child->can('value')) {
+                $value = $child->value;
+            }
+
             # Skip until we find '->'
             if (!$found_arrow) {
-                if (defined($child) && !ref($child) && $child eq '->') {
+                if (defined($value) && !ref($value) && $value eq '->') {
                     $found_arrow = 1;
                 }
                 next;
             }
 
             # Next non-whitespace child is the method name
-            if (defined($child) && $child ne '' && !ref($child)) {
-                $callee = $child;
+            if (defined($value) && $value ne '' && !ref($value)) {
+                $callee = $value;
                 last;
             }
         }
@@ -195,8 +208,14 @@ class Chalk::Grammar::Chalk::Rule::Variable :isa(Chalk::GrammarRule) {
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
 
+            # Extract value from Token objects for paren detection
+            my $value = $child;
+            if (blessed($child) && $child->can('value')) {
+                $value = $child->value;
+            }
+
             if (!$found_paren) {
-                if (defined($child) && !ref($child) && $child eq '(') {
+                if (defined($value) && !ref($value) && $value eq '(') {
                     $found_paren = 1;
                 }
                 next;

@@ -282,21 +282,27 @@ class Chalk::Grammar::Chalk::Rule::MethodDeclaration :isa(Chalk::GrammarRule) {
             return $node;
         }
 
-        # Handle Call nodes (callee + args)
+        # Handle Call nodes (callee + args + receiver)
         if ($op eq 'Call' && $node->can('args')) {
             my $call_args = $node->args // [];
             my @new_args;
-            my $changed = 0;
+            my $args_changed = 0;
             for my $arg ($call_args->@*) {
                 my $new_arg = $self->_replace_unbound_variables($arg, $param_map);
                 push @new_args, $new_arg;
-                $changed = 1 if defined($arg) && defined($new_arg) && refaddr($new_arg) != refaddr($arg);
+                $args_changed = 1 if defined($arg) && defined($new_arg) && refaddr($new_arg) != refaddr($arg);
             }
-            if ($changed) {
+
+            # Also replace UnboundVariables in receiver (important for $class->new() patterns)
+            my $receiver = $node->can('receiver') ? $node->receiver : undef;
+            my $new_receiver = defined($receiver) ? $self->_replace_unbound_variables($receiver, $param_map) : undef;
+            my $receiver_changed = defined($receiver) && defined($new_receiver) && refaddr($new_receiver) != refaddr($receiver);
+
+            if ($args_changed || $receiver_changed) {
                 return Chalk::IR::Node::Call->new(
                     callee      => $node->callee,
                     args        => \@new_args,
-                    receiver    => $node->can('receiver') ? $node->receiver : undef,
+                    receiver    => $new_receiver,
                     source_info => $node->can('source_info') ? $node->source_info : undef,
                 );
             }
