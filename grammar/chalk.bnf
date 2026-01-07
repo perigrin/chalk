@@ -284,7 +284,7 @@ Expression -> Postfix
 # Assignment operators (right-associative)
 Assignment -> Expression WS_OPT '=' WS_OPT Expression
 Assignment -> Expression WS_OPT %ASSIGN_OP% WS_OPT Expression
-Assignment -> VariableDeclaration WS_OPT '=' WS_OPT Expression  # my $x = 1
+Assignment -> VariableDeclaration WS_OPT '=' WS_OPT Expression  # my $x = 1, field $y = 0 (for declarations with defaults)
 
 # Ternary operator (right-associative)
 Ternary -> Expression WS_OPT '?' WS_OPT Expression WS_OPT ':' WS_OPT Expression
@@ -460,6 +460,12 @@ Variable -> Variable '->' '[' Expression ']'          # $ref->[0]
 Variable -> Variable '->' '{' Expression '}'          # $ref->{key}
 Variable -> Variable '->' '{' %BAREWORD_ANY% '}'      # $ref->{class} - bareword key (auto-quoted, allows keywords)
 
+# Simple method call in Variable helps break left-recursion for common patterns
+Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'     # $obj->method($args)
+Variable -> Variable '->' Identifier '(' WS_OPT ')'                           # $obj->method()
+
+# Note: Method calls without parens still go through MethodCall to avoid ambiguity
+
 # Chained subscripts without arrows (Perl allows omitting arrows between subscripts)
 Variable -> Variable '[' Expression ']'               # $ref->[0][1] or $ref->[0]{key}
 Variable -> Variable '{' Expression '}'               # $ref->{key1}{key2} or $array->[0]{key}
@@ -468,11 +474,6 @@ Variable -> Variable '{' %BAREWORD_ANY% '}'           # $ref->{key1}{class} - ba
 # Postfix dereferencing on Variables - for patterns like $context->children->@*
 Variable -> Variable '->' '@' '*'                     # $var->@* (array postfix deref)
 Variable -> Variable '->' '%' '*'                     # $var->%* (hash postfix deref)
-
-# Method calls on Variables become Variables to allow further dereferencing
-# This allows patterns like: $obj->method->@*, $obj->method->[0], etc.
-Variable -> Variable '->' Identifier                  # $var->method (method call without parens)
-Variable -> Variable '->' Identifier '(' WS_OPT ExpressionList WS_OPT ')'  # $var->method($args)
 
 # Subscript access on function/method call results (for patterns like foo()->{key}, $obj->method()->{key})
 # These rules enable chained access: $self->to_hash()->{attributes}, Class->new()->[0]

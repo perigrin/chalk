@@ -8,7 +8,8 @@ class Chalk::Grammar::Chalk::Rule::Statement :isa(Chalk::GrammarRule) {
     method evaluate($context) {
         # Statement passes through to its single child
         # PostfixConditionalStatement handles postfix if/unless
-        return $context->child(0);
+        my $result = $context->child(0);
+        return $result;
     }
 }
 

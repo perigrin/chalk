@@ -195,13 +195,16 @@ sub count_node_types {
         my $node_count = scalar(keys %$nodes);
         ok($node_count > 0, "ChalkIR: collected nodes for variable (found $node_count)");
 
-        my $counts = count_node_types($nodes, 'Constant', 'Store', 'Start', 'Stop');
+        # In SSA, assignments return RHS values (not Store nodes)
+        # Store nodes are only for memory (heap) operations, not variable bindings
+        # Note: Without explicit return, Start is not reachable from Stop
+        my $counts = count_node_types($nodes, 'Constant', 'Stop');
         ok($counts->{Constant} > 0, "ChalkIR: has Constant node for value");
-        ok($counts->{Store} > 0, "ChalkIR: has Store node for variable");
+        ok($counts->{Stop} > 0, "ChalkIR: has Stop node");
     }
 }
 
-# Test 8: Verify control chain structure
+# Test 8: Verify Stop node structure (assignments without explicit return)
 {
     my $code = 'my $x = 42;';
     my ($result, $ir_root) = parse_chalk_with_ir($code);
@@ -209,37 +212,35 @@ sub count_node_types {
     ok($result, 'ChalkIR: parse succeeds');
     ok($ir_root, 'ChalkIR: has IR root');
 
-    if ($ir_root && $ir_root->can('control')) {
-        my $control = $ir_root->control;
-        ok($control, 'ChalkIR: Return has control input');
+    # For statements without explicit return, ir_root is Stop (not Return)
+    # In SSA, assignments don't create Store nodes - they just bind values in scope
+    if ($ir_root && $ir_root->can('op')) {
+        is($ir_root->op, 'Stop', 'ChalkIR: root is Stop for non-return statement');
+    }
+}
 
-        if ($control && $control->can('op')) {
-            is($control->op, 'Store', 'ChalkIR: Return control is Store');
+# Test 9: Verify explicit return value chain structure
+{
+    # Use explicit return to test Return node value chain
+    my $code = 'return 42;';
+    my ($result, $ir_root) = parse_chalk_with_ir($code);
 
-            if ($control->can('control')) {
-                my $store_control = $control->control;
-                ok($store_control, 'ChalkIR: Store has control input');
-                is($store_control->op, 'Start', 'ChalkIR: Store control is Start');
+    ok($result, 'ChalkIR: parse succeeds');
+    ok($ir_root, 'ChalkIR: has IR root');
+
+    # For explicit return, Stop node has return_nodes containing Return
+    if ($ir_root && $ir_root->can('return_nodes') && $ir_root->return_nodes) {
+        my $return_node = $ir_root->return_nodes->[0];
+        ok($return_node, 'ChalkIR: Stop has return node');
+
+        if ($return_node && $return_node->can('value')) {
+            my $value = $return_node->value;
+            ok($value, 'ChalkIR: Return has value');
+
+            if ($value && $value->can('op')) {
+                is($value->op, 'Constant', 'ChalkIR: Return value is Constant');
+                is($value->value, 42, 'ChalkIR: Constant value is 42');
             }
-        }
-    }
-}
-
-# Test 9: Verify value chain structure
-{
-    my $code = 'my $x = 42;';
-    my ($result, $ir_root) = parse_chalk_with_ir($code);
-
-    ok($result, 'ChalkIR: parse succeeds');
-    ok($ir_root, 'ChalkIR: has IR root');
-
-    if ($ir_root && $ir_root->can('value')) {
-        my $value = $ir_root->value;
-        ok($value, 'ChalkIR: Return has value');
-
-        if ($value && $value->can('op')) {
-            is($value->op, 'Constant', 'ChalkIR: Return value is Constant');
-            is($value->value, 42, 'ChalkIR: Constant value is 42');
         }
     }
 }
