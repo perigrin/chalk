@@ -165,7 +165,7 @@ CODE
 };
 
 subtest 'BooleanElement-like first class' => sub {
-    todo 'Complex class with multiple operators and method calls triggers precedence parsing issues' => sub {
+    todo 'Complex class with multiple operators and method calls triggers precedence parsing issues (#578)' => sub {
     # Simplified version of BooleanElement class
     my $code = <<'CODE';
 class Foo {
@@ -213,7 +213,7 @@ CODE
 };
 
 subtest 'Exact Boolean.pm first class content' => sub {
-    todo 'Real-world Boolean.pm class triggers precedence parsing issues' => sub {
+    todo 'Real-world Boolean.pm class triggers precedence parsing issues (#578)' => sub {
     # Read actual first class from Boolean.pm
     open my $cfh, '<:utf8', "$RealBin/../../lib/Chalk/Semiring/Boolean.pm" or die $!;
     my @lines = <$cfh>;

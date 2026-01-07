@@ -294,7 +294,7 @@ subtest 'Arithmetic expression' => sub {
 # Test 8: Method call expression
 subtest 'Method call expression' => sub {
     TODO: {
-        local $TODO = 'Grammar ambiguity: method call with arithmetic causes parser timeout due to left-recursion (#559)';
+        local $TODO = 'Grammar ambiguity: method call with arithmetic causes parser timeout (#577)';
 
         my $code = q{
             class Test {
