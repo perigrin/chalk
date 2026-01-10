@@ -3,6 +3,7 @@
 
 use 5.42.0;
 use experimental 'class';
+use Scalar::Util qw(blessed);
 use Chalk::Grammar::Chalk::Type::Str;
 
 class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
@@ -13,11 +14,18 @@ class Chalk::Grammar::Chalk::Rule::String :isa(Chalk::GrammarRule) {
         # String -> %VERSION% (version number like 5.42.0)
         # Child [0] contains the matched string literal with quotes
 
-        my $string_with_quotes = $context->child(0);
-        die "String: expected string token at child(0), got undefined - grammar bug" unless defined $string_with_quotes;
+        my $child_value = $context->child(0);
+        die "String: expected string token at child(0), got undefined - grammar bug" unless defined $child_value;
 
-        # Strip surrounding quotes - see issue #201 for proper interpolation handling
-        my $value = "$string_with_quotes";
+        # If child already evaluated to Constant, pass through
+        # (SingleQuotedString/DoubleQuotedString already create proper Constants)
+        if (blessed($child_value) && $child_value->can('op') && $child_value->op eq 'Constant') {
+            return $child_value;
+        }
+
+        # Otherwise, create Constant (for VERSION tokens that come directly)
+        my $value = "$child_value";
+        # Strip quotes if present
         if (length($value) >= 2 && $value =~ m/^['"]/) {
             $value = substr($value, 1, length($value) - 2);
         }
