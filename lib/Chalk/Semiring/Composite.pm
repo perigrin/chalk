@@ -11,82 +11,17 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
     field $parent_semiring :param :reader = undef;  # Reference to parent Composite semiring
 
     method add( $other, $swap = undef ) {
-        # COORDINATED ADD: Let the first semiring (Precedence) be the leader
-        # When Precedence chooses one derivation, ALL semirings use that derivation
-        # This ensures that when Precedence invalidates a parse, Semantic follows
-        #
-        # The first semiring (index 0) is assumed to be the Precedence semiring
-        # which filters invalid parses. Its add() returns $self or $other directly.
+        # SEQUENTIAL FILTERING: Each semiring filters independently
+        # Call add() on each semiring in sequence, short-circuiting on first invalid result
+        # This replaces the complex "leader pattern" with simple sequential iteration
 
-        my $prec_self = $elements->[0];
-        my $prec_other = $other->elements->[0];
-
-        # SPECIAL CASE: If Precedence elements are the same object (shared),
-        # fall back to independent delegation - Precedence can't distinguish
-        # Use refaddr for reference equality since == is overloaded to call equals()
-        if (refaddr($prec_self) == refaddr($prec_other)) {
-            my @results;
-            for my $i (0..$#$elements) {
-                my $result = $elements->[$i]->add($other->elements->[$i]);
-                push @results, $result;
-
-                # Short-circuit check: if result equals child's add_id, return composite's add_id
-                if ($parent_semiring && defined($parent_semiring->child_add_ids->[$i])) {
-                    if ($result->equals($parent_semiring->child_add_ids->[$i])) {
-                        return $parent_semiring->add_id;
-                    }
-                }
-            }
-
-            return Chalk::Semiring::CompositeElement->new(
-                elements => \@results,
-                parent_semiring => $parent_semiring
-            );
-        }
-
-        # Precedence elements are different - let Precedence be the leader
-        my $prec_result = $prec_self->add($prec_other);
-
-        # Check which derivation Precedence chose via reference equality
-        # PrecedenceElement.add() returns $self or $other, not new objects
-        # Use refaddr for reference equality since == is overloaded to call equals()
-        my $use_self = refaddr($prec_result) == refaddr($prec_self);
-        my $use_other = refaddr($prec_result) == refaddr($prec_other);
-
-        # DEBUG: Trace coordination decisions
-        if ($ENV{DEBUG_PRECEDENCE}) {
-            warn "COORD: self(v" . $prec_self->valid . ") vs other(v" . $prec_other->valid . ") => use_self=$use_self, use_other=$use_other\n";
-        }
-
-        # Only let Precedence be the leader when it makes a MEANINGFUL choice
-        # (i.e., one element is valid and the other is invalid).
-        # When both are valid, fall through to independent delegation so
-        # Semantic.add() can prefer elements with defined focus.
-        #
-        # Note: Only PrecedenceElement has the 'valid' method. Other semiring
-        # elements (Boolean, Position, etc.) don't participate in this optimization.
-        my $both_valid = $prec_self->can('valid') && $prec_other->can('valid')
-            ? ($prec_self->valid && $prec_other->valid)
-            : 0;  # If no 'valid' method, use standard Precedence leadership
-
-        if ($use_self && !$both_valid) {
-            # Precedence chose self because other is invalid (or non-Precedence element)
-            # Use self's elements for ALL semirings
-            return $self;
-        } elsif ($use_other && !$both_valid) {
-            # Precedence chose other because self is invalid
-            # Use other's elements for ALL semirings
-            return $other;
-        }
-
-        # Either both are valid (Precedence can't meaningfully choose) or
-        # Precedence created a new element - fall back to independent delegation
-        my @results = ($prec_result);
-        for my $i (1..$#$elements) {
+        my @results;
+        for my $i (0..$#$elements) {
             my $result = $elements->[$i]->add($other->elements->[$i]);
             push @results, $result;
 
             # Short-circuit check: if result equals child's add_id, return composite's add_id
+            # This happens when a filtering semiring (e.g., Precedence) rejects both options
             if ($parent_semiring && defined($parent_semiring->child_add_ids->[$i])) {
                 if ($result->equals($parent_semiring->child_add_ids->[$i])) {
                     return $parent_semiring->add_id;
@@ -94,6 +29,7 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
             }
         }
 
+        # All semirings produced valid results - create composite element
         return Chalk::Semiring::CompositeElement->new(
             elements => \@results,
             parent_semiring => $parent_semiring
