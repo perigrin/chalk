@@ -1,5 +1,5 @@
-# ABOUTME: Composite semiring for Chalk syntax validation (Boolean + Precedence + SemanticValidation + TypeInference)
-# ABOUTME: Pure validation composite - no building, just filtering for valid parses
+# ABOUTME: Composite semiring for Chalk syntax validation with progressive filtering (Boolean → Precedence → TypeInference → SemanticValidation)
+# ABOUTME: Pure validation composite - filters from least to most restrictive, short-circuiting on first invalid result
 use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
@@ -16,12 +16,15 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
     field $composite :reader;
 
     ADJUST {
-        # Phase 1: Validation filters (no building, just filtering)
+        # Progressive filtering: least restrictive → most restrictive
+        # Each semiring filters independently, short-circuiting on first invalid result
 
-        # Filter 1: Boolean - Grammar syntax validation
+        # Filter 1: Boolean - Grammar syntax validation (least restrictive)
+        # Validates that the parse tree matches BNF grammar rules
         my $bool_sr = Chalk::Semiring::Boolean->new();
 
         # Filter 2: Precedence - Operator precedence validation
+        # Validates operator precedence and associativity per Perl's precedence table
         # Reference: perldoc perlop - Operator Precedence and Associativity
         my @perl_precedence_table = (
             # Index 0 - Highest precedence
@@ -58,25 +61,22 @@ class Chalk::Semiring::ChalkSyntax :isa(Chalk::Semiring) {
             precedence_table => \@perl_precedence_table
         );
 
-        # Filter 3: SemanticValidation - Semantic constraint validation
-        # Uses Chalk-specific semantic rules
+        # Filter 3: TypeInference - Type checking during parsing
+        # Validates type compatibility using tropical semiring (join/meet) for type lattice
+        my $type_sr = Chalk::Semiring::TypeInference->new();
+
+        # Filter 4: SemanticValidation - Semantic constraint validation (most restrictive)
+        # Validates Chalk-specific semantic rules like variable scoping, control flow
         my $semantic_rules = Chalk::Grammar::Chalk::SemanticRules->new();
         my $semantic_sr = Chalk::Semiring::SemanticValidation->new(
             rules => $semantic_rules
         );
 
-        # Filter 4: TypeInference - Type checking during parsing
-        # Uses tropical semiring (join/meet) for type lattice operations
-        my $type_sr = Chalk::Semiring::TypeInference->new();
-
-        # Composite: Precedence + Boolean + SemanticValidation + TypeInference
-        # Pure validation - returns boolean success/failure
-        # NOTE: Precedence must be first - Composite.add() uses the first semiring
-        # as the "leader" that decides between alternative parses. When Precedence
-        # rejects an invalid parse (e.g., wrong operator precedence), Composite
-        # should use the valid alternative instead.
+        # Composite: Boolean → Precedence → TypeInference → SemanticValidation
+        # Progressive filtering from least to most restrictive
+        # Sequential filtering short-circuits on first invalid result
         $composite = Chalk::Semiring::Composite->new(
-            semirings => [$precedence_sr, $bool_sr, $semantic_sr, $type_sr]
+            semirings => [$bool_sr, $precedence_sr, $type_sr, $semantic_sr]
         );
     }
 
