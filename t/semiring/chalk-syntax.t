@@ -30,13 +30,13 @@ subtest 'ChalkSyntax semiring creation' => sub {
     my $semirings = $semiring->composite->semirings;
     is scalar(@$semirings), 4, 'Composite has four semirings';
 
-    # NOTE: Precedence is first because Composite.add() uses index 0 as the "leader"
-    # that decides between alternative parses. Precedence must be first to properly
-    # filter based on operator precedence.
-    isa_ok $semirings->[0], ['Chalk::Semiring::Precedence'], 'First semiring is Precedence';
-    isa_ok $semirings->[1], ['Chalk::Semiring::Boolean'], 'Second semiring is Boolean';
-    isa_ok $semirings->[2], ['Chalk::Semiring::SemanticValidation'], 'Third semiring is SemanticValidation';
-    isa_ok $semirings->[3], ['Chalk::Semiring::TypeInference'], 'Fourth semiring is TypeInference';
+    # Progressive filtering: least restrictive → most restrictive
+    # Boolean validates grammar syntax, Precedence validates operator precedence,
+    # TypeInference validates types, SemanticValidation validates semantic constraints
+    isa_ok $semirings->[0], ['Chalk::Semiring::Boolean'], 'First semiring is Boolean (grammar syntax)';
+    isa_ok $semirings->[1], ['Chalk::Semiring::Precedence'], 'Second semiring is Precedence (operator precedence)';
+    isa_ok $semirings->[2], ['Chalk::Semiring::TypeInference'], 'Third semiring is TypeInference (type checking)';
+    isa_ok $semirings->[3], ['Chalk::Semiring::SemanticValidation'], 'Fourth semiring is SemanticValidation (semantic constraints)';
 };
 
 subtest 'ChalkSyntax identity elements' => sub {
@@ -184,14 +184,14 @@ subtest 'ChalkSyntax syntax check mode usage' => sub {
 
     # Get the elements
     my $elements = $result->elements;
-    is scalar(@$elements), 4, 'Result has 4 elements (Boolean + Precedence + SemanticValidation + TypeInference)';
+    is scalar(@$elements), 4, 'Result has 4 elements (Boolean + Precedence + TypeInference + SemanticValidation)';
 
-    isa_ok $elements->[0], ['Chalk::Semiring::PrecedenceElement'], 'First element is PrecedenceElement';
-    isa_ok $elements->[1], ['Chalk::Semiring::BooleanElement'], 'Second element is BooleanElement';
-    isa_ok $elements->[2], ['Chalk::Semiring::SemanticValidationElement'], 'Third element is SemanticValidationElement';
-    isa_ok $elements->[3], ['Chalk::Semiring::TypeInferenceElement'], 'Fourth element is TypeInferenceElement';
+    isa_ok $elements->[0], ['Chalk::Semiring::BooleanElement'], 'First element is BooleanElement';
+    isa_ok $elements->[1], ['Chalk::Semiring::PrecedenceElement'], 'Second element is PrecedenceElement';
+    isa_ok $elements->[2], ['Chalk::Semiring::TypeInferenceElement'], 'Third element is TypeInferenceElement';
+    isa_ok $elements->[3], ['Chalk::Semiring::SemanticValidationElement'], 'Fourth element is SemanticValidationElement';
 
     # Check that precedence and type inference are valid
-    ok $elements->[0]->valid, 'Precedence validation succeeded';
-    ok $elements->[3]->valid, 'TypeInference validation succeeded';
+    ok $elements->[1]->valid, 'Precedence validation succeeded';
+    ok $elements->[2]->valid, 'TypeInference validation succeeded';
 };
