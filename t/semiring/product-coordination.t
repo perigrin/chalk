@@ -194,9 +194,12 @@ subtest 'TypeInference × Precedence: Coordination via Composite.add()' => sub {
     );
 
     # add() should choose parse1 (valid precedence)
+    # Sequential filtering: Precedence filters first, TypeInference follows consensus
     my $result = $parse1->add($parse2);
 
-    ok $result == $parse1, 'Composite.add() chooses precedence-valid parse';
+    # Verify sequential filtering via reference equality (not just value equality)
+    # This ensures TypeInference.add() returns original references for consensus detection
+    ok $result == $parse1, 'Sequential filtering: Composite.add() returns parse1 by reference';
 };
 
 subtest 'TypeInference × SemanticValidation: Both validate at different levels' => sub {
