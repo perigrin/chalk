@@ -360,6 +360,7 @@ subtest 'Sequential filtering: short-circuit when semiring returns add_id' => su
 
 subtest 'Sequential filtering: consensus when all agree' => sub {
     use Chalk::Semiring::Precedence;
+    use Scalar::Util qw(refaddr);
 
     my @precedence_table = (
         { assoc => 'left', ops => ['+'] },
@@ -392,12 +393,14 @@ subtest 'Sequential filtering: consensus when all agree' => sub {
     my $result = $elem1->add($elem2);
 
     # When both valid, each semiring chooses independently
-    # Both should prefer their own element (reference equality)
-    # Result should be a new composite with choices from each semiring
+    # Boolean.add() prefers true (both are true, so should return elem1)
+    # Precedence.add() when both valid returns self
+    # Both should return their self element -> consensus on $elem1
     isa_ok $result, 'Chalk::Semiring::CompositeElement';
+    is refaddr($result), refaddr($elem1), 'Consensus: all semirings chose self, returns original $self';
 };
 
-subtest 'Sequential filtering: ambiguity creates new element' => sub {
+subtest 'Sequential filtering: ambiguity dies with diagnostic' => sub {
     use Chalk::Semiring::Precedence;
 
     my @precedence_table = (
@@ -411,7 +414,9 @@ subtest 'Sequential filtering: ambiguity creates new element' => sub {
         semirings => [$prec_sr, $bool_sr]
     );
 
-    # Both precedence elements valid, so each semiring chooses independently
+    # Both precedence elements valid, so Precedence chooses self
+    # But Boolean chooses other (true vs false)
+    # This creates ambiguity
     my $prec_valid1 = Chalk::Semiring::PrecedenceElement->new(valid => 1);
     my $bool_false = Chalk::Semiring::BooleanElement->new(value => 0);
 
@@ -428,11 +433,18 @@ subtest 'Sequential filtering: ambiguity creates new element' => sub {
         parent_semiring => $composite
     );
 
-    my $result = $elem1->add($elem2);
+    # Should die with diagnostic showing which semiring chose what
+    like dies { $elem1->add($elem2) },
+        qr/Ambiguous parse in Composite\.add\(\):/,
+        'Dies with ambiguity error';
 
-    # When both valid, Boolean.add() should prefer elem2 (true)
-    # Result should be new composite element combining choices
-    ok $result->elements->[1]->value, 'Boolean semiring chooses true element';
+    like dies { $elem1->add($elem2) },
+        qr/Precedence chose self/,
+        'Diagnostic shows Precedence chose self';
+
+    like dies { $elem1->add($elem2) },
+        qr/Boolean chose other/,
+        'Diagnostic shows Boolean chose other';
 };
 
 # Mock rule class for testing
