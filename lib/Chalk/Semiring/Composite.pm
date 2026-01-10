@@ -4,6 +4,7 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Scalar::Util qw(refaddr);
+use List::Util qw(all);
 use Chalk::Base;
 
 class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
@@ -15,10 +16,13 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
         # Call add() on each semiring in sequence, short-circuiting on first invalid result
         # This replaces the complex "leader pattern" with simple sequential iteration
 
-        my @results;
-        for my $i (0..$#$elements) {
-            my $result = $elements->[$i]->add($other->elements->[$i]);
-            push @results, $result;
+        my @result_elements;
+        my @self_elements = $elements->@*;
+        my @other_elements = $other->elements->@*;
+
+        for my $i (0..$#self_elements) {
+            my $result = $self_elements[$i]->add($other_elements[$i]);
+            push @result_elements, $result;
 
             # Short-circuit check: if result equals child's add_id, return composite's add_id
             # This happens when a filtering semiring (e.g., Precedence) rejects both options
@@ -29,11 +33,38 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
             }
         }
 
-        # All semirings produced valid results - create composite element
-        return Chalk::Semiring::CompositeElement->new(
-            elements => \@results,
-            parent_semiring => $parent_semiring
-        );
+        # All semirings processed successfully - determine consensus
+        # Check if all semirings chose their self element
+        my $all_chose_self = all {
+            my $i = $_;
+            refaddr($result_elements[$i]) == refaddr($self_elements[$i])
+        } (0..$#result_elements);
+
+        if ($all_chose_self) {
+            return $self;  # All chose their self elements
+        }
+
+        # Check if all semirings chose their other element
+        my $all_chose_other = all {
+            my $i = $_;
+            refaddr($result_elements[$i]) == refaddr($other_elements[$i])
+        } (0..$#result_elements);
+
+        if ($all_chose_other) {
+            return $other;  # All chose their other elements
+        }
+
+        # No consensus - build diagnostic and fail
+        my @diagnostics;
+        my $semirings = $parent_semiring ? $parent_semiring->semirings : undef;
+        for my $i (0..$#result_elements) {
+            my $chose = refaddr($result_elements[$i]) == refaddr($self_elements[$i]) ? 'self' :
+                       refaddr($result_elements[$i]) == refaddr($other_elements[$i]) ? 'other' : 'new';
+            my $semiring_name = $semirings ? (ref($semirings->[$i]) =~ s/^Chalk::Semiring:://r) : "semiring[$i]";
+            push @diagnostics, "$semiring_name chose $chose";
+        }
+
+        die "Ambiguous parse in Composite.add():\n  " . join("\n  ", @diagnostics) . "\n";
     }
 
     method multiply( $other, $swap = undef ) {

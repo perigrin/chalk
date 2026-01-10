@@ -10,9 +10,16 @@ class Chalk::Semiring::BooleanElement :isa(Chalk::Element) {
 
     method add( $other, $swap = undef ) {
         # Boolean OR for choice: either can succeed
-        return Chalk::Semiring::BooleanElement->new(
-            value => $value || $other->value
-        );
+        # CONTRACT: Return $self or $other directly (not copies) to enable
+        # Composite::add() reference equality checks for consensus detection
+        my $result_value = $value || $other->value;
+
+        # Return original reference when it matches the result
+        return $self if $value == $result_value;
+        return $other if $other->value == $result_value;
+
+        # Both false - create new (should be rare, but handle it)
+        return Chalk::Semiring::BooleanElement->new(value => $result_value);
     }
 
     method multiply( $other, $swap = undef ) {
