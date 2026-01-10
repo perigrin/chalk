@@ -53,18 +53,22 @@ subtest 'CompositeElement multiplication delegates' => sub {
 };
 
 subtest 'CompositeElement addition delegates' => sub {
+    # Create elements that will reach consensus (both semirings choose comp1)
     my $bool1 = Chalk::Semiring::BooleanElement->new(value => 1);
-    my $pos1 = Chalk::Semiring::PositionElement->new(start_pos => 0, end_pos => 3);
+    my $pos1 = Chalk::Semiring::PositionElement->new(start_pos => 0, end_pos => 5);
 
     my $bool2 = Chalk::Semiring::BooleanElement->new(value => 0);
-    my $pos2 = Chalk::Semiring::PositionElement->new(start_pos => 0, end_pos => 5);
+    my $pos2 = Chalk::Semiring::PositionElement->new(start_pos => 0, end_pos => 3);
 
     my $comp1 = Chalk::Semiring::CompositeElement->new(elements => [$bool1, $pos1]);
     my $comp2 = Chalk::Semiring::CompositeElement->new(elements => [$bool2, $pos2]);
 
+    # Boolean: true OR false = true → returns comp1's Boolean (self)
+    # Position: end=5 vs end=3 → returns comp1's Position (self)
+    # Consensus: both chose self → returns comp1
     my $result = $comp1->add($comp2);
 
-    ok $result, 'Addition succeeds';
+    ok $result == $comp1, 'Addition returns comp1 by reference (consensus)';
     isa_ok $result, 'Chalk::Semiring::CompositeElement';
 
     # Check Boolean addition (OR)
@@ -199,8 +203,17 @@ subtest 'Composite operator overloading' => sub {
     my $mult = $comp1 * $comp2;
     ok $mult, 'Operator * works';
 
-    my $add = $comp1 + $comp2;
-    ok $add, 'Operator + works';
+    # For add, use elements where both semirings will choose the same composite
+    my $bool3 = Chalk::Semiring::BooleanElement->new(value => 1);
+    my $pos3 = Chalk::Semiring::PositionElement->new(start_pos => 0, end_pos => 5);
+    my $bool4 = Chalk::Semiring::BooleanElement->new(value => 0);
+    my $pos4 = Chalk::Semiring::PositionElement->new(start_pos => 0, end_pos => 3);
+    my $comp3 = Chalk::Semiring::CompositeElement->new(elements => [$bool3, $pos3]);
+    my $comp4 = Chalk::Semiring::CompositeElement->new(elements => [$bool4, $pos4]);
+
+    # Boolean: true OR false = true → comp3, Position: 5 vs 3 → comp3
+    my $add = $comp3 + $comp4;
+    ok $add == $comp3, 'Operator + works (returns comp3 by consensus)';
 };
 
 subtest 'Invalid precedence propagates through multiply' => sub {
@@ -332,13 +345,18 @@ subtest 'Sequential filtering: short-circuit when semiring returns add_id' => su
     );
 
     # Sequential filtering: Precedence.add(add_id, valid) returns valid (other)
-    # But we're checking if elem1 is add_id before calling add()
-    # Actually, let's test what happens when add() returns add_id
-    my $result = $elem1->add($elem2);
+    # Boolean.add(true, true) returns one of them (self)
+    # This creates ambiguity, so use matching boolean values
+    my $bool_false = Chalk::Semiring::BooleanElement->new(value => 0);
+    my $elem1_fixed = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_add_id, $bool_false],
+        parent_semiring => $composite
+    );
+    # Precedence: add_id + valid → other, Boolean: false + true → other
+    my $result = $elem1_fixed->add($elem2);
 
-    # When one input is add_id, Precedence.add() returns the other (valid)
-    # So result should be a new composite with valid precedence and bool elements
-    ok $result->elements->[0]->valid, 'Result has valid precedence (add returned non-add_id)';
+    # Both semirings chose elem2, so result should be elem2 by reference
+    ok $result == $elem2, 'Result is elem2 by reference (consensus on other)';
 
     # But what if BOTH inputs to add() are add_id?
     my $elem_both_add_id_1 = Chalk::Semiring::CompositeElement->new(
