@@ -295,6 +295,146 @@ subtest 'No short-circuit when all children valid in multiply' => sub {
     ok $result->elements->[1]->valid, 'Precedence element still valid';
 };
 
+subtest 'Sequential filtering: short-circuit when semiring returns add_id' => sub {
+    use Chalk::Semiring::Precedence;
+
+    my @precedence_table = (
+        { assoc => 'left', ops => ['+'] },
+    );
+
+    my $prec_sr = Chalk::Semiring::Precedence->new(precedence_table => \@precedence_table);
+    my $bool_sr = Chalk::Semiring::Boolean->new();
+
+    my $composite = Chalk::Semiring::Composite->new(
+        semirings => [$prec_sr, $bool_sr]
+    );
+
+    # Use actual add_id from precedence semiring as one element
+    # This simulates the case where a previous operation returned add_id
+    my $prec_add_id = $prec_sr->add_id;
+    my $bool_true1 = Chalk::Semiring::BooleanElement->new(value => 1);
+
+    my $elem1 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_add_id, $bool_true1],
+        parent_semiring => $composite
+    );
+
+    my $prec_valid = Chalk::Semiring::PrecedenceElement->new(
+        valid => 1,
+        operator => '+',
+        precedence_level => 0
+    );
+    my $bool_true2 = Chalk::Semiring::BooleanElement->new(value => 1);
+
+    my $elem2 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_valid, $bool_true2],
+        parent_semiring => $composite
+    );
+
+    # Sequential filtering: Precedence.add(add_id, valid) returns valid (other)
+    # But we're checking if elem1 is add_id before calling add()
+    # Actually, let's test what happens when add() returns add_id
+    my $result = $elem1->add($elem2);
+
+    # When one input is add_id, Precedence.add() returns the other (valid)
+    # So result should be a new composite with valid precedence and bool elements
+    ok $result->elements->[0]->valid, 'Result has valid precedence (add returned non-add_id)';
+
+    # But what if BOTH inputs to add() are add_id?
+    my $elem_both_add_id_1 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_sr->add_id, $bool_true1],
+        parent_semiring => $composite
+    );
+
+    my $elem_both_add_id_2 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_sr->add_id, $bool_true1],
+        parent_semiring => $composite
+    );
+
+    my $result2 = $elem_both_add_id_1->add($elem_both_add_id_2);
+
+    # When both are add_id, Precedence.add() returns add_id
+    # Sequential filtering should short-circuit
+    ok $result2->equals($composite->add_id), 'Short-circuits when semiring add returns add_id';
+};
+
+subtest 'Sequential filtering: consensus when all agree' => sub {
+    use Chalk::Semiring::Precedence;
+
+    my @precedence_table = (
+        { assoc => 'left', ops => ['+'] },
+    );
+
+    my $bool_sr = Chalk::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Semiring::Precedence->new(precedence_table => \@precedence_table);
+
+    my $composite = Chalk::Semiring::Composite->new(
+        semirings => [$prec_sr, $bool_sr]
+    );
+
+    # Both elements valid - both semirings should prefer same element
+    my $prec_valid1 = Chalk::Semiring::PrecedenceElement->new(valid => 1);
+    my $bool_true = Chalk::Semiring::BooleanElement->new(value => 1);
+
+    my $elem1 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_valid1, $bool_true],
+        parent_semiring => $composite
+    );
+
+    my $prec_valid2 = Chalk::Semiring::PrecedenceElement->new(valid => 1);
+    my $bool_true2 = Chalk::Semiring::BooleanElement->new(value => 1);
+
+    my $elem2 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_valid2, $bool_true2],
+        parent_semiring => $composite
+    );
+
+    my $result = $elem1->add($elem2);
+
+    # When both valid, each semiring chooses independently
+    # Both should prefer their own element (reference equality)
+    # Result should be a new composite with choices from each semiring
+    isa_ok $result, 'Chalk::Semiring::CompositeElement';
+};
+
+subtest 'Sequential filtering: ambiguity creates new element' => sub {
+    use Chalk::Semiring::Precedence;
+
+    my @precedence_table = (
+        { assoc => 'left', ops => ['+'] },
+    );
+
+    my $bool_sr = Chalk::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Semiring::Precedence->new(precedence_table => \@precedence_table);
+
+    my $composite = Chalk::Semiring::Composite->new(
+        semirings => [$prec_sr, $bool_sr]
+    );
+
+    # Both precedence elements valid, so each semiring chooses independently
+    my $prec_valid1 = Chalk::Semiring::PrecedenceElement->new(valid => 1);
+    my $bool_false = Chalk::Semiring::BooleanElement->new(value => 0);
+
+    my $elem1 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_valid1, $bool_false],
+        parent_semiring => $composite
+    );
+
+    my $prec_valid2 = Chalk::Semiring::PrecedenceElement->new(valid => 1);
+    my $bool_true = Chalk::Semiring::BooleanElement->new(value => 1);
+
+    my $elem2 = Chalk::Semiring::CompositeElement->new(
+        elements => [$prec_valid2, $bool_true],
+        parent_semiring => $composite
+    );
+
+    my $result = $elem1->add($elem2);
+
+    # When both valid, Boolean.add() should prefer elem2 (true)
+    # Result should be new composite element combining choices
+    ok $result->elements->[1]->value, 'Boolean semiring chooses true element';
+};
+
 # Mock rule class for testing
 package MockRule {
     sub lhs { shift->{lhs} }
