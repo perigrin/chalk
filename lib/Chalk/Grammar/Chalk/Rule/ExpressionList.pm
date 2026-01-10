@@ -17,11 +17,20 @@ class Chalk::Grammar::Chalk::Rule::ExpressionList :isa(Chalk::GrammarRule) {
         }
 
         # Filter to only IR nodes (skip comma tokens and other non-IR children)
+        # IMPORTANT: Flatten nested List nodes created by right-recursive grammar rules
+        # Grammar: ExpressionList -> Expression ',' ExpressionList (right-recursive)
+        # This creates: [expr1, expr2, List[expr3, expr4, List[...]]]
+        # We need: [expr1, expr2, expr3, expr4, ...]
         my @ir_nodes;
         for my $child_ctx (@children) {
             my $focus = $child_ctx->focus;
             if (blessed($focus) && $focus->can('id')) {
-                push @ir_nodes, $focus;
+                # Recursively flatten nested List nodes
+                if ($focus->can('op') && $focus->op eq 'List' && $focus->can('elements')) {
+                    push @ir_nodes, $focus->elements->@*;
+                } else {
+                    push @ir_nodes, $focus;
+                }
             }
         }
 

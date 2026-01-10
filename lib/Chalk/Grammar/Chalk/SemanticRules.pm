@@ -12,11 +12,20 @@ class Chalk::Grammar::Chalk::SemanticRules {
         my $rule = $packed->rule;
         return 1 unless $rule;  # Non-rule nodes valid by default
 
+        warn "DEBUG validate: checking rule lhs=" . $rule->lhs . "\n";
+
         # VALIDATION: Statement -> Statement WS_OPT ConditionalKeyword WS_OPT Expression
         # This is the postfix conditional modifier rule
         # It should NOT apply when the base Statement is already a block-form conditional
         if ($rule->lhs eq 'Statement' && $self->_is_postfix_conditional_rule($rule)) {
             return $self->_validate_postfix_conditional($packed);
+        }
+
+        # VALIDATION: UseStatement should not be truncated
+        # Reject parses where UseStatement ends with comma (incomplete ExpressionList)
+        if ($rule->lhs eq 'UseStatement') {
+            warn "DEBUG validate: matched UseStatement, calling _validate_use_statement\n";
+            return $self->_validate_use_statement($packed);
         }
 
         # Add more Chalk/Perl-specific validation rules here as needed:
@@ -25,6 +34,46 @@ class Chalk::Grammar::Chalk::SemanticRules {
         # - Package name validation
         # - etc.
 
+        return 1;  # Default: valid
+    }
+
+    method _validate_use_statement($packed) {
+        # Check if this UseStatement has a complete ExpressionList
+        # Reject if it ends with a comma (indicates truncation)
+        my @children = $packed->children;
+        warn "DEBUG _validate_use_statement: checking UseStatement with " . scalar(@children) . " children\n";
+        return 1 unless @children;
+
+        # Look at last child before semicolon
+        # If it's a comma or incomplete expression, reject
+        for my $i (reverse 0..$#children) {
+            my $child = $children[$i];
+            next unless $child;
+
+            # Skip whitespace and semicolon
+            if ($child->isa('Chalk::ParseForest::SymbolNode')) {
+                my $symbol = $child->symbol;
+                warn "DEBUG _validate_use_statement: child[$i] symbol=$symbol\n";
+                next if $symbol eq 'WS_OPT' || $symbol eq ';';
+
+                # If we see ExpressionList, check if it's complete
+                if ($symbol eq 'ExpressionList') {
+                    # ExpressionList is valid - this is a complete UseStatement
+                    warn "DEBUG _validate_use_statement: VALID - found ExpressionList\n";
+                    return 1;
+                }
+
+                # If we see a comma as last significant token, reject
+                if ($symbol eq ',') {
+                    warn "DEBUG _validate_use_statement: REJECT - trailing comma\n";
+                    return 0;  # Incomplete - trailing comma
+                }
+
+                last;  # Found last significant child
+            }
+        }
+
+        warn "DEBUG _validate_use_statement: VALID - default\n";
         return 1;  # Default: valid
     }
 
