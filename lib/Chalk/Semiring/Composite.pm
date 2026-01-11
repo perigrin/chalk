@@ -54,9 +54,44 @@ class Chalk::Semiring::CompositeElement :isa(Chalk::Element) {
             return $other;  # All chose their other elements
         }
 
-        # No consensus - build diagnostic and fail
-        my @diagnostics;
+        # No consensus - check if this is semantic disambiguation (allowed) or ambiguity (error)
+        # SEMANTIC DISAMBIGUATION: When all validation layers mark both parses as valid,
+        # Semantic is allowed to choose based on preferences (e.g., defined focus).
+        # This is how the parser resolves highly ambiguous grammars.
+
         my $semirings = $parent_semiring ? $parent_semiring->semirings : undef;
+
+        # Check if all elements that have 'valid' method say both are valid
+        my $both_valid = 1;
+        for my $i (0..$#result_elements) {
+            if ($self_elements[$i]->can('valid') && $other_elements[$i]->can('valid')) {
+                unless ($self_elements[$i]->valid && $other_elements[$i]->valid) {
+                    $both_valid = 0;
+                    last;
+                }
+            }
+        }
+
+        # If both are valid and we have a Semantic element that's choosing, allow it
+        # This handles the ChalkIR case: [ChalkSyntax (validates both), Semantic (disambiguates)]
+        if ($both_valid && $semirings) {
+            for my $i (0..$#result_elements) {
+                my $semiring = $semirings->[$i];
+                # If this is a Semantic semiring and it made a choice, use it
+                if (ref($semiring) eq 'Chalk::Semiring::Semantic') {
+                    my $chose = refaddr($result_elements[$i]) == refaddr($self_elements[$i]) ? 'self' :
+                               refaddr($result_elements[$i]) == refaddr($other_elements[$i]) ? 'other' : 'new';
+                    if ($chose eq 'self') {
+                        return $self;
+                    } elsif ($chose eq 'other') {
+                        return $other;
+                    }
+                }
+            }
+        }
+
+        # True ambiguity - validation layers disagree or no Semantic to disambiguate
+        my @diagnostics;
         for my $i (0..$#result_elements) {
             my $chose = refaddr($result_elements[$i]) == refaddr($self_elements[$i]) ? 'self' :
                        refaddr($result_elements[$i]) == refaddr($other_elements[$i]) ? 'other' : 'new';
