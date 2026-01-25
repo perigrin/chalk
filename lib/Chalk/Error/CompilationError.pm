@@ -120,6 +120,11 @@ class Chalk::Error::CompilationError {
 
         return $result;
     }
+
+    # Alias for compatibility
+    method to_string() {
+        return $self->as_string();
+    }
 }
 
 1;

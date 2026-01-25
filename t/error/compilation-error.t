@@ -131,7 +131,7 @@ use Chalk::IR::SourceInfo;
         message => 'Test error',
     );
 
-    my $str = "$error";
+    my $str = $error->to_string();
     like($str, qr/Test error/, 'Error stringifies to message');
 }
 
