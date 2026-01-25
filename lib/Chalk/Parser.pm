@@ -152,7 +152,7 @@ class Chalk::EarleyChart {
     }
 
     method has_item($item) {
-        return exists( $chart{$item} );
+        return exists( $chart{$item->key} );
     }
 
     method has_predicted( $nonterminal, $pos, $rule_id ) {
@@ -164,11 +164,11 @@ class Chalk::EarleyChart {
     }
 
     method has_completed($item) {
-        return exists( $completed{$item} );
+        return exists( $completed{$item->key} );
     }
 
     method mark_completed($item) {
-        $completed{$item} = 1;
+        $completed{$item->key} = 1;
     }
 
     method goal_value( $start_symbol, $n ) {
