@@ -37,7 +37,7 @@ class Chalk::Grammar::Chalk::Rule::ComparisonOp :isa(Chalk::GrammarRule) {
         for my $i (0 .. $#children) {
             my $child = $context->child($i);
             if ($child isa Chalk::Grammar::Token::Operator) {
-                $operator = "$child";  # Stringify to get operator value
+                $operator = $child->value();  # Extract operator value
                 $operator_idx = $i;
                 last;
             }
