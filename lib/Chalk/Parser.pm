@@ -8,7 +8,6 @@ use Chalk::Grammar::Token;
 use Chalk::Preprocessor::Heredoc;
 
 class Chalk::EarleyItem {
-    use overload '""' => 'key';
 
     field $start_pos :param :reader;
     field $rule      :param :reader;
@@ -50,7 +49,6 @@ class Chalk::EarleyItem {
 # See t/optimization/test-leo-items.t for verification tests.
 # See issue #10 for detailed analysis and rationale.
 class Chalk::LeoItem {
-    use overload '""' => 'key';
 
     field $symbol    :param :reader;
     field $start_pos :param :reader;
@@ -89,14 +87,14 @@ class Chalk::EarleyChart {
     method merge_element( $item, $element ) {
         my $key     = $item->key;
         my $current = $self->get_element($key);
-        $chart{$key} = $current ? $current + $element : $element;
+        $chart{$key} = $current ? $current->add($element) : $element;
         return $chart{$key};
     }
 
     method add_element( $item, $element ) {
         my $key     = $item->key;
         my $current = $self->get_element($key);
-        $chart{$key} = $current ? $current + $element : $element;
+        $chart{$key} = $current ? $current->add($element) : $element;
 
         my $end_pos = $item->end_pos;
         push( $by_end_pos[$end_pos]->@*, $item );
@@ -128,6 +126,22 @@ class Chalk::EarleyChart {
         }
 
         return $chart{$key};
+    }
+
+    # Replace element without merging via add()
+    # Used after on_complete() to store the authoritative evaluated result
+    # without merging with previous unevaluated alternatives
+    method replace_element( $item, $element ) {
+        my $key = $item->key;
+
+        # Store directly without calling add()
+        $chart{$key} = $element;
+
+        # Note: We don't update indexes here because the item should already
+        # be indexed from when it was first added to the chart.
+        # This method only updates the element value for an existing item.
+
+        return $element;
     }
 
     method items_ending_at($end_pos) {
@@ -178,13 +192,21 @@ class Chalk::EarleyChart {
 
         my @items = $self->items_ending_at($n);
 
+        # DEBUG: Count parse alternatives
+        my $parse_count = 0;
+
         for my $item (@items) {
             next unless $item->complete;
             next unless $item->start_pos == 0;
             next unless $item->rule->lhs eq $start_symbol;
 
-            my $element = $self->get_element($item);
+            my $element = $self->get_element($item->key);
             if ($element) {
+                $parse_count++;
+                if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                    warn "[PARSER.goal_value] Found complete parse #$parse_count for $start_symbol\n";
+                    warn "[PARSER.goal_value]   Rule: " . $item->rule->to_string . "\n";
+                }
                 # DEBUG: Log goal elements
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     if ($element->can('valid')) {
@@ -194,8 +216,20 @@ class Chalk::EarleyChart {
                         warn "GOAL: found composite element prec.valid=" . ($prec->valid // '?') . " prec.op=" . ($prec->operator // 'undef') . " for " . $item->rule->lhs . "\n";
                     }
                 }
+                if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                    if ($element->can('context')) {
+                        my $ctx = $element->context;
+                        if ($ctx && $ctx->can('focus')) {
+                            my $focus = $ctx->focus;
+                            if ($focus && ref($focus) eq 'Chalk::IR::Node::ClassDef') {
+                                my $mappings = $focus->overload_mappings;
+                                warn "[PARSER.parse_text] GOAL element has ClassDef with " . scalar(keys %$mappings) . " overload mappings\n";
+                            }
+                        }
+                    }
+                }
                 my $old_result = $result;
-                $result = $result + $element;
+                $result = $result->add($element);
                 if ($ENV{DEBUG_PRECEDENCE} && $result->can('valid')) {
                     warn "GOAL: after add, result.valid=" . $result->valid . " op=" . ($result->operator // 'undef') . "\n";
                 }
@@ -211,6 +245,17 @@ class Chalk::EarleyChart {
                 {
                     return $result;
                 }
+            }
+        }
+
+        # DEBUG: Report parse count
+        if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+            if ($parse_count == 0) {
+                warn "[PARSER.goal_value] *** NO PARSES FOUND for $start_symbol ***\n";
+            } elsif ($parse_count == 1) {
+                warn "[PARSER.goal_value] *** UNAMBIGUOUS: Exactly 1 parse for $start_symbol ***\n";
+            } else {
+                warn "[PARSER.goal_value] *** AMBIGUOUS: $parse_count parses for $start_symbol ***\n";
             }
         }
 
@@ -268,7 +313,16 @@ class Chalk::Parser {
 
             my $start_element =
               $semiring->init_element_from_rule( $rule, 0, 0 );
+            if ($ENV{DEBUG_SCANNER}) {
+                my $rule_str = $rule->to_string;
+                warn "[INIT] Adding start item: $rule_str\n";
+                warn "[INIT]   Element: " . (defined($start_element) ? ref($start_element) : 'UNDEFINED') . "\n";
+            }
             $chart->add_element( $start_item, $start_element );
+            if ($ENV{DEBUG_SCANNER}) {
+                my $retrieved = $chart->get_element($start_item->key);
+                warn "[INIT]   Retrieved after add: " . (defined($retrieved) ? "defined" : "UNDEFINED") . "\n";
+            }
         }
 
         # Process positions from 0 to end of string
@@ -515,9 +569,18 @@ class Chalk::Parser {
     method process_position_string( $pos, $chart, $input_string ) {
         my @agenda = $chart->items_ending_at($pos);
 
+        if ($ENV{DEBUG_SCANNER} && $pos == 0) {
+            warn "[PROCESS] Position $pos has " . scalar(@agenda) . " items\n";
+        }
+
         my $item;
         while ( $item = shift(@agenda) ) {
-            my $element = $chart->get_element($item);
+            my $element = $chart->get_element($item->key);
+            if ($ENV{DEBUG_SCANNER} && $pos == 0) {
+                my $rule_str = $item->rule->to_string;
+                warn "[PROCESS]   Item: $rule_str (dot=" . $item->dot_pos . ", complete=" . $item->complete . ")\n";
+                warn "[PROCESS]     Element: " . (defined($element) ? "defined" : "UNDEFINED") . "\n";
+            }
             next unless defined($element);
 
             if ( $item->complete ) {
@@ -525,8 +588,14 @@ class Chalk::Parser {
             }
             else {
                 my $next_sym = $item->next_symbol;
+                if ($ENV{DEBUG_SCANNER} && $pos == 0) {
+                    warn "[PROCESS]     Next symbol: " . (defined($next_sym) ? (ref($next_sym) || $next_sym) : 'undef') . "\n";
+                }
                 if ( defined($next_sym) ) {
                     if ( $grammar->is_nonterminal($next_sym) ) {
+                        if ($ENV{DEBUG_SCANNER} && $pos == 0) {
+                            warn "[PROCESS]       Predicting nonterminal: $next_sym\n";
+                        }
                         $self->predict( $item, $next_sym, $chart, \@agenda );
                     }
                     else {
@@ -534,11 +603,20 @@ class Chalk::Parser {
                         # Pattern includes capture group from terminal_to_regex
                         my $pattern = $item->rule->terminal_to_regex($next_sym);
                         pos($input_string) = $pos;
+                        if ($ENV{DEBUG_SCANNER}) {
+                            my $rule_str = $item->rule->to_string;
+                            warn "[SCANNER] At pos=$pos, trying pattern: $pattern\n";
+                            warn "[SCANNER]   From rule: $rule_str\n";
+                            warn "[SCANNER]   Input at pos: '" . substr($input_string, $pos, 20) . "'\n";
+                        }
                         if ( $input_string =~ qr/\G$pattern/ ) {
                             # Extract matched text and pattern name (if named capture)
                             # For named captures: %+ = (NAME => 'text'), for unnamed: $1 = 'text'
                             my ($pattern_name, $matched_text) = %+;
                             $matched_text //= $1;  # Fall back to $1 for unnamed captures
+                            if ($ENV{DEBUG_SCANNER}) {
+                                warn "[SCANNER]   MATCHED: '$matched_text' (pattern_name: " . ($pattern_name // 'none') . ")\n";
+                            }
 
                             # Create appropriate Token subclass based on pattern_name
                             my $token_class = 'Chalk::Grammar::Token';
@@ -558,6 +636,8 @@ class Chalk::Parser {
                             );
 
                             $self->scan( $item, $element, $chart, $pos, $token, $pattern_name );
+                        } elsif ($ENV{DEBUG_SCANNER}) {
+                            warn "[SCANNER]   NO MATCH\n";
                         }
 
                       # Aycock-Horspool optimization for nullable terminals:
@@ -589,8 +669,16 @@ class Chalk::Parser {
 
         my $lhs = $completed_item->rule->lhs;
 
+        # DEBUG: Log all rule completions to trace why CommaOp might not complete
+        if ($ENV{DEBUG_RULE_COMPLETION}) {
+            my $rule_str = $completed_item->rule->to_string;
+            warn "[PARSER.complete] Rule completed: $rule_str\n";
+            warn "[PARSER.complete]   LHS: $lhs\n";
+            warn "[PARSER.complete]   Span: [" . $completed_item->start_pos . ", " . $completed_item->end_pos . "]\n";
+        }
+
       # Get latest element from chart (handles updates from multiply operations)
-        my $latest_element = $chart->get_element($completed_item);
+        my $latest_element = $chart->get_element($completed_item->key);
         if ($latest_element) {
             $completed_element = $latest_element;
         }
@@ -600,11 +688,44 @@ class Chalk::Parser {
         # - Semantic: calls evaluate() on semantic actions and updates context
         # - Composite: delegates to all wrapped semirings
         # - Others: NOOP (returns element unchanged)
+        if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+            my $rule_name = $completed_item->rule ? $completed_item->rule->lhs : 'NORULE';
+            if ($rule_name eq 'UseStatement' || $rule_name eq 'ExpressionList') {
+                warn "[PARSER.complete] BEFORE on_complete for $rule_name\n";
+            }
+        }
         $completed_element =
           $semiring->on_complete( $completed_item, $completed_element );
+        if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+            my $rule_name = $completed_item->rule ? $completed_item->rule->lhs : 'NORULE';
+            if ($rule_name eq 'UseStatement' || $rule_name eq 'ExpressionList') {
+                warn "[PARSER.complete] AFTER on_complete for $rule_name\n";
+                if ($rule_name eq 'UseStatement' && $completed_element->can('context')) {
+                    my $ctx = $completed_element->context;
+                    if ($ctx && $ctx->can('focus')) {
+                        my $focus = $ctx->focus;
+                        if ($focus && ref($focus) eq 'Chalk::IR::Node::ClassDef') {
+                            my $mappings = $focus->overload_mappings;
+                            warn "[PARSER.complete]   UseStatement focus is ClassDef with " .
+                                 scalar(keys %$mappings) . " overload mappings\n";
+                        }
+                    }
+                }
+            }
+        }
 
-        # Update the chart with the (potentially modified) element
-        $chart->add_element( $completed_item, $completed_element );
+        # Store the evaluated element directly without merging via add()
+        # The result from on_complete() is authoritative - it has evaluated
+        # the semantic actions and updated the context. We don't want to merge
+        # this with previous unevaluated alternatives via the semiring's add()
+        # operator, as that can cause the wrong alternative to be selected.
+        if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+            my $rule_name = $completed_item->rule ? $completed_item->rule->lhs : 'NORULE';
+            if ($rule_name eq 'UseStatement') {
+                warn "[PARSER.complete] REPLACING element for UseStatement item: " . $completed_item->key . "\n";
+            }
+        }
+        $chart->replace_element( $completed_item, $completed_element );
 
         # Use indexed lookups to get items waiting for this symbol
         # This avoids the expensive grep operations with isa checks
@@ -638,9 +759,9 @@ class Chalk::Parser {
                 top_item  => $waiting_item,
             );
 
-            my $waiting_element = $chart->get_element($waiting_item);
+            my $waiting_element = $chart->get_element($waiting_item->key);
             next unless $waiting_element;
-            my $combined_element = $waiting_element * $completed_element;
+            my $combined_element = $waiting_element->multiply($completed_element);
             $chart->add_element( $leo, $combined_element );
             push( $agenda->@*, $leo );
             return;    # Skip normal completion
@@ -649,11 +770,11 @@ class Chalk::Parser {
         # Normal completion for regular items
         for my $waiting_item (@waiting_for_lhs) {
 
-            my $waiting_element = $chart->get_element($waiting_item);
+            my $waiting_element = $chart->get_element($waiting_item->key);
             next unless $waiting_element;
 
             # Semiring multiplication ⊗ combines sequential components
-            my $combined_element = $waiting_element * $completed_element;
+            my $combined_element = $waiting_element->multiply($completed_element);
 
             my $new_item = Chalk::EarleyItem->new(
                 start_pos => $waiting_item->start_pos,
@@ -665,7 +786,7 @@ class Chalk::Parser {
             # Always merge element (for disambiguation), only add to agenda if new
             my $has_existing = $chart->has_item($new_item);
             if ( $has_existing ) {
-                my $old_element = $chart->get_element($new_item);
+                my $old_element = $chart->get_element($new_item->key);
 
                 # For complete items, call on_complete() on the new derivation BEFORE merging
                 # This ensures add() can choose between fully-evaluated semantic elements,
@@ -721,9 +842,9 @@ class Chalk::Parser {
                         warn "  Looking for parents waiting for $lhs at pos " . $new_item->start_pos . ": found " . scalar(@parent_waiting) . "\n";
                     }
                     for my $parent_item (@parent_waiting) {
-                        my $parent_element = $chart->get_element($parent_item);
+                        my $parent_element = $chart->get_element($parent_item->key);
                         next unless $parent_element;
-                        my $parent_combined = $parent_element * $combined_element;
+                        my $parent_combined = $parent_element->multiply($combined_element);
                         my $parent_new_item = Chalk::EarleyItem->new(
                             start_pos => $parent_item->start_pos,
                             rule      => $parent_item->rule,
@@ -754,9 +875,9 @@ class Chalk::Parser {
 
             # Now $current is the original EarleyItem at the bottom of the chain
             # Complete it with the current completed item
-            my $waiting_element = $chart->get_element($leo_item);
+            my $waiting_element = $chart->get_element($leo_item->key);
             next unless $waiting_element;
-            my $combined_element = $waiting_element * $completed_element;
+            my $combined_element = $waiting_element->multiply($completed_element);
 
             my $new_item = Chalk::EarleyItem->new(
                 start_pos => $current->start_pos,
@@ -815,11 +936,11 @@ class Chalk::Parser {
             );
 
             # Get current element for this item (may have been updated by merge)
-            my $current_element = $chart->get_element($item);
+            my $current_element = $chart->get_element($item->key);
             if ($current_element) {
                 if ( $chart->has_item($advanced_item) ) {
                     # Item exists - merge in case we have a better element
-                    my $old_element = $chart->get_element($advanced_item);
+                    my $old_element = $chart->get_element($advanced_item->key);
                     my $merged = $chart->merge_element( $advanced_item, $current_element );
 
                     # Only re-add to agenda if merge changed validity (invalid→valid)
@@ -847,8 +968,10 @@ class Chalk::Parser {
     }
 
     method scan( $item, $element, $chart, $pos, $matched_value, $pattern_name = undef ) {
-        # $matched_value is a Chalk::Grammar::Token object (stringifies to its value)
-        my $match_length = length($matched_value);
+        # $matched_value is a Chalk::Grammar::Token object
+        my $token_value = ref($matched_value) && $matched_value->can('value') ? $matched_value->value : $matched_value;
+        $token_value //= '';  # Default to empty string if undef
+        my $match_length = length($token_value);
         my $scanned_item = Chalk::EarleyItem->new(
             start_pos => $item->start_pos,
             rule      => $item->rule,
