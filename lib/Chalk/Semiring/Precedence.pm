@@ -29,7 +29,7 @@ use utf8;
 use Chalk::Base;
 
 class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
-    field $valid :param :reader;  # Boolean: 1 = valid precedence, 0 = invalid
+    field $valid :param :reader = 0;  # Boolean: 1 = valid precedence, 0 = invalid (default to add_id)
     field $operator :param :reader = undef;  # Operator symbol (if known)
     field $precedence_level :param :reader = undef;  # Index in precedence table
     field $associativity :param :reader = undef;  # Associativity type: left, right, nonassoc, chained, chain/na
@@ -39,6 +39,14 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     field $errors :param :reader = [];  # Accumulated error messages (arrayref)
     field $start_pos :param :reader = 0;  # Start position for error reporting
     field $end_pos :param :reader = 0;  # End position for error reporting
+    field $semiring_add_id :param :reader = undef;  # Cached add_id from parent semiring
+    field $semiring_mul_id :param :reader = undef;  # Cached mul_id from parent semiring
+
+    ADJUST {
+        # Identity elements are self-referential - all others get explicit refs from parent
+        $semiring_add_id //= $self;
+        $semiring_mul_id //= $self;
+    }
 
     # Lookup operator precedence and associativity from operator_index
     method lookup_operator($op) {
@@ -77,28 +85,25 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     }
 
     method multiply( $other, $swap = undef ) {
-        # Handle undef or wrong type for $other
-        return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index) unless defined $other;
-        return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index) unless ref($other) && $other->can('valid');
+        # Handle undef or wrong type for $other - return cached add_id
+        return $semiring_add_id unless defined $other;
+        return $semiring_add_id unless ref($other) && $other->can('valid');
+
+        # Helper closure to create new elements with identity references
+        my $new_element = sub (%params) {
+            return Chalk::Semiring::PrecedenceElement->new(
+                %params,
+                operator_index => $operator_index,
+                semiring_add_id => $semiring_add_id,
+                semiring_mul_id => $semiring_mul_id
+            );
+        };
 
         # Boolean AND for sequence: both must succeed
-        # If either is invalid, result is invalid
-        # IMPORTANT: Preserve operator info so invalid elements don't equal add_id
-        # This prevents premature Composite short-circuit and allows add() to choose correctly
+        # If either is invalid, return cached add_id (semiring zero) to reject this parse
+        # This allows Composite to short-circuit and reject the entire derivation
         if (!$valid || !$other->valid) {
-            my $op = $operator // ($other->can('operator') ? $other->operator : undef);
-            my $level = $precedence_level // ($other->can('precedence_level') ? $other->precedence_level : undef);
-            my $assoc = $associativity // ($other->can('associativity') ? $other->associativity : undef);
-            my $active = $is_active || ($other->can('is_active') ? $other->is_active : 0);
-
-            return Chalk::Semiring::PrecedenceElement->new(
-                valid => 0,
-                operator => $op,
-                precedence_level => $level,
-                associativity => $assoc,
-                operator_index => $operator_index,
-                is_active => $active
-            );
+            return $semiring_add_id;
         }
 
         # Precedence validation: check if $other (right operand) has valid precedence
@@ -115,14 +120,14 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         # If either element has no operator info, preserve the one that does
         if (!defined($self_op) && !defined($other_op)) {
             # Neither has operator - return plain valid element, preserving any active status
-            return Chalk::Semiring::PrecedenceElement->new(
+            return $new_element->(
                 valid => 1,
                 operator_index => $operator_index,
                 is_active => ($is_active || ($other->is_active // 0))
             );
         } elsif (!defined($self_op)) {
             # Other has operator, self doesn't - preserve other's operator and active status
-            return Chalk::Semiring::PrecedenceElement->new(
+            return $new_element->(
                 valid => 1,
                 operator => $other_op,
                 precedence_level => $other_level,
@@ -132,7 +137,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
             );
         } elsif (!defined($other_op)) {
             # Self has operator, other doesn't - preserve self's operator and active status
-            return Chalk::Semiring::PrecedenceElement->new(
+            return $new_element->(
                 valid => 1,
                 operator => $self_op,
                 precedence_level => $self_level,
@@ -177,14 +182,14 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
             if ($self_level < $other_level && !$is_regex_match_context) {
                 # Parent has higher precedence than child - INVALID
-                # Example: `*` trying to contain `+` result
+                # Return cached add_id to reject this parse entirely
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "PREC REJECT: $self_op*(L$self_level) cannot contain $other_op(L$other_level) - parent has higher precedence\n";
                 }
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return $semiring_add_id;
             }
             # Parent has lower or equal precedence - VALID
-            return Chalk::Semiring::PrecedenceElement->new(
+            return $new_element->(
                 valid => 1,
                 operator => $self_op,
                 precedence_level => $self_level,
@@ -198,14 +203,14 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
             # Invalid if other (parent) has higher precedence - the child should have bound first
             if ($other_level < $self_level) {
                 # Parent has higher precedence than child - INVALID
-                # Example: `*` trying to contain `+` result
+                # Return cached add_id to reject this parse entirely
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "PREC REJECT: $other_op*(L$other_level) cannot contain $self_op(L$self_level) - parent has higher precedence\n";
                 }
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return $semiring_add_id;
             }
             # Parent has lower or equal precedence - VALID
-            return Chalk::Semiring::PrecedenceElement->new(
+            return $new_element->(
                 valid => 1,
                 operator => $other_op,
                 precedence_level => $other_level,
@@ -220,7 +225,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         if ($self_level < $other_level) {
             # self has higher precedence (lower level), other has lower precedence (higher level)
             # Preserve the higher precedence operator
-            return Chalk::Semiring::PrecedenceElement->new(
+            return $new_element->(
                 valid => 1,
                 operator => $self_op,
                 precedence_level => $self_level,
@@ -234,7 +239,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         if ($self_level > $other_level) {
             # self has lower precedence (higher level), other has higher precedence (lower level)
             # Preserve the higher precedence operator
-            return Chalk::Semiring::PrecedenceElement->new(
+            return $new_element->(
                 valid => 1,
                 operator => $other_op,
                 precedence_level => $other_level,
@@ -248,11 +253,12 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
         # Rule 3: nonassoc operators cannot chain with themselves
         if (defined($self_assoc) && $self_assoc eq 'nonassoc') {
             # nonassoc operators at same level cannot chain
+            # Return cached add_id to reject this parse entirely
             if ($self_op eq $other_op) {
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "PREC REJECT: nonassoc $self_op cannot chain with $other_op\n";
                 }
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return $semiring_add_id;
             }
         }
 
@@ -263,19 +269,20 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
             my $other_dir = _operator_direction($other_op);
 
             # If both have directions, they must match
+            # Return cached add_id to reject this parse entirely
             if (defined($self_dir) && defined($other_dir) && $self_dir ne $other_dir) {
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return $semiring_add_id;
             }
         }
 
         # Rule 5: chain/na allows chaining (like chained but context-dependent)
         if (defined($self_assoc) && $self_assoc eq 'chain/na') {
-            return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index);
+            return $new_element->(valid => 1, );
         }
 
         # Rule 6: left and right associativity
         # Default: valid
-        return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index);
+        return $new_element->(valid => 1, );
     }
 
     method to_string(@args) {
@@ -330,16 +337,10 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         }
         $operator_index = \%index;
 
-        # Identity elements
-        $add_id = Chalk::Semiring::PrecedenceElement->new(
-            valid => 0,
-            operator_index => $operator_index
-        );
-
-        $mul_id = Chalk::Semiring::PrecedenceElement->new(
-            valid => 1,
-            operator_index => $operator_index
-        );
+        # Identity elements - don't pass semiring_add_id/mul_id
+        # ADJUST block will make them self-referential (circular refs acceptable for 2 singletons)
+        $add_id = Chalk::Semiring::PrecedenceElement->new();
+        $mul_id = Chalk::Semiring::PrecedenceElement->new(valid => 1);
     }
 
     method zero() {
@@ -355,10 +356,12 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     }
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
-        # Return a plain valid element
+        # Return a plain valid element with identity references
         return Chalk::Semiring::PrecedenceElement->new(
             valid => 1,
-            operator_index => $operator_index
+            operator_index => $operator_index,
+            semiring_add_id => $add_id,
+            semiring_mul_id => $mul_id
         );
     }
 
@@ -406,6 +409,9 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                 if ($op_info) {
                     # Create element for the scanned operator (active)
                     my $new_op_element = Chalk::Semiring::PrecedenceElement->new(
+                semiring_add_id => $add_id,
+                semiring_mul_id => $mul_id,
+                
                         valid => 1,
                         operator => $token_str,
                         precedence_level => $op_info->{level},
@@ -454,6 +460,9 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         my $rhs = $completed_item->rule->rhs;
         if ($rhs && $rhs->@* > 0 && ($rhs->[0] eq '(' || $rhs->[0] eq '[')) {
             return Chalk::Semiring::PrecedenceElement->new(
+                semiring_add_id => $add_id,
+                semiring_mul_id => $mul_id,
+                
                 valid => $was_valid,
                 operator_index => $operator_index
             );
@@ -464,6 +473,9 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # operators. The '-' in '-1' is unary (high precedence) not binary.
         if ($rule_name eq 'Unary') {
             return Chalk::Semiring::PrecedenceElement->new(
+                semiring_add_id => $add_id,
+                semiring_mul_id => $mul_id,
+                
                 valid => $was_valid,
                 operator_index => $operator_index
             );
@@ -484,6 +496,9 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # If not an expression rule, clear operator info (but preserve validity)
         if (!$is_expression) {
             return Chalk::Semiring::PrecedenceElement->new(
+                semiring_add_id => $add_id,
+                semiring_mul_id => $mul_id,
+                
                 valid => $was_valid,
                 operator_index => $operator_index
             );
@@ -504,6 +519,9 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # IMPORTANT: Preserve validity state - don't always return valid => 1
         if (defined($operator)) {
             return Chalk::Semiring::PrecedenceElement->new(
+                semiring_add_id => $add_id,
+                semiring_mul_id => $mul_id,
+                
                 valid => $was_valid,
                 operator => $operator,
                 precedence_level => $prec_level,
@@ -512,6 +530,9 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
             );
         } else {
             return Chalk::Semiring::PrecedenceElement->new(
+                semiring_add_id => $add_id,
+                semiring_mul_id => $mul_id,
+                
                 valid => $was_valid,
                 operator_index => $operator_index
             );
