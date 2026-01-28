@@ -6,9 +6,8 @@ use utf8;
 use Chalk::Base;
 
 class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
-    use overload '""' => 'to_string';
 
-    field $valid :param :reader;  # Boolean: 1 = semantically valid, 0 = invalid
+    field $valid :param :reader = 0;  # Boolean: 1 = semantically valid, 0 = invalid (default to add_id)
     field $type :param :reader = undef;  # Inferred type (if known) - reserved for future use
     field $sppf_node :param :reader = undef;  # SPPF node for examining parse structure
     field $forest :param :reader = undef;  # Reference to SPPF forest
@@ -16,6 +15,14 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
     field $errors :param :reader = [];  # Accumulated error messages (arrayref)
     field $start_pos :param :reader = 0;  # Start position for error reporting
     field $end_pos :param :reader = 0;  # End position for error reporting
+    field $semiring_add_id :param :reader = undef;  # Cached add_id from parent
+    field $semiring_mul_id :param :reader = undef;  # Cached mul_id from parent
+
+    ADJUST {
+        # Identity elements are self-referential
+        $semiring_add_id //= $self;
+        $semiring_mul_id //= $self;
+    }
 
     method to_string(@args) {
         return $valid ? 'valid' : 'invalid';
@@ -50,38 +57,88 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
         # Merge errors from both alternatives
         my @merged_errors = ($errors->@*, ($other->can('errors') ? $other->errors->@* : ()));
 
+        # INSTRUMENTATION: Log what alternatives we see
+        if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+            my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+            my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+
+            # Try to identify UseStatement vs ExpressionList
+            my $self_is_use = ($self_node =~ /UseStatement/);
+            my $self_is_exprlist = ($self_node =~ /ExpressionList/);
+            my $other_is_use = ($other_node =~ /UseStatement/);
+            my $other_is_exprlist = ($other_node =~ /ExpressionList/);
+
+            if ($self_is_use || $self_is_exprlist || $other_is_use || $other_is_exprlist) {
+                warn "[SEMVAL.add] $self_node(valid=$valid,start=$start_pos,end=$end_pos) vs $other_node(valid=" . $other->valid . ",start=" . $other->start_pos . ",end=" . $other->end_pos . ")\n";
+            }
+        }
+
         # If self is invalid (add_id), return other
-        return $other if !$valid;
+        if (!$valid) {
+            if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+                my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+                my $is_relevant = ($self_node =~ /UseStatement|ExpressionList/) || ($other_node =~ /UseStatement|ExpressionList/);
+                warn "[SEMVAL.add]   => Choosing OTHER (self is add_id)\n" if $is_relevant;
+            }
+            return $other;
+        }
 
         # If other is invalid, return self
-        return $self if !$other->valid;
+        if (!$other->valid) {
+            if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+                my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+                my $is_relevant = ($self_node =~ /UseStatement|ExpressionList/) || ($other_node =~ /UseStatement|ExpressionList/);
+                warn "[SEMVAL.add]   => Choosing SELF (other is invalid)\n" if $is_relevant;
+            }
+            return $self;
+        }
 
         # Both marked valid initially - validate their semantic constraints
         my $self_valid = $self->_validate_semantic_constraints();
         my $other_valid = $other->_validate_semantic_constraints();
 
+        if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+            my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+            my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+            my $is_relevant = ($self_node =~ /UseStatement|ExpressionList/) || ($other_node =~ /UseStatement|ExpressionList/);
+            warn "[SEMVAL.add]   After constraint validation: self_valid=$self_valid, other_valid=$other_valid\n" if $is_relevant;
+        }
+
         if ($self_valid && !$other_valid) {
+            if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+                my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+                my $is_relevant = ($self_node =~ /UseStatement|ExpressionList/) || ($other_node =~ /UseStatement|ExpressionList/);
+                warn "[SEMVAL.add]   => Choosing SELF (only self valid)\n" if $is_relevant;
+            }
             return $self;
         } elsif ($other_valid && !$self_valid) {
+            if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+                my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+                my $is_relevant = ($self_node =~ /UseStatement|ExpressionList/) || ($other_node =~ /UseStatement|ExpressionList/);
+                warn "[SEMVAL.add]   => Choosing OTHER (only other valid)\n" if $is_relevant;
+            }
             return $other;
         } elsif (!$self_valid && !$other_valid) {
-            # Neither valid - return invalid element with errors
-            push @merged_errors, {
-                type => 'semantic_validation_failed',
-                message => 'No valid semantic alternative found',
-                start_pos => $start_pos,
-                end_pos => $end_pos
-            };
-            return Chalk::Semiring::SemanticValidationElement->new(
-                valid => 0,
-                forest => $forest,
-                rules => $rules,
-                errors => \@merged_errors,
-                start_pos => $start_pos,
-                end_pos => $end_pos
-            );
+            # Neither valid - return cached add_id
+            if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+                my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+                my $is_relevant = ($self_node =~ /UseStatement|ExpressionList/) || ($other_node =~ /UseStatement|ExpressionList/);
+                warn "[SEMVAL.add]   => Both invalid, returning add_id\n" if $is_relevant;
+            }
+            return $semiring_add_id;
         } else {
             # Both valid - prefer self (first alternative)
+            if ($ENV{DEBUG_PARSE_ALTERNATIVES}) {
+                my $self_node = $sppf_node ? $sppf_node->symbol : 'NO_NODE';
+                my $other_node = $other->sppf_node ? $other->sppf_node->symbol : 'NO_NODE';
+                my $is_relevant = ($self_node =~ /UseStatement|ExpressionList/) || ($other_node =~ /UseStatement|ExpressionList/);
+                warn "[SEMVAL.add]   => Choosing SELF (both valid, prefer first)\n" if $is_relevant;
+            }
             return $self;
         }
     }
@@ -122,16 +179,9 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
         my $new_start = $start_pos < $other_start ? $start_pos : $other_start;
         my $new_end = $end_pos > $other_end ? $end_pos : $other_end;
 
-        # If either is invalid, result is invalid
+        # If either is invalid, return cached add_id
         if (!$valid || !$other->valid) {
-            return Chalk::Semiring::SemanticValidationElement->new(
-                valid => 0,
-                forest => $forest,
-                rules => $rules,
-                errors => \@new_errors,
-                start_pos => $new_start,
-                end_pos => $new_end
-            );
+            return $semiring_add_id;
         }
 
         # Both valid - return new element with combined errors and positions
@@ -142,7 +192,9 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
             rules => $rules,
             errors => \@new_errors,
             start_pos => $new_start,
-            end_pos => $new_end
+            end_pos => $new_end,
+            semiring_add_id => $semiring_add_id,
+            semiring_mul_id => $semiring_mul_id
         );
     }
 
@@ -195,23 +247,18 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             $forest = $shared_context->{forest};
         }
 
-        # Initialize identity elements
+        # Initialize identity elements - don't pass semiring_add_id/mul_id
+        # ADJUST block will make them self-referential
         $add_id = Chalk::Semiring::SemanticValidationElement->new(
             valid => 0,
             forest => $forest,
-            rules => $rules,
-            errors => [],
-            start_pos => 0,
-            end_pos => 0
+            rules => $rules
         );
 
         $mul_id = Chalk::Semiring::SemanticValidationElement->new(
             valid => 1,
             forest => $forest,
-            rules => $rules,
-            errors => [],
-            start_pos => 0,
-            end_pos => 0
+            rules => $rules
         );
     }
 
@@ -240,7 +287,9 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             rules => $rules,
             errors => [],
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            semiring_add_id => $add_id,
+            semiring_mul_id => $mul_id
         );
     }
 
@@ -252,7 +301,9 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             rules => $rules,
             errors => [],
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            semiring_add_id => $add_id,
+            semiring_mul_id => $mul_id
         );
     }
 
@@ -265,7 +316,9 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             rules => $rules,
             errors => [],
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            semiring_add_id => $add_id,
+            semiring_mul_id => $mul_id
         );
     }
 
