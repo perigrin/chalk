@@ -10,6 +10,14 @@ class Chalk::Semiring::LongestMatchElement :isa(Chalk::Element) {
     field $valid :param :reader = 1;
     field $start_pos :param :reader = 0;
     field $end_pos :param :reader = 0;
+    field $semiring_add_id :param :reader = undef;
+    field $semiring_mul_id :param :reader = undef;
+
+    ADJUST {
+        # Identity elements are self-referential
+        $semiring_add_id //= $self;
+        $semiring_mul_id //= $self;
+    }
 
     method span() {
         return $end_pos - $start_pos;
@@ -42,9 +50,9 @@ class Chalk::Semiring::LongestMatchElement :isa(Chalk::Element) {
         return $self unless defined $other;
         return $self unless ref($other) && $other->can('valid');
 
-        # If either is invalid, result is invalid
+        # If either is invalid, return cached add_id
         if (!$valid || !$other->valid) {
-            return Chalk::Semiring::LongestMatchElement->new(valid => 0);
+            return $semiring_add_id;
         }
 
         # Combine spans
@@ -63,7 +71,9 @@ class Chalk::Semiring::LongestMatchElement :isa(Chalk::Element) {
         return Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => $new_start,
-            end_pos => $new_end
+            end_pos => $new_end,
+            semiring_add_id => $semiring_add_id,
+            semiring_mul_id => $semiring_mul_id
         );
     }
 
@@ -87,17 +97,9 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
     field $add_id :reader;
 
     ADJUST {
-        $add_id = Chalk::Semiring::LongestMatchElement->new(
-            valid => 0,
-            start_pos => 0,
-            end_pos => 0
-        );
-
-        $mul_id = Chalk::Semiring::LongestMatchElement->new(
-            valid => 1,
-            start_pos => 0,
-            end_pos => 0
-        );
+        # Don't pass semiring_add_id/mul_id - will be self-referential
+        $add_id = Chalk::Semiring::LongestMatchElement->new(valid => 0);
+        $mul_id = Chalk::Semiring::LongestMatchElement->new(valid => 1);
     }
 
     method zero() {
@@ -112,7 +114,9 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
         return Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            semiring_add_id => $add_id,
+            semiring_mul_id => $mul_id
         );
     }
 
@@ -130,7 +134,9 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
         my $terminal_element = Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => $pos,
-            end_pos => $pos + $match_length
+            end_pos => $pos + $match_length,
+            semiring_add_id => $add_id,
+            semiring_mul_id => $mul_id
         );
 
         return $element->multiply($terminal_element);
