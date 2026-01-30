@@ -6,6 +6,7 @@ use utf8;
 use Chalk::Semiring::Boolean;
 use Chalk::Grammar::Token;
 use Chalk::Preprocessor::Heredoc;
+use Chalk::EvalContext;
 
 class Chalk::EarleyItem {
     use overload '""' => 'key';
@@ -266,8 +267,19 @@ class Chalk::Parser {
                 end_pos   => 0,
             );
 
+            # Create EvalContext for this rule
+            my $ctx = Chalk::EvalContext->new(
+                focus     => undef,  # No value yet
+                children  => [],     # No children yet
+                start_pos => 0,
+                end_pos   => 0,
+                env       => {},     # Empty environment for now
+                grammar   => $grammar,
+                rule      => $rule,
+            );
+
             my $start_element =
-              $semiring->init_element_from_rule( $rule, 0, 0 );
+              $semiring->init_element_from_rule( $rule, 0, 0, undef, $ctx );
             $chart->add_element( $start_item, $start_element );
         }
 
@@ -792,8 +804,19 @@ class Chalk::Parser {
 
                 # Only add if not already in chart
                 unless ( $chart->has_item($predicted_item) ) {
+                    # Create EvalContext for this predicted rule
+                    my $ctx = Chalk::EvalContext->new(
+                        focus     => undef,  # No value yet
+                        children  => [],     # No children yet
+                        start_pos => $pos,
+                        end_pos   => $pos,
+                        env       => {},     # Empty environment for now
+                        grammar   => $grammar,
+                        rule      => $rule,
+                    );
+
                     my $rule_element =
-                      $semiring->init_element_from_rule( $rule, $pos, $pos );
+                      $semiring->init_element_from_rule( $rule, $pos, $pos, undef, $ctx );
                     $chart->add_element( $predicted_item, $rule_element );
                     push( $agenda->@*, $predicted_item );
                 }
