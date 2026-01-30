@@ -404,41 +404,64 @@ NOT in TypeInference, which only annotates types.
 - Cannot return `add_id` to reject alternatives
 - This is WHY TypeInference disagrees - it's using different algebra than Boolean/Precedence/SemanticValidation
 
-**C. Unified Comonad Fixes Multiply() Validation (CONFIRMED)**: The architectural flaw is that multiply() cannot properly validate sequences
+**C. Unified Comonad Fixes Multiply() Validation (CONFIRMED BY USER)**: The architectural flaw is that multiply() cannot properly validate sequences
 
-**The Real Problem**:
-- multiply() is WHERE filtering should happen (combines sequential parse components)
+**The Real Problem** (User's insight from conversation history):
+> "The Unified comonad is (partially) fixing an Architectural Flaw that is _causing_ TypeInference's algebra mismatch, which is that we're not properly validating in the multiply() step"
+
+**Why TypeInference.multiply() Can't Validate Properly**:
+- multiply() is WHERE filtering should happen (combines sequential parse components as Earley advances)
 - TypeInference.multiply() currently does type meet but CANNOT reject invalid sequences
 - Even when types contradict (meet produces bottom), it returns a valid element with error recorded
-- **Missing**: No way to return semiring's add_id to short-circuit invalid sequences
+- **Critical missing pieces**:
+  1. No access to rule/grammar context (can't know "UseStatement expects list type")
+  2. No reference to semiring's add_id (can't signal rejection to Composite)
+  3. No parse tree structure (can't validate based on what we're combining)
 
-**What TypeInference.multiply() Lacks**:
-1. Access to rule/grammar context (what rule is being parsed?)
-2. Reference to semiring's add_id (to reject invalid sequences)
-3. Parse tree structure (what are we actually combining?)
+**Current Broken Behavior**:
+```perl
+# TypeInference.pm lines 72-83
+if ($meet_type->is_bottom() && !$type_obj->is_bottom() && !$other_type->is_bottom()) {
+    push @new_errors, { type => 'type_contradiction', ... };
+}
+
+return TypeInferenceElement->new(
+    type_obj => $meet_type,  # Returns bottom type, NOT add_id!
+    errors => \@new_errors,
+    ...
+);
+```
+
+**Problem**: Composite.multiply() never sees the failure because TypeInference didn't return add_id. Invalid sequence continues parsing, causing disagreement later in add().
 
 **How Unified Comonad Fixes This**:
 ```perl
 method multiply($other, $swap = undef) {
     my $rule = $self->context->rule;  # NOW AVAILABLE
+    my $add_id_ref = $self->semiring_add_id;  # NOW AVAILABLE
 
-    # Can validate based on rule expectations
+    # Validate based on rule expectations
     if ($rule->expects_list_context() && !$other->type_obj->is_list_compatible()) {
-        return $semiring_add_id;  # REJECT: type mismatch for this rule
+        return $add_id_ref;  # REJECT: type mismatch for this rule
     }
 
     # Type contradiction detection
     my $meet_type = $type_obj->meet($other_type);
     if ($meet_type->is_bottom() && !$type_obj->is_bottom() && !$other_type->is_bottom()) {
-        return $semiring_add_id;  # REJECT: contradictory types
+        return $add_id_ref;  # REJECT: contradictory types - SHORT CIRCUIT!
     }
 
     # Build valid context tree
-    return TypeInferenceElement->new(...);
+    my @new_children = ($self->context->children->@*, $other->context);
+    return TypeInferenceElement->new(
+        type_obj => $meet_type,
+        context => EvalContext->new(children => \@new_children, ...),
+        ...
+    );
 }
 ```
 
-**Verdict**: NOT a red herring - this IS the architectural fix needed for proper multiply() validation
+**Verdict**: This IS the architectural fix needed for proper multiply() validation. Review #2's claim that current behavior is "intentional design" is INCORRECT - it confused container type limitation with the core validation flaw.
 
 **D. Grammar Naming Confusion (CONFIRMED - Grammar Analysis 2026-01-30)**: Chalk's naming is backwards from Perl's
 
@@ -752,11 +775,17 @@ We now face a fundamental choice:
 - "Next Steps" section confusingly mixes blockers, findings, and future work
 
 **Review #2 - Technical Architect:**
-- TypeInference.multiply() behavior is **INTENTIONAL DESIGN**, not architectural flaw
-- Soft failures (bottom type + errors) prevent breaking multi-statement programs (see TypeInference.pm lines 361-369)
-- Unified comonad is useful but NOT required for immediate bug fix
-- Should be separate RFC with performance benchmarks
-- Proposed grammar refactoring conflicts with Chalk's architectural decision (flat grammar + Precedence semiring)
+- ❌ **INCORRECT CONCLUSION**: Claimed TypeInference.multiply() behavior is "intentional design"
+- **Why this is wrong**: Architect cited comment about container types (lines 361-369) but misread it
+  - That comment explains why **container type inference** isn't implemented
+  - It does NOT justify soft failures instead of proper rejection in multiply()
+- **Actual architectural flaw** (confirmed by user):
+  - TypeInference.multiply() detects type contradictions but can't reject sequences
+  - Missing: Access to `semiring_add_id` reference for rejection
+  - Missing: Access to rule/grammar context to know when to reject
+  - Result: Invalid sequences continue parsing, causing semiring disagreement
+- ✅ **CORRECT**: Unified comonad enables proper multiply() validation (not separate from bug fix)
+- ✅ **CORRECT**: Proposed grammar refactoring conflicts with flat + Precedence architecture
 
 **Review #3 - Perl Expert (WINNER):**
 - ✅ Three-level hierarchy claims verified against actual perly.y source
