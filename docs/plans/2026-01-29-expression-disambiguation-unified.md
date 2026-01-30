@@ -1,8 +1,28 @@
 # Expression Disambiguation in use Statements - Unified Plan
 
 **Date**: 2026-01-29
-**Status**: Implementation Plan
-**Related Issue**: #562 - Multi-line `use overload` parsing failure
+**Status**: ⚠️ **REVISION REQUIRED - DO NOT IMPLEMENT**
+**Related Issue**: ❌ #562 is WRONG (C++ keywords) - See #571 or #605
+
+---
+
+## ⚠️ CRITICAL: PLAN REQUIRES REVISION
+
+**Three senior architect reviews (2026-01-30) identified CRITICAL BLOCKERS:**
+
+1. ❌ **Wrong issue number** - #562 is about C++ keywords, not use overload parsing
+2. ❌ **No evidence** - Phase 1 investigation not executed (no actual error captured)
+3. ❌ **Contradictory claims** - Plan argues both FOR and AGAINST ExpressionList
+
+**DO NOT PROCEED with implementation until:**
+- Issue number corrected (#571 or #605)
+- Phase 1 investigation completed (capture actual error)
+- Contradictions resolved (choose ONE approach)
+- Comonad separated into independent RFC
+
+**See**: "Senior Architect Review Findings" section below for details.
+
+---
 
 ## Executive Summary
 
@@ -690,6 +710,91 @@ We now face a fundamental choice:
 1. Proceed directly to Phase 2: Grammar Simplification
 2. Document architectural issue for future work
 3. Work within current semiring constraints
+
+## Senior Architect Review Findings (2026-01-30)
+
+**Three independent senior architects reviewed this plan. All three identified CRITICAL BLOCKERS.**
+
+### Consensus Findings (All Three Reviewers Agree):
+
+**🚨 CRITICAL BLOCKERS - IMPLEMENTATION CANNOT PROCEED:**
+
+1. **❌ WRONG ISSUE NUMBER**
+   - Issue #562 is "Parameter name 'class' conflicts with C++ keyword"
+   - NOT related to use overload parsing
+   - Actual relevant issues: #571 or #605
+   - **Impact**: Plan is solving the wrong problem
+
+2. **❌ PHASE 1 INVESTIGATION NOT EXECUTED**
+   - Plan marks it "CRITICAL" (line 161) but never ran it
+   - No actual error message captured
+   - No parse alternatives documented
+   - **Impact**: All solutions are speculative without evidence
+
+3. **❌ CONTRADICTORY PERL SEMANTICS CLAIMS**
+   - Lines 8, 81: "Perl doesn't have ExpressionList" → remove it
+   - Lines 469, 473: "Perl DOES have LIST" → keep ExpressionList
+   - **Impact**: Plan argues for opposite solutions simultaneously
+
+**✅ WHAT REVIEWERS CONFIRMED AS CORRECT:**
+
+- ✅ Perl DOES have LIST as first-class construct (verified in perlglossary, perly.y)
+- ✅ Sequential filtering implemented correctly in Composite.pm
+- ✅ Perl has three-level hierarchy: term → listexpr → expr (verified in perly.y)
+- ✅ Chalk's naming is backwards (Chalk Expression ≈ Perl term)
+
+### Individual Review Findings:
+
+**Review #1 - Coherence Expert:**
+- Plan updated multiple times but created MORE contradictions
+- Comonad presented as both PRIMARY fix (line 479) AND separate initiative (line 717)
+- Success criteria don't match actual problem (targets use overload but error is in grammar/chalk.bnf)
+- "Next Steps" section confusingly mixes blockers, findings, and future work
+
+**Review #2 - Technical Architect:**
+- TypeInference.multiply() behavior is **INTENTIONAL DESIGN**, not architectural flaw
+- Soft failures (bottom type + errors) prevent breaking multi-statement programs (see TypeInference.pm lines 361-369)
+- Unified comonad is useful but NOT required for immediate bug fix
+- Should be separate RFC with performance benchmarks
+- Proposed grammar refactoring conflicts with Chalk's architectural decision (flat grammar + Precedence semiring)
+
+**Review #3 - Perl Expert (WINNER):**
+- ✅ Three-level hierarchy claims verified against actual perly.y source
+- ❌ **MISSING VERSION HANDLING**: `use Module VERSION, LIST` not supported in current grammar
+- ❌ **MISSING EDGE CASE**: `use Module ()` vs `use Module` have different semantics (import called vs not called)
+- Real ambiguity likely simpler: ExpressionList has both left-recursive AND right-recursive paths
+- Example: `Expression => Expression , ExpressionList` creates parsing ambiguity
+
+### Immediate Actions Required (All Reviewers Agree):
+
+**BEFORE ANY DESIGN OR IMPLEMENTATION:**
+
+1. **Fix issue number** - Replace all #562 references with #571 or #605
+2. **Execute Phase 1 fully**:
+   ```bash
+   cd /home/perigrin/dev/chalk
+   git checkout sequential-filtering-clean
+   DEBUG_PARSE_ALTERNATIVES=1 perl -Ilib t/self-hosting.t 2>&1 | tee ambiguity-error.log
+   ```
+3. **Analyze real error**:
+   - What input triggers it?
+   - What are "self" and "other" alternatives?
+   - Which semiring disagrees?
+   - Is it actually about use overload or something else?
+4. **Resolve contradictions**:
+   - Decide: Keep ExpressionList (matches Perl) OR remove it?
+   - Update plan to have ONE consistent position
+5. **Separate comonad discussion** into independent RFC with benchmarks
+
+### Verdict from All Reviewers:
+
+**DO NOT IMPLEMENT THIS PLAN AS WRITTEN**
+
+The plan contains critical errors and internal contradictions that would lead to implementing the wrong solution. Complete the investigation phase first, then revise plan based on actual evidence.
+
+**Estimated Time to Fix Blockers**: 1-2 days
+
+---
 
 ## Next Steps
 
