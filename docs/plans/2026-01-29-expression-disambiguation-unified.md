@@ -420,7 +420,43 @@ method multiply($other, $swap = undef) {
 
 **Verdict**: NOT a red herring - this IS the architectural fix needed for proper multiply() validation
 
-**D. ExpressionList Semantic Model (CONFIRMED - Perl Research 2026-01-30)**: Perl DOES have LIST as a first-class construct
+**D. Grammar Naming Confusion (CONFIRMED - Grammar Analysis 2026-01-30)**: Chalk's naming is backwards from Perl's
+
+**Critical Discovery**: Chalk's current "Expression" is what Perl calls "term"!
+
+**Perl's Actual Hierarchy** (from perly.y):
+```
+expr:
+  - expr ANDOP expr
+  - expr OROP expr
+  - listexpr
+
+listexpr:
+  - listexpr ',' term
+  - listexpr ','
+  - term
+
+term:
+  - (all actual operators: arithmetic, ternary, references, literals, etc.)
+```
+
+**Chalk's Current Hierarchy**:
+```
+Expression:
+  - Literal, Variable, Identifier
+  - Assignment, Ternary, LogicalOp, ArithmeticOp, etc.
+  - (all the things Perl calls "term")
+
+ExpressionList:
+  - Expression ',' ExpressionList
+  - (should be comma-separated Terms)
+```
+
+**The Problem**: Chalk calls "term" → "Expression" and "listexpr" → "ExpressionList", but is **too permissive** because:
+- Chalk's Expression includes everything (no separation of term vs expr)
+- Chalk's ExpressionList uses Expression (should use Term)
+
+**E. ExpressionList Semantic Model (CONFIRMED - Perl Research 2026-01-30)**: Perl DOES have LIST as a first-class construct
 
 **Evidence from Perl Documentation**:
 - **perlglossary**: "LIST: A syntactic construct representing a comma-separated list of expressions"
@@ -728,6 +764,46 @@ Based on three independent senior architect reviews (2026-01-30):
 6. **Implement chosen approach**
 7. **Test thoroughly with progressive layers**
 8. **Document findings and update related plans**
+
+### Grammar Analysis Results (2026-01-30)
+
+**Agent Review of chalk.bnf** found:
+
+**Current State**:
+- ✅ Comma and fat-comma are NOT Expression operators (prevents one overlap)
+- ❌ ExpressionList uses full Expression instead of Term (diverges from Perl)
+- ❌ No Term production exists (needed to match Perl's hierarchy)
+- ⚠️ Minor structural ambiguities in ExpressionList rules (trailing comma variations)
+
+**Key Finding**: Chalk's naming is backwards:
+- Chalk "Expression" ≈ Perl "term" (the actual expressions)
+- Chalk "ExpressionList" ≈ Perl "listexpr" (comma-separated)
+- Chalk MISSING ≈ Perl "expr" (logical combinations of lists)
+
+**Recommended Fix**: Introduce proper three-level hierarchy:
+```bnf
+# Level 1: Term (atomic expressions - Perl's "term")
+Term -> Literal | Variable | Assignment | Ternary | ArithmeticOp | ...
+
+# Level 2: ListExpression (comma-separated - Perl's "listexpr")
+ListExpression -> Term
+ListExpression -> Term ',' ListExpression
+ListExpression -> Term '=>' Term ',' ListExpression
+
+# Level 3: Expression (logical combinations - Perl's "expr")
+Expression -> Term
+Expression -> ListExpression
+Expression -> Expression ANDOP Expression
+Expression -> Expression OROP Expression
+```
+
+**Impact**: This refactoring would:
+- Match Perl's documented three-level hierarchy
+- Prevent ambiguity by restricting ListExpression to use Term
+- Allow comma to be both separator (in ListExpression) and operator (in future Expression extensions)
+- Align Chalk's grammar with Perl's actual design
+
+**See**: Full analysis in agent output above with line number citations and specific ambiguity examples.
 
 ### SEPARATE TRACK: Unified Comonad Architecture
 
