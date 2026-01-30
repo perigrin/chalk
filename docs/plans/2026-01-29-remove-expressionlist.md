@@ -4,6 +4,16 @@
 **Status**: Planning
 **Related**: `docs/perl-expression-semantics.md`, `docs/plans/2026-01-29-expression-context-understanding.md`
 
+## Status Update (2026-01-30)
+
+**Architectural discovery completed**: Prototype validates unified EvalContext comonad architecture.
+
+See `docs/prototype-unified-comonad-findings.md` for complete analysis.
+
+**Key finding**: Parser should create EvalContext and pass to all semirings, eliminating the need for on_complete() metadata passing and cross-semiring peeking.
+
+**Next step**: Decide whether to adopt unified architecture before proceeding with ExpressionList removal.
+
 ## Goal
 
 Remove the `ExpressionList` grammar construct entirely and replace it with `Expression` + type-based context (list vs scalar).
@@ -397,10 +407,79 @@ Find which layer fails → that's where the bug is.
 - `perldoc perlop` - Perl operator precedence
 - `perldoc -f use` - Use statement specification
 
-## Next Steps After This Plan
+## Architectural Discovery: Unified Comonad Pattern (2026-01-30)
 
-1. Review this plan with perigrin
-2. Create git branch for ExpressionList removal
-3. Implement phases 1-6 in order
-4. Test progressively at each step
-5. Merge when all tests pass
+### Prototype Results
+
+**Branch**: `prototype-unified-comonad`
+**Documentation**: `docs/prototype-unified-comonad-findings.md`
+
+Successfully prototyped architecture where **Parser creates EvalContext and passes to all semirings**.
+
+### What Was Validated
+
+✅ Parser successfully creates and passes EvalContext to Boolean semiring
+✅ Elements store and carry contexts through parsing
+✅ multiply() builds proper context trees: `children => [$left_ctx, $right_ctx]`
+✅ Test shows correct parent+children structure for grammar `S -> A B`
+✅ Backward compatibility maintained (optional context parameter)
+
+### Key Discovery
+
+**All semirings should operate on same EvalContext comonad**, just with different domain values:
+- **SemanticElement**: `{ context, value: IR_node }`
+- **TypeInferenceElement**: `{ context, value: { type_obj, type_env } }`
+- **PrecedenceElement**: `{ context, value: { valid, operator, level } }`
+- **BooleanElement**: `{ context, value: bool }`
+
+This eliminates:
+- on_complete() metadata passing (rule is in context)
+- Cross-semiring peeking (TypeInference doesn't peek at Semantic)
+- Duplicate position tracking (all use `context->start_pos/end_pos`)
+
+### Trade-offs
+
+**Pros**:
+- Clearer data flow (Parser → context → semiring)
+- Explicit context management (no hidden state)
+- Natural comonad structure (extract/extend/duplicate)
+- Eliminates architectural violations
+
+**Cons**:
+- Performance cost (more allocations, no cached identities)
+- All semirings must be updated
+- Identity element semantics change
+
+### Decision Point
+
+**Before proceeding with ExpressionList removal**, must decide:
+
+**Option A**: Adopt unified comonad architecture
+- Update all semirings (Boolean, Precedence, TypeInference, SemanticValidation)
+- Refactor Parser to create contexts
+- Benchmark performance impact
+- **Estimated effort**: 10-15 days
+
+**Option B**: Keep current architecture
+- Fix immediate bugs (TypeInference/SemanticValidation multiply validation)
+- Accept architectural complexity
+- Proceed with ExpressionList removal
+- **Estimated effort**: 2-3 days
+
+**Recommendation**: Pursue Option A. The architectural benefits (elimination of peeking, unified API, proper comonad structure) outweigh the implementation cost.
+
+## Next Steps
+
+### If Adopting Unified Architecture (Recommended):
+
+1. **Extend prototype to TypeInference and Semantic** (highest value semirings)
+2. **Benchmark performance** on real Chalk code
+3. **If acceptable**: Extend to Precedence and SemanticValidation
+4. **Then**: Proceed with ExpressionList removal using unified architecture
+
+### If Keeping Current Architecture:
+
+1. Fix TypeInference.multiply() to reject type-invalid sequences
+2. Fix SemanticValidation.multiply() to validate semantic sequences
+3. Proceed with ExpressionList removal
+4. Accept cross-semiring peeking as necessary evil
