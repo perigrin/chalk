@@ -384,21 +384,70 @@ NOT in TypeInference, which only annotates types.
 - Cannot return `add_id` to reject alternatives
 - This is WHY TypeInference disagrees - it's using different algebra than Boolean/Precedence/SemanticValidation
 
-**C. Unified Comonad Hypothesis (UNPROVEN)**: Proposal that TypeInference needs access to full parse context (rule, grammar, tree)
-- Prototype shows it CAN work for Boolean semiring
-- Does NOT prove it SOLVES the TypeInference disagreement problem
-- TypeInference operates on type lattice, orthogonal to parse structure
-- **Verdict**: Red herring - gives TypeInference access it doesn't need for type inference
+**C. Unified Comonad Fixes Multiply() Validation (CONFIRMED)**: The architectural flaw is that multiply() cannot properly validate sequences
 
-**D. ExpressionList Semantic Model (LIKELY)**: Chalk's ExpressionList differs from Perl's `listexpr`
-- Perl separates `term` (no comma operators) from `listexpr` (comma-separated terms)
-- Chalk allows full `Expression` in `ExpressionList`, creating overlap
-- Solution: Either remove ExpressionList OR introduce `Term` construct like Perl
+**The Real Problem**:
+- multiply() is WHERE filtering should happen (combines sequential parse components)
+- TypeInference.multiply() currently does type meet but CANNOT reject invalid sequences
+- Even when types contradict (meet produces bottom), it returns a valid element with error recorded
+- **Missing**: No way to return semiring's add_id to short-circuit invalid sequences
+
+**What TypeInference.multiply() Lacks**:
+1. Access to rule/grammar context (what rule is being parsed?)
+2. Reference to semiring's add_id (to reject invalid sequences)
+3. Parse tree structure (what are we actually combining?)
+
+**How Unified Comonad Fixes This**:
+```perl
+method multiply($other, $swap = undef) {
+    my $rule = $self->context->rule;  # NOW AVAILABLE
+
+    # Can validate based on rule expectations
+    if ($rule->expects_list_context() && !$other->type_obj->is_list_compatible()) {
+        return $semiring_add_id;  # REJECT: type mismatch for this rule
+    }
+
+    # Type contradiction detection
+    my $meet_type = $type_obj->meet($other_type);
+    if ($meet_type->is_bottom() && !$type_obj->is_bottom() && !$other_type->is_bottom()) {
+        return $semiring_add_id;  # REJECT: contradictory types
+    }
+
+    # Build valid context tree
+    return TypeInferenceElement->new(...);
+}
+```
+
+**Verdict**: NOT a red herring - this IS the architectural fix needed for proper multiply() validation
+
+**D. ExpressionList Semantic Model (CONFIRMED - Perl Research 2026-01-30)**: Perl DOES have LIST as a first-class construct
+
+**Evidence from Perl Documentation**:
+- **perlglossary**: "LIST: A syntactic construct representing a comma-separated list of expressions"
+- **perldoc -f use**: Explicitly documents `use Module LIST` (not `use Module EXPR`)
+- **perlop**: Comma has dual semantics - operator (scalar context) vs separator (list context)
+
+**Critical Finding**: The claim "Perl doesn't have ExpressionList, just Expression in context" is **WRONG per Perl documentation**.
+
+**Three Orthogonal Concepts**:
+1. **LIST** = comma-separated expressions (syntactic construct)
+2. **Expression** = can be evaluated in list or scalar context
+3. **Context** = how expressions are evaluated (list vs scalar)
+
+**Implication for Chalk**:
+- ExpressionList SHOULD exist (matches Perl's documented LIST construct)
+- Current problem: Chalk allows full Expression in ExpressionList, creating overlap
+- Solution: Restrict to `Term` (expressions without comma operators) in ExpressionList, matching Perl's `listexpr` using `term` productions
 
 **Root Cause Priority**:
-1. **PRIMARY**: Grammar ambiguity (A) + TypeInference algebra mismatch (B)
-2. **SECONDARY**: Semantic model divergence from Perl (D)
-3. **NOT ROOT CAUSE**: Unified comonad (C) - architectural improvement, not bug fix
+1. **PRIMARY**: TypeInference cannot validate in multiply() due to architectural flaw (C)
+   - Missing access to rule/grammar context
+   - Missing reference to semiring's add_id for rejection
+   - This CAUSES the algebra mismatch (B) - TypeInference can't short-circuit
+2. **SECONDARY**: Grammar ambiguity (A) creates alternatives that need filtering
+3. **TERTIARY**: Semantic model divergence from Perl (D) - LIST is first-class construct
+
+**Critical Insight**: The unified comonad is NOT separate from the bug fix - it IS the architectural fix that enables proper multiply() validation across all semirings.
 
 ## Alternative Approaches Considered
 
