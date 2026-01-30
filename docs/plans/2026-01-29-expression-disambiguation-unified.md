@@ -2,7 +2,8 @@
 
 **Date**: 2026-01-29
 **Status**: ⚠️ **REVISION REQUIRED - DO NOT IMPLEMENT**
-**Related Issue**: ❌ #562 is WRONG (C++ keywords) - See #571 or #605
+**Related Issue**: ✅ **#572** - "fix: Enable use overload parsing and IR integration"
+**Note**: Issue #562 (C++ Reserved Keywords) is blocked by #572
 
 ---
 
@@ -10,17 +11,57 @@
 
 **Three senior architect reviews (2026-01-30) identified CRITICAL BLOCKERS:**
 
-1. ❌ **Wrong issue number** - #562 is about C++ keywords, not use overload parsing
+1. ✅ **Issue number corrected** - #572 is the correct issue for use overload parsing
 2. ❌ **No evidence** - Phase 1 investigation not executed (no actual error captured)
-3. ❌ **Contradictory claims** - Plan argues both FOR and AGAINST ExpressionList
+3. ✅ **Contradictory claims resolved (2026-01-30)** - Plan now has ONE consistent position: Keep ExpressionList but refactor to use Term
 
 **DO NOT PROCEED with implementation until:**
-- Issue number corrected (#571 or #605)
+- ~~Issue number corrected~~ ✅ DONE (#572)
 - Phase 1 investigation completed (capture actual error)
-- Contradictions resolved (choose ONE approach)
+- ~~Contradictions resolved (choose ONE approach)~~ ✅ DONE (2026-01-30)
 - Comonad separated into independent RFC
 
 **See**: "Senior Architect Review Findings" section below for details.
+
+---
+
+## 📋 ARCHITECTURAL DECISION (2026-01-30)
+
+**RESOLVED**: Contradictions in plan have been eliminated. The plan now has ONE consistent position.
+
+### Decision: Keep ExpressionList, Introduce Three-Level Hierarchy
+
+**What we're doing**:
+- ✅ KEEP ExpressionList (renamed to ListExpression to match Perl's "listexpr")
+- ✅ INTRODUCE Term construct (matches Perl's "term" - atomic expressions)
+- ✅ REFACTOR Expression to be top-level (matches Perl's "expr" - logical combinations)
+
+**Mapping to Perl's hierarchy**:
+```
+Perl perly.y          →  Chalk grammar (after refactor)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+term                  →  Term (literals, variables, operators)
+listexpr              →  ListExpression (comma-separated Terms)
+expr                  →  Expression (Terms, Lists, AND/OR combinations)
+```
+
+**Why this fixes the ambiguity**:
+- Current problem: `ExpressionList -> Expression ',' ExpressionList` creates ambiguity because Expression includes comma operators
+- Solution: `ListExpression -> Term ',' ListExpression` is unambiguous because Term does NOT include comma operators
+- Comma becomes separator in ListExpression, NOT an operator within Term
+
+**What was rejected**:
+- ❌ Removing ExpressionList entirely (see `docs/plans/2026-01-29-remove-expressionlist.md` - now marked REJECTED)
+- ❌ Keeping current two-level hierarchy (Expression/ExpressionList)
+
+**Evidence base**:
+- ✅ Verified in Perl source: perly.y shows three-level hierarchy
+- ✅ Verified in Perl docs: perlglossary defines LIST, perldoc -f use documents `use Module LIST`
+- ✅ Confirmed by user: Jan 9 conversation established this hierarchy
+
+**Related documents**:
+- `docs/plans/2026-01-29-remove-expressionlist.md` - REJECTED approach (contradicts Perl)
+- Grammar Analysis Results section (lines 903-941 below) - Detailed analysis
 
 ---
 
@@ -46,12 +87,14 @@ use overload '+' => 'add', '-' => 'sub';
 
 ### The Fundamental Issue
 
-Perl does not have an "ExpressionList" construct. Instead, Perl has:
-- **Expressions** (singular)
-- **Context** (scalar vs list)
-- The **comma operator** which evaluates to a list in list context
+**CORRECTION (2026-01-30)**: Perl DOES have a list construct - called `listexpr` in perly.y.
 
-Our grammar currently models this as:
+Perl has a **three-level expression hierarchy**:
+- **term** - atomic expressions (literals, variables, operators)
+- **listexpr** - comma-separated terms (LIST construct)
+- **expr** - logical combinations with AND/OR
+
+Our grammar currently models this incorrectly as:
 
 ```bnf
 UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT ExpressionList
@@ -81,7 +124,7 @@ use overload
 use overload ('+', 'add', '*', 'multiply', '""', 'to_string');
 ```
 
-**Key insight**: It's a **flat list** of comma-separated values, not a nested structure of fat-comma pairs.
+**Key insight**: It's a **flat list** (listexpr) of comma-separated values (terms). Fat-comma `=>` is just comma with left-operand auto-quoting.
 
 ## Sequential Filtering Architecture Context
 
@@ -98,32 +141,44 @@ The sequential filtering architecture (see `docs/plans/2026-01-10-composite-sequ
 
 We have three complementary approaches that work together:
 
-### Approach 1: Remove ExpressionList from Grammar (Primary Solution)
+### Approach 1: Introduce Term and Refactor Hierarchy (Primary Solution)
 
-**Rationale**: ExpressionList doesn't match Perl's semantics and creates ambiguity.
+**Rationale**: Chalk's naming is backwards from Perl. We need the three-level hierarchy.
 
 **Changes**:
 
 ```bnf
-# Remove ambiguous ExpressionList rules
-# Replace with direct Expression usage
+# Introduce Term (Perl's "term" - atomic expressions)
+Term -> Literal | Variable | Assignment | Ternary | ArithmeticOp | ...
 
-UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT Expression
-UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT VersionNumber WS_OPT Expression
+# Refactor ExpressionList to use Term (matches Perl's "listexpr")
+ListExpression -> Term
+ListExpression -> Term WS_OPT ',' WS_OPT ListExpression
+ListExpression -> Term WS_OPT '=>' WS_OPT Term WS_OPT ',' WS_OPT ListExpression
+
+# Expression becomes top-level (Perl's "expr")
+Expression -> Term
+Expression -> ListExpression
+Expression -> Expression WS_OPT ANDOP WS_OPT Expression
+Expression -> Expression WS_OPT OROP WS_OPT Expression
+
+# UseStatement uses ListExpression
+UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT ListExpression
+UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT VersionNumber WS_OPT ListExpression
 UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT VersionNumber
 UseStatement -> 'use' WS_OPT QualifiedIdentifier
 UseStatement -> 'use' WS_OPT VersionNumber
 ```
 
-**Key insight**: Only ONE Expression slot after the module (and optional version). The Expression contains comma operators, which are evaluated based on context.
+**Key insight**: Current "Expression" is actually Perl's "term". Restricting ListExpression to use Term (not full Expression) prevents ambiguity.
 
 **Advantages**:
-- Matches Perl's actual semantics precisely
-- Eliminates grammar-level ambiguity
-- Simpler grammar structure
-- Context determines interpretation, not grammar structure
+- Matches Perl's actual three-level hierarchy precisely
+- Eliminates ambiguity (ListExpression can't contain comma operators because Term doesn't include them)
+- Aligns Chalk's grammar with Perl's documented design
+- ExpressionList concept is CORRECT - just needs to use Term, not Expression
 
-**Implementation**: See `docs/plans/2026-01-29-remove-expressionlist.md` for detailed migration plan.
+**Implementation**: See "Grammar Analysis Results" section below (lines 903-941) for detailed analysis.
 
 ### Approach 2: Type-Based Disambiguation (Supporting Layer)
 
@@ -519,32 +574,36 @@ ExpressionList:
 - Solution: Restrict to `Term` (expressions without comma operators) in ExpressionList, matching Perl's `listexpr` using `term` productions
 
 **Root Cause Priority**:
-1. **PRIMARY**: TypeInference cannot validate in multiply() due to architectural flaw (C)
+1. **PRIMARY**: Grammar naming confusion (D) - Chalk uses "Expression" where Perl uses "term"
+   - Current ExpressionList uses Expression (too permissive - includes all operators)
+   - Should use Term (atomic expressions only, like Perl's "term")
+   - This creates overlapping parse alternatives
+2. **SECONDARY**: TypeInference cannot validate in multiply() due to architectural flaw (C)
    - Missing access to rule/grammar context
    - Missing reference to semiring's add_id for rejection
    - This CAUSES the algebra mismatch (B) - TypeInference can't short-circuit
-2. **SECONDARY**: Grammar ambiguity (A) creates alternatives that need filtering
-3. **TERTIARY**: Semantic model divergence from Perl (D) - LIST is first-class construct
+3. **TERTIARY**: Grammar ambiguity (A) is a symptom of #1 - wrong hierarchy
 
-**Critical Insight**: The unified comonad is NOT separate from the bug fix - it IS the architectural fix that enables proper multiply() validation across all semirings.
+**Critical Insight**: ExpressionList SHOULD exist (matches Perl's listexpr) but needs to use Term instead of Expression. The unified comonad is a separate architectural improvement that enables better validation.
 
 ## Alternative Approaches Considered
 
-### Alternative 1: CommaList Grammar Rule
+### Alternative 1: Remove ExpressionList Entirely
 
-Create a dedicated grammar rule:
+Remove ExpressionList and use Expression with context:
 
 ```bnf
-UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT CommaList
+UseStatement -> 'use' WS_OPT QualifiedIdentifier WS_OPT Expression
 
-CommaList -> CommaElement
-CommaList -> CommaElement WS_OPT ',' WS_OPT CommaList
-
-CommaElement -> Expression
-CommaElement -> %BAREWORD_ANY% WS_OPT '=>' WS_OPT Expression
+# Make comma an operator in Expression
+Expression -> Expression WS_OPT ',' WS_OPT Expression
+Expression -> Expression WS_OPT '=>' WS_OPT Expression
 ```
 
-**Why rejected**: ExpressionList concept itself is wrong. Better to remove it entirely and use Expression with context.
+**Why rejected**:
+- Diverges from Perl's documented design (Perl has LIST as first-class construct in perlglossary and perldoc -f use)
+- Doesn't solve the ambiguity (comma would still be both separator AND operator)
+- See `docs/plans/2026-01-29-remove-expressionlist.md` for this approach (now considered incorrect)
 
 ### Alternative 2: Require Parentheses
 
@@ -840,19 +899,19 @@ Based on three independent senior architect reviews (2026-01-30):
    - **Action**: Get exact input string and parse alternatives
    - **Blocker**: All solutions are speculative without this data
 
-3. **❌ PERL SEMANTICS ERROR**: Plan claims "Perl doesn't have ExpressionList" but Perl DOES have `listexpr` in perly.y
-   - **Action**: Study actual Perl grammar (perly.y) for use statement
-   - **Action**: Verify `use MODULE VERSION, LIST` form is valid (it is)
-   - **Impact**: Proposed grammar may diverge from Perl semantics
+3. **✅ PERL SEMANTICS VERIFIED**: Perl DOES have `listexpr` in perly.y (contradictory claims resolved)
+   - **Verified**: Perl has three-level hierarchy: term → listexpr → expr
+   - **Verified**: `use MODULE VERSION, LIST` form is valid
+   - **Resolution**: Keep ExpressionList but restrict it to use Term (not Expression)
 
 ### ARCHITECTURAL DECISION REQUIRED
 
 **DO NOT CONFLATE THESE TWO DECISIONS**:
 
 **Decision A: How to fix immediate ambiguity?**
-- Option A1: Remove ExpressionList (grammar simplification)
-- Option A2: Introduce Term construct (conservative, matches Perl)
-- Option A3: Enhance Precedence/SemanticValidation filtering
+- ~~Option A1: Remove ExpressionList (grammar simplification)~~ **REJECTED** - diverges from Perl
+- **Option A2: Introduce Term construct (RECOMMENDED)** - matches Perl's three-level hierarchy
+- Option A3: Enhance Precedence/SemanticValidation filtering (fallback)
 
 **Decision B: Adopt unified comonad architecture?**
 - This is a SEPARATE architectural improvement
@@ -894,10 +953,13 @@ Based on three independent senior architect reviews (2026-01-30):
 ### THEN CONTINUE WITH ORIGINAL PLAN
 
 4. **Design fix based on evidence** (not speculation)
-5. **Choose grammar approach** (A1: remove ExpressionList OR A2: introduce Term)
-6. **Implement chosen approach**
-7. **Test thoroughly with progressive layers**
-8. **Document findings and update related plans**
+5. **Implement grammar approach A2** (introduce Term, refactor to three-level hierarchy)
+   - Rename current Expression productions to Term
+   - Create ListExpression using Term (not Expression)
+   - Create Expression as top level (Term | ListExpression | logical combinations)
+6. **Test thoroughly with progressive layers**
+7. **Document findings and update related plans**
+8. **Mark remove-expressionlist.md as REJECTED** (contradicts Perl's design)
 
 ### Grammar Analysis Results (2026-01-30)
 
