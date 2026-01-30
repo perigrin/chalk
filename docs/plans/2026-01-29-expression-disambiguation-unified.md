@@ -321,39 +321,84 @@ use overload '""' => 'as_string', fallback => 1;
 
 ### Question 1: Is there actually parse ambiguity?
 
-**Hypothesis A**: No grammar ambiguity exists, TypeInference just needs context annotations
-**Hypothesis B**: Grammar ambiguity exists, needs grammar changes
+**ANSWER (from investigation 2026-01-29)**: YES - Sequential filtering on `sequential-filtering-clean` branch detects ambiguity in parsing Chalk source files (specifically grammar/chalk.bnf).
 
-**How to test**: Run self-hosting test, capture actual error.
+**Evidence**:
+- Input: `grammar/chalk.bnf` (not a Chalk program, but used as test input)
+- Error: TypeInference semiring disagreed with Boolean/Precedence/SemanticValidation in Composite.add()
+- Branch: `sequential-filtering-clean` with sequential filtering implementation
+- The ambiguity is REAL and detected by the architecture
+
+**Remaining unknown**: Exact input string that triggers the disagreement (need to capture from actual test run).
 
 ### Question 2: What was the CI error?
 
-From earlier notes:
+**PARTIAL ANSWER**:
 ```
 Ambiguous parse in Composite.add():
   Boolean chose self
   Precedence chose self
-  TypeInference chose other
+  TypeInference chose other  ← Disagrees!
   SemanticValidation chose self
 ```
 
-**Questions**:
-- What were "self" and "other"?
-- Why did TypeInference choose differently?
-- Which file triggered it?
+**What we know**:
+- Triggered when parsing `grammar/chalk.bnf` with ChalkSyntax parser
+- TypeInference semiring made different choice than other three semirings
+- Sequential filtering correctly detected the disagreement and died
+- This proves the architecture is working as designed
+
+**Still unknown**:
+- Exact input substring causing disagreement
+- What "self" and "other" parse alternatives represent
+- Which operator or construct causes the split (`/` vs `=~` was mentioned in error)
+
+**How to answer**: Run with `DEBUG_PARSE_ALTERNATIVES=1` to see the actual alternatives.
 
 ### Question 3: Does TypeInference currently use container_context for filtering?
 
-Current behavior: `container_context` is preserved but not used for disambiguation.
+**ANSWER**: NO - `container_context` field exists in TypeInferenceElement (line 18) but is:
+- Preserved through multiply() and add() operations
+- NOT used for disambiguation decisions
+- Available for future semantic action use
 
-**Question**: Should it be? Or should we fix the grammar instead?
+**Architectural Finding**: TypeInference CANNOT use context for filtering because it uses **tropical semiring with lattice join** for add(). Lattice join always succeeds (worst case returns `Any` top type), so TypeInference cannot return `add_id` to reject alternatives.
+
+**Implication**: If context-based filtering is needed, it must happen in:
+- **Precedence semiring** (can reject based on operator precedence rules), OR
+- **SemanticValidation semiring** (can validate semantic constraints)
+
+NOT in TypeInference, which only annotates types.
 
 ### Question 4: What is the actual root cause?
 
-**Possibility A**: Grammar ambiguity (multiple parse trees exist)
-**Possibility B**: Missing type information (one parse exists, lacks annotations)
-**Possibility C**: Semantic layer issue (parse correct, semantic action broken)
-**Possibility D**: Grammar design issue (ExpressionList concept is wrong)
+**ANSWER**: Multiple contributing factors discovered:
+
+**A. Grammar Ambiguity (CONFIRMED)**: ExpressionList grammar allows overlapping parses
+- `ExpressionList -> Expression WS_OPT ',' WS_OPT ExpressionList`
+- `ExpressionList -> Expression WS_OPT '=>' WS_OPT Expression WS_OPT ',' WS_OPT ExpressionList`
+- If Expression can contain `,` or `=>` operators, creates ambiguity with ExpressionList structure
+
+**B. TypeInference Architectural Limitation (CONFIRMED)**: TypeInference uses lattice operations (join/meet) which cannot express "this parse is invalid"
+- Join always produces a valid type (worst case: `Any`)
+- Cannot return `add_id` to reject alternatives
+- This is WHY TypeInference disagrees - it's using different algebra than Boolean/Precedence/SemanticValidation
+
+**C. Unified Comonad Hypothesis (UNPROVEN)**: Proposal that TypeInference needs access to full parse context (rule, grammar, tree)
+- Prototype shows it CAN work for Boolean semiring
+- Does NOT prove it SOLVES the TypeInference disagreement problem
+- TypeInference operates on type lattice, orthogonal to parse structure
+- **Verdict**: Red herring - gives TypeInference access it doesn't need for type inference
+
+**D. ExpressionList Semantic Model (LIKELY)**: Chalk's ExpressionList differs from Perl's `listexpr`
+- Perl separates `term` (no comma operators) from `listexpr` (comma-separated terms)
+- Chalk allows full `Expression` in `ExpressionList`, creating overlap
+- Solution: Either remove ExpressionList OR introduce `Term` construct like Perl
+
+**Root Cause Priority**:
+1. **PRIMARY**: Grammar ambiguity (A) + TypeInference algebra mismatch (B)
+2. **SECONDARY**: Semantic model divergence from Perl (D)
+3. **NOT ROOT CAUSE**: Unified comonad (C) - architectural improvement, not bug fix
 
 ## Alternative Approaches Considered
 
@@ -563,16 +608,83 @@ We now face a fundamental choice:
 
 ## Next Steps
 
-**ARCHITECTURAL DECISION REQUIRED**:
-- [ ] Choose Option A (Unified Comonad) or Option B (Fix Immediate)
-- [ ] If Option A: Extend prototype to TypeInference and Semantic
-- [ ] If Option A: Benchmark performance on self-hosting test
-- [ ] If Option B: Proceed to Phase 2 (Grammar Simplification)
+### CRITICAL CORRECTIONS NEEDED FIRST
 
-**Then continue with original plan**:
-1. Run investigation phase to capture actual error (if Option B)
-2. Design fix based on reality, not speculation
-3. Implement grammar simplification
-4. Test thoroughly with progressive layers
-5. Document findings and update related plans
-6. Merge with sequential filtering PR
+Based on three independent senior architect reviews (2026-01-30):
+
+1. **❌ WRONG ISSUE NUMBER**: Issue #562 is "Parameter name 'class' conflicts with C++ keyword" - NOT about use overload parsing
+   - **Action**: Find correct issue number (possibly #571 or #605) or create new issue
+   - **Blocker**: Cannot proceed without knowing what we're actually fixing
+
+2. **❌ INCOMPLETE INVESTIGATION**: Phase 1 not yet executed despite being marked "CRITICAL"
+   - **Action**: Capture actual error with `DEBUG_PARSE_ALTERNATIVES=1`
+   - **Action**: Get exact input string and parse alternatives
+   - **Blocker**: All solutions are speculative without this data
+
+3. **❌ PERL SEMANTICS ERROR**: Plan claims "Perl doesn't have ExpressionList" but Perl DOES have `listexpr` in perly.y
+   - **Action**: Study actual Perl grammar (perly.y) for use statement
+   - **Action**: Verify `use MODULE VERSION, LIST` form is valid (it is)
+   - **Impact**: Proposed grammar may diverge from Perl semantics
+
+### ARCHITECTURAL DECISION REQUIRED
+
+**DO NOT CONFLATE THESE TWO DECISIONS**:
+
+**Decision A: How to fix immediate ambiguity?**
+- Option A1: Remove ExpressionList (grammar simplification)
+- Option A2: Introduce Term construct (conservative, matches Perl)
+- Option A3: Enhance Precedence/SemanticValidation filtering
+
+**Decision B: Adopt unified comonad architecture?**
+- This is a SEPARATE architectural improvement
+- Not required to fix the immediate ambiguity
+- Should be evaluated independently with benchmarks
+- Requires separate RFC/proposal
+
+**Recommendation from reviewers**:
+- Treat unified comonad as separate work
+- Focus Decision A on fixing immediate grammar issue
+- Complete Phase 1 investigation BEFORE choosing A1/A2/A3
+
+### IMMEDIATE ACTIONS (In Order)
+
+1. **✅ COMPLETE PHASE 1 INVESTIGATION**:
+   ```bash
+   cd /home/perigrin/dev/chalk
+   git checkout sequential-filtering-clean
+   DEBUG_PARSE_ALTERNATIVES=1 perl -Ilib t/self-hosting.t 2>&1 | tee ambiguity-error-full.log
+   ```
+   - Capture exact error message
+   - Identify triggering input string
+   - See what "self" and "other" alternatives are
+   - Verify which operators cause the split
+
+2. **✅ VERIFY ISSUE NUMBER**:
+   ```bash
+   gh issue view 562  # Should show C++ keyword issue
+   gh issue list --label "grammar" --label "parsing"
+   ```
+   - Find or create correct issue for use overload parsing
+   - Update all references in this plan
+
+3. **✅ STUDY PERL GRAMMAR**:
+   - Read perly.y `bare_statement_utilize` production
+   - Understand `optlistexpr` vs `listexpr` vs `term`
+   - Document how Perl actually handles `use MODULE VERSION, LIST`
+
+### THEN CONTINUE WITH ORIGINAL PLAN
+
+4. **Design fix based on evidence** (not speculation)
+5. **Choose grammar approach** (A1: remove ExpressionList OR A2: introduce Term)
+6. **Implement chosen approach**
+7. **Test thoroughly with progressive layers**
+8. **Document findings and update related plans**
+
+### SEPARATE TRACK: Unified Comonad Architecture
+
+If pursuing unified comonad (Decision B):
+- Create separate RFC document
+- Benchmark prototype on real Chalk code
+- Measure performance impact (allocations, memory, parse time)
+- Evaluate benefit vs cost independently
+- Do NOT tie to immediate bug fix
