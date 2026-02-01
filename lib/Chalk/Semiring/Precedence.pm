@@ -27,6 +27,7 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
+use Chalk::EvalContext;
 
 class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     field $valid :param :reader;  # Boolean: 1 = valid precedence, 0 = invalid
@@ -39,6 +40,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     field $errors :param :reader = [];  # Accumulated error messages (arrayref)
     field $start_pos :param :reader = 0;  # Start position for error reporting
     field $end_pos :param :reader = 0;  # End position for error reporting
+    field $context :param :reader = undef;  # EvalContext for this element
 
     # Lookup operator precedence and associativity from operator_index
     method lookup_operator($op) {
@@ -354,12 +356,17 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         return $operator_index->{$op};
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
-        # Return a plain valid element
-        return Chalk::Semiring::PrecedenceElement->new(
-            valid => 1,
-            operator_index => $operator_index
-        );
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
+        # If context provided, create element with it
+        if (defined($ctx)) {
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator_index => $operator_index,
+                context => $ctx
+            );
+        }
+        # Otherwise return cached mul_id (no context)
+        return $mul_id;
     }
 
     method multiply($x, $y) {
@@ -372,31 +379,78 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
 
     # Called when a token is scanned - mark operators and create precedence element
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
-        # Check if the token's value is an operator in our precedence table
+        # If element has context, create new context for scanned terminal
+        if (defined($element->context)) {
+            my $old_ctx = $element->context;
+            my $match_length = length($matched_value // '');
+
+            my $new_ctx = Chalk::EvalContext->new(
+                focus     => $matched_value,
+                children  => [],  # Terminal has no children
+                start_pos => $pos,
+                end_pos   => $pos + $match_length,
+                env       => $old_ctx->env,
+                grammar   => $old_ctx->grammar,
+                rule      => $old_ctx->rule,
+            );
+
+            # Check if the token's value is an operator in our precedence table
+            if (defined($matched_value)) {
+                my $token_str = "$matched_value";
+
+                # DEBUG: Log scanned tokens when DEBUG_PRECEDENCE is set
+                if ($ENV{DEBUG_PRECEDENCE} && $self->lookup_operator($token_str)) {
+                    warn "SCAN: token='$token_str' pattern='$pattern_name' found operator\n";
+                }
+
+                # Don't treat identifiers or attribute tokens as operators
+                my $is_identifier = defined($pattern_name) &&
+                    ($pattern_name eq 'IDENTIFIER' || $pattern_name eq 'BAREWORD' || $pattern_name eq 'BAREWORD_ANY');
+                my $is_attribute = $token_str =~ m/^:\w/ && $token_str ne '::';
+
+                # Don't treat certain tokens as operators when matched as literal terminals
+                my $is_empty_pattern = !defined($pattern_name) || $pattern_name eq '';
+                my $is_literal_terminal = $is_empty_pattern && ($token_str eq '/' || $token_str eq '.');
+
+                if (!$is_identifier && !$is_attribute && !$is_literal_terminal) {
+                    my $op_info = $self->lookup_operator($token_str);
+
+                    if ($op_info) {
+                        # Create element for the scanned operator (active) with context
+                        my $new_op_element = Chalk::Semiring::PrecedenceElement->new(
+                            valid => 1,
+                            operator => $token_str,
+                            precedence_level => $op_info->{level},
+                            associativity => $op_info->{assoc},
+                            operator_index => $operator_index,
+                            is_active => 1,  # Mark as active
+                            context => $new_ctx
+                        );
+
+                        return $element->multiply($new_op_element);
+                    }
+                }
+            }
+
+            # Not an operator, return plain element with new context
+            return Chalk::Semiring::PrecedenceElement->new(
+                valid => 1,
+                operator_index => $operator_index,
+                context => $new_ctx
+            );
+        }
+
+        # No context in element - use original logic (backward compatibility)
         if (defined($matched_value)) {
             my $token_str = "$matched_value";
 
-            # DEBUG: Log scanned tokens when DEBUG_PRECEDENCE is set
             if ($ENV{DEBUG_PRECEDENCE} && $self->lookup_operator($token_str)) {
                 warn "SCAN: token='$token_str' pattern='$pattern_name' found operator\n";
             }
 
-            # Don't treat identifiers or attribute tokens as operators
-            # BAREWORD, BAREWORD_ANY, and IDENTIFIER patterns are all identifier-like tokens
-            # that should never be treated as operators even if they match an operator string
-            # (e.g., the 'x' in variable $x should not be treated as string repetition operator)
             my $is_identifier = defined($pattern_name) &&
                 ($pattern_name eq 'IDENTIFIER' || $pattern_name eq 'BAREWORD' || $pattern_name eq 'BAREWORD_ANY');
-            # Attributes are : followed by word chars (not ::)
             my $is_attribute = $token_str =~ m/^:\w/ && $token_str ne '::';
-
-            # Don't treat certain tokens as operators when matched as literal terminals
-            # pattern_name tells us HOW the token was matched:
-            # - 'ARITHMETIC_OP' means it matched via the operator pattern (it's truly an operator)
-            # - empty/undef means it matched a literal terminal (context-dependent)
-            # Filter cases:
-            # - '/' as literal: regex delimiter, not division
-            # - '.' as literal: part of '..', method call separator, or qw delimiter - not concat
             my $is_empty_pattern = !defined($pattern_name) || $pattern_name eq '';
             my $is_literal_terminal = $is_empty_pattern && ($token_str eq '/' || $token_str eq '.');
 
@@ -404,27 +458,20 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                 my $op_info = $self->lookup_operator($token_str);
 
                 if ($op_info) {
-                    # Create element for the scanned operator (active)
                     my $new_op_element = Chalk::Semiring::PrecedenceElement->new(
                         valid => 1,
                         operator => $token_str,
                         precedence_level => $op_info->{level},
                         associativity => $op_info->{assoc},
                         operator_index => $operator_index,
-                        is_active => 1  # Mark as active - this is the current rule's operator
+                        is_active => 1
                     );
 
-                    # CRITICAL: Use multiply() to combine with existing element
-                    # This ensures precedence validation happens when active operator
-                    # (new) tries to combine with passive operator (existing from sub-expr)
-                    # multiply() at lines 149-185 will reject invalid precedence like
-                    # * (active, level 5) trying to contain + (passive, level 6)
                     return $element->multiply($new_op_element);
                 }
             }
         }
 
-        # Otherwise return element unchanged
         return $element;
     }
 
