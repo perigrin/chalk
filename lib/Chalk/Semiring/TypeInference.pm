@@ -6,6 +6,7 @@ use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
 use Chalk::Grammar::Chalk::TypeLattice;
+use Chalk::EvalContext;
 
 class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
     field $type_obj :param :reader;       # Type object from Chalk::Grammar::Chalk::Type::*
@@ -17,6 +18,7 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
     field $end_pos :param :reader = 0;    # End position for error reporting
     field $container_context :param :reader = undef;  # Container context: 'list', 'scalar', 'void', or undef
     field $value_context :param :reader = undef;      # Value context: 'numeric', 'string', 'boolean', or undef
+    field $context :param :reader = undef;  # EvalContext for this element
 
     # Tropical semiring addition: join (∨) - "could be either type"
     method add( $other, $swap = undef ) {
@@ -186,20 +188,24 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         return $mul_id;  # Top type (⊤ / Any)
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
-        # Start with top type (no constraints yet)
-        # Type constraints will be refined through meet operations
-        return Chalk::Semiring::TypeInferenceElement->new(
-            type_obj => $lattice->top_type(),
-            type_env => {},
-            children => [],
-            token => undef,
-            errors => [],
-            start_pos => $start_pos,
-            end_pos => $end_pos,
-            container_context => undef,
-            value_context => undef
-        );
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
+        # If context provided, create element with it
+        if (defined($ctx)) {
+            return Chalk::Semiring::TypeInferenceElement->new(
+                type_obj => $lattice->top_type(),
+                type_env => {},
+                children => [],
+                token => undef,
+                errors => [],
+                start_pos => $start_pos,
+                end_pos => $end_pos,
+                container_context => undef,
+                value_context => undef,
+                context => $ctx
+            );
+        }
+        # Otherwise return cached mul_id (no context)
+        return $mul_id;
     }
 
     method from_symbol($symbol, $start_pos, $end_pos, $sppf_node = undef) {
@@ -252,6 +258,21 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         my $match_len = defined($matched_value) ? length($matched_value) : 0;
         my $end_pos = $pos + $match_len;
 
+        # If element has context, create new context for scanned terminal
+        my $new_ctx = undef;
+        if (defined($element->context)) {
+            my $old_ctx = $element->context;
+            $new_ctx = Chalk::EvalContext->new(
+                focus     => $matched_value,
+                children  => [],  # Terminal has no children
+                start_pos => $pos,
+                end_pos   => $end_pos,
+                env       => $old_ctx->env,
+                grammar   => $old_ctx->grammar,
+                rule      => $old_ctx->rule,
+            );
+        }
+
         # Check if matched_value is a Token with type information
         if (defined $matched_value && ref($matched_value)) {
             my $type_obj = $element->type_obj;  # Default to current type
@@ -281,7 +302,8 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
                 start_pos => $pos,
                 end_pos => $end_pos,
                 container_context => $element->container_context,
-                value_context => $element->value_context
+                value_context => $element->value_context,
+                context => $new_ctx
             );
         }
 
@@ -295,7 +317,8 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
             start_pos => $pos,
             end_pos => $end_pos,
             container_context => $element->container_context,
-            value_context => $element->value_context
+            value_context => $element->value_context,
+            context => $new_ctx
         );
     }
 
