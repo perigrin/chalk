@@ -5,10 +5,12 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
+use Chalk::EvalContext;
 
 class Chalk::Semiring::PositionElement :isa(Chalk::Element) {
     field $start_pos :param :reader;
     field $end_pos   :param :reader;
+    field $context :param :reader = undef;  # EvalContext for this element
 
     method add( $other, $swap = undef ) {
         # Choice: prefer whichever parse went further
@@ -52,10 +54,11 @@ class Chalk::Semiring::Position :isa(Chalk::Semiring) {
         end_pos   => 0
     );
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
         return Chalk::Semiring::PositionElement->new(
             start_pos => $start_pos,
-            end_pos   => $end_pos
+            end_pos   => $end_pos,
+            context   => $ctx
         );
     }
 
@@ -67,6 +70,33 @@ class Chalk::Semiring::Position :isa(Chalk::Semiring) {
     method plus($x, $y) {
         # For backward compatibility if called directly
         return $x->add($y);
+    }
+
+    method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
+        # If element has context, create new context for scanned terminal
+        if (defined($element->context)) {
+            my $old_ctx = $element->context;
+            my $match_length = length($matched_value // '');
+
+            my $new_ctx = Chalk::EvalContext->new(
+                focus     => $matched_value,
+                children  => [],  # Terminal has no children
+                start_pos => $pos,
+                end_pos   => $pos + $match_length,
+                env       => $old_ctx->env,
+                grammar   => $old_ctx->grammar,
+                rule      => $old_ctx->rule,
+            );
+
+            return Chalk::Semiring::PositionElement->new(
+                start_pos => $pos,
+                end_pos   => $pos + $match_length,
+                context   => $new_ctx
+            );
+        }
+
+        # No context - return element unchanged (backward compatibility)
+        return $element;
     }
 }
 
