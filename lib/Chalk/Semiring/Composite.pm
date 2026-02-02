@@ -224,11 +224,12 @@ class Chalk::Semiring::Composite :isa(Chalk::Semiring) {
         $child_add_ids = \@add_ids;
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
         # Initialize element from each child semiring
+        # Pass context to all children for API standardization
         my @elements;
         for my $semiring ($semirings->@*) {
-            push @elements, $semiring->init_element_from_rule($rule, $start_pos, $end_pos, $matched_value);
+            push @elements, $semiring->init_element_from_rule($rule, $start_pos, $end_pos, $matched_value, $ctx);
         }
 
         return Chalk::Semiring::CompositeElement->new(
