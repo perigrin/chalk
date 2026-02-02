@@ -189,27 +189,35 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
         $rule,
         $start_pos            = 0,
         $end_pos              = 0,
-        $parent_derivation_id = undef
+        $parent_derivation_id = undef,
+        $ctx                  = undef
       )
     {
-        # Infer type from the rule
-        my $inferred_type = $self->infer_type_from_rule($rule);
+        # If context provided, use it (for API standardization)
+        # Otherwise create context as before (backward compatibility)
+        my $context;
+        if (defined($ctx)) {
+            $context = $ctx;
+        } else {
+            # Infer type from the rule
+            my $inferred_type = $self->infer_type_from_rule($rule);
 
-        my $ctx = Chalk::EvalContext->new(
-            focus     => undef,
-            children  => [],
-            start_pos => $start_pos,
-            end_pos   => $end_pos,
-            env       => $env,
-            grammar   => $grammar,
-            rule      => $rule,
-            type      => $inferred_type,
-            metadata_element => undef        # Will be set during on_complete()
-        );
+            $context = Chalk::EvalContext->new(
+                focus     => undef,
+                children  => [],
+                start_pos => $start_pos,
+                end_pos   => $end_pos,
+                env       => $env,
+                grammar   => $grammar,
+                rule      => $rule,
+                type      => $inferred_type,
+                metadata_element => undef        # Will be set during on_complete()
+            );
+        }
 
         return Chalk::Semiring::SemanticElement->new(
             value   => 1,     # Success value (not add_id which is 0)
-            context => $ctx
+            context => $context
         );
     }
 
