@@ -20,9 +20,13 @@ class Chalk::Semiring::PositionElement :isa(Chalk::Element) {
 
     method multiply( $other, $swap = undef ) {
         # Sequence: combine spans [self.start, other.end]
+        # Prefer other's context if present, else keep self's context
+        my $result_context = defined($other->context) ? $other->context : $context;
+
         return Chalk::Semiring::PositionElement->new(
             start_pos => $start_pos,
-            end_pos   => $other->end_pos
+            end_pos   => $other->end_pos,
+            context   => $result_context
         );
     }
 
