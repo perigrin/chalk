@@ -515,7 +515,8 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         if ($rhs && $rhs->@* > 0 && ($rhs->[0] eq '(' || $rhs->[0] eq '[')) {
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => $was_valid,
-                operator_index => $operator_index
+                operator_index => $operator_index,
+                context => $completed_element->context
             );
         }
 
@@ -525,7 +526,8 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         if ($rule_name eq 'Unary') {
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => $was_valid,
-                operator_index => $operator_index
+                operator_index => $operator_index,
+                context => $completed_element->context
             );
         }
 
@@ -545,7 +547,8 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         if (!$is_expression) {
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => $was_valid,
-                operator_index => $operator_index
+                operator_index => $operator_index,
+                context => $completed_element->context
             );
         }
 
@@ -568,12 +571,14 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
                 operator => $operator,
                 precedence_level => $prec_level,
                 associativity => $assoc,
-                operator_index => $operator_index
+                operator_index => $operator_index,
+                context => $completed_element->context
             );
         } else {
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => $was_valid,
-                operator_index => $operator_index
+                operator_index => $operator_index,
+                context => $completed_element->context
             );
         }
     }
