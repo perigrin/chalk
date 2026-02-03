@@ -18,11 +18,12 @@ use Chalk::Grammar;
         precedence_table => \@precedence_table
     );
 
-    # Without context - should return cached identity
+    # Without context - should return cached identity with shared empty context
     my $elem1 = $semiring->init_element_from_rule(undef, 0, 0, undef);
     ok($elem1, "init_element_from_rule works without context");
     is($elem1->valid, 1, "Element without context is valid");
-    ok(!defined($elem1->context), "Element without context has no context");
+    ok(defined($elem1->context), "Element has shared empty context");
+    is(scalar(@{$elem1->context->children}), 0, "Empty context has no children");
 
     # With same rule, should return same cached identity (reference equality)
     my $elem2 = $semiring->init_element_from_rule(undef, 0, 0, undef);
@@ -140,7 +141,7 @@ use Chalk::Grammar;
     is($scanned->context->focus, 'foo', "Scanned context has matched value as focus");
 }
 
-# Test 5: Identity elements have context => undef
+# Test 5: Identity elements have shared empty context
 {
     my @precedence_table = (
         { assoc => 'left', ops => ['+', '-'] },
@@ -153,8 +154,14 @@ use Chalk::Grammar;
     my $mul_id = $semiring->mul_id;
     my $add_id = $semiring->add_id;
 
-    ok(!defined($mul_id->context), "mul_id has context => undef");
-    ok(!defined($add_id->context), "add_id has context => undef");
+    ok(defined($mul_id->context), "mul_id has defined context");
+    ok(defined($add_id->context), "add_id has defined context");
+    is(scalar(@{$mul_id->context->children}), 0, "mul_id context has empty children");
+    is(scalar(@{$add_id->context->children}), 0, "add_id context has empty children");
+
+    # Verify they share the same context instance
+    use Scalar::Util qw(refaddr);
+    is(refaddr($mul_id->context), refaddr($add_id->context), "Identity elements share same context instance");
 }
 
 done_testing();

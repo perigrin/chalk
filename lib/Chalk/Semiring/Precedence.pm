@@ -318,6 +318,17 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
     field $mul_id :reader;
     field $add_id :reader;
 
+    # Shared empty context singleton for identity elements
+    field $empty_context :reader = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 0,
+        end_pos   => 0,
+        env       => {},
+        grammar   => undef,
+        rule      => undef,
+    );
+
     ADJUST {
         # Build operator index for fast lookup
         my %index;
@@ -335,12 +346,14 @@ class Chalk::Semiring::Precedence :isa(Chalk::Semiring) {
         # Identity elements
         $add_id = Chalk::Semiring::PrecedenceElement->new(
             valid => 0,
-            operator_index => $operator_index
+            operator_index => $operator_index,
+            context => $empty_context
         );
 
         $mul_id = Chalk::Semiring::PrecedenceElement->new(
             valid => 1,
-            operator_index => $operator_index
+            operator_index => $operator_index,
+            context => $empty_context
         );
     }
 
