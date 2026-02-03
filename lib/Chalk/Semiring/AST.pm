@@ -5,6 +5,7 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
+use Chalk::EvalContext;
 
 class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
     field $rule_name :param :reader =
@@ -14,6 +15,7 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
     field $terminal :param :reader  = undef;   # Terminal value (for leaf nodes)
     field $start_pos :param :reader = 0;
     field $end_pos :param :reader   = 0;
+    field $context :param :reader = undef;  # EvalContext for this element
 
     method add( $other, $swap = undef ) {
 
@@ -45,11 +47,13 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
         # Accumulate children
         my @new_children = ( $self->children->@*, $other );
 
+        # Preserve context from self (parent element)
         return Chalk::Semiring::ASTElement->new(
             rule_name => $self->rule_name,
             children  => \@new_children,
             start_pos => $self->start_pos,
-            end_pos   => $other->end_pos
+            end_pos   => $other->end_pos,
+            context   => $self->context
         );
     }
 
@@ -141,7 +145,8 @@ class Chalk::Semiring::AST :isa(Chalk::Semiring) {
         $rule,
         $start_pos     = 0,
         $end_pos       = 0,
-        $matched_value = undef
+        $matched_value = undef,
+        $ctx = undef
       )
     {
         # Create element for rule with rule_name set immediately
@@ -151,7 +156,8 @@ class Chalk::Semiring::AST :isa(Chalk::Semiring) {
             rule_name => $rule_name,
             children  => [],
             start_pos => $start_pos,
-            end_pos   => $end_pos
+            end_pos   => $end_pos,
+            context   => $ctx
         );
     }
 
@@ -170,11 +176,27 @@ class Chalk::Semiring::AST :isa(Chalk::Semiring) {
         my $value        = defined($matched_value) ? "$matched_value" : '';
         my $match_length = length($value);
 
+        # If element has context, create new context for scanned terminal
+        my $terminal_context = undef;
+        if (defined($element->context)) {
+            my $old_ctx = $element->context;
+            $terminal_context = Chalk::EvalContext->new(
+                focus     => $value,
+                children  => [],  # Terminal has no children
+                start_pos => $pos,
+                end_pos   => $pos + $match_length,
+                env       => $old_ctx->env,
+                grammar   => $old_ctx->grammar,
+                rule      => $old_ctx->rule,
+            );
+        }
+
         # Create terminal element
         my $terminal_element = Chalk::Semiring::ASTElement->new(
             terminal  => $value,
             start_pos => $pos,
-            end_pos   => $pos + $match_length
+            end_pos   => $pos + $match_length,
+            context   => $terminal_context
         );
 
         # Multiply to accumulate terminal into the rule element
