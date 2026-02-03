@@ -187,6 +187,7 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
     field $rules :param :reader = undef;  # Grammar-specific semantic rules
     field $forest :reader = undef;  # Shared SPPF forest
     field $shared_context :param = undef;
+    field $empty_context :reader;  # Shared empty context for identity elements
     field $mul_id :reader;  # Multiplicative identity (one)
     field $add_id :reader;  # Additive identity (zero)
     field @collected_errors;  # Errors collected during parsing
@@ -197,6 +198,17 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             $forest = $shared_context->{forest};
         }
 
+        # Create shared empty context for identity elements
+        $empty_context = Chalk::EvalContext->new(
+            focus     => undef,
+            children  => [],
+            start_pos => 0,
+            end_pos   => 0,
+            env       => {},
+            grammar   => undef,
+            rule      => undef,
+        );
+
         # Initialize identity elements
         $add_id = Chalk::Semiring::SemanticValidationElement->new(
             valid => 0,
@@ -204,7 +216,8 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             rules => $rules,
             errors => [],
             start_pos => 0,
-            end_pos => 0
+            end_pos => 0,
+            context => $empty_context
         );
 
         $mul_id = Chalk::Semiring::SemanticValidationElement->new(
@@ -213,7 +226,8 @@ class Chalk::Semiring::SemanticValidation :isa(Chalk::Semiring) {
             rules => $rules,
             errors => [],
             start_pos => 0,
-            end_pos => 0
+            end_pos => 0,
+            context => $empty_context
         );
     }
 

@@ -11,10 +11,11 @@ use Chalk::EvalContext;
 {
     my $semiring = Chalk::Semiring::SemanticValidation->new();
 
-    # Without context - should return cached identity
+    # Without context - should return cached identity with shared empty context
     my $elem1 = $semiring->init_element_from_rule(undef, 0, 0, undef);
     ok($elem1, "init_element_from_rule works without context");
-    ok(!defined($elem1->context), "Element without context has no context");
+    ok(defined($elem1->context), "Cached identity has shared empty context");
+    is(refaddr($elem1->context), refaddr($semiring->empty_context), "Uses semiring's empty_context");
 
     # With same rule, should return same cached identity (reference equality)
     my $elem2 = $semiring->init_element_from_rule(undef, 0, 0, undef);
@@ -108,15 +109,17 @@ use Chalk::EvalContext;
     is($scanned->context->focus, 'foo', "Scanned context has matched value as focus");
 }
 
-# Test 5: Identity elements have context => undef
+# Test 5: Identity elements have shared empty context
 {
     my $semiring = Chalk::Semiring::SemanticValidation->new();
 
     my $mul_id = $semiring->mul_id;
     my $add_id = $semiring->add_id;
 
-    ok(!defined($mul_id->context), "mul_id has context => undef");
-    ok(!defined($add_id->context), "add_id has context => undef");
+    ok(defined($mul_id->context), "mul_id has context defined");
+    ok(defined($add_id->context), "add_id has context defined");
+    is(refaddr($mul_id->context), refaddr($add_id->context), "Both identity elements share same context instance");
+    is(refaddr($mul_id->context), refaddr($semiring->empty_context), "Identity elements use semiring's empty_context");
 }
 
 done_testing();
