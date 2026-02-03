@@ -62,10 +62,14 @@ class Chalk::Semiring::LongestMatchElement :isa(Chalk::Element) {
             $new_end = $end_pos;
         }
 
+        # Prefer other's context if present, else keep self's context
+        my $result_context = defined($other->context) ? $other->context : $context;
+
         return Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => $new_start,
-            end_pos => $new_end
+            end_pos => $new_end,
+            context => $result_context
         );
     }
 
@@ -92,13 +96,15 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
         $add_id = Chalk::Semiring::LongestMatchElement->new(
             valid => 0,
             start_pos => 0,
-            end_pos => 0
+            end_pos => 0,
+            context => undef
         );
 
         $mul_id = Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => 0,
-            end_pos => 0
+            end_pos => 0,
+            context => undef
         );
     }
 
@@ -144,22 +150,13 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
                 rule      => $old_ctx->rule,
             );
 
-            my $terminal_element = Chalk::Semiring::LongestMatchElement->new(
+            my $terminal = Chalk::Semiring::LongestMatchElement->new(
                 valid => 1,
                 start_pos => $pos,
                 end_pos => $pos + $match_length,
                 context => $new_context
             );
-
-            my $result = $element->multiply($terminal_element);
-
-            # Preserve the context from the terminal in the result
-            return Chalk::Semiring::LongestMatchElement->new(
-                valid => $result->valid,
-                start_pos => $result->start_pos,
-                end_pos => $result->end_pos,
-                context => $new_context
-            );
+            return $element->multiply($terminal);
         }
 
         # No context - use original behavior
