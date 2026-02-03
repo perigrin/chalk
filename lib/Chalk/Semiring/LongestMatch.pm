@@ -5,11 +5,13 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
+use Chalk::EvalContext;
 
 class Chalk::Semiring::LongestMatchElement :isa(Chalk::Element) {
     field $valid :param :reader = 1;
     field $start_pos :param :reader = 0;
     field $end_pos :param :reader = 0;
+    field $context :param :reader = undef;  # EvalContext for this element
 
     method span() {
         return $end_pos - $start_pos;
@@ -108,11 +110,12 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
         return $mul_id;
     }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
         return Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => $start_pos,
-            end_pos => $end_pos
+            end_pos => $end_pos,
+            context => $ctx
         );
     }
 
@@ -127,6 +130,39 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
         my $match_length = length($matched_value // '');
 
+        # If element has context, create new context for scanned terminal
+        if (defined($element->context)) {
+            my $old_ctx = $element->context;
+
+            my $new_context = Chalk::EvalContext->new(
+                focus     => $matched_value,
+                children  => [],  # Terminal has no children
+                start_pos => $pos,
+                end_pos   => $pos + $match_length,
+                env       => $old_ctx->env,
+                grammar   => $old_ctx->grammar,
+                rule      => $old_ctx->rule,
+            );
+
+            my $terminal_element = Chalk::Semiring::LongestMatchElement->new(
+                valid => 1,
+                start_pos => $pos,
+                end_pos => $pos + $match_length,
+                context => $new_context
+            );
+
+            my $result = $element->multiply($terminal_element);
+
+            # Preserve the context from the terminal in the result
+            return Chalk::Semiring::LongestMatchElement->new(
+                valid => $result->valid,
+                start_pos => $result->start_pos,
+                end_pos => $result->end_pos,
+                context => $new_context
+            );
+        }
+
+        # No context - use original behavior
         my $terminal_element = Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => $pos,
