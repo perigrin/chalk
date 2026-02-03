@@ -151,7 +151,7 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     field $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
 
     # Shared empty context for identity elements (optimization)
-    my $empty_context = Chalk::EvalContext->new(
+    field $empty_context :reader = Chalk::EvalContext->new(
         focus     => undef,
         children  => [],
         start_pos => 0,
