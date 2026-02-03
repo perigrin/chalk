@@ -223,11 +223,11 @@ use Chalk::EvalContext;
     is(scalar(@mul_elems), 2, "mul_id has 2 wrapped identities");
     is(scalar(@add_elems), 2, "add_id has 2 wrapped identities");
 
-    # Wrapped identities should have context => undef
-    ok(!defined($mul_elems[0]->context), "Wrapped Precedence mul_id has no context");
-    ok(!defined($mul_elems[1]->context), "Wrapped TypeInference mul_id has no context");
-    ok(!defined($add_elems[0]->context), "Wrapped Precedence add_id has no context");
-    ok(!defined($add_elems[1]->context), "Wrapped TypeInference add_id has no context");
+    # Wrapped identities should have defined contexts (shared empty context pattern)
+    ok(defined($mul_elems[0]->context), "Wrapped Precedence mul_id has defined context");
+    ok(defined($mul_elems[1]->context), "Wrapped TypeInference mul_id has defined context");
+    ok(defined($add_elems[0]->context), "Wrapped Precedence add_id has defined context");
+    ok(defined($add_elems[1]->context), "Wrapped TypeInference add_id has defined context");
 }
 
 done_testing();
