@@ -78,15 +78,21 @@ use Chalk::EvalContext;
     is($scanned->context->focus, 'foo', "Scanned context has matched value as focus");
 }
 
-# Test 4: Identity elements have context => undef
+# Test 4: Identity elements share empty context singleton
 {
     my $semiring = Chalk::Semiring::LongestMatch->new();
 
     my $mul_id = $semiring->mul_id;
     my $add_id = $semiring->add_id;
 
-    ok(!defined($mul_id->context), "mul_id has context => undef");
-    ok(!defined($add_id->context), "add_id has context => undef");
+    ok(defined($mul_id->context), "mul_id has defined context");
+    ok(defined($add_id->context), "add_id has defined context");
+
+    # Both identity elements should share the same empty context singleton
+    is(refaddr($mul_id->context), refaddr($add_id->context),
+       "mul_id and add_id share the same empty context singleton");
+    is(refaddr($mul_id->context), refaddr($semiring->empty_context),
+       "mul_id context is the shared empty_context singleton");
 }
 
 done_testing();

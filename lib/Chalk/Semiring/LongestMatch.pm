@@ -89,6 +89,17 @@ class Chalk::Semiring::LongestMatchElement :isa(Chalk::Element) {
 }
 
 class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
+    # Shared empty context singleton for identity elements
+    field $empty_context :reader = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 0,
+        end_pos   => 0,
+        env       => {},
+        grammar   => undef,
+        rule      => undef,
+    );
+
     field $mul_id :reader;
     field $add_id :reader;
 
@@ -97,14 +108,14 @@ class Chalk::Semiring::LongestMatch :isa(Chalk::Semiring) {
             valid => 0,
             start_pos => 0,
             end_pos => 0,
-            context => undef
+            context => $empty_context
         );
 
         $mul_id = Chalk::Semiring::LongestMatchElement->new(
             valid => 1,
             start_pos => 0,
             end_pos => 0,
-            context => undef
+            context => $empty_context
         );
     }
 

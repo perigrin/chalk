@@ -43,15 +43,28 @@ class Chalk::Semiring::PositionElement :isa(Chalk::Element) {
 }
 
 class Chalk::Semiring::Position :isa(Chalk::Semiring) {
+    # Shared empty context singleton for identity elements
+    field $empty_context :reader = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 0,
+        end_pos   => 0,
+        env       => {},
+        grammar   => undef,
+        rule      => undef,
+    );
+
     # Identity elements
     field $mul_id :reader = Chalk::Semiring::PositionElement->new(
         start_pos => 0,
-        end_pos   => 0
+        end_pos   => 0,
+        context   => $empty_context
     );
 
     field $add_id :reader = Chalk::Semiring::PositionElement->new(
         start_pos => 0,
-        end_pos   => 0
+        end_pos   => 0,
+        context   => $empty_context
     );
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {

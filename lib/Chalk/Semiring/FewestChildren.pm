@@ -65,12 +65,23 @@ class Chalk::Semiring::FewestChildrenElement :isa(Chalk::Element) {
 }
 
 class Chalk::Semiring::FewestChildren :isa(Chalk::Semiring) {
+    # Shared empty context singleton for identity elements
+    field $empty_context :reader = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 0,
+        end_pos   => 0,
+        env       => {},
+        grammar   => undef,
+        rule      => undef,
+    );
+
     field $mul_id :reader;
     field $add_id :reader;
 
     ADJUST {
-        $add_id = Chalk::Semiring::FewestChildrenElement->new(valid => 0, child_count => 0);
-        $mul_id = Chalk::Semiring::FewestChildrenElement->new(valid => 1, child_count => 0);
+        $add_id = Chalk::Semiring::FewestChildrenElement->new(valid => 0, child_count => 0, context => $empty_context);
+        $mul_id = Chalk::Semiring::FewestChildrenElement->new(valid => 1, child_count => 0, context => $empty_context);
     }
 
     method zero() { return $add_id; }
