@@ -23,6 +23,7 @@ Without SPPF (Shared Packed Parse Forest), every semiring element represents an 
 - Standardize semiring API: All `init_element_from_rule()` methods accept optional `$ctx` parameter
 - Standardize terminal handling: All `on_scan()` methods create contexts for scanned terminals
 - Identity invariant: All identity elements (`add_id`, `mul_id`) have `context => undef`
+  - **Exception**: Semantic semiring identities have contexts (see below)
 - Maintain singleton pattern: Identity elements remain shared singletons with `context => undef`
 - Backward compatibility: Existing code paths continue to work when context not provided
 
@@ -206,6 +207,7 @@ class SomeSemiring :isa(Chalk::Semiring) {
 3. **Context Propagation**: Parser creates contexts, semirings propagate them through multiply/on_scan
 4. **Optional Usage**: Semirings can ignore contexts in their algebra (implementation detail)
 5. **Singleton Pattern**: Identity elements remain shared singletons, works because `context => undef`
+6. **Semantic Exception**: Semantic semiring's identity elements have non-undef contexts because they always perform semantic actions during parsing. This is intentional and required for IR generation.
 
 ### Reference Implementation
 
@@ -372,7 +374,8 @@ After all semirings updated:
   - Verified `field $context` already present
   - Updated `init_element_from_rule()` signature (5th parameter)
   - Verified `on_scan()` already creates contexts
-  - Identity elements already have contexts (different from others)
+  - **Note**: Identity elements have contexts (exception to standard invariant)
+  - **Rationale**: Semantic always performs IR generation, requires context for semantic actions
   - Tests: 17 tests pass (t/semiring-api-semantic.t)
 
 ### Phase 3: Composite Semirings ✅ COMPLETE
