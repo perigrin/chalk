@@ -30,6 +30,9 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
         my $combined_env = { $type_env->%*, $other->type_env->%* };
         # Merge errors from both alternatives
         my @merged_errors = ($errors->@*, $other->errors->@*);
+        # Prefer other's context, fall back to self's
+        my $result_context = defined($other->context) ? $other->context : $context;
+
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $joined,
             type_env => $combined_env,
@@ -39,7 +42,8 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
             start_pos => $start_pos,
             end_pos => $end_pos,
             container_context => $container_context,
-            value_context => $value_context
+            value_context => $value_context,
+            context => $result_context
         );
     }
 
@@ -76,6 +80,9 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
         my $new_start = $start_pos < $other->start_pos ? $start_pos : $other->start_pos;
         my $new_end = $end_pos > $other->end_pos ? $end_pos : $other->end_pos;
 
+        # Prefer other's context, fall back to self's
+        my $result_context = defined($other->context) ? $other->context : $context;
+
         return Chalk::Semiring::TypeInferenceElement->new(
             type_obj => $meet_type,
             type_env => $combined_env,
@@ -85,7 +92,8 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
             start_pos => $new_start,
             end_pos => $new_end,
             container_context => $container_context,  # Preserve from left element
-            value_context => $value_context           # Preserve from left element
+            value_context => $value_context,          # Preserve from left element
+            context => $result_context
         );
     }
 

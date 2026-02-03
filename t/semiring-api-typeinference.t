@@ -129,4 +129,31 @@ use Chalk::EvalContext;
     is($mul_id->context->end_pos, 0, "Shared context has end_pos = 0");
 }
 
+# Test 6: Context propagation through add() and multiply()
+{
+    my $semiring = Chalk::Semiring::TypeInference->new();
+
+    my $ctx1 = Chalk::EvalContext->new(
+        focus => 'test1', children => [], start_pos => 0, end_pos => 5,
+        env => {}, grammar => undef, rule => undef
+    );
+    my $ctx2 = Chalk::EvalContext->new(
+        focus => 'test2', children => [], start_pos => 5, end_pos => 10,
+        env => {}, grammar => undef, rule => undef
+    );
+
+    my $elem1 = $semiring->init_element_from_rule(undef, 0, 5, undef, $ctx1);
+    my $elem2 = $semiring->init_element_from_rule(undef, 5, 10, undef, $ctx2);
+
+    # Test add() preserves context (prefers other's context)
+    my $added = $elem1->add($elem2);
+    ok(defined($added->context), "add() result has context");
+    is($added->context->focus, 'test2', "add() prefers other's context");
+
+    # Test multiply() preserves context (prefers other's context)
+    my $multiplied = $elem1->multiply($elem2);
+    ok(defined($multiplied->context), "multiply() result has context");
+    is($multiplied->context->focus, 'test2', "multiply() prefers other's context");
+}
+
 done_testing();
