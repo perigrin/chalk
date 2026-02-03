@@ -257,7 +257,8 @@ class Chalk::Semiring::AST :isa(Chalk::Semiring) {
             rule_name => $rule_name,
             children  => \@filtered_children,
             start_pos => $completed_element->start_pos,
-            end_pos   => $completed_element->end_pos
+            end_pos   => $completed_element->end_pos,
+            context   => $completed_element->context
         );
     }
 }

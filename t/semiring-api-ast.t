@@ -107,9 +107,51 @@ use Chalk::EvalContext;
        "mul_id context is the shared empty_context singleton");
 }
 
+# Test 5: on_complete preserves context from completed element
+{
+    my $semiring = Chalk::Semiring::AST->new();
+
+    # Create element with context
+    my $ctx = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 10,
+        end_pos   => 25,
+        env       => {test => 'value'},
+        grammar   => undef,
+        rule      => undef,
+    );
+
+    my $elem = Chalk::Semiring::ASTElement->new(
+        rule_name => 'TestRule',
+        children  => [],
+        start_pos => 10,
+        end_pos   => 25,
+        context   => $ctx
+    );
+
+    # Create mock item for on_complete
+    my $mock_rule = MockRule->new(lhs => 'CompletedRule');
+    my $mock_item = MockItem->new(rule => $mock_rule);
+
+    # Call on_complete
+    my $completed = $semiring->on_complete($mock_item, $elem, undef);
+
+    ok(defined($completed->context), "on_complete preserves context");
+    is(refaddr($completed->context), refaddr($ctx), "on_complete preserves same context object");
+    is($completed->context->start_pos, 10, "Completed context has correct start_pos");
+    is($completed->context->end_pos, 25, "Completed context has correct end_pos");
+    is($completed->context->env->{test}, 'value', "Completed context has correct env");
+}
+
 # Mock rule class for testing
 class MockRule {
     field $lhs :param :reader;
+}
+
+# Mock item class for testing on_complete
+class MockItem {
+    field $rule :param :reader;
 }
 
 done_testing();
