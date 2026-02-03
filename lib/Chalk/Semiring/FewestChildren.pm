@@ -5,10 +5,12 @@ use 5.42.0;
 use experimental qw(class builtin keyword_any keyword_all);
 use utf8;
 use Chalk::Base;
+use Chalk::EvalContext;
 
 class Chalk::Semiring::FewestChildrenElement :isa(Chalk::Element) {
     field $valid :param :reader = 1;
     field $child_count :param :reader = 0;
+    field $context :param :reader = undef;  # EvalContext for this element
 
     method add($other, $swap = undef) {
         return $self unless defined $other;
@@ -36,10 +38,14 @@ class Chalk::Semiring::FewestChildrenElement :isa(Chalk::Element) {
             return Chalk::Semiring::FewestChildrenElement->new(valid => 0);
         }
 
+        # Prefer other's context if present, else keep self's context
+        my $result_context = defined($other->context) ? $other->context : $context;
+
         # Sum children
         return Chalk::Semiring::FewestChildrenElement->new(
-            valid => 1,
-            child_count => $child_count + $other->child_count
+            valid       => 1,
+            child_count => $child_count + $other->child_count,
+            context     => $result_context
         );
     }
 
@@ -70,15 +76,42 @@ class Chalk::Semiring::FewestChildren :isa(Chalk::Semiring) {
     method zero() { return $add_id; }
     method one() { return $mul_id; }
 
-    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef) {
-        return Chalk::Semiring::FewestChildrenElement->new(valid => 1, child_count => 0);
+    method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
+        return Chalk::Semiring::FewestChildrenElement->new(
+            valid       => 1,
+            child_count => 0,
+            context     => $ctx
+        );
     }
 
     method multiply($x, $y) { return $x->multiply($y); }
     method plus($x, $y) { return $x->add($y); }
 
     method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
-        # Each terminal adds 1 to count
+        # If element has context, create new context for scanned terminal
+        if (defined($element->context)) {
+            my $old_ctx = $element->context;
+            my $match_length = length($matched_value // '');
+
+            my $new_ctx = Chalk::EvalContext->new(
+                focus     => $matched_value,
+                children  => [],  # Terminal has no children
+                start_pos => $pos,
+                end_pos   => $pos + $match_length,
+                env       => $old_ctx->env,
+                grammar   => $old_ctx->grammar,
+                rule      => $old_ctx->rule,
+            );
+
+            my $terminal = Chalk::Semiring::FewestChildrenElement->new(
+                valid       => 1,
+                child_count => 1,
+                context     => $new_ctx
+            );
+            return $element->multiply($terminal);
+        }
+
+        # No context - use existing behavior (backward compatibility)
         my $terminal = Chalk::Semiring::FewestChildrenElement->new(valid => 1, child_count => 1);
         return $element->multiply($terminal);
     }
