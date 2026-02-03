@@ -150,6 +150,17 @@ class Chalk::Semiring::TypeInferenceElement :isa(Chalk::Element) {
 class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
     field $lattice = Chalk::Grammar::Chalk::TypeLattice->new();
 
+    # Shared empty context for identity elements (optimization)
+    my $empty_context = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 0,
+        end_pos   => 0,
+        env       => {},
+        grammar   => undef,
+        rule      => undef,
+    );
+
     # Identity elements for tropical semiring
     # 𝟘 = ⊥ (bottom) - identity for join (addition)
     # 𝟙 = ⊤ (top/Any) - identity for meet (multiplication)
@@ -162,7 +173,8 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         start_pos => 0,
         end_pos => 0,
         container_context => undef,
-        value_context => undef
+        value_context => undef,
+        context => $empty_context
     );
     field $mul_id :reader = Chalk::Semiring::TypeInferenceElement->new(
         type_obj => $lattice->top_type(),
@@ -173,7 +185,8 @@ class Chalk::Semiring::TypeInference :isa(Chalk::Semiring) {
         start_pos => 0,
         end_pos => 0,
         container_context => undef,
-        value_context => undef
+        value_context => undef,
+        context => $empty_context
     );
 
     # Shared context for SPPF integration (optional)

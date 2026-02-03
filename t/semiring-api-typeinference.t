@@ -11,10 +11,10 @@ use Chalk::EvalContext;
 {
     my $semiring = Chalk::Semiring::TypeInference->new();
 
-    # Without context - should return cached identity
+    # Without context - should return cached identity with shared empty context
     my $elem1 = $semiring->init_element_from_rule(undef, 0, 0, undef);
     ok($elem1, "init_element_from_rule works without context");
-    ok(!defined($elem1->context), "Element without context has no context");
+    ok(defined($elem1->context), "Element without context has shared empty context");
 
     # With same rule, should return same cached identity (reference equality)
     my $elem2 = $semiring->init_element_from_rule(undef, 0, 0, undef);
@@ -111,15 +111,22 @@ use Chalk::EvalContext;
     is($scanned->context->focus, 'foo', "Scanned context has matched value as focus");
 }
 
-# Test 5: Identity elements have context => undef
+# Test 5: Identity elements use shared empty context singleton
 {
     my $semiring = Chalk::Semiring::TypeInference->new();
 
     my $mul_id = $semiring->mul_id;
     my $add_id = $semiring->add_id;
 
-    ok(!defined($mul_id->context), "mul_id has context => undef");
-    ok(!defined($add_id->context), "add_id has context => undef");
+    ok(defined($mul_id->context), "mul_id has shared empty context");
+    ok(defined($add_id->context), "add_id has shared empty context");
+    is(refaddr($mul_id->context), refaddr($add_id->context), "mul_id and add_id share same context singleton");
+
+    # Verify empty context properties
+    ok(!defined($mul_id->context->focus), "Shared context has undef focus");
+    is(scalar($mul_id->context->children->@*), 0, "Shared context has empty children");
+    is($mul_id->context->start_pos, 0, "Shared context has start_pos = 0");
+    is($mul_id->context->end_pos, 0, "Shared context has end_pos = 0");
 }
 
 done_testing();
