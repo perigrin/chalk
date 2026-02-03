@@ -11,10 +11,14 @@ use Chalk::EvalContext;
 {
     my $semiring = Chalk::Semiring::Position->new();
 
-    # Without context - creates element without context (backward compatibility)
+    # Without context - returns cached mul_id
     my $elem1 = $semiring->init_element_from_rule(undef, 0, 5, undef);
     ok($elem1, "init_element_from_rule works without context");
-    ok(!defined($elem1->context), "Element without context has no context");
+
+    # Test that no-context returns cached identity
+    my $elem2 = $semiring->init_element_from_rule(undef, 0, 0);
+    is(refaddr($elem1), refaddr($elem2), "No-context returns same cached mul_id");
+    is(refaddr($elem1), refaddr($semiring->mul_id), "No-context returns mul_id");
 
     # With context - creates element with context
     my $ctx = Chalk::EvalContext->new(
@@ -27,11 +31,11 @@ use Chalk::EvalContext;
         rule      => undef,
     );
 
-    my $elem2 = $semiring->init_element_from_rule(undef, 10, 20, undef, $ctx);
-    ok($elem2, "init_element_from_rule works with context");
-    ok(defined($elem2->context), "Element with context has context");
-    is($elem2->context->start_pos, 10, "Context has correct start_pos");
-    is($elem2->context->end_pos, 20, "Context has correct end_pos");
+    my $elem3 = $semiring->init_element_from_rule(undef, 10, 20, undef, $ctx);
+    ok($elem3, "init_element_from_rule works with context");
+    ok(defined($elem3->context), "Element with context has context");
+    is($elem3->context->start_pos, 10, "Context has correct start_pos");
+    is($elem3->context->end_pos, 20, "Context has correct end_pos");
 }
 
 # Test 2: Element class has context field

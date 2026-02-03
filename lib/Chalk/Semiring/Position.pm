@@ -68,11 +68,15 @@ class Chalk::Semiring::Position :isa(Chalk::Semiring) {
     );
 
     method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
-        return Chalk::Semiring::PositionElement->new(
-            start_pos => $start_pos,
-            end_pos   => $end_pos,
-            context   => $ctx
-        );
+        if (defined($ctx)) {
+            return Chalk::Semiring::PositionElement->new(
+                start_pos => $start_pos,
+                end_pos   => $end_pos,
+                context   => $ctx
+            );
+        }
+        # Return cached identity when no context
+        return $mul_id;
     }
 
     method multiply($x, $y) {
