@@ -79,9 +79,12 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
     }
 
     method multiply( $other, $swap = undef ) {
+        # Prefer other's context if present, else keep self's context
+        my $result_context = defined($other) && ref($other) && $other->can('context') && defined($other->context) ? $other->context : $context;
+
         # Handle undef or wrong type for $other
-        return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index) unless defined $other;
-        return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index) unless ref($other) && $other->can('valid');
+        return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index, context => $result_context) unless defined $other;
+        return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index, context => $result_context) unless ref($other) && $other->can('valid');
 
         # Boolean AND for sequence: both must succeed
         # If either is invalid, result is invalid
@@ -99,7 +102,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 precedence_level => $level,
                 associativity => $assoc,
                 operator_index => $operator_index,
-                is_active => $active
+                is_active => $active,
+                context => $result_context
             );
         }
 
@@ -120,7 +124,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
             return Chalk::Semiring::PrecedenceElement->new(
                 valid => 1,
                 operator_index => $operator_index,
-                is_active => ($is_active || ($other->is_active // 0))
+                is_active => ($is_active || ($other->is_active // 0)),
+                context => $result_context
             );
         } elsif (!defined($self_op)) {
             # Other has operator, self doesn't - preserve other's operator and active status
@@ -130,7 +135,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 precedence_level => $other_level,
                 associativity => $other_assoc,
                 operator_index => $operator_index,
-                is_active => ($other->is_active // 0)
+                is_active => ($other->is_active // 0),
+                context => $result_context
             );
         } elsif (!defined($other_op)) {
             # Self has operator, other doesn't - preserve self's operator and active status
@@ -140,7 +146,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 precedence_level => $self_level,
                 associativity => $self_assoc,
                 operator_index => $operator_index,
-                is_active => $is_active
+                is_active => $is_active,
+                context => $result_context
             );
         }
 
@@ -183,7 +190,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "PREC REJECT: $self_op*(L$self_level) cannot contain $other_op(L$other_level) - parent has higher precedence\n";
                 }
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index, context => $result_context);
             }
             # Parent has lower or equal precedence - VALID
             return Chalk::Semiring::PrecedenceElement->new(
@@ -192,7 +199,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 precedence_level => $self_level,
                 associativity => $self_assoc,
                 operator_index => $operator_index,
-                is_active => 1
+                is_active => 1,
+                context => $result_context
             );
         } elsif (!$self_active && $other_active) {
             # other is the current rule's operator, self is from sub-expression
@@ -204,7 +212,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "PREC REJECT: $other_op*(L$other_level) cannot contain $self_op(L$self_level) - parent has higher precedence\n";
                 }
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index, context => $result_context);
             }
             # Parent has lower or equal precedence - VALID
             return Chalk::Semiring::PrecedenceElement->new(
@@ -213,7 +221,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 precedence_level => $other_level,
                 associativity => $other_assoc,
                 operator_index => $operator_index,
-                is_active => 1
+                is_active => 1,
+                context => $result_context
             );
         }
 
@@ -228,7 +237,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 precedence_level => $self_level,
                 associativity => $self_assoc,
                 operator_index => $operator_index,
-                is_active => $self_active || $other_active
+                is_active => $self_active || $other_active,
+                context => $result_context
             );
         }
 
@@ -242,7 +252,8 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 precedence_level => $other_level,
                 associativity => $other_assoc,
                 operator_index => $operator_index,
-                is_active => $self_active || $other_active
+                is_active => $self_active || $other_active,
+                context => $result_context
             );
         }
 
@@ -254,7 +265,7 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "PREC REJECT: nonassoc $self_op cannot chain with $other_op\n";
                 }
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index, context => $result_context);
             }
         }
 
@@ -266,18 +277,18 @@ class Chalk::Semiring::PrecedenceElement :isa(Chalk::Element) {
 
             # If both have directions, they must match
             if (defined($self_dir) && defined($other_dir) && $self_dir ne $other_dir) {
-                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index);
+                return Chalk::Semiring::PrecedenceElement->new(valid => 0, operator_index => $operator_index, context => $result_context);
             }
         }
 
         # Rule 5: chain/na allows chaining (like chained but context-dependent)
         if (defined($self_assoc) && $self_assoc eq 'chain/na') {
-            return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index);
+            return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index, context => $result_context);
         }
 
         # Rule 6: left and right associativity
         # Default: valid
-        return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index);
+        return Chalk::Semiring::PrecedenceElement->new(valid => 1, operator_index => $operator_index, context => $result_context);
     }
 
     method to_string(@args) {

@@ -110,6 +110,9 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
     }
 
     method multiply($other, $swap = undef) {
+        # Prefer other's context if present, else keep self's context
+        my $result_context = defined($other) && ref($other) && $other->can('context') && defined($other->context) ? $other->context : $context;
+
         # Semantic validation doesn't need special multiply logic
         # Just combine the elements
         return $self unless defined $other;
@@ -144,7 +147,8 @@ class Chalk::Semiring::SemanticValidationElement :isa(Chalk::Element) {
             rules => $rules,
             errors => \@new_errors,
             start_pos => $new_start,
-            end_pos => $new_end
+            end_pos => $new_end,
+            context => $result_context
         );
     }
 
