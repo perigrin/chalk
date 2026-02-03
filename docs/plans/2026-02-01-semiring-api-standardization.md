@@ -22,9 +22,8 @@ Without SPPF (Shared Packed Parse Forest), every semiring element represents an 
 - Standardize element API: All element classes have `field $context :param :reader = undef`
 - Standardize semiring API: All `init_element_from_rule()` methods accept optional `$ctx` parameter
 - Standardize terminal handling: All `on_scan()` methods create contexts for scanned terminals
-- Identity invariant: All identity elements (`add_id`, `mul_id`) have `context => undef`
-  - **Exception**: Semantic semiring identities have contexts (see below)
-- Maintain singleton pattern: Identity elements remain shared singletons with `context => undef`
+- Identity invariant: All identity elements (`add_id`, `mul_id`) use shared empty context singleton
+- Maintain singleton pattern: Identity elements remain shared singletons using shared empty context
 - Backward compatibility: Existing code paths continue to work when context not provided
 
 ### Out of Scope (Future Work)
@@ -40,7 +39,7 @@ Without SPPF (Shared Packed Parse Forest), every semiring element represents an 
 - All 12 semiring element classes have standardized context field
 - All `init_element_from_rule()` methods have consistent signature
 - All `on_scan()` methods create contexts for terminals
-- Identity elements verified to have `context => undef`
+- Identity elements verified to use shared empty context singleton
 - Self-hosting test suite passes: `prove`
 - No behavioral changes to parsing (same IR output as before)
 
@@ -110,10 +109,21 @@ For each semiring, follow this pattern:
    }
    ```
 
-5. **Verify identity elements**:
+5. **Verify identity elements use shared empty context**:
    ```perl
-   field $mul_id :reader = SomeElement->new(..., context => undef);
-   field $add_id :reader = SomeElement->new(..., context => undef);
+   # Shared empty context singleton for identity elements
+   field $empty_context :reader = Chalk::EvalContext->new(
+       focus     => undef,
+       children  => [],
+       start_pos => 0,
+       end_pos   => 0,
+       env       => {},
+       grammar   => undef,
+       rule      => undef,
+   );
+
+   field $mul_id :reader = SomeElement->new(..., context => $empty_context);
+   field $add_id :reader = SomeElement->new(..., context => $empty_context);
    ```
 
 6. **Run tests** after each update:
@@ -148,9 +158,20 @@ Every semiring class must implement:
 
 ```perl
 class SomeSemiring :isa(Chalk::Semiring) {
-    # REQUIRED: Identity elements with context => undef
-    field $mul_id :reader = SomeElement->new(..., context => undef);
-    field $add_id :reader = SomeElement->new(..., context => undef);
+    # REQUIRED: Shared empty context singleton for identity elements
+    field $empty_context :reader = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 0,
+        end_pos   => 0,
+        env       => {},
+        grammar   => undef,
+        rule      => undef,
+    );
+
+    # REQUIRED: Identity elements use shared empty context
+    field $mul_id :reader = SomeElement->new(..., context => $empty_context);
+    field $add_id :reader = SomeElement->new(..., context => $empty_context);
 
     # REQUIRED: Five-parameter signature (last parameter optional)
     method init_element_from_rule(
@@ -203,11 +224,21 @@ class SomeSemiring :isa(Chalk::Semiring) {
 ### Key Principles
 
 1. **Backward Compatibility**: If `$ctx` is undef, semiring behaves as before
-2. **Identity Invariant**: `add_id` and `mul_id` always have `context => undef`
+2. **Shared Empty Contexts**: Identity elements use shared singleton empty context for API consistency
 3. **Context Propagation**: Parser creates contexts, semirings propagate them through multiply/on_scan
 4. **Optional Usage**: Semirings can ignore contexts in their algebra (implementation detail)
-5. **Singleton Pattern**: Identity elements remain shared singletons, works because `context => undef`
-6. **Semantic Exception**: Semantic semiring's identity elements have non-undef contexts because they always perform semantic actions during parsing. This is intentional and required for IR generation.
+5. **Singleton Pattern**: Identity elements remain shared singletons, using shared empty context singleton
+
+### Rationale: Shared Empty Contexts
+
+Identity elements use shared empty context singletons rather than `undef` for:
+
+- **API Consistency**: All elements always have defined contexts
+- **Simpler Client Code**: No undef checks needed in multiply/add operations
+- **Uniform Semantics**: Empty context vs populated context, but always a context object
+- **Performance**: Single shared allocation per semiring (negligible overhead)
+
+This pattern simplifies client code that works with contexts. Instead of checking `defined($element->context)`, clients can safely call `$element->context->children` knowing it will always return a valid (possibly empty) array. The distinction between identity elements and parse-derived elements becomes semantic (empty vs populated context) rather than structural (undef vs object).
 
 ### Reference Implementation
 
@@ -215,49 +246,63 @@ See `lib/Chalk/Semiring/Boolean.pm` for the complete reference implementation.
 
 **Key excerpts**:
 
-**Element class** (lines 9-13):
+**Element class** (lines 9-11):
 ```perl
 class Chalk::Semiring::BooleanElement :isa(Chalk::Element) {
     field $value :param :reader;
-    field $semiring_add_id :param :reader = undef;
-    field $semiring_mul_id :param :reader = undef;
     field $context :param :reader = undef;  # EvalContext
 }
 ```
 
-**Identity elements** (lines 134-135):
+**Shared empty context and identity elements** (lines 45-58):
 ```perl
-field $mul_id :reader = Chalk::Semiring::BooleanElement->new(value => 1);
-field $add_id :reader = Chalk::Semiring::BooleanElement->new(value => 0);
-# Both implicitly have context => undef
+# Shared empty context singleton for identity elements
+field $empty_context :reader = Chalk::EvalContext->new(
+    focus     => undef,
+    children  => [],
+    start_pos => 0,
+    end_pos   => 0,
+    env       => {},
+    grammar   => undef,
+    rule      => undef,
+);
+
+# Identity elements for Boolean algebra
+field $mul_id :reader = Chalk::Semiring::BooleanElement->new(value => 1, context => $empty_context);
+field $add_id :reader = Chalk::Semiring::BooleanElement->new(value => 0, context => $empty_context);
 ```
 
-**init_element_from_rule** (lines 194-211):
+**init_element_from_rule** (lines 102-112):
 ```perl
 method init_element_from_rule($rule, $start_pos = 0, $end_pos = 0, $matched_value = undef, $ctx = undef) {
     if (defined($ctx)) {
         return Chalk::Semiring::BooleanElement->new(
             value => 1,
-            semiring_add_id => $add_id,
-            semiring_mul_id => $mul_id,
             context => $ctx
         );
     }
-    # Otherwise return cached mul_id (no context)
+    # Otherwise return cached mul_id (with shared empty context)
     return $mul_id;
 }
 ```
 
-**on_scan** (lines 162-192):
+**on_scan** (lines 69-100):
 ```perl
 method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
+    # Reject keywords when they appear as identifiers
+    my $is_identifier = defined($pattern_name) && $pattern_name eq 'IDENTIFIER';
+    if ($is_identifier && defined($matched_value) && exists $keywords->{$matched_value}) {
+        return $add_id;  # Return 0 (invalid parse)
+    }
+
+    # If element has context, create new context for scanned terminal
     if (defined($element->context)) {
         my $old_ctx = $element->context;
-        my $match_length = length($matched_value);
+        my $match_length = length($matched_value // '');
 
         my $new_ctx = Chalk::EvalContext->new(
             focus     => $matched_value,
-            children  => [],
+            children  => [],  # Terminal has no children
             start_pos => $pos,
             end_pos   => $pos + $match_length,
             env       => $old_ctx->env,
@@ -265,57 +310,30 @@ method on_scan($item, $element, $pos, $matched_value, $pattern_name = undef) {
             rule      => $old_ctx->rule,
         );
 
+        # Return new element with updated context
         return Chalk::Semiring::BooleanElement->new(
             value => 1,
-            semiring_add_id => $add_id,
-            semiring_mul_id => $mul_id,
             context => $new_ctx
         );
     }
-    return $element;  # Backward compatibility
+
+    # Otherwise return element unchanged (no context)
+    return $element;
 }
 ```
 
-**multiply** (lines 55-116):
+**multiply** (lines 22-28):
 ```perl
-method multiply($other, $swap = undef) {
-    my $result_value = $value && $other->value;
-
-    unless ($result_value) {
-        return $semiring_add_id;
-    }
-
-    # Build new context from left + right contexts
-    my $new_context = undef;
-    my $left_ctx = $context;
-    my $right_ctx = $other->context;
-
-    if (defined($left_ctx) || defined($right_ctx)) {
-        my @children;
-        push @children, $left_ctx if defined($left_ctx);
-        push @children, $right_ctx if defined($right_ctx);
-
-        my $ctx_for_meta = $left_ctx // $right_ctx;
-
-        $new_context = Chalk::EvalContext->new(
-            focus     => $result_value,
-            children  => \@children,
-            start_pos => defined($left_ctx) ? $left_ctx->start_pos : 0,
-            end_pos   => defined($right_ctx) ? $right_ctx->end_pos : 0,
-            env       => $ctx_for_meta->env,
-            grammar   => $ctx_for_meta->grammar,
-            rule      => $ctx_for_meta->rule,
-        );
-    }
-
-    return Chalk::Semiring::BooleanElement->new(
-        value => 1,
-        semiring_add_id => $semiring_add_id,
-        semiring_mul_id => $semiring_mul_id,
-        context => $new_context
-    );
+method multiply( $other, $swap = undef ) {
+    # Boolean AND for sequence: both must succeed
+    # For Boolean, we prefer to return existing elements when possible
+    # to preserve context and match Precedence semiring pattern
+    return $self unless $value;  # If self is false, return self (fail fast, preserves context)
+    return $other;  # self is true, result is other (preserves other's context)
 }
 ```
+
+Note: The current Boolean implementation uses a simplified multiply that returns existing elements rather than creating new ones. This preserves contexts efficiently. When identity elements have shared empty contexts, this pattern remains valid - the identity's empty context is simply propagated when appropriate.
 
 ## Testing Strategy
 
@@ -351,21 +369,21 @@ After all semirings updated:
   - Added `field $context :param :reader = undef` to PrecedenceElement
   - Updated `init_element_from_rule()` signature
   - Updated `on_scan()` to create contexts
-  - Verified identity elements
+  - Verified identity elements use shared empty context
   - Tests: 18 tests pass (t/semiring-api-precedence.t)
 
 - [x] **Task 1.2**: Update TypeInference semiring ✅
   - Added `field $context :param :reader = undef` to TypeInferenceElement
   - Updated `init_element_from_rule()` signature
   - Updated `on_scan()` to create contexts
-  - Verified identity elements
+  - Verified identity elements use shared empty context
   - Tests: 16 tests pass (t/semiring-api-typeinference.t)
 
 - [x] **Task 1.3**: Update SemanticValidation semiring ✅
   - Added `field $context :param :reader = undef` to SemanticValidationElement
   - Updated `init_element_from_rule()` signature
   - Added `on_scan()` method
-  - Verified identity elements
+  - Verified identity elements use shared empty context
   - Tests: 16 tests pass (t/semiring-api-semanticvalidation.t)
 
 ### Phase 2: IR Generation Semiring ✅ COMPLETE
@@ -374,8 +392,7 @@ After all semirings updated:
   - Verified `field $context` already present
   - Updated `init_element_from_rule()` signature (5th parameter)
   - Verified `on_scan()` already creates contexts
-  - **Note**: Identity elements have contexts (exception to standard invariant)
-  - **Rationale**: Semantic always performs IR generation, requires context for semantic actions
+  - Verified identity elements use shared empty context
   - Tests: 17 tests pass (t/semiring-api-semantic.t)
 
 ### Phase 3: Composite Semirings ✅ COMPLETE
