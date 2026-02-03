@@ -152,31 +152,26 @@ class Chalk::Semiring::Semantic :isa(Chalk::Semiring) {
     field $type_env       :param :reader =
       {};    # Maps variable names to Chalk::Type objects
 
+    # Shared empty context for both identity elements
+    # This singleton ensures mul_id and add_id share the same context instance
+    field $empty_context :reader = Chalk::EvalContext->new(
+        focus     => undef,
+        children  => [],
+        start_pos => 0,
+        end_pos   => 0,
+        env       => $env,
+        grammar   => $grammar,
+        rule      => undef,
+        metadata_element => undef
+    );
+
     field $mul_id :reader = Chalk::Semiring::SemanticElement->new(
         value   => 1,                         # mul_id has value 1
-        context => Chalk::EvalContext->new(
-            focus     => undef,
-            children  => [],
-            start_pos => 0,
-            end_pos   => 0,
-            env       => $env,
-            grammar   => $grammar,
-            rule      => undef,
-            metadata_element => undef        # Identity elements have no metadata
-        )
+        context => $empty_context             # Share empty_context singleton
     );
     field $add_id :reader = Chalk::Semiring::SemanticElement->new(
-        value   => 0,    # add_id has value 0 (failure/no parse)
-        context => Chalk::EvalContext->new(
-            focus     => undef,
-            children  => [],
-            start_pos => 0,
-            end_pos   => 0,
-            env       => $env,
-            grammar   => $grammar,
-            rule      => undef,
-            metadata_element => undef        # Identity elements have no metadata
-        )
+        value   => 0,                         # add_id has value 0 (failure/no parse)
+        context => $empty_context             # Share empty_context singleton
     );
     field $_add_id_is_zero :reader = 1;    # Flag to identify add_id
 

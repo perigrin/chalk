@@ -113,6 +113,10 @@ use Chalk::Grammar;
     # This is existing behavior - they always have contexts
     ok(defined($mul_id->context), "mul_id has context (Semantic always has contexts)");
     ok(defined($add_id->context), "add_id has context (Semantic always has contexts)");
+
+    # NEW: Verify identity elements share empty_context singleton
+    is(refaddr($mul_id->context), refaddr($add_id->context),
+       "Identity elements share empty_context singleton");
 }
 
 done_testing();
