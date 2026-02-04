@@ -33,7 +33,7 @@ class Chalk::IR::Type::Memory :isa(Chalk::IR::Type) {
         return $self if $other isa Chalk::IR::Type::Top;
 
         # MemBot absorbs everything within memory domain
-        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $is_bottom;
         return blessed($self)->BOTTOM() if $other isa blessed($self) && $other->is_bottom;
 
         # MemTop is identity for meet within memory domain
@@ -66,7 +66,7 @@ class Chalk::IR::Type::Memory :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Top;
 
         # MemBot is identity for join within memory domain
-        return $other if $self->is_bottom && $other isa blessed($self);
+        return $other if $is_bottom && $other isa blessed($self);
         return $self if $other isa blessed($self) && $other->is_bottom;
 
         # MemTop absorbs everything within memory domain

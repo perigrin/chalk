@@ -37,7 +37,7 @@ class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
         return $self if $other isa Chalk::IR::Type::Top;
 
         # FloatBot absorbs everything within float domain
-        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $is_bottom;
         return blessed($self)->BOTTOM() if $other isa blessed($self) && $other->is_bottom;
 
         # FloatTop is identity for meet within float domain
@@ -62,7 +62,7 @@ class Chalk::IR::Type::Float :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Top;
 
         # FloatBot is identity for join within float domain
-        return $other if $self->is_bottom && $other isa blessed($self);
+        return $other if $is_bottom && $other isa blessed($self);
         return $self if $other isa blessed($self) && $other->is_bottom;
 
         # FloatTop absorbs everything within float domain

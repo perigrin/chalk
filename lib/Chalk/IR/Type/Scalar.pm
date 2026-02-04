@@ -27,7 +27,7 @@ class Chalk::IR::Type::Scalar :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Bottom;
         return $self if $other isa Chalk::IR::Type::Top;
 
-        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $is_bottom;
 
         # Scalar meets Scalar = Scalar
         return $self if $other isa blessed($self);

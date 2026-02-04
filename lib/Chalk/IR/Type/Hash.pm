@@ -32,7 +32,7 @@ class Chalk::IR::Type::Hash :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Bottom;
         return $self if $other isa Chalk::IR::Type::Top;
 
-        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $is_bottom;
         return blessed($self)->BOTTOM() if $other isa blessed($self) && $other->is_bottom;
 
         return $other if $self->is_top && $other isa blessed($self);

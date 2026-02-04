@@ -38,7 +38,7 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
         return $self if $other isa Chalk::IR::Type::Top;
 
         # IntBot absorbs everything within integer domain
-        return blessed($self)->BOTTOM() if $self->is_bottom;
+        return blessed($self)->BOTTOM() if $is_bottom;
         return blessed($self)->BOTTOM() if $other isa blessed($self) && $other->is_bottom;
 
         # IntTop is identity for meet within integer domain
@@ -63,7 +63,7 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
         return $other if $other isa Chalk::IR::Type::Top;
 
         # IntBot is identity for join within integer domain
-        return $other if $self->is_bottom && $other isa blessed($self);
+        return $other if $is_bottom && $other isa blessed($self);
         return $self if $other isa blessed($self) && $other->is_bottom;
 
         # IntTop absorbs everything within integer domain
@@ -86,7 +86,7 @@ class Chalk::IR::Type::Integer :isa(Chalk::IR::Type) {
         if ($other->isa('Chalk::IR::Type::Float')) {
             use Chalk::IR::Type::Float;
             # IntBot widens to FloatBot
-            return Chalk::IR::Type::Float->BOTTOM() if $self->is_bottom;
+            return Chalk::IR::Type::Float->BOTTOM() if $is_bottom;
             # IntTop widens to FloatTop
             return Chalk::IR::Type::Float->TOP() if $self->is_top;
             # Constant integer widens to constant float

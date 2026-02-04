@@ -64,7 +64,7 @@ class Chalk::Grammar::Chalk::Type::Class :isa(Chalk::Grammar::Chalk::Type) {
         # Nominal typing: Class("X") <: Class("X") (reflexive)
         if ($other isa Chalk::Grammar::Chalk::Type::Class) {
             # Same class name => subtype (reflexive)
-            return $self->class_name() eq $other->class_name();
+            return $class_name eq $other->class_name();
         }
 
         # Class <: Object <: Ref <: Scalar <: Any

@@ -25,7 +25,7 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
         return $other
           if !defined($rule_name)
           && !defined($terminal)
-          && scalar( $children->@* ) == 0;
+          && scalar( @$children ) == 0;
 
         # If other has no content, return self
         return $self
@@ -43,12 +43,12 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
         return $self unless $other isa Chalk::Semiring::ASTElement;
 
         # Accumulate children
-        my @new_children = ( $self->children->@*, $other );
+        my @new_children = ( @$children, $other );
 
         return Chalk::Semiring::ASTElement->new(
-            rule_name => $self->rule_name,
+            rule_name => $rule_name,
             children  => \@new_children,
-            start_pos => $self->start_pos,
+            start_pos => $start_pos,
             end_pos   => $other->end_pos
         );
     }
@@ -77,22 +77,21 @@ class Chalk::Semiring::ASTElement :isa(Chalk::Element) {
 
     # Convert AST to nested hash structure for JSON serialization
     method to_hash() {
-        if ( defined( $self->terminal ) ) {
+        if ( defined( $terminal ) ) {
 
             # Leaf node - just return the terminal value
-            return $self->terminal;
+            return $terminal;
         }
 
         my $result = {
-            rule => $self->rule_name,
-            span => [ $self->start_pos, $self->end_pos ]
+            rule => $rule_name,
+            span => [ $start_pos, $end_pos ]
         };
 
         # Process children
-        my $my_children = $self->children;
-        if ( scalar( $my_children->@* ) > 0 ) {
+        if ( scalar( @$children ) > 0 ) {
             my @child_hashes;
-            for my $child ( $my_children->@* ) {
+            for my $child ( @$children ) {
                 if ( ref($child) && $child->can('to_hash') ) {
                     push @child_hashes, $child->to_hash();
                 }

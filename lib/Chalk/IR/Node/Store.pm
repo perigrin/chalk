@@ -72,8 +72,8 @@ class Chalk::IR::Node::Store {
     # Immutable reconstruction with new control edge
     method with_control($new_control) {
         return Chalk::IR::Node::Store->new(
-            var     => $self->var,
-            value   => $self->value,
+            var     => $var,
+            value   => $value,
             control => $new_control,
         );
     }
