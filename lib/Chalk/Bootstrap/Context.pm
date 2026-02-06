@@ -33,4 +33,45 @@ class Chalk::Bootstrap::Context {
     method duplicate() {
         return $self->extend(sub ($ctx) { return $ctx });
     }
+
+    # Collect leaf contexts with defined focuses from this Context tree.
+    # A "leaf" is a context that has a defined focus (from complete_value).
+    # Optional $node_class filters to only contexts whose focus isa $node_class.
+    method leaves($node_class = undef) {
+        my @results;
+
+        my $focus = $self->extract();
+        if (defined $focus) {
+            # This context has a focus — it's a "leaf" produced by complete_value
+            if (!$node_class || $focus isa $node_class) {
+                push @results, $self;
+            }
+            return @results;
+        }
+
+        # No focus — this is an intermediate multiply() node. Recurse into children.
+        for my $child ($children->@*) {
+            push @results, $child->leaves($node_class);
+        }
+
+        return @results;
+    }
+
+    # Extract concatenated scanned text from this Context tree.
+    # Walks the tree and collects all string focuses (from scan_value),
+    # concatenating them in order. Skips non-string focuses (IR nodes from complete_value).
+    method scanned_text() {
+        my $focus = $self->extract();
+        if (defined $focus && !ref($focus)) {
+            # String focus from scan_value
+            return $focus;
+        }
+
+        # Recurse into children and concatenate
+        my $text = '';
+        for my $child ($children->@*) {
+            $text .= $child->scanned_text();
+        }
+        return $text;
+    }
 }

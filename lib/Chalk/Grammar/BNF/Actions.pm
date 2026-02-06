@@ -14,55 +14,11 @@ class Chalk::Grammar::BNF::Actions {
         $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     }
 
-    # Recursively collect leaf contexts from a binary Context tree
-    # A "leaf" is a context that has a defined focus (from complete_value).
-    # Optional $node_class parameter filters to only contexts whose focus isa $node_class.
-    my sub _collect_children {
-        my ($ctx, $node_class) = @_;
-        my @results;
-
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            # This context has a focus — it's a "leaf" produced by complete_value
-            if (!$node_class || $focus isa $node_class) {
-                push @results, $ctx;
-            }
-            return @results;
-        }
-
-        # No focus — this is an intermediate multiply() node. Recurse into children.
-        for my $child ($ctx->children()->@*) {
-            push @results, __SUB__->($child, $node_class);
-        }
-
-        return @results;
-    }
-
-    # Extract concatenated scanned text from a binary Context tree.
-    # Walks the tree and collects all string focuses (from scan_value),
-    # concatenating them in order. Skips non-string focuses (IR nodes from complete_value).
-    my sub _extract_scanned_text {
-        my ($ctx) = @_;
-
-        my $focus = $ctx->extract();
-        if (defined $focus && !ref($focus)) {
-            # String focus from scan_value
-            return $focus;
-        }
-
-        # Recurse into children and concatenate
-        my $text = '';
-        for my $child ($ctx->children()->@*) {
-            $text .= __SUB__->($child);
-        }
-        return $text;
-    }
-
     # Shared implementation for Rule_plus and Rule_star
     my sub _collect_rule_list {
         my ($ctx) = @_;
 
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
         my @rules;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -82,7 +38,7 @@ class Chalk::Grammar::BNF::Actions {
     method Grammar($ctx) {
         # Collect all MakeRule nodes from the binary Context tree
         # Rule+ desugars to Rule_plus which returns an arrayref
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
         my @rules;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -102,7 +58,7 @@ class Chalk::Grammar::BNF::Actions {
     # Returns MakeRule IR node
     method Rule($ctx) {
         # Collect all leaves from the binary tree
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
 
         # Find name (Constant from Identifier) and alternatives (arrayref from Alternatives)
         my $name_node;
@@ -129,7 +85,7 @@ class Chalk::Grammar::BNF::Actions {
     method Alternatives($ctx) {
         # Collect all leaves and extract MakeExpression nodes
         # Nested Alternatives produce arrayrefs of MakeExpressions, not single MakeExpressions
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
         my @expressions;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -150,7 +106,7 @@ class Chalk::Grammar::BNF::Actions {
     method Sequence($ctx) {
         # Collect all leaves and extract MakeSymbol nodes
         # Nested Sequence matches produce MakeExpression nodes containing MakeSymbol arrays
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
         my @elements;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -172,7 +128,7 @@ class Chalk::Grammar::BNF::Actions {
     # Returns MakeSymbol with optional quantifier
     method Element($ctx) {
         # Collect all leaves from the binary tree
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
 
         # Find the MakeSymbol (from Atom) and optional Constant (from Quantifier)
         my $symbol;
@@ -204,7 +160,7 @@ class Chalk::Grammar::BNF::Actions {
     # Returns MakeSymbol (reference for Identifier, terminal for InlineRegex)
     method Atom($ctx) {
         # Find the child with a Constant focus (from Identifier or InlineRegex)
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
         my $value_leaf;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -244,7 +200,7 @@ class Chalk::Grammar::BNF::Actions {
     method Quantifier($ctx) {
         # Use extract() for pre-wired contexts, fall back to scanning tree
         my $quantifier = $ctx->extract();
-        $quantifier = _extract_scanned_text($ctx) unless defined $quantifier;
+        $quantifier = $ctx->scanned_text() unless defined $quantifier;
 
         return $factory->make('Constant', const_type => 'string', value => $quantifier);
     }
@@ -260,7 +216,7 @@ class Chalk::Grammar::BNF::Actions {
     method Identifier($ctx) {
         # Use extract() for pre-wired contexts, fall back to scanning tree
         my $identifier = $ctx->extract();
-        $identifier = _extract_scanned_text($ctx) unless defined $identifier;
+        $identifier = $ctx->scanned_text() unless defined $identifier;
 
         return $factory->make('Constant', const_type => 'string', value => $identifier);
     }
@@ -270,7 +226,7 @@ class Chalk::Grammar::BNF::Actions {
     method InlineRegex($ctx) {
         # Use extract() for pre-wired contexts, fall back to scanning tree
         my $regex = $ctx->extract();
-        $regex = _extract_scanned_text($ctx) unless defined $regex;
+        $regex = $ctx->scanned_text() unless defined $regex;
 
         return $factory->make('Constant', const_type => 'string', value => $regex);
     }
@@ -290,7 +246,7 @@ class Chalk::Grammar::BNF::Actions {
     # Quantifier_opt ::= Quantifier | epsilon (desugared from Quantifier?)
     # Returns the Quantifier's Constant value or undef (epsilon case)
     method Quantifier_opt($ctx) {
-        my @leaves = _collect_children($ctx);
+        my @leaves = $ctx->leaves();
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
             if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {

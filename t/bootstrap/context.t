@@ -110,4 +110,149 @@ use Chalk::Bootstrap::Context;
     is(scalar $extracted->{children}->@*, 2, "can access nested arrays");
 }
 
+# Test 11: leaves() with single leaf context
+{
+    my $ctx = Chalk::Bootstrap::Context->new(focus => "leaf value");
+    my @leaves = $ctx->leaves();
+
+    is(scalar @leaves, 1, "single leaf context returns self");
+    is($leaves[0]->extract(), "leaf value", "leaf has correct focus");
+}
+
+# Test 12: leaves() with binary tree of contexts
+{
+    my $leaf1 = Chalk::Bootstrap::Context->new(focus => "leaf1");
+    my $leaf2 = Chalk::Bootstrap::Context->new(focus => "leaf2");
+    my $parent = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$leaf1, $leaf2],
+    );
+
+    my @leaves = $parent->leaves();
+    is(scalar @leaves, 2, "binary tree returns two leaves");
+    is($leaves[0]->extract(), "leaf1", "first leaf has correct focus");
+    is($leaves[1]->extract(), "leaf2", "second leaf has correct focus");
+}
+
+# Test 13: leaves() with nested binary tree
+{
+    my $leaf1 = Chalk::Bootstrap::Context->new(focus => "a");
+    my $leaf2 = Chalk::Bootstrap::Context->new(focus => "b");
+    my $subtree = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$leaf1, $leaf2],
+    );
+
+    my $leaf3 = Chalk::Bootstrap::Context->new(focus => "c");
+    my $root = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$subtree, $leaf3],
+    );
+
+    my @leaves = $root->leaves();
+    is(scalar @leaves, 3, "nested tree returns three leaves");
+    is($leaves[0]->extract(), "a", "first leaf correct");
+    is($leaves[1]->extract(), "b", "second leaf correct");
+    is($leaves[2]->extract(), "c", "third leaf correct");
+}
+
+# Test 14: leaves() with class filter
+{
+    my $obj1 = bless { value => 1 }, 'NodeA';
+    my $obj2 = bless { value => 2 }, 'NodeB';
+    my $obj3 = bless { value => 3 }, 'NodeA';
+
+    my $leaf1 = Chalk::Bootstrap::Context->new(focus => $obj1);
+    my $leaf2 = Chalk::Bootstrap::Context->new(focus => $obj2);
+    my $leaf3 = Chalk::Bootstrap::Context->new(focus => $obj3);
+
+    my $root = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$leaf1, $leaf2, $leaf3],
+    );
+
+    my @all_leaves = $root->leaves();
+    is(scalar @all_leaves, 3, "no filter returns all leaves");
+
+    my @filtered = $root->leaves('NodeA');
+    is(scalar @filtered, 2, "class filter returns only NodeA objects");
+    is($filtered[0]->extract()->{value}, 1, "first filtered leaf correct");
+    is($filtered[1]->extract()->{value}, 3, "second filtered leaf correct");
+}
+
+# Test 15: scanned_text() with single string focus
+{
+    my $ctx = Chalk::Bootstrap::Context->new(focus => "hello");
+    is($ctx->scanned_text(), "hello", "single string returns itself");
+}
+
+# Test 16: scanned_text() with binary tree of strings
+{
+    my $leaf1 = Chalk::Bootstrap::Context->new(focus => "hello");
+    my $leaf2 = Chalk::Bootstrap::Context->new(focus => " world");
+    my $parent = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$leaf1, $leaf2],
+    );
+
+    is($parent->scanned_text(), "hello world", "concatenates children");
+}
+
+# Test 17: scanned_text() with nested tree
+{
+    my $leaf1 = Chalk::Bootstrap::Context->new(focus => "a");
+    my $leaf2 = Chalk::Bootstrap::Context->new(focus => "b");
+    my $subtree = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$leaf1, $leaf2],
+    );
+
+    my $leaf3 = Chalk::Bootstrap::Context->new(focus => "c");
+    my $root = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$subtree, $leaf3],
+    );
+
+    is($root->scanned_text(), "abc", "concatenates deeply nested strings");
+}
+
+# Test 18: scanned_text() skips non-string focuses (IR nodes)
+{
+    my $obj = bless { type => 'IR' }, 'IRNode';
+    my $leaf1 = Chalk::Bootstrap::Context->new(focus => "start");
+    my $leaf2 = Chalk::Bootstrap::Context->new(focus => $obj);
+    my $leaf3 = Chalk::Bootstrap::Context->new(focus => "end");
+
+    my $root = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$leaf1, $leaf2, $leaf3],
+    );
+
+    is($root->scanned_text(), "startend", "skips object focuses, concatenates strings");
+}
+
+# Test 19: scanned_text() with undef focus at leaf
+{
+    my $leaf1 = Chalk::Bootstrap::Context->new(focus => "text");
+    my $leaf2 = Chalk::Bootstrap::Context->new(focus => undef);
+    my $parent = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [$leaf1, $leaf2],
+    );
+
+    is($parent->scanned_text(), "text", "treats undef as empty string");
+}
+
+# Test 20: leaves() with empty children array
+{
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus => undef,
+        children => [],
+    );
+
+    my @leaves = $ctx->leaves();
+    is(scalar @leaves, 0, "empty children returns no leaves");
+    is($ctx->scanned_text(), "", "empty children returns empty string");
+}
+
 done_testing();
