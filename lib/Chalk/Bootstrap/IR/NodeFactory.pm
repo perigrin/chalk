@@ -8,6 +8,14 @@ no warnings 'experimental::class';
 class Chalk::Bootstrap::IR::NodeFactory {
     use Scalar::Util qw(refaddr);
 
+    # Static imports for all node types (eliminates need for dynamic loading)
+    use Chalk::Bootstrap::IR::Node::Start;
+    use Chalk::Bootstrap::IR::Node::Return;
+    use Chalk::Bootstrap::IR::Node::Constant;
+    use Chalk::Bootstrap::IR::Node::MakeSymbol;
+    use Chalk::Bootstrap::IR::Node::MakeExpression;
+    use Chalk::Bootstrap::IR::Node::MakeRule;
+
     # Singleton instance
     my $instance;
 
@@ -51,10 +59,8 @@ class Chalk::Bootstrap::IR::NodeFactory {
         # Return cached node if exists
         return $node_cache->{$key} if exists $node_cache->{$key};
 
-        # Create new node
+        # Create new node (node classes loaded statically at compile time)
         my $node_class = "Chalk::Bootstrap::IR::Node::$operation";
-        eval "require $node_class" or die $@;
-
         my $node = $node_class->new(
             id => $key,
             inputs => \@inputs,
