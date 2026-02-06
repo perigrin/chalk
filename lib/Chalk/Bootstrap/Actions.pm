@@ -5,6 +5,7 @@ use utf8;
 
 package Chalk::Bootstrap::Actions;
 
+use Scalar::Util;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Exporter 'import';
 our @EXPORT_OK = qw(_collect_children action_registry);
@@ -24,7 +25,7 @@ sub _collect_children {
     my $focus = $ctx->extract();
     if (defined $focus) {
         # This context has a focus — it's a "leaf" produced by complete_value
-        if (!$node_class || (ref($focus) && $focus->isa($node_class))) {
+        if (!$node_class || (Scalar::Util::blessed($focus) && $focus->isa($node_class))) {
             push @results, $ctx;
         }
         return @results;
@@ -36,6 +37,26 @@ sub _collect_children {
     }
 
     return @results;
+}
+
+# Extract concatenated scanned text from a binary Context tree.
+# Walks the tree and collects all string focuses (from scan_value),
+# concatenating them in order. Skips non-string focuses (IR nodes from complete_value).
+sub _extract_scanned_text {
+    my ($ctx) = @_;
+
+    my $focus = $ctx->extract();
+    if (defined $focus && !ref($focus)) {
+        # String focus from scan_value
+        return $focus;
+    }
+
+    # Recurse into children and concatenate
+    my $text = '';
+    for my $child ($ctx->children()->@*) {
+        $text .= _extract_scanned_text($child);
+    }
+    return $text;
 }
 
 # Grammar ::= /(?:\s|#[^\n]*)*/ Rule+
@@ -76,6 +97,9 @@ sub action_Rule {
         my $focus = $leaf->extract();
         if (!defined $focus) {
             next;
+        } elsif (!ref($focus)) {
+            # Raw string from scanned terminal (whitespace, ::=, ;) — skip
+            next;
         } elsif (ref($focus) eq 'ARRAY') {
             # action_Alternatives returns an arrayref of MakeExpression nodes
             $alts_node = $focus;
@@ -96,10 +120,20 @@ sub action_Rule {
 sub action_Alternatives {
     my ($ctx) = @_;
 
-    # Recursively collect all MakeExpression nodes from the binary tree
-    my @leaves = _collect_children($ctx, 'Chalk::Bootstrap::IR::Node::MakeExpression');
-
-    my @expressions = map { $_->extract() } @leaves;
+    # Collect all leaves and extract MakeExpression nodes
+    # Nested Alternatives produce arrayrefs of MakeExpressions, not single MakeExpressions
+    my @leaves = _collect_children($ctx);
+    my @expressions;
+    for my $leaf (@leaves) {
+        my $focus = $leaf->extract();
+        next unless defined $focus;
+        if (ref($focus) eq 'ARRAY') {
+            # Nested Alternatives result — flatten the arrayrefs
+            push @expressions, $focus->@*;
+        } elsif (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeExpression')) {
+            push @expressions, $focus;
+        }
+    }
 
     # Return arrayref of all expressions
     return \@expressions;
@@ -110,10 +144,22 @@ sub action_Alternatives {
 sub action_Sequence {
     my ($ctx) = @_;
 
-    # Recursively collect all MakeSymbol nodes from the binary tree
-    my @leaves = _collect_children($ctx, 'Chalk::Bootstrap::IR::Node::MakeSymbol');
-
-    my @elements = map { $_->extract() } @leaves;
+    # Collect all leaves and extract MakeSymbol nodes
+    # Nested Sequence matches produce MakeExpression nodes containing MakeSymbol arrays
+    my @leaves = _collect_children($ctx);
+    my @elements;
+    for my $leaf (@leaves) {
+        my $focus = $leaf->extract();
+        next unless defined $focus;
+        next unless ref($focus);
+        if (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeSymbol')) {
+            push @elements, $focus;
+        } elsif (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeExpression')) {
+            # Nested Sequence result — extract its elements
+            my $inner_elements = $focus->inputs()->[0];
+            push @elements, $inner_elements->@* if $inner_elements;
+        }
+    }
 
     return _factory()->make('MakeExpression',
         elements => \@elements,
@@ -200,7 +246,9 @@ sub action_Atom {
 # Returns Constant with quantifier string
 sub action_Quantifier {
     my ($ctx) = @_;
+    # Use extract() for pre-wired contexts, fall back to scanning tree
     my $quantifier = $ctx->extract();
+    $quantifier = _extract_scanned_text($ctx) unless defined $quantifier;
 
     return _factory()->make('Constant', const_type => 'string', value => $quantifier);
 }
@@ -216,7 +264,9 @@ sub action_Comment {
 # Returns Constant with identifier string
 sub action_Identifier {
     my ($ctx) = @_;
+    # Use extract() for pre-wired contexts, fall back to scanning tree
     my $identifier = $ctx->extract();
+    $identifier = _extract_scanned_text($ctx) unless defined $identifier;
 
     return _factory()->make('Constant', const_type => 'string', value => $identifier);
 }
@@ -225,7 +275,9 @@ sub action_Identifier {
 # Returns Constant with regex string
 sub action_InlineRegex {
     my ($ctx) = @_;
+    # Use extract() for pre-wired contexts, fall back to scanning tree
     my $regex = $ctx->extract();
+    $regex = _extract_scanned_text($ctx) unless defined $regex;
 
     return _factory()->make('Constant', const_type => 'string', value => $regex);
 }
@@ -248,8 +300,18 @@ sub action_Rule_star {
 sub _collect_rule_list {
     my ($ctx) = @_;
 
-    my @leaves = _collect_children($ctx, 'Chalk::Bootstrap::IR::Node::MakeRule');
-    my @rules = map { $_->extract() } @leaves;
+    my @leaves = _collect_children($ctx);
+    my @rules;
+    for my $leaf (@leaves) {
+        my $focus = $leaf->extract();
+        next unless defined $focus;
+        if (ref($focus) eq 'ARRAY') {
+            # Nested Rule_star result — flatten
+            push @rules, $focus->@*;
+        } elsif (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeRule')) {
+            push @rules, $focus;
+        }
+    }
 
     return \@rules;
 }
