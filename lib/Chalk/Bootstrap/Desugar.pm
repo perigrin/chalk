@@ -27,10 +27,10 @@ sub desugar_grammar($grammar) {
                 if ($sym->is_quantified()) {
                     my $helper_name = _helper_name($sym->value(), $sym->quantifier());
 
-                    # Create helper rule if not already seen
+                    # Create helper rule(s) if not already seen
                     if (!exists $helpers{$helper_name}) {
-                        $helpers{$helper_name} = _make_helper_rule(
-                            $helper_name, $sym->value(), $sym->quantifier(), $sym->type(),
+                        _create_helpers(
+                            \%helpers, $sym->value(), $sym->quantifier(), $sym->type(),
                         );
                     }
 
@@ -67,43 +67,68 @@ sub desugar_grammar($grammar) {
 sub _helper_name($base, $quant) {
     my %suffix = (
         '+' => 'plus',
-        '?' => 'optional',
+        '?' => 'opt',
         '*' => 'star',
     );
+    die "Unknown quantifier '$quant' on symbol '$base'"
+        unless exists $suffix{$quant};
     return "${base}_$suffix{$quant}";
 }
 
-# Build a Chalk::Grammar::Rule for a desugared quantifier.
-sub _make_helper_rule($name, $base, $quant, $type) {
+# Create helper rule(s) for a desugared quantifier and register them in %helpers.
+# Per PRD: X+ generates both X_plus and X_star; X* and X? each generate one rule.
+sub _create_helpers($helpers, $base, $quant, $type) {
     my $base_sym = Chalk::Grammar::Symbol->new(type => $type, value => $base);
-    my $self_ref = Chalk::Grammar::Symbol->new(type => 'reference', value => $name);
 
-    my @expressions;
+    die "Unknown quantifier '$quant' on symbol '$base'"
+        unless $quant eq '+' || $quant eq '?' || $quant eq '*';
 
     if ($quant eq '+') {
-        # X_plus ::= X X_plus | X
-        @expressions = (
-            [$base_sym, $self_ref],
-            [$base_sym],
+        # X_plus ::= X X_star (single alternative, reuses X_star)
+        my $star_name = _helper_name($base, '*');
+        my $plus_name = _helper_name($base, '+');
+
+        # Create X_star if not already present (e.g., from an explicit X* elsewhere)
+        if (!exists $helpers->{$star_name}) {
+            my $star_ref = Chalk::Grammar::Symbol->new(type => 'reference', value => $star_name);
+            $helpers->{$star_name} = Chalk::Grammar::Rule->new(
+                name        => $star_name,
+                expressions => [
+                    [$base_sym, $star_ref],
+                    [],
+                ],
+            );
+        }
+
+        my $star_ref = Chalk::Grammar::Symbol->new(type => 'reference', value => $star_name);
+        $helpers->{$plus_name} = Chalk::Grammar::Rule->new(
+            name        => $plus_name,
+            expressions => [
+                [$base_sym, $star_ref],
+            ],
         );
     } elsif ($quant eq '?') {
-        # X_optional ::= X | (epsilon)
-        @expressions = (
-            [$base_sym],
-            [],
+        # X_opt ::= X | (epsilon)
+        my $opt_name = _helper_name($base, '?');
+        $helpers->{$opt_name} = Chalk::Grammar::Rule->new(
+            name        => $opt_name,
+            expressions => [
+                [$base_sym],
+                [],
+            ],
         );
     } elsif ($quant eq '*') {
         # X_star ::= X X_star | (epsilon)
-        @expressions = (
-            [$base_sym, $self_ref],
-            [],
+        my $star_name = _helper_name($base, '*');
+        my $star_ref = Chalk::Grammar::Symbol->new(type => 'reference', value => $star_name);
+        $helpers->{$star_name} = Chalk::Grammar::Rule->new(
+            name        => $star_name,
+            expressions => [
+                [$base_sym, $star_ref],
+                [],
+            ],
         );
     }
-
-    return Chalk::Grammar::Rule->new(
-        name        => $name,
-        expressions => \@expressions,
-    );
 }
 
 true;
