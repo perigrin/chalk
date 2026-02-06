@@ -236,13 +236,13 @@ class Chalk::Grammar::BNF::Actions {
     }
 
     # Rule_plus ::= Rule Rule_star (desugared from Rule+)
-    # Collects all MakeRule nodes from the recursive structure
+    # Collects all Constructor:Rule nodes from the recursive structure
     method Rule_plus($ctx) {
         return _collect_rule_list($ctx);
     }
 
     # Rule_star ::= Rule Rule_star | epsilon (desugared from Rule+)
-    # Collects all MakeRule nodes from the recursive structure
+    # Collects all Constructor:Rule nodes from the recursive structure
     method Rule_star($ctx) {
         return _collect_rule_list($ctx);
     }

@@ -44,16 +44,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule');
-    is($rule->class(), 'Rule', 'created MakeRule node');
+    is($rule->class(), 'Rule', 'created Rule node');
     is($rule->inputs()->[0]->value(), 'Identifier', 'rule name is Identifier');
 
     my $expr = $rule->inputs()->[1];
     isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Expression');
-    is($expr->class(), 'Expression', 'rule has MakeExpression');
+    is($expr->class(), 'Expression', 'rule has Expression');
 
     my $sym = $expr->inputs()->[0][0];
     isa_ok($sym, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Symbol');
-    is($sym->class(), 'Symbol', 'expression has MakeSymbol');
+    is($sym->class(), 'Symbol', 'expression has Symbol');
     is($sym->inputs()->[0]->value(), 'terminal', 'symbol type is terminal');
     is($sym->inputs()->[1]->value(), '[A-Za-z_][A-Za-z_0-9]*', 'symbol value is pattern');
 }
@@ -96,9 +96,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         elements => [$regex_sym],
     );
 
-    # NOTE: MakeRule expects expressions input to be a single MakeExpression or array
+    # NOTE: Constructor:Rule expects expressions input to be a single Expression or array
     # According to Actions.pm, Rule expects a single node from Alternatives
-    # But the semantic should be that MakeRule wraps multiple alternatives
+    # But the semantic should be that Constructor:Rule wraps multiple alternatives
     # For now, test with single expression and document this
 
     # Create rule with first expression (simplified)
@@ -195,7 +195,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($const1, $const2, 'hash consing deduplicates identical Constant nodes');
     is($const1->id(), $const2->id(), 'deduplicated nodes have same ID');
 
-    # Create two identical MakeSymbol nodes
+    # Create two identical Symbol nodes
     my $ref_type = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
@@ -213,7 +213,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         quantifier => $no_quant,
     );
 
-    is($sym1, $sym2, 'hash consing deduplicates identical MakeSymbol nodes');
+    is($sym1, $sym2, 'hash consing deduplicates identical Symbol nodes');
 }
 
 # Test 6: Verify use-def chains are correct

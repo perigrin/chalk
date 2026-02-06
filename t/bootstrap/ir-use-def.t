@@ -169,7 +169,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     is($const->consumers->[0], $symbol, 'const consumer is symbol');
 
     is(scalar($symbol->consumers->@*), 1, 'symbol has 1 consumer');
-    # Note: MakeExpression stores elements as arrayref, so it's the consumer
+    # Note: Constructor:Expression stores elements as arrayref, so it's the consumer
     ok($symbol->consumers->[0], 'symbol has a consumer');
 }
 

@@ -59,11 +59,11 @@ my $parser = build_parser();
     ok(defined $ir, 'parse single rule returns defined IR');
     isa_ok($ir, 'ARRAY', 'Grammar action returns arrayref');
 
-    # Grammar produces arrayref of MakeRule nodes
-    is(scalar($ir->@*), 1, 'single rule produces 1 MakeRule');
+    # Grammar produces arrayref of Rule nodes
+    is(scalar($ir->@*), 1, 'single rule produces 1 Rule');
     my $rule = $ir->[0];
     isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($rule->class(), 'Rule', 'element is MakeRule');
+    is($rule->class(), 'Rule', 'element is Rule');
 
     # Check rule name
     my $name = $rule->inputs()->[0];
@@ -77,7 +77,7 @@ my $parser = build_parser();
 
     my $expr = $exprs->[0];
     isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($expr->class(), 'Expression', 'alternative is MakeExpression');
+    is($expr->class(), 'Expression', 'alternative is Expression');
 
     # The expression should have 1 element (the InlineRegex terminal)
     my $elements = $expr->inputs()->[0];
@@ -85,7 +85,7 @@ my $parser = build_parser();
 
     my $elem = $elements->[0];
     isa_ok($elem, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($elem->class(), 'Symbol', 'element is MakeSymbol');
+    is($elem->class(), 'Symbol', 'element is Symbol');
     is($elem->inputs()->[0]->value(), 'terminal', 'element type is terminal');
 }
 
@@ -95,7 +95,7 @@ my $parser = build_parser();
     my $ir = parse_ir($parser, $input);
 
     ok(defined $ir, 'parse rule with alternatives returns defined IR');
-    is(scalar($ir->@*), 1, 'single rule produces 1 MakeRule');
+    is(scalar($ir->@*), 1, 'single rule produces 1 Rule');
     my $rule = $ir->[0];
 
     is($rule->inputs()->[0]->value(), 'Atom', 'rule name is "Atom"');
@@ -120,7 +120,7 @@ my $parser = build_parser();
     my $ir = parse_ir($parser, $input);
 
     ok(defined $ir, 'parse rule with sequence returns defined IR');
-    is(scalar($ir->@*), 1, 'single rule produces 1 MakeRule');
+    is(scalar($ir->@*), 1, 'single rule produces 1 Rule');
     my $rule = $ir->[0];
 
     is($rule->inputs()->[0]->value(), 'Rule', 'rule name is "Rule"');
@@ -145,7 +145,7 @@ my $parser = build_parser();
     my $ir = parse_ir($parser, $input);
 
     ok(defined $ir, 'parse multiple rules returns defined IR');
-    is(scalar($ir->@*), 2, 'two rules produce 2 MakeRule nodes');
+    is(scalar($ir->@*), 2, 'two rules produce 2 Rule nodes');
     is($ir->[0]->inputs()->[0]->value(), 'Identifier', 'first rule is Identifier');
     is($ir->[1]->inputs()->[0]->value(), 'Comment', 'second rule is Comment');
 }

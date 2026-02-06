@@ -24,7 +24,7 @@ use Chalk::Bootstrap::Context;
 # Test 3: Create context with hashref value (simulating IR node)
 {
     my $ir_node = {
-        type  => 'MakeSymbol',
+        type  => 'Symbol',
         value => 'Identifier',
     };
 

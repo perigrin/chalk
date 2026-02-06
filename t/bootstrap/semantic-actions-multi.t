@@ -18,7 +18,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
 # Test 1: Alternatives should return arrayref of ALL alternatives, not just first
 {
-    # Create 3 MakeExpression nodes
+    # Create 3 Expression nodes
     my $expr1 = $factory->make('Constructor',
         class => 'Expression', elements => []);
     my $expr2 = $factory->make('Constructor',
@@ -59,11 +59,11 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     ok(ref($result) eq 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 3, 'Alternatives returns all 3 alternatives');
     isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[0]->class(), 'Expression', 'First alternative is MakeExpression');
+    is($result->[0]->class(), 'Expression', 'First alternative is Expression');
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[1]->class(), 'Expression', 'Second alternative is MakeExpression');
+    is($result->[1]->class(), 'Expression', 'Second alternative is Expression');
     isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[2]->class(), 'Expression', 'Third alternative is MakeExpression');
+    is($result->[2]->class(), 'Expression', 'Third alternative is Expression');
 }
 
 # Test 2: Rule should receive arrayref of expressions and pass it correctly
@@ -101,9 +101,9 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Rule($rule_ctx);
 
-    # BUG 3: Currently checks for single MakeExpression, should accept arrayref
+    # BUG 3: Currently checks for single Expression, should accept arrayref
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->class(), 'Rule', 'Rule creates MakeRule');
+    is($result->class(), 'Rule', 'Rule creates Rule');
     is($result->inputs()->[0]->value(), 'TestRule', 'Rule name is correct');
 
     # The expressions input should be an arrayref
@@ -111,14 +111,14 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     ok(ref($expressions) eq 'ARRAY', 'Rule expressions is arrayref');
     is(scalar($expressions->@*), 2, 'Rule has 2 expressions');
     isa_ok($expressions->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($expressions->[0]->class(), 'Expression', 'First expression is MakeExpression');
+    is($expressions->[0]->class(), 'Expression', 'First expression is Expression');
     isa_ok($expressions->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($expressions->[1]->class(), 'Expression', 'Second expression is MakeExpression');
+    is($expressions->[1]->class(), 'Expression', 'Second expression is Expression');
 }
 
 # Test 3: Grammar should return arrayref of ALL rules, not just first
 {
-    # Create 3 MakeRule nodes
+    # Create 3 Rule nodes
     my $name1 = $factory->make('Constant', const_type => 'string', value => 'Rule1');
     my $name2 = $factory->make('Constant', const_type => 'string', value => 'Rule2');
     my $name3 = $factory->make('Constant', const_type => 'string', value => 'Rule3');
@@ -166,11 +166,11 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     ok(ref($result) eq 'ARRAY', 'Grammar returns arrayref');
     is(scalar($result->@*), 3, 'Grammar returns all 3 rules');
     isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[0]->class(), 'Rule', 'First rule is MakeRule');
+    is($result->[0]->class(), 'Rule', 'First rule is Rule');
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[1]->class(), 'Rule', 'Second rule is MakeRule');
+    is($result->[1]->class(), 'Rule', 'Second rule is Rule');
     isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[2]->class(), 'Rule', 'Third rule is MakeRule');
+    is($result->[2]->class(), 'Rule', 'Third rule is Rule');
     is($result->[0]->inputs()->[0]->value(), 'Rule1', 'First rule name is Rule1');
     is($result->[1]->inputs()->[0]->value(), 'Rule2', 'Second rule name is Rule2');
     is($result->[2]->inputs()->[0]->value(), 'Rule3', 'Third rule name is Rule3');

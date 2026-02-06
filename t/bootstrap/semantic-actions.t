@@ -511,9 +511,9 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     isa_ok($result, 'ARRAY', 'Rule_star returns arrayref');
     is(scalar($result->@*), 2, 'Rule_star collects 2 rules');
     isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[0]->class(), 'Rule', 'first is MakeRule');
+    is($result->[0]->class(), 'Rule', 'first is Rule');
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->[1]->class(), 'Rule', 'second is MakeRule');
+    is($result->[1]->class(), 'Rule', 'second is Rule');
 }
 
 # Test 13: Rule_plus delegates to Rule_star
@@ -616,7 +616,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $result = $actions->Atom($atom_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($result->class(), 'Symbol', 'Atom creates MakeSymbol');
+    is($result->class(), 'Symbol', 'Atom creates Symbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom correctly identifies reference via rule field');
 }
 

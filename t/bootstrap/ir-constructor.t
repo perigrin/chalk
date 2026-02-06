@@ -1,4 +1,4 @@
-# ABOUTME: Tests for parameterized Constructor IR node replacing MakeSymbol/MakeExpression/MakeRule
+# ABOUTME: Tests for parameterized Constructor IR node for Symbol, Expression, and Rule
 # ABOUTME: Verifies Constructor with class parameter works for all three grammar object types
 use 5.42.0;
 use utf8;
