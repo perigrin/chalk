@@ -15,7 +15,7 @@ my sub _factory {
 # Recursively collect leaf contexts from a binary Context tree
 # A "leaf" is a context that has a defined focus (from complete_value).
 # Optional $node_class parameter filters to only contexts whose focus isa $node_class.
-sub _collect_children {
+my sub _collect_children {
     my ($ctx, $node_class) = @_;
     my @results;
 
@@ -30,7 +30,7 @@ sub _collect_children {
 
     # No focus — this is an intermediate multiply() node. Recurse into children.
     for my $child ($ctx->children()->@*) {
-        push @results, _collect_children($child, $node_class);
+        push @results, __SUB__->($child, $node_class);
     }
 
     return @results;
@@ -39,7 +39,7 @@ sub _collect_children {
 # Extract concatenated scanned text from a binary Context tree.
 # Walks the tree and collects all string focuses (from scan_value),
 # concatenating them in order. Skips non-string focuses (IR nodes from complete_value).
-sub _extract_scanned_text {
+my sub _extract_scanned_text {
     my ($ctx) = @_;
 
     my $focus = $ctx->extract();
@@ -51,9 +51,28 @@ sub _extract_scanned_text {
     # Recurse into children and concatenate
     my $text = '';
     for my $child ($ctx->children()->@*) {
-        $text .= _extract_scanned_text($child);
+        $text .= __SUB__->($child);
     }
     return $text;
+}
+
+# Shared implementation for Rule_plus and Rule_star
+my sub _collect_rule_list {
+    my ($ctx) = @_;
+
+    my @leaves = _collect_children($ctx);
+    my @rules;
+    for my $leaf (@leaves) {
+        my $focus = $leaf->extract();
+        if (ref($focus) eq 'ARRAY') {
+            # Nested Rule_star result — flatten
+            push @rules, $focus->@*;
+        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
+            push @rules, $focus;
+        }
+    }
+
+    return \@rules;
 }
 
 # Grammar ::= /(?:\s|#[^\n]*)*/ Rule+
@@ -282,25 +301,6 @@ sub Rule_plus {
 sub Rule_star {
     my ($ctx) = @_;
     return _collect_rule_list($ctx);
-}
-
-# Shared implementation for Rule_plus and Rule_star
-sub _collect_rule_list {
-    my ($ctx) = @_;
-
-    my @leaves = _collect_children($ctx);
-    my @rules;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if (ref($focus) eq 'ARRAY') {
-            # Nested Rule_star result — flatten
-            push @rules, $focus->@*;
-        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
-            push @rules, $focus;
-        }
-    }
-
-    return \@rules;
 }
 
 # Quantifier_opt ::= Quantifier | epsilon (desugared from Quantifier?)
