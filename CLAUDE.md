@@ -113,6 +113,26 @@ See `docs/ir-node-types.md` for complete taxonomy.
 
 **All tests must pass 100%** - no TODO tests on critical path after their phase is complete.
 
+## Code Review Requirements
+
+**CRITICAL**: Whenever conducting a code review (via code-reviewer subagent or similar), you MUST:
+
+1. **Verify Test Coverage** - Launch a test coverage verification subagent (test-architect or similar) to check:
+   - Unit test coverage for all implemented functionality
+   - **Integration test coverage** - especially verify tests use real data/grammars, not just toy examples
+   - Test quality - do tests actually validate behavior or just exercise code?
+
+2. **Check for Missing Artifacts** - Ensure all required data files, grammar specifications, or configuration files exist and are tested
+
+3. **Validate Test Reality** - Verify tests use real production data:
+   - If building a grammar compiler, tests should use the actual grammar specification
+   - If building a parser, tests should parse real input files
+   - If building a code generator, tests should generate and validate real output
+
+**Why This Matters**: It's easy to pass 100% of tests while missing critical integration testing. Code reviews must verify not just that tests pass, but that tests are comprehensive and realistic.
+
+**Example**: In this bootstrap project, we reached 299 passing tests across Phases 0-2b but never tested parsing the actual 10-rule BNF meta-grammar - all tests used toy grammars created inline. This gap wasn't caught until explicitly invoking test-architect to review test coverage.
+
 ## Implementation Phases
 
 ### Current Status: Phase 0 Complete ✅
