@@ -16,12 +16,19 @@ This is the **Chalk::Bootstrap** worktree - a clean-room implementation of a BNF
 
 **Perl Version**: This project requires Perl 5.42.0 for `feature class` support.
 
-**CRITICAL**: Always use the `writing-perl-5.42.0` skill when writing any Perl code for this project. Invoke it at the start of work with:
-```
-/skill writing-perl-5.42.0
-```
+**CRITICAL**: Always use these skills when working on this project:
 
-This skill ensures proper use of modern Perl 5.42.0 features including `feature class`, auto-exported builtins, and correct idioms.
+1. **writing-perl-5.42.0** - For all Perl code
+   ```
+   /skill writing-perl-5.42.0
+   ```
+   Ensures proper use of modern Perl 5.42.0 features including `feature class`, auto-exported builtins, and correct idioms.
+
+2. **test-driven-development** - For all new code implementation
+   ```
+   /skill test-driven-development
+   ```
+   Enforces TDD workflow: write failing test → implement → verify pass. This is a strict requirement per the implementation plan.
 
 **Run tests**:
 ```bash
@@ -159,13 +166,13 @@ Not required for self-hosting validation.
 
 ## Critical Design Constraints
 
-1. **Immutability**: All Context operations return new contexts (no mutation)
-2. **Determinism**: Code generation must produce byte-identical output across runs
+1. **Strict TDD**: Write failing tests before implementation code (use test-driven-development skill)
+2. **Immutability**: All Context operations return new contexts (no mutation)
+3. **Determinism**: Code generation must produce byte-identical output across runs
    - Sort all hash iteration
    - Stable helper-rule naming (derive from source position)
    - Content-based node IDs (not creation order)
-3. **Progressive Testing**: Test each layer independently before integration
-4. **TDD**: Write failing tests before implementation code
+4. **Progressive Testing**: Test each layer independently before integration
 
 ## Key Files
 
@@ -207,8 +214,9 @@ Reference files in main Chalk (read-only):
 
 ## Common Pitfalls
 
-1. **Not using the writing-perl-5.42.0 skill**: This project REQUIRES the skill - invoke it before writing any Perl code
-2. **Missing `use utf8`**: Always include after `use 5.42.0;` (5.42 defaults to ASCII source encoding)
+1. **Not using required skills**: This project REQUIRES both `writing-perl-5.42.0` and `test-driven-development` skills
+2. **Writing code before tests**: Always write the failing test first (TDD), never implementation code first
+3. **Missing `use utf8`**: Always include after `use 5.42.0;` (5.42 defaults to ASCII source encoding)
 3. **Old-style dereferencing**: Use `$ref->@*` not `@$ref`
 4. **Returning 1/0 for booleans**: Use `true`/`false` builtins
 5. **Non-deterministic codegen**: Sort all hash keys, use stable naming schemes
@@ -217,8 +225,9 @@ Reference files in main Chalk (read-only):
 
 ## Working with This Codebase
 
-1. **Read the architecture docs first**: Especially comonad-specification.md and ir-node-types.md before implementing parser/IR
-2. **Follow TDD**: Write failing test → implement → verify pass
-3. **Test progressively**: Each layer independently before integration
-4. **Commit frequently**: After each sub-phase or working feature
-5. **Validate determinism**: Run codegen tests multiple times, diff outputs
+1. **Invoke required skills**: Always start by invoking `writing-perl-5.42.0` and `test-driven-development` skills
+2. **Read the architecture docs first**: Especially comonad-specification.md and ir-node-types.md before implementing parser/IR
+3. **Follow strict TDD**: Write failing test → implement minimal code → verify pass (use test-driven-development skill)
+4. **Test progressively**: Each layer independently before integration
+5. **Commit frequently**: After each sub-phase or working feature
+6. **Validate determinism**: Run codegen tests multiple times, diff outputs
