@@ -1,323 +1,306 @@
 # ABOUTME: Semantic actions for BNF meta-grammar that build IR nodes from parse results.
-# ABOUTME: One function per BNF rule, plus helpers for desugared rules, constructing IR via NodeFactory.
+# ABOUTME: One method per BNF rule, plus helpers for desugared rules, constructing IR via NodeFactory.
 use 5.42.0;
 use utf8;
-
-package Chalk::Grammar::BNF::Actions;
+use feature 'class';
+no warnings 'experimental::class';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 
-# Get singleton factory
-my sub _factory {
-    return Chalk::Bootstrap::IR::NodeFactory->instance();
-}
+class Chalk::Grammar::BNF::Actions {
+    field $factory;
 
-# Recursively collect leaf contexts from a binary Context tree
-# A "leaf" is a context that has a defined focus (from complete_value).
-# Optional $node_class parameter filters to only contexts whose focus isa $node_class.
-my sub _collect_children {
-    my ($ctx, $node_class) = @_;
-    my @results;
+    ADJUST {
+        $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    }
 
-    my $focus = $ctx->extract();
-    if (defined $focus) {
-        # This context has a focus — it's a "leaf" produced by complete_value
-        if (!$node_class || $focus isa $node_class) {
-            push @results, $ctx;
+    # Recursively collect leaf contexts from a binary Context tree
+    # A "leaf" is a context that has a defined focus (from complete_value).
+    # Optional $node_class parameter filters to only contexts whose focus isa $node_class.
+    my sub _collect_children {
+        my ($ctx, $node_class) = @_;
+        my @results;
+
+        my $focus = $ctx->extract();
+        if (defined $focus) {
+            # This context has a focus — it's a "leaf" produced by complete_value
+            if (!$node_class || $focus isa $node_class) {
+                push @results, $ctx;
+            }
+            return @results;
         }
+
+        # No focus — this is an intermediate multiply() node. Recurse into children.
+        for my $child ($ctx->children()->@*) {
+            push @results, __SUB__->($child, $node_class);
+        }
+
         return @results;
     }
 
-    # No focus — this is an intermediate multiply() node. Recurse into children.
-    for my $child ($ctx->children()->@*) {
-        push @results, __SUB__->($child, $node_class);
-    }
+    # Extract concatenated scanned text from a binary Context tree.
+    # Walks the tree and collects all string focuses (from scan_value),
+    # concatenating them in order. Skips non-string focuses (IR nodes from complete_value).
+    my sub _extract_scanned_text {
+        my ($ctx) = @_;
 
-    return @results;
-}
-
-# Extract concatenated scanned text from a binary Context tree.
-# Walks the tree and collects all string focuses (from scan_value),
-# concatenating them in order. Skips non-string focuses (IR nodes from complete_value).
-my sub _extract_scanned_text {
-    my ($ctx) = @_;
-
-    my $focus = $ctx->extract();
-    if (defined $focus && !ref($focus)) {
-        # String focus from scan_value
-        return $focus;
-    }
-
-    # Recurse into children and concatenate
-    my $text = '';
-    for my $child ($ctx->children()->@*) {
-        $text .= __SUB__->($child);
-    }
-    return $text;
-}
-
-# Shared implementation for Rule_plus and Rule_star
-my sub _collect_rule_list {
-    my ($ctx) = @_;
-
-    my @leaves = _collect_children($ctx);
-    my @rules;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if (ref($focus) eq 'ARRAY') {
-            # Nested Rule_star result — flatten
-            push @rules, $focus->@*;
-        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
-            push @rules, $focus;
+        my $focus = $ctx->extract();
+        if (defined $focus && !ref($focus)) {
+            # String focus from scan_value
+            return $focus;
         }
-    }
 
-    return \@rules;
-}
-
-# Grammar ::= /(?:\s|#[^\n]*)*/ Rule+
-# Returns arrayref of MakeRule IR nodes
-sub Grammar {
-    my ($ctx) = @_;
-
-    # Collect all MakeRule nodes from the binary Context tree
-    # Rule+ desugars to Rule_plus which returns an arrayref
-    my @leaves = _collect_children($ctx);
-    my @rules;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if (ref($focus) eq 'ARRAY') {
-            # Rule_plus/Rule_star returns arrayref of MakeRule nodes
-            push @rules, $focus->@*;
-        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
-            push @rules, $focus;
+        # Recurse into children and concatenate
+        my $text = '';
+        for my $child ($ctx->children()->@*) {
+            $text .= __SUB__->($child);
         }
+        return $text;
     }
 
-    # Return arrayref of all rules
-    return \@rules;
-}
+    # Shared implementation for Rule_plus and Rule_star
+    my sub _collect_rule_list {
+        my ($ctx) = @_;
 
-# Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/
-# Returns MakeRule IR node
-sub Rule {
-    my ($ctx) = @_;
-
-    # Collect all leaves from the binary tree
-    my @leaves = _collect_children($ctx);
-
-    # Find name (Constant from Identifier) and alternatives (arrayref from Alternatives)
-    my $name_node;
-    my $alts_node;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if (ref($focus) eq 'ARRAY') {
-            # Alternatives returns an arrayref of MakeExpression nodes
-            $alts_node = $focus;
-        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && !defined $name_node) {
-            # First Constant is the identifier name
-            $name_node = $focus;
+        my @leaves = _collect_children($ctx);
+        my @rules;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if (ref($focus) eq 'ARRAY') {
+                # Nested Rule_star result — flatten
+                push @rules, $focus->@*;
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
+                push @rules, $focus;
+            }
         }
+
+        return \@rules;
     }
 
-    return _factory()->make('MakeRule',
-        name => $name_node,
-        expressions => $alts_node,
-    );
-}
-
-# Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence
-# Returns arrayref of MakeExpression nodes (one per alternative)
-sub Alternatives {
-    my ($ctx) = @_;
-
-    # Collect all leaves and extract MakeExpression nodes
-    # Nested Alternatives produce arrayrefs of MakeExpressions, not single MakeExpressions
-    my @leaves = _collect_children($ctx);
-    my @expressions;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if (ref($focus) eq 'ARRAY') {
-            # Nested Alternatives result — flatten the arrayrefs
-            push @expressions, $focus->@*;
-        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
-            push @expressions, $focus;
+    # Grammar ::= /(?:\s|#[^\n]*)*/ Rule+
+    # Returns arrayref of MakeRule IR nodes
+    method Grammar($ctx) {
+        # Collect all MakeRule nodes from the binary Context tree
+        # Rule+ desugars to Rule_plus which returns an arrayref
+        my @leaves = _collect_children($ctx);
+        my @rules;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if (ref($focus) eq 'ARRAY') {
+                # Rule_plus/Rule_star returns arrayref of MakeRule nodes
+                push @rules, $focus->@*;
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
+                push @rules, $focus;
+            }
         }
+
+        # Return arrayref of all rules
+        return \@rules;
     }
 
-    # Return arrayref of all expressions
-    return \@expressions;
-}
+    # Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/
+    # Returns MakeRule IR node
+    method Rule($ctx) {
+        # Collect all leaves from the binary tree
+        my @leaves = _collect_children($ctx);
 
-# Sequence ::= Element /(?:\s|#[^\n]*)+/ Sequence | Element
-# Returns MakeExpression with list of symbols
-sub Sequence {
-    my ($ctx) = @_;
-
-    # Collect all leaves and extract MakeSymbol nodes
-    # Nested Sequence matches produce MakeExpression nodes containing MakeSymbol arrays
-    my @leaves = _collect_children($ctx);
-    my @elements;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
-            push @elements, $focus;
-        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
-            # Nested Sequence result — extract its elements
-            my $inner_elements = $focus->inputs()->[0];
-            push @elements, $inner_elements->@* if $inner_elements;
+        # Find name (Constant from Identifier) and alternatives (arrayref from Alternatives)
+        my $name_node;
+        my $alts_node;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if (ref($focus) eq 'ARRAY') {
+                # Alternatives returns an arrayref of MakeExpression nodes
+                $alts_node = $focus;
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && !defined $name_node) {
+                # First Constant is the identifier name
+                $name_node = $focus;
+            }
         }
-    }
 
-    return _factory()->make('MakeExpression',
-        elements => \@elements,
-    );
-}
-
-# Element ::= Atom Quantifier?
-# Returns MakeSymbol with optional quantifier
-sub Element {
-    my ($ctx) = @_;
-
-    # Collect all leaves from the binary tree
-    my @leaves = _collect_children($ctx);
-
-    # Find the MakeSymbol (from Atom) and optional Constant (from Quantifier)
-    my $symbol;
-    my $quantifier;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
-            $symbol = $focus;
-        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && defined $focus->value()
-                 && $focus->value() =~ /^[*+?]$/) {
-            $quantifier = $focus;
-        }
-    }
-
-    # If quantifier exists, create new symbol with quantifier
-    if (defined $quantifier) {
-        return _factory()->make('MakeSymbol',
-            type => $symbol->inputs()->[0],
-            value => $symbol->inputs()->[1],
-            quantifier => $quantifier,
+        return $factory->make('MakeRule',
+            name => $name_node,
+            expressions => $alts_node,
         );
     }
 
-    # No quantifier, return symbol as-is
-    return $symbol;
-}
-
-# Atom ::= Identifier | InlineRegex
-# Returns MakeSymbol (reference for Identifier, terminal for InlineRegex)
-sub Atom {
-    my ($ctx) = @_;
-
-    # Find the child with a Constant focus (from Identifier or InlineRegex)
-    my @leaves = _collect_children($ctx);
-    my $value_leaf;
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
-            $value_leaf = $leaf;
-            last;
+    # Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence
+    # Returns arrayref of MakeExpression nodes (one per alternative)
+    method Alternatives($ctx) {
+        # Collect all leaves and extract MakeExpression nodes
+        # Nested Alternatives produce arrayrefs of MakeExpressions, not single MakeExpressions
+        my @leaves = _collect_children($ctx);
+        my @expressions;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if (ref($focus) eq 'ARRAY') {
+                # Nested Alternatives result — flatten the arrayrefs
+                push @expressions, $focus->@*;
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
+                push @expressions, $focus;
+            }
         }
+
+        # Return arrayref of all expressions
+        return \@expressions;
     }
 
-    my $value_node = $value_leaf->extract();
-
-    # Determine type using rule field if available, fall back to value format
-    my $type;
-    my $rule = $value_leaf->rule();
-    if (defined $rule && $rule eq 'InlineRegex') {
-        $type = _factory()->make('Constant', const_type => 'enum', value => 'terminal');
-    } elsif (defined $rule && $rule eq 'Identifier') {
-        $type = _factory()->make('Constant', const_type => 'enum', value => 'reference');
-    } elsif ($value_node->value() =~ m{^/}) {
-        # Fallback for pre-wired contexts: regex on value
-        $type = _factory()->make('Constant', const_type => 'enum', value => 'terminal');
-    } else {
-        $type = _factory()->make('Constant', const_type => 'enum', value => 'reference');
-    }
-
-    my $quant = _factory()->make('Constant', const_type => 'string', value => undef);
-
-    return _factory()->make('MakeSymbol',
-        type => $type,
-        value => $value_node,
-        quantifier => $quant,
-    );
-}
-
-# Quantifier ::= /\*/ | /\+/ | /\?/
-# Returns Constant with quantifier string
-sub Quantifier {
-    my ($ctx) = @_;
-    # Use extract() for pre-wired contexts, fall back to scanning tree
-    my $quantifier = $ctx->extract();
-    $quantifier = _extract_scanned_text($ctx) unless defined $quantifier;
-
-    return _factory()->make('Constant', const_type => 'string', value => $quantifier);
-}
-
-# Comment ::= /#[^\n]*/
-# Returns nothing (comments ignored)
-sub Comment {
-    my ($ctx) = @_;
-    return undef;
-}
-
-# Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/
-# Returns Constant with identifier string
-sub Identifier {
-    my ($ctx) = @_;
-    # Use extract() for pre-wired contexts, fall back to scanning tree
-    my $identifier = $ctx->extract();
-    $identifier = _extract_scanned_text($ctx) unless defined $identifier;
-
-    return _factory()->make('Constant', const_type => 'string', value => $identifier);
-}
-
-# InlineRegex ::= /\/(?:[^\/\\]|\\.)*\//
-# Returns Constant with regex string
-sub InlineRegex {
-    my ($ctx) = @_;
-    # Use extract() for pre-wired contexts, fall back to scanning tree
-    my $regex = $ctx->extract();
-    $regex = _extract_scanned_text($ctx) unless defined $regex;
-
-    return _factory()->make('Constant', const_type => 'string', value => $regex);
-}
-
-# Rule_plus ::= Rule Rule_star (desugared from Rule+)
-# Collects all MakeRule nodes from the recursive structure
-sub Rule_plus {
-    my ($ctx) = @_;
-    return _collect_rule_list($ctx);
-}
-
-# Rule_star ::= Rule Rule_star | epsilon (desugared from Rule+)
-# Collects all MakeRule nodes from the recursive structure
-sub Rule_star {
-    my ($ctx) = @_;
-    return _collect_rule_list($ctx);
-}
-
-# Quantifier_opt ::= Quantifier | epsilon (desugared from Quantifier?)
-# Returns the Quantifier's Constant value or undef (epsilon case)
-sub Quantifier_opt {
-    my ($ctx) = @_;
-
-    my @leaves = _collect_children($ctx);
-    for my $leaf (@leaves) {
-        my $focus = $leaf->extract();
-        if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
-            return $focus;
+    # Sequence ::= Element /(?:\s|#[^\n]*)+/ Sequence | Element
+    # Returns MakeExpression with list of symbols
+    method Sequence($ctx) {
+        # Collect all leaves and extract MakeSymbol nodes
+        # Nested Sequence matches produce MakeExpression nodes containing MakeSymbol arrays
+        my @leaves = _collect_children($ctx);
+        my @elements;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
+                push @elements, $focus;
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
+                # Nested Sequence result — extract its elements
+                my $inner_elements = $focus->inputs()->[0];
+                push @elements, $inner_elements->@* if $inner_elements;
+            }
         }
+
+        return $factory->make('MakeExpression',
+            elements => \@elements,
+        );
     }
 
-    # Epsilon case - no quantifier found
-    return undef;
+    # Element ::= Atom Quantifier?
+    # Returns MakeSymbol with optional quantifier
+    method Element($ctx) {
+        # Collect all leaves from the binary tree
+        my @leaves = _collect_children($ctx);
+
+        # Find the MakeSymbol (from Atom) and optional Constant (from Quantifier)
+        my $symbol;
+        my $quantifier;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
+                $symbol = $focus;
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && defined $focus->value()
+                     && $focus->value() =~ /^[*+?]$/) {
+                $quantifier = $focus;
+            }
+        }
+
+        # If quantifier exists, create new symbol with quantifier
+        if (defined $quantifier) {
+            return $factory->make('MakeSymbol',
+                type => $symbol->inputs()->[0],
+                value => $symbol->inputs()->[1],
+                quantifier => $quantifier,
+            );
+        }
+
+        # No quantifier, return symbol as-is
+        return $symbol;
+    }
+
+    # Atom ::= Identifier | InlineRegex
+    # Returns MakeSymbol (reference for Identifier, terminal for InlineRegex)
+    method Atom($ctx) {
+        # Find the child with a Constant focus (from Identifier or InlineRegex)
+        my @leaves = _collect_children($ctx);
+        my $value_leaf;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
+                $value_leaf = $leaf;
+                last;
+            }
+        }
+
+        my $value_node = $value_leaf->extract();
+
+        # Determine type using rule field if available, fall back to value format
+        my $type;
+        my $rule = $value_leaf->rule();
+        if (defined $rule && $rule eq 'InlineRegex') {
+            $type = $factory->make('Constant', const_type => 'enum', value => 'terminal');
+        } elsif (defined $rule && $rule eq 'Identifier') {
+            $type = $factory->make('Constant', const_type => 'enum', value => 'reference');
+        } elsif ($value_node->value() =~ m{^/}) {
+            # Fallback for pre-wired contexts: regex on value
+            $type = $factory->make('Constant', const_type => 'enum', value => 'terminal');
+        } else {
+            $type = $factory->make('Constant', const_type => 'enum', value => 'reference');
+        }
+
+        my $quant = $factory->make('Constant', const_type => 'string', value => undef);
+
+        return $factory->make('MakeSymbol',
+            type => $type,
+            value => $value_node,
+            quantifier => $quant,
+        );
+    }
+
+    # Quantifier ::= /\*/ | /\+/ | /\?/
+    # Returns Constant with quantifier string
+    method Quantifier($ctx) {
+        # Use extract() for pre-wired contexts, fall back to scanning tree
+        my $quantifier = $ctx->extract();
+        $quantifier = _extract_scanned_text($ctx) unless defined $quantifier;
+
+        return $factory->make('Constant', const_type => 'string', value => $quantifier);
+    }
+
+    # Comment ::= /#[^\n]*/
+    # Returns nothing (comments ignored)
+    method Comment($ctx) {
+        return undef;
+    }
+
+    # Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/
+    # Returns Constant with identifier string
+    method Identifier($ctx) {
+        # Use extract() for pre-wired contexts, fall back to scanning tree
+        my $identifier = $ctx->extract();
+        $identifier = _extract_scanned_text($ctx) unless defined $identifier;
+
+        return $factory->make('Constant', const_type => 'string', value => $identifier);
+    }
+
+    # InlineRegex ::= /\/(?:[^\/\\]|\\.)*\//
+    # Returns Constant with regex string
+    method InlineRegex($ctx) {
+        # Use extract() for pre-wired contexts, fall back to scanning tree
+        my $regex = $ctx->extract();
+        $regex = _extract_scanned_text($ctx) unless defined $regex;
+
+        return $factory->make('Constant', const_type => 'string', value => $regex);
+    }
+
+    # Rule_plus ::= Rule Rule_star (desugared from Rule+)
+    # Collects all MakeRule nodes from the recursive structure
+    method Rule_plus($ctx) {
+        return _collect_rule_list($ctx);
+    }
+
+    # Rule_star ::= Rule Rule_star | epsilon (desugared from Rule+)
+    # Collects all MakeRule nodes from the recursive structure
+    method Rule_star($ctx) {
+        return _collect_rule_list($ctx);
+    }
+
+    # Quantifier_opt ::= Quantifier | epsilon (desugared from Quantifier?)
+    # Returns the Quantifier's Constant value or undef (epsilon case)
+    method Quantifier_opt($ctx) {
+        my @leaves = _collect_children($ctx);
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
+                return $focus;
+            }
+        }
+
+        # Epsilon case - no quantifier found
+        return undef;
+    }
 }
 
 1;

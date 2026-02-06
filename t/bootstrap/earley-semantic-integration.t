@@ -114,6 +114,7 @@ package TestRule {
     # This test verifies the semantic action interface works
     # We manually create a context and call actions
 
+    my $actions = Chalk::Grammar::BNF::Actions->new();
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => 'TestId',
         children => [],
@@ -121,7 +122,7 @@ package TestRule {
         rule => 'Identifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Identifier($ctx);
+    my $result = $actions->Identifier($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'semantic action returns IR node');
     is($result->value(), 'TestId', 'semantic action preserves value');

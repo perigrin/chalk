@@ -68,6 +68,7 @@ use lib 'lib';
     use_ok('Chalk::Bootstrap::Context');
 
     # Test calling semantic action directly with constructed Context
+    my $actions = Chalk::Grammar::BNF::Actions->new();
     my $ctx = Chalk::Bootstrap::Context->new(
         focus => 'TestIdentifier',
         children => [],
@@ -75,7 +76,7 @@ use lib 'lib';
         rule => 'Identifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Identifier($ctx);
+    my $result = $actions->Identifier($ctx);
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Phase 2b: Identifier returns IR node');
     is($result->value(), 'TestIdentifier', 'Phase 2b: action preserves identifier value');
 

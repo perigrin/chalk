@@ -23,8 +23,9 @@ sub build_parser {
     my $desugared = desugar_grammar($grammar);
 
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $actions = Chalk::Grammar::BNF::Actions->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
-        action_package => 'Chalk::Grammar::BNF::Actions',
+        actions => $actions,
     );
 
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(

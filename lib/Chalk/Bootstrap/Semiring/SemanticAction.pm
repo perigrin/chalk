@@ -8,7 +8,7 @@ no warnings 'experimental::class';
 use Chalk::Bootstrap::Context;
 
 class Chalk::Bootstrap::Semiring::SemanticAction {
-    field $action_package :param = undef;
+    field $actions :param = undef;
 
     # zero returns undef (parse failure)
     method zero() {
@@ -63,10 +63,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     method complete_value($value, $rule_name) {
         return undef if !defined $value;
 
-        my $action = $action_package ? $action_package->can($rule_name) : undef;
+        my $method = $actions ? $actions->can($rule_name) : undef;
         my $result;
-        if ($action) {
-            $result = $value->extend($action);
+        if ($method) {
+            # Call the method via the actions object instance
+            $result = $value->extend(sub { $actions->$method(@_) });
         } else {
             # No action registered - preserve value as-is
             $result = $value;

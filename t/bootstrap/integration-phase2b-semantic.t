@@ -13,6 +13,9 @@ use Chalk::Bootstrap::IR::NodeFactory;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
+# Create Actions instance to use throughout tests
+my $actions = Chalk::Grammar::BNF::Actions->new();
+
 # Test 1: Identifier creates Constant with identifier value
 {
     my $ctx = Chalk::Bootstrap::Context->new(
@@ -22,7 +25,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Identifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Identifier($ctx);
+    my $result = $actions->Identifier($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Identifier creates Constant');
     is($result->const_type(), 'string', 'Identifier constant is string type');
@@ -38,7 +41,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'InlineRegex',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::InlineRegex($ctx);
+    my $result = $actions->InlineRegex($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'InlineRegex creates Constant');
     is($result->const_type(), 'string', 'InlineRegex constant is string type');
@@ -54,7 +57,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Quantifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Quantifier($ctx);
+    my $result = $actions->Quantifier($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Quantifier creates Constant');
     is($result->const_type(), 'string', 'Quantifier constant is string type');
@@ -80,7 +83,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Atom($atom_ctx);
+    my $result = $actions->Atom($atom_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom with Identifier is reference type');
@@ -105,7 +108,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Atom($atom_ctx);
+    my $result = $actions->Atom($atom_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'terminal', 'Atom with InlineRegex is terminal type');
@@ -140,7 +143,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Element',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Element($elem_ctx);
+    my $result = $actions->Element($elem_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
     ok(!defined $result->inputs()->[2]->value(), 'Element has no quantifier');
@@ -183,7 +186,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Element',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Element($elem_ctx);
+    my $result = $actions->Element($elem_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), '+', 'Element has + quantifier');
@@ -229,7 +232,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Sequence',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Sequence($seq_ctx);
+    my $result = $actions->Sequence($seq_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Sequence creates MakeExpression');
     my $elements = $result->inputs()->[0];
@@ -286,7 +289,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alternatives',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Alternatives($alts_ctx);
+    my $result = $actions->Alternatives($alts_ctx);
 
     ok(ref($result) eq 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 2, 'Alternatives has 2 expressions');
@@ -354,7 +357,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Rule($rule_ctx);
+    my $result = $actions->Rule($rule_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'Rule creates MakeRule');
     is($result->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
@@ -427,7 +430,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Grammar',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Grammar($grammar_ctx);
+    my $result = $actions->Grammar($grammar_ctx);
 
     ok(ref($result) eq 'ARRAY', 'Grammar returns arrayref');
     is(scalar($result->@*), 2, 'Grammar has 2 rules');
@@ -446,7 +449,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Comment',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::Comment($ctx);
+    my $result = $actions->Comment($ctx);
 
     ok(!defined $result, 'Comment returns undef');
 }
@@ -473,7 +476,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $atom1_ir = Chalk::Grammar::BNF::Actions::Atom($atom1_ctx);
+    my $atom1_ir = $actions->Atom($atom1_ctx);
 
     # Element context for Identifier
     my $elem1_ctx = Chalk::Bootstrap::Context->new(
@@ -491,7 +494,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Sequence',
     );
 
-    my $seq1_ir = Chalk::Grammar::BNF::Actions::Sequence($seq1_ctx);
+    my $seq1_ir = $actions->Sequence($seq1_ctx);
 
     # InlineRegex constant
     my $regex_const = $factory->make('Constant', const_type => 'string', value => 'InlineRegex');
@@ -510,7 +513,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $atom2_ir = Chalk::Grammar::BNF::Actions::Atom($atom2_ctx);
+    my $atom2_ir = $actions->Atom($atom2_ctx);
 
     # Element context for InlineRegex
     my $elem2_ctx = Chalk::Bootstrap::Context->new(
@@ -528,7 +531,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Sequence',
     );
 
-    my $seq2_ir = Chalk::Grammar::BNF::Actions::Sequence($seq2_ctx);
+    my $seq2_ir = $actions->Sequence($seq2_ctx);
 
     # Alternatives context with both sequences
     my $alts_ctx = Chalk::Bootstrap::Context->new(
@@ -541,7 +544,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alternatives',
     );
 
-    my $alts_ir = Chalk::Grammar::BNF::Actions::Alternatives($alts_ctx);
+    my $alts_ir = $actions->Alternatives($alts_ctx);
 
     # Rule name: Atom
     my $rule_name_const = $factory->make('Constant', const_type => 'string', value => 'Atom');
@@ -563,7 +566,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule',
     );
 
-    my $rule_ir = Chalk::Grammar::BNF::Actions::Rule($rule_ctx);
+    my $rule_ir = $actions->Rule($rule_ctx);
 
     # Verify the complete rule
     isa_ok($rule_ir, 'Chalk::Bootstrap::IR::Node::MakeRule', 'complete rule is MakeRule');
