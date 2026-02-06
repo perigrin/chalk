@@ -7,11 +7,6 @@ package Chalk::Grammar::BNF::Actions;
 
 use Chalk::Bootstrap::IR::NodeFactory;
 
-# Forward declarations for lexical subs (needed for recursion and mutual recursion)
-my sub _collect_children;
-my sub _extract_scanned_text;
-my sub _collect_rule_list;
-
 # Get singleton factory
 my sub _factory {
     return Chalk::Bootstrap::IR::NodeFactory->instance();
