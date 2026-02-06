@@ -47,6 +47,17 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         );
     }
 
+    # Return semiring value for a scanned terminal match
+    # Creates a Context with the matched text as focus
+    method scan_value($text) {
+        return Chalk::Bootstrap::Context->new(
+            focus    => $text,
+            children => [],
+            position => 0,
+            rule     => undef,
+        );
+    }
+
     # Add combines alternative derivations
     # For now, just return first alternative (disambiguation later)
     method add($left, $right) {

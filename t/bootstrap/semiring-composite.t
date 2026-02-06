@@ -167,4 +167,22 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     ok($comp->is_zero($result), 'multiply(zero, one) is zero');
 }
 
+# Test 8: scan_value delegates to both semirings
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        boolean  => $bool_sr,
+        semantic => $sem_sr,
+    );
+
+    my $result = $comp->scan_value('hello');
+
+    isa_ok($result, 'ARRAY', 'scan_value returns array ref');
+    is(scalar($result->@*), 2, 'scan_value returns 2-tuple');
+    ok(!$bool_sr->is_zero($result->[0]), 'bool component is non-zero (one)');
+    isa_ok($result->[1], 'Chalk::Bootstrap::Context', 'sem component is Context');
+    is($result->[1]->extract(), 'hello', 'sem component has matched text as focus');
+}
+
 done_testing();

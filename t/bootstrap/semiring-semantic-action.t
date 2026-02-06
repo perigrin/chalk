@@ -126,4 +126,22 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result2->extract()->value(), 'test', 'add(ctx, zero) returns ctx');
 }
 
+# Test 7: scan_value returns Context with matched text as focus
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $scan_val = $sr->scan_value('hello');
+
+    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'scan_value returns Context');
+    is($scan_val->extract(), 'hello', 'scan_value Context has matched text as focus');
+}
+
+# Test 8: scan_value with empty string
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $scan_val = $sr->scan_value('');
+
+    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'scan_value("") returns Context');
+    is($scan_val->extract(), '', 'scan_value("") Context has empty string as focus');
+}
+
 done_testing();

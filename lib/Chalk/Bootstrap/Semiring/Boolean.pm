@@ -42,4 +42,9 @@ class Chalk::Bootstrap::Semiring::Boolean {
         return true unless $self->is_zero($right);
         return $ZERO;
     }
+
+    # Return semiring value for a scanned terminal match (ignores text)
+    method scan_value($text) {
+        return $self->one();
+    }
 }

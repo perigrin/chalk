@@ -152,12 +152,18 @@ class Chalk::Bootstrap::Earley {
 
         return unless defined $end_pos;
 
+        # Capture matched text and create scan value
+        my $matched = substr($input, $pos, $end_pos - $pos);
+        my $scan_val = $semiring->can('scan_value')
+            ? $semiring->scan_value($matched)
+            : $semiring->one();
+
         # Advance dot
         my $new_item = $self->_make_item(
             $item->{rule},
             $item->{dot} + 1,
             $item->{origin},
-            $semiring->multiply($item->{value}, $semiring->one())
+            $semiring->multiply($item->{value}, $scan_val)
         );
 
         my $key = $self->_item_key($new_item, $alt_idx);

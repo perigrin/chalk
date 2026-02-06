@@ -142,4 +142,15 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$sr->is_zero("false"), "string 'false' is not zero");
 }
 
+# Test 11: scan_value returns one (ignores terminal text)
+{
+    my $one = $sr->one();
+    my $scan_val = $sr->scan_value('hello');
+    ok(!$sr->is_zero($scan_val), "scan_value returns non-zero value");
+
+    # scan_value with empty string also returns one
+    my $scan_empty = $sr->scan_value('');
+    ok(!$sr->is_zero($scan_empty), "scan_value('') returns non-zero value");
+}
+
 done_testing();

@@ -31,6 +31,11 @@ class Chalk::Bootstrap::Semiring::Composite {
         return [$bool_result, $sem_result];
     }
 
+    # Return semiring value for a scanned terminal match, delegates to both
+    method scan_value($text) {
+        return [$boolean->scan_value($text), $semantic->scan_value($text)];
+    }
+
     # Add delegates to both semirings
     method add($left, $right) {
         my $bool_result = $boolean->add($left->[0], $right->[0]);
