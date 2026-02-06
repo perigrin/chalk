@@ -129,4 +129,32 @@ SKIP: {
     }
 }
 
+# === Gap 3.1: Test that Generated.pm on disk matches pipeline output ===
+
+{
+    my $ir = parse_ir($parser, bnf_text());
+    ok(defined $ir, 'parse BNF for disk sync test');
+
+    SKIP: {
+        skip 'IR parse failed, cannot test disk sync', 2 unless defined $ir;
+
+        my $target = Chalk::Bootstrap::Target::Perl->new();
+        my $generated_code = $target->generate($ir);
+
+        ok(defined $generated_code, 'generated code from pipeline');
+
+        # Read Generated.pm from disk
+        my $generated_pm_path = 'lib/Chalk/Grammar/BNF/Generated.pm';
+        my $disk_content = do {
+            open my $fh, '<', $generated_pm_path
+                or die "Cannot read $generated_pm_path: $!";
+            local $/;
+            <$fh>;
+        };
+
+        is($generated_code, $disk_content,
+            'Generated.pm on disk matches pipeline output (byte-identical)');
+    }
+}
+
 done_testing();

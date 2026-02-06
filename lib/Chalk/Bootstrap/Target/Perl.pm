@@ -10,6 +10,9 @@ use Chalk::Bootstrap::Target;
 class Chalk::Bootstrap::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     method generate($ir) {
+        die "generate() requires an arrayref of IR rules"
+            unless defined($ir) && ref($ir) eq 'ARRAY';
+
         my $body = $self->_emit_body($ir);
 
         return $self->_preamble() . $body . $self->_postamble();
@@ -61,7 +64,7 @@ PREAMBLE
 
         my $code = "Chalk::Grammar::Symbol->new(type => '$type_str', value => '$value'";
         if (defined $quant_str) {
-            $code .= ", quantifier => '$quant_str'";
+            $code .= ", quantifier => '" . $self->_escape_single_quote($quant_str) . "'";
         }
         $code .= ')';
 

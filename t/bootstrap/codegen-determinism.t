@@ -17,19 +17,23 @@ sub build_and_generate {
     return $target->generate($ir);
 }
 
-# Generate twice and compare
-my $output1 = build_and_generate();
-ok(defined $output1, 'first generation succeeds');
+# Generate 5 times and compare all against the first
+my @outputs;
+for my $i (1..5) {
+    my $output = build_and_generate();
+    push @outputs, $output;
+    ok(defined $output, "generation $i succeeds");
+}
 
-my $output2 = build_and_generate();
-ok(defined $output2, 'second generation succeeds');
-
-is($output1, $output2, 'two generations produce byte-identical output');
+# Compare all against the first
+for my $i (1..$#outputs) {
+    is($outputs[$i], $outputs[0], "generation " . ($i+1) . " matches generation 1");
+}
 
 # Verify non-empty
-ok(length($output1) > 100, 'generated output is non-trivial');
+ok(length($outputs[0]) > 100, 'generated output is non-trivial');
 
 # Verify it contains expected content
-like($output1, qr/10.*rule|Grammar.*InlineRegex/s, 'output contains expected rules');
+like($outputs[0], qr/10.*rule|Grammar.*InlineRegex/s, 'output contains expected rules');
 
 done_testing();

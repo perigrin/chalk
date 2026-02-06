@@ -73,6 +73,21 @@ sub make_symbol {
     like($code, qr/quantifier => '\+'/, 'symbol with quantifier includes it');
 }
 
+# Test: Quantifier with single quote (defense-in-depth escaping test)
+{
+    my $sym = make_symbol(type => 'reference', value => 'Test', quantifier => "'");
+    my $code = $target->_emit_symbol($sym);
+    like($code, qr/quantifier => '\\''/, 'quantifier with single quote is escaped');
+    unlike($code, qr/quantifier => '''/, 'quantifier single quote is not left unescaped');
+}
+
+# Test: Quantifier with backslash (defense-in-depth escaping test)
+{
+    my $sym = make_symbol(type => 'reference', value => 'Test', quantifier => '\\');
+    my $code = $target->_emit_symbol($sym);
+    like($code, qr/quantifier => '\\\\'/, 'quantifier with backslash is escaped (doubled)');
+}
+
 # Test: Complex escaping for single-quoted Perl strings
 # IR value: /(?:\s|#[^\n]*)*/ -> strip -> (?:\s|#[^\n]*)*  -> escape -> (?:\\s|#[^\\n]*)*
 {
@@ -181,6 +196,22 @@ sub make_rule {
     my $rule = make_rule('Test\\Rule', $expr);
     my $code = $target->_emit_rule($rule);
     like($code, qr/name => 'Test\\\\Rule'/, 'rule name with backslash is escaped (doubled)');
+}
+
+# === Gap 3.3: Negative tests for malformed IR ===
+
+# Test: generate(undef) dies with useful error
+{
+    my $target_neg = Chalk::Bootstrap::Target::Perl->new();
+    eval { $target_neg->generate(undef); };
+    like($@, qr/generate\(\) requires an arrayref/, 'generate(undef) dies with useful error');
+}
+
+# Test: generate("not an array") dies with useful error
+{
+    my $target_neg = Chalk::Bootstrap::Target::Perl->new();
+    eval { $target_neg->generate("not an array"); };
+    like($@, qr/generate\(\) requires an arrayref/, 'generate(non-arrayref) dies with useful error');
 }
 
 # === Step 6: Full generate() Assembly ===
