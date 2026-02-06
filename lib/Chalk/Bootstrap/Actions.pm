@@ -188,4 +188,21 @@ sub action_InlineRegex {
     return _factory()->make('Constant', const_type => 'string', value => $regex);
 }
 
+# Returns a hash mapping rule names to action coderefs
+# Used by SemanticAction semiring to register actions for complete_value
+sub action_registry {
+    return {
+        Grammar      => \&action_Grammar,
+        Rule         => \&action_Rule,
+        Alternatives => \&action_Alternatives,
+        Sequence     => \&action_Sequence,
+        Element      => \&action_Element,
+        Atom         => \&action_Atom,
+        Quantifier   => \&action_Quantifier,
+        Comment      => \&action_Comment,
+        Identifier   => \&action_Identifier,
+        InlineRegex  => \&action_InlineRegex,
+    };
+}
+
 1;

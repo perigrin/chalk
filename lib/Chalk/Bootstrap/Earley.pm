@@ -83,6 +83,12 @@ class Chalk::Bootstrap::Earley {
                 $processed->{$key} = true;
 
                 if ($self->_is_complete($item, $alt_idx)) {
+                    # Apply semantic action for completed rule before propagating
+                    if ($semiring->can('complete_value')) {
+                        $item = { %$item, value => $semiring->complete_value($item->{value}, $item->{rule}->name()) };
+                        # Update the chart entry with the action-applied value
+                        $chart[$pos]->{$key} = [$item, $alt_idx];
+                    }
                     # Complete
                     $self->_complete($item, $alt_idx, $pos, \@chart, $agenda);
                 } else {

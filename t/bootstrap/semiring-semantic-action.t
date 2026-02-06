@@ -144,4 +144,53 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($scan_val->extract(), '', 'scan_value("") Context has empty string as focus');
 }
 
+# Test 9: complete_value applies action via extend
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    # Register a simple action that uppercases the focus
+    $sr->register_actions({
+        'TestRule' => sub ($ctx) { return uc($ctx->extract() // ''); },
+    });
+
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => 'hello',
+        children => [],
+        position => 0,
+        rule     => undef,
+    );
+
+    my $result = $sr->complete_value($ctx, 'TestRule');
+
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'complete_value returns Context');
+    is($result->extract(), 'HELLO', 'complete_value applies action to compute new focus');
+    is($result->rule(), 'TestRule', 'complete_value sets rule name on result');
+}
+
+# Test 10: complete_value with unknown rule returns value with rule set
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => 'hello',
+        children => [],
+        position => 0,
+        rule     => undef,
+    );
+
+    my $result = $sr->complete_value($ctx, 'UnknownRule');
+
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'complete_value returns Context for unknown rule');
+    is($result->rule(), 'UnknownRule', 'complete_value sets rule even without action');
+    is($result->extract(), 'hello', 'complete_value preserves focus for unknown rule');
+}
+
+# Test 11: complete_value with undef (zero) returns undef
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $result = $sr->complete_value(undef, 'TestRule');
+
+    ok(!defined $result, 'complete_value(undef, ...) returns undef');
+}
+
 done_testing();

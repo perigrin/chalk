@@ -185,4 +185,34 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result->[1]->extract(), 'hello', 'sem component has matched text as focus');
 }
 
+# Test 9: complete_value delegates to both semirings
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    $sem_sr->register_actions({
+        'TestRule' => sub ($ctx) { return uc($ctx->extract() // ''); },
+    });
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        boolean  => $bool_sr,
+        semantic => $sem_sr,
+    );
+
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => 'hello',
+        children => [],
+        position => 0,
+        rule     => undef,
+    );
+    my $val = [$bool_sr->one(), $ctx];
+
+    my $result = $comp->complete_value($val, 'TestRule');
+
+    isa_ok($result, 'ARRAY', 'complete_value returns array ref');
+    is(scalar($result->@*), 2, 'complete_value returns 2-tuple');
+    ok(!$bool_sr->is_zero($result->[0]), 'bool component unchanged');
+    isa_ok($result->[1], 'Chalk::Bootstrap::Context', 'sem component is Context');
+    is($result->[1]->extract(), 'HELLO', 'sem component has action applied');
+    is($result->[1]->rule(), 'TestRule', 'sem component has rule name set');
+}
+
 done_testing();

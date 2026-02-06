@@ -153,4 +153,15 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$sr->is_zero($scan_empty), "scan_value('') returns non-zero value");
 }
 
+# Test 12: complete_value returns value unchanged
+{
+    my $one = $sr->one();
+    my $result = $sr->complete_value($one, 'SomeRule');
+    ok(!$sr->is_zero($result), "complete_value returns non-zero for non-zero input");
+
+    my $zero = $sr->zero();
+    my $result2 = $sr->complete_value($zero, 'SomeRule');
+    ok($sr->is_zero($result2), "complete_value returns zero for zero input");
+}
+
 done_testing();

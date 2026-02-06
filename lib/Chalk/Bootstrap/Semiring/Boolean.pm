@@ -47,4 +47,9 @@ class Chalk::Bootstrap::Semiring::Boolean {
     method scan_value($text) {
         return $self->one();
     }
+
+    # Apply semantic action for a completed rule (no-op for Boolean)
+    method complete_value($value, $rule_name) {
+        return $value;
+    }
 }

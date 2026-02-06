@@ -95,10 +95,7 @@ my $parser = Chalk::Bootstrap::Earley->new(
     # The context should contain the parse tree structure
     isa_ok($context, 'Chalk::Bootstrap::Context', 'can extract Context from parse result');
 
-    TODO: {
-        local $TODO = "Context rule() accessor needs investigation - returns undef";
-        is($context->rule(), 'Start', 'context has correct rule name');
-    }
+    is($context->rule(), 'Start', 'context has correct rule name');
 }
 
 # Test 4: parse_value() returns undef for parse failure

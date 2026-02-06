@@ -36,6 +36,13 @@ class Chalk::Bootstrap::Semiring::Composite {
         return [$boolean->scan_value($text), $semantic->scan_value($text)];
     }
 
+    # Apply semantic action for a completed rule, delegates to both
+    method complete_value($value, $rule_name) {
+        my $bool_result = $boolean->complete_value($value->[0], $rule_name);
+        my $sem_result = $semantic->complete_value($value->[1], $rule_name);
+        return [$bool_result, $sem_result];
+    }
+
     # Add delegates to both semirings
     method add($left, $right) {
         my $bool_result = $boolean->add($left->[0], $right->[0]);

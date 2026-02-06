@@ -10,6 +10,15 @@ use Chalk::Bootstrap::Context;
 class Chalk::Bootstrap::Semiring::SemanticAction {
     use Scalar::Util qw(refaddr);
 
+    field $actions = {};
+
+    # Register semantic actions keyed by rule name
+    method register_actions($action_map) {
+        for my $name (keys $action_map->%*) {
+            $actions->{$name} = $action_map->{$name};
+        }
+    }
+
     # zero returns undef (parse failure)
     method zero() {
         return undef;
@@ -55,6 +64,29 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             children => [],
             position => 0,
             rule     => undef,
+        );
+    }
+
+    # Apply semantic action for a completed rule
+    # Looks up action by rule_name, applies via extend, sets rule field
+    method complete_value($value, $rule_name) {
+        return undef if !defined $value;
+
+        my $action = $actions->{$rule_name};
+        my $result;
+        if ($action) {
+            $result = $value->extend($action);
+        } else {
+            # No action registered - preserve value as-is
+            $result = $value;
+        }
+
+        # Set the rule name on the result context
+        return Chalk::Bootstrap::Context->new(
+            focus    => $result->extract(),
+            children => $result->children(),
+            position => $result->position(),
+            rule     => $rule_name,
         );
     }
 
