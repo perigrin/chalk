@@ -111,11 +111,8 @@ sub reference($value) {
         semiring => $semiring,
     );
 
-    # TODO: Zero-width matches need special handling in scan
-    TODO: {
-        local $TODO = "Zero-width terminal matches not yet supported";
-        ok($parser->parse(''), "accepts empty (zero-width match)");
-    }
+    # Zero-width matches now supported (H3 fix)
+    ok($parser->parse(''), "accepts empty (zero-width match)");
     ok($parser->parse(' '), "accepts space");
     ok($parser->parse('# comment'), "accepts comment");
     ok($parser->parse("  # comment\n  "), "accepts mixed ws and comment");
@@ -169,11 +166,8 @@ sub reference($value) {
         semiring => $semiring,
     );
 
-    # TODO: Zero-width match in middle of sequence
-    TODO: {
-        local $TODO = "Zero-width terminal matches not yet supported";
-        ok($parser->parse('Rule::='), "accepts without whitespace");
-    }
+    # Zero-width match in middle of sequence (H3 fix)
+    ok($parser->parse('Rule::='), "accepts without whitespace");
     ok($parser->parse('Rule ::='), "accepts with space");
     ok($parser->parse('Rule  ::='), "accepts with multiple spaces");
     ok($parser->parse("Rule\t::="), "accepts with tab");

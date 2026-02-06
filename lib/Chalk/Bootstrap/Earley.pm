@@ -92,8 +92,8 @@ class Chalk::Bootstrap::Earley {
                         # Predict
                         $self->_predict($symbol, $pos, \@chart, $agenda);
                     } else {
-                        # Scan (only if not at end of input)
-                        $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart) if $pos < $n;
+                        # Scan (allow at end of input for zero-width matches)
+                        $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart, $agenda, $n);
                     }
                 }
             }
@@ -134,7 +134,7 @@ class Chalk::Bootstrap::Earley {
     }
 
     # Scan: match terminal and advance to next position
-    method _scan($item, $alt_idx, $symbol, $pos, $input, $chart) {
+    method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $agenda, $n) {
         my $pattern_str = $symbol->value();
         my $pattern = qr/$pattern_str/;
         my $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
@@ -151,8 +151,29 @@ class Chalk::Bootstrap::Earley {
 
         my $key = $self->_item_key($new_item, $alt_idx);
 
-        unless (exists $chart->[$end_pos]->{$key}) {
+        if (exists $chart->[$end_pos]->{$key}) {
+            # Merge with existing item using semiring add (create new item, don't mutate)
+            my $existing = $chart->[$end_pos]->{$key}->[0];
+            my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+            my $merged_item = $self->_make_item(
+                $existing->{rule},
+                $existing->{dot},
+                $existing->{origin},
+                $merged_value,
+            );
+            $chart->[$end_pos]->{$key} = [$merged_item, $alt_idx];
+            # If zero-width match not at final position, add to current agenda for immediate processing
+            # (Don't add at final position to prevent infinite loops)
+            if ($end_pos == $pos && $pos < $n) {
+                push $agenda->@*, [$merged_item, $alt_idx];
+            }
+        } else {
             $chart->[$end_pos]->{$key} = [$new_item, $alt_idx];
+            # If zero-width match not at final position, add to current agenda for immediate processing
+            # (Don't add at final position to prevent infinite loops)
+            if ($end_pos == $pos && $pos < $n) {
+                push $agenda->@*, [$new_item, $alt_idx];
+            }
         }
     }
 
@@ -182,9 +203,16 @@ class Chalk::Bootstrap::Earley {
             my $new_key = $self->_item_key($new_item, $waiting_alt_idx);
 
             if (exists $chart->[$pos]->{$new_key}) {
-                # Merge with existing item using semiring add
+                # Merge with existing item using semiring add (create new item, don't mutate)
                 my $existing = $chart->[$pos]->{$new_key}->[0];
-                $existing->{value} = $semiring->add($existing->{value}, $new_item->{value});
+                my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+                my $merged_item = $self->_make_item(
+                    $existing->{rule},
+                    $existing->{dot},
+                    $existing->{origin},
+                    $merged_value,
+                );
+                $chart->[$pos]->{$new_key} = [$merged_item, $waiting_alt_idx];
             } else {
                 $chart->[$pos]->{$new_key} = [$new_item, $waiting_alt_idx];
                 push $agenda->@*, [$new_item, $waiting_alt_idx];

@@ -2,9 +2,12 @@
 # ABOUTME: Match method returns end position on success or undef on failure.
 use 5.42.0;
 use utf8;
+use feature 'class';
+no warnings 'experimental::class';
 
-package Chalk::Bootstrap::Terminal {
+class Chalk::Bootstrap::Terminal {
 
+    # Class method for terminal matching (stateless utility)
     sub match($input, $position, $pattern) {
         # Set \G to the specified position
         pos($input) = $position;
