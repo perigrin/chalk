@@ -187,11 +187,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
 # Test 9: complete_value delegates to both semirings
 {
+    # Create a test package with an action
+    package CompositeTestActions {
+        sub TestRule ($ctx) { return uc($ctx->extract() // ''); }
+    }
+
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    $sem_sr->register_actions({
-        'TestRule' => sub ($ctx) { return uc($ctx->extract() // ''); },
-    });
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        action_package => 'CompositeTestActions',
+    );
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(
         boolean  => $bool_sr,
         semantic => $sem_sr,

@@ -144,14 +144,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($scan_val->extract(), '', 'scan_value("") Context has empty string as focus');
 }
 
-# Test 9: complete_value applies action via extend
+# Test 9: complete_value applies action via extend using action_package
 {
-    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    # Create a test package with an action
+    package TestActions {
+        sub TestRule ($ctx) { return uc($ctx->extract() // ''); }
+    }
 
-    # Register a simple action that uppercases the focus
-    $sr->register_actions({
-        'TestRule' => sub ($ctx) { return uc($ctx->extract() // ''); },
-    });
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        action_package => 'TestActions',
+    );
 
     my $ctx = Chalk::Bootstrap::Context->new(
         focus    => 'hello',

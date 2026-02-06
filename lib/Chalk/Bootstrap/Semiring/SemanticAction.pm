@@ -8,16 +8,7 @@ no warnings 'experimental::class';
 use Chalk::Bootstrap::Context;
 
 class Chalk::Bootstrap::Semiring::SemanticAction {
-    use Scalar::Util qw(refaddr);
-
-    field $actions = {};
-
-    # Register semantic actions keyed by rule name
-    method register_actions($action_map) {
-        for my $name (keys $action_map->%*) {
-            $actions->{$name} = $action_map->{$name};
-        }
-    }
+    field $action_package :param = undef;
 
     # zero returns undef (parse failure)
     method zero() {
@@ -68,11 +59,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     }
 
     # Apply semantic action for a completed rule
-    # Looks up action by rule_name, applies via extend, sets rule field
+    # Looks up action by rule_name via can(), applies via extend, sets rule field
     method complete_value($value, $rule_name) {
         return undef if !defined $value;
 
-        my $action = $actions->{$rule_name};
+        my $action = $action_package ? $action_package->can($rule_name) : undef;
         my $result;
         if ($action) {
             $result = $value->extend($action);

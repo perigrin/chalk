@@ -6,8 +6,6 @@ use utf8;
 package Chalk::Grammar::BNF::Actions;
 
 use Chalk::Bootstrap::IR::NodeFactory;
-use Exporter 'import';
-our @EXPORT_OK = qw(_collect_children registry);
 
 # Get singleton factory
 sub _factory {
@@ -320,26 +318,6 @@ sub Quantifier_opt {
 
     # Epsilon case - no quantifier found
     return undef;
-}
-
-# Returns a hash mapping rule names to action coderefs
-# Used by SemanticAction semiring to register actions for complete_value
-sub registry {
-    return {
-        Grammar        => \&Grammar,
-        Rule           => \&Rule,
-        Alternatives   => \&Alternatives,
-        Sequence       => \&Sequence,
-        Element        => \&Element,
-        Atom           => \&Atom,
-        Quantifier     => \&Quantifier,
-        Comment        => \&Comment,
-        Identifier     => \&Identifier,
-        InlineRegex    => \&InlineRegex,
-        Rule_plus      => \&Rule_plus,
-        Rule_star      => \&Rule_star,
-        Quantifier_opt => \&Quantifier_opt,
-    };
 }
 
 1;
