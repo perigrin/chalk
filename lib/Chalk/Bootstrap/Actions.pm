@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Bootstrap::Actions;
 
-use Scalar::Util;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Exporter 'import';
 our @EXPORT_OK = qw(_collect_children action_registry);
@@ -25,7 +24,7 @@ sub _collect_children {
     my $focus = $ctx->extract();
     if (defined $focus) {
         # This context has a focus — it's a "leaf" produced by complete_value
-        if (!$node_class || (Scalar::Util::blessed($focus) && $focus->isa($node_class))) {
+        if (!$node_class || $focus isa $node_class) {
             push @results, $ctx;
         }
         return @results;
@@ -73,7 +72,7 @@ sub action_Grammar {
         if (ref($focus) eq 'ARRAY') {
             # Rule_plus/Rule_star returns arrayref of MakeRule nodes
             push @rules, $focus->@*;
-        } elsif (defined $focus && ref($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeRule')) {
+        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
             push @rules, $focus;
         }
     }
@@ -95,15 +94,10 @@ sub action_Rule {
     my $alts_node;
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
-        if (!defined $focus) {
-            next;
-        } elsif (!ref($focus)) {
-            # Raw string from scanned terminal (whitespace, ::=, ;) — skip
-            next;
-        } elsif (ref($focus) eq 'ARRAY') {
+        if (ref($focus) eq 'ARRAY') {
             # action_Alternatives returns an arrayref of MakeExpression nodes
             $alts_node = $focus;
-        } elsif ($focus->isa('Chalk::Bootstrap::IR::Node::Constant') && !defined $name_node) {
+        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && !defined $name_node) {
             # First Constant is the identifier name
             $name_node = $focus;
         }
@@ -126,11 +120,10 @@ sub action_Alternatives {
     my @expressions;
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
-        next unless defined $focus;
         if (ref($focus) eq 'ARRAY') {
             # Nested Alternatives result — flatten the arrayrefs
             push @expressions, $focus->@*;
-        } elsif (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeExpression')) {
+        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
             push @expressions, $focus;
         }
     }
@@ -150,11 +143,9 @@ sub action_Sequence {
     my @elements;
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
-        next unless defined $focus;
-        next unless ref($focus);
-        if (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeSymbol')) {
+        if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
             push @elements, $focus;
-        } elsif (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeExpression')) {
+        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
             # Nested Sequence result — extract its elements
             my $inner_elements = $focus->inputs()->[0];
             push @elements, $inner_elements->@* if $inner_elements;
@@ -179,10 +170,9 @@ sub action_Element {
     my $quantifier;
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
-        next unless defined $focus && ref($focus);
-        if ($focus->isa('Chalk::Bootstrap::IR::Node::MakeSymbol')) {
+        if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
             $symbol = $focus;
-        } elsif ($focus->isa('Chalk::Bootstrap::IR::Node::Constant') && defined $focus->value()
+        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && defined $focus->value()
                  && $focus->value() =~ /^[*+?]$/) {
             $quantifier = $focus;
         }
@@ -211,7 +201,7 @@ sub action_Atom {
     my $value_leaf;
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
-        if (defined $focus && ref($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::Constant')) {
+        if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
             $value_leaf = $leaf;
             last;
         }
@@ -304,11 +294,10 @@ sub _collect_rule_list {
     my @rules;
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
-        next unless defined $focus;
         if (ref($focus) eq 'ARRAY') {
             # Nested Rule_star result — flatten
             push @rules, $focus->@*;
-        } elsif (Scalar::Util::blessed($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::MakeRule')) {
+        } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
             push @rules, $focus;
         }
     }
@@ -324,7 +313,7 @@ sub action_Quantifier_opt {
     my @leaves = _collect_children($ctx);
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
-        if (defined $focus && ref($focus) && $focus->isa('Chalk::Bootstrap::IR::Node::Constant')) {
+        if ($focus isa 'Chalk::Bootstrap::IR::Node::Constant') {
             return $focus;
         }
     }
