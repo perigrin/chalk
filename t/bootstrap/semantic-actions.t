@@ -185,10 +185,29 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result->inputs()->[2]->value(), '+', 'Element has quantifier');
 }
 
-# Test 8: _collect_children flattens binary Context trees
+# Test 8: Alternatives flattens binary Context trees (verifies _collect_children behavior)
 {
-    # Build a binary tree like multiply produces:
-    # multiply(multiply(one, A), B) → Ctx(children=[Ctx(children=[one, A]), B])
+    # Build a binary tree to verify that Alternatives correctly flattens the tree structure.
+    # This tests the internal _collect_children behavior through the public API.
+    my $elem1 = $factory->make('Constant', const_type => 'string', value => 'A');
+    my $expr1 = $factory->make('MakeExpression', elements => [$elem1]);
+    my $seq1_ctx = Chalk::Bootstrap::Context->new(
+        focus    => $expr1,
+        children => [],
+        position => 0,
+        rule     => 'Sequence',
+    );
+
+    my $elem2 = $factory->make('Constant', const_type => 'string', value => 'B');
+    my $expr2 = $factory->make('MakeExpression', elements => [$elem2]);
+    my $seq2_ctx = Chalk::Bootstrap::Context->new(
+        focus    => $expr2,
+        children => [],
+        position => 2,
+        rule     => 'Sequence',
+    );
+
+    # Build binary tree: multiply(multiply(one, seq1), seq2)
     my $one_ctx = Chalk::Bootstrap::Context->new(
         focus    => undef,
         children => [],
@@ -196,42 +215,26 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $node_a = $factory->make('Constant', const_type => 'string', value => 'A');
-    my $ctx_a = Chalk::Bootstrap::Context->new(
-        focus    => $node_a,
-        children => [],
-        position => 1,
-        rule     => 'Identifier',
-    );
-
-    my $node_b = $factory->make('Constant', const_type => 'string', value => 'B');
-    my $ctx_b = Chalk::Bootstrap::Context->new(
-        focus    => $node_b,
-        children => [],
-        position => 2,
-        rule     => 'Identifier',
-    );
-
-    # multiply(one, A) → inner
     my $inner = Chalk::Bootstrap::Context->new(
         focus    => undef,
-        children => [$one_ctx, $ctx_a],
+        children => [$one_ctx, $seq1_ctx],
         position => 1,
         rule     => undef,
     );
 
-    # multiply(inner, B) → outer
     my $outer = Chalk::Bootstrap::Context->new(
         focus    => undef,
-        children => [$inner, $ctx_b],
+        children => [$inner, $seq2_ctx],
         position => 2,
-        rule     => undef,
+        rule     => 'Alternatives',
     );
 
-    my @collected = Chalk::Grammar::BNF::Actions::_collect_children($outer);
-    is(scalar @collected, 2, '_collect_children finds 2 leaf contexts with focuses');
-    is($collected[0]->extract()->value(), 'A', 'first collected child is A');
-    is($collected[1]->extract()->value(), 'B', 'second collected child is B');
+    my $result = Chalk::Grammar::BNF::Actions::Alternatives($outer);
+
+    isa_ok($result, 'ARRAY', 'Alternatives returns arrayref');
+    is(scalar($result->@*), 2, 'Alternatives flattens binary tree to find 2 expressions');
+    is($result->[0]->inputs()->[0]->[0]->value(), 'A', 'first alternative element is A');
+    is($result->[1]->inputs()->[0]->[0]->value(), 'B', 'second alternative element is B');
 }
 
 # Test 9: Alternatives with parser-style binary tree
@@ -383,16 +386,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     isa_ok($elements->[1], 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'second element is MakeSymbol');
 }
 
-# Test 11: _collect_children filters by node class
+# Test 11: Sequence handles mixed node types (verifies _collect_children filtering)
 {
-    my $node_a = $factory->make('Constant', const_type => 'string', value => 'A');
-    my $ctx_a = Chalk::Bootstrap::Context->new(
-        focus    => $node_a,
-        children => [],
-        position => 0,
-        rule     => 'Identifier',
-    );
-
+    # Sequence should extract only MakeSymbol nodes and ignore other node types.
+    # This tests the class filtering behavior of _collect_children through the public API.
     my $type = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $val = $factory->make('Constant', const_type => 'string', value => 'X');
     my $quant = $factory->make('Constant', const_type => 'string', value => undef);
@@ -404,17 +401,43 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Element',
     );
 
-    my $tree = Chalk::Bootstrap::Context->new(
+    # Add some noise: a Constant node that should be ignored by Sequence
+    my $node_const = $factory->make('Constant', const_type => 'string', value => 'ignored');
+    my $ctx_const = Chalk::Bootstrap::Context->new(
+        focus    => $node_const,
+        children => [],
+        position => 0,
+        rule     => 'Identifier',
+    );
+
+    # Build binary tree with mixed node types
+    my $one_ctx = Chalk::Bootstrap::Context->new(
         focus    => undef,
-        children => [$ctx_a, $ctx_sym],
-        position => 5,
+        children => [],
+        position => 0,
         rule     => undef,
     );
 
-    # Collect only MakeSymbol nodes
-    my @syms = Chalk::Grammar::BNF::Actions::_collect_children($tree, 'Chalk::Bootstrap::IR::Node::MakeSymbol');
-    is(scalar @syms, 1, '_collect_children with class filter finds only matching nodes');
-    isa_ok($syms[0]->extract(), 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'filtered result is MakeSymbol');
+    my $left = Chalk::Bootstrap::Context->new(
+        focus    => undef,
+        children => [$one_ctx, $ctx_const],
+        position => 0,
+        rule     => undef,
+    );
+
+    my $tree = Chalk::Bootstrap::Context->new(
+        focus    => undef,
+        children => [$left, $ctx_sym],
+        position => 5,
+        rule     => 'Sequence',
+    );
+
+    my $result = Chalk::Grammar::BNF::Actions::Sequence($tree);
+
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Sequence returns MakeExpression');
+    my $elements = $result->inputs()->[0];
+    is(scalar($elements->@*), 1, 'Sequence filters to find only 1 MakeSymbol (ignoring Constant)');
+    isa_ok($elements->[0], 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'filtered result is MakeSymbol');
 }
 
 # Test 12: Rule_star flattens recursive list
