@@ -5,49 +5,12 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::Earley;
-use Chalk::Bootstrap::Semiring::Composite;
-use Chalk::Bootstrap::Semiring::Boolean;
-use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Grammar::BNF::Actions;
-use Chalk::Bootstrap::Desugar qw(desugar_grammar);
-use Chalk::Grammar::BNF;
+use lib 't/bootstrap/lib';
+use TestPipeline qw(build_parser parse_ir);
 use Chalk::Bootstrap::IR::NodeFactory;
 
 # Reset factory for clean test state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-
-# Build the full parse pipeline
-sub build_parser {
-    my $grammar = Chalk::Grammar::BNF::grammar();
-    my $desugared = desugar_grammar($grammar);
-
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $actions = Chalk::Grammar::BNF::Actions->new();
-    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
-        actions => $actions,
-    );
-
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        boolean  => $bool_sr,
-        semantic => $sem_sr,
-    );
-
-    return Chalk::Bootstrap::Earley->new(
-        grammar  => $desugared,
-        semiring => $comp_sr,
-    );
-}
-
-# Helper to extract semantic value from parse result
-sub parse_ir {
-    my ($parser, $input) = @_;
-    my $result = $parser->parse_value($input);
-    return undef unless defined $result;
-    my ($bool_val, $context) = $result->@*;
-    return undef unless $bool_val;
-    return $context->extract();
-}
 
 my $parser = build_parser();
 

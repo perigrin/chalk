@@ -114,51 +114,13 @@ use lib 'lib';
 
 # Phase 3: Code generation
 {
+    use lib 't/bootstrap/lib';
+    use TestPipeline qw(full_pipeline bnf_text);
     use Chalk::Bootstrap::Desugar qw(desugar_grammar);
     use Chalk::Bootstrap::Target::Perl;
 
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-
-    # Build full pipeline
-    my $grammar = Chalk::Grammar::BNF::grammar();
-    my $desugared = desugar_grammar($grammar);
-
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $actions = Chalk::Grammar::BNF::Actions->new();
-    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
-        actions => $actions,
-    );
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        boolean  => $bool_sr,
-        semantic => $sem_sr,
-    );
-
-    my $parser = Chalk::Bootstrap::Earley->new(
-        grammar  => $desugared,
-        semiring => $comp_sr,
-    );
-
-    # Parse the 10-rule BNF meta-grammar
-    my $bnf_text = <<'BNF';
-Grammar ::= /(?:\s|#[^\n]*)*/ Rule+ ;
-Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/ ;
-Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence ;
-Sequence ::= Element /(?:\s|#[^\n]*)+/ Sequence | Element ;
-Element ::= Atom Quantifier? ;
-Atom ::= Identifier | InlineRegex ;
-Quantifier ::= /\*/ | /\+/ | /\?/ ;
-Comment ::= /#[^\n]*/ ;
-Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/ ;
-InlineRegex ::= /\/(?:[^\/\\]|\\.)*\// ;
-BNF
-
-    my $result = $parser->parse_value($bnf_text);
-    ok(defined $result, 'Phase 3: BNF meta-grammar parses');
-
-    my ($bool_val, $context) = $result->@*;
-    ok($bool_val, 'Phase 3: parse is recognized');
-
-    my $ir = $context->extract();
+    my $ir = full_pipeline();
+    ok(defined $ir, 'Phase 3: BNF meta-grammar parses');
     is(scalar($ir->@*), 10, 'Phase 3: IR contains 10 rules');
 
     # Generate Perl code

@@ -5,49 +5,13 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::Earley;
-use Chalk::Bootstrap::Semiring::Composite;
-use Chalk::Bootstrap::Semiring::Boolean;
-use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Grammar::BNF::Actions;
-use Chalk::Bootstrap::Desugar qw(desugar_grammar);
-use Chalk::Grammar::BNF;
+use lib 't/bootstrap/lib';
+use TestPipeline qw(build_parser parse_ir bnf_text);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
 
 # Reset factory for clean state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-
-# Build the full pipeline (reused from integration-phase2b-parse-ir.t)
-sub build_parser {
-    my $grammar = Chalk::Grammar::BNF::grammar();
-    my $desugared = desugar_grammar($grammar);
-
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $actions = Chalk::Grammar::BNF::Actions->new();
-    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
-        actions => $actions,
-    );
-
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        boolean  => $bool_sr,
-        semantic => $sem_sr,
-    );
-
-    return Chalk::Bootstrap::Earley->new(
-        grammar  => $desugared,
-        semiring => $comp_sr,
-    );
-}
-
-sub parse_ir {
-    my ($parser, $input) = @_;
-    my $result = $parser->parse_value($input);
-    return undef unless defined $result;
-    my ($bool_val, $context) = $result->@*;
-    return undef unless $bool_val;
-    return $context->extract();
-}
 
 my $parser = build_parser();
 
@@ -88,20 +52,7 @@ my $parser = build_parser();
 
 # === Full 10-rule BNF meta-grammar parse ===
 
-my $bnf_text = <<'BNF';
-Grammar ::= /(?:\s|#[^\n]*)*/ Rule+ ;
-Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/ ;
-Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence ;
-Sequence ::= Element /(?:\s|#[^\n]*)+/ Sequence | Element ;
-Element ::= Atom Quantifier? ;
-Atom ::= Identifier | InlineRegex ;
-Quantifier ::= /\*/ | /\+/ | /\?/ ;
-Comment ::= /#[^\n]*/ ;
-Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/ ;
-InlineRegex ::= /\/(?:[^\/\\]|\\.)*\// ;
-BNF
-
-my $ir = parse_ir($parser, $bnf_text);
+my $ir = parse_ir($parser, bnf_text());
 ok(defined $ir, 'full 10-rule BNF parse returns defined IR');
 
 SKIP: {
