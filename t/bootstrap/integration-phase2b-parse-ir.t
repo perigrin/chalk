@@ -24,7 +24,7 @@ sub build_parser {
 
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    $sem_sr->register_actions(Chalk::Grammar::BNF::Actions::action_registry());
+    $sem_sr->register_actions(Chalk::Grammar::BNF::Actions::registry());
 
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
         boolean  => $bool_sr,

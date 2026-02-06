@@ -22,7 +22,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Identifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Identifier($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Identifier($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Identifier creates Constant');
     is($result->const_type(), 'string', 'Identifier constant is string type');
@@ -38,7 +38,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'InlineRegex',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_InlineRegex($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::InlineRegex($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'InlineRegex creates Constant');
     is($result->const_type(), 'string', 'InlineRegex constant is string type');
@@ -54,7 +54,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Quantifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Quantifier($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Quantifier($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Quantifier creates Constant');
     is($result->const_type(), 'string', 'Quantifier constant is string type');
@@ -79,7 +79,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Atom($atom_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Atom($atom_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom type is reference');
@@ -104,7 +104,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Atom($atom_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Atom($atom_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'terminal', 'Atom type is terminal');
@@ -138,7 +138,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Element',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Element($elem_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Element($elem_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), undef, 'Element has no quantifier');
@@ -179,7 +179,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Element',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Element($elem_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Element($elem_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), '+', 'Element has quantifier');
@@ -234,7 +234,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($collected[1]->extract()->value(), 'B', 'second collected child is B');
 }
 
-# Test 9: action_Alternatives with parser-style binary tree
+# Test 9: Alternatives with parser-style binary tree
 {
     # Alternatives ::= Sequence | Sequence | Alternatives
     # Parser builds: multiply(multiply(one, seq1_ctx), pipe_ws_ctx, alt_ctx)
@@ -310,7 +310,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alternatives',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Alternatives($outer);
+    my $result = Chalk::Grammar::BNF::Actions::Alternatives($outer);
 
     isa_ok($result, 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 2, 'Alternatives finds 2 expressions in binary tree');
@@ -318,7 +318,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'second alt is MakeExpression');
 }
 
-# Test 10: action_Sequence with parser-style binary tree
+# Test 10: Sequence with parser-style binary tree
 {
     my $type1 = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $val1 = $factory->make('Constant', const_type => 'string', value => 'Foo');
@@ -373,7 +373,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Sequence',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Sequence($outer);
+    my $result = Chalk::Grammar::BNF::Actions::Sequence($outer);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Sequence returns MakeExpression');
     # inputs()->[0] is the elements arrayref (MakeExpression's single input)
@@ -417,7 +417,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     isa_ok($syms[0]->extract(), 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'filtered result is MakeSymbol');
 }
 
-# Test 12: action_Rule_star flattens recursive list
+# Test 12: Rule_star flattens recursive list
 {
     my $rule1 = $factory->make('MakeRule',
         name => $factory->make('Constant', const_type => 'string', value => 'A'),
@@ -458,7 +458,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule_star',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Rule_star($tree);
+    my $result = Chalk::Grammar::BNF::Actions::Rule_star($tree);
 
     isa_ok($result, 'ARRAY', 'Rule_star returns arrayref');
     is(scalar($result->@*), 2, 'Rule_star collects 2 rules');
@@ -466,7 +466,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeRule', 'second is MakeRule');
 }
 
-# Test 13: action_Rule_plus delegates to action_Rule_star
+# Test 13: Rule_plus delegates to Rule_star
 {
     my $rule1 = $factory->make('MakeRule',
         name => $factory->make('Constant', const_type => 'string', value => 'X'),
@@ -490,13 +490,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule_plus',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Rule_plus($tree);
+    my $result = Chalk::Grammar::BNF::Actions::Rule_plus($tree);
 
     isa_ok($result, 'ARRAY', 'Rule_plus returns arrayref');
     is(scalar($result->@*), 1, 'Rule_plus collects 1 rule');
 }
 
-# Test 14: action_Quantifier_opt with quantifier present
+# Test 14: Quantifier_opt with quantifier present
 {
     my $quant_val = $factory->make('Constant', const_type => 'string', value => '+');
     my $quant_ctx = Chalk::Bootstrap::Context->new(
@@ -516,13 +516,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Quantifier_opt',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Quantifier_opt($tree);
+    my $result = Chalk::Grammar::BNF::Actions::Quantifier_opt($tree);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Quantifier_opt with value returns Constant');
     is($result->value(), '+', 'Quantifier_opt preserves quantifier value');
 }
 
-# Test 15: action_Quantifier_opt with epsilon (no quantifier)
+# Test 15: Quantifier_opt with epsilon (no quantifier)
 {
     # Epsilon match: just the one() context with no meaningful children
     my $one_ctx = Chalk::Bootstrap::Context->new(
@@ -535,12 +535,12 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Quantifier_opt',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Quantifier_opt($tree);
+    my $result = Chalk::Grammar::BNF::Actions::Quantifier_opt($tree);
 
     ok(!defined($result), 'Quantifier_opt with epsilon returns undef');
 }
 
-# Test 16: action_Atom uses rule field instead of regex matching
+# Test 16: Atom uses rule field instead of regex matching
 {
     # When complete_value is wired, child contexts have rule field set
     my $name_const = $factory->make('Constant', const_type => 'string', value => 'SomeName');
@@ -562,7 +562,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Atom($atom_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Atom($atom_ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom correctly identifies reference via rule field');

@@ -13,7 +13,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-# Test 1: action_Identifier creates Constant with identifier value
+# Test 1: Identifier creates Constant with identifier value
 {
     my $ctx = Chalk::Bootstrap::Context->new(
         focus    => 'Element',
@@ -22,14 +22,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Identifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Identifier($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Identifier($ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'action_Identifier creates Constant');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Identifier creates Constant');
     is($result->const_type(), 'string', 'Identifier constant is string type');
     is($result->value(), 'Element', 'Identifier value preserved');
 }
 
-# Test 2: action_InlineRegex creates Constant with regex value
+# Test 2: InlineRegex creates Constant with regex value
 {
     my $ctx = Chalk::Bootstrap::Context->new(
         focus    => '/[A-Za-z]+/',
@@ -38,14 +38,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'InlineRegex',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_InlineRegex($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::InlineRegex($ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'action_InlineRegex creates Constant');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'InlineRegex creates Constant');
     is($result->const_type(), 'string', 'InlineRegex constant is string type');
     is($result->value(), '/[A-Za-z]+/', 'InlineRegex value preserved');
 }
 
-# Test 3: action_Quantifier creates Constant with quantifier value
+# Test 3: Quantifier creates Constant with quantifier value
 {
     my $ctx = Chalk::Bootstrap::Context->new(
         focus    => '+',
@@ -54,14 +54,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Quantifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Quantifier($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Quantifier($ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'action_Quantifier creates Constant');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Quantifier creates Constant');
     is($result->const_type(), 'string', 'Quantifier constant is string type');
     is($result->value(), '+', 'Quantifier value preserved');
 }
 
-# Test 4: action_Atom with Identifier creates reference symbol
+# Test 4: Atom with Identifier creates reference symbol
 {
     # Create Identifier context with Constant node as focus
     my $name_const = $factory->make('Constant', const_type => 'string', value => 'Element');
@@ -80,15 +80,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Atom($atom_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'action_Atom creates MakeSymbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom with Identifier is reference type');
     is($result->inputs()->[1]->value(), 'Element', 'Atom value from Identifier');
     ok(!defined $result->inputs()->[2]->value(), 'Atom has no quantifier initially');
 }
 
-# Test 5: action_Atom with InlineRegex creates terminal symbol
+# Test 5: Atom with InlineRegex creates terminal symbol
 {
     my $regex_const = $factory->make('Constant', const_type => 'string', value => '/[A-Z]+/');
     my $regex_ctx = Chalk::Bootstrap::Context->new(
@@ -105,14 +105,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Atom($atom_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'action_Atom creates MakeSymbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'terminal', 'Atom with InlineRegex is terminal type');
     is($result->inputs()->[1]->value(), '/[A-Z]+/', 'Atom value from InlineRegex');
 }
 
-# Test 6: action_Element with Atom only (no quantifier)
+# Test 6: Element with Atom only (no quantifier)
 {
     # Create Atom symbol
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
@@ -140,13 +140,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Element',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Element($elem_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'action_Element returns symbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
     ok(!defined $result->inputs()->[2]->value(), 'Element has no quantifier');
 }
 
-# Test 7: action_Element with Atom and Quantifier
+# Test 7: Element with Atom and Quantifier
 {
     # Create Atom symbol
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
@@ -183,13 +183,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Element',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Element($elem_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'action_Element returns symbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), '+', 'Element has + quantifier');
 }
 
-# Test 8: action_Sequence collects multiple Elements into MakeExpression
+# Test 8: Sequence collects multiple Elements into MakeExpression
 {
     # Create two Element symbols
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
@@ -229,16 +229,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Sequence',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Sequence($seq_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Sequence($seq_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'action_Sequence creates MakeExpression');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Sequence creates MakeExpression');
     my $elements = $result->inputs()->[0];
     is(scalar($elements->@*), 2, 'Sequence has 2 elements');
     is($elements->[0]->inputs()->[1]->value(), 'Atom', 'first element is Atom');
     is($elements->[1]->inputs()->[1]->value(), 'Quantifier', 'second element is Quantifier');
 }
 
-# Test 9: action_Alternatives collects multiple Sequences into arrayref
+# Test 9: Alternatives collects multiple Sequences into arrayref
 {
     # Create two Sequence expressions
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
@@ -286,15 +286,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alternatives',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Alternatives($alts_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Alternatives($alts_ctx);
 
-    ok(ref($result) eq 'ARRAY', 'action_Alternatives returns arrayref');
+    ok(ref($result) eq 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 2, 'Alternatives has 2 expressions');
     isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'first alternative is MakeExpression');
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'second alternative is MakeExpression');
 }
 
-# Test 10: action_Rule builds MakeRule from name and alternatives
+# Test 10: Rule builds MakeRule from name and alternatives
 {
     # Create rule name
     my $name_const = $factory->make('Constant', const_type => 'string', value => 'Atom');
@@ -354,9 +354,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Rule($rule_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Rule($rule_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'action_Rule creates MakeRule');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'Rule creates MakeRule');
     is($result->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
 
     my $expressions = $result->inputs()->[1];
@@ -364,7 +364,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is(scalar($expressions->@*), 2, 'rule has 2 alternatives');
 }
 
-# Test 11: action_Grammar collects multiple Rules into arrayref
+# Test 11: Grammar collects multiple Rules into arrayref
 {
     # Create two MakeRule nodes
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
@@ -427,9 +427,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Grammar',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Grammar($grammar_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Grammar($grammar_ctx);
 
-    ok(ref($result) eq 'ARRAY', 'action_Grammar returns arrayref');
+    ok(ref($result) eq 'ARRAY', 'Grammar returns arrayref');
     is(scalar($result->@*), 2, 'Grammar has 2 rules');
     isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeRule', 'first rule is MakeRule');
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeRule', 'second rule is MakeRule');
@@ -437,7 +437,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result->[1]->inputs()->[0]->value(), 'Quantifier', 'second rule is Quantifier');
 }
 
-# Test 12: action_Comment returns undef (comments are ignored)
+# Test 12: Comment returns undef (comments are ignored)
 {
     my $ctx = Chalk::Bootstrap::Context->new(
         focus    => '# this is a comment',
@@ -446,9 +446,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Comment',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Comment($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Comment($ctx);
 
-    ok(!defined $result, 'action_Comment returns undef');
+    ok(!defined $result, 'Comment returns undef');
 }
 
 # Test 13: Multi-rule grammar with alternatives
@@ -473,7 +473,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $atom1_ir = Chalk::Grammar::BNF::Actions::action_Atom($atom1_ctx);
+    my $atom1_ir = Chalk::Grammar::BNF::Actions::Atom($atom1_ctx);
 
     # Element context for Identifier
     my $elem1_ctx = Chalk::Bootstrap::Context->new(
@@ -491,7 +491,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Sequence',
     );
 
-    my $seq1_ir = Chalk::Grammar::BNF::Actions::action_Sequence($seq1_ctx);
+    my $seq1_ir = Chalk::Grammar::BNF::Actions::Sequence($seq1_ctx);
 
     # InlineRegex constant
     my $regex_const = $factory->make('Constant', const_type => 'string', value => 'InlineRegex');
@@ -510,7 +510,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Atom',
     );
 
-    my $atom2_ir = Chalk::Grammar::BNF::Actions::action_Atom($atom2_ctx);
+    my $atom2_ir = Chalk::Grammar::BNF::Actions::Atom($atom2_ctx);
 
     # Element context for InlineRegex
     my $elem2_ctx = Chalk::Bootstrap::Context->new(
@@ -528,7 +528,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Sequence',
     );
 
-    my $seq2_ir = Chalk::Grammar::BNF::Actions::action_Sequence($seq2_ctx);
+    my $seq2_ir = Chalk::Grammar::BNF::Actions::Sequence($seq2_ctx);
 
     # Alternatives context with both sequences
     my $alts_ctx = Chalk::Bootstrap::Context->new(
@@ -541,7 +541,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alternatives',
     );
 
-    my $alts_ir = Chalk::Grammar::BNF::Actions::action_Alternatives($alts_ctx);
+    my $alts_ir = Chalk::Grammar::BNF::Actions::Alternatives($alts_ctx);
 
     # Rule name: Atom
     my $rule_name_const = $factory->make('Constant', const_type => 'string', value => 'Atom');
@@ -563,7 +563,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule',
     );
 
-    my $rule_ir = Chalk::Grammar::BNF::Actions::action_Rule($rule_ctx);
+    my $rule_ir = Chalk::Grammar::BNF::Actions::Rule($rule_ctx);
 
     # Verify the complete rule
     isa_ok($rule_ir, 'Chalk::Bootstrap::IR::Node::MakeRule', 'complete rule is MakeRule');

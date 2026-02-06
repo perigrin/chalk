@@ -75,8 +75,8 @@ use lib 'lib';
         rule => 'Identifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Identifier($ctx);
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Phase 2b: action_Identifier returns IR node');
+    my $result = Chalk::Grammar::BNF::Actions::Identifier($ctx);
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Phase 2b: Identifier returns IR node');
     is($result->value(), 'TestIdentifier', 'Phase 2b: action preserves identifier value');
 
     # Test parser with composite semiring extracts semantic value

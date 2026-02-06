@@ -1,5 +1,5 @@
 # ABOUTME: Semantic actions for BNF meta-grammar that build IR nodes from parse results.
-# ABOUTME: Provides 10 action functions, one per BNF rule, that construct IR using NodeFactory.
+# ABOUTME: One function per BNF rule, plus helpers for desugared rules, constructing IR via NodeFactory.
 use 5.42.0;
 use utf8;
 
@@ -7,7 +7,7 @@ package Chalk::Grammar::BNF::Actions;
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Exporter 'import';
-our @EXPORT_OK = qw(_collect_children action_registry);
+our @EXPORT_OK = qw(_collect_children registry);
 
 # Get singleton factory
 sub _factory {
@@ -60,7 +60,7 @@ sub _extract_scanned_text {
 
 # Grammar ::= /(?:\s|#[^\n]*)*/ Rule+
 # Returns arrayref of MakeRule IR nodes
-sub action_Grammar {
+sub Grammar {
     my ($ctx) = @_;
 
     # Collect all MakeRule nodes from the binary Context tree
@@ -83,7 +83,7 @@ sub action_Grammar {
 
 # Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/
 # Returns MakeRule IR node
-sub action_Rule {
+sub Rule {
     my ($ctx) = @_;
 
     # Collect all leaves from the binary tree
@@ -95,7 +95,7 @@ sub action_Rule {
     for my $leaf (@leaves) {
         my $focus = $leaf->extract();
         if (ref($focus) eq 'ARRAY') {
-            # action_Alternatives returns an arrayref of MakeExpression nodes
+            # Alternatives returns an arrayref of MakeExpression nodes
             $alts_node = $focus;
         } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && !defined $name_node) {
             # First Constant is the identifier name
@@ -111,7 +111,7 @@ sub action_Rule {
 
 # Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence
 # Returns arrayref of MakeExpression nodes (one per alternative)
-sub action_Alternatives {
+sub Alternatives {
     my ($ctx) = @_;
 
     # Collect all leaves and extract MakeExpression nodes
@@ -134,7 +134,7 @@ sub action_Alternatives {
 
 # Sequence ::= Element /(?:\s|#[^\n]*)+/ Sequence | Element
 # Returns MakeExpression with list of symbols
-sub action_Sequence {
+sub Sequence {
     my ($ctx) = @_;
 
     # Collect all leaves and extract MakeSymbol nodes
@@ -159,7 +159,7 @@ sub action_Sequence {
 
 # Element ::= Atom Quantifier?
 # Returns MakeSymbol with optional quantifier
-sub action_Element {
+sub Element {
     my ($ctx) = @_;
 
     # Collect all leaves from the binary tree
@@ -193,7 +193,7 @@ sub action_Element {
 
 # Atom ::= Identifier | InlineRegex
 # Returns MakeSymbol (reference for Identifier, terminal for InlineRegex)
-sub action_Atom {
+sub Atom {
     my ($ctx) = @_;
 
     # Find the child with a Constant focus (from Identifier or InlineRegex)
@@ -234,7 +234,7 @@ sub action_Atom {
 
 # Quantifier ::= /\*/ | /\+/ | /\?/
 # Returns Constant with quantifier string
-sub action_Quantifier {
+sub Quantifier {
     my ($ctx) = @_;
     # Use extract() for pre-wired contexts, fall back to scanning tree
     my $quantifier = $ctx->extract();
@@ -245,14 +245,14 @@ sub action_Quantifier {
 
 # Comment ::= /#[^\n]*/
 # Returns nothing (comments ignored)
-sub action_Comment {
+sub Comment {
     my ($ctx) = @_;
     return undef;
 }
 
 # Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/
 # Returns Constant with identifier string
-sub action_Identifier {
+sub Identifier {
     my ($ctx) = @_;
     # Use extract() for pre-wired contexts, fall back to scanning tree
     my $identifier = $ctx->extract();
@@ -263,7 +263,7 @@ sub action_Identifier {
 
 # InlineRegex ::= /\/(?:[^\/\\]|\\.)*\//
 # Returns Constant with regex string
-sub action_InlineRegex {
+sub InlineRegex {
     my ($ctx) = @_;
     # Use extract() for pre-wired contexts, fall back to scanning tree
     my $regex = $ctx->extract();
@@ -274,14 +274,14 @@ sub action_InlineRegex {
 
 # Rule_plus ::= Rule Rule_star (desugared from Rule+)
 # Collects all MakeRule nodes from the recursive structure
-sub action_Rule_plus {
+sub Rule_plus {
     my ($ctx) = @_;
     return _collect_rule_list($ctx);
 }
 
 # Rule_star ::= Rule Rule_star | epsilon (desugared from Rule+)
 # Collects all MakeRule nodes from the recursive structure
-sub action_Rule_star {
+sub Rule_star {
     my ($ctx) = @_;
     return _collect_rule_list($ctx);
 }
@@ -307,7 +307,7 @@ sub _collect_rule_list {
 
 # Quantifier_opt ::= Quantifier | epsilon (desugared from Quantifier?)
 # Returns the Quantifier's Constant value or undef (epsilon case)
-sub action_Quantifier_opt {
+sub Quantifier_opt {
     my ($ctx) = @_;
 
     my @leaves = _collect_children($ctx);
@@ -324,21 +324,21 @@ sub action_Quantifier_opt {
 
 # Returns a hash mapping rule names to action coderefs
 # Used by SemanticAction semiring to register actions for complete_value
-sub action_registry {
+sub registry {
     return {
-        Grammar        => \&action_Grammar,
-        Rule           => \&action_Rule,
-        Alternatives   => \&action_Alternatives,
-        Sequence       => \&action_Sequence,
-        Element        => \&action_Element,
-        Atom           => \&action_Atom,
-        Quantifier     => \&action_Quantifier,
-        Comment        => \&action_Comment,
-        Identifier     => \&action_Identifier,
-        InlineRegex    => \&action_InlineRegex,
-        Rule_plus      => \&action_Rule_plus,
-        Rule_star      => \&action_Rule_star,
-        Quantifier_opt => \&action_Quantifier_opt,
+        Grammar        => \&Grammar,
+        Rule           => \&Rule,
+        Alternatives   => \&Alternatives,
+        Sequence       => \&Sequence,
+        Element        => \&Element,
+        Atom           => \&Atom,
+        Quantifier     => \&Quantifier,
+        Comment        => \&Comment,
+        Identifier     => \&Identifier,
+        InlineRegex    => \&InlineRegex,
+        Rule_plus      => \&Rule_plus,
+        Rule_star      => \&Rule_star,
+        Quantifier_opt => \&Quantifier_opt,
     };
 }
 

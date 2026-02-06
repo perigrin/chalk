@@ -13,7 +13,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-# Test 1: action_Alternatives should return arrayref of ALL alternatives, not just first
+# Test 1: Alternatives should return arrayref of ALL alternatives, not just first
 {
     # Create 3 MakeExpression nodes
     my $expr1 = $factory->make('MakeExpression', elements => []);
@@ -47,17 +47,17 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alternatives',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Alternatives($alts_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Alternatives($alts_ctx);
 
     # BUG 2: Currently returns only first expression, should return arrayref of all 3
-    ok(ref($result) eq 'ARRAY', 'action_Alternatives returns arrayref');
-    is(scalar($result->@*), 3, 'action_Alternatives returns all 3 alternatives');
+    ok(ref($result) eq 'ARRAY', 'Alternatives returns arrayref');
+    is(scalar($result->@*), 3, 'Alternatives returns all 3 alternatives');
     isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'First alternative is MakeExpression');
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Second alternative is MakeExpression');
     isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Third alternative is MakeExpression');
 }
 
-# Test 2: action_Rule should receive arrayref of expressions and pass it correctly
+# Test 2: Rule should receive arrayref of expressions and pass it correctly
 {
     # Create rule name
     my $name_const = $factory->make('Constant', const_type => 'string', value => 'TestRule');
@@ -68,7 +68,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Identifier',
     );
 
-    # Create 2 alternatives (as arrayref from fixed action_Alternatives)
+    # Create 2 alternatives (as arrayref from fixed Alternatives)
     my $expr1 = $factory->make('MakeExpression', elements => []);
     my $expr2 = $factory->make('MakeExpression', elements => []);
     my $alts_arrayref = [$expr1, $expr2];
@@ -88,10 +88,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Rule($rule_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Rule($rule_ctx);
 
     # BUG 3: Currently checks for single MakeExpression, should accept arrayref
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'action_Rule creates MakeRule');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'Rule creates MakeRule');
     is($result->inputs()->[0]->value(), 'TestRule', 'Rule name is correct');
 
     # The expressions input should be an arrayref
@@ -102,7 +102,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     isa_ok($expressions->[1], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Second expression is MakeExpression');
 }
 
-# Test 3: action_Grammar should return arrayref of ALL rules, not just first
+# Test 3: Grammar should return arrayref of ALL rules, not just first
 {
     # Create 3 MakeRule nodes
     my $name1 = $factory->make('Constant', const_type => 'string', value => 'Rule1');
@@ -142,11 +142,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Grammar',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Grammar($grammar_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Grammar($grammar_ctx);
 
     # BUG 1: Currently returns only first rule, should return arrayref of all 3
-    ok(ref($result) eq 'ARRAY', 'action_Grammar returns arrayref');
-    is(scalar($result->@*), 3, 'action_Grammar returns all 3 rules');
+    ok(ref($result) eq 'ARRAY', 'Grammar returns arrayref');
+    is(scalar($result->@*), 3, 'Grammar returns all 3 rules');
     isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeRule', 'First rule is MakeRule');
     isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeRule', 'Second rule is MakeRule');
     isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::MakeRule', 'Third rule is MakeRule');

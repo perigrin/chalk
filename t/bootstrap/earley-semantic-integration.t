@@ -121,7 +121,7 @@ package TestRule {
         rule => 'Identifier',
     );
 
-    my $result = Chalk::Grammar::BNF::Actions::action_Identifier($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::Identifier($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'semantic action returns IR node');
     is($result->value(), 'TestId', 'semantic action preserves value');

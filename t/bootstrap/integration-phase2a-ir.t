@@ -89,7 +89,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     # NOTE: MakeRule expects expressions input to be a single MakeExpression or array
-    # According to Actions.pm, action_Rule expects a single node from Alternatives
+    # According to Actions.pm, Rule expects a single node from Alternatives
     # But the semantic should be that MakeRule wraps multiple alternatives
     # For now, test with single expression and document this
 
