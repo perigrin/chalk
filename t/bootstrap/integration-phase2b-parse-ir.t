@@ -62,7 +62,7 @@ my $parser = build_parser();
     # Grammar produces arrayref of MakeRule nodes
     is(scalar($ir->@*), 1, 'single rule produces 1 MakeRule');
     my $rule = $ir->[0];
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::MakeRule', 'element is MakeRule');
+    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor'); is($rule->class(), 'Rule', 'element is MakeRule');
 
     # Check rule name
     my $name = $rule->inputs()->[0];
@@ -75,14 +75,14 @@ my $parser = build_parser();
     is(scalar($exprs->@*), 1, 'rule has 1 alternative');
 
     my $expr = $exprs->[0];
-    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'alternative is MakeExpression');
+    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor'); is($expr->class(), 'Expression', 'alternative is MakeExpression');
 
     # The expression should have 1 element (the InlineRegex terminal)
     my $elements = $expr->inputs()->[0];
     is(scalar($elements->@*), 1, 'expression has 1 element');
 
     my $elem = $elements->[0];
-    isa_ok($elem, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'element is MakeSymbol');
+    isa_ok($elem, 'Chalk::Bootstrap::IR::Node::Constructor'); is($elem->class(), 'Symbol', 'element is MakeSymbol');
     is($elem->inputs()->[0]->value(), 'terminal', 'element type is terminal');
 }
 

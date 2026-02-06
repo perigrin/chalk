@@ -19,9 +19,12 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 # Test 1: Alternatives should return arrayref of ALL alternatives, not just first
 {
     # Create 3 MakeExpression nodes
-    my $expr1 = $factory->make('MakeExpression', elements => []);
-    my $expr2 = $factory->make('MakeExpression', elements => []);
-    my $expr3 = $factory->make('MakeExpression', elements => []);
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression', elements => []);
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression', elements => []);
+    my $expr3 = $factory->make('Constructor',
+        class => 'Expression', elements => []);
 
     my $ctx1 = Chalk::Bootstrap::Context->new(
         focus    => $expr1,
@@ -55,9 +58,9 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     # BUG 2: Currently returns only first expression, should return arrayref of all 3
     ok(ref($result) eq 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 3, 'Alternatives returns all 3 alternatives');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'First alternative is MakeExpression');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Second alternative is MakeExpression');
-    isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Third alternative is MakeExpression');
+    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[0]->class(), 'Expression', 'First alternative is MakeExpression');
+    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[1]->class(), 'Expression', 'Second alternative is MakeExpression');
+    isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[2]->class(), 'Expression', 'Third alternative is MakeExpression');
 }
 
 # Test 2: Rule should receive arrayref of expressions and pass it correctly
@@ -72,8 +75,10 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     );
 
     # Create 2 alternatives (as arrayref from fixed Alternatives)
-    my $expr1 = $factory->make('MakeExpression', elements => []);
-    my $expr2 = $factory->make('MakeExpression', elements => []);
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression', elements => []);
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression', elements => []);
     my $alts_arrayref = [$expr1, $expr2];
 
     my $alts_ctx = Chalk::Bootstrap::Context->new(
@@ -94,15 +99,15 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $result = $actions->Rule($rule_ctx);
 
     # BUG 3: Currently checks for single MakeExpression, should accept arrayref
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'Rule creates MakeRule');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Rule', 'Rule creates MakeRule');
     is($result->inputs()->[0]->value(), 'TestRule', 'Rule name is correct');
 
     # The expressions input should be an arrayref
     my $expressions = $result->inputs()->[1];
     ok(ref($expressions) eq 'ARRAY', 'Rule expressions is arrayref');
     is(scalar($expressions->@*), 2, 'Rule has 2 expressions');
-    isa_ok($expressions->[0], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'First expression is MakeExpression');
-    isa_ok($expressions->[1], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Second expression is MakeExpression');
+    isa_ok($expressions->[0], 'Chalk::Bootstrap::IR::Node::Constructor'); is($expressions->[0]->class(), 'Expression', 'First expression is MakeExpression');
+    isa_ok($expressions->[1], 'Chalk::Bootstrap::IR::Node::Constructor'); is($expressions->[1]->class(), 'Expression', 'Second expression is MakeExpression');
 }
 
 # Test 3: Grammar should return arrayref of ALL rules, not just first
@@ -112,11 +117,15 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $name2 = $factory->make('Constant', const_type => 'string', value => 'Rule2');
     my $name3 = $factory->make('Constant', const_type => 'string', value => 'Rule3');
 
-    my $expr = $factory->make('MakeExpression', elements => []);
+    my $expr = $factory->make('Constructor',
+        class => 'Expression', elements => []);
 
-    my $rule1 = $factory->make('MakeRule', name => $name1, expressions => [$expr]);
-    my $rule2 = $factory->make('MakeRule', name => $name2, expressions => [$expr]);
-    my $rule3 = $factory->make('MakeRule', name => $name3, expressions => [$expr]);
+    my $rule1 = $factory->make('Constructor',
+        class => 'Rule', name => $name1, expressions => [$expr]);
+    my $rule2 = $factory->make('Constructor',
+        class => 'Rule', name => $name2, expressions => [$expr]);
+    my $rule3 = $factory->make('Constructor',
+        class => 'Rule', name => $name3, expressions => [$expr]);
 
     my $ctx1 = Chalk::Bootstrap::Context->new(
         focus    => $rule1,
@@ -150,9 +159,9 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     # BUG 1: Currently returns only first rule, should return arrayref of all 3
     ok(ref($result) eq 'ARRAY', 'Grammar returns arrayref');
     is(scalar($result->@*), 3, 'Grammar returns all 3 rules');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeRule', 'First rule is MakeRule');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeRule', 'Second rule is MakeRule');
-    isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::MakeRule', 'Third rule is MakeRule');
+    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[0]->class(), 'Rule', 'First rule is MakeRule');
+    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[1]->class(), 'Rule', 'Second rule is MakeRule');
+    isa_ok($result->[2], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[2]->class(), 'Rule', 'Third rule is MakeRule');
     is($result->[0]->inputs()->[0]->value(), 'Rule1', 'First rule name is Rule1');
     is($result->[1]->inputs()->[0]->value(), 'Rule2', 'Second rule name is Rule2');
     is($result->[2]->inputs()->[0]->value(), 'Rule3', 'Third rule name is Rule3');

@@ -62,14 +62,16 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'foo'
     );
 
-    # Create two MakeSymbol nodes with same inputs
-    my $symbol1 = $factory->make('MakeSymbol',
+    # Create two Constructor:Symbol nodes with same inputs
+    my $symbol1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $value,
         quantifier => undef
     );
 
-    my $symbol2 = $factory->make('MakeSymbol',
+    my $symbol2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $value,
         quantifier => undef
@@ -92,7 +94,8 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'bar'
     );
 
-    my $symbol1 = $factory->make('MakeSymbol',
+    my $symbol1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type1,
         value => $val1,
         quantifier => undef
@@ -108,7 +111,8 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'bar'
     );
 
-    my $symbol2 = $factory->make('MakeSymbol',
+    my $symbol2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type2,
         value => $val2,
         quantifier => undef
@@ -130,7 +134,8 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         const_type => 'string',
         value => 'terminal'
     );
-    my $symbol1 = $factory->make('MakeSymbol',
+    my $symbol1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type1,
         value => $const1,
         quantifier => undef
@@ -145,7 +150,8 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         const_type => 'string',
         value => 'terminal'
     );
-    my $symbol2 = $factory->make('MakeSymbol',
+    my $symbol2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type2,
         value => $const2,
         quantifier => undef

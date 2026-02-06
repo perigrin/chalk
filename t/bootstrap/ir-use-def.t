@@ -25,7 +25,8 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'terminal'
     );
 
-    my $symbol = $factory->make('MakeSymbol',
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $const,
         quantifier => undef
@@ -60,13 +61,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'terminal'
     );
 
-    my $symbol1 = $factory->make('MakeSymbol',
+    my $symbol1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $shared,
         quantifier => undef
     );
 
-    my $symbol2 = $factory->make('MakeSymbol',
+    my $symbol2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $shared,
         quantifier => undef
@@ -103,13 +106,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => '+'
     );
 
-    my $symbol1 = $factory->make('MakeSymbol',
+    my $symbol1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $shared,
         quantifier => $quant1
     );
 
-    my $symbol2 = $factory->make('MakeSymbol',
+    my $symbol2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $shared,
         quantifier => $quant2
@@ -141,13 +146,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => 'terminal'
     );
 
-    my $symbol = $factory->make('MakeSymbol',
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $const,
         quantifier => undef
     );
 
-    my $expr = $factory->make('MakeExpression',
+    my $expr = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$symbol]
     );
 
@@ -190,13 +197,15 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         value => '+'
     );
 
-    my $symbol1 = $factory->make('MakeSymbol',
+    my $symbol1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $const,
         quantifier => $quant1
     );
 
-    my $symbol2 = $factory->make('MakeSymbol',
+    my $symbol2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type,
         value => $const,
         quantifier => $quant2

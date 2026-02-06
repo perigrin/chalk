@@ -25,7 +25,7 @@ class Chalk::Grammar::BNF::Actions {
             if (ref($focus) eq 'ARRAY') {
                 # Nested Rule_star result — flatten
                 push @rules, $focus->@*;
-            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constructor' && $focus->class() eq 'Rule') {
                 push @rules, $focus;
             }
         }
@@ -34,18 +34,18 @@ class Chalk::Grammar::BNF::Actions {
     }
 
     # Grammar ::= /(?:\s|#[^\n]*)*/ Rule+
-    # Returns arrayref of MakeRule IR nodes
+    # Returns arrayref of Constructor:Rule IR nodes
     method Grammar($ctx) {
-        # Collect all MakeRule nodes from the binary Context tree
+        # Collect all Constructor:Rule nodes from the binary Context tree
         # Rule+ desugars to Rule_plus which returns an arrayref
         my @leaves = $ctx->leaves();
         my @rules;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
             if (ref($focus) eq 'ARRAY') {
-                # Rule_plus/Rule_star returns arrayref of MakeRule nodes
+                # Rule_plus/Rule_star returns arrayref of Constructor:Rule nodes
                 push @rules, $focus->@*;
-            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeRule') {
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constructor' && $focus->class() eq 'Rule') {
                 push @rules, $focus;
             }
         }
@@ -55,7 +55,7 @@ class Chalk::Grammar::BNF::Actions {
     }
 
     # Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/
-    # Returns MakeRule IR node
+    # Returns Constructor:Rule IR node
     method Rule($ctx) {
         # Collect all leaves from the binary tree
         my @leaves = $ctx->leaves();
@@ -66,7 +66,7 @@ class Chalk::Grammar::BNF::Actions {
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
             if (ref($focus) eq 'ARRAY') {
-                # Alternatives returns an arrayref of MakeExpression nodes
+                # Alternatives returns an arrayref of Constructor:Expression nodes
                 $alts_node = $focus;
             } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && !defined $name_node) {
                 # First Constant is the identifier name
@@ -74,17 +74,18 @@ class Chalk::Grammar::BNF::Actions {
             }
         }
 
-        return $factory->make('MakeRule',
+        return $factory->make('Constructor',
+            class => 'Rule',
             name => $name_node,
             expressions => $alts_node,
         );
     }
 
     # Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence
-    # Returns arrayref of MakeExpression nodes (one per alternative)
+    # Returns arrayref of Constructor:Expression nodes (one per alternative)
     method Alternatives($ctx) {
-        # Collect all leaves and extract MakeExpression nodes
-        # Nested Alternatives produce arrayrefs of MakeExpressions, not single MakeExpressions
+        # Collect all leaves and extract Constructor:Expression nodes
+        # Nested Alternatives produce arrayrefs of Expressions, not single Expressions
         my @leaves = $ctx->leaves();
         my @expressions;
         for my $leaf (@leaves) {
@@ -92,7 +93,7 @@ class Chalk::Grammar::BNF::Actions {
             if (ref($focus) eq 'ARRAY') {
                 # Nested Alternatives result — flatten the arrayrefs
                 push @expressions, $focus->@*;
-            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constructor' && $focus->class() eq 'Expression') {
                 push @expressions, $focus;
             }
         }
@@ -102,40 +103,41 @@ class Chalk::Grammar::BNF::Actions {
     }
 
     # Sequence ::= Element /(?:\s|#[^\n]*)+/ Sequence | Element
-    # Returns MakeExpression with list of symbols
+    # Returns Constructor:Expression with list of symbols
     method Sequence($ctx) {
-        # Collect all leaves and extract MakeSymbol nodes
-        # Nested Sequence matches produce MakeExpression nodes containing MakeSymbol arrays
+        # Collect all leaves and extract Constructor:Symbol nodes
+        # Nested Sequence matches produce Constructor:Expression nodes containing Symbol arrays
         my @leaves = $ctx->leaves();
         my @elements;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
-            if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
+            if ($focus isa 'Chalk::Bootstrap::IR::Node::Constructor' && $focus->class() eq 'Symbol') {
                 push @elements, $focus;
-            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::MakeExpression') {
+            } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constructor' && $focus->class() eq 'Expression') {
                 # Nested Sequence result — extract its elements
                 my $inner_elements = $focus->inputs()->[0];
                 push @elements, $inner_elements->@* if $inner_elements;
             }
         }
 
-        return $factory->make('MakeExpression',
+        return $factory->make('Constructor',
+            class => 'Expression',
             elements => \@elements,
         );
     }
 
     # Element ::= Atom Quantifier?
-    # Returns MakeSymbol with optional quantifier
+    # Returns Constructor:Symbol with optional quantifier
     method Element($ctx) {
         # Collect all leaves from the binary tree
         my @leaves = $ctx->leaves();
 
-        # Find the MakeSymbol (from Atom) and optional Constant (from Quantifier)
+        # Find the Constructor:Symbol (from Atom) and optional Constant (from Quantifier)
         my $symbol;
         my $quantifier;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
-            if ($focus isa 'Chalk::Bootstrap::IR::Node::MakeSymbol') {
+            if ($focus isa 'Chalk::Bootstrap::IR::Node::Constructor' && $focus->class() eq 'Symbol') {
                 $symbol = $focus;
             } elsif ($focus isa 'Chalk::Bootstrap::IR::Node::Constant' && defined $focus->value()
                      && $focus->value() =~ /^[*+?]$/) {
@@ -145,7 +147,8 @@ class Chalk::Grammar::BNF::Actions {
 
         # If quantifier exists, create new symbol with quantifier
         if (defined $quantifier) {
-            return $factory->make('MakeSymbol',
+            return $factory->make('Constructor',
+                class => 'Symbol',
                 type => $symbol->inputs()->[0],
                 value => $symbol->inputs()->[1],
                 quantifier => $quantifier,
@@ -157,7 +160,7 @@ class Chalk::Grammar::BNF::Actions {
     }
 
     # Atom ::= Identifier | InlineRegex
-    # Returns MakeSymbol (reference for Identifier, terminal for InlineRegex)
+    # Returns Constructor:Symbol (reference for Identifier, terminal for InlineRegex)
     method Atom($ctx) {
         # Find the child with a Constant focus (from Identifier or InlineRegex)
         my @leaves = $ctx->leaves();
@@ -188,7 +191,8 @@ class Chalk::Grammar::BNF::Actions {
 
         my $quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-        return $factory->make('MakeSymbol',
+        return $factory->make('Constructor',
+            class => 'Symbol',
             type => $type,
             value => $value_node,
             quantifier => $quant,

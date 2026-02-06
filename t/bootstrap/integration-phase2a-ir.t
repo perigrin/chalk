@@ -7,9 +7,7 @@ use Test::More;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::IR::Node::Constant;
-use Chalk::Bootstrap::IR::Node::MakeSymbol;
-use Chalk::Bootstrap::IR::Node::MakeExpression;
-use Chalk::Bootstrap::IR::Node::MakeRule;
+use Chalk::Bootstrap::IR::Node::Constructor;
 
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -25,31 +23,34 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
     # Create symbol node
-    my $symbol = $factory->make('MakeSymbol',
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
         type => $terminal_type,
         value => $pattern,
         quantifier => $no_quant,
     );
 
     # Create expression node (list of symbols)
-    my $expression = $factory->make('MakeExpression',
+    my $expression = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$symbol],
     );
 
     # Create rule node
-    my $rule = $factory->make('MakeRule',
+    my $rule = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule_name,
         expressions => $expression,
     );
 
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::MakeRule', 'created MakeRule node');
+    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule->class(), 'Rule', 'created MakeRule node');
     is($rule->inputs()->[0]->value(), 'Identifier', 'rule name is Identifier');
 
     my $expr = $rule->inputs()->[1];
-    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'rule has MakeExpression');
+    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Expression'); is($expr->class(), 'Expression', 'rule has MakeExpression');
 
     my $sym = $expr->inputs()->[0][0];
-    isa_ok($sym, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'expression has MakeSymbol');
+    isa_ok($sym, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Symbol'); is($sym->class(), 'Symbol', 'expression has MakeSymbol');
     is($sym->inputs()->[0]->value(), 'terminal', 'symbol type is terminal');
     is($sym->inputs()->[1]->value(), '[A-Za-z_][A-Za-z_0-9]*', 'symbol value is pattern');
 }
@@ -65,26 +66,30 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $ident_value = $factory->make('Constant', const_type => 'string', value => 'Identifier');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $ident_sym = $factory->make('MakeSymbol',
+    my $ident_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $ident_value,
         quantifier => $no_quant,
     );
 
-    my $expr1 = $factory->make('MakeExpression',
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$ident_sym],
     );
 
     # Second alternative: InlineRegex (reference)
     my $regex_value = $factory->make('Constant', const_type => 'string', value => 'InlineRegex');
 
-    my $regex_sym = $factory->make('MakeSymbol',
+    my $regex_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $regex_value,
         quantifier => $no_quant,
     );
 
-    my $expr2 = $factory->make('MakeExpression',
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$regex_sym],
     );
 
@@ -94,12 +99,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     # For now, test with single expression and document this
 
     # Create rule with first expression (simplified)
-    my $rule = $factory->make('MakeRule',
+    my $rule = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule_name,
         expressions => $expr1,
     );
 
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::MakeRule', 'created Atom rule');
+    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule->class(), 'Rule', 'created Atom rule');
     is($rule->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
 }
 
@@ -112,22 +118,25 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $rule_value = $factory->make('Constant', const_type => 'string', value => 'Rule');
     my $plus_quant = $factory->make('Constant', const_type => 'string', value => '+');
 
-    my $rule_sym = $factory->make('MakeSymbol',
+    my $rule_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $rule_value,
         quantifier => $plus_quant,
     );
 
-    my $expression = $factory->make('MakeExpression',
+    my $expression = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$rule_sym],
     );
 
-    my $grammar_rule = $factory->make('MakeRule',
+    my $grammar_rule = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule_name,
         expressions => $expression,
     );
 
-    isa_ok($grammar_rule, 'Chalk::Bootstrap::IR::Node::MakeRule', 'created Grammar rule');
+    isa_ok($grammar_rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($grammar_rule->class(), 'Rule', 'created Grammar rule');
 
     my $sym = $grammar_rule->inputs()->[1]->inputs()->[0][0];
     is($sym->inputs()->[2]->value(), '+', 'symbol has + quantifier');
@@ -141,7 +150,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     # Atom symbol
     my $atom_value = $factory->make('Constant', const_type => 'string', value => 'Atom');
-    my $atom_sym = $factory->make('MakeSymbol',
+    my $atom_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $atom_value,
         quantifier => $no_quant,
@@ -149,18 +159,20 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     # Quantifier symbol
     my $quant_value = $factory->make('Constant', const_type => 'string', value => 'Quantifier');
-    my $quant_sym = $factory->make('MakeSymbol',
+    my $quant_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $quant_value,
         quantifier => $no_quant,
     );
 
     # Create expression with two symbols (sequence)
-    my $expression = $factory->make('MakeExpression',
+    my $expression = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$atom_sym, $quant_sym],
     );
 
-    isa_ok($expression, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'created sequence expression');
+    isa_ok($expression, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Expression'); is($expression->class(), 'Expression', 'created sequence expression');
     my $elements = $expression->inputs()->[0];
     is(scalar($elements->@*), 2, 'expression has 2 elements');
     is($elements->[0]->inputs()->[1]->value(), 'Atom', 'first element is Atom');
@@ -181,13 +193,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $ref_type = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $sym1 = $factory->make('MakeSymbol',
+    my $sym1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $const1,
         quantifier => $no_quant,
     );
 
-    my $sym2 = $factory->make('MakeSymbol',
+    my $sym2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $const1,
         quantifier => $no_quant,
@@ -203,17 +217,20 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $const_value = $factory->make('Constant', const_type => 'string', value => 'Foo');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $symbol = $factory->make('MakeSymbol',
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
         type => $const_type,
         value => $const_value,
         quantifier => $no_quant,
     );
 
-    my $expression = $factory->make('MakeExpression',
+    my $expression = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$symbol],
     );
 
-    my $rule = $factory->make('MakeRule',
+    my $rule = $factory->make('Constructor',
+        class => 'Rule',
         name => $const_name,
         expressions => $expression,
     );
@@ -244,17 +261,20 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $rule2_name = $factory->make('Constant', const_type => 'string', value => 'Rule2');
     my $terminal_value = $factory->make('Constant', const_type => 'string', value => 'abc');
 
-    my $terminal_sym = $factory->make('MakeSymbol',
+    my $terminal_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $terminal_value,
         quantifier => $no_quant,
     );
 
-    my $expr2 = $factory->make('MakeExpression',
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$terminal_sym],
     );
 
-    my $rule2 = $factory->make('MakeRule',
+    my $rule2 = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule2_name,
         expressions => $expr2,
     );
@@ -263,24 +283,27 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $rule1_name = $factory->make('Constant', const_type => 'string', value => 'Rule1');
     my $rule2_ref_value = $factory->make('Constant', const_type => 'string', value => 'Rule2');
 
-    my $rule2_ref_sym = $factory->make('MakeSymbol',
+    my $rule2_ref_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $rule2_ref_value,
         quantifier => $no_quant,
     );
 
-    my $expr1 = $factory->make('MakeExpression',
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$rule2_ref_sym],
     );
 
-    my $rule1 = $factory->make('MakeRule',
+    my $rule1 = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule1_name,
         expressions => $expr1,
     );
 
     # Verify structure
-    isa_ok($rule1, 'Chalk::Bootstrap::IR::Node::MakeRule', 'created Rule1');
-    isa_ok($rule2, 'Chalk::Bootstrap::IR::Node::MakeRule', 'created Rule2');
+    isa_ok($rule1, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule1->class(), 'Rule', 'created Rule1');
+    isa_ok($rule2, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule2->class(), 'Rule', 'created Rule2');
 
     is($rule1->inputs()->[0]->value(), 'Rule1', 'Rule1 name correct');
     is($rule2->inputs()->[0]->value(), 'Rule2', 'Rule2 name correct');
@@ -297,7 +320,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     # Test * quantifier
     my $star_quant = $factory->make('Constant', const_type => 'string', value => '*');
-    my $sym_star = $factory->make('MakeSymbol',
+    my $sym_star = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $sym_value,
         quantifier => $star_quant,
@@ -306,7 +330,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     # Test + quantifier
     my $plus_quant = $factory->make('Constant', const_type => 'string', value => '+');
-    my $sym_plus = $factory->make('MakeSymbol',
+    my $sym_plus = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $sym_value,
         quantifier => $plus_quant,
@@ -315,7 +340,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     # Test ? quantifier
     my $quest_quant = $factory->make('Constant', const_type => 'string', value => '?');
-    my $sym_quest = $factory->make('MakeSymbol',
+    my $sym_quest = $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $sym_value,
         quantifier => $quest_quant,
@@ -330,14 +356,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $value = $factory->make('Constant', const_type => 'string', value => 'foo');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $terminal_sym = $factory->make('MakeSymbol',
+    my $terminal_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $terminal_type,
         value => $value,
         quantifier => $no_quant,
     );
     is($terminal_sym->inputs()->[0]->value(), 'terminal', 'created terminal symbol');
 
-    my $reference_sym = $factory->make('MakeSymbol',
+    my $reference_sym = $factory->make('Constructor',
+        class => 'Symbol',
         type => $reference_type,
         value => $value,
         quantifier => $no_quant,
@@ -357,71 +385,81 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my @symbols;
 
     # Identifier (reference)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $factory->make('Constant', const_type => 'string', value => 'Identifier'),
         quantifier => $no_quant,
     );
 
     # /ws/ (terminal)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $factory->make('Constant', const_type => 'string', value => '(?:\\s|#[^\\n]*)*'),
         quantifier => $no_quant,
     );
 
     # /::=/ (terminal)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $factory->make('Constant', const_type => 'string', value => '::='),
         quantifier => $no_quant,
     );
 
     # /ws/ (terminal)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $factory->make('Constant', const_type => 'string', value => '(?:\\s|#[^\\n]*)*'),
         quantifier => $no_quant,
     );
 
     # Alternatives (reference)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $ref_type,
         value => $factory->make('Constant', const_type => 'string', value => 'Alternatives'),
         quantifier => $no_quant,
     );
 
     # /ws/ (terminal)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $factory->make('Constant', const_type => 'string', value => '(?:\\s|#[^\\n]*)*'),
         quantifier => $no_quant,
     );
 
     # /;/ (terminal)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $factory->make('Constant', const_type => 'string', value => ';'),
         quantifier => $no_quant,
     );
 
     # /ws/ (terminal)
-    push @symbols, $factory->make('MakeSymbol',
+    push @symbols, $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $factory->make('Constant', const_type => 'string', value => '(?:\\s|#[^\\n]*)*'),
         quantifier => $no_quant,
     );
 
-    my $expression = $factory->make('MakeExpression',
+    my $expression = $factory->make('Constructor',
+        class => 'Expression',
         elements => \@symbols,
     );
 
-    my $rule = $factory->make('MakeRule',
+    my $rule = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule_name,
         expressions => $expression,
     );
 
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::MakeRule', 'created complex Rule');
+    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule->class(), 'Rule', 'created complex Rule');
     my $elements = $rule->inputs()->[1]->inputs()->[0];
     is(scalar($elements->@*), 8, 'Rule has 8 symbols in sequence');
 }

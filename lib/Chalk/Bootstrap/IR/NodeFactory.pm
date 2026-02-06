@@ -12,9 +12,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
     use Chalk::Bootstrap::IR::Node::Start;
     use Chalk::Bootstrap::IR::Node::Return;
     use Chalk::Bootstrap::IR::Node::Constant;
-    use Chalk::Bootstrap::IR::Node::MakeSymbol;
-    use Chalk::Bootstrap::IR::Node::MakeExpression;
-    use Chalk::Bootstrap::IR::Node::MakeRule;
+    use Chalk::Bootstrap::IR::Node::Constructor;
 
     # Singleton instance
     my $instance;
@@ -23,13 +21,14 @@ class Chalk::Bootstrap::IR::NodeFactory {
     field $node_cache = {};
 
     # Define input parameter names for each operation type (in order)
+    # Constructor uses compound keys: "Constructor:Class" format
     my %INPUT_SPECS = (
         Start => [],
         Return => ['value'],
         Constant => [],  # Constant has attributes, not inputs
-        MakeSymbol => ['type', 'value', 'quantifier'],
-        MakeExpression => ['elements'],
-        MakeRule => ['name', 'expressions'],
+        'Constructor:Symbol'     => ['type', 'value', 'quantifier'],
+        'Constructor:Expression' => ['elements'],
+        'Constructor:Rule'       => ['name', 'expressions'],
     );
 
     # Get singleton instance
@@ -46,12 +45,20 @@ class Chalk::Bootstrap::IR::NodeFactory {
     }
 
     # Create or retrieve a node
-    # $operation: string like 'Constant', 'MakeSymbol', etc.
+    # $operation: string like 'Constant', 'Constructor', etc.
     # %params: named parameters (inputs and attributes)
     method make($operation, %params) {
+        # For Constructor, use compound key for INPUT_SPECS lookup
+        my $lookup_key = $operation;
+        if ($operation eq 'Constructor') {
+            my $class = $params{class}
+                or die "Constructor requires 'class' parameter";
+            $lookup_key = "Constructor:$class";
+        }
+
         # Get input specification for this operation
-        my $input_names = $INPUT_SPECS{$operation}
-            or die "Unknown operation: $operation";
+        my $input_names = $INPUT_SPECS{$lookup_key}
+            or die "Unknown operation: $lookup_key";
 
         # Separate inputs from attributes
         my @inputs;
@@ -67,6 +74,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
         return $node_cache->{$key} if exists $node_cache->{$key};
 
         # Create new node (node classes loaded statically at compile time)
+        # Constructor is a special case - class is always Constructor, not derived from operation
         my $node_class = "Chalk::Bootstrap::IR::Node::$operation";
         my $node = $node_class->new(
             id => $key,
@@ -107,7 +115,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
                     push @parts, 'undef';
                 }
                 elsif (ref($input) eq 'ARRAY') {
-                    # Handle array of nodes (e.g., elements in MakeExpression)
+                    # Handle array of nodes (e.g., elements in Constructor:Expression)
                     my @ids = map { defined($_) ? $_->id : 'undef' } $input->@*;
                     push @parts, '[' . join(',', @ids) . ']';
                 }

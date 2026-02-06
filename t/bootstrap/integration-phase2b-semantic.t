@@ -85,7 +85,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom with Identifier is reference type');
     is($result->inputs()->[1]->value(), 'Element', 'Atom value from Identifier');
     ok(!defined $result->inputs()->[2]->value(), 'Atom has no quantifier initially');
@@ -110,7 +110,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Atom creates MakeSymbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Atom creates MakeSymbol');
     is($result->inputs()->[0]->value(), 'terminal', 'Atom with InlineRegex is terminal type');
     is($result->inputs()->[1]->value(), '/[A-Z]+/', 'Atom value from InlineRegex');
 }
@@ -122,7 +122,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $name_const = $factory->make('Constant', const_type => 'string', value => 'Atom');
     my $quant_const = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $symbol = $factory->make('MakeSymbol',
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $name_const,
         quantifier => $quant_const,
@@ -145,7 +146,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Element returns symbol');
     ok(!defined $result->inputs()->[2]->value(), 'Element has no quantifier');
 }
 
@@ -156,7 +157,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $name_const = $factory->make('Constant', const_type => 'string', value => 'Rule');
     my $quant_const = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $symbol = $factory->make('MakeSymbol',
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $name_const,
         quantifier => $quant_const,
@@ -188,7 +190,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'Element returns symbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), '+', 'Element has + quantifier');
 }
 
@@ -198,13 +200,15 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $elem1 = $factory->make('MakeSymbol',
+    my $elem1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $factory->make('Constant', const_type => 'string', value => 'Atom'),
         quantifier => $no_quant,
     );
 
-    my $elem2 = $factory->make('MakeSymbol',
+    my $elem2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $factory->make('Constant', const_type => 'string', value => 'Quantifier'),
         quantifier => $no_quant,
@@ -234,7 +238,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Sequence($seq_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeExpression', 'Sequence creates MakeExpression');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Expression', 'Sequence creates MakeExpression');
     my $elements = $result->inputs()->[0];
     is(scalar($elements->@*), 2, 'Sequence has 2 elements');
     is($elements->[0]->inputs()->[1]->value(), 'Atom', 'first element is Atom');
@@ -247,23 +251,27 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $sym1 = $factory->make('MakeSymbol',
+    my $sym1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $factory->make('Constant', const_type => 'string', value => 'Identifier'),
         quantifier => $no_quant,
     );
 
-    my $expr1 = $factory->make('MakeExpression',
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$sym1],
     );
 
-    my $sym2 = $factory->make('MakeSymbol',
+    my $sym2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $factory->make('Constant', const_type => 'string', value => 'InlineRegex'),
         quantifier => $no_quant,
     );
 
-    my $expr2 = $factory->make('MakeExpression',
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$sym2],
     );
 
@@ -293,8 +301,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     ok(ref($result) eq 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 2, 'Alternatives has 2 expressions');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'first alternative is MakeExpression');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeExpression', 'second alternative is MakeExpression');
+    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[0]->class(), 'Expression', 'first alternative is MakeExpression');
+    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[1]->class(), 'Expression', 'second alternative is MakeExpression');
 }
 
 # Test 10: Rule builds MakeRule from name and alternatives
@@ -312,23 +320,27 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
-    my $sym1 = $factory->make('MakeSymbol',
+    my $sym1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $factory->make('Constant', const_type => 'string', value => 'Identifier'),
         quantifier => $no_quant,
     );
 
-    my $expr1 = $factory->make('MakeExpression',
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$sym1],
     );
 
-    my $sym2 = $factory->make('MakeSymbol',
+    my $sym2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $factory->make('Constant', const_type => 'string', value => 'InlineRegex'),
         quantifier => $no_quant,
     );
 
-    my $expr2 = $factory->make('MakeExpression',
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression',
         elements => [$sym2],
     );
 
@@ -359,7 +371,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Rule($rule_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'Rule creates MakeRule');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Rule', 'Rule creates MakeRule');
     is($result->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
 
     my $expressions = $result->inputs()->[1];
@@ -375,13 +387,16 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     # Rule 1: Atom ::= Identifier
     my $rule1_name = $factory->make('Constant', const_type => 'string', value => 'Atom');
-    my $sym1 = $factory->make('MakeSymbol',
+    my $sym1 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $type_const,
         value => $factory->make('Constant', const_type => 'string', value => 'Identifier'),
         quantifier => $no_quant,
     );
-    my $expr1 = $factory->make('MakeExpression', elements => [$sym1]);
-    my $rule1 = $factory->make('MakeRule',
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression', elements => [$sym1]);
+    my $rule1 = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule1_name,
         expressions => [$expr1],
     );
@@ -389,13 +404,16 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     # Rule 2: Quantifier ::= /\*/
     my $rule2_name = $factory->make('Constant', const_type => 'string', value => 'Quantifier');
     my $term_type = $factory->make('Constant', const_type => 'enum', value => 'terminal');
-    my $sym2 = $factory->make('MakeSymbol',
+    my $sym2 = $factory->make('Constructor',
+        class => 'Symbol',
         type => $term_type,
         value => $factory->make('Constant', const_type => 'string', value => '\\*'),
         quantifier => $no_quant,
     );
-    my $expr2 = $factory->make('MakeExpression', elements => [$sym2]);
-    my $rule2 = $factory->make('MakeRule',
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression', elements => [$sym2]);
+    my $rule2 = $factory->make('Constructor',
+        class => 'Rule',
         name => $rule2_name,
         expressions => [$expr2],
     );
@@ -434,8 +452,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     ok(ref($result) eq 'ARRAY', 'Grammar returns arrayref');
     is(scalar($result->@*), 2, 'Grammar has 2 rules');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::MakeRule', 'first rule is MakeRule');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::MakeRule', 'second rule is MakeRule');
+    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[0]->class(), 'Rule', 'first rule is MakeRule');
+    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[1]->class(), 'Rule', 'second rule is MakeRule');
     is($result->[0]->inputs()->[0]->value(), 'Atom', 'first rule is Atom');
     is($result->[1]->inputs()->[0]->value(), 'Quantifier', 'second rule is Quantifier');
 }
@@ -569,7 +587,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $rule_ir = $actions->Rule($rule_ctx);
 
     # Verify the complete rule
-    isa_ok($rule_ir, 'Chalk::Bootstrap::IR::Node::MakeRule', 'complete rule is MakeRule');
+    isa_ok($rule_ir, 'Chalk::Bootstrap::IR::Node::Constructor'); is($rule_ir->class(), 'Rule', 'complete rule is MakeRule');
     is($rule_ir->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
 
     my $exprs = $rule_ir->inputs()->[1];
