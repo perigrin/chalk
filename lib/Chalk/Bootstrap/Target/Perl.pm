@@ -64,6 +64,40 @@ PREAMBLE
         return $code;
     }
 
+    # Emit Perl source for a Constructor:Expression IR node (one alternative)
+    method _emit_expression($expr_node) {
+        my $elements = $expr_node->inputs()->[0];
+        my @symbol_codes;
+        for my $sym ($elements->@*) {
+            push @symbol_codes, $self->_emit_symbol($sym);
+        }
+
+        return "[\n" . join(",\n", map { "                $_ " } @symbol_codes) . ",\n            ]";
+    }
+
+    # Emit Perl source for a Constructor:Rule IR node
+    method _emit_rule($rule_node) {
+        my $name = $rule_node->inputs()->[0]->value();
+        my $expressions = $rule_node->inputs()->[1];
+
+        my @expr_codes;
+        for my $expr ($expressions->@*) {
+            push @expr_codes, $self->_emit_expression($expr);
+        }
+
+        my $exprs_str;
+        if (scalar @expr_codes == 1) {
+            $exprs_str = "[$expr_codes[0]]";
+        } else {
+            $exprs_str = "[\n            " . join(",\n            ", @expr_codes) . ",\n        ]";
+        }
+
+        return "        push \@rules, Chalk::Grammar::Rule->new(\n"
+             . "            name => '$name',\n"
+             . "            expressions => $exprs_str,\n"
+             . "        );\n";
+    }
+
     # Escape a string for embedding in a single-quoted Perl string literal
     method _escape_single_quote($str) {
         $str =~ s/\\/\\\\/g;   # \ -> \\

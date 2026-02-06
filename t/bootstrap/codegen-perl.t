@@ -93,4 +93,75 @@ sub make_symbol {
     like($code, qr/value => '::='/, 'simple terminal value preserved after stripping');
 }
 
+# === Step 4: Expression Emission ===
+
+# Helper: build a Constructor:Expression IR node from symbols
+sub make_expression {
+    my (@symbols) = @_;
+    return $factory->make('Constructor',
+        class => 'Expression',
+        elements => \@symbols,
+    );
+}
+
+# Test: Single-element expression
+{
+    my $sym = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $code = $target->_emit_expression($expr);
+    like($code, qr/\[/, 'expression starts with arrayref bracket');
+    like($code, qr/Chalk::Grammar::Symbol->new/, 'expression contains symbol constructor');
+    like($code, qr/\]/, 'expression ends with arrayref bracket');
+}
+
+# Test: Multi-element expression
+{
+    my $sym1 = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $sym2 = make_symbol(type => 'terminal', value => '/::=/', quantifier => undef);
+    my $sym3 = make_symbol(type => 'reference', value => 'Alternatives', quantifier => undef);
+    my $expr = make_expression($sym1, $sym2, $sym3);
+    my $code = $target->_emit_expression($expr);
+    # Should contain all 3 symbols separated by commas
+    my @matches = ($code =~ /Chalk::Grammar::Symbol->new/g);
+    is(scalar @matches, 3, 'multi-element expression has 3 symbols');
+}
+
+# === Step 5: Rule Emission ===
+
+# Helper: build a Constructor:Rule IR node
+sub make_rule {
+    my ($name, @expressions) = @_;
+    my $name_node = $factory->make('Constant', const_type => 'string', value => $name);
+    return $factory->make('Constructor',
+        class => 'Rule',
+        name => $name_node,
+        expressions => \@expressions,
+    );
+}
+
+# Test: Single-alternative rule
+{
+    my $sym = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $rule = make_rule('Identifier', $expr);
+    my $code = $target->_emit_rule($rule);
+    like($code, qr/push \@rules/, 'rule starts with push');
+    like($code, qr/Chalk::Grammar::Rule->new/, 'rule uses Rule constructor');
+    like($code, qr/name => 'Identifier'/, 'rule name is correct');
+    like($code, qr/expressions => \[/, 'rule has expressions arrayref');
+}
+
+# Test: Multi-alternative rule
+{
+    my $sym1 = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $sym2 = make_symbol(type => 'reference', value => 'InlineRegex', quantifier => undef);
+    my $expr1 = make_expression($sym1);
+    my $expr2 = make_expression($sym2);
+    my $rule = make_rule('Atom', $expr1, $expr2);
+    my $code = $target->_emit_rule($rule);
+    # Should have 2 expression arrays (alternatives)
+    my @expr_matches = ($code =~ /\[[\s\n]*Chalk::Grammar::Symbol/g);
+    is(scalar @expr_matches, 2, 'multi-alternative rule has 2 expression arrays');
+}
+
 done_testing();
