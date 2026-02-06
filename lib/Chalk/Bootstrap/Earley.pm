@@ -173,16 +173,16 @@ class Chalk::Bootstrap::Earley {
                 $merged_value,
             );
             $chart->[$end_pos]->{$key} = [$merged_item, $alt_idx];
-            # If zero-width match not at final position, add to current agenda for immediate processing
-            # (Don't add at final position to prevent infinite loops)
-            if ($end_pos == $pos && $pos < $n) {
+            # If zero-width match, add to current agenda for immediate processing
+            # (The $processed hash prevents infinite loops from repeated zero-width matches)
+            if ($end_pos == $pos) {
                 push $agenda->@*, [$merged_item, $alt_idx];
             }
         } else {
             $chart->[$end_pos]->{$key} = [$new_item, $alt_idx];
-            # If zero-width match not at final position, add to current agenda for immediate processing
-            # (Don't add at final position to prevent infinite loops)
-            if ($end_pos == $pos && $pos < $n) {
+            # If zero-width match, add to current agenda for immediate processing
+            # (The $processed hash prevents infinite loops from repeated zero-width matches)
+            if ($end_pos == $pos) {
                 push $agenda->@*, [$new_item, $alt_idx];
             }
         }

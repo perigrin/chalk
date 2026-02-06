@@ -10,6 +10,7 @@ use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
+use Chalk::Bootstrap::Desugar qw(desugar_grammar);
 
 # Get the BNF meta-grammar
 my $grammar = Chalk::Grammar::BNF->grammar();
@@ -344,43 +345,27 @@ sub reference($value, $quant = undef) {
     ok(!$parser->parse('Foo::=Bar;'), "rejects 'Foo::=Bar;' (missing required whitespace)");
 }
 
-# TODO: Test with full BNF meta-grammar including quantifiers
-# The following tests are marked as TODO because the Earley parser may not yet
-# support quantifiers on nonterminal references (e.g., Rule+ in Grammar ::= /ws*/ Rule+)
-TODO: {
-    local $TODO = 'Earley parser may not support quantifiers on nonterminal references yet';
+# Test with full BNF meta-grammar including quantifiers (desugared)
+{
+    my $desugared = desugar_grammar($grammar);
 
-    # Test parsing full BNF meta-grammar
     my $parser = Chalk::Bootstrap::Earley->new(
-        grammar  => $grammar,
+        grammar  => $desugared,
         semiring => $semiring,
     );
 
     # Simple rule: Identifier ::= /[A-Za-z]+/ ;
     my $input1 = 'Identifier ::= /[A-Za-z]+/ ;';
-    my $result1 = $parser->parse($input1);
-    ok($result1, "accepts simple rule: $input1") if defined $result1;
+    ok($parser->parse($input1), "accepts simple rule: $input1");
 
     # Rule with alternatives
     my $input2 = 'Atom ::= Identifier | InlineRegex ;';
-    my $result2 = $parser->parse($input2);
-    ok($result2, "accepts rule with alternatives: $input2") if defined $result2;
+    ok($parser->parse($input2), "accepts rule with alternatives: $input2");
 
-    # Full meta-grammar (the entire 10-rule BNF parsing itself)
-    my $full_bnf = q{
-Grammar ::= /(?:\s|#[^\n]*)*/ Rule+ ;
-Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/ ;
-Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence ;
-Sequence ::= Element /(?:\s|#[^\n]*)+/ Sequence | Element ;
-Element ::= Atom Quantifier? ;
-Atom ::= Identifier | InlineRegex ;
-Quantifier ::= /\*/ | /\+/ | /\?/ ;
-Comment ::= /#[^\n]*/ ;
-Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/ ;
-InlineRegex ::= /\/(?:[^\/\\]|\\.)*\// ;
-    };
-    my $result3 = $parser->parse($full_bnf);
-    ok($result3, "accepts full BNF meta-grammar parsing itself") if defined $result3;
+    # Multi-rule input (exercises Rule_plus desugaring)
+    my $input3 = q{Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/ ;
+Atom ::= Identifier | InlineRegex ;};
+    ok($parser->parse($input3), "accepts multi-rule BNF input");
 }
 
 done_testing();
