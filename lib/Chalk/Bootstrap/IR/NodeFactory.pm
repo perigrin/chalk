@@ -1,0 +1,117 @@
+# ABOUTME: Singleton factory for creating IR nodes with hash consing deduplication
+# ABOUTME: Ensures identical computation graphs share node instances
+use 5.42.0;
+use utf8;
+use feature 'class';
+no warnings 'experimental::class';
+
+class Chalk::Bootstrap::IR::NodeFactory {
+    use Scalar::Util qw(refaddr);
+
+    # Singleton instance
+    my $instance;
+
+    # Cache mapping hash keys to nodes for deduplication
+    field $node_cache = {};
+
+    # Define input parameter names for each operation type (in order)
+    my %INPUT_SPECS = (
+        Start => [],
+        Return => ['value'],
+        Constant => [],  # Constant has attributes, not inputs
+        MakeSymbol => ['type', 'value', 'quantifier'],
+        MakeExpression => ['elements'],
+        MakeRule => ['name', 'expressions'],
+    );
+
+    # Get singleton instance
+    sub instance {
+        $instance //= Chalk::Bootstrap::IR::NodeFactory->new;
+        return $instance;
+    }
+
+    # Create or retrieve a node
+    # $operation: string like 'Constant', 'MakeSymbol', etc.
+    # %params: named parameters (inputs and attributes)
+    method make($operation, %params) {
+        # Get input specification for this operation
+        my $input_names = $INPUT_SPECS{$operation}
+            or die "Unknown operation: $operation";
+
+        # Separate inputs from attributes
+        my @inputs;
+        for my $name ($input_names->@*) {
+            push @inputs, delete $params{$name};
+        }
+        my %attributes = %params;
+
+        # Generate hash key for deduplication
+        my $key = $self->_make_key($operation, \@inputs, \%attributes);
+
+        # Return cached node if exists
+        return $node_cache->{$key} if exists $node_cache->{$key};
+
+        # Create new node
+        my $node_class = "Chalk::Bootstrap::IR::Node::$operation";
+        eval "require $node_class" or die $@;
+
+        my $node = $node_class->new(
+            id => $key,
+            inputs => \@inputs,
+            %attributes,
+        );
+
+        # Register this node as a consumer of its inputs
+        for my $input (@inputs) {
+            if (!defined $input) {
+                next;
+            }
+            elsif (ref($input) eq 'ARRAY') {
+                # Handle array of nodes
+                for my $element ($input->@*) {
+                    $element->add_consumer($node) if defined $element;
+                }
+            }
+            else {
+                # Single node
+                $input->add_consumer($node);
+            }
+        }
+
+        # Cache and return
+        $node_cache->{$key} = $node;
+        return $node;
+    }
+
+    # Generate deterministic hash key from operation, inputs, and attributes
+    method _make_key($operation, $inputs, $attributes) {
+        my @parts = ($operation);
+
+        # Add input IDs in source order
+        if ($inputs) {
+            for my $input ($inputs->@*) {
+                if (!defined $input) {
+                    push @parts, 'undef';
+                }
+                elsif (ref($input) eq 'ARRAY') {
+                    # Handle array of nodes (e.g., elements in MakeExpression)
+                    my @ids = map { defined($_) ? $_->id : 'undef' } $input->@*;
+                    push @parts, '[' . join(',', @ids) . ']';
+                }
+                else {
+                    # Single node
+                    push @parts, $input->id;
+                }
+            }
+        }
+
+        # Add attributes in alphabetical order
+        for my $key (sort keys %$attributes) {
+            my $value = $attributes->{$key};
+            my $value_str = defined($value) ? $value : 'undef';
+            push @parts, "$key=$value_str";
+        }
+
+        return join('|', @parts);
+    }
+}
