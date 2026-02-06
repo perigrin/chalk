@@ -43,14 +43,17 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         expressions => $expression,
     );
 
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule->class(), 'Rule', 'created MakeRule node');
+    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule');
+    is($rule->class(), 'Rule', 'created MakeRule node');
     is($rule->inputs()->[0]->value(), 'Identifier', 'rule name is Identifier');
 
     my $expr = $rule->inputs()->[1];
-    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Expression'); is($expr->class(), 'Expression', 'rule has MakeExpression');
+    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Expression');
+    is($expr->class(), 'Expression', 'rule has MakeExpression');
 
     my $sym = $expr->inputs()->[0][0];
-    isa_ok($sym, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Symbol'); is($sym->class(), 'Symbol', 'expression has MakeSymbol');
+    isa_ok($sym, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Symbol');
+    is($sym->class(), 'Symbol', 'expression has MakeSymbol');
     is($sym->inputs()->[0]->value(), 'terminal', 'symbol type is terminal');
     is($sym->inputs()->[1]->value(), '[A-Za-z_][A-Za-z_0-9]*', 'symbol value is pattern');
 }
@@ -105,7 +108,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         expressions => $expr1,
     );
 
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule->class(), 'Rule', 'created Atom rule');
+    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule');
+    is($rule->class(), 'Rule', 'created Atom rule');
     is($rule->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
 }
 
@@ -136,7 +140,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         expressions => $expression,
     );
 
-    isa_ok($grammar_rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($grammar_rule->class(), 'Rule', 'created Grammar rule');
+    isa_ok($grammar_rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule');
+    is($grammar_rule->class(), 'Rule', 'created Grammar rule');
 
     my $sym = $grammar_rule->inputs()->[1]->inputs()->[0][0];
     is($sym->inputs()->[2]->value(), '+', 'symbol has + quantifier');
@@ -172,7 +177,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         elements => [$atom_sym, $quant_sym],
     );
 
-    isa_ok($expression, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Expression'); is($expression->class(), 'Expression', 'created sequence expression');
+    isa_ok($expression, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Expression');
+    is($expression->class(), 'Expression', 'created sequence expression');
     my $elements = $expression->inputs()->[0];
     is(scalar($elements->@*), 2, 'expression has 2 elements');
     is($elements->[0]->inputs()->[1]->value(), 'Atom', 'first element is Atom');
@@ -302,8 +308,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     # Verify structure
-    isa_ok($rule1, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule1->class(), 'Rule', 'created Rule1');
-    isa_ok($rule2, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule2->class(), 'Rule', 'created Rule2');
+    isa_ok($rule1, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule');
+    is($rule1->class(), 'Rule', 'created Rule1');
+    isa_ok($rule2, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule');
+    is($rule2->class(), 'Rule', 'created Rule2');
 
     is($rule1->inputs()->[0]->value(), 'Rule1', 'Rule1 name correct');
     is($rule2->inputs()->[0]->value(), 'Rule2', 'Rule2 name correct');
@@ -459,7 +467,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         expressions => $expression,
     );
 
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule'); is($rule->class(), 'Rule', 'created complex Rule');
+    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor:Rule');
+    is($rule->class(), 'Rule', 'created complex Rule');
     my $elements = $rule->inputs()->[1]->inputs()->[0];
     is(scalar($elements->@*), 8, 'Rule has 8 symbols in sequence');
 }

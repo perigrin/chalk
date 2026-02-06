@@ -85,7 +85,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Atom creates MakeSymbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->class(), 'Symbol', 'Atom creates Symbol');
     is($result->inputs()->[0]->value(), 'reference', 'Atom with Identifier is reference type');
     is($result->inputs()->[1]->value(), 'Element', 'Atom value from Identifier');
     ok(!defined $result->inputs()->[2]->value(), 'Atom has no quantifier initially');
@@ -110,7 +111,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Atom($atom_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Atom creates MakeSymbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->class(), 'Symbol', 'Atom creates Symbol');
     is($result->inputs()->[0]->value(), 'terminal', 'Atom with InlineRegex is terminal type');
     is($result->inputs()->[1]->value(), '/[A-Z]+/', 'Atom value from InlineRegex');
 }
@@ -146,7 +148,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Element returns symbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->class(), 'Symbol', 'Element returns symbol');
     ok(!defined $result->inputs()->[2]->value(), 'Element has no quantifier');
 }
 
@@ -190,11 +193,12 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Element($elem_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Symbol', 'Element returns symbol');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->class(), 'Symbol', 'Element returns symbol');
     is($result->inputs()->[2]->value(), '+', 'Element has + quantifier');
 }
 
-# Test 8: Sequence collects multiple Elements into MakeExpression
+# Test 8: Sequence collects multiple Elements into Expression
 {
     # Create two Element symbols
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
@@ -238,7 +242,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Sequence($seq_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Expression', 'Sequence creates MakeExpression');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->class(), 'Expression', 'Sequence creates Expression');
     my $elements = $result->inputs()->[0];
     is(scalar($elements->@*), 2, 'Sequence has 2 elements');
     is($elements->[0]->inputs()->[1]->value(), 'Atom', 'first element is Atom');
@@ -301,11 +306,13 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     ok(ref($result) eq 'ARRAY', 'Alternatives returns arrayref');
     is(scalar($result->@*), 2, 'Alternatives has 2 expressions');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[0]->class(), 'Expression', 'first alternative is MakeExpression');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[1]->class(), 'Expression', 'second alternative is MakeExpression');
+    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->[0]->class(), 'Expression', 'first alternative is Expression');
+    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->[1]->class(), 'Expression', 'second alternative is Expression');
 }
 
-# Test 10: Rule builds MakeRule from name and alternatives
+# Test 10: Rule builds Rule from name and alternatives
 {
     # Create rule name
     my $name_const = $factory->make('Constant', const_type => 'string', value => 'Atom');
@@ -371,7 +378,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     my $result = $actions->Rule($rule_ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->class(), 'Rule', 'Rule creates MakeRule');
+    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->class(), 'Rule', 'Rule creates Rule');
     is($result->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
 
     my $expressions = $result->inputs()->[1];
@@ -381,7 +389,7 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
 # Test 11: Grammar collects multiple Rules into arrayref
 {
-    # Create two MakeRule nodes
+    # Create two Rule nodes
     my $type_const = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $no_quant = $factory->make('Constant', const_type => 'string', value => undef);
 
@@ -452,8 +460,10 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
 
     ok(ref($result) eq 'ARRAY', 'Grammar returns arrayref');
     is(scalar($result->@*), 2, 'Grammar has 2 rules');
-    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[0]->class(), 'Rule', 'first rule is MakeRule');
-    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor'); is($result->[1]->class(), 'Rule', 'second rule is MakeRule');
+    isa_ok($result->[0], 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->[0]->class(), 'Rule', 'first rule is Rule');
+    isa_ok($result->[1], 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($result->[1]->class(), 'Rule', 'second rule is Rule');
     is($result->[0]->inputs()->[0]->value(), 'Atom', 'first rule is Atom');
     is($result->[1]->inputs()->[0]->value(), 'Quantifier', 'second rule is Quantifier');
 }
@@ -587,7 +597,8 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     my $rule_ir = $actions->Rule($rule_ctx);
 
     # Verify the complete rule
-    isa_ok($rule_ir, 'Chalk::Bootstrap::IR::Node::Constructor'); is($rule_ir->class(), 'Rule', 'complete rule is MakeRule');
+    isa_ok($rule_ir, 'Chalk::Bootstrap::IR::Node::Constructor');
+    is($rule_ir->class(), 'Rule', 'complete rule is Rule');
     is($rule_ir->inputs()->[0]->value(), 'Atom', 'rule name is Atom');
 
     my $exprs = $rule_ir->inputs()->[1];
