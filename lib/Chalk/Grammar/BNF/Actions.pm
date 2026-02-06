@@ -3,7 +3,7 @@
 use 5.42.0;
 use utf8;
 
-package Chalk::Bootstrap::Actions;
+package Chalk::Grammar::BNF::Actions;
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Exporter 'import';

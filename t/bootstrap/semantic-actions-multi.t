@@ -5,7 +5,7 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::Actions;
+use Chalk::Grammar::BNF::Actions;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
 
@@ -47,7 +47,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alternatives',
     );
 
-    my $result = Chalk::Bootstrap::Actions::action_Alternatives($alts_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::action_Alternatives($alts_ctx);
 
     # BUG 2: Currently returns only first expression, should return arrayref of all 3
     ok(ref($result) eq 'ARRAY', 'action_Alternatives returns arrayref');
@@ -88,7 +88,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Rule',
     );
 
-    my $result = Chalk::Bootstrap::Actions::action_Rule($rule_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::action_Rule($rule_ctx);
 
     # BUG 3: Currently checks for single MakeExpression, should accept arrayref
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::MakeRule', 'action_Rule creates MakeRule');
@@ -142,7 +142,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Grammar',
     );
 
-    my $result = Chalk::Bootstrap::Actions::action_Grammar($grammar_ctx);
+    my $result = Chalk::Grammar::BNF::Actions::action_Grammar($grammar_ctx);
 
     # BUG 1: Currently returns only first rule, should return arrayref of all 3
     ok(ref($result) eq 'ARRAY', 'action_Grammar returns arrayref');

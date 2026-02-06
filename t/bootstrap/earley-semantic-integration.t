@@ -9,7 +9,7 @@ use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Composite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::Actions;
+use Chalk::Grammar::BNF::Actions;
 use Chalk::Bootstrap::IR::NodeFactory;
 
 # Reset factory for clean test environment
@@ -121,7 +121,7 @@ package TestRule {
         rule => 'Identifier',
     );
 
-    my $result = Chalk::Bootstrap::Actions::action_Identifier($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::action_Identifier($ctx);
 
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'semantic action returns IR node');
     is($result->value(), 'TestId', 'semantic action preserves value');

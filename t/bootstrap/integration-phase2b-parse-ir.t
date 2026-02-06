@@ -9,7 +9,7 @@ use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Composite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Chalk::Bootstrap::Actions;
+use Chalk::Grammar::BNF::Actions;
 use Chalk::Bootstrap::Desugar qw(desugar_grammar);
 use Chalk::Grammar::BNF;
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -24,7 +24,7 @@ sub build_parser {
 
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    $sem_sr->register_actions(Chalk::Bootstrap::Actions::action_registry());
+    $sem_sr->register_actions(Chalk::Grammar::BNF::Actions::action_registry());
 
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
         boolean  => $bool_sr,

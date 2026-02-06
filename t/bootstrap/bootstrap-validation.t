@@ -64,7 +64,7 @@ use lib 'lib';
 {
     use_ok('Chalk::Bootstrap::Semiring::Composite');
     use_ok('Chalk::Bootstrap::Semiring::SemanticAction');
-    use_ok('Chalk::Bootstrap::Actions');
+    use_ok('Chalk::Grammar::BNF::Actions');
     use_ok('Chalk::Bootstrap::Context');
 
     # Test calling semantic action directly with constructed Context
@@ -75,7 +75,7 @@ use lib 'lib';
         rule => 'Identifier',
     );
 
-    my $result = Chalk::Bootstrap::Actions::action_Identifier($ctx);
+    my $result = Chalk::Grammar::BNF::Actions::action_Identifier($ctx);
     isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'Phase 2b: action_Identifier returns IR node');
     is($result->value(), 'TestIdentifier', 'Phase 2b: action preserves identifier value');
 
