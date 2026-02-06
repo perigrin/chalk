@@ -54,7 +54,7 @@ perl -Ilib t/bootstrap/*.t             # All bootstrap tests
    - Progressive testing: unambiguous → ambiguous → full grammar
 
 2. **IR Layer** (Phases 2a-2b): Sea of Nodes intermediate representation
-   - Hash-consed immutable graph nodes (6 types: Start, Return, Constant, MakeSymbol, MakeExpression, MakeRule)
+   - Hash-consed immutable graph nodes (4 types: Start, Return, Constant, Constructor)
    - Use-def chains for optimization passes
    - Semantic actions thread through comonad Context (extract/extend/duplicate operations)
 
@@ -80,7 +80,7 @@ Graph-based IR with explicit data-flow:
 - **Hash consing**: Identical nodes share single object (key = operation + input IDs)
 - **Immutable**: Nodes never mutated after construction
 - **Use-def chains**: Bidirectional producer/consumer tracking
-- **6 node types**: Start (entry), Return (exit), Constant (literals), MakeSymbol/MakeExpression/MakeRule (grammar construction)
+- **4 node types**: Start (entry), Return (exit), Constant (literals), Constructor (grammar construction — parameterized by class: Symbol, Expression, Rule)
 
 See `docs/ir-node-types.md` for complete taxonomy.
 
@@ -157,7 +157,7 @@ Deliverables (all implemented):
 Deliverables (all implemented):
 - ✅ `lib/Chalk/Bootstrap/IR/NodeFactory.pm` - Hash consing factory
 - ✅ `lib/Chalk/Bootstrap/IR/Node.pm` - Base class with use-def chains
-- ✅ `lib/Chalk/Bootstrap/IR/Node/*.pm` - 6 node subclasses
+- ✅ `lib/Chalk/Bootstrap/IR/Node/*.pm` - 4 node subclasses (Start, Return, Constant, Constructor)
 - ✅ Tests: `t/bootstrap/ir-*.t` (hash consing, use-def chains)
 
 ### Phase 2b - Semantic Actions: Partially Complete ⚠️

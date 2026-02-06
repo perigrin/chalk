@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Chalk::Bootstrap IR uses a "Sea of Nodes" representation where the program is a directed graph of operations with explicit data-flow edges. This document specifies the 6 node types needed for grammar compilation.
+The Chalk::Bootstrap IR uses a "Sea of Nodes" representation where the program is a directed graph of operations with explicit data-flow edges. This document specifies the 4 node types needed for grammar compilation.
 
 ## Design Principles
 
@@ -26,7 +26,7 @@ The Chalk::Bootstrap IR uses a "Sea of Nodes" representation where the program i
 
 **Example**:
 ```
-Start → MakeRule("Grammar", ...)
+Start → Constructor(class='Rule', name="Grammar", ...)
 ```
 
 ### 2. Return
@@ -40,11 +40,11 @@ Start → MakeRule("Grammar", ...)
 **Outputs**: None (sink node)
 
 **Attributes**:
-- `value`: The IR node being returned (typically a `MakeRule` or list of rules)
+- `value`: The IR node being returned (typically a `Constructor(class='Rule')` or list of rules)
 
 **Example**:
 ```
-MakeRule(...) → Return(value=...)
+Constructor(class='Rule', ...) → Return(value=...)
 ```
 
 ### 3. Constant
@@ -67,23 +67,26 @@ Constant(type='enum', value='reference')
 
 **Usage**: Rule names, symbol types, quantifier values, regex patterns.
 
-### 4. MakeSymbol
+### 4. Constructor
 
-**Purpose**: Constructs a `Chalk::Grammar::Symbol` object.
+**Purpose**: Constructs grammar objects (Symbol, Expression, or Rule) with a parameterized class field.
 
-**Inputs**:
+**Attributes**:
+- `class`: One of 'Symbol', 'Expression', or 'Rule' (determines which type to construct)
+
+**Inputs** (vary by class):
+
+#### Constructor(class='Symbol')
 - `type`: Constant ('reference' or 'terminal')
 - `value`: Constant (string)
 - `quantifier`: Optional Constant ('*', '+', '?', or undef)
 
-**Outputs**: Symbol object (consumed by MakeExpression)
-
-**Attributes**: None (data comes from inputs)
+**Outputs**: Symbol object (consumed by Constructor(class='Expression'))
 
 **Example**:
 ```
 Constant('reference') →┐
-Constant('Atom')       →├→ MakeSymbol → (output)
+Constant('Atom')       →├→ Constructor(class='Symbol') → (output)
 Constant('+')          →┘
 ```
 
@@ -96,22 +99,16 @@ Chalk::Grammar::Symbol->new(
 )
 ```
 
-### 5. MakeExpression
+#### Constructor(class='Expression')
+- `elements`: List of Constructor(class='Symbol') nodes (ordered)
 
-**Purpose**: Constructs a sequence of symbols (one alternative in a rule).
-
-**Inputs**:
-- `elements`: List of MakeSymbol nodes (ordered)
-
-**Outputs**: Expression (array of Symbols, consumed by MakeRule)
-
-**Attributes**: None (data comes from inputs)
+**Outputs**: Expression (array of Symbols, consumed by Constructor(class='Rule'))
 
 **Example**:
 ```
-MakeSymbol(Atom) →┐
-MakeSymbol(Quantifier) →├→ MakeExpression → (output)
-                     →┘
+Constructor(class='Symbol', Atom) →┐
+Constructor(class='Symbol', Quantifier) →├→ Constructor(class='Expression') → (output)
+                                      →┘
 ```
 
 **Generated code**:
@@ -119,23 +116,17 @@ MakeSymbol(Quantifier) →├→ MakeExpression → (output)
 [$atom_symbol, $quantifier_symbol]
 ```
 
-### 6. MakeRule
-
-**Purpose**: Constructs a `Chalk::Grammar::Rule` object.
-
-**Inputs**:
+#### Constructor(class='Rule')
 - `name`: Constant (string)
-- `expressions`: List of MakeExpression nodes (one per alternative)
+- `expressions`: List of Constructor(class='Expression') nodes (one per alternative)
 
 **Outputs**: Rule object (consumed by Return or collected into Grammar)
-
-**Attributes**: None (data comes from inputs)
 
 **Example**:
 ```
 Constant('Element') →┐
-MakeExpression(...) →├→ MakeRule → (output)
-MakeExpression(...) →┘
+Constructor(class='Expression', ...) →├→ Constructor(class='Rule') → (output)
+Constructor(class='Expression', ...) →┘
 ```
 
 **Generated code**:
@@ -155,13 +146,13 @@ Start
   ↓
 Constant('Element') ────────────┐
                                 ↓
-Constant('reference') ──┐     MakeRule
+Constant('reference') ──┐     Constructor(class='Rule')
 Constant('Atom')       ──┤       ↓
-Constant(undef)         ─┴→ MakeSymbol ──┐
+Constant(undef)         ─┴→ Constructor(class='Symbol') ──┐
                                           ↓
-Constant('reference')  ──┐            MakeExpression
+Constant('reference')  ──┐            Constructor(class='Expression')
 Constant('Quantifier') ──┤               ↓
-Constant('?')           ─┴→ MakeSymbol ──┘
+Constant('?')           ─┴→ Constructor(class='Symbol') ──┘
                                           ↓
                                        Return
 ```
@@ -176,9 +167,9 @@ Hash keys are constructed from:
 **Example keys**:
 ```perl
 "Constant|string|Identifier"
-"MakeSymbol|$type_id|$value_id|$quant_id"
-"MakeExpression|$elem1_id|$elem2_id"
-"MakeRule|$name_id|$expr1_id|$expr2_id"
+"Constructor|Symbol|$type_id|$value_id|$quant_id"
+"Constructor|Expression|$elem1_id|$elem2_id"
+"Constructor|Rule|$name_id|$expr1_id|$expr2_id"
 ```
 
 **Ordering**: Input IDs must be in deterministic order (e.g., sorted for commutative operations, or source order for non-commutative).
@@ -213,9 +204,9 @@ $symbol->producers; # [$const, ...]
 ### Variable Naming
 
 - Constants: `$const_<ID>`
-- Symbols: `$sym_<ID>`
-- Expressions: `$expr_<ID>`
-- Rules: `$rule_<ID>`
+- Constructor(class='Symbol'): `$sym_<ID>`
+- Constructor(class='Expression'): `$expr_<ID>`
+- Constructor(class='Rule'): `$rule_<ID>`
 
 Where `<ID>` is the stable content-based node ID.
 
@@ -226,8 +217,8 @@ Hash consing ensures that identical sub-expressions are computed only once:
 ```perl
 # These two symbols share the same type constant
 my $const_type = Constant('reference');
-my $sym1 = MakeSymbol($const_type, ...);
-my $sym2 = MakeSymbol($const_type, ...);
+my $sym1 = Constructor(class='Symbol', type=$const_type, ...);
+my $sym2 = Constructor(class='Symbol', type=$const_type, ...);
 
 # Generated code computes $const_type once:
 my $const_123 = 'reference';
@@ -239,8 +230,8 @@ my $sym_789 = make_symbol($const_123, ...);
 
 ### Peephole Optimizations
 
-- **Constant folding**: MakeSymbol with all constant inputs → pre-compute
-- **Identity elimination**: MakeExpression with single element → unwrap
+- **Constant folding**: Constructor(class='Symbol') with all constant inputs → pre-compute
+- **Identity elimination**: Constructor(class='Expression') with single element → unwrap
 - **Dead code elimination**: Remove nodes unreachable from Return
 
 ### Global Code Motion (GCM)

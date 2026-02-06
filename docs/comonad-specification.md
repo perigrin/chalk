@@ -52,7 +52,7 @@ my $value = $ctx->extract();  # Returns $ir_node
 # Semantic action that combines child IR nodes
 my $action = sub ($ctx) {
     my @child_nodes = map { $_->extract() } $ctx->children();
-    return IR::Node::MakeExpression->new(elements => \@child_nodes);
+    return IR::Node::Constructor->new(class => 'Expression', elements => \@child_nodes);
 };
 
 my $new_ctx = $ctx->extend($action);
@@ -101,15 +101,16 @@ When an Earley completion occurs:
 **Example flow**:
 ```perl
 # Completed rule: Element ::= Atom Quantifier?
-# Child 1 context: focus = IR::MakeSymbol(Atom)
-# Child 2 context: focus = IR::MakeSymbol(Quantifier, quantifier='?')
+# Child 1 context: focus = IR::Constructor(class='Symbol', Atom)
+# Child 2 context: focus = IR::Constructor(class='Symbol', Quantifier, quantifier='?')
 
 my $element_action = sub ($ctx) {
     my @children = map { $_->extract() } $ctx->children();
     my $atom = $children[0];
     my $quant = $children[1];  # May be undef for '?'
 
-    return IR::Node::MakeSymbol->new(
+    return IR::Node::Constructor->new(
+        class      => 'Symbol',
         type       => $atom->type,
         value      => $atom->value,
         quantifier => $quant ? $quant->value : undef,
