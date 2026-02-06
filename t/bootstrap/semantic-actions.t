@@ -188,10 +188,10 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     is($result->inputs()->[2]->value(), '+', 'Element has quantifier');
 }
 
-# Test 8: Alternatives flattens binary Context trees (verifies _collect_children behavior)
+# Test 8: Alternatives flattens binary Context trees (verifies Context->leaves() behavior)
 {
     # Build a binary tree to verify that Alternatives correctly flattens the tree structure.
-    # This tests the internal _collect_children behavior through the public API.
+    # This tests Context->leaves() behavior through the public API.
     my $elem1 = $factory->make('Constant', const_type => 'string', value => 'A');
     my $expr1 = $factory->make('MakeExpression', elements => [$elem1]);
     my $seq1_ctx = Chalk::Bootstrap::Context->new(
@@ -389,10 +389,10 @@ my $actions = Chalk::Grammar::BNF::Actions->new();
     isa_ok($elements->[1], 'Chalk::Bootstrap::IR::Node::MakeSymbol', 'second element is MakeSymbol');
 }
 
-# Test 11: Sequence handles mixed node types (verifies _collect_children filtering)
+# Test 11: Sequence handles mixed node types (verifies Context->leaves() filtering)
 {
     # Sequence should extract only MakeSymbol nodes and ignore other node types.
-    # This tests the class filtering behavior of _collect_children through the public API.
+    # This tests the class filtering behavior of Context->leaves() through the public API.
     my $type = $factory->make('Constant', const_type => 'enum', value => 'reference');
     my $val = $factory->make('Constant', const_type => 'string', value => 'X');
     my $quant = $factory->make('Constant', const_type => 'string', value => undef);
