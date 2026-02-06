@@ -164,6 +164,25 @@ sub make_rule {
     is(scalar @expr_matches, 2, 'multi-alternative rule has 2 expression arrays');
 }
 
+# Test: Rule name with single quote (defense-in-depth escaping test)
+{
+    my $sym = make_symbol(type => 'terminal', value => '/test/', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $rule = make_rule("Test'Rule", $expr);
+    my $code = $target->_emit_rule($rule);
+    like($code, qr/name => 'Test\\'Rule'/, 'rule name with single quote is escaped');
+    unlike($code, qr/name => 'Test'Rule'/, 'rule name single quote is not left unescaped');
+}
+
+# Test: Rule name with backslash (defense-in-depth escaping test)
+{
+    my $sym = make_symbol(type => 'terminal', value => '/test/', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $rule = make_rule('Test\\Rule', $expr);
+    my $code = $target->_emit_rule($rule);
+    like($code, qr/name => 'Test\\\\Rule'/, 'rule name with backslash is escaped (doubled)');
+}
+
 # === Step 6: Full generate() Assembly ===
 
 # Test: generate() with IR rules produces valid Perl

@@ -97,7 +97,7 @@ PREAMBLE
         }
 
         return "        push \@rules, Chalk::Grammar::Rule->new(\n"
-             . "            name => '$name',\n"
+             . "            name => '" . $self->_escape_single_quote($name) . "',\n"
              . "            expressions => $exprs_str,\n"
              . "        );\n";
     }
