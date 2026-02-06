@@ -156,4 +156,83 @@ sub build_mini_rule {
     like($@, qr/requires.*arrayref/i, 'run(undef) dies with useful error');
 }
 
+# ===== Integration tests with full BNF pipeline =====
+
+{
+    use lib 't/bootstrap/lib';
+    use TestPipeline qw(full_pipeline bnf_text);
+    use Chalk::Bootstrap::Target::Perl;
+
+    # Run full pipeline to get IR from the real 10-rule BNF
+    my $ir = full_pipeline();
+    ok(defined($ir), 'full pipeline produces IR');
+    is(scalar($ir->@*), 10, 'IR contains 10 rules');
+
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $count_before = $factory->node_count();
+    ok($count_before > 0, "have nodes before DCE (count=$count_before)");
+
+    # Run DCE
+    my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
+    my $optimized_ir = $dce->run($ir);
+
+    my $count_after = $factory->node_count();
+    ok($count_after <= $count_before,
+        "node count did not increase (before=$count_before, after=$count_after)");
+    is(scalar($optimized_ir->@*), 10, 'optimized IR still has 10 rules');
+
+    # Generate Perl code from optimized IR
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($optimized_ir);
+    ok(defined($generated), 'code generation from optimized IR produces output');
+
+    # Eval generated code
+    eval $generated;
+    is($@, '', 'generated code from optimized IR evals without error');
+
+    # Compare generated grammar structurally to hand-written grammar
+    my $gen_grammar = Chalk::Grammar::BNF::Generated::grammar();
+    my $ref_grammar = Chalk::Grammar::BNF::grammar();
+
+    is(scalar($gen_grammar->@*), scalar($ref_grammar->@*),
+        'optimized output has same number of rules as reference');
+
+    my $all_match = true;
+    for my $i (0 .. $#{$ref_grammar}) {
+        my $gen = $gen_grammar->[$i];
+        my $ref = $ref_grammar->[$i];
+        if ($gen->name() ne $ref->name()) {
+            $all_match = false;
+            diag("Rule name mismatch at index $i: got " . $gen->name() . ", expected " . $ref->name());
+            last;
+        }
+        if ($gen->alternative_count() != $ref->alternative_count()) {
+            $all_match = false;
+            diag("Alt count mismatch at rule " . $ref->name());
+            last;
+        }
+        for my $j (0 .. $#{$ref->expressions()}) {
+            my $gen_alt = $gen->expressions()->[$j];
+            my $ref_alt = $ref->expressions()->[$j];
+            if (scalar($gen_alt->@*) != scalar($ref_alt->@*)) {
+                $all_match = false;
+                diag("Element count mismatch at rule " . $ref->name() . " alt $j");
+                last;
+            }
+            for my $k (0 .. $#{$ref_alt}) {
+                my $gs = $gen_alt->[$k];
+                my $rs = $ref_alt->[$k];
+                if ($gs->type() ne $rs->type()
+                    || $gs->value() ne $rs->value()
+                    || ($gs->quantifier() // '') ne ($rs->quantifier() // '')) {
+                    $all_match = false;
+                    diag("Symbol mismatch at rule " . $ref->name() . " alt $j elem $k");
+                    last;
+                }
+            }
+        }
+    }
+    ok($all_match, 'optimized generated grammar structurally matches hand-written grammar');
+}
+
 done_testing();
