@@ -18,11 +18,9 @@ class Chalk::Bootstrap::Optimizer::DCE :isa(Chalk::Bootstrap::Optimizer::Pass) {
 
         my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-        # Mark: collect all reachable node IDs from roots
+        # Mark: collect all reachable node IDs via iterative worklist
         my %reachable;
-        for my $root ($ir->@*) {
-            $self->_mark($root, \%reachable);
-        }
+        $self->_mark_reachable($ir, \%reachable);
 
         # Sweep: find dead nodes (in cache but not reachable)
         my @dead_ids;
@@ -56,22 +54,23 @@ class Chalk::Bootstrap::Optimizer::DCE :isa(Chalk::Bootstrap::Optimizer::Pass) {
         return $ir;
     }
 
-    # Recursively mark a node and all its inputs as reachable
-    method _mark($node, $reachable) {
-        return unless defined $node;
-        return if $reachable->{$node->id()};
+    # Walk roots and all transitive inputs, collecting reachable node IDs
+    # Uses iterative worklist to avoid stack overflow on deep graphs
+    method _mark_reachable($roots, $reachable) {
+        my @worklist = grep { defined } $roots->@*;
 
-        $reachable->{$node->id()} = true;
+        while (my $node = shift @worklist) {
+            next if $reachable->{$node->id()};
+            $reachable->{$node->id()} = true;
 
-        for my $input ($node->inputs()->@*) {
-            next unless defined $input;
-            if (ref($input) eq 'ARRAY') {
-                for my $element ($input->@*) {
-                    $self->_mark($element, $reachable) if defined $element;
+            for my $input ($node->inputs()->@*) {
+                next unless defined $input;
+                if (ref($input) eq 'ARRAY') {
+                    push @worklist, grep { defined } $input->@*;
                 }
-            }
-            else {
-                $self->_mark($input, $reachable);
+                else {
+                    push @worklist, $input;
+                }
             }
         }
     }

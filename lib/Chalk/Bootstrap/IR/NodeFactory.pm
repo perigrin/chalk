@@ -120,7 +120,12 @@ class Chalk::Bootstrap::IR::NodeFactory {
     }
 
     # Remove a node from the cache by its ID
+    # Dies if the node still has consumers to protect hash consing invariant
     method remove_node($id) {
+        my $node = $node_cache->{$id};
+        if (defined $node && scalar($node->consumers()->@*) > 0) {
+            die "Cannot remove node '$id' that still has consumers";
+        }
         delete $node_cache->{$id};
         return;
     }

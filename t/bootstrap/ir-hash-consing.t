@@ -235,4 +235,38 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     ok(!defined($gone), 'get_node() returns undef after remove');
 }
 
+# Test 12: remove_node() on non-existent ID is a no-op
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    $factory->make('Constant', const_type => 'string', value => 'survivor');
+    is($factory->node_count(), 1, 'count is 1 before removing missing ID');
+    $factory->remove_node('nonexistent_id_12345');
+    is($factory->node_count(), 1, 'count unchanged after removing non-existent ID');
+}
+
+# Test 13: remove_node() dies if node still has consumers
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    my $type = $factory->make('Constant', const_type => 'string', value => 'terminal');
+    my $val = $factory->make('Constant', const_type => 'string', value => '/x/');
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
+        type => $type,
+        value => $val,
+        quantifier => undef,
+    );
+
+    # $type has $symbol as a consumer, so removing it should die
+    eval { $factory->remove_node($type->id()) };
+    like($@, qr/still has consumers/, 'remove_node() dies when node has consumers');
+
+    # $symbol has no consumers, so removing it should succeed
+    eval { $factory->remove_node($symbol->id()) };
+    is($@, '', 'remove_node() succeeds when node has no consumers');
+}
+
 done_testing;

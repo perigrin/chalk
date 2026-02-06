@@ -102,6 +102,14 @@ use_ok('Chalk::Bootstrap::Optimizer');
         'optimize() calls passes in order');
 }
 
+# add_pass() rejects non-Pass objects
+{
+    my $opt = Chalk::Bootstrap::Optimizer->new();
+    eval { $opt->add_pass("not a pass") };
+    like($@, qr/requires.*Pass instance/i,
+        'add_pass() rejects non-Pass objects');
+}
+
 # optimize(undef) dies with useful error
 {
     my $opt = Chalk::Bootstrap::Optimizer->new();

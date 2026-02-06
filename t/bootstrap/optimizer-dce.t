@@ -84,7 +84,55 @@ sub build_mini_rule {
         'root rule node still exists');
 }
 
+# Multiple roots sharing nodes: shared subgraph preserved when reachable from both
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    # Build two rules that share the type constant 'terminal' but have different
+    # value constants, forcing distinct Symbols that both consume the shared type.
+    my $shared_type = $factory->make('Constant',
+        const_type => 'string', value => 'terminal');
+
+    my $name1 = $factory->make('Constant',
+        const_type => 'string', value => 'Rule1');
+    my $val1 = $factory->make('Constant',
+        const_type => 'string', value => '/pattern_a/');
+    my $sym1 = $factory->make('Constructor',
+        class => 'Symbol', type => $shared_type, value => $val1, quantifier => undef);
+    my $expr1 = $factory->make('Constructor',
+        class => 'Expression', elements => [$sym1]);
+    my $rule1 = $factory->make('Constructor',
+        class => 'Rule', name => $name1, expressions => [$expr1]);
+
+    my $name2 = $factory->make('Constant',
+        const_type => 'string', value => 'Rule2');
+    my $val2 = $factory->make('Constant',
+        const_type => 'string', value => '/pattern_b/');
+    my $sym2 = $factory->make('Constructor',
+        class => 'Symbol', type => $shared_type, value => $val2, quantifier => undef);
+    my $expr2 = $factory->make('Constructor',
+        class => 'Expression', elements => [$sym2]);
+    my $rule2 = $factory->make('Constructor',
+        class => 'Rule', name => $name2, expressions => [$expr2]);
+
+    # shared_type is consumed by both sym1 and sym2
+    is(scalar($shared_type->consumers()->@*), 2,
+        'shared type constant has 2 consumers from distinct symbols');
+
+    my $count_before = $factory->node_count();
+    my $dce = Chalk::Bootstrap::Optimizer::DCE->new();
+    $dce->run([$rule1, $rule2]);
+
+    is($factory->node_count(), $count_before,
+        'multi-root: all shared nodes preserved');
+    is(scalar($shared_type->consumers()->@*), 2,
+        'multi-root: shared node consumer count unchanged');
+}
+
 # Consumer cleanup: dead node removed from consumer lists of its inputs
+# Note: $shared_type retrieves the same 'terminal' Constant created inside
+# build_mini_rule() due to hash consing deduplication.
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -160,7 +208,7 @@ sub build_mini_rule {
 
 {
     use lib 't/bootstrap/lib';
-    use TestPipeline qw(full_pipeline bnf_text);
+    use TestPipeline qw(full_pipeline bnf_text grammars_match);
     use Chalk::Bootstrap::Target::Perl;
 
     # Run full pipeline to get IR from the real 10-rule BNF
@@ -196,43 +244,8 @@ sub build_mini_rule {
 
     is(scalar($gen_grammar->@*), scalar($ref_grammar->@*),
         'optimized output has same number of rules as reference');
-
-    my $all_match = true;
-    for my $i (0 .. $#{$ref_grammar}) {
-        my $gen = $gen_grammar->[$i];
-        my $ref = $ref_grammar->[$i];
-        if ($gen->name() ne $ref->name()) {
-            $all_match = false;
-            diag("Rule name mismatch at index $i: got " . $gen->name() . ", expected " . $ref->name());
-            last;
-        }
-        if ($gen->alternative_count() != $ref->alternative_count()) {
-            $all_match = false;
-            diag("Alt count mismatch at rule " . $ref->name());
-            last;
-        }
-        for my $j (0 .. $#{$ref->expressions()}) {
-            my $gen_alt = $gen->expressions()->[$j];
-            my $ref_alt = $ref->expressions()->[$j];
-            if (scalar($gen_alt->@*) != scalar($ref_alt->@*)) {
-                $all_match = false;
-                diag("Element count mismatch at rule " . $ref->name() . " alt $j");
-                last;
-            }
-            for my $k (0 .. $#{$ref_alt}) {
-                my $gs = $gen_alt->[$k];
-                my $rs = $ref_alt->[$k];
-                if ($gs->type() ne $rs->type()
-                    || $gs->value() ne $rs->value()
-                    || ($gs->quantifier() // '') ne ($rs->quantifier() // '')) {
-                    $all_match = false;
-                    diag("Symbol mismatch at rule " . $ref->name() . " alt $j elem $k");
-                    last;
-                }
-            }
-        }
-    }
-    ok($all_match, 'optimized generated grammar structurally matches hand-written grammar');
+    ok(grammars_match($gen_grammar, $ref_grammar),
+        'optimized generated grammar structurally matches hand-written grammar');
 }
 
 done_testing();

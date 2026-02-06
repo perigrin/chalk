@@ -15,6 +15,8 @@ class Chalk::Bootstrap::Optimizer {
 
     # Register an optimizer pass; returns $self for chaining
     method add_pass($pass) {
+        die "add_pass() requires a Chalk::Bootstrap::Optimizer::Pass instance"
+            unless $pass->isa('Chalk::Bootstrap::Optimizer::Pass');
         push $passes->@*, $pass;
         return $self;
     }

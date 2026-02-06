@@ -6,7 +6,7 @@ use utf8;
 package TestPipeline;
 
 use Exporter 'import';
-our @EXPORT_OK = qw(build_parser parse_ir bnf_text full_pipeline optimized_pipeline);
+our @EXPORT_OK = qw(build_parser parse_ir bnf_text full_pipeline optimized_pipeline grammars_match);
 
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Composite;
@@ -83,6 +83,35 @@ sub optimized_pipeline {
     my $optimizer = Chalk::Bootstrap::Optimizer->new();
     $optimizer->add_pass(Chalk::Bootstrap::Optimizer::DCE->new());
     return $optimizer->optimize($ir);
+}
+
+# Compare two grammars structurally (rule names, alternatives, symbols)
+# Returns true if they match, false otherwise
+sub grammars_match {
+    my ($gen_grammar, $ref_grammar) = @_;
+    return false unless scalar($gen_grammar->@*) == scalar($ref_grammar->@*);
+
+    for my $i (0 .. $#{$ref_grammar}) {
+        my $gen = $gen_grammar->[$i];
+        my $ref = $ref_grammar->[$i];
+        return false if $gen->name() ne $ref->name();
+        return false if $gen->alternative_count() != $ref->alternative_count();
+
+        for my $j (0 .. $#{$ref->expressions()}) {
+            my $gen_alt = $gen->expressions()->[$j];
+            my $ref_alt = $ref->expressions()->[$j];
+            return false if scalar($gen_alt->@*) != scalar($ref_alt->@*);
+
+            for my $k (0 .. $#{$ref_alt}) {
+                my $gs = $gen_alt->[$k];
+                my $rs = $ref_alt->[$k];
+                return false if $gs->type() ne $rs->type()
+                    || $gs->value() ne $rs->value()
+                    || ($gs->quantifier() // '') ne ($rs->quantifier() // '');
+            }
+        }
+    }
+    return true;
 }
 
 1;
