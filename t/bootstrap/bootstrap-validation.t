@@ -61,9 +61,7 @@ use lib 'lib';
 }
 
 # Phase 2b: Semantic actions produce correct IR
-TODO: {
-    local $TODO = "Phase 2b: Semantic actions have known bugs being fixed";
-
+{
     use_ok('Chalk::Bootstrap::Semiring::Composite');
     use_ok('Chalk::Bootstrap::Semiring::SemanticAction');
     use_ok('Chalk::Bootstrap::Actions');
