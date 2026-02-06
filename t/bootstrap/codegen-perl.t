@@ -32,4 +32,65 @@ isa_ok($target, 'Chalk::Bootstrap::Target::Perl');
     like($output, qr/return \\/, 'output contains return statement');
 }
 
+# === Step 3: Symbol Emission ===
+
+# Helper: build a Constructor:Symbol IR node
+sub make_symbol {
+    my (%args) = @_;
+    my $type = $factory->make('Constant', const_type => 'enum', value => $args{type});
+    my $value = $factory->make('Constant', const_type => 'string', value => $args{value});
+    my $quant = $factory->make('Constant', const_type => 'string', value => $args{quantifier});
+    return $factory->make('Constructor',
+        class => 'Symbol',
+        type => $type,
+        value => $value,
+        quantifier => $quant,
+    );
+}
+
+# Test: Reference symbol emission
+{
+    my $sym = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
+    my $code = $target->_emit_symbol($sym);
+    like($code, qr/type => 'reference'/, 'reference symbol has correct type');
+    like($code, qr/value => 'Atom'/, 'reference symbol has correct value');
+    unlike($code, qr/quantifier/, 'reference symbol with undef quantifier omits it');
+}
+
+# Test: Terminal symbol — strips / delimiters
+{
+    my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
+    my $code = $target->_emit_symbol($sym);
+    like($code, qr/type => 'terminal'/, 'terminal symbol has correct type');
+    like($code, qr/value => '\[A-Z\]\+'/, 'terminal symbol strips / delimiters');
+    unlike($code, qr/quantifier/, 'terminal symbol with undef quantifier omits it');
+}
+
+# Test: Symbol with quantifier
+{
+    my $sym = make_symbol(type => 'reference', value => 'Rule', quantifier => '+');
+    my $code = $target->_emit_symbol($sym);
+    like($code, qr/quantifier => '\+'/, 'symbol with quantifier includes it');
+}
+
+# Test: Complex escaping for single-quoted Perl strings
+# IR value: /(?:\s|#[^\n]*)*/ -> strip -> (?:\s|#[^\n]*)*  -> escape -> (?:\\s|#[^\\n]*)*
+{
+    my $sym = make_symbol(type => 'terminal', value => '/(?:\\s|#[^\\n]*)*/', quantifier => undef);
+    my $code = $target->_emit_symbol($sym);
+    # After stripping delimiters: (?:\s|#[^\n]*)*
+    # After escaping for single-quote: backslashes doubled
+    like($code, qr/value => '/, 'terminal uses single-quoted value');
+    # The escaped output should have doubled backslashes
+    like($code, qr/\\\\s/, 'backslash-s becomes double-backslash-s in output');
+    like($code, qr/\\\\n/, 'backslash-n becomes double-backslash-n in output');
+}
+
+# Test: Terminal without / delimiters (already stripped, e.g. '::=')
+{
+    my $sym = make_symbol(type => 'terminal', value => '/::=/', quantifier => undef);
+    my $code = $target->_emit_symbol($sym);
+    like($code, qr/value => '::='/, 'simple terminal value preserved after stripping');
+}
+
 done_testing();

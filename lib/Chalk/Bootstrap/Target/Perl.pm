@@ -38,6 +38,39 @@ PREAMBLE
         return '';
     }
 
+    # Emit Perl source for a Constructor:Symbol IR node
+    method _emit_symbol($symbol_node) {
+        my $inputs = $symbol_node->inputs();
+        my $type_str = $inputs->[0]->value();
+        my $raw_value = $inputs->[1]->value();
+        my $quant_node = $inputs->[2];
+        my $quant_str = defined($quant_node) ? $quant_node->value() : undef;
+
+        # Strip / delimiters from terminal values
+        my $value = $raw_value;
+        if ($type_str eq 'terminal' && $value =~ m{^/(.*)/$}) {
+            $value = $1;
+        }
+
+        # Escape for single-quoted Perl strings
+        $value = $self->_escape_single_quote($value);
+
+        my $code = "Chalk::Grammar::Symbol->new(type => '$type_str', value => '$value'";
+        if (defined $quant_str) {
+            $code .= ", quantifier => '$quant_str'";
+        }
+        $code .= ')';
+
+        return $code;
+    }
+
+    # Escape a string for embedding in a single-quoted Perl string literal
+    method _escape_single_quote($str) {
+        $str =~ s/\\/\\\\/g;   # \ -> \\
+        $str =~ s/'/\\'/g;     # ' -> \'
+        return $str;
+    }
+
     method _postamble() {
         return <<'POSTAMBLE';
         return \@rules;
