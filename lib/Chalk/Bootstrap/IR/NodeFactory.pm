@@ -38,6 +38,13 @@ class Chalk::Bootstrap::IR::NodeFactory {
         return $instance;
     }
 
+    # Reset singleton and cache for testing (prevents cross-test contamination)
+    # Call at the beginning of each test file to ensure clean state
+    sub reset_for_testing {
+        $instance = undef;
+        return;
+    }
+
     # Create or retrieve a node
     # $operation: string like 'Constant', 'MakeSymbol', etc.
     # %params: named parameters (inputs and attributes)

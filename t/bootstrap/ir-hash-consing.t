@@ -8,6 +8,9 @@ use Test2::V0;
 use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 
+# Reset factory to ensure clean test state (prevents cross-test contamination)
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
 # Test 1: Duplicate constants deduplicated
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
