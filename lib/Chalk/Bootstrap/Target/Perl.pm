@@ -35,7 +35,11 @@ PREAMBLE
     }
 
     method _emit_body($ir) {
-        return '';
+        my $body = '';
+        for my $rule ($ir->@*) {
+            $body .= $self->_emit_rule($rule) . "\n";
+        }
+        return $body;
     }
 
     # Emit Perl source for a Constructor:Symbol IR node

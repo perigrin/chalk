@@ -164,4 +164,55 @@ sub make_rule {
     is(scalar @expr_matches, 2, 'multi-alternative rule has 2 expression arrays');
 }
 
+# === Step 6: Full generate() Assembly ===
+
+# Test: generate() with IR rules produces valid Perl
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $sym1 = make_symbol(type => 'terminal', value => '/[A-Za-z_][A-Za-z_0-9]*/', quantifier => undef);
+    my $expr1 = make_expression($sym1);
+    my $rule1 = make_rule('Identifier', $expr1);
+
+    my $sym2a = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $sym2b = make_symbol(type => 'reference', value => 'InlineRegex', quantifier => undef);
+    my $expr2a = make_expression($sym2a);
+    my $expr2b = make_expression($sym2b);
+    my $rule2 = make_rule('Atom', $expr2a, $expr2b);
+
+    my $target2 = Chalk::Bootstrap::Target::Perl->new();
+    my $output = $target2->generate([$rule1, $rule2]);
+
+    like($output, qr/push \@rules.*Identifier/s, 'generate() includes Identifier rule');
+    like($output, qr/push \@rules.*Atom/s, 'generate() includes Atom rule');
+
+    # eval the generated code — should not die
+    eval $output;
+    is($@, '', 'generated code evals without error');
+
+    # Call the generated grammar()
+    my $grammar = Chalk::Grammar::BNF::Generated::grammar();
+    isa_ok($grammar, 'ARRAY', 'grammar() returns arrayref');
+    is(scalar($grammar->@*), 2, 'grammar has 2 rules');
+
+    # Verify rule names
+    is($grammar->[0]->name(), 'Identifier', 'first rule name is Identifier');
+    is($grammar->[1]->name(), 'Atom', 'second rule name is Atom');
+
+    # Verify Identifier rule structure
+    my $id_rule = $grammar->[0];
+    is($id_rule->alternative_count(), 1, 'Identifier has 1 alternative');
+    my $id_syms = $id_rule->expressions()->[0];
+    is(scalar($id_syms->@*), 1, 'Identifier alternative has 1 symbol');
+    ok($id_syms->[0]->is_terminal(), 'Identifier symbol is terminal');
+    is($id_syms->[0]->value(), '[A-Za-z_][A-Za-z_0-9]*', 'Identifier terminal value correct');
+
+    # Verify Atom rule structure
+    my $atom_rule = $grammar->[1];
+    is($atom_rule->alternative_count(), 2, 'Atom has 2 alternatives');
+    ok($atom_rule->expressions()->[0][0]->is_reference(), 'Atom alt 1 is reference');
+    is($atom_rule->expressions()->[0][0]->value(), 'Identifier', 'Atom alt 1 value is Identifier');
+}
+
 done_testing();
