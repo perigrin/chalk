@@ -184,7 +184,7 @@ Each node maintains:
 **Example**:
 ```perl
 my $const = Constant->new(type => 'string', value => 'Atom');
-my $symbol = MakeSymbol->new(type => $const, ...);
+my $symbol = Constructor->new(class => 'Symbol', type => $const, ...);
 
 # Use-def chain:
 $const->consumers;  # [$symbol]
@@ -222,8 +222,8 @@ my $sym2 = Constructor(class='Symbol', type=$const_type, ...);
 
 # Generated code computes $const_type once:
 my $const_123 = 'reference';
-my $sym_456 = make_symbol($const_123, ...);
-my $sym_789 = make_symbol($const_123, ...);
+my $sym_456 = make_constructor('Symbol', $const_123, ...);
+my $sym_789 = make_constructor('Symbol', $const_123, ...);
 ```
 
 ## Optimization Opportunities
