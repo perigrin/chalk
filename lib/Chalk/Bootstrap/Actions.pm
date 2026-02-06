@@ -13,7 +13,7 @@ sub _factory {
 }
 
 # Grammar ::= /(?:\s|#[^\n]*)*/ Rule+
-# Returns list of MakeRule IR nodes
+# Returns arrayref of MakeRule IR nodes
 sub action_Grammar {
     my ($ctx) = @_;
 
@@ -28,10 +28,8 @@ sub action_Grammar {
         }
     }
 
-    # For now, return first rule or undef
-    # Later, this might wrap in a Grammar node
-    return $rules[0] if @rules;
-    return undef;
+    # Return arrayref of all rules
+    return \@rules;
 }
 
 # Rule ::= Identifier /(?:\s|#[^\n]*)*/ /::=/ /(?:\s|#[^\n]*)*/ Alternatives /(?:\s|#[^\n]*)*/ /;/ /(?:\s|#[^\n]*)*/
@@ -43,11 +41,12 @@ sub action_Rule {
     # Extract rule name from first child (Identifier)
     my $name_node = $children[0]->extract();
 
-    # Extract alternatives from Alternatives child (skip whitespace/punctuation)
+    # Extract alternatives from Alternatives child (arrayref of MakeExpression nodes)
     my $alts_node;
     for my $child (@children) {
         my $focus = $child->extract();
-        if (defined $focus && $focus->isa('Chalk::Bootstrap::IR::Node::MakeExpression')) {
+        # action_Alternatives returns an arrayref, not a single MakeExpression
+        if (defined $focus && ref($focus) eq 'ARRAY') {
             $alts_node = $focus;
             last;
         }
@@ -60,7 +59,7 @@ sub action_Rule {
 }
 
 # Alternatives ::= Sequence /(?:\s|#[^\n]*)*/ /\|/ /(?:\s|#[^\n]*)*/ Alternatives | Sequence
-# Returns MakeExpression (for single alternative) or list of MakeExpression nodes
+# Returns arrayref of MakeExpression nodes (one per alternative)
 sub action_Alternatives {
     my ($ctx) = @_;
     my @children = $ctx->children()->@*;
@@ -74,10 +73,8 @@ sub action_Alternatives {
         }
     }
 
-    # Return first expression (simplification)
-    # TODO: Handle multiple alternatives properly
-    return $expressions[0] if @expressions;
-    return undef;
+    # Return arrayref of all expressions
+    return \@expressions;
 }
 
 # Sequence ::= Sequence_Element /(?:\s|#[^\n]*)+/ Sequence | Sequence_Element
