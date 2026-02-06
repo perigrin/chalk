@@ -135,36 +135,40 @@ See `docs/ir-node-types.md` for complete taxonomy.
 
 ## Implementation Phases
 
-### Current Status: Phase 0 Complete ✅
+### Phase 0 - Data Model: Complete ✅
 
 - ✅ Data model classes: `Chalk::Grammar::Symbol`, `Chalk::Grammar::Rule`
+- ✅ BNF meta-grammar: `Chalk::Grammar::BNF` - 10 rules as Perl data
 - ✅ Architecture docs: comonad spec, IR node types, meta-grammar
-- ✅ Test skeleton: `bootstrap-validation.t` (fails with TODO)
+- ✅ Progressive validation test: `bootstrap-validation.t`
 
-### Next: Phase 1a - Standard Earley Parser
+### Phase 1a - Standard Earley Parser: Complete ✅
+
+Deliverables (all implemented):
+- ✅ `lib/Chalk/Bootstrap/Earley.pm` - Scanless Earley recognizer
+- ✅ `lib/Chalk/Bootstrap/Semiring/Boolean.pm` - Recognition semiring
+- ✅ `lib/Chalk/Bootstrap/Context.pm` - Basic comonad (extract only)
+- ✅ `lib/Chalk/Bootstrap/Terminal.pm` - Regex terminal matching
+- ✅ Tests: `t/bootstrap/earley-*.t` (progressive: boolean → ambiguous → regex)
+- ✅ `parse_value()` method - exposes raw semiring values for semantic extraction
+
+### Phase 2a - IR Infrastructure: Complete ✅
+
+Deliverables (all implemented):
+- ✅ `lib/Chalk/Bootstrap/IR/NodeFactory.pm` - Hash consing factory
+- ✅ `lib/Chalk/Bootstrap/IR/Node.pm` - Base class with use-def chains
+- ✅ `lib/Chalk/Bootstrap/IR/Node/*.pm` - 6 node subclasses
+- ✅ Tests: `t/bootstrap/ir-*.t` (hash consing, use-def chains)
+
+### Phase 2b - Semantic Actions: Partially Complete ⚠️
 
 Deliverables:
-- `lib/Chalk/Bootstrap/Earley.pm` - Scanless Earley recognizer
-- `lib/Chalk/Bootstrap/Semiring/Boolean.pm` - Recognition semiring
-- `lib/Chalk/Bootstrap/Context.pm` - Basic comonad (extract only)
-- `lib/Chalk/Bootstrap/Terminal.pm` - Regex terminal matching
-- Tests: `t/bootstrap/earley-*.t` (progressive: boolean → ambiguous → regex)
-
-### Phase 2a - IR Infrastructure
-
-Deliverables:
-- `lib/Chalk/Bootstrap/IR/NodeFactory.pm` - Hash consing factory
-- `lib/Chalk/Bootstrap/IR/Node.pm` - Base class with use-def chains
-- `lib/Chalk/Bootstrap/IR/Node/*.pm` - 6 node subclasses
-- Tests: `t/bootstrap/ir-*.t` (hash consing, use-def chains)
-
-### Phase 2b - Semantic Actions
-
-Deliverables:
-- Complete comonad: add `extend`/`duplicate` to Context
-- `lib/Chalk/Bootstrap/Semiring/SemanticAction.pm` - IR construction semiring
-- `lib/Chalk/Bootstrap/Actions.pm` - 10 semantic action callbacks
-- Tests: `t/bootstrap/semantic-ir.t`, `t/bootstrap/comonad-threading.t`
+- ✅ Complete comonad: add `extend`/`duplicate` to Context
+- ✅ `lib/Chalk/Bootstrap/Semiring/SemanticAction.pm` - IR construction semiring
+- ✅ `lib/Chalk/Bootstrap/Semiring/Composite.pm` - Boolean + Semantic combined
+- ✅ `lib/Chalk/Bootstrap/Actions.pm` - 10 semantic action callbacks
+- ✅ Tests: `t/bootstrap/comonad-threading.t`, `t/bootstrap/semantic-actions*.t`
+- ⚠️ Known bugs: Some semantic actions need fixes (see failing integration tests)
 
 ### Phase 3 - Code Generation (MILESTONE)
 

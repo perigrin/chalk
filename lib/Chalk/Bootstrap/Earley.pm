@@ -51,8 +51,8 @@ class Chalk::Bootstrap::Earley {
         return $dot >= scalar $alt->@*;
     }
 
-    # Parse input string
-    method parse($input) {
+    # Internal parse implementation that returns raw semiring value or undef
+    method _run_parse($input) {
         my $n = length($input);
 
         # Chart: array of sets, where each set is a hash of items
@@ -108,11 +108,22 @@ class Chalk::Bootstrap::Earley {
 
             if (exists $chart[$n]->{$key}) {
                 my $item = $chart[$n]->{$key}->[0];
-                return !$semiring->is_zero($item->{value});
+                return $item->{value};
             }
         }
 
-        return false;
+        return undef;
+    }
+
+    # Parse input string, returns boolean indicating success
+    method parse($input) {
+        my $value = $self->_run_parse($input);
+        return defined($value) ? !$semiring->is_zero($value) : false;
+    }
+
+    # Parse input string, returns raw semiring value (or undef on failure)
+    method parse_value($input) {
+        return $self->_run_parse($input);
     }
 
     # Predict: add items for all alternatives of a nonterminal
