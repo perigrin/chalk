@@ -1,0 +1,22 @@
+# ABOUTME: Represents a single symbol in a BNF grammar (terminal or nonterminal).
+# ABOUTME: Immutable value object with type, value, and optional quantifier.
+use 5.42.0;
+use utf8;
+use feature 'class';
+no warnings 'experimental::class';
+
+class Chalk::Grammar::Symbol {
+    field $type      :param :reader; # 'reference' (nonterminal) or 'terminal' (regex)
+    field $value     :param :reader; # identifier name or regex pattern
+    field $quantifier :param :reader = undef; # undef, '*', '+', or '?'
+
+    method is_terminal()   { $type eq 'terminal' }
+    method is_reference()  { $type eq 'reference' }
+    method is_quantified() { defined $quantifier }
+
+    method to_string() {
+        my $str = $self->is_terminal() ? "/$value/" : $value;
+        $str .= $quantifier if defined $quantifier;
+        return $str;
+    }
+}
