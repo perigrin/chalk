@@ -104,6 +104,27 @@ class Chalk::Bootstrap::IR::NodeFactory {
         return $node;
     }
 
+    # Return the number of nodes currently in the cache
+    method node_count() {
+        return scalar keys $node_cache->%*;
+    }
+
+    # Return a sorted arrayref of all node IDs in the cache
+    method all_node_ids() {
+        return [ sort keys $node_cache->%* ];
+    }
+
+    # Retrieve a node by its ID, or undef if not found
+    method get_node($id) {
+        return $node_cache->{$id};
+    }
+
+    # Remove a node from the cache by its ID
+    method remove_node($id) {
+        delete $node_cache->{$id};
+        return;
+    }
+
     # Generate deterministic hash key from operation, inputs, and attributes
     method _make_key($operation, $inputs, $attributes) {
         my @parts = ($operation);
