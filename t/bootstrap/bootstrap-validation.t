@@ -113,15 +113,83 @@ use lib 'lib';
 }
 
 # Phase 3: Code generation
-TODO: {
-    local $TODO = "Phase 3: Code generation not yet implemented";
+{
+    use lib 't/bootstrap/lib';
+    use TestPipeline qw(full_pipeline bnf_text);
+    use Chalk::Bootstrap::Desugar qw(desugar_grammar);
+    use Chalk::Bootstrap::Target::Perl;
 
-    # This test will verify that the bootstrap compiler can:
-    # 1. Parse the BNF meta-grammar
-    # 2. Generate Perl code for a BNF recognizer
-    # 3. The generated code accepts/rejects the same inputs as the hand-written version
+    my $ir = full_pipeline();
+    ok(defined $ir, 'Phase 3: BNF meta-grammar parses');
+    is(scalar($ir->@*), 10, 'Phase 3: IR contains 10 rules');
 
-    fail("Code generation not implemented");
+    # Generate Perl code
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    ok(defined $generated, 'Phase 3: code generation produces output');
+
+    # Eval the generated code
+    eval $generated;
+    is($@, '', 'Phase 3: generated code evals without error');
+
+    # Compare generated grammar to hand-written grammar
+    my $gen_grammar = Chalk::Grammar::BNF::Generated::grammar();
+    my $ref_grammar = Chalk::Grammar::BNF::grammar();
+
+    is(scalar($gen_grammar->@*), scalar($ref_grammar->@*),
+        'Phase 3: same number of rules');
+
+    # Structural comparison of each rule
+    my $all_match = true;
+    for my $i (0 .. $#{$ref_grammar}) {
+        my $gen = $gen_grammar->[$i];
+        my $ref = $ref_grammar->[$i];
+        if ($gen->name() ne $ref->name()) {
+            $all_match = false;
+            last;
+        }
+        if ($gen->alternative_count() != $ref->alternative_count()) {
+            $all_match = false;
+            last;
+        }
+        for my $j (0 .. $#{$ref->expressions()}) {
+            my $gen_alt = $gen->expressions()->[$j];
+            my $ref_alt = $ref->expressions()->[$j];
+            if (scalar($gen_alt->@*) != scalar($ref_alt->@*)) {
+                $all_match = false;
+                last;
+            }
+            for my $k (0 .. $#{$ref_alt}) {
+                my $gs = $gen_alt->[$k];
+                my $rs = $ref_alt->[$k];
+                if ($gs->type() ne $rs->type()
+                    || $gs->value() ne $rs->value()
+                    || ($gs->quantifier() // '') ne ($rs->quantifier() // '')) {
+                    $all_match = false;
+                    last;
+                }
+            }
+        }
+    }
+    ok($all_match, 'Phase 3: generated grammar structurally matches hand-written grammar');
+
+    # Build parser from generated grammar and verify it accepts/rejects same inputs
+    my $gen_desugared = desugar_grammar($gen_grammar);
+    my $gen_bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $gen_parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $gen_desugared,
+        semiring => $gen_bool_sr,
+    );
+
+    # Test inputs that the hand-written parser accepts
+    ok($gen_parser->parse("Identifier ::= /[A-Za-z]+/ ;"),
+        'Phase 3: generated parser accepts simple rule');
+    ok($gen_parser->parse("Atom ::= Identifier | InlineRegex ;"),
+        'Phase 3: generated parser accepts rule with alternatives');
+
+    # Test inputs that should be rejected
+    ok(!$gen_parser->parse("not valid BNF"),
+        'Phase 3: generated parser rejects invalid input');
 }
 
 # Helper test classes
