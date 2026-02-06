@@ -171,4 +171,102 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     is(refaddr($factory1), refaddr($factory2), 'singleton reference addresses match');
 }
 
+# Test 7: node_count() returns 0 on fresh factory
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+    is($factory->node_count(), 0, 'node_count() is 0 on fresh factory');
+}
+
+# Test 8: node_count() reflects number of created nodes
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    $factory->make('Constant', const_type => 'string', value => 'a');
+    $factory->make('Constant', const_type => 'string', value => 'b');
+    is($factory->node_count(), 2, 'node_count() reflects created nodes');
+
+    # Duplicate doesn't increase count
+    $factory->make('Constant', const_type => 'string', value => 'a');
+    is($factory->node_count(), 2, 'node_count() unchanged after duplicate');
+}
+
+# Test 9: all_node_ids() returns sorted arrayref
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    my $node_b = $factory->make('Constant', const_type => 'string', value => 'b');
+    my $node_a = $factory->make('Constant', const_type => 'string', value => 'a');
+
+    my $ids = $factory->all_node_ids();
+    is(ref($ids), 'ARRAY', 'all_node_ids() returns arrayref');
+    is(scalar($ids->@*), 2, 'all_node_ids() has correct count');
+    is($ids, [ sort($node_a->id(), $node_b->id()) ], 'all_node_ids() returns sorted IDs');
+}
+
+# Test 10: get_node() retrieves known node, returns undef for unknown
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    my $node = $factory->make('Constant', const_type => 'string', value => 'findme');
+    my $retrieved = $factory->get_node($node->id());
+    is($retrieved, $node, 'get_node() retrieves known node');
+    is(refaddr($retrieved), refaddr($node), 'get_node() returns same reference');
+
+    my $missing = $factory->get_node('nonexistent');
+    ok(!defined($missing), 'get_node() returns undef for unknown ID');
+}
+
+# Test 11: remove_node() removes a node and decrements count
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    my $node = $factory->make('Constant', const_type => 'string', value => 'remove_me');
+    is($factory->node_count(), 1, 'count is 1 before remove');
+
+    $factory->remove_node($node->id());
+    is($factory->node_count(), 0, 'count is 0 after remove');
+
+    my $gone = $factory->get_node($node->id());
+    ok(!defined($gone), 'get_node() returns undef after remove');
+}
+
+# Test 12: remove_node() on non-existent ID is a no-op
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    $factory->make('Constant', const_type => 'string', value => 'survivor');
+    is($factory->node_count(), 1, 'count is 1 before removing missing ID');
+    $factory->remove_node('nonexistent_id_12345');
+    is($factory->node_count(), 1, 'count unchanged after removing non-existent ID');
+}
+
+# Test 13: remove_node() dies if node still has consumers
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    my $type = $factory->make('Constant', const_type => 'string', value => 'terminal');
+    my $val = $factory->make('Constant', const_type => 'string', value => '/x/');
+    my $symbol = $factory->make('Constructor',
+        class => 'Symbol',
+        type => $type,
+        value => $val,
+        quantifier => undef,
+    );
+
+    # $type has $symbol as a consumer, so removing it should die
+    eval { $factory->remove_node($type->id()) };
+    like($@, qr/still has consumers/, 'remove_node() dies when node has consumers');
+
+    # $symbol has no consumers, so removing it should succeed
+    eval { $factory->remove_node($symbol->id()) };
+    is($@, '', 'remove_node() succeeds when node has no consumers');
+}
+
 done_testing;

@@ -115,7 +115,7 @@ use lib 'lib';
 # Phase 3: Code generation
 {
     use lib 't/bootstrap/lib';
-    use TestPipeline qw(full_pipeline bnf_text);
+    use TestPipeline qw(full_pipeline optimized_pipeline bnf_text grammars_match);
     use Chalk::Bootstrap::Desugar qw(desugar_grammar);
     use Chalk::Bootstrap::Target::Perl;
 
@@ -139,39 +139,8 @@ use lib 'lib';
     is(scalar($gen_grammar->@*), scalar($ref_grammar->@*),
         'Phase 3: same number of rules');
 
-    # Structural comparison of each rule
-    my $all_match = true;
-    for my $i (0 .. $#{$ref_grammar}) {
-        my $gen = $gen_grammar->[$i];
-        my $ref = $ref_grammar->[$i];
-        if ($gen->name() ne $ref->name()) {
-            $all_match = false;
-            last;
-        }
-        if ($gen->alternative_count() != $ref->alternative_count()) {
-            $all_match = false;
-            last;
-        }
-        for my $j (0 .. $#{$ref->expressions()}) {
-            my $gen_alt = $gen->expressions()->[$j];
-            my $ref_alt = $ref->expressions()->[$j];
-            if (scalar($gen_alt->@*) != scalar($ref_alt->@*)) {
-                $all_match = false;
-                last;
-            }
-            for my $k (0 .. $#{$ref_alt}) {
-                my $gs = $gen_alt->[$k];
-                my $rs = $ref_alt->[$k];
-                if ($gs->type() ne $rs->type()
-                    || $gs->value() ne $rs->value()
-                    || ($gs->quantifier() // '') ne ($rs->quantifier() // '')) {
-                    $all_match = false;
-                    last;
-                }
-            }
-        }
-    }
-    ok($all_match, 'Phase 3: generated grammar structurally matches hand-written grammar');
+    ok(grammars_match($gen_grammar, $ref_grammar),
+        'Phase 3: generated grammar structurally matches hand-written grammar');
 
     # Build parser from generated grammar and verify it accepts/rejects same inputs
     my $gen_desugared = desugar_grammar($gen_grammar);
@@ -190,6 +159,37 @@ use lib 'lib';
     # Test inputs that should be rejected
     ok(!$gen_parser->parse("not valid BNF"),
         'Phase 3: generated parser rejects invalid input');
+}
+
+# Phase 4: Optimizer preserves correctness
+{
+    use Chalk::Bootstrap::Optimizer;
+    use Chalk::Bootstrap::Optimizer::DCE;
+    use Chalk::Bootstrap::IR::NodeFactory;
+
+    my $ir = optimized_pipeline();
+    ok(defined $ir, 'Phase 4: optimized pipeline produces IR');
+    is(scalar($ir->@*), 10, 'Phase 4: optimized IR contains 10 rules');
+
+    # Generate Perl code from optimized IR
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    ok(defined $generated, 'Phase 4: optimized code generation produces output');
+
+    # Use a distinct class name to avoid collision with Phase 3's eval
+    my $opt_generated = $generated;
+    $opt_generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::BNF::Optimized/g;
+    eval $opt_generated;
+    is($@, '', 'Phase 4: optimized generated code evals without error');
+
+    # Structural comparison with hand-written grammar
+    my $gen_grammar = Chalk::Grammar::BNF::Optimized::grammar();
+    my $ref_grammar = Chalk::Grammar::BNF::grammar();
+
+    is(scalar($gen_grammar->@*), scalar($ref_grammar->@*),
+        'Phase 4: same number of rules after optimization');
+    ok(grammars_match($gen_grammar, $ref_grammar),
+        'Phase 4: optimized grammar structurally matches hand-written grammar');
 }
 
 # Helper test classes
