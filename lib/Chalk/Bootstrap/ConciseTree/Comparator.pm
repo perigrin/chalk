@@ -74,12 +74,19 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
                 }
             }
 
+            # Strip /REFC from leave private flags (ref count detail)
+            my $private = $op->private();
+            if ($op->name() eq 'leave') {
+                $private =~ s{/REFC}{};
+                $private =~ s{^\s+|\s+$}{}g;
+            }
+
             push @normalized_ops, Chalk::Bootstrap::ConciseOp->new(
                 name      => $op->name(),
                 arity     => $op->arity(),
                 type_info => $type_info,
                 flags     => '',       # flags are not structurally significant
-                private   => $op->private(),
+                private   => $private,
             );
         }
 
