@@ -147,14 +147,27 @@ SKIP: {
         'Phase 3: accepts nested block inside method');
 
     # Negative cases
+    # NOTE: Keywords (class, method, sub, ADJUST) are NOT reserved in this
+    # grammar — they match Identifier and can appear in expression context
+    # (e.g., "class;" is valid as an expression statement). The Boolean semiring
+    # accepts all valid parses. These negative tests validate structural
+    # incompleteness, not keyword semantics.
     ok(!$recognizer->parse('class { }'),
-        'Phase 3: rejects class without name');
+        'Phase 3: rejects "class { }" (no valid parse consumes full input)');
     ok(!$recognizer->parse('method () { }'),
-        'Phase 3: rejects method without name');
+        'Phase 3: rejects "method () { }" (no valid parse consumes full input)');
     ok(!$recognizer->parse('sub helper('),
         'Phase 3: rejects sub with unclosed signature');
     ok(!$recognizer->parse('class Foo {'),
         'Phase 3: rejects class with unclosed block');
+    ok(!$recognizer->parse('method foo('),
+        'Phase 3: rejects method with unclosed signature');
+    ok(!$recognizer->parse('ADJUST'),
+        'Phase 3: rejects bare ADJUST without block');
+    ok(!$recognizer->parse('class Foo :isa( { }'),
+        'Phase 3: rejects unclosed attribute parens');
+    ok(!$recognizer->parse('class Foo { method }'),
+        'Phase 3: rejects incomplete method inside class');
 }
 
 done_testing();
