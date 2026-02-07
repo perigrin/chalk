@@ -217,4 +217,147 @@ sub make_symbol {
     like($code, qr/\\\\n/, 'complex regex has escaped backslash-n');
 }
 
+# === Expression Construction Lowering ===
+
+# Helper: build a Constructor:Expression IR node from symbols
+sub make_expression {
+    my (@symbols) = @_;
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    return $factory->make('Constructor',
+        class => 'Expression',
+        elements => \@symbols,
+    );
+}
+
+# Helper: build a Constructor:Rule IR node
+sub make_rule {
+    my ($name, @expressions) = @_;
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $name_node = $factory->make('Constant', const_type => 'string', value => $name);
+    return $factory->make('Constructor',
+        class => 'Rule',
+        name => $name_node,
+        expressions => \@expressions,
+    );
+}
+
+# Test: Single-symbol expression lowering
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $expr = make_expression($sym);
+
+    my $nodes = $target->_emit_expression($expr, 'expr_0');
+    is(ref($nodes), 'ARRAY', '_emit_expression returns arrayref');
+
+    # Should have: VarDecl(AV *expr_0), Statement(expr_0 = newAV()),
+    #   symbol VarDecl, symbol Statement, Statement(av_push)
+    ok(scalar $nodes->@* >= 4, '_emit_expression returns at least 4 nodes');
+
+    # First node: VarDecl for AV *expr_0
+    isa_ok($nodes->[0], 'Chalk::Bootstrap::Target::XS::AST::VarDecl');
+    is($nodes->[0]->type(), 'AV *', 'expression VarDecl type is AV *');
+    is($nodes->[0]->name(), 'expr_0', 'expression VarDecl name is expr_0');
+
+    # Second node: Statement for newAV()
+    isa_ok($nodes->[1], 'Chalk::Bootstrap::Target::XS::AST::Statement');
+    like($nodes->[1]->code(), qr/expr_0 = newAV\(\)/, 'expression init with newAV()');
+
+    # Last node: av_push statement
+    my $last = $nodes->[-1];
+    isa_ok($last, 'Chalk::Bootstrap::Target::XS::AST::Statement');
+    like($last->code(), qr/av_push\(expr_0/, 'expression av_push to expr_0');
+}
+
+# Test: Multi-symbol expression
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym1 = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $sym2 = make_symbol(type => 'terminal', value => '/::=/', quantifier => undef);
+    my $expr = make_expression($sym1, $sym2);
+
+    my $nodes = $target->_emit_expression($expr, 'expr_0');
+
+    # Count av_push statements (one per symbol)
+    my @pushes = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        && $_->code() =~ /av_push/
+    } $nodes->@*;
+    is(scalar @pushes, 2, 'multi-symbol expression has 2 av_push statements');
+}
+
+# === Rule Construction Lowering ===
+
+# Test: Single-alternative rule
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $rule = make_rule('Identifier', $expr);
+
+    my $nodes = $target->_emit_rule($rule);
+    is(ref($nodes), 'ARRAY', '_emit_rule returns arrayref');
+
+    # Check for VarDecls: AV *expressions, SV *rule (at minimum)
+    my @var_decls = grep { $_ isa Chalk::Bootstrap::Target::XS::AST::VarDecl } $nodes->@*;
+    ok(scalar @var_decls >= 2, 'rule has at least 2 VarDecls');
+
+    # Check for expressions = newAV()
+    my @init_stmts = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        && $_->code() =~ /expressions = newAV/
+    } $nodes->@*;
+    is(scalar @init_stmts, 1, 'rule has expressions = newAV() statement');
+
+    # Check for av_push to expressions (one per alternative)
+    my @expr_pushes = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        && $_->code() =~ /av_push\(expressions/
+    } $nodes->@*;
+    is(scalar @expr_pushes, 1, 'single-alt rule has 1 av_push to expressions');
+
+    # Check for call_method block constructing Rule
+    my @rule_blocks = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        && $_->code() =~ /Chalk::Grammar::Rule/
+    } $nodes->@*;
+    is(scalar @rule_blocks, 1, 'rule has call_method block for Rule constructor');
+
+    # Check Rule call_method uses newRV_noinc for expressions
+    like($rule_blocks[0]->code(), qr/newRV_noinc/, 'Rule constructor uses newRV_noinc');
+
+    # Check for RETVAL assignment
+    my @retval = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        && $_->code() =~ /RETVAL = rule/
+    } $nodes->@*;
+    is(scalar @retval, 1, 'rule has RETVAL = rule statement');
+
+    # Check rule name appears in the call_method block
+    like($rule_blocks[0]->code(), qr/"Identifier"/, 'Rule constructor has correct name');
+}
+
+# Test: Multi-alternative rule
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym1 = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $sym2 = make_symbol(type => 'reference', value => 'InlineRegex', quantifier => undef);
+    my $expr1 = make_expression($sym1);
+    my $expr2 = make_expression($sym2);
+    my $rule = make_rule('Atom', $expr1, $expr2);
+
+    my $nodes = $target->_emit_rule($rule);
+
+    # 2 alternatives → 2 av_pushes to expressions
+    my @expr_pushes = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        && $_->code() =~ /av_push\(expressions/
+    } $nodes->@*;
+    is(scalar @expr_pushes, 2, 'multi-alt rule has 2 av_pushes to expressions');
+}
+
 done_testing();
