@@ -113,9 +113,53 @@ See `docs/ir-node-types.md` for complete taxonomy.
 
 **All tests must pass 100%** - no TODO tests on critical path after their phase is complete.
 
+## Development Workflow
+
+Implementation follows a **build-then-review** pattern using specialized agents.
+This workflow applies to every phase in `docs/chalk-parse-perl-plan.md`.
+
+### Step 1: Implementation (software-engineer agent)
+
+A `software-engineer` subagent performs the implementation work for each phase.
+It follows TDD, writes code, and runs tests. It should invoke the required
+skills (`writing-perl-5.42.0`, `test-driven-development`) and commit frequently.
+
+### Step 2: Triple Review (after every phase completes)
+
+After each phase, launch **three review agents in parallel** to evaluate the work:
+
+1. **code-reviewer** — Correctness and accuracy
+   - Does the implementation match the phase requirements in `docs/chalk-parse-perl-plan.md`?
+   - Are there logic errors, security issues, or violations of project conventions?
+   - Does the code follow the architecture (immutability, determinism, semiring contracts)?
+
+2. **test-architect** — Test coverage and quality
+   - Are all implemented features covered by tests?
+   - Do tests use real data (actual grammars, actual source files), not just toy examples?
+   - Are there missing integration tests or edge cases?
+   - Are there test anti-patterns (testing mocks, brittle assertions)?
+
+3. **code-reviewer** (performance focus) — Performance and scalability
+   - Are there O(n²) algorithms where O(n) is possible?
+   - Will the implementation scale to the 65-rule grammar / 31 source files?
+   - Are there unnecessary allocations, redundant computations, or missed caching?
+   - Is this the point where Aycock optimizations (`docs/chalk-ayock-optimizations.md`)
+     become necessary?
+
+### Step 3: Address Findings
+
+Fix issues identified by reviewers before proceeding to the next phase. This
+prevents technical debt from accumulating across phases.
+
+**Why three reviewers**: A single reviewer tends to focus on one dimension
+(usually correctness) while missing test gaps or performance issues. The triple
+review caught the missing integration test gap at Phase 2b — 299 tests passing
+but none using the actual BNF meta-grammar.
+
 ## Code Review Requirements
 
-**CRITICAL**: Whenever conducting a code review (via code-reviewer subagent or similar), you MUST:
+**CRITICAL**: In addition to the triple review workflow above, any ad-hoc code
+review (via code-reviewer subagent or similar) MUST:
 
 1. **Verify Test Coverage** - Launch a test coverage verification subagent (test-architect or similar) to check:
    - Unit test coverage for all implemented functionality
@@ -135,58 +179,30 @@ See `docs/ir-node-types.md` for complete taxonomy.
 
 ## Implementation Phases
 
-### Phase 0 - Data Model: Complete ✅
+### BNF Pipeline (Complete ✅)
 
-- ✅ Data model classes: `Chalk::Grammar::Symbol`, `Chalk::Grammar::Rule`
-- ✅ BNF meta-grammar: `Chalk::Grammar::BNF` - 10 rules as Perl data
-- ✅ Architecture docs: comonad spec, IR node types, meta-grammar
-- ✅ Progressive validation test: `bootstrap-validation.t`
+The BNF-to-Perl compiler pipeline is fully operational with 1549 tests passing:
 
-### Phase 1a - Standard Earley Parser: Complete ✅
+- ✅ **Phase 0** - Data model: Symbol, Rule, BNF meta-grammar
+- ✅ **Phase 1a** - Earley parser: Boolean semiring, scanless recognition
+- ✅ **Phase 2a** - IR infrastructure: Sea of Nodes, hash consing, use-def chains
+- ✅ **Phase 2b** - Semantic actions: Comonad Context, SemanticAction semiring
+- ✅ **Phase 3** - Code generation: Target::Perl, Generated.pm, bootstrap-validation passes
+- ✅ **Phase 4** - Optimizer: DCE pass, framework for future passes
 
-Deliverables (all implemented):
-- ✅ `lib/Chalk/Bootstrap/Earley.pm` - Scanless Earley recognizer
-- ✅ `lib/Chalk/Bootstrap/Semiring/Boolean.pm` - Recognition semiring
-- ✅ `lib/Chalk/Bootstrap/Context.pm` - Basic comonad (extract only)
-- ✅ `lib/Chalk/Bootstrap/Terminal.pm` - Regex terminal matching
-- ✅ Tests: `t/bootstrap/earley-*.t` (progressive: boolean → ambiguous → regex)
-- ✅ `parse_value()` method - exposes raw semiring values for semantic extraction
+Full pipeline: BNF text → desugar → Earley parse → semantic actions → IR → Optimizer(DCE) → Target::Perl → Generated.pm
 
-### Phase 2a - IR Infrastructure: Complete ✅
+### Perl Parsing Roadmap (Next)
 
-Deliverables (all implemented):
-- ✅ `lib/Chalk/Bootstrap/IR/NodeFactory.pm` - Hash consing factory
-- ✅ `lib/Chalk/Bootstrap/IR/Node.pm` - Base class with use-def chains
-- ✅ `lib/Chalk/Bootstrap/IR/Node/*.pm` - 4 node subclasses (Start, Return, Constant, Constructor)
-- ✅ Tests: `t/bootstrap/ir-*.t` (hash consing, use-def chains)
+See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
 
-### Phase 2b - Semantic Actions: Partially Complete ⚠️
-
-Deliverables:
-- ✅ Complete comonad: add `extend`/`duplicate` to Context
-- ✅ `lib/Chalk/Bootstrap/Semiring/SemanticAction.pm` - IR construction semiring
-- ✅ `lib/Chalk/Bootstrap/Semiring/Composite.pm` - Boolean + Semantic combined
-- ✅ `lib/Chalk/Bootstrap/Actions.pm` - 10 semantic action callbacks
-- ✅ Tests: `t/bootstrap/comonad-threading.t`, `t/bootstrap/semantic-actions*.t`
-- ⚠️ Known bugs: Some semantic actions need fixes (see failing integration tests)
-
-### Phase 3 - Code Generation (MILESTONE)
-
-Deliverables:
-- `lib/Chalk/Bootstrap/Target.pm` - Target abstraction
-- `lib/Chalk/Bootstrap/Target/Perl.pm` - Emit feature class code
-- Generated: `lib/Chalk/Grammar/BNF/Generated.pm`
-- Tests: `t/bootstrap/codegen-*.t`, **bootstrap-validation.t PASSES**
-
-### Phase 4 - Optimization Pipeline
-
-Deliverables:
-- `lib/Chalk/Bootstrap/Optimizer/*.pm` - Peephole, DCE, GCM passes
-- Tests: `t/bootstrap/optimizer-*.t` (correctness + effectiveness)
-
-### Phase 5 - Leo Optimization (DEFERRED, off critical path)
-
-Not required for self-hosting validation.
+- **Phase 0**: Wire 65-rule Perl grammar through existing BNF pipeline
+- **Phases 1-5**: Progressive grammar recognition with synthetic tests,
+  adding Precedence/Structural semirings and Aycock optimizations as needed
+- **Phase 6**: Perl IR from parsed source (file-driven, least to most complex)
+- **Phase 7**: Lower to Perl (validate against existing source)
+- **Phase 8**: Lower to XS (validate functional equivalence)
+- **Phase 9**: Optimizations (Peephole, GCM, Aycock)
 
 ## Critical Design Constraints
 
@@ -213,15 +229,21 @@ Not required for self-hosting validation.
 - `t/bootstrap/grammar-data-model.t` - Data model tests (24 passing)
 - `t/bootstrap/bootstrap-validation.t` - Self-hosting integration test (TODO)
 
-## Validation Gate
+## Validation Gates
 
-The `t/bootstrap/bootstrap-validation.t` test is the integration gate:
+### BNF Pipeline Gate (PASSING ✅)
 
-- **Phase 0**: Fails "parser not implemented" ✅ (current state)
-- **Phase 1a**: Fails "IR construction not implemented"
-- **Phase 2b**: Fails "codegen not implemented"
-- **Phase 3**: **PASSES** (milestone - self-hosting works)
-- **Phase 4**: Still passes (validates optimization correctness)
+The `t/bootstrap/bootstrap-validation.t` test validates the BNF pipeline:
+
+- ✅ **Phase 4**: Passes — generated recognizer ≡ hand-written recognizer
+
+### Perl Parsing Gate (Future)
+
+Progressive validation targets per `docs/chalk-parse-perl-plan.md`:
+
+- **Phase 5**: All 31 `.pm` files recognized by Perl grammar
+- **Phase 7**: Generated Perl matches existing source
+- **Phase 8**: Generated XS functionally equivalent to Perl
 
 ## Relationship to Main Chalk
 
