@@ -172,6 +172,14 @@ SKIP: {
         sub { push @pm_files, $File::Find::name if /\.pm$/ },
         'lib/Chalk'
     );
+
+    # Files using grammar constructs not yet supported
+    my %known_gaps = (
+        'lib/Chalk/Bootstrap/ConciseTree.pm'          => '$#array (last-index)',
+        'lib/Chalk/Bootstrap/ConciseTree/Actions.pm'   => '$#array (last-index)',
+        'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm'    => 'backtick (qx) operator',
+    );
+
     for my $file (sort @pm_files) {
         open my $fh, '<:utf8', $file or do {
             fail("Phase 5: cannot read $file: $!");
@@ -180,8 +188,13 @@ SKIP: {
         local $/;
         my $source = <$fh>;
         close $fh;
-        TODO: {
-            local $TODO = 'real file recognition may require grammar or performance fixes';
+        if ($known_gaps{$file}) {
+            TODO: {
+                local $TODO = "grammar gap: $known_gaps{$file} not yet supported";
+                ok($recognizer->parse($source),
+                    "Phase 5: recognizes $file");
+            }
+        } else {
             ok($recognizer->parse($source),
                 "Phase 5: recognizes $file");
         }
