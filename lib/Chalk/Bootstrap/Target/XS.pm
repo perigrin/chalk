@@ -9,6 +9,8 @@ use Chalk::Bootstrap::Target;
 use Chalk::Bootstrap::Target::XS::AST::Preamble;
 use Chalk::Bootstrap::Target::XS::AST::Module;
 use Chalk::Bootstrap::Target::XS::AST::CompositeNode;
+use Chalk::Bootstrap::Target::XS::AST::VarDecl;
+use Chalk::Bootstrap::Target::XS::AST::Statement;
 
 class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader = 'Chalk::Grammar::BNF::Rules';
@@ -33,6 +35,57 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $value = $node->value();
         my $escaped = $self->_escape_c_string($value);
         return "newSVpvs(\"$escaped\")";
+    }
+
+    # Emit AST nodes for a Constructor:Symbol IR node
+    # Returns arrayref of [VarDecl, Statement] AST nodes
+    method _emit_symbol($symbol_node, $var_name) {
+        my $inputs = $symbol_node->inputs();
+        my $type_const = $inputs->[0];
+        my $value_const = $inputs->[1];
+        my $quant_const = $inputs->[2];
+
+        my $type_str = $type_const->value();
+
+        # Strip / delimiters from terminal values, then C-escape
+        my $raw_value = $value_const->value();
+        my $value_str = ($type_str eq 'terminal')
+            ? $self->_escape_c_string($self->_strip_terminal_delimiters($raw_value))
+            : $self->_escape_c_string($raw_value);
+
+        # Build the call_method block
+        my $block = "{\n";
+        $block .= "    dSP;\n";
+        $block .= "    ENTER; SAVETMPS;\n";
+        $block .= "    PUSHMARK(SP);\n";
+        $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"Chalk::Grammar::Symbol\")));\n";
+        $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"type\")));\n";
+        $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$type_str\")));\n";
+        $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"value\")));\n";
+        $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$value_str\")));\n";
+
+        # Optional quantifier args (check value, not node — node may exist with undef value)
+        if (defined $quant_const && defined $quant_const->value()) {
+            my $quant_str = $self->_escape_c_string($quant_const->value());
+            $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"quantifier\")));\n";
+            $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$quant_str\")));\n";
+        }
+
+        $block .= "    PUTBACK;\n";
+        $block .= "    call_method(\"new\", G_SCALAR);\n";
+        $block .= "    SPAGAIN;\n";
+        $block .= "    $var_name = SvREFCNT_inc(POPs);\n";
+        $block .= "    PUTBACK;\n";
+        $block .= "    FREETMPS; LEAVE;\n";
+        $block .= "}";
+
+        my $var_decl = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+            type => 'SV *',
+            name => $var_name,
+        );
+        my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => $block);
+
+        return [$var_decl, $stmt];
     }
 
     method generate($ir) {

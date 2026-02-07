@@ -130,4 +130,91 @@ use Chalk::Bootstrap::IR::NodeFactory;
         'constant with backslash is escaped');
 }
 
+# === Symbol Construction Lowering ===
+
+# Helper: build a Constructor:Symbol IR node (same as codegen-perl.t)
+sub make_symbol {
+    my (%args) = @_;
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $type = $factory->make('Constant', const_type => 'enum', value => $args{type});
+    my $value = $factory->make('Constant', const_type => 'string', value => $args{value});
+    my $quant = $factory->make('Constant', const_type => 'string', value => $args{quantifier});
+    return $factory->make('Constructor',
+        class => 'Symbol',
+        type => $type,
+        value => $value,
+        quantifier => $quant,
+    );
+}
+
+# Test: Reference symbol without quantifier
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
+
+    my $nodes = $target->_emit_symbol($sym, 'sym_0');
+    is(ref($nodes), 'ARRAY', '_emit_symbol returns arrayref');
+    is(scalar $nodes->@*, 2, '_emit_symbol returns 2 nodes (VarDecl + Statement)');
+
+    # First node is a VarDecl
+    isa_ok($nodes->[0], 'Chalk::Bootstrap::Target::XS::AST::VarDecl');
+    is($nodes->[0]->type(), 'SV *', 'VarDecl type is SV *');
+    is($nodes->[0]->name(), 'sym_0', 'VarDecl name matches var_name arg');
+
+    # Second node is a Statement with call_method block
+    isa_ok($nodes->[1], 'Chalk::Bootstrap::Target::XS::AST::Statement');
+    my $code = $nodes->[1]->code();
+    like($code, qr/dSP/, 'call_method block has dSP');
+    like($code, qr/ENTER; SAVETMPS/, 'call_method block has ENTER; SAVETMPS');
+    like($code, qr/Chalk::Grammar::Symbol/, 'block pushes Symbol class name');
+    like($code, qr/"type"/, 'block pushes type key');
+    like($code, qr/"reference"/, 'block pushes reference type value');
+    like($code, qr/"value"/, 'block pushes value key');
+    like($code, qr/"Atom"/, 'block pushes Atom value');
+    unlike($code, qr/quantifier/, 'block omits quantifier when undef');
+    like($code, qr/call_method\("new", G_SCALAR\)/, 'block calls new');
+    like($code, qr/sym_0 = SvREFCNT_inc\(POPs\)/, 'block assigns to sym_0');
+    like($code, qr/FREETMPS; LEAVE/, 'block has FREETMPS; LEAVE');
+}
+
+# Test: Terminal symbol — value has delimiters stripped and C-escaped
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
+
+    my $nodes = $target->_emit_symbol($sym, 'sym_1');
+    my $code = $nodes->[1]->code();
+    like($code, qr/"terminal"/, 'terminal symbol has correct type');
+    like($code, qr/"\[A-Z\]\+"/, 'terminal value has delimiters stripped');
+    unlike($code, qr/\/\[A-Z\]\+\//, 'terminal value does not have / delimiters');
+}
+
+# Test: Symbol with quantifier — block includes quantifier args
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'reference', value => 'Rule', quantifier => '+');
+
+    my $nodes = $target->_emit_symbol($sym, 'sym_2');
+    my $code = $nodes->[1]->code();
+    like($code, qr/"quantifier"/, 'block includes quantifier key');
+    like($code, qr/"\+"/, 'block includes + quantifier value');
+}
+
+# Test: Complex regex terminal — properly escaped in C string
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'terminal', value => '/(?:\\s|#[^\\n]*)*/');
+
+    my $nodes = $target->_emit_symbol($sym, 'sym_3');
+    my $code = $nodes->[1]->code();
+    # After stripping delimiters: (?:\s|#[^\n]*)*
+    # After C escaping: (?:\\s|#[^\\n]*)*
+    like($code, qr/\\\\s/, 'complex regex has escaped backslash-s');
+    like($code, qr/\\\\n/, 'complex regex has escaped backslash-n');
+}
+
 done_testing();
