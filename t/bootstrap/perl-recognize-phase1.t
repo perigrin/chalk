@@ -45,11 +45,29 @@ SKIP: {
     ok($recognizer->parse('{ foo; }'),
         'Phase 1: accepts block as compound statement');
 
+    # Whitespace and comment variations
+    ok($recognizer->parse("  \t\n  "),
+        'Phase 1: accepts whitespace-only program');
+    ok($recognizer->parse("foo;\n# comment\nbar;"),
+        'Phase 1: accepts comments between statements');
+    ok($recognizer->parse("foo ;"),
+        'Phase 1: accepts whitespace before semicolon');
+
+    # Block variations
+    ok($recognizer->parse('{}'),
+        'Phase 1: accepts empty block');
+    ok($recognizer->parse('{ { foo; } }'),
+        'Phase 1: accepts nested blocks');
+    ok($recognizer->parse('{ foo; bar; }'),
+        'Phase 1: accepts block with multiple statements');
+
     # Negative cases
     ok(!$recognizer->parse('{ foo;'),
         'Phase 1: rejects unclosed brace');
     ok(!$recognizer->parse(':::'),
         'Phase 1: rejects invalid syntax');
+    ok(!$recognizer->parse('foo'),
+        'Phase 1: rejects identifier without semicolon');
 }
 
 done_testing();
