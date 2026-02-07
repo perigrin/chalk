@@ -20,6 +20,9 @@ class Chalk::Bootstrap::Earley {
     field %waiting_for;
     field %completed_at;
 
+    # Compiled regex cache: pattern_string => qr// object
+    field %regex_cache;
+
     ADJUST {
         $rule_table = {};
         for my $rule ($grammar->@*) {
@@ -181,7 +184,7 @@ class Chalk::Bootstrap::Earley {
     # Scan: match terminal and advance to next position
     method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $agenda, $n) {
         my $pattern_str = $symbol->value();
-        my $pattern = qr/$pattern_str/;
+        my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
         my $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
 
         return unless defined $end_pos;
