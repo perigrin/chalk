@@ -6,7 +6,10 @@ use utf8;
 package TestPipeline;
 
 use Exporter 'import';
-our @EXPORT_OK = qw(build_parser parse_ir bnf_text full_pipeline optimized_pipeline grammars_match);
+our @EXPORT_OK = qw(
+    build_parser parse_ir bnf_text full_pipeline optimized_pipeline grammars_match
+    perl_bnf_text perl_pipeline build_perl_recognizer
+);
 
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Composite;
@@ -83,6 +86,33 @@ sub optimized_pipeline {
     my $optimizer = Chalk::Bootstrap::Optimizer->new();
     $optimizer->add_pass(Chalk::Bootstrap::Optimizer::DCE->new());
     return $optimizer->optimize($ir);
+}
+
+# Returns the 65-rule Perl grammar as BNF text (reads from docs/chalk-bootstrap.bnf)
+sub perl_bnf_text {
+    my $bnf_file = 'docs/chalk-bootstrap.bnf';
+    open my $fh, '<:utf8', $bnf_file or die "Cannot read $bnf_file: $!";
+    local $/;
+    return <$fh>;
+}
+
+# Convenience function: resets factory, builds parser, parses Perl BNF, returns IR
+sub perl_pipeline {
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $parser = build_parser();
+    return parse_ir($parser, perl_bnf_text());
+}
+
+# Builds a Boolean recognizer from the generated Perl grammar IR
+# Returns an Earley parser that can recognize Perl source code
+sub build_perl_recognizer {
+    my ($grammar) = @_;
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    return Chalk::Bootstrap::Earley->new(
+        grammar  => $desugared,
+        semiring => $bool_sr,
+    );
 }
 
 # Compare two grammars structurally (rule names, alternatives, symbols)
