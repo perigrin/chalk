@@ -436,4 +436,113 @@ sub make_rule {
     like($code, qr/newSVpvs\("Atom"\)/, 'reference value uses newSVpvs');
 }
 
+# === Graph Visitor + Full XSUB Assembly (Prompt 8) ===
+
+# Test: _emit_xsub wraps a rule in an XSUB AST node
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $rule = make_rule('Identifier', $expr);
+
+    my $xsub = $target->_emit_xsub($rule);
+    isa_ok($xsub, 'Chalk::Bootstrap::Target::XS::AST::XSUB', '_emit_xsub returns XSUB node');
+    is($xsub->name(), 'Identifier', 'XSUB name matches rule name');
+    is($xsub->return_type(), 'SV *', 'XSUB return type is SV *');
+
+    my $output = $xsub->emit();
+    like($output, qr/PREINIT:/, 'XSUB has PREINIT section');
+    like($output, qr/CODE:/, 'XSUB has CODE section');
+    like($output, qr/OUTPUT:\n    RETVAL/, 'XSUB has OUTPUT: RETVAL');
+    like($output, qr/Identifier\(self\)/, 'XSUB signature has rule name');
+}
+
+# Test: generate() with single rule produces valid XS with 1 XSUB
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $rule = make_rule('Identifier', $expr);
+
+    my $output = $target->generate([$rule]);
+
+    # Preamble still present
+    like($output, qr/#define PERL_NO_GET_CONTEXT/, 'single rule XS has preamble');
+    like($output, qr/MODULE = Chalk::Grammar::BNF::Rules/, 'single rule XS has MODULE');
+
+    # XSUB present
+    like($output, qr/^SV \*\nIdentifier\(self\)/m, 'single rule XS has Identifier XSUB');
+    like($output, qr/PREINIT:/, 'single rule XSUB has PREINIT');
+    like($output, qr/CODE:/, 'single rule XSUB has CODE');
+    like($output, qr/OUTPUT:\n    RETVAL/, 'single rule XSUB has OUTPUT');
+}
+
+# Test: generate() with 2 rules produces XS with 2 XSUBs in order
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+
+    my $sym1 = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
+    my $expr1 = make_expression($sym1);
+    my $rule1 = make_rule('Identifier', $expr1);
+
+    my $sym2a = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
+    my $sym2b = make_symbol(type => 'reference', value => 'InlineRegex', quantifier => undef);
+    my $expr2a = make_expression($sym2a);
+    my $expr2b = make_expression($sym2b);
+    my $rule2 = make_rule('Atom', $expr2a, $expr2b);
+
+    my $output = $target->generate([$rule1, $rule2]);
+
+    # Both XSUBs present
+    like($output, qr/Identifier\(self\)/, '2-rule XS has Identifier XSUB');
+    like($output, qr/Atom\(self\)/, '2-rule XS has Atom XSUB');
+
+    # Identifier appears before Atom (order preserved)
+    my $id_pos = index($output, 'Identifier(self)');
+    my $atom_pos = index($output, 'Atom(self)');
+    ok($id_pos < $atom_pos, 'Identifier XSUB appears before Atom XSUB');
+}
+
+# Test: Full 10-rule BNF meta-grammar integration via optimized_pipeline
+use lib 't/bootstrap/lib';
+use TestPipeline qw(optimized_pipeline);
+
+{
+    my $ir = optimized_pipeline();
+    ok(defined $ir, 'optimized_pipeline returns IR');
+
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $output = $target->generate($ir);
+
+    # Preamble and MODULE present
+    like($output, qr/#define PERL_NO_GET_CONTEXT/, 'full pipeline XS has preamble');
+    like($output, qr/MODULE = Chalk::Grammar::BNF::Rules/, 'full pipeline XS has MODULE');
+
+    # The BNF text defines 10 rules; desugared helpers (Rule_plus, etc.) are
+    # parser infrastructure, not parsed output. IR has 10 Constructor:Rule nodes.
+    for my $name (qw(Grammar Rule Alternatives Sequence Element Atom Quantifier Comment Identifier InlineRegex)) {
+        like($output, qr/^SV \*\n\Q$name\E\(self\)/m,
+            "full pipeline XS has $name XSUB");
+    }
+
+    # Each XSUB should have PREINIT, CODE, OUTPUT sections
+    # Count PREINIT sections (should be >= 10)
+    my @preinit_matches = ($output =~ /PREINIT:/g);
+    ok(scalar @preinit_matches >= 10, "full pipeline XS has >= 10 PREINIT sections (got " . scalar @preinit_matches . ")");
+
+    my @code_matches = ($output =~ /CODE:/g);
+    ok(scalar @code_matches >= 10, "full pipeline XS has >= 10 CODE sections (got " . scalar @code_matches . ")");
+
+    my @output_matches = ($output =~ /OUTPUT:/g);
+    ok(scalar @output_matches >= 10, "full pipeline XS has >= 10 OUTPUT sections (got " . scalar @output_matches . ")");
+
+    # Should contain call_method blocks for Symbol and Rule construction
+    like($output, qr/call_method\("new", G_SCALAR\)/, 'full pipeline XS has call_method blocks');
+    like($output, qr/Chalk::Grammar::Symbol/, 'full pipeline XS constructs Symbols');
+    like($output, qr/Chalk::Grammar::Rule/, 'full pipeline XS constructs Rules');
+}
+
 done_testing();

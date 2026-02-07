@@ -8,7 +8,7 @@ Prompts build on each other sequentially — no orphaned code.
 
 ---
 
-## Prompt 1: XS AST Leaf Nodes (Node, Preamble, Module, VarDecl, Statement)
+## Prompt 1: XS AST Leaf Nodes (Node, Preamble, Module, VarDecl, Statement) ✅ COMPLETED
 
 **Milestone**: 5.0 (XS AST Infrastructure — part 1)
 **Files created**: 5 AST classes + test file (started)
@@ -75,7 +75,7 @@ Commit when all tests pass.
 
 ---
 
-## Prompt 2: XSUB Node + CompositeNode (PREINIT/CODE Partitioning)
+## Prompt 2: XSUB Node + CompositeNode (PREINIT/CODE Partitioning) ✅ COMPLETED
 
 **Milestone**: 5.0 (XS AST Infrastructure — part 2, completing milestone)
 **Files created**: 2 AST classes
@@ -139,7 +139,7 @@ Commit when all tests pass.
 
 ---
 
-## Prompt 3: Target Interface Extension (generate_distribution)
+## Prompt 3: Target Interface Extension (generate_distribution) ✅ COMPLETED
 
 **Milestone**: 5.1 (Target::XS Graph Visitor — prerequisite)
 **Files modified**: Target.pm, Target/Perl.pm, codegen-target.t
@@ -185,7 +185,7 @@ Commit when all tests pass.
 
 ---
 
-## Prompt 4: Target::XS Scaffold
+## Prompt 4: Target::XS Scaffold ✅ COMPLETED
 
 **Milestone**: 5.1 (Target::XS Graph Visitor — part 1)
 **Files created**: Target/XS.pm, t/bootstrap/xs-target.t
@@ -232,11 +232,11 @@ Commit when all tests pass.
 
 ---
 
-## Prompt 5: C String Escaping + Constant Lowering
+## Prompt 5: C String Escaping + Constant Lowering ✅ COMPLETED
 
 **Milestone**: 5.1 (Target::XS Graph Visitor — part 2)
 **Files modified**: Target/XS.pm, xs-target.t
-**Depends on**: Prompt 4
+**Depends on**: Prompt 4 ✅ COMPLETED
 
 ```text
 Add C string escaping and IR Constant node lowering to Target::XS.
@@ -283,7 +283,7 @@ Commit when all tests pass.
 
 ---
 
-## Prompt 6: Symbol Construction Lowering
+## Prompt 6: Symbol Construction Lowering ✅ COMPLETED
 
 **Milestone**: 5.1 (Target::XS Graph Visitor — part 3)
 **Files modified**: Target/XS.pm, xs-target.t
@@ -351,7 +351,7 @@ Commit when all tests pass.
 
 ---
 
-## Prompt 7: Expression + Rule Construction Lowering
+## Prompt 7: Expression + Rule Construction Lowering ✅ COMPLETED
 
 **Milestone**: 5.1 (Target::XS Graph Visitor — part 4)
 **Files modified**: Target/XS.pm, xs-target.t
@@ -427,7 +427,7 @@ Commit when all tests pass.
 
 ---
 
-## Prompt 8: Graph Visitor + Full XSUB Assembly
+## Prompt 8: Graph Visitor + Full XSUB Assembly ✅ COMPLETED
 
 **Milestone**: 5.1 (Target::XS Graph Visitor — completing milestone)
 **Files modified**: Target/XS.pm, xs-target.t

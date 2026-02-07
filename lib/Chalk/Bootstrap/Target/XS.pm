@@ -11,6 +11,7 @@ use Chalk::Bootstrap::Target::XS::AST::Module;
 use Chalk::Bootstrap::Target::XS::AST::CompositeNode;
 use Chalk::Bootstrap::Target::XS::AST::VarDecl;
 use Chalk::Bootstrap::Target::XS::AST::Statement;
+use Chalk::Bootstrap::Target::XS::AST::XSUB;
 
 class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader = 'Chalk::Grammar::BNF::Rules';
@@ -201,6 +202,18 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@nodes;
     }
 
+    # Wrap a Constructor:Rule IR node into an XSUB AST node
+    method _emit_xsub($rule_node) {
+        my $rule_name = $rule_node->inputs()->[0]->value();
+        my $body_nodes = $self->_emit_rule($rule_node);
+
+        return Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+            name   => $rule_name,
+            params => ['SV *self'],
+            body   => $body_nodes,
+        );
+    }
+
     method generate($ir) {
         die "generate() requires an arrayref of IR rules"
             unless defined($ir) && ref($ir) eq 'ARRAY';
@@ -211,8 +224,14 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
             package => $module_name,
         );
 
+        my @children = ($preamble, $module);
+
+        for my $rule ($ir->@*) {
+            push @children, $self->_emit_xsub($rule);
+        }
+
         my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(
-            children => [$preamble, $module],
+            children => \@children,
         );
 
         return $composite->emit();
