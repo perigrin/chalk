@@ -13,6 +13,13 @@ class Chalk::Bootstrap::Earley {
     # Build a lookup table for rules by name
     field $rule_table;
 
+    # Secondary indexes for O(1) lookup during complete/advance
+    # Reset at the start of each parse.
+    # waiting_for: {rule_name}{pos} = [chart_key, ...] — items waiting for a nonterminal
+    # completed_at: {rule_name}{origin_pos}{chart_pos} = [chart_key, ...] — completed items
+    field %waiting_for;
+    field %completed_at;
+
     ADJUST {
         $rule_table = {};
         for my $rule ($grammar->@*) {
@@ -58,6 +65,10 @@ class Chalk::Bootstrap::Earley {
         # Key format: "rule_name:alt_index:dot:origin"
         my @chart = map { {} } (0 .. $n);
 
+        # Reset secondary indexes for this parse
+        %waiting_for = ();
+        %completed_at = ();
+
         # Find the start rule (first rule in grammar)
         my $start_rule = $grammar->[0];
 
@@ -88,12 +99,21 @@ class Chalk::Bootstrap::Earley {
                         # Update the chart entry with the action-applied value
                         $chart[$pos]->{$key} = [$item, $alt_idx];
                     }
+                    # Index this completed item for _advance_from_completed lookups
+                    my $c_rule = $item->{rule}->name();
+                    my $c_origin = $item->{origin};
+                    $completed_at{$c_rule}{$c_origin}{$pos} //= [];
+                    push $completed_at{$c_rule}{$c_origin}{$pos}->@*, $key;
                     # Complete
                     $self->_complete($item, $alt_idx, $pos, \@chart, $agenda);
                 } else {
                     my $symbol = $self->_symbol_after_dot($item, $alt_idx);
 
                     if ($symbol->is_reference()) {
+                        # Index this item as waiting for the nonterminal
+                        my $w_rule = $symbol->value();
+                        $waiting_for{$w_rule}{$pos} //= [];
+                        push $waiting_for{$w_rule}{$pos}->@*, $key;
                         # Predict
                         $self->_predict($symbol, $pos, \@chart, $agenda);
                         # Advance from already-completed items at this position.
@@ -208,20 +228,20 @@ class Chalk::Bootstrap::Earley {
         }
     }
 
-    # Complete: combine completed items with items waiting for them
+    # Complete: combine completed items with items waiting for them.
+    # Uses %waiting_for index for O(1) lookup instead of scanning the full chart.
     method _complete($completed_item, $completed_alt_idx, $pos, $chart, $agenda) {
         my $rule_name = $completed_item->{rule}->name();
         my $origin = $completed_item->{origin};
 
-        # Find all items at origin position that are waiting for this rule
-        for my $key (keys $chart->[$origin]->%*) {
-            my ($waiting_item, $waiting_alt_idx) = $chart->[$origin]->{$key}->@*;
+        # Look up items at origin that are waiting for this rule name
+        my $waiting_keys = $waiting_for{$rule_name}{$origin};
+        return unless defined $waiting_keys;
 
-            next if $self->_is_complete($waiting_item, $waiting_alt_idx);
-
-            my $symbol = $self->_symbol_after_dot($waiting_item, $waiting_alt_idx);
-            next unless $symbol && $symbol->is_reference();
-            next unless $symbol->value() eq $rule_name;
+        for my $wkey ($waiting_keys->@*) {
+            my $entry = $chart->[$origin]->{$wkey};
+            next unless defined $entry;
+            my ($waiting_item, $waiting_alt_idx) = $entry->@*;
 
             # Advance the waiting item
             my $new_item = $self->_make_item(
@@ -256,14 +276,18 @@ class Chalk::Bootstrap::Earley {
     # nullable nonterminals (like whitespace _) appearing multiple times in a
     # rule — the second prediction is suppressed but the earlier completion
     # never saw this waiting item, so we combine them here.
+    # Uses %completed_at index for O(1) lookup instead of scanning the full chart.
     method _advance_from_completed($item, $alt_idx, $symbol, $pos, $chart, $agenda) {
         my $rule_name = $symbol->value();
 
-        for my $ckey (keys $chart->[$pos]->%*) {
-            my ($citem, $calt_idx) = $chart->[$pos]->{$ckey}->@*;
-            next unless $citem->{rule}->name() eq $rule_name;
-            next unless $self->_is_complete($citem, $calt_idx);
-            next unless $citem->{origin} == $pos;
+        # Look up completed items for this rule name with origin == pos at chart pos
+        my $completed_keys = $completed_at{$rule_name}{$pos}{$pos};
+        return unless defined $completed_keys;
+
+        for my $ckey ($completed_keys->@*) {
+            my $entry = $chart->[$pos]->{$ckey};
+            next unless defined $entry;
+            my ($citem, $calt_idx) = $entry->@*;
 
             # Advance the waiting item past the completed reference
             my $new_item = $self->_make_item(
