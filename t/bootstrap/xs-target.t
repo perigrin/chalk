@@ -422,6 +422,9 @@ sub make_rule {
 
     # Terminal values should use newSVpvn with explicit length per spec §5.4
     like($code, qr/newSVpvn\("[^"]+",\s*\d+\)/, 'terminal value uses newSVpvn with length');
+
+    # Verify exact length: /[A-Z]+/ stripped to [A-Z]+ (6 chars), C-escaped stays [A-Z]+ (6 chars)
+    like($code, qr/newSVpvn\("\[A-Z\]\+", 6\)/, 'newSVpvn length is exactly correct for [A-Z]+');
 }
 
 # Test: Non-terminal values still use newSVpvs
@@ -528,21 +531,35 @@ use TestPipeline qw(optimized_pipeline);
             "full pipeline XS has $name XSUB");
     }
 
-    # Each XSUB should have PREINIT, CODE, OUTPUT sections
-    # Count PREINIT sections (should be >= 10)
+    # Each XSUB should have PREINIT, CODE, OUTPUT sections — exactly 10
     my @preinit_matches = ($output =~ /PREINIT:/g);
-    ok(scalar @preinit_matches >= 10, "full pipeline XS has >= 10 PREINIT sections (got " . scalar @preinit_matches . ")");
+    is(scalar @preinit_matches, 10, "full pipeline XS has exactly 10 PREINIT sections");
 
     my @code_matches = ($output =~ /CODE:/g);
-    ok(scalar @code_matches >= 10, "full pipeline XS has >= 10 CODE sections (got " . scalar @code_matches . ")");
+    is(scalar @code_matches, 10, "full pipeline XS has exactly 10 CODE sections");
 
     my @output_matches = ($output =~ /OUTPUT:/g);
-    ok(scalar @output_matches >= 10, "full pipeline XS has >= 10 OUTPUT sections (got " . scalar @output_matches . ")");
+    is(scalar @output_matches, 10, "full pipeline XS has exactly 10 OUTPUT sections");
 
     # Should contain call_method blocks for Symbol and Rule construction
     like($output, qr/call_method\("new", G_SCALAR\)/, 'full pipeline XS has call_method blocks');
     like($output, qr/Chalk::Grammar::Symbol/, 'full pipeline XS constructs Symbols');
     like($output, qr/Chalk::Grammar::Rule/, 'full pipeline XS constructs Rules');
+}
+
+# === Determinism Test (spec §5.5) ===
+
+# Test: Same input produces byte-identical output across regenerations
+{
+    my $ir1 = optimized_pipeline();
+    my $target1 = Chalk::Bootstrap::Target::XS->new();
+    my $output1 = $target1->generate($ir1);
+
+    my $ir2 = optimized_pipeline();
+    my $target2 = Chalk::Bootstrap::Target::XS->new();
+    my $output2 = $target2->generate($ir2);
+
+    is($output1, $output2, 'XS output is deterministic across regenerations');
 }
 
 done_testing();
