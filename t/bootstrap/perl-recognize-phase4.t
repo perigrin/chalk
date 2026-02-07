@@ -45,6 +45,26 @@ SKIP: {
         'Phase 4: accepts &&= assignment');
     ok($recognizer->parse('$x ||= $val;'),
         'Phase 4: accepts ||= assignment');
+    ok($recognizer->parse('$x -= 1;'),
+        'Phase 4: accepts -= assignment');
+    ok($recognizer->parse('$x *= 2;'),
+        'Phase 4: accepts *= assignment');
+    ok($recognizer->parse('$x /= 2;'),
+        'Phase 4: accepts /= assignment');
+    ok($recognizer->parse('$x %= 10;'),
+        'Phase 4: accepts %= assignment');
+    ok($recognizer->parse('$x **= 2;'),
+        'Phase 4: accepts **= assignment');
+    ok($recognizer->parse('$x &= 0xFF;'),
+        'Phase 4: accepts &= assignment');
+    ok($recognizer->parse('$x |= 0x01;'),
+        'Phase 4: accepts |= assignment');
+    ok($recognizer->parse('$x ^= 0x01;'),
+        'Phase 4: accepts ^= assignment');
+    ok($recognizer->parse('$x <<= 1;'),
+        'Phase 4: accepts <<= assignment');
+    ok($recognizer->parse('$x >>= 1;'),
+        'Phase 4: accepts >>= assignment');
 
     # §14 UnaryExpression
     ok($recognizer->parse('!$x;'),
@@ -99,6 +119,16 @@ SKIP: {
         'Phase 4: accepts eq comparison');
     ok($recognizer->parse('$a ne $b;'),
         'Phase 4: accepts ne comparison');
+    ok($recognizer->parse('$a lt $b;'),
+        'Phase 4: accepts lt string comparison');
+    ok($recognizer->parse('$a gt $b;'),
+        'Phase 4: accepts gt string comparison');
+    ok($recognizer->parse('$a le $b;'),
+        'Phase 4: accepts le string comparison');
+    ok($recognizer->parse('$a ge $b;'),
+        'Phase 4: accepts ge string comparison');
+    ok($recognizer->parse('$a cmp $b;'),
+        'Phase 4: accepts cmp three-way string compare');
     ok($recognizer->parse('$obj isa Foo;'),
         'Phase 4: accepts isa operator');
 
@@ -113,6 +143,8 @@ SKIP: {
         'Phase 4: accepts and keyword');
     ok($recognizer->parse('$a or $b;'),
         'Phase 4: accepts or keyword');
+    ok($recognizer->parse('$a xor $b;'),
+        'Phase 4: accepts xor keyword');
 
     # §15 BinaryExpression — regex binding
     ok($recognizer->parse('$str =~ /pattern/;'),
@@ -178,6 +210,8 @@ SKIP: {
         'Phase 4: accepts postfix hash deref');
     ok($recognizer->parse('$ref->$*;'),
         'Phase 4: accepts postfix scalar deref');
+    ok($recognizer->parse('$aref->$#*;'),
+        'Phase 4: accepts postfix array length deref');
 
     # §16 PostfixExpression — CallExpression
     ok($recognizer->parse('defined($x);'),
@@ -186,6 +220,10 @@ SKIP: {
         'Phase 4: accepts function call with multiple args');
     ok($recognizer->parse('push @arr, $val;'),
         'Phase 4: accepts list-style function call');
+    ok($recognizer->parse('Scalar::Util::blessed($obj);'),
+        'Phase 4: accepts qualified function call');
+    ok($recognizer->parse('Foo::Bar::baz();'),
+        'Phase 4: accepts qualified function call no args');
 
     # §16 PostfixExpression — CallExpression with block
     # CallExpression with block: grammar requires semicolons inside blocks,
@@ -212,6 +250,22 @@ SKIP: {
         'Phase 4: accepts unless postfix modifier');
     ok($recognizer->parse('push @arr, $val for @items;'),
         'Phase 4: accepts for postfix modifier');
+    ok($recognizer->parse('say $item foreach @items;'),
+        'Phase 4: accepts foreach postfix modifier');
+    ok($recognizer->parse('$x++ while $x < 10;'),
+        'Phase 4: accepts while postfix modifier');
+    ok($recognizer->parse('next until $ready;'),
+        'Phase 4: accepts until postfix modifier');
+
+    # Chained postfix operations
+    ok($recognizer->parse('$obj->method()->method2();'),
+        'Phase 4: accepts chained method calls');
+    ok($recognizer->parse('$hash->{$key}->{$key2};'),
+        'Phase 4: accepts nested hash subscripts');
+    ok($recognizer->parse('$arr->[0]->[1];'),
+        'Phase 4: accepts nested array subscripts');
+    ok($recognizer->parse('$obj->method()->[$i];'),
+        'Phase 4: accepts method-to-subscript chain');
 
     # Negative cases
     # NOTE: Keywords are NOT reserved. These test structural incompleteness.
