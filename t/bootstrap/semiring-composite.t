@@ -9,7 +9,9 @@ use Chalk::Bootstrap::Semiring::Composite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Semiring::Precedence;
+use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::PrecedenceTable;
+use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Grammar::Rule;
@@ -353,6 +355,122 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     # Construct a tuple where precedence component is zero
     my $bad = [$bool_sr->one(), $prec_sr->zero(), $sem_sr->one()];
     ok($comp->is_zero($bad), 'precedence zero in 3-tuple kills item');
+}
+
+# ========================================================================
+# 4-ary Composite: Boolean + Precedence + TypeInference + SemanticAction
+# ========================================================================
+
+# Test 14: 4-ary creation
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    );
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
+    );
+
+    isa_ok($comp, 'Chalk::Bootstrap::Semiring::Composite', 'creates 4-ary composite');
+
+    my $one = $comp->one();
+    is(scalar($one->@*), 4, '4-ary one returns 4-tuple');
+    ok(!$comp->is_zero($one), '4-ary one is non-zero');
+
+    my $zero = $comp->zero();
+    is(scalar($zero->@*), 4, '4-ary zero returns 4-tuple');
+    ok($comp->is_zero($zero), '4-ary zero is zero');
+}
+
+# Test 15: 4-ary is_zero when TypeInference kills an item
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    );
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
+    );
+
+    # TypeInference zero kills the whole tuple
+    my $bad = [$bool_sr->one(), $prec_sr->one(), $type_sr->zero(), $sem_sr->one()];
+    ok($comp->is_zero($bad), 'type inference zero in 4-tuple kills item');
+}
+
+# Test 16: 4-ary on_scan with keyword detection in Identifier rule
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    );
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
+    );
+
+    my $rule = Chalk::Grammar::Rule->new(
+        name        => 'Identifier',
+        expressions => [[]],
+    );
+    my $item = {
+        rule   => $rule,
+        dot    => 0,
+        origin => 0,
+        value  => $comp->one(),
+    };
+
+    # Scan "use" as Identifier: TypeInference tags it
+    my $result = $comp->on_scan($item, 0, 0, 'use');
+    is(scalar($result->@*), 4, '4-ary on_scan returns 4-tuple');
+    ok(!$bool_sr->is_zero($result->[0]), 'bool ok for keyword scan');
+    ok(!$prec_sr->is_zero($result->[1]), 'prec ok for keyword scan');
+    ok(!$type_sr->is_zero($result->[2]), 'type non-zero at scan (rejection at complete)');
+    ok($result->[2]->{keyword_as_identifier}, 'type inference tagged keyword_as_identifier');
+}
+
+# Test 17: 4-ary on_complete rejects keyword as Identifier
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    );
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
+    );
+
+    my $rule = Chalk::Grammar::Rule->new(
+        name        => 'Identifier',
+        expressions => [[]],
+    );
+
+    # Simulate: Identifier item with keyword_as_identifier tagged
+    my $tagged_type = { valid => true, keyword_as_identifier => true };
+    my $item = {
+        rule   => $rule,
+        dot    => 0,
+        origin => 0,
+        value  => [$bool_sr->one(), $prec_sr->one(), $tagged_type, $sem_sr->one()],
+    };
+
+    my $result = $comp->on_complete($item, 0, 3);
+    is(scalar($result->@*), 4, '4-ary on_complete returns 4-tuple');
+    ok($type_sr->is_zero($result->[2]), 'type inference rejects Identifier completion with keyword');
+    ok($comp->is_zero($result), 'whole 4-tuple is zero when type inference rejects');
 }
 
 done_testing();

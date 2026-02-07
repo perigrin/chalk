@@ -1,0 +1,239 @@
+# ABOUTME: Tests for TypeInference semiring and KeywordTable for keyword disambiguation.
+# ABOUTME: Verifies keyword detection at scan time and rejection at Identifier completion.
+use 5.42.0;
+use utf8;
+use Test::More;
+
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+# ========================================================================
+# KeywordTable tests
+# ========================================================================
+
+use_ok('Chalk::Grammar::Perl::KeywordTable');
+
+# All 33 keywords should be recognized
+my @keywords = qw(
+    use class sub method ADJUST
+    if unless elsif else
+    while until for foreach
+    my our state local field
+    not and or xor
+    eq ne lt gt le ge cmp isa x
+    undef true false
+);
+
+for my $kw (@keywords) {
+    ok(Chalk::Grammar::Perl::KeywordTable::is_keyword($kw),
+        "is_keyword('$kw') returns true");
+}
+
+# Non-keywords should NOT be recognized
+my @non_keywords = qw(
+    return die warn push pop shift unshift
+    keys values defined ref length chomp
+    join split grep map sort print say sprintf
+    foo bar baz hello world
+    _  WS Program Expression
+);
+
+for my $word (@non_keywords) {
+    ok(!Chalk::Grammar::Perl::KeywordTable::is_keyword($word),
+        "is_keyword('$word') returns false");
+}
+
+# ========================================================================
+# TypeInference semiring basic operations
+# ========================================================================
+
+use_ok('Chalk::Bootstrap::Semiring::TypeInference');
+
+my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
+    keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+);
+
+# zero/one/is_zero
+{
+    my $z = $ti->zero();
+    ok($ti->is_zero($z), 'zero is zero');
+
+    my $o = $ti->one();
+    ok(!$ti->is_zero($o), 'one is not zero');
+
+    ok(!$z->{valid}, 'zero has valid=false');
+    ok($o->{valid}, 'one has valid=true');
+}
+
+# multiply
+{
+    my $o = $ti->one();
+    my $z = $ti->zero();
+
+    # one * one = one (non-zero)
+    my $r1 = $ti->multiply($o, $o);
+    ok(!$ti->is_zero($r1), 'one * one is non-zero');
+
+    # zero * one = zero
+    my $r2 = $ti->multiply($z, $o);
+    ok($ti->is_zero($r2), 'zero * one is zero');
+
+    # one * zero = zero
+    my $r3 = $ti->multiply($o, $z);
+    ok($ti->is_zero($r3), 'one * zero is zero');
+
+    # keyword_as_identifier propagation
+    my $tagged = { valid => true, keyword_as_identifier => true };
+
+    my $r4 = $ti->multiply($tagged, $o);
+    ok($r4->{keyword_as_identifier}, 'keyword_as_identifier propagates from left');
+
+    my $r5 = $ti->multiply($o, $tagged);
+    ok($r5->{keyword_as_identifier}, 'keyword_as_identifier propagates from right');
+}
+
+# add
+{
+    my $o = $ti->one();
+    my $z = $ti->zero();
+
+    # add(zero, one) = one
+    my $r1 = $ti->add($z, $o);
+    ok(!$ti->is_zero($r1), 'add(zero, one) is non-zero');
+
+    # add(one, zero) = one
+    my $r2 = $ti->add($o, $z);
+    ok(!$ti->is_zero($r2), 'add(one, zero) is non-zero');
+
+    # add(one, one) = first (one)
+    my $r3 = $ti->add($o, $o);
+    ok(!$ti->is_zero($r3), 'add(one, one) is non-zero');
+}
+
+# ========================================================================
+# on_scan: keyword detection
+# ========================================================================
+
+use Chalk::Grammar::Rule;
+use Chalk::Grammar::Symbol;
+
+# Helper to make an item
+my sub make_item($rule_name, $value) {
+    my $rule = Chalk::Grammar::Rule->new(
+        name        => $rule_name,
+        expressions => [[]],
+    );
+    return {
+        rule   => $rule,
+        dot    => 0,
+        origin => 0,
+        value  => $value,
+    };
+}
+
+# Scanning a keyword as Identifier → tag keyword_as_identifier
+{
+    my $item = make_item('Identifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'use');
+    ok(!$ti->is_zero($result), 'scanning keyword as Identifier is non-zero at scan time');
+    ok($result->{keyword_as_identifier}, 'scanning "use" as Identifier tags keyword_as_identifier');
+}
+
+# Scanning a non-keyword as Identifier → no tag
+{
+    my $item = make_item('Identifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'foo');
+    ok(!$ti->is_zero($result), 'scanning non-keyword as Identifier is non-zero');
+    ok(!$result->{keyword_as_identifier}, 'scanning "foo" as Identifier does not tag');
+}
+
+# Scanning a keyword in a non-Identifier rule → no tag
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'and');
+    ok(!$ti->is_zero($result), 'scanning keyword in BinaryOp is non-zero');
+    ok(!$result->{keyword_as_identifier}, 'scanning keyword in BinaryOp does not tag');
+}
+
+# Scanning with zero value propagates zero
+{
+    my $item = make_item('Identifier', $ti->zero());
+    my $result = $ti->on_scan($item, 0, 0, 'foo');
+    ok($ti->is_zero($result), 'scanning with zero propagates zero');
+}
+
+# All 33 keywords scanned as Identifier get tagged
+for my $kw (@keywords) {
+    my $item = make_item('Identifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, $kw);
+    ok($result->{keyword_as_identifier}, "on_scan tags '$kw' as keyword_as_identifier");
+}
+
+# ========================================================================
+# on_complete: rejection of keyword-as-identifier
+# ========================================================================
+
+# Identifier complete with keyword_as_identifier → zero
+{
+    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $item = make_item('Identifier', $tagged);
+    my $result = $ti->on_complete($item, 0, 3);
+    ok($ti->is_zero($result), 'Identifier completion with keyword_as_identifier returns zero');
+}
+
+# Identifier complete without tag → valid
+{
+    my $item = make_item('Identifier', $ti->one());
+    my $result = $ti->on_complete($item, 0, 3);
+    ok(!$ti->is_zero($result), 'Identifier completion without tag returns valid');
+}
+
+# Non-Identifier complete with tag → valid (clears flag)
+{
+    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $item = make_item('BinaryExpression', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'non-Identifier completion ignores keyword flag');
+    ok(!$result->{keyword_as_identifier}, 'non-Identifier completion clears flag');
+}
+
+# ========================================================================
+# Full chain: scan "use" as Identifier → complete → is_zero
+# ========================================================================
+
+{
+    my $item = make_item('Identifier', $ti->one());
+    my $scanned = $ti->on_scan($item, 0, 0, 'use');
+    ok(!$ti->is_zero($scanned), 'chain step 1: scan "use" as Identifier is non-zero');
+    ok($scanned->{keyword_as_identifier}, 'chain step 1: tagged');
+
+    my $completed_item = make_item('Identifier', $scanned);
+    my $completed = $ti->on_complete($completed_item, 0, 3);
+    ok($ti->is_zero($completed), 'chain step 2: Identifier completion returns zero');
+}
+
+# Full chain for non-keyword: scan "foo" as Identifier → complete → valid
+{
+    my $item = make_item('Identifier', $ti->one());
+    my $scanned = $ti->on_scan($item, 0, 0, 'foo');
+    ok(!$ti->is_zero($scanned), 'non-keyword chain step 1: scan is non-zero');
+
+    my $completed_item = make_item('Identifier', $scanned);
+    my $completed = $ti->on_complete($completed_item, 0, 3);
+    ok(!$ti->is_zero($completed), 'non-keyword chain step 2: completion is valid');
+}
+
+# Keyword scanned in proper context (e.g., UseDeclaration's /use\b/) → no rejection
+# because the rule is not Identifier, the terminal matches differently
+{
+    my $item = make_item('UseDeclaration', $ti->one());
+    my $scanned = $ti->on_scan($item, 0, 0, 'use');
+    ok(!$ti->is_zero($scanned), 'keyword in proper context: scan is non-zero');
+    ok(!$scanned->{keyword_as_identifier}, 'keyword in proper context: not tagged');
+
+    my $completed_item = make_item('UseDeclaration', $scanned);
+    my $completed = $ti->on_complete($completed_item, 0, 10);
+    ok(!$ti->is_zero($completed), 'keyword in proper context: completion is valid');
+}
+
+done_testing;

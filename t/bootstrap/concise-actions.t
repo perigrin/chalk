@@ -31,12 +31,12 @@ SKIP: {
     skip 'Concise parser not built', 1 unless defined $parser;
 
     # Helper to parse and extract ConciseTree
-    # Result tuple: [0]=Boolean, [1]=Precedence, [2]=SemanticAction
+    # Result tuple: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=SemanticAction
     my sub parse_concise($source) {
         my $result = $parser->parse_value($source);
         return undef unless defined $result;
         my $bool_val = $result->[0];
-        my $sem_val = $result->[2];
+        my $sem_val = $result->[3];
         return undef unless $bool_val;
         return $sem_val->extract();
     }

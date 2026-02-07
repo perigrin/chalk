@@ -193,7 +193,7 @@ class Chalk::Bootstrap::Earley {
         my $new_value = $semiring->on_scan($item, $alt_idx, $pos, $matched);
 
         # on_scan returns the combined result; check for zero (semiring rejected)
-        next if $semiring->is_zero($new_value);
+        return if $semiring->is_zero($new_value);
 
         # Advance dot
         my $new_item = $self->_make_item(
