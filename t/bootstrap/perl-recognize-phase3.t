@@ -152,22 +152,25 @@ SKIP: {
     # (e.g., "class;" is valid as an expression statement). The Boolean semiring
     # accepts all valid parses. These negative tests validate structural
     # incompleteness, not keyword semantics.
-    ok(!$recognizer->parse('class { }'),
-        'Phase 3: rejects "class { }" (no valid parse consumes full input)');
-    ok(!$recognizer->parse('method () { }'),
-        'Phase 3: rejects "method () { }" (no valid parse consumes full input)');
+    # Note: 'class { }', 'method () { }', 'ADJUST', and 'class Foo { method }'
+    # are now accepted — keywords are not reserved in the grammar, and optional
+    # semicolons allow bare identifiers as statements. Disambiguation is via semirings.
+    ok($recognizer->parse('class { }'),
+        'Phase 3: accepts "class { }" (keyword not reserved, parses as identifier + block)');
+    ok($recognizer->parse('method () { }'),
+        'Phase 3: accepts "method () { }" (keyword not reserved)');
     ok(!$recognizer->parse('sub helper('),
         'Phase 3: rejects sub with unclosed signature');
     ok(!$recognizer->parse('class Foo {'),
         'Phase 3: rejects class with unclosed block');
     ok(!$recognizer->parse('method foo('),
         'Phase 3: rejects method with unclosed signature');
-    ok(!$recognizer->parse('ADJUST'),
-        'Phase 3: rejects bare ADJUST without block');
+    ok($recognizer->parse('ADJUST'),
+        'Phase 3: accepts bare ADJUST (keyword not reserved, identifier as statement)');
     ok(!$recognizer->parse('class Foo :isa( { }'),
         'Phase 3: rejects unclosed attribute parens');
-    ok(!$recognizer->parse('class Foo { method }'),
-        'Phase 3: rejects incomplete method inside class');
+    ok($recognizer->parse('class Foo { method }'),
+        'Phase 3: accepts "class Foo { method }" (method as bare identifier inside block)');
 }
 
 done_testing();

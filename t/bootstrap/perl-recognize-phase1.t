@@ -66,8 +66,9 @@ SKIP: {
         'Phase 1: rejects unclosed brace');
     ok(!$recognizer->parse(':::'),
         'Phase 1: rejects invalid syntax');
-    ok(!$recognizer->parse('foo'),
-        'Phase 1: rejects identifier without semicolon');
+    # 'foo' is now accepted — optional semicolons allow bare expressions as statements
+    ok($recognizer->parse('foo'),
+        'Phase 1: accepts bare identifier (optional semicolon)');
     ok(!$recognizer->parse('{ { foo; }'),
         'Phase 1: rejects unbalanced nested blocks');
     ok(!$recognizer->parse('} foo; {'),

@@ -123,6 +123,7 @@ StatementList ::= StatementItem
     | StatementList _ StatementItem ;
 
 StatementItem ::= SimpleStatement _ /;/
+    | SimpleStatement
     | CompoundStatement
     | /;/ ;
 ```
@@ -309,6 +310,7 @@ Atom ::= Variable
     | HashConstructor
     | QwLiteral
     | AnonymousSub
+    | QualifiedIdentifier
     | Identifier ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
@@ -384,7 +386,9 @@ PostfixExpression ::= MethodCall
     | PostfixIncDec ;
 
 MethodCall ::= Expression _ /->/ _ Identifier _ /\(/ _ ExpressionList? _ /\)/
-    | Expression _ /->/ _ Identifier ;
+    | Expression _ /->/ _ Identifier
+    | Expression _ /->/ _ ScalarVariable _ /\(/ _ ExpressionList? _ /\)/
+    | Expression _ /->/ _ ScalarVariable ;
 
 Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
     | Expression _ /->/ _ /\{/ _ Expression _ /\}/
@@ -439,11 +443,15 @@ Variable ::= ScalarVariable
     | ArrayVariable
     | HashVariable ;
 
-ScalarVariable ::= /\$[a-zA-Z_]\w*/ ;
+ScalarVariable ::= /\$[a-zA-Z_]\w*/
+    | /\$\d+/
+    | /\$\$[a-zA-Z_]\w*/ ;
 
-ArrayVariable ::= /@[a-zA-Z_]\w*/ ;
+ArrayVariable ::= /@[a-zA-Z_]\w*/
+    | /@\$[a-zA-Z_]\w*/ ;
 
-HashVariable ::= /%[a-zA-Z_]\w*/ ;
+HashVariable ::= /%[a-zA-Z_]\w*/
+    | /%\$[a-zA-Z_]\w*/ ;
 ```
 
 Variables are single-token terminals: sigil + identifier name.
@@ -465,13 +473,18 @@ NumericLiteral ::= /0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*/
     | /[0-9](?:_?[0-9])*(?:\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9]+)?/ ;
 
 StringLiteral ::= /'(?:[^'\\]|\\.)*'/
-    | /"(?:[^"\\]|\\.)*"/ ;
+    | /"(?:[^"\\]|\\.)*"/
+    | /q\s*\{(?:[^}\\]|\\.)*\}/
+    | /q\s*\[(?:[^\]\\]|\\.)*\]/
+    | /qq\s*\{(?:[^}\\]|\\.)*\}/
+    | /qq\s*\[(?:[^\]\\]|\\.)*\]/ ;
 
 RegexLiteral ::= /\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /m\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /qr\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /s\s*\/(?:[^\/\\]|\\.)*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
-    | /s\s*\{(?:[^}\\]|\\.)*\}\s*\{(?:[^}\\]|\\.)*\}[msixpodualngcer]*/ ;
+    | /s\s*\{(?:[^}\\]|\\.)*\}\s*\{(?:[^}\\]|\\.)*\}[msixpodualngcer]*/
+    | /m\s*\{(?:[^}\\]|\\.)*\}[msixpodualngcer]*/ ;
 ```
 
 `NumericLiteral` covers hex (`0xFF`), binary (`0b1010`), octal (`0o77`),
