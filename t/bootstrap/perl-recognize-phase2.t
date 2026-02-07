@@ -116,11 +116,25 @@ SKIP: {
     ok($recognizer->parse('1.5e10;'),
         'Phase 2: accepts scientific notation');
 
-    # String and regex literals
+    # String literals
     ok($recognizer->parse("'it\\'s';"),
         'Phase 2: accepts escaped quote in string');
     ok($recognizer->parse('"hello\\nworld";'),
         'Phase 2: accepts escape sequence in double-quoted string');
+
+    # §19 Regex literals (all five RegexLiteral alternatives)
+    ok($recognizer->parse('/pattern/;'),
+        'Phase 2: accepts bare regex literal');
+    ok($recognizer->parse('/pattern/gi;'),
+        'Phase 2: accepts regex with flags');
+    ok($recognizer->parse('m/pattern/;'),
+        'Phase 2: accepts m// regex');
+    ok($recognizer->parse('qr/pattern/i;'),
+        'Phase 2: accepts qr// regex');
+    ok($recognizer->parse('s/foo/bar/g;'),
+        'Phase 2: accepts s/// substitution');
+    ok($recognizer->parse('s{foo}{bar}g;'),
+        'Phase 2: accepts s{}{} substitution');
 
     # Field declarations (used in feature class)
     ok($recognizer->parse('field $x :param :reader;'),
@@ -128,9 +142,24 @@ SKIP: {
     ok($recognizer->parse('field $x :param = undef;'),
         'Phase 2: accepts field with default value');
 
-    # Expression list with fat comma
+    # §13 QwLiteral as standalone expression
+    ok($recognizer->parse('qw(foo bar baz);'),
+        'Phase 2: accepts qw() as expression statement');
+    ok($recognizer->parse('qw();'),
+        'Phase 2: accepts empty qw()');
+
+    # Expression list with fat comma and trailing comma
     ok($recognizer->parse("my %h = (a => 1, b => 2);"),
         'Phase 2: accepts hash-style list assignment');
+    ok($recognizer->parse('[1, 2, 3,];'),
+        'Phase 2: accepts array constructor with trailing comma');
+    ok($recognizer->parse("my %h = (a => 1, b => 2,);"),
+        'Phase 2: accepts hash-style list with trailing comma');
+
+    # Note: keywords like 'use', 'my', 'field' are not reserved — they match
+    # Identifier when not followed by expected syntax. E.g. 'use;' parses as
+    # an expression statement. Disambiguation is handled by semirings, not
+    # tested here.
 
     # Negative cases
     ok(!$recognizer->parse("'unclosed string;"),
