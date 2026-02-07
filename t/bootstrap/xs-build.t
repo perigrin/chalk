@@ -6,7 +6,7 @@ use Test::More;
 use File::Temp qw(tempdir);
 use File::Path qw(make_path);
 use File::Basename qw(dirname);
-use Cwd qw(getcwd);
+use Chalk::Grammar::BNF;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
@@ -27,7 +27,7 @@ eval { require Module::Build; 1 }
 
 # === Generate distribution ===
 
-use TestPipeline qw(optimized_pipeline full_pipeline grammars_match);
+use TestPipeline qw(optimized_pipeline full_pipeline grammars_match bnf_text);
 use Chalk::Bootstrap::Target::XS;
 use Chalk::Bootstrap::Target::Perl;
 use Chalk::Bootstrap::Desugar qw(desugar_grammar);
@@ -59,8 +59,6 @@ for my $path (sort keys $dist->%*) {
 }
 
 # === Build cycle ===
-
-my $orig_dir = getcwd();
 
 # Run Build.PL
 {
@@ -160,6 +158,26 @@ for my $pair (@grammars) {
         "$label: accepts rule with alternatives");
     ok(!$parser->parse("not valid BNF"),
         "$label: rejects invalid input");
+}
+
+# === Full BNF meta-grammar parse through each recognizer ===
+# This exercises the whitespace regex, quantifier terminals, and inline regex
+# patterns — the values most affected by the newSVpvn length bug.
+
+{
+    my $bnf = bnf_text();
+    for my $pair (@grammars) {
+        my ($label, $grammar) = $pair->@*;
+        my $desugared = desugar_grammar($grammar);
+        my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+        my $parser = Chalk::Bootstrap::Earley->new(
+            grammar  => $desugared,
+            semiring => $bool_sr,
+        );
+
+        ok($parser->parse($bnf),
+            "$label: accepts full 10-rule BNF meta-grammar");
+    }
 }
 
 done_testing();

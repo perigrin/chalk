@@ -12,7 +12,7 @@
 
 ## 1. Overview
 
-This spec describes how to implement `Chalk::Bootstrap::Target::XS`, a second code generation target for the bootstrap compiler. It takes the same optimized Sea of Nodes IR that `Target::Perl` consumes and emits a buildable XS distribution: `.xs`, `.pmc`, and `Build.PL` files.
+This spec describes how to implement `Chalk::Bootstrap::Target::XS`, a second code generation target for the bootstrap compiler. It takes the same optimized Sea of Nodes IR that `Target::Perl` consumes and emits a buildable XS distribution: `.xs`, `.pm`, and `Build.PL` files.
 
 The pipeline is unchanged through optimization:
 
@@ -23,7 +23,7 @@ BNF source → desugar → Earley parse → semantic actions → IR → Optimize
                                                         ↓                       ↓
                                                   Target::Perl            Target::XS
                                                         ↓                       ↓
-                                                     .pm file          .xs + .pmc + Build.PL
+                                                     .pm file          .xs + .pm + Build.PL
 ```
 
 Both targets consume the same optimized IR independently. They are peers — neither depends on the other.
@@ -194,7 +194,7 @@ method generate_distribution($ir) {
 method generate_distribution($ir) {
     return {
         'lib/Chalk/Grammar/BNF/Rules.xs'  => $self->generate($ir),
-        'lib/Chalk/Grammar/BNF/Rules.pmc' => $self->_generate_pmc(),
+        'lib/Chalk/Grammar/BNF/Rules.pm'  => $self->_generate_pm_stub(),
         'Build.PL'                         => $self->_generate_build_pl(),
     };
 }
@@ -373,7 +373,7 @@ Test the IR-to-XS lowering without building:
 - Symbol without quantifier → constructor args omit quantifier
 - Expression with multiple symbols → correct `av_push` sequence
 - Full BNF meta-grammar → complete `.xs` file with all XSUBs
-- `generate_distribution()` → returns hashref with `.xs`, `.pmc`, `Build.PL` keys
+- `generate_distribution()` → returns hashref with `.xs`, `.pm`, `Build.PL` keys
 - Determinism: generate twice, compare output
 
 ### 8.3 Build Integration Tests (`xs-build.t`)
