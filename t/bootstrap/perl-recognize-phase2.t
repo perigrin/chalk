@@ -156,6 +156,18 @@ SKIP: {
     ok($recognizer->parse("my %h = (a => 1, b => 2,);"),
         'Phase 2: accepts hash-style list with trailing comma');
 
+    # Coverage gaps from review: untested alternatives
+    ok($recognizer->parse('my ($x, $y);'),
+        'Phase 2: accepts list declaration without initializer');
+    ok($recognizer->parse('field $x;'),
+        'Phase 2: accepts bare field declaration');
+    ok($recognizer->parse("'';"),
+        'Phase 2: accepts empty single-quoted string');
+    ok($recognizer->parse('"";'),
+        'Phase 2: accepts empty double-quoted string');
+    ok($recognizer->parse('use Chalk::Grammar 5.42.0;'),
+        'Phase 2: accepts module name with version');
+
     # Note: keywords like 'use', 'my', 'field' are not reserved — they match
     # Identifier when not followed by expected syntax. E.g. 'use;' parses as
     # an expression statement. Disambiguation is handled by semirings, not
