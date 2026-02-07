@@ -179,26 +179,13 @@ review (via code-reviewer subagent or similar) MUST:
 
 ## Implementation Phases
 
-### BNF Pipeline (Complete ✅)
-
-The BNF-to-Perl compiler pipeline is fully operational with 1549 tests passing:
-
-- ✅ **Phase 0** - Data model: Symbol, Rule, BNF meta-grammar
-- ✅ **Phase 1a** - Earley parser: Boolean semiring, scanless recognition
-- ✅ **Phase 2a** - IR infrastructure: Sea of Nodes, hash consing, use-def chains
-- ✅ **Phase 2b** - Semantic actions: Comonad Context, SemanticAction semiring
-- ✅ **Phase 3** - Code generation: Target::Perl, Generated.pm, bootstrap-validation passes
-- ✅ **Phase 4** - Optimizer: DCE pass, framework for future passes
-
-Full pipeline: BNF text → desugar → Earley parse → semantic actions → IR → Optimizer(DCE) → Target::Perl → Generated.pm
-
-### Perl Parsing Roadmap (Next)
+### Perl Parsing Roadmap
 
 See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
 
 - **Phase 0**: Wire 65-rule Perl grammar through existing BNF pipeline
 - **Phases 1-5**: Progressive grammar recognition with synthetic tests,
-  adding Precedence/Structural semirings and Aycock optimizations as needed
+  adding Precedence/Type/Structural semirings and Aycock optimizations as needed
 - **Phase 6**: Perl IR from parsed source (file-driven, least to most complex)
 - **Phase 7**: Lower to Perl (validate against existing source)
 - **Phase 8**: Lower to XS (validate functional equivalence)
@@ -231,17 +218,11 @@ See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
 
 ## Validation Gates
 
-### BNF Pipeline Gate (PASSING ✅)
-
-The `t/bootstrap/bootstrap-validation.t` test validates the BNF pipeline:
-
-- ✅ **Phase 4**: Passes — generated recognizer ≡ hand-written recognizer
-
-### Perl Parsing Gate (Future)
+### Perl Parsing Gate
 
 Progressive validation targets per `docs/chalk-parse-perl-plan.md`:
 
-- **Phase 5**: All 31 `.pm` files recognized by Perl grammar
+- **Phase 5**: All 31 `.pm` files recognized by Perl grammar, producing a unambiguous valid parse tree
 - **Phase 7**: Generated Perl matches existing source
 - **Phase 8**: Generated XS functionally equivalent to Perl
 
@@ -267,7 +248,7 @@ Reference files in main Chalk (read-only):
 4. **Returning 1/0 for booleans**: Use `true`/`false` builtins
 5. **Non-deterministic codegen**: Sort all hash keys, use stable naming schemes
 6. **Mutation**: Context/IR nodes are immutable - always return new objects
-7. **Premature optimization**: Focus on correctness first (Leo optimization is Phase 5, deferred)
+7. **Premature optimization**: Focus on correctness first
 
 ## Working with This Codebase
 
