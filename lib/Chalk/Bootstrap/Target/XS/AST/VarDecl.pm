@@ -12,6 +12,8 @@ class Chalk::Bootstrap::Target::XS::AST::VarDecl :isa(Chalk::Bootstrap::Target::
     field $name :param :reader;
 
     method emit() {
-        return "    $type $name;\n";
+        # Omit space between pointer sigil and name (e.g. "SV *sym" not "SV * sym")
+        my $sep = ($type =~ /\*$/) ? '' : ' ';
+        return "    $type$sep$name;\n";
     }
 }

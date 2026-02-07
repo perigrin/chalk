@@ -88,7 +88,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::VarDecl');
     isa_ok($var, 'Chalk::Bootstrap::Target::XS::AST::VarDecl');
 
     my $output = $var->emit();
-    is($output, "    SV * symbol;\n", 'VarDecl emits correct format');
+    is($output, "    SV *symbol;\n", 'VarDecl emits correct format');
 
     is($var->type(), 'SV *', 'type reader works');
     is($var->name(), 'symbol', 'name reader works');
@@ -101,7 +101,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::VarDecl');
         name => 'expressions',
     );
     my $output = $var->emit();
-    is($output, "    AV * expressions;\n", 'VarDecl with AV * type');
+    is($output, "    AV *expressions;\n", 'VarDecl with AV * type');
 }
 
 # VarDecl with non-pointer type
@@ -173,7 +173,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::CompositeNode');
     );
 
     my $output = $composite->emit();
-    is($output, "    SV * x;\n    x = newSViv(42);\n", 'CompositeNode with mixed child types');
+    is($output, "    SV *x;\n    x = newSViv(42);\n", 'CompositeNode with mixed child types');
 }
 
 # CompositeNode children reader
@@ -236,7 +236,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::XSUB');
     like($output, qr/PREINIT:/, 'XSUB with VarDecls has PREINIT section');
 
     # VarDecls go to PREINIT, not CODE
-    like($output, qr/PREINIT:\n    AV \* expressions;\n    SV \* rule;\n/,
+    like($output, qr/PREINIT:\n    AV \*expressions;\n    SV \*rule;\n/,
         'VarDecls are collected into PREINIT section');
 
     # Statements go to CODE
@@ -285,9 +285,9 @@ SV *
 Grammar(self)
     SV *self
   PREINIT:
-    AV * expressions;
-    SV * sym_0;
-    SV * rule;
+    AV *expressions;
+    SV *sym_0;
+    SV *rule;
   CODE:
     expressions = newAV();
     {

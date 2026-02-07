@@ -15,6 +15,7 @@ use Chalk::Bootstrap::Target::XS::AST::XSUB;
 
 class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader = 'Chalk::Grammar::BNF::Rules';
+    # Per-rule scratch counters; reset at the start of each _emit_rule call
     field $sym_counter = 0;
     field $expr_counter = 0;
 
@@ -23,7 +24,8 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
             unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
     }
 
-    # Escape a string for embedding in a C double-quoted string literal
+    # Escape a string for embedding in a C double-quoted string literal.
+    # Handles all non-printable bytes via \xHH hex escapes.
     method _escape_c_string($str) {
         $str =~ s/\\/\\\\/g;   # \ -> \\
         $str =~ s/"/\\"/g;     # " -> \"
@@ -31,6 +33,8 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         $str =~ s/\t/\\t/g;    # tab -> \t
         $str =~ s/\r/\\r/g;    # carriage return -> \r
         $str =~ s/\0/\\0/g;    # null byte -> \0
+        # All remaining non-printable bytes → \xHH
+        $str =~ s/([^\x20-\x7E])/sprintf("\\x%02x", ord($1))/ge;
         return $str;
     }
 
@@ -42,10 +46,16 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         return $value;
     }
 
-    # Emit a C expression for an IR Constant node
+    # Emit a C expression for an IR Constant node.
+    # Uses newSVpvn with pre-escape length when C escaping changes the byte count,
+    # and newSVpvs when the value has no escape-sensitive characters.
     method _emit_constant($node) {
         my $value = $node->value();
         my $escaped = $self->_escape_c_string($value);
+        if (length($escaped) != length($value)) {
+            my $len = length($value);
+            return "newSVpvn(\"$escaped\", $len)";
+        }
         return "newSVpvs(\"$escaped\")";
     }
 
@@ -213,6 +223,8 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Wrap a Constructor:Rule IR node into an XSUB AST node
     method _emit_xsub($rule_node) {
         my $rule_name = $rule_node->inputs()->[0]->value();
+        die "Invalid rule name for XS target: $rule_name"
+            unless $rule_name =~ /^[A-Za-z_][A-Za-z_0-9]*$/;
         my $body_nodes = $self->_emit_rule($rule_node);
 
         return Chalk::Bootstrap::Target::XS::AST::XSUB->new(

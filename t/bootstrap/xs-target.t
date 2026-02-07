@@ -121,6 +121,32 @@ use_ok('Chalk::Bootstrap::Target::XS');
     # Null byte → \0 in C
     is($target->_escape_c_string("before\0after"), 'before\\0after',
         'null byte escaped to \\0');
+
+    # Non-printable control characters → \xHH hex escapes
+    is($target->_escape_c_string("\x01"), '\\x01',
+        'SOH control character escaped to hex');
+    is($target->_escape_c_string("\x0B"), '\\x0b',
+        'vertical tab escaped to hex');
+    is($target->_escape_c_string("\x0C"), '\\x0c',
+        'form feed escaped to hex');
+    is($target->_escape_c_string("\x1B"), '\\x1b',
+        'escape character escaped to hex');
+    is($target->_escape_c_string("\x7F"), '\\x7f',
+        'DEL character escaped to hex');
+
+    # High bytes (0x80+) → \xHH hex escapes
+    is($target->_escape_c_string("\x80"), '\\x80',
+        'high byte 0x80 escaped to hex');
+    is($target->_escape_c_string("\xFF"), '\\xff',
+        'high byte 0xFF escaped to hex');
+
+    # Empty string → passes through unchanged
+    is($target->_escape_c_string(''), '',
+        'empty string passes through');
+
+    # Mixed: printable + control in one string
+    is($target->_escape_c_string("A\x01B"), 'A\\x01B',
+        'mixed printable and control chars');
 }
 
 # === Terminal Delimiter Stripping ===
@@ -165,15 +191,25 @@ use Chalk::Bootstrap::IR::NodeFactory;
     is($target->_emit_constant($enum), 'newSVpvs("reference")',
         'enum constant emits newSVpvs');
 
-    # String with double quotes → escaped in C
+    # String with double quotes → newSVpvn (escaping changes length)
     my $quoted = $factory->make('Constant', const_type => 'string', value => 'say "hi"');
-    is($target->_emit_constant($quoted), 'newSVpvs("say \\"hi\\"")',
-        'constant with double quotes is escaped');
+    is($target->_emit_constant($quoted), 'newSVpvn("say \\"hi\\"", 8)',
+        'constant with double quotes uses newSVpvn with pre-escape length');
 
-    # String with backslash → escaped in C
+    # String with backslash → newSVpvn with pre-escape length
     my $bslash = $factory->make('Constant', const_type => 'string', value => 'a\\b');
-    is($target->_emit_constant($bslash), 'newSVpvs("a\\\\b")',
-        'constant with backslash is escaped');
+    is($target->_emit_constant($bslash), 'newSVpvn("a\\\\b", 3)',
+        'constant with backslash uses newSVpvn with pre-escape length');
+
+    # String without backslash → newSVpvs (no length ambiguity)
+    my $plain = $factory->make('Constant', const_type => 'string', value => 'hello');
+    is($target->_emit_constant($plain), 'newSVpvs("hello")',
+        'constant without escape-sensitive chars uses newSVpvs');
+
+    # Empty string → newSVpvs
+    my $empty = $factory->make('Constant', const_type => 'string', value => '');
+    is($target->_emit_constant($empty), 'newSVpvs("")',
+        'empty string constant uses newSVpvs');
 }
 
 # === Symbol Construction Lowering ===
@@ -513,6 +549,44 @@ sub make_rule {
     like($output, qr/CODE:/, 'XSUB has CODE section');
     like($output, qr/OUTPUT:\n    RETVAL/, 'XSUB has OUTPUT: RETVAL');
     like($output, qr/Identifier\(self\)/, 'XSUB signature has rule name');
+}
+
+# Test: _emit_xsub rejects rule names that are not valid C identifiers
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+
+    # Rule name with C injection attempt
+    my $sym = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
+    my $expr = make_expression($sym);
+    my $bad_rule = make_rule('foo; system("rm -rf /"); //', $expr);
+    eval { $target->_emit_xsub($bad_rule) };
+    like($@, qr/Invalid rule name/, '_emit_xsub rejects C injection in rule name');
+
+    # Rule name with spaces
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $sym2 = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
+    my $expr2 = make_expression($sym2);
+    my $space_rule = make_rule('has space', $expr2);
+    eval { $target->_emit_xsub($space_rule) };
+    like($@, qr/Invalid rule name/, '_emit_xsub rejects rule name with spaces');
+
+    # Rule name starting with digit
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $sym3 = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
+    my $expr3 = make_expression($sym3);
+    my $digit_rule = make_rule('1Rule', $expr3);
+    eval { $target->_emit_xsub($digit_rule) };
+    like($@, qr/Invalid rule name/, '_emit_xsub rejects rule name starting with digit');
+
+    # Valid rule names still work
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $sym4 = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
+    my $expr4 = make_expression($sym4);
+    my $good_rule = make_rule('Grammar_v2', $expr4);
+    my $xsub = eval { $target->_emit_xsub($good_rule) };
+    is($@, '', '_emit_xsub accepts valid C identifier rule name');
+    is($xsub->name(), 'Grammar_v2', 'XSUB name preserved for valid identifier');
 }
 
 # Test: generate() with single rule produces valid XS with 1 XSUB
