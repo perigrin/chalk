@@ -61,9 +61,10 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # Strip / delimiters from terminal values, then C-escape
         my $raw_value = $value_const->value();
-        my $value_str = ($type_str eq 'terminal')
-            ? $self->_escape_c_string($self->_strip_terminal_delimiters($raw_value))
-            : $self->_escape_c_string($raw_value);
+        my $stripped_value = ($type_str eq 'terminal')
+            ? $self->_strip_terminal_delimiters($raw_value)
+            : $raw_value;
+        my $value_str = $self->_escape_c_string($stripped_value);
 
         # Build the call_method block
         my $block = "{\n";
@@ -75,8 +76,10 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$type_str\")));\n";
         $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"value\")));\n";
         # Terminal regex values use newSVpvn with explicit length per spec §5.4
+        # Length is computed on the pre-C-escaped value because the C compiler
+        # interprets escape sequences (e.g. \\ → \), reducing byte count
         if ($type_str eq 'terminal') {
-            my $len = length($value_str);
+            my $len = length($stripped_value);
             $block .= "    XPUSHs(sv_2mortal(newSVpvn(\"$value_str\", $len)));\n";
         } else {
             $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$value_str\")));\n";
@@ -281,11 +284,11 @@ BUILD_PL
 
     method generate_distribution($ir) {
         my $xs_path = $self->_module_path_prefix() . '.xs';
-        my $pmc_path = $self->_module_path_prefix() . '.pmc';
+        my $pm_path = $self->_module_path_prefix() . '.pm';
 
         return {
-            $xs_path   => $self->generate($ir),
-            $pmc_path  => $self->_generate_pmc(),
+            $xs_path  => $self->generate($ir),
+            $pm_path  => $self->_generate_pmc(),
             'Build.PL' => $self->_generate_build_pl(),
         };
     }

@@ -690,7 +690,7 @@ use TestPipeline qw(optimized_pipeline);
 
     # Check expected keys
     ok(exists $dist->{'lib/Chalk/Grammar/BNF/Rules.xs'}, 'distribution has .xs key');
-    ok(exists $dist->{'lib/Chalk/Grammar/BNF/Rules.pmc'}, 'distribution has .pmc key');
+    ok(exists $dist->{'lib/Chalk/Grammar/BNF/Rules.pm'}, 'distribution has .pm key');
     ok(exists $dist->{'Build.PL'}, 'distribution has Build.PL key');
 }
 
@@ -709,7 +709,7 @@ use TestPipeline qw(optimized_pipeline);
         '.xs distribution content matches generate() output');
 }
 
-# Test: .pmc content matches _generate_pmc() output
+# Test: .pm content matches _generate_pmc() output
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $target = Chalk::Bootstrap::Target::XS->new();
@@ -720,8 +720,8 @@ use TestPipeline qw(optimized_pipeline);
     my $dist = $target->generate_distribution([$rule]);
     my $pmc = $target->_generate_pmc();
 
-    is($dist->{'lib/Chalk/Grammar/BNF/Rules.pmc'}, $pmc,
-        '.pmc distribution content matches _generate_pmc() output');
+    is($dist->{'lib/Chalk/Grammar/BNF/Rules.pm'}, $pmc,
+        '.pm distribution content matches _generate_pmc() output');
 }
 
 # Test: Build.PL content matches _generate_build_pl() output
@@ -750,7 +750,7 @@ use TestPipeline qw(optimized_pipeline);
     my $dist = $target->generate_distribution([$rule]);
 
     ok(exists $dist->{'lib/My/Custom/Module.xs'}, 'custom module derives correct .xs path');
-    ok(exists $dist->{'lib/My/Custom/Module.pmc'}, 'custom module derives correct .pmc path');
+    ok(exists $dist->{'lib/My/Custom/Module.pm'}, 'custom module derives correct .pm path');
     ok(exists $dist->{'Build.PL'}, 'Build.PL key unchanged for custom module');
 }
 
