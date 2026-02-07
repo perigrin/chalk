@@ -75,6 +75,22 @@ use_ok('Chalk::Bootstrap::Target::XS');
     is($target->_escape_c_string('(?:\\s|#[^\\n]*)*'),
        '(?:\\\\s|#[^\\\\n]*)*',
        'complex regex pattern escaping');
+
+    # Control characters: actual newline byte → \n in C
+    is($target->_escape_c_string("line1\nline2"), 'line1\\nline2',
+        'actual newline byte escaped to \\n');
+
+    # Control characters: actual tab byte → \t in C
+    is($target->_escape_c_string("col1\tcol2"), 'col1\\tcol2',
+        'actual tab byte escaped to \\t');
+
+    # Control characters: actual carriage return → \r in C
+    is($target->_escape_c_string("line1\rline2"), 'line1\\rline2',
+        'actual carriage return escaped to \\r');
+
+    # Null byte → \0 in C
+    is($target->_escape_c_string("before\0after"), 'before\\0after',
+        'null byte escaped to \\0');
 }
 
 # === Terminal Delimiter Stripping ===
@@ -358,6 +374,66 @@ sub make_rule {
         && $_->code() =~ /av_push\(expressions/
     } $nodes->@*;
     is(scalar @expr_pushes, 2, 'multi-alt rule has 2 av_pushes to expressions');
+}
+
+# === Counter reset between rules ===
+
+# Test: Symbol/expression counters reset when _emit_rule is called multiple times
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+
+    my $sym1 = make_symbol(type => 'reference', value => 'A', quantifier => undef);
+    my $expr1 = make_expression($sym1);
+    my $rule1 = make_rule('First', $expr1);
+
+    my $sym2 = make_symbol(type => 'reference', value => 'B', quantifier => undef);
+    my $expr2 = make_expression($sym2);
+    my $rule2 = make_rule('Second', $expr2);
+
+    # First call uses sym_0, expr_0
+    $target->_emit_rule($rule1);
+
+    # Second call should also use sym_0, expr_0 (counters reset)
+    my $nodes2 = $target->_emit_rule($rule2);
+
+    my @sym_decls = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::VarDecl
+        && $_->name() =~ /^sym_/
+    } $nodes2->@*;
+    is($sym_decls[0]->name(), 'sym_0', 'symbol counter resets between rules');
+
+    my @expr_decls = grep {
+        $_ isa Chalk::Bootstrap::Target::XS::AST::VarDecl
+        && $_->name() =~ /^expr_/
+    } $nodes2->@*;
+    is($expr_decls[0]->name(), 'expr_0', 'expression counter resets between rules');
+}
+
+# === newSVpvn for terminal regex values ===
+
+# Test: Terminal regex values use newSVpvn with explicit length
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
+    my $nodes = $target->_emit_symbol($sym, 'sym_0');
+    my $code = $nodes->[1]->code();
+
+    # Terminal values should use newSVpvn with explicit length per spec §5.4
+    like($code, qr/newSVpvn\("[^"]+",\s*\d+\)/, 'terminal value uses newSVpvn with length');
+}
+
+# Test: Non-terminal values still use newSVpvs
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $sym = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
+    my $nodes = $target->_emit_symbol($sym, 'sym_0');
+    my $code = $nodes->[1]->code();
+
+    # Reference values use newSVpvs (compile-time sizeof)
+    like($code, qr/newSVpvs\("Atom"\)/, 'reference value uses newSVpvs');
 }
 
 done_testing();

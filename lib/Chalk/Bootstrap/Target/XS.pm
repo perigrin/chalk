@@ -21,6 +21,10 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
     method _escape_c_string($str) {
         $str =~ s/\\/\\\\/g;   # \ -> \\
         $str =~ s/"/\\"/g;     # " -> \"
+        $str =~ s/\n/\\n/g;    # newline -> \n
+        $str =~ s/\t/\\t/g;    # tab -> \t
+        $str =~ s/\r/\\r/g;    # carriage return -> \r
+        $str =~ s/\0/\\0/g;    # null byte -> \0
         return $str;
     }
 
@@ -64,7 +68,13 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"type\")));\n";
         $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$type_str\")));\n";
         $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"value\")));\n";
-        $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$value_str\")));\n";
+        # Terminal regex values use newSVpvn with explicit length per spec §5.4
+        if ($type_str eq 'terminal') {
+            my $len = length($value_str);
+            $block .= "    XPUSHs(sv_2mortal(newSVpvn(\"$value_str\", $len)));\n";
+        } else {
+            $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$value_str\")));\n";
+        }
 
         # Optional quantifier args (check value, not node — node may exist with undef value)
         if (defined $quant_const && defined $quant_const->value()) {
