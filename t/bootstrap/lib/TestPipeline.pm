@@ -8,7 +8,7 @@ package TestPipeline;
 use Exporter 'import';
 our @EXPORT_OK = qw(
     build_parser parse_ir bnf_text full_pipeline optimized_pipeline grammars_match
-    perl_bnf_text perl_pipeline build_perl_recognizer
+    perl_bnf_text perl_pipeline build_perl_recognizer build_perl_concise_parser
 );
 
 use Chalk::Bootstrap::Earley;
@@ -21,6 +21,7 @@ use Chalk::Grammar::BNF;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer;
 use Chalk::Bootstrap::Optimizer::DCE;
+use Chalk::Bootstrap::ConciseTree::Actions;
 
 # Returns the canonical 10-rule BNF meta-grammar as a string
 sub bnf_text {
@@ -131,6 +132,47 @@ sub build_perl_recognizer {
     return Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
         semiring => $bool_sr,
+    );
+}
+
+# Builds a Composite(Boolean, SemanticAction(ConciseTree::Actions)) parser
+# from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
+sub build_perl_concise_parser {
+    my ($grammar, %opts) = @_;
+    my $ordered = $grammar;
+
+    if (defined $opts{start}) {
+        my $start = $opts{start};
+        my @reordered;
+        my $found = false;
+        for my $rule ($grammar->@*) {
+            if (!$found && $rule->name() eq $start) {
+                unshift @reordered, $rule;
+                $found = true;
+            } else {
+                push @reordered, $rule;
+            }
+        }
+        die "Start rule '$start' not found in grammar" unless $found;
+        $ordered = \@reordered;
+    }
+
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
+
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+        boolean  => $bool_sr,
+        semantic => $sem_sr,
+    );
+
+    return Chalk::Bootstrap::Earley->new(
+        grammar  => $desugared,
+        semiring => $comp_sr,
     );
 }
 
