@@ -5,7 +5,7 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::PrecedenceTable;
+use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
@@ -16,40 +16,40 @@ use Chalk::Grammar::Symbol;
 
 # Test 1: Table returns expected structure
 {
-    my @table = Chalk::Bootstrap::PrecedenceTable::get_table();
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
     ok(scalar @table > 0, 'precedence table has entries');
     is($table[0]->{assoc}, 'right', 'level 0 is right-associative (**)')
 }
 
 # Test 2: ** is at level 0
 {
-    my @table = Chalk::Bootstrap::PrecedenceTable::get_table();
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
     ok((grep { $_ eq '**' } $table[0]->{ops}->@*), '** is at level 0');
 }
 
 # Test 3: + and - are at level 3
 {
-    my @table = Chalk::Bootstrap::PrecedenceTable::get_table();
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
     ok((grep { $_ eq '+' } $table[3]->{ops}->@*), '+ is at level 3');
     ok((grep { $_ eq '-' } $table[3]->{ops}->@*), '- is at level 3');
 }
 
 # Test 4: * is at level 2 (higher precedence than +)
 {
-    my @table = Chalk::Bootstrap::PrecedenceTable::get_table();
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
     ok((grep { $_ eq '*' } $table[2]->{ops}->@*), '* is at level 2');
 }
 
 # Test 5: && and || are at different levels
 {
-    my @table = Chalk::Bootstrap::PrecedenceTable::get_table();
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
     ok((grep { $_ eq '&&' } $table[10]->{ops}->@*), '&& is at level 10');
     ok((grep { $_ eq '||' } $table[11]->{ops}->@*), '|| is at level 11');
 }
 
 # Test 6: 'and', 'or' are lowest binary precedence (level 13)
 {
-    my @table = Chalk::Bootstrap::PrecedenceTable::get_table();
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
     ok((grep { $_ eq 'and' } $table[13]->{ops}->@*), 'and is at level 13');
     ok((grep { $_ eq 'or' } $table[13]->{ops}->@*), 'or is at level 13');
 }
@@ -58,7 +58,9 @@ use Chalk::Grammar::Symbol;
 # Precedence semiring: basic operations
 # ========================================================================
 
-my $prec = Chalk::Bootstrap::Semiring::Precedence->new();
+my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
+    lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+);
 
 # Test 7: zero and one
 {

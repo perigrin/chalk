@@ -6,6 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::Semiring::Boolean;
+use Chalk::Grammar::Rule;
 
 # Create a semiring instance
 my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
@@ -142,26 +143,38 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$sr->is_zero("false"), "string 'false' is not zero");
 }
 
-# Test 11: scan_value returns one (ignores terminal text)
-{
-    my $one = $sr->one();
-    my $scan_val = $sr->scan_value('hello');
-    ok(!$sr->is_zero($scan_val), "scan_value returns non-zero value");
-
-    # scan_value with empty string also returns one
-    my $scan_empty = $sr->scan_value('');
-    ok(!$sr->is_zero($scan_empty), "scan_value('') returns non-zero value");
+# Helper to build a mock item for on_scan/on_complete
+my sub make_bool_item($rule_name, $value) {
+    my $rule = Chalk::Grammar::Rule->new(
+        name        => $rule_name,
+        expressions => [[]],
+    );
+    return { rule => $rule, dot => 0, origin => 0, value => $value };
 }
 
-# Test 12: complete_value returns value unchanged
+# Test 11: on_scan returns non-zero value (ignores terminal text)
 {
     my $one = $sr->one();
-    my $result = $sr->complete_value($one, 'SomeRule');
-    ok(!$sr->is_zero($result), "complete_value returns non-zero for non-zero input");
+    my $item = make_bool_item('SomeRule', $one);
+    my $scan_val = $sr->on_scan($item, 0, 0, 'hello');
+    ok(!$sr->is_zero($scan_val), "on_scan returns non-zero value");
+
+    # on_scan with empty string also returns non-zero
+    my $scan_empty = $sr->on_scan($item, 0, 0, '');
+    ok(!$sr->is_zero($scan_empty), "on_scan('') returns non-zero value");
+}
+
+# Test 12: on_complete returns value unchanged
+{
+    my $one = $sr->one();
+    my $item = make_bool_item('SomeRule', $one);
+    my $result = $sr->on_complete($item, 0, 5);
+    ok(!$sr->is_zero($result), "on_complete returns non-zero for non-zero input");
 
     my $zero = $sr->zero();
-    my $result2 = $sr->complete_value($zero, 'SomeRule');
-    ok($sr->is_zero($result2), "complete_value returns zero for zero input");
+    my $item2 = make_bool_item('SomeRule', $zero);
+    my $result2 = $sr->on_complete($item2, 0, 5);
+    ok($sr->is_zero($result2), "on_complete returns zero for zero input");
 }
 
 done_testing();

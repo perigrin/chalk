@@ -51,8 +51,7 @@ sub build_parser {
     );
 
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        boolean  => $bool_sr,
-        semantic => $sem_sr,
+        semirings => [$bool_sr, $sem_sr],
     );
 
     return Chalk::Bootstrap::Earley->new(
@@ -166,8 +165,7 @@ sub build_perl_concise_parser {
     );
 
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        boolean  => $bool_sr,
-        semantic => $sem_sr,
+        semirings => [$bool_sr, $sem_sr],
     );
 
     return Chalk::Bootstrap::Earley->new(

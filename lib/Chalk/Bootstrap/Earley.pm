@@ -96,12 +96,11 @@ class Chalk::Bootstrap::Earley {
                 $processed->{$key} = true;
 
                 if ($self->_is_complete($item, $alt_idx)) {
-                    # Apply semantic action for completed rule before propagating
-                    if ($semiring->can('complete_value')) {
-                        $item = { %$item, value => $semiring->complete_value($item->{value}, $item->{rule}->name()) };
-                        # Update the chart entry with the action-applied value
-                        $chart[$pos]->{$key} = [$item, $alt_idx];
-                    }
+                    # Apply on_complete for completed rule before propagating
+                    my $completed_value = $semiring->on_complete($item, $alt_idx, $pos);
+                    $item = { %$item, value => $completed_value };
+                    # Update the chart entry with the action-applied value
+                    $chart[$pos]->{$key} = [$item, $alt_idx];
                     # Index this completed item for _advance_from_completed lookups
                     my $c_rule = $item->{rule}->name();
                     my $c_origin = $item->{origin};
@@ -189,18 +188,19 @@ class Chalk::Bootstrap::Earley {
 
         return unless defined $end_pos;
 
-        # Capture matched text and create scan value
+        # Capture matched text, use on_scan to combine existing value with scan
         my $matched = substr($input, $pos, $end_pos - $pos);
-        my $scan_val = $semiring->can('scan_value')
-            ? $semiring->scan_value($matched)
-            : $semiring->one();
+        my $new_value = $semiring->on_scan($item, $alt_idx, $pos, $matched);
+
+        # on_scan returns the combined result; check for zero (semiring rejected)
+        next if $semiring->is_zero($new_value);
 
         # Advance dot
         my $new_item = $self->_make_item(
             $item->{rule},
             $item->{dot} + 1,
             $item->{origin},
-            $semiring->multiply($item->{value}, $scan_val)
+            $new_value
         );
 
         my $key = $self->_item_key($new_item, $alt_idx);

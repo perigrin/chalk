@@ -67,8 +67,7 @@ package TestRule {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        boolean => $bool_sr,
-        semantic => $sem_sr,
+        semirings => [$bool_sr, $sem_sr],
     );
 
     my $parser = Chalk::Bootstrap::Earley->new(
@@ -95,8 +94,7 @@ package TestRule {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        boolean => $bool_sr,
-        semantic => $sem_sr,
+        semirings => [$bool_sr, $sem_sr],
     );
 
     my $parser = Chalk::Bootstrap::Earley->new(

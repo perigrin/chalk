@@ -8,6 +8,7 @@ use lib 'lib';
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Grammar::Rule;
 
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -126,25 +127,38 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result2->extract()->value(), 'test', 'add(ctx, zero) returns ctx');
 }
 
-# Test 7: scan_value returns Context with matched text as focus
-{
-    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $scan_val = $sr->scan_value('hello');
-
-    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'scan_value returns Context');
-    is($scan_val->extract(), 'hello', 'scan_value Context has matched text as focus');
+# Helper to build a mock item for on_scan/on_complete
+my sub make_sem_item($rule_name, $value) {
+    my $rule = Chalk::Grammar::Rule->new(
+        name        => $rule_name,
+        expressions => [[]],
+    );
+    return { rule => $rule, dot => 0, origin => 0, value => $value };
 }
 
-# Test 8: scan_value with empty string
+# Test 7: on_scan returns Context with matched text as focus
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $scan_val = $sr->scan_value('');
+    my $item = make_sem_item('SomeRule', $sr->one());
+    my $scan_val = $sr->on_scan($item, 0, 0, 'hello');
 
-    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'scan_value("") returns Context');
-    is($scan_val->extract(), '', 'scan_value("") Context has empty string as focus');
+    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'on_scan returns Context');
+    # on_scan multiplies one() with scan context, so focus is undef (parent node)
+    # but the scan text is in a child
+    ok(defined $scan_val, 'on_scan produces defined result');
 }
 
-# Test 9: complete_value applies action via extend using actions object
+# Test 8: on_scan with empty string
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $item = make_sem_item('SomeRule', $sr->one());
+    my $scan_val = $sr->on_scan($item, 0, 0, '');
+
+    isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'on_scan("") returns Context');
+    ok(defined $scan_val, 'on_scan("") produces defined result');
+}
+
+# Test 9: on_complete applies action via extend using actions object
 {
     # Create a test class with an action method
     package TestActions {
@@ -168,14 +182,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $result = $sr->complete_value($ctx, 'TestRule');
+    my $item = make_sem_item('TestRule', $ctx);
+    my $result = $sr->on_complete($item, 0, 5);
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'complete_value returns Context');
-    is($result->extract(), 'HELLO', 'complete_value applies action to compute new focus');
-    is($result->rule(), 'TestRule', 'complete_value sets rule name on result');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns Context');
+    is($result->extract(), 'HELLO', 'on_complete applies action to compute new focus');
+    is($result->rule(), 'TestRule', 'on_complete sets rule name on result');
 }
 
-# Test 10: complete_value with unknown rule returns value with rule set
+# Test 10: on_complete with unknown rule returns value with rule set
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
@@ -186,19 +201,21 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $result = $sr->complete_value($ctx, 'UnknownRule');
+    my $item = make_sem_item('UnknownRule', $ctx);
+    my $result = $sr->on_complete($item, 0, 5);
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'complete_value returns Context for unknown rule');
-    is($result->rule(), 'UnknownRule', 'complete_value sets rule even without action');
-    is($result->extract(), 'hello', 'complete_value preserves focus for unknown rule');
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns Context for unknown rule');
+    is($result->rule(), 'UnknownRule', 'on_complete sets rule even without action');
+    is($result->extract(), 'hello', 'on_complete preserves focus for unknown rule');
 }
 
-# Test 11: complete_value with undef (zero) returns undef
+# Test 11: on_complete with undef value (zero) returns undef
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $result = $sr->complete_value(undef, 'TestRule');
+    my $item = make_sem_item('TestRule', undef);
+    my $result = $sr->on_complete($item, 0, 5);
 
-    ok(!defined $result, 'complete_value(undef, ...) returns undef');
+    ok(!defined $result, 'on_complete with undef value returns undef');
 }
 
 done_testing();

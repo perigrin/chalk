@@ -34,14 +34,14 @@ class Chalk::Bootstrap::Context {
     }
 
     # Collect leaf contexts with defined focuses from this Context tree.
-    # A "leaf" is a context that has a defined focus (from complete_value).
+    # A "leaf" is a context that has a defined focus (from on_complete).
     # Optional $node_class filters to only contexts whose focus isa $node_class.
     method leaves($node_class = undef) {
         my @results;
 
         my $focus = $self->extract();
         if (defined $focus) {
-            # This context has a focus — it's a "leaf" produced by complete_value
+            # This context has a focus — it's a "leaf" produced by on_complete
             if (!$node_class || $focus isa $node_class) {
                 push @results, $self;
             }
@@ -57,12 +57,12 @@ class Chalk::Bootstrap::Context {
     }
 
     # Extract concatenated scanned text from this Context tree.
-    # Walks the tree and collects all string focuses (from scan_value),
-    # concatenating them in order. Skips non-string focuses (IR nodes from complete_value).
+    # Walks the tree and collects all string focuses (from on_scan),
+    # concatenating them in order. Skips non-string focuses (IR nodes from on_complete).
     method scanned_text() {
         my $focus = $self->extract();
         if (defined $focus && !ref($focus)) {
-            # String focus from scan_value
+            # String focus from on_scan
             return $focus;
         }
 

@@ -1,51 +1,53 @@
-# ABOUTME: Composite semiring running Boolean and SemanticAction together.
-# ABOUTME: Values are 2-tuples [bool_value, semantic_value], operations delegate to both.
+# ABOUTME: N-ary composite semiring running multiple semirings together as staged filters.
+# ABOUTME: Values are N-tuples, is_zero returns true if ANY component is zero.
 use 5.42.0;
 use utf8;
 use experimental 'class';
 
 class Chalk::Bootstrap::Semiring::Composite {
-    field $boolean  :param :reader;
-    field $semantic :param :reader;
+    field $semirings :param :reader;  # arrayref of semirings
 
-    # zero returns tuple of both zeros
     method zero() {
-        return [$boolean->zero(), $semantic->zero()];
+        return [ map { $_->zero() } $semirings->@* ];
     }
 
-    # one returns tuple of both ones
     method one() {
-        return [$boolean->one(), $semantic->one()];
+        return [ map { $_->one() } $semirings->@* ];
     }
 
-    # Check if value is zero by checking boolean component
+    # Staged filter: ANY component zero → whole tuple is zero
     method is_zero($value) {
-        return $boolean->is_zero($value->[0]);
+        for my $i (0 .. $semirings->$#*) {
+            return true if $semirings->[$i]->is_zero($value->[$i]);
+        }
+        return false;
     }
 
-    # Multiply delegates to both semirings
     method multiply($left, $right) {
-        my $bool_result = $boolean->multiply($left->[0], $right->[0]);
-        my $sem_result = $semantic->multiply($left->[1], $right->[1]);
-        return [$bool_result, $sem_result];
+        return [ map { $semirings->[$_]->multiply($left->[$_], $right->[$_]) } 0 .. $semirings->$#* ];
     }
 
-    # Return semiring value for a scanned terminal match, delegates to both
-    method scan_value($text) {
-        return [$boolean->scan_value($text), $semantic->scan_value($text)];
-    }
-
-    # Apply semantic action for a completed rule, delegates to both
-    method complete_value($value, $rule_name) {
-        my $bool_result = $boolean->complete_value($value->[0], $rule_name);
-        my $sem_result = $semantic->complete_value($value->[1], $rule_name);
-        return [$bool_result, $sem_result];
-    }
-
-    # Add delegates to both semirings
     method add($left, $right) {
-        my $bool_result = $boolean->add($left->[0], $right->[0]);
-        my $sem_result = $semantic->add($left->[1], $right->[1]);
-        return [$bool_result, $sem_result];
+        return [ map { $semirings->[$_]->add($left->[$_], $right->[$_]) } 0 .. $semirings->$#* ];
+    }
+
+    # Delegate on_scan to each component with its own slice of the value
+    method on_scan($item, $alt_idx, $pos, $matched_text) {
+        my @results;
+        for my $i (0 .. $semirings->$#*) {
+            my $component_item = { %$item, value => $item->{value}->[$i] };
+            push @results, $semirings->[$i]->on_scan($component_item, $alt_idx, $pos, $matched_text);
+        }
+        return \@results;
+    }
+
+    # Delegate on_complete to each component with its own slice of the value
+    method on_complete($item, $alt_idx, $pos) {
+        my @results;
+        for my $i (0 .. $semirings->$#*) {
+            my $component_item = { %$item, value => $item->{value}->[$i] };
+            push @results, $semirings->[$i]->on_complete($component_item, $alt_idx, $pos);
+        }
+        return \@results;
     }
 }

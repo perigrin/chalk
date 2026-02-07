@@ -4,9 +4,10 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::Bootstrap::PrecedenceTable;
-
 class Chalk::Bootstrap::Semiring::Precedence {
+    # Callback: op_string => { level => N, assoc => str } or undef
+    field $lookup :param;
+
     # Expression-type precedence levels (relative to binary operators).
     # PostfixExpression is highest, AssignmentExpression is lowest.
     # These are conceptual levels above/below the binary operator table.
@@ -94,7 +95,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
         # In BinaryOp or AssignOp context, look up operator
         if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
-            my $op_info = Chalk::Bootstrap::PrecedenceTable::lookup($matched_text);
+            my $op_info = $lookup->($matched_text);
             if (defined $op_info) {
                 return $self->multiply($existing, {
                     valid => true,

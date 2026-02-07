@@ -46,22 +46,24 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         );
     }
 
-    # Return semiring value for a scanned terminal match
-    # Creates a Context with the matched text as focus
-    method scan_value($text) {
-        return Chalk::Bootstrap::Context->new(
-            focus    => $text,
+    # on_scan: create a Context for the matched text and multiply with existing value
+    method on_scan($item, $alt_idx, $pos, $matched_text) {
+        my $scan_ctx = Chalk::Bootstrap::Context->new(
+            focus    => $matched_text,
             children => [],
             position => 0,
             rule     => undef,
         );
+        return $self->multiply($item->{value}, $scan_ctx);
     }
 
-    # Apply semantic action for a completed rule
+    # on_complete: apply semantic action for a completed rule
     # Looks up action by rule_name via can(), applies via extend, sets rule field
-    method complete_value($value, $rule_name) {
+    method on_complete($item, $alt_idx, $pos) {
+        my $value = $item->{value};
         return undef if !defined $value;
 
+        my $rule_name = $item->{rule}->name();
         my $method = $actions ? $actions->can($rule_name) : undef;
         my $result;
         if ($method) {

@@ -42,13 +42,13 @@ class Chalk::Bootstrap::Semiring::Boolean {
         return $ZERO;
     }
 
-    # Return semiring value for a scanned terminal match (ignores text)
-    method scan_value($text) {
-        return $self->one();
+    # on_scan: combine existing item value with one() for successful scan
+    method on_scan($item, $alt_idx, $pos, $matched_text) {
+        return $self->multiply($item->{value}, $self->one());
     }
 
-    # Apply semantic action for a completed rule (no-op for Boolean)
-    method complete_value($value, $rule_name) {
-        return $value;
+    # on_complete: no-op for Boolean, return value unchanged
+    method on_complete($item, $alt_idx, $pos) {
+        return $item->{value};
     }
 }

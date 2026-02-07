@@ -4,7 +4,7 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-class Chalk::Bootstrap::PrecedenceTable {
+class Chalk::Grammar::Perl::PrecedenceTable {
     # Returns the operator precedence table.
     # Each entry: { assoc => 'left'|'right'|'nonassoc'|'chained', ops => [...] }
     # Lower index = higher precedence (tighter binding).
