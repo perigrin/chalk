@@ -140,6 +140,194 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::Statement');
     like($output, qr/FREETMPS/, 'multi-line Statement contains FREETMPS');
 }
 
+# === CompositeNode ===
+
+use_ok('Chalk::Bootstrap::Target::XS::AST::CompositeNode');
+
+{
+    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(children => []);
+    isa_ok($composite, 'Chalk::Bootstrap::Target::XS::AST::Node');
+    isa_ok($composite, 'Chalk::Bootstrap::Target::XS::AST::CompositeNode');
+
+    is($composite->emit(), '', 'CompositeNode with empty children emits empty string');
+}
+
+# CompositeNode emits children in order
+{
+    my $stmt1 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'first();');
+    my $stmt2 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'second();');
+    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(
+        children => [$stmt1, $stmt2],
+    );
+
+    my $output = $composite->emit();
+    is($output, "    first();\n    second();\n", 'CompositeNode emits children in order');
+}
+
+# CompositeNode with mixed child types
+{
+    my $var = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'x');
+    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'x = newSViv(42);');
+    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(
+        children => [$var, $stmt],
+    );
+
+    my $output = $composite->emit();
+    is($output, "    SV * x;\n    x = newSViv(42);\n", 'CompositeNode with mixed child types');
+}
+
+# CompositeNode children reader
+{
+    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'foo();');
+    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(children => [$stmt]);
+    is(scalar $composite->children()->@*, 1, 'children reader returns arrayref with 1 element');
+}
+
+# === XSUB ===
+
+use_ok('Chalk::Bootstrap::Target::XS::AST::XSUB');
+
+# XSUB with only statements (no VarDecls) omits PREINIT
+{
+    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(
+        code => 'RETVAL = newSViv(42);',
+    );
+    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+        name        => 'simple',
+        params      => ['SV *self'],
+        body        => [$stmt],
+    );
+    isa_ok($xsub, 'Chalk::Bootstrap::Target::XS::AST::Node');
+    isa_ok($xsub, 'Chalk::Bootstrap::Target::XS::AST::XSUB');
+
+    my $output = $xsub->emit();
+    unlike($output, qr/PREINIT/, 'XSUB without VarDecls omits PREINIT');
+    like($output, qr/CODE:/, 'XSUB has CODE section');
+    like($output, qr/OUTPUT:\n    RETVAL/, 'XSUB has OUTPUT: RETVAL');
+}
+
+# XSUB default return type is SV *
+{
+    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+        name   => 'test_func',
+        params => ['SV *self'],
+        body   => [
+            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = self;'),
+        ],
+    );
+    my $output = $xsub->emit();
+    like($output, qr/^SV \*\n/, 'XSUB default return type is SV *');
+}
+
+# XSUB with mixed VarDecl + Statement correctly partitions them
+{
+    my $var1 = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'AV *', name => 'expressions');
+    my $var2 = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'rule');
+    my $stmt1 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'expressions = newAV();');
+    my $stmt2 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = rule;');
+
+    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+        name   => 'Grammar',
+        params => ['SV *self'],
+        body   => [$var1, $stmt1, $var2, $stmt2],
+    );
+
+    my $output = $xsub->emit();
+    like($output, qr/PREINIT:/, 'XSUB with VarDecls has PREINIT section');
+
+    # VarDecls go to PREINIT, not CODE
+    like($output, qr/PREINIT:\n    AV \* expressions;\n    SV \* rule;\n/,
+        'VarDecls are collected into PREINIT section');
+
+    # Statements go to CODE
+    like($output, qr/CODE:\n    expressions = newAV\(\);\n    RETVAL = rule;\n/,
+        'Statements are collected into CODE section');
+
+    like($output, qr/OUTPUT:\n    RETVAL\n/, 'XSUB ends with OUTPUT: RETVAL');
+}
+
+# XSUB emits correct signature line
+{
+    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+        return_type => 'SV *',
+        name        => 'Grammar',
+        params      => ['SV *self'],
+        body        => [
+            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = self;'),
+        ],
+    );
+
+    my $output = $xsub->emit();
+    # Return type on its own line, then name(params) on next line
+    like($output, qr/^SV \*\nGrammar\(self\)\n/, 'XSUB has correct signature');
+    # Parameter declaration indented under signature
+    like($output, qr/Grammar\(self\)\n    SV \*self\n/, 'XSUB params indented under signature');
+}
+
+# Full realistic XSUB with expected exact structure
+{
+    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+        name   => 'Grammar',
+        params => ['SV *self'],
+        body   => [
+            Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'AV *', name => 'expressions'),
+            Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'sym_0'),
+            Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'rule'),
+            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'expressions = newAV();'),
+            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => "{\n    dSP;\n    ENTER; SAVETMPS;\n    FREETMPS; LEAVE;\n}"),
+            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'av_push(expressions, sym_0);'),
+            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = rule;'),
+        ],
+    );
+
+    my $expected = <<'EXPECTED';
+SV *
+Grammar(self)
+    SV *self
+  PREINIT:
+    AV * expressions;
+    SV * sym_0;
+    SV * rule;
+  CODE:
+    expressions = newAV();
+    {
+    dSP;
+    ENTER; SAVETMPS;
+    FREETMPS; LEAVE;
+}
+    av_push(expressions, sym_0);
+    RETVAL = rule;
+  OUTPUT:
+    RETVAL
+
+EXPECTED
+
+    my $output = $xsub->emit();
+    is($output, $expected, 'Full realistic XSUB matches expected structure');
+}
+
+# XSUB readers work
+{
+    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+        return_type => 'void',
+        name        => 'test',
+        params      => ['SV *self', 'SV *arg'],
+        body        => [],
+    );
+    is($xsub->return_type(), 'void', 'return_type reader works');
+    is($xsub->name(), 'test', 'name reader works');
+    is(scalar $xsub->params()->@*, 2, 'params reader returns 2 elements');
+}
+
+# XSUB requires name and params
+{
+    eval { Chalk::Bootstrap::Target::XS::AST::XSUB->new(name => 'test') };
+    ok($@, 'XSUB dies when missing params');
+
+    eval { Chalk::Bootstrap::Target::XS::AST::XSUB->new(params => ['SV *self']) };
+    ok($@, 'XSUB dies when missing name');
+}
+
 # === Required parameter validation ===
 
 # Module requires both module and package
