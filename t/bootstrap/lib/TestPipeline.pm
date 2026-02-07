@@ -22,6 +22,8 @@ use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer;
 use Chalk::Bootstrap::Optimizer::DCE;
 use Chalk::Bootstrap::ConciseTree::Actions;
+use Chalk::Bootstrap::Semiring::Precedence;
+use Chalk::Grammar::Perl::PrecedenceTable;
 
 # Returns the canonical 10-rule BNF meta-grammar as a string
 sub bnf_text {
@@ -134,8 +136,9 @@ sub build_perl_recognizer {
     );
 }
 
-# Builds a Composite(Boolean, SemanticAction(ConciseTree::Actions)) parser
-# from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
+# Builds a Composite(Boolean, Precedence, SemanticAction(ConciseTree::Actions))
+# parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
+# Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=SemanticAction
 sub build_perl_concise_parser {
     my ($grammar, %opts) = @_;
     my $ordered = $grammar;
@@ -159,13 +162,16 @@ sub build_perl_concise_parser {
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
 
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
     my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
         actions => $actions,
     );
 
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $sem_sr],
+        semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
     return Chalk::Bootstrap::Earley->new(

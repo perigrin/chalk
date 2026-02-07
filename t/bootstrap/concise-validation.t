@@ -38,10 +38,12 @@ SKIP: {
     my $comparator = Chalk::Bootstrap::ConciseTree::Comparator->new();
 
     # Helper to parse and extract ConciseTree from our parser
+    # Result tuple: [0]=Boolean, [1]=Precedence, [2]=SemanticAction
     my sub our_tree($source) {
         my $result = $parser->parse_value($source);
         return undef unless defined $result;
-        my ($bool_val, $sem_val) = $result->@*;
+        my $bool_val = $result->[0];
+        my $sem_val = $result->[2];
         return undef unless $bool_val;
         return $sem_val->extract();
     }
