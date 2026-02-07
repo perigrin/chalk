@@ -23,11 +23,17 @@ class Chalk::Bootstrap::Earley {
     # Compiled regex cache: pattern_string => qr// object
     field %regex_cache;
 
+    # Precomputed semiring capabilities
+    field $has_scan_value;
+    field $has_complete_value;
+
     ADJUST {
         $rule_table = {};
         for my $rule ($grammar->@*) {
             $rule_table->{$rule->name()} = $rule;
         }
+        $has_scan_value = $semiring->can('scan_value') ? true : false;
+        $has_complete_value = $semiring->can('complete_value') ? true : false;
     }
 
     # Earley item: [rule, dot_position, origin, semiring_value]
@@ -97,7 +103,7 @@ class Chalk::Bootstrap::Earley {
 
                 if ($self->_is_complete($item, $alt_idx)) {
                     # Apply semantic action for completed rule before propagating
-                    if ($semiring->can('complete_value')) {
+                    if ($has_complete_value) {
                         $item = { %$item, value => $semiring->complete_value($item->{value}, $item->{rule}->name()) };
                         # Update the chart entry with the action-applied value
                         $chart[$pos]->{$key} = [$item, $alt_idx];
@@ -191,7 +197,7 @@ class Chalk::Bootstrap::Earley {
 
         # Capture matched text and create scan value
         my $matched = substr($input, $pos, $end_pos - $pos);
-        my $scan_val = $semiring->can('scan_value')
+        my $scan_val = $has_scan_value
             ? $semiring->scan_value($matched)
             : $semiring->one();
 
