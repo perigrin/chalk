@@ -25,6 +25,11 @@ Three concrete advantages:
 3. **The hardest problems arrive late.** Expression disambiguation is Phase 4;
    complex source files are Phases 6-8.
 
+**IMPORTANT — Before starting any phase**: The implementing agent MUST read
+`CLAUDE.md` to load project conventions, required skills, development workflow,
+and the triple-review process. CLAUDE.md is the authoritative source for how
+work is done; this plan is the authoritative source for what work to do.
+
 -----
 
 ## Architecture
