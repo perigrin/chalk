@@ -175,9 +175,9 @@ SKIP: {
 
     # Files using grammar constructs not yet supported
     my %known_gaps = (
-        'lib/Chalk/Bootstrap/ConciseTree.pm'          => '$#array (last-index)',
-        'lib/Chalk/Bootstrap/ConciseTree/Actions.pm'   => '$#array (last-index)',
-        'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm'    => 'backtick (qx) operator',
+        'lib/Chalk/Bootstrap/ConciseTree.pm'            => '$#array (last-index)',
+        'lib/Chalk/Bootstrap/ConciseTree/Actions.pm'    => '$#array (last-index)',
+        'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm'     => 'backtick (qx) operator',
     );
 
     for my $file (sort @pm_files) {

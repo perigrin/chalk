@@ -35,7 +35,8 @@ class Chalk::Grammar::Perl::PrecedenceTable {
     sub _build_lookup() {
         return if $lookup_built;
         my @table = get_table();
-        for my $i (0 .. $#table) {
+        my $last = scalar(@table) - 1;
+        for my $i (0 .. $last) {
             for my $op ($table[$i]->{ops}->@*) {
                 $op_lookup{$op} = { level => $i, assoc => $table[$i]->{assoc} };
             }
