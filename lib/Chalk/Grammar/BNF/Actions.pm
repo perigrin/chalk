@@ -2,8 +2,7 @@
 # ABOUTME: One method per BNF rule, plus helpers for desugared rules, constructing IR via NodeFactory.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 

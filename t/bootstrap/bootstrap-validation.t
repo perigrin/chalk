@@ -116,7 +116,7 @@ use lib 'lib';
 {
     use lib 't/bootstrap/lib';
     use TestPipeline qw(full_pipeline optimized_pipeline bnf_text grammars_match);
-    use Chalk::Bootstrap::Desugar qw(desugar_grammar);
+    use Chalk::Bootstrap::Desugar;
     use Chalk::Bootstrap::Target::Perl;
 
     my $ir = full_pipeline();
@@ -143,7 +143,7 @@ use lib 'lib';
         'Phase 3: generated grammar structurally matches hand-written grammar');
 
     # Build parser from generated grammar and verify it accepts/rejects same inputs
-    my $gen_desugared = desugar_grammar($gen_grammar);
+    my $gen_desugared = Chalk::Bootstrap::Desugar::desugar_grammar($gen_grammar);
     my $gen_bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $gen_parser = Chalk::Bootstrap::Earley->new(
         grammar  => $gen_desugared,
@@ -195,8 +195,7 @@ use lib 'lib';
 # Helper test classes
 package TestSymbol {
     use 5.42.0;
-    use feature 'class';
-    no warnings 'experimental::class';
+    use experimental 'class';
 
     class TestSymbol {
         field $type :param :reader;
@@ -214,8 +213,7 @@ package TestSymbol {
 
 package TestRule {
     use 5.42.0;
-    use feature 'class';
-    no warnings 'experimental::class';
+    use experimental 'class';
 
     class TestRule {
         field $name :param :reader;

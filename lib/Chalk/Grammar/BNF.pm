@@ -2,8 +2,7 @@
 # ABOUTME: Provides 10-rule meta-grammar as Chalk::Grammar::Rule objects.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Grammar::BNF {
     use Chalk::Grammar::Rule;

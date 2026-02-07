@@ -2,8 +2,7 @@
 # ABOUTME: Immutable value object with type, value, and optional quantifier.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Grammar::Symbol {
     field $type      :param :reader; # 'reference' (nonterminal) or 'terminal' (regex)

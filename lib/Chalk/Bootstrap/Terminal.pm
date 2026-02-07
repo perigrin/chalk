@@ -2,8 +2,7 @@
 # ABOUTME: Match method returns end position on success or undef on failure.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::Terminal {
 

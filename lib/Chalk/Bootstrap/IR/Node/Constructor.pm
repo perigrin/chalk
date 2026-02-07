@@ -2,8 +2,7 @@
 # ABOUTME: Parameterized by class field to determine target construction type.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::IR::Node::Constructor :isa(Chalk::Bootstrap::IR::Node) {
     field $class :param :reader;

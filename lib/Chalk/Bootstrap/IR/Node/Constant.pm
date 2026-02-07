@@ -2,8 +2,7 @@
 # ABOUTME: Stores const_type ('string', 'integer', 'enum') and value
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::IR::Node::Constant :isa(Chalk::Bootstrap::IR::Node) {
     # Type of constant: 'string', 'integer', or 'enum'

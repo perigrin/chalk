@@ -2,8 +2,7 @@
 # ABOUTME: Values are Contexts, operations combine contexts for sequences and alternatives.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 use Chalk::Bootstrap::Context;
 

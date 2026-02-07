@@ -13,7 +13,7 @@ use Chalk::Bootstrap::Semiring::Composite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Grammar::BNF::Actions;
-use Chalk::Bootstrap::Desugar qw(desugar_grammar);
+use Chalk::Bootstrap::Desugar;
 use Chalk::Grammar::BNF;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer;
@@ -38,7 +38,7 @@ BNF
 # Builds the full Earley parser with composite semiring and desugared BNF grammar
 sub build_parser {
     my $grammar = Chalk::Grammar::BNF::grammar();
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $actions = Chalk::Grammar::BNF::Actions->new();

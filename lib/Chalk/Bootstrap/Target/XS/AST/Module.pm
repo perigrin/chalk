@@ -2,8 +2,7 @@
 # ABOUTME: Emits the MODULE = X  PACKAGE = Y line that establishes the Perl namespace.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 use Chalk::Bootstrap::Target::XS::AST::Node;
 

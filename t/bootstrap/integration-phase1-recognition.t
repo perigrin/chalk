@@ -10,7 +10,7 @@ use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
-use Chalk::Bootstrap::Desugar qw(desugar_grammar);
+use Chalk::Bootstrap::Desugar;
 
 # Get the BNF meta-grammar
 my $grammar = Chalk::Grammar::BNF->grammar();
@@ -347,7 +347,7 @@ sub reference($value, $quant = undef) {
 
 # Test with full BNF meta-grammar including quantifiers (desugared)
 {
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,

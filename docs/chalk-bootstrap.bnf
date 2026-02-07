@@ -1,0 +1,302 @@
+# ============================================================================
+# Chalk::Bootstrap Perl 5.42.0 Subset Grammar
+# ============================================================================
+#
+# FORMAT: Chalk::Bootstrap BNF (::= rules, ; terminators, /regex/ terminals)
+# SPEC:   docs/perlish-grammar-spec.md
+#
+# This grammar is intentionally ambiguous. Disambiguation is delegated to
+# semirings (Precedence, Arity/TypeInference, Structural) not grammar
+# structure. 65 rules, ~74-79 after quantifier desugaring.
+#
+# ============================================================================
+
+# §1  WHITESPACE
+# _ is optional (zero or more), WS is required (one or more)
+
+_ ::= /(?:\s|#[^\n]*)*/ ;
+
+WS ::= /(?:\s|#[^\n]*)+/ ;
+
+# §2  PROGRAM STRUCTURE
+
+Program ::= _ StatementList? _ ;
+
+StatementList ::= StatementItem
+    | StatementList _ StatementItem ;
+
+StatementItem ::= SimpleStatement _ /;/
+    | CompoundStatement
+    | /;/ ;
+
+# §3  STATEMENT CATEGORIES
+
+SimpleStatement ::= ExpressionStatement
+    | UseDeclaration
+    | VariableDeclaration
+    | FieldDeclaration ;
+
+CompoundStatement ::= Block
+    | IfStatement
+    | WhileStatement
+    | ForStatement
+    | ForeachStatement
+    | ClassBlock
+    | SubroutineDefinition
+    | MethodDefinition
+    | AdjustBlock ;
+
+# §4  EXPRESSION STATEMENTS
+
+ExpressionStatement ::= Expression
+    | Expression WS PostfixModifier ;
+
+PostfixModifier ::= /(?:if|unless|while|until|for|foreach)\b/ WS Expression ;
+
+# §5  CONDITIONALS
+
+IfStatement ::= /(?:if|unless)\b/ _ ParenExpr _ Block ElsifChain? ;
+
+ElsifChain ::= _ /elsif\b/ _ ParenExpr _ Block ElsifChain?
+    | _ /else\b/ _ Block ;
+
+# §6  LOOPS
+
+WhileStatement ::= /(?:while|until)\b/ _ ParenExpr _ Block ;
+
+ForStatement ::= /for\b/ _ /\(/ _ Expression? _ /;/ _ Expression? _ /;/
+    _ Expression? _ /\)/ _ Block ;
+
+ForeachStatement ::= /(?:for|foreach)\b/ WS IteratorVariable _ ParenExpr _ Block
+    | /(?:for|foreach)\b/ _ ParenExpr _ Block ;
+
+IteratorVariable ::= /my\b/ WS ScalarVariable
+    | ScalarVariable ;
+
+# §7  USE DECLARATIONS
+
+UseDeclaration ::= /use\b/ WS ModuleName
+    | /use\b/ WS ModuleName WS ImportList ;
+
+ModuleName ::= QualifiedIdentifier
+    | Version
+    | QualifiedIdentifier WS Version ;
+
+ImportList ::= ExpressionList ;
+
+# §8  VARIABLE AND FIELD DECLARATIONS
+
+VariableDeclaration ::= /(?:my|our|state|local)\b/ WS Variable
+    | /(?:my|our|state|local)\b/ WS Variable _ /=/ _ Expression
+    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/
+    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/ _ /=/ _ Expression ;
+
+VariableList ::= Variable
+    | VariableList _ /,/ _ Variable ;
+
+FieldDeclaration ::= /field\b/ WS Variable AttributeList? DefaultValue? ;
+
+DefaultValue ::= _ /=/ _ Expression ;
+
+# §9  DEFINITIONS
+
+ClassBlock ::= /class\b/ WS QualifiedIdentifier AttributeList? _ Block ;
+
+SubroutineDefinition ::= /sub\b/ WS Identifier _ Signature? _ Block
+    | /(?:my|our|state)\b/ WS /sub\b/ WS Identifier _ Signature? _ Block ;
+
+MethodDefinition ::= /method\b/ WS Identifier AttributeList? _ Signature? _ Block ;
+
+AdjustBlock ::= /ADJUST\b/ _ Block ;
+
+# §10  ATTRIBUTES
+
+AttributeList ::= WS Attribute
+    | AttributeList WS Attribute ;
+
+Attribute ::= /:/ _ Identifier
+    | /:/ _ Identifier _ /\(/ _ QualifiedIdentifier _ /\)/ ;
+
+# §11  SIGNATURES
+
+Signature ::= /\(/ _ /\)/
+    | /\(/ _ SignatureParams _ /\)/ ;
+
+SignatureParams ::= SignatureParam
+    | SignatureParams _ /,/ _ SignatureParam
+    | SignatureParams _ /,/ ;
+
+SignatureParam ::= ScalarSignatureParam
+    | SlurpySignatureParam ;
+
+ScalarSignatureParam ::= ScalarVariable
+    | ScalarVariable _ /=/ _ Expression ;
+
+SlurpySignatureParam ::= ArrayVariable
+    | HashVariable ;
+
+# §12  EXPRESSIONS
+# All operators at the same structural level. Precedence semiring resolves.
+
+Expression ::= Atom
+    | UnaryExpression
+    | BinaryExpression
+    | PostfixExpression
+    | TernaryExpression
+    | AssignmentExpression ;
+
+ExpressionList ::= Expression
+    | ExpressionList _ /,/ _ Expression
+    | ExpressionList _ /=>/ _ Expression
+    | ExpressionList _ /,/ ;
+
+# §13  ATOMS
+
+Atom ::= Variable
+    | Literal
+    | ParenExpr
+    | ArrayConstructor
+    | HashConstructor
+    | QwLiteral
+    | AnonymousSub
+    | Identifier ;
+
+ParenExpr ::= /\(/ _ Expression _ /\)/
+    | /\(/ _ ExpressionList _ /\)/
+    | /\(/ _ /\)/ ;
+
+ArrayConstructor ::= /\[/ _ ExpressionList? _ /\]/ ;
+
+HashConstructor ::= /\{/ _ ExpressionList? _ /\}/ ;
+
+AnonymousSub ::= /sub\b/ _ Signature? _ Block ;
+
+QwLiteral ::= /qw\s*\([^)]*\)/ ;
+
+# §14  UNARY EXPRESSIONS
+
+UnaryExpression ::= /!/ _ Expression
+    | /-/ _ Expression
+    | /\+/ _ Expression
+    | /~/ _ Expression
+    | /\\/ _ Expression
+    | /not\b/ WS Expression ;
+
+# §15  BINARY EXPRESSIONS
+# Flat: all binary operators at one level. Precedence semiring resolves.
+
+BinaryExpression ::= Expression _ BinaryOp _ Expression ;
+
+BinaryOp ::= /\*\*/
+    | /[*\/%]/
+    | /x\b/
+    | /[+-]/
+    | /\.(?!\.)/
+    | /<</
+    | />>/
+    | /<=>/
+    | /[<>]=?/
+    | /[!=]=/
+    | /(?:eq|ne|lt|gt|le|ge|cmp)\b/
+    | /=~/
+    | /!~/
+    | /&&/
+    | /\|\|/
+    | /\/\//
+    | /(?:and|or|xor)\b/
+    | /&(?!&)/
+    | /\|(?!\|)/
+    | /\^/
+    | /\.\.\.?/
+    | /isa\b/ ;
+
+# §16  POSTFIX EXPRESSIONS
+
+PostfixExpression ::= MethodCall
+    | Subscript
+    | PostfixDeref
+    | CallExpression
+    | PostfixIncDec ;
+
+MethodCall ::= Expression _ /->/ _ Identifier _ /\(/ _ ExpressionList? _ /\)/
+    | Expression _ /->/ _ Identifier ;
+
+Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
+    | Expression _ /->/ _ /\{/ _ Expression _ /\}/
+    | Expression _ /->/ _ /\(/ _ ExpressionList? _ /\)/
+    | Expression _ /\[/ _ Expression _ /\]/
+    | Expression _ /\{/ _ Expression _ /\}/ ;
+
+PostfixDeref ::= Expression _ /->/ _ /@\*/
+    | Expression _ /->/ _ /%\*/
+    | Expression _ /->/ _ /\$\*/
+    | Expression _ /->/ _ /\$#\*/ ;
+
+CallExpression ::= Identifier _ /\(/ _ ExpressionList? _ /\)/
+    | QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    | Identifier WS ExpressionList
+    | Identifier WS Block WS ExpressionList
+    | Identifier WS Block ;
+
+PostfixIncDec ::= Expression _ /\+\+/
+    | Expression _ /--/ ;
+
+# §17  TERNARY AND ASSIGNMENT
+
+TernaryExpression ::= Expression _ /\?/ _ Expression _ /:/ _ Expression ;
+
+AssignmentExpression ::= Expression _ AssignOp _ Expression ;
+
+AssignOp ::= /=(?![=>])/
+    | /\*\*=/
+    | /[*\/%+\-&|^.]=/
+    | /&&=/
+    | /\|\|=/
+    | /\/\/=/
+    | /<<=/
+    | />>=/  ;
+
+# §18  VARIABLES
+
+Variable ::= ScalarVariable
+    | ArrayVariable
+    | HashVariable ;
+
+ScalarVariable ::= /\$[a-zA-Z_]\w*/ ;
+
+ArrayVariable ::= /@[a-zA-Z_]\w*/ ;
+
+HashVariable ::= /%[a-zA-Z_]\w*/ ;
+
+# §19  LITERALS
+
+Literal ::= NumericLiteral
+    | StringLiteral
+    | RegexLiteral
+    | /undef\b/
+    | /true\b/
+    | /false\b/ ;
+
+NumericLiteral ::= /0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*/
+    | /0[bB][01](?:_?[01])*/
+    | /0[oO]?[0-7](?:_?[0-7])*/
+    | /[0-9](?:_?[0-9])*(?:\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9]+)?/ ;
+
+StringLiteral ::= /'(?:[^'\\]|\\.)*'/
+    | /"(?:[^"\\]|\\.)*"/ ;
+
+RegexLiteral ::= /\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
+    | /m\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
+    | /qr\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
+    | /s\s*\/(?:[^\/\\]|\\.)*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
+    | /s\s*\{(?:[^}\\]|\\.)*\}\s*\{(?:[^}\\]|\\.)*\}[msixpodualngcer]*/ ;
+
+# §20  IDENTIFIERS AND HELPERS
+
+Identifier ::= /[a-zA-Z_]\w*/ ;
+
+QualifiedIdentifier ::= /[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/ ;
+
+Block ::= /\{/ _ StatementList? _ /\}/ ;
+
+Version ::= /v?[0-9]+(?:\.[0-9]+){2,}/ ;

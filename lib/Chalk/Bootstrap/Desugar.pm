@@ -2,11 +2,9 @@
 # ABOUTME: Desugars X+, X?, X* so the Earley parser never sees quantifiers.
 use 5.42.0;
 use utf8;
+use experimental 'class';
 
-package Chalk::Bootstrap::Desugar;
-
-use Exporter 'import';
-our @EXPORT_OK = ('desugar_grammar');
+class Chalk::Bootstrap::Desugar {
 
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
@@ -130,5 +128,4 @@ sub _create_helpers($helpers, $base, $quant, $type) {
         );
     }
 }
-
-true;
+}

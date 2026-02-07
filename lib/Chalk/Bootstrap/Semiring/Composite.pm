@@ -2,8 +2,7 @@
 # ABOUTME: Values are 2-tuples [bool_value, semantic_value], operations delegate to both.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::Semiring::Composite {
     field $boolean  :param :reader;

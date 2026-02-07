@@ -10,7 +10,7 @@ use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 
 # Test 1: Module loads
-use_ok('Chalk::Bootstrap::Desugar', 'desugar_grammar');
+use_ok('Chalk::Bootstrap::Desugar');
 
 # Helper to create terminal symbol
 sub terminal($value) {
@@ -42,7 +42,7 @@ sub reference($value, $quant = undef) {
         ),
     ];
 
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     is(scalar $result->@*, 2, 'no-quantifier grammar: same rule count');
     is($result->[0]->name(), 'Start', 'no-quantifier grammar: first rule name preserved');
     is($result->[1]->name(), 'A', 'no-quantifier grammar: second rule name preserved');
@@ -62,7 +62,7 @@ sub reference($value, $quant = undef) {
         ),
     ];
 
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     is(scalar $result->@*, 4, 'X+ desugaring: adds two helper rules (plus and star)');
 
     # Start rule should now reference Rule_plus (no quantifier)
@@ -108,7 +108,7 @@ sub reference($value, $quant = undef) {
         ),
     ];
 
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     is(scalar $result->@*, 3, 'X? desugaring: adds one helper rule');
 
     # Start rule should now reference Quantifier_opt
@@ -144,7 +144,7 @@ sub reference($value, $quant = undef) {
         ),
     ];
 
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     is(scalar $result->@*, 3, 'X* desugaring: adds one helper rule');
 
     # Start rule should now reference Foo_star
@@ -180,8 +180,8 @@ sub reference($value, $quant = undef) {
         ),
     ];
 
-    my $result1 = desugar_grammar($grammar);
-    my $result2 = desugar_grammar($grammar);
+    my $result1 = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
+    my $result2 = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     is(scalar $result1->@*, scalar $result2->@*, 'determinism: same rule count');
     for my $i (0 .. $result1->$#*) {
@@ -207,7 +207,7 @@ sub reference($value, $quant = undef) {
         ),
     ];
 
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     # X+ generates X_plus and X_star, but both should be shared (deduped)
     is(scalar $result->@*, 5, 'dedup: 3 original + 2 helpers (X_plus, X_star)');
 
@@ -233,7 +233,7 @@ sub reference($value, $quant = undef) {
     ];
 
     my $orig_count = scalar $grammar->@*;
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     is(scalar $grammar->@*, $orig_count, 'immutability: original grammar not modified');
     is($grammar->[0]->expressions()->[0]->[0]->quantifier(), '+',
@@ -245,7 +245,7 @@ sub reference($value, $quant = undef) {
 # 10 original + Rule_plus + Rule_star (from Rule+) + Quantifier_opt (from Quantifier?)
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     is(scalar $result->@*, 13, 'full BNF: 10 original + 3 helpers = 13 rules');
 
     # Check helper rule names exist
@@ -258,7 +258,7 @@ sub reference($value, $quant = undef) {
 # Test 10: No quantified symbols remain in desugared output
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $found_quantified = false;
     for my $rule ($result->@*) {
@@ -283,7 +283,7 @@ my $bool_semiring = Chalk::Bootstrap::Semiring::Boolean->new();
 # Test 11: Desugared grammar + Earley + Boolean parses simple rule
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
@@ -297,7 +297,7 @@ my $bool_semiring = Chalk::Bootstrap::Semiring::Boolean->new();
 # Test 12: Parses rule with alternatives
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
@@ -311,7 +311,7 @@ my $bool_semiring = Chalk::Bootstrap::Semiring::Boolean->new();
 # Test 13: Parses multi-rule input (exercises Rule+ via Rule_plus)
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
@@ -342,7 +342,7 @@ Atom ::= Identifier | InlineRegex ;};
         ),
     ];
 
-    eval { desugar_grammar($grammar) };
+    eval { Chalk::Bootstrap::Desugar::desugar_grammar($grammar) };
     like($@, qr/unknown quantifier/i, 'unknown quantifier dies with error');
 }
 
@@ -361,7 +361,7 @@ Atom ::= Identifier | InlineRegex ;};
         ),
     ];
 
-    my $result = desugar_grammar($grammar);
+    my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     my %by_name = map { $_->name() => $_ } $result->@*;
 
     # The helper rules should reference the base terminal correctly
@@ -376,7 +376,7 @@ Atom ::= Identifier | InlineRegex ;};
 # Parse all 10 BNF rules as a single input through desugared grammar + Earley
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
@@ -401,7 +401,7 @@ Atom ::= Identifier | InlineRegex ;};
 # Test 17: Parses rule with quantifier in body (exercises Quantifier_opt)
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,

@@ -2,8 +2,7 @@
 # ABOUTME: Removes IR nodes unreachable from the root set (Constructor:Rule nodes).
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 use Chalk::Bootstrap::Optimizer::Pass;
 use Chalk::Bootstrap::IR::NodeFactory;

@@ -2,8 +2,7 @@
 # ABOUTME: Immutable value object where expressions is an array of arrays of Symbols.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Grammar::Rule {
     field $name        :param :reader; # rule name (string)

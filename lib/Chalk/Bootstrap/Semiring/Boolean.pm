@@ -2,8 +2,7 @@
 # ABOUTME: Provides zero, one, multiply, add operations with reference-based zero detection.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::Semiring::Boolean {
     # Use a unique reference for zero value

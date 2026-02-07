@@ -2,8 +2,7 @@
 # ABOUTME: Passes are added via add_pass() and executed in order by optimize().
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::Optimizer {
     field $passes = [];

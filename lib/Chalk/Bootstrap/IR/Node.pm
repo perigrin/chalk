@@ -2,11 +2,9 @@
 # ABOUTME: Provides use-def chains and common node interface
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::IR::Node {
-    use Scalar::Util qw(refaddr);
 
     # Stable content-based ID for the node
     field $id :param :reader;

@@ -2,8 +2,7 @@
 # ABOUTME: Subclasses implement generate() to emit code from IR nodes.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::Target {
     method generate($ir) {

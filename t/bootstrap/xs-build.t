@@ -30,7 +30,7 @@ eval { require Module::Build; 1 }
 use TestPipeline qw(optimized_pipeline full_pipeline grammars_match bnf_text);
 use Chalk::Bootstrap::Target::XS;
 use Chalk::Bootstrap::Target::Perl;
-use Chalk::Bootstrap::Desugar qw(desugar_grammar);
+use Chalk::Bootstrap::Desugar;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Grammar::BNF;
@@ -145,7 +145,7 @@ my @grammars = (
 
 for my $pair (@grammars) {
     my ($label, $grammar) = $pair->@*;
-    my $desugared = desugar_grammar($grammar);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $parser = Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
@@ -168,7 +168,7 @@ for my $pair (@grammars) {
     my $bnf = bnf_text();
     for my $pair (@grammars) {
         my ($label, $grammar) = $pair->@*;
-        my $desugared = desugar_grammar($grammar);
+        my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
         my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
         my $parser = Chalk::Bootstrap::Earley->new(
             grammar  => $desugared,

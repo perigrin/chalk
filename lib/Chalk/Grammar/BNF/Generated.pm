@@ -2,8 +2,7 @@
 # ABOUTME: Equivalent to hand-written Chalk::Grammar::BNF.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Grammar::BNF::Generated {
     use Chalk::Grammar::Rule;

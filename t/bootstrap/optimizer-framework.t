@@ -65,8 +65,7 @@ use_ok('Chalk::Bootstrap::Optimizer');
 
     package TestPass1 {
         use 5.42.0;
-        use feature 'class';
-        no warnings 'experimental::class';
+        use experimental 'class';
 
         class TestPass1 :isa(Chalk::Bootstrap::Optimizer::Pass) {
             method name() { return 'TestPass1' }
@@ -79,8 +78,7 @@ use_ok('Chalk::Bootstrap::Optimizer');
 
     package TestPass2 {
         use 5.42.0;
-        use feature 'class';
-        no warnings 'experimental::class';
+        use experimental 'class';
 
         class TestPass2 :isa(Chalk::Bootstrap::Optimizer::Pass) {
             method name() { return 'TestPass2' }

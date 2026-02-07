@@ -2,11 +2,9 @@
 # ABOUTME: Ensures identical computation graphs share node instances
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::IR::NodeFactory {
-    use Scalar::Util qw(refaddr);
 
     # Static imports for all node types (eliminates need for dynamic loading)
     use Chalk::Bootstrap::IR::Node::Start;

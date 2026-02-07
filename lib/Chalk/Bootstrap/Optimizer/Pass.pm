@@ -2,8 +2,7 @@
 # ABOUTME: Subclasses implement name() and run($ir) to perform a specific optimization.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Bootstrap::Optimizer::Pass {
     method name() {

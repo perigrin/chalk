@@ -2,8 +2,7 @@
 # ABOUTME: Generates Chalk::Grammar::BNF::Generated equivalent to hand-written BNF.pm.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 use Chalk::Bootstrap::Target;
 
@@ -19,13 +18,11 @@ class Chalk::Bootstrap::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _preamble() {
-        return <<'PREAMBLE';
-# ABOUTME: Generated BNF meta-grammar from bootstrap compiler.
+        return q[# ABOUTME: Generated BNF meta-grammar from bootstrap compiler.
 # ABOUTME: Equivalent to hand-written Chalk::Grammar::BNF.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 class Chalk::Grammar::BNF::Generated {
     use Chalk::Grammar::Rule;
@@ -34,7 +31,7 @@ class Chalk::Grammar::BNF::Generated {
     sub grammar {
         my @rules;
 
-PREAMBLE
+];
     }
 
     method _emit_body($ir) {
@@ -119,10 +116,9 @@ PREAMBLE
     }
 
     method _postamble() {
-        return <<'POSTAMBLE';
-        return \@rules;
+        return q[        return \@rules;
     }
 }
-POSTAMBLE
+];
     }
 }

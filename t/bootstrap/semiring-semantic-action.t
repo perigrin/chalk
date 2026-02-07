@@ -149,8 +149,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     # Create a test class with an action method
     package TestActions {
         use 5.42.0;
-        use feature 'class';
-        no warnings 'experimental::class';
+        use experimental 'class';
 
         class TestActions {
             method TestRule($ctx) { return uc($ctx->extract() // ''); }

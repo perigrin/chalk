@@ -2,8 +2,7 @@
 # ABOUTME: Emits indented C code lines, including multi-line call_method blocks.
 use 5.42.0;
 use utf8;
-use feature 'class';
-no warnings 'experimental::class';
+use experimental 'class';
 
 use Chalk::Bootstrap::Target::XS::AST::Node;
 
