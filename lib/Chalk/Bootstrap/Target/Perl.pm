@@ -112,6 +112,12 @@ PREAMBLE
         return $str;
     }
 
+    method generate_distribution($ir) {
+        return {
+            'lib/Chalk/Grammar/BNF/Generated.pm' => $self->generate($ir),
+        };
+    }
+
     method _postamble() {
         return <<'POSTAMBLE';
         return \@rules;

@@ -21,4 +21,13 @@ like($@, qr/Subclass must implement generate/, 'generate() dies on base class');
 eval { $target->generate() };
 ok($@, 'generate() with no arguments dies');
 
+# Test 5: generate_distribution() is abstract - dies when called on base class
+eval { $target->generate_distribution([]) };
+like($@, qr/Subclass must implement generate_distribution/,
+    'generate_distribution() dies on base class');
+
+# Test 6: generate_distribution() requires IR argument
+eval { $target->generate_distribution() };
+ok($@, 'generate_distribution() with no arguments dies');
+
 done_testing();

@@ -265,4 +265,25 @@ sub make_rule {
     is($atom_rule->expressions()->[0][0]->value(), 'Identifier', 'Atom alt 1 value is Identifier');
 }
 
+# === generate_distribution() ===
+
+# Test: Target::Perl generate_distribution returns hashref
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $target_dist = Chalk::Bootstrap::Target::Perl->new();
+    my $dist = $target_dist->generate_distribution([]);
+    is(ref($dist), 'HASH', 'generate_distribution returns hashref');
+
+    # Has the expected key
+    ok(exists $dist->{'lib/Chalk/Grammar/BNF/Generated.pm'},
+        'distribution has Generated.pm key');
+
+    # Value matches generate() output
+    my $gen_output = $target_dist->generate([]);
+    is($dist->{'lib/Chalk/Grammar/BNF/Generated.pm'}, $gen_output,
+        'distribution value matches generate() output');
+}
+
 done_testing();

@@ -9,4 +9,8 @@ class Chalk::Bootstrap::Target {
     method generate($ir) {
         die "Subclass must implement generate()";
     }
+
+    method generate_distribution($ir) {
+        die "Subclass must implement generate_distribution()";
+    }
 }
