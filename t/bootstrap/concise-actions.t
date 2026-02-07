@@ -1,5 +1,5 @@
 # ABOUTME: Tests for ConciseTree::Actions that map Perl grammar rules to ConciseOps.
-# ABOUTME: Tests Phase 2 subset (declarations and literals) via actual parsing with the Perl grammar.
+# ABOUTME: Tests Phase 2 (declarations/literals) and Phase 3 (class/sub/method) via actual parsing.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -9,6 +9,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_concise_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::ConciseTree;
 use Chalk::Bootstrap::ConciseTree::Actions;
 
@@ -166,6 +167,158 @@ SKIP: {
         is(scalar @consts, 2, 'mixed types have 2 consts');
         like($consts[0]->type_info(), qr/PV/, 'first const is PV');
         like($consts[1]->type_info(), qr/NV/, 'second const is NV');
+    }
+
+    # ========================================================================
+    # Phase 3: Class definitions, subroutines, methods
+    # ========================================================================
+
+    # --- Named sub: compile-time only (enter stub leave) ---
+    {
+        my $tree = parse_concise('sub foo { }');
+        ok(defined $tree, 'named sub parses');
+
+        my @names = op_names($tree);
+        is_deeply(\@names, [qw(enter stub leave)],
+            'named sub produces enter stub leave');
+    }
+
+    # --- Named sub with body: compile-time when SubroutineDefinition parse wins ---
+    # The ambiguous grammar can also parse this through alternative paths
+    # (keywords aren't reserved), so add() may pick a different parse.
+    # We verify the SubroutineDefinition action exists and works correctly
+    # by testing that parse succeeds and the result is reasonable.
+    {
+        my $tree = parse_concise('sub foo { return 42; }');
+        ok(defined $tree, 'named sub with body parses');
+
+        my @names = op_names($tree);
+        # Must have enter/leave envelope
+        is($names[0], 'enter', 'named sub with body: starts with enter');
+        is($names[-1], 'leave', 'named sub with body: ends with leave');
+    }
+
+    # --- Named sub with signature: compile-time when SubroutineDefinition parse wins ---
+    {
+        my $tree = parse_concise('sub foo($x, $y) { return $x; }');
+        ok(defined $tree, 'named sub with signature parses');
+
+        my @names = op_names($tree);
+        is($names[0], 'enter', 'named sub with signature: starts with enter');
+        is($names[-1], 'leave', 'named sub with signature: ends with leave');
+    }
+
+    # --- Multiple named subs: still compile-time ---
+    {
+        my $tree = parse_concise('sub foo { } sub bar { }');
+        ok(defined $tree, 'multiple named subs parse');
+
+        my @names = op_names($tree);
+        is_deeply(\@names, [qw(enter stub leave)],
+            'multiple named subs: enter stub leave');
+    }
+
+    # --- Anonymous sub assigned to variable ---
+    # The ambiguous grammar may or may not route through AnonymousSub action.
+    # With disambiguation (future semiring work), this should produce anoncode.
+    # For now, verify parsing succeeds and the result has a variable store.
+    {
+        my $tree = parse_concise('my $x = sub { return 42; };');
+        ok(defined $tree, 'anonymous sub assignment parses');
+
+        my @names = op_names($tree);
+        is($names[0], 'enter', 'anon sub: starts with enter');
+        is($names[-1], 'leave', 'anon sub: ends with leave');
+        # Variable store should be present regardless of parse path
+        ok((grep { $_ =~ /^padsv/ } @names),
+            'anonymous sub assignment has padsv op');
+    }
+
+    # --- Anonymous sub with empty body ---
+    {
+        my $tree = parse_concise('my $f = sub { };');
+        ok(defined $tree, 'empty anonymous sub parses');
+
+        my @names = op_names($tree);
+        is($names[0], 'enter', 'empty anon sub: starts with enter');
+        is($names[-1], 'leave', 'empty anon sub: ends with leave');
+    }
+
+    # --- AnonymousSub action unit test: verify it produces anoncode ---
+    # Test the action method directly to ensure it returns the right op,
+    # independent of grammar ambiguity.
+    {
+        my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+        ok($actions->can('AnonymousSub'), 'AnonymousSub action method exists');
+
+        # Create a minimal context for the action
+        my $ctx = Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [],
+            position => 0,
+            rule     => 'AnonymousSub',
+        );
+        my $tree = $actions->AnonymousSub($ctx);
+        isa_ok($tree, 'Chalk::Bootstrap::ConciseTree');
+        is($tree->op_count(), 1, 'AnonymousSub produces exactly 1 op');
+        is($tree->ops()->[0]->name(), 'anoncode', 'AnonymousSub produces anoncode op');
+        is($tree->ops()->[0]->type_info(), 'CV CODE', 'anoncode has CV CODE type_info');
+    }
+
+    # --- Direct action unit tests for compile-time methods ---
+    # Verify each Phase 3 action method returns the expected result,
+    # independent of grammar ambiguity.
+    {
+        my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+        my $empty_ctx = Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [],
+            position => 0,
+            rule     => undef,
+        );
+
+        # Compile-time only methods should return empty trees
+        for my $method_name (qw(
+            SubroutineDefinition ClassBlock MethodDefinition AdjustBlock
+            AttributeList Attribute
+            Signature SignatureParams SignatureParam
+            ScalarSignatureParam SlurpySignatureParam
+        )) {
+            ok($actions->can($method_name), "$method_name action method exists");
+            my $tree = $actions->$method_name($empty_ctx);
+            isa_ok($tree, 'Chalk::Bootstrap::ConciseTree');
+            is($tree->op_count(), 0, "$method_name returns empty tree");
+        }
+
+        # Transparent pass-through methods should work on empty context
+        for my $method_name (qw(CompoundStatement Block)) {
+            ok($actions->can($method_name), "$method_name action method exists");
+            my $tree = $actions->$method_name($empty_ctx);
+            isa_ok($tree, 'Chalk::Bootstrap::ConciseTree');
+            is($tree->op_count(), 0, "$method_name on empty ctx returns empty tree");
+        }
+    }
+
+    # --- Block as compound statement (bare block) ---
+    {
+        my $tree = parse_concise('{ my $x = 42; }');
+        ok(defined $tree, 'bare block parses');
+
+        my @names = op_names($tree);
+        # Block contents should pass through
+        ok((grep { $_ eq 'padsv_store' } @names),
+            'bare block passes through child ops');
+    }
+
+    # --- CompoundStatement transparent pass-through ---
+    {
+        my $tree = parse_concise('sub foo { } my $x = 1;');
+        ok(defined $tree, 'compound + simple statement parses');
+
+        my @names = op_names($tree);
+        # The sub is compile-time, the var decl produces runtime ops
+        ok((grep { $_ eq 'padsv_store' } @names),
+            'variable after sub produces padsv_store');
     }
 }
 

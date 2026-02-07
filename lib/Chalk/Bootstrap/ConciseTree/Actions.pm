@@ -420,4 +420,76 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my @trees = _collect_trees($ctx);
         return _merge_trees(@trees);
     }
+
+    # §3 CompoundStatement — transparent pass-through
+    method CompoundStatement($ctx) {
+        my @trees = _collect_trees($ctx);
+        return _merge_trees(@trees);
+    }
+
+    # §20 Block — transparent pass-through (children are statement ops)
+    method Block($ctx) {
+        my @trees = _collect_trees($ctx);
+        return _merge_trees(@trees);
+    }
+
+    # §9 SubroutineDefinition — compile-time only; body ops belong to the sub's pad
+    method SubroutineDefinition($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §9 ClassBlock — compile-time only; class body compiled at compile time
+    method ClassBlock($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §10 MethodDefinition — compile-time only; inside class block
+    method MethodDefinition($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §10 AdjustBlock — compile-time only; inside class block
+    method AdjustBlock($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §10 AttributeList — no runtime ops
+    method AttributeList($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §10 Attribute — no runtime ops
+    method Attribute($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §11 Signature — no runtime ops at definition site
+    method Signature($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §11 SignatureParams — no runtime ops
+    method SignatureParams($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §11 SignatureParam — no runtime ops
+    method SignatureParam($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §11 ScalarSignatureParam — no runtime ops
+    method ScalarSignatureParam($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §11 SlurpySignatureParam — no runtime ops
+    method SlurpySignatureParam($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §13 AnonymousSub — produces anoncode[CV CODE] at runtime
+    method AnonymousSub($ctx) {
+        return _op('anoncode', '$', type_info => 'CV CODE');
+    }
 }
