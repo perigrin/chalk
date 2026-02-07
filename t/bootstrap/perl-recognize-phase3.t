@@ -67,6 +67,10 @@ SKIP: {
         'Phase 3: accepts our sub with signature');
     ok($recognizer->parse('state sub memoized($x) { }'),
         'Phase 3: accepts state sub with signature');
+    ok($recognizer->parse('our sub exported { }'),
+        'Phase 3: accepts our sub without signature');
+    ok($recognizer->parse('state sub memoized { }'),
+        'Phase 3: accepts state sub without signature');
 
     # §9 MethodDefinition — basic method
     ok($recognizer->parse('method name() { }'),
@@ -86,6 +90,12 @@ SKIP: {
     ok($recognizer->parse('method configure(%opts) { }'),
         'Phase 3: accepts method with hash slurpy');
 
+    # §11 Signatures — mixed scalar and slurpy
+    ok($recognizer->parse('method process($x, @rest) { }'),
+        'Phase 3: accepts scalar then array slurpy');
+    ok($recognizer->parse('method configure($name, %opts) { }'),
+        'Phase 3: accepts scalar then hash slurpy');
+
     # §11 Signatures — trailing comma
     ok($recognizer->parse('method process($x, $y,) { }'),
         'Phase 3: accepts signature with trailing comma');
@@ -103,6 +113,10 @@ SKIP: {
     # §10 AttributeList — multiple attributes
     ok($recognizer->parse('method name :lvalue() { }'),
         'Phase 3: accepts method with attribute');
+    ok($recognizer->parse('method name :lvalue :reader() { }'),
+        'Phase 3: accepts method with multiple attributes');
+    ok($recognizer->parse('method transform :lvalue { }'),
+        'Phase 3: accepts method with attribute but no signature');
 
     # §9 Full class combining everything (from test plan)
     ok($recognizer->parse("class Foo :isa(Bar) {\n    field \$name :param :reader;\n    field \$count :param = 0;\n    method increment() { }\n    ADJUST { }\n}"),
