@@ -156,7 +156,7 @@ SKIP: {
     ok($recognizer->parse('1 .. 10;'),
         'Phase 4: accepts .. range');
     ok($recognizer->parse('1 ... 10;'),
-        'Phase 4: accepts ... yada range');
+        'Phase 4: accepts ... three-dot range');
 
     # §15 BinaryExpression — bitwise
     ok($recognizer->parse('$a & $b;'),
@@ -174,6 +174,12 @@ SKIP: {
     # Boolean semiring accepts ALL valid parses, so these should all accept
     ok($recognizer->parse('$a + $b * $c;'),
         'Phase 4: accepts mixed arithmetic (ambiguous)');
+    ok($recognizer->parse('$a * $b + $c;'),
+        'Phase 4: accepts mixed arithmetic reverse order (ambiguous)');
+    ok($recognizer->parse('$a ** $b ** $c;'),
+        'Phase 4: accepts chained exponentiation (ambiguous)');
+    ok($recognizer->parse('$a + $b + $c;'),
+        'Phase 4: accepts chained addition (ambiguous)');
     ok($recognizer->parse('$a && $b || $c;'),
         'Phase 4: accepts mixed logical (ambiguous)');
 
