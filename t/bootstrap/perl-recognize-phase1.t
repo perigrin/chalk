@@ -68,6 +68,17 @@ SKIP: {
         'Phase 1: rejects invalid syntax');
     ok(!$recognizer->parse('foo'),
         'Phase 1: rejects identifier without semicolon');
+    ok(!$recognizer->parse('{ { foo; }'),
+        'Phase 1: rejects unbalanced nested blocks');
+    ok(!$recognizer->parse('} foo; {'),
+        'Phase 1: rejects reversed braces');
+    ok(!$recognizer->parse('"unclosed string'),
+        'Phase 1: rejects unclosed string literal');
+
+    # Error handling: invalid start rule
+    eval { build_perl_recognizer($gen_grammar, start => 'NonExistentRule') };
+    like($@, qr/not found in grammar/,
+        'build_perl_recognizer dies on missing start rule');
 }
 
 done_testing();
