@@ -18,6 +18,11 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $sym_counter = 0;
     field $expr_counter = 0;
 
+    ADJUST {
+        die "Invalid module name: $module_name"
+            unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
+    }
+
     # Escape a string for embedding in a C double-quoted string literal
     method _escape_c_string($str) {
         $str =~ s/\\/\\\\/g;   # \ -> \\
