@@ -96,6 +96,15 @@ class Chalk::Bootstrap::Earley {
                     if ($symbol->is_reference()) {
                         # Predict
                         $self->_predict($symbol, $pos, \@chart, $agenda);
+                        # Advance from already-completed items at this position.
+                        # When a nullable nonterminal (e.g. _) appears multiple
+                        # times in a rule, the second prediction is suppressed
+                        # (already predicted). The completion that ran earlier
+                        # couldn't advance this waiting item because it didn't
+                        # exist yet. So we check for completed items now.
+                        $self->_advance_from_completed(
+                            $item, $alt_idx, $symbol, $pos, \@chart, $agenda
+                        );
                     } else {
                         # Scan (allow at end of input for zero-width matches)
                         $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart, $agenda, $n);
@@ -238,6 +247,47 @@ class Chalk::Bootstrap::Earley {
             } else {
                 $chart->[$pos]->{$new_key} = [$new_item, $waiting_alt_idx];
                 push $agenda->@*, [$new_item, $waiting_alt_idx];
+            }
+        }
+    }
+
+    # After prediction, check for already-completed items of the predicted
+    # rule at the current position and advance the waiting item. This handles
+    # nullable nonterminals (like whitespace _) appearing multiple times in a
+    # rule — the second prediction is suppressed but the earlier completion
+    # never saw this waiting item, so we combine them here.
+    method _advance_from_completed($item, $alt_idx, $symbol, $pos, $chart, $agenda) {
+        my $rule_name = $symbol->value();
+
+        for my $ckey (keys $chart->[$pos]->%*) {
+            my ($citem, $calt_idx) = $chart->[$pos]->{$ckey}->@*;
+            next unless $citem->{rule}->name() eq $rule_name;
+            next unless $self->_is_complete($citem, $calt_idx);
+            next unless $citem->{origin} == $pos;
+
+            # Advance the waiting item past the completed reference
+            my $new_item = $self->_make_item(
+                $item->{rule},
+                $item->{dot} + 1,
+                $item->{origin},
+                $semiring->multiply($item->{value}, $citem->{value})
+            );
+
+            my $new_key = $self->_item_key($new_item, $alt_idx);
+
+            if (exists $chart->[$pos]->{$new_key}) {
+                my $existing = $chart->[$pos]->{$new_key}->[0];
+                my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+                my $merged_item = $self->_make_item(
+                    $existing->{rule},
+                    $existing->{dot},
+                    $existing->{origin},
+                    $merged_value,
+                );
+                $chart->[$pos]->{$new_key} = [$merged_item, $alt_idx];
+            } else {
+                $chart->[$pos]->{$new_key} = [$new_item, $alt_idx];
+                push $agenda->@*, [$new_item, $alt_idx];
             }
         }
     }

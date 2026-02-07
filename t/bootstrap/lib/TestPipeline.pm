@@ -103,11 +103,30 @@ sub perl_pipeline {
     return parse_ir($parser, perl_bnf_text());
 }
 
-# Builds a Boolean recognizer from the generated Perl grammar IR
-# Returns an Earley parser that can recognize Perl source code
+# Builds a Boolean recognizer from the generated Perl grammar IR.
+# Accepts optional start => 'RuleName' to select the start symbol.
+# Without start, uses the first rule in the grammar array (Earley default).
 sub build_perl_recognizer {
-    my ($grammar) = @_;
-    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
+    my ($grammar, %opts) = @_;
+    my $ordered = $grammar;
+
+    if (defined $opts{start}) {
+        my $start = $opts{start};
+        my @reordered;
+        my $found = false;
+        for my $rule ($grammar->@*) {
+            if (!$found && $rule->name() eq $start) {
+                unshift @reordered, $rule;
+                $found = true;
+            } else {
+                push @reordered, $rule;
+            }
+        }
+        die "Start rule '$start' not found in grammar" unless $found;
+        $ordered = \@reordered;
+    }
+
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     return Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
