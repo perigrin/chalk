@@ -1,5 +1,5 @@
 # ABOUTME: Tests for TypeInference semiring and KeywordTable for keyword disambiguation.
-# ABOUTME: Verifies keyword detection at scan time and rejection at Identifier completion.
+# ABOUTME: Verifies keyword detection at scan time and rejection at Identifier and QualifiedIdentifier completion.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -234,6 +234,94 @@ for my $kw (@keywords) {
     my $completed_item = make_item('UseDeclaration', $scanned);
     my $completed = $ti->on_complete($completed_item, 0, 10);
     ok(!$ti->is_zero($completed), 'keyword in proper context: completion is valid');
+}
+
+# ========================================================================
+# on_scan: QualifiedIdentifier keyword detection
+# ========================================================================
+
+# Scanning a bare keyword as QualifiedIdentifier → tag keyword_as_identifier
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'use');
+    ok(!$ti->is_zero($result), 'scanning bare keyword as QualifiedIdentifier is non-zero at scan time');
+    ok($result->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
+}
+
+# Scanning a qualified name containing a keyword → NOT tagged
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'Foo::class');
+    ok(!$ti->is_zero($result), 'scanning qualified name as QualifiedIdentifier is non-zero');
+    ok(!$result->{keyword_as_identifier}, 'scanning "Foo::class" as QualifiedIdentifier does NOT tag');
+}
+
+# Scanning a non-keyword as QualifiedIdentifier → NOT tagged
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'foo');
+    ok(!$ti->is_zero($result), 'scanning non-keyword as QualifiedIdentifier is non-zero');
+    ok(!$result->{keyword_as_identifier}, 'scanning "foo" as QualifiedIdentifier does NOT tag');
+}
+
+# All 33 keywords scanned as QualifiedIdentifier (bare) get tagged
+for my $kw (@keywords) {
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, $kw);
+    ok($result->{keyword_as_identifier}, "on_scan QualifiedIdentifier tags bare '$kw' as keyword_as_identifier");
+}
+
+# Qualified forms of keywords are NOT tagged
+for my $kw (qw(use class sub method)) {
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, "Foo::$kw");
+    ok(!$result->{keyword_as_identifier}, "on_scan QualifiedIdentifier does NOT tag 'Foo::$kw'");
+}
+
+# ========================================================================
+# on_complete: QualifiedIdentifier keyword rejection
+# ========================================================================
+
+# QualifiedIdentifier complete with keyword_as_identifier → zero
+{
+    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $item = make_item('QualifiedIdentifier', $tagged);
+    my $result = $ti->on_complete($item, 0, 3);
+    ok($ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier returns zero');
+}
+
+# QualifiedIdentifier complete without tag → valid
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_complete($item, 0, 3);
+    ok(!$ti->is_zero($result), 'QualifiedIdentifier completion without tag returns valid');
+}
+
+# ========================================================================
+# Full chain: scan "class" as QualifiedIdentifier → complete → is_zero
+# ========================================================================
+
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $scanned = $ti->on_scan($item, 0, 0, 'class');
+    ok(!$ti->is_zero($scanned), 'QualifiedIdentifier chain: scan "class" is non-zero');
+    ok($scanned->{keyword_as_identifier}, 'QualifiedIdentifier chain: tagged');
+
+    my $completed_item = make_item('QualifiedIdentifier', $scanned);
+    my $completed = $ti->on_complete($completed_item, 0, 5);
+    ok($ti->is_zero($completed), 'QualifiedIdentifier chain: completion returns zero');
+}
+
+# Full chain for qualified name: scan "Foo::class" → complete → valid
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $scanned = $ti->on_scan($item, 0, 0, 'Foo::class');
+    ok(!$ti->is_zero($scanned), 'QualifiedIdentifier qualified chain: scan is non-zero');
+    ok(!$scanned->{keyword_as_identifier}, 'QualifiedIdentifier qualified chain: not tagged');
+
+    my $completed_item = make_item('QualifiedIdentifier', $scanned);
+    my $completed = $ti->on_complete($completed_item, 0, 10);
+    ok(!$ti->is_zero($completed), 'QualifiedIdentifier qualified chain: completion is valid');
 }
 
 done_testing;

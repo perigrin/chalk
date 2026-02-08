@@ -1,5 +1,5 @@
 # ABOUTME: TypeInference semiring for keyword-vs-identifier disambiguation in Earley parsing.
-# ABOUTME: Tags Identifier scans matching keywords, rejects them at completion so bad parses die in the chart.
+# ABOUTME: Tags Identifier and QualifiedIdentifier scans matching bare keywords, rejects them at completion.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -57,7 +57,18 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             });
         }
 
-        # Non-Identifier or non-keyword: transparent
+        # In QualifiedIdentifier context, reject bare keywords (no :: separator)
+        if ($rule_name eq 'QualifiedIdentifier'
+            && $matched_text !~ /::/
+            && $keyword_check->($matched_text))
+        {
+            return $self->multiply($existing, {
+                valid                => true,
+                keyword_as_identifier => true,
+            });
+        }
+
+        # Non-Identifier/QualifiedIdentifier or non-keyword: transparent
         return $self->multiply($existing, $self->one());
     }
 
@@ -67,8 +78,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         my $rule_name = $item->{rule}->name();
 
-        # Identifier completion with keyword tag → reject
-        if ($rule_name eq 'Identifier' && $value->{keyword_as_identifier}) {
+        # Identifier or QualifiedIdentifier completion with keyword tag → reject
+        if (($rule_name eq 'Identifier' || $rule_name eq 'QualifiedIdentifier')
+            && $value->{keyword_as_identifier})
+        {
             return $self->zero();
         }
 
