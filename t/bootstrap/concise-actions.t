@@ -619,6 +619,260 @@ SKIP: {
             'compound *= has multiply op');
     }
 
+    # --- Additional numeric comparison operators ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a != $b;');
+        ok(defined $tree, 'numeric inequality parses');
+        ok((grep { $_->name() eq 'ne' } $tree->ops()->@*),
+            'numeric inequality has ne op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a < $b;');
+        ok(defined $tree, 'numeric less-than parses');
+        ok((grep { $_->name() eq 'lt' } $tree->ops()->@*),
+            'numeric less-than has lt op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a <= $b;');
+        ok(defined $tree, 'numeric less-equal parses');
+        ok((grep { $_->name() eq 'le' } $tree->ops()->@*),
+            'numeric less-equal has le op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a >= $b;');
+        ok(defined $tree, 'numeric greater-equal parses');
+        ok((grep { $_->name() eq 'ge' } $tree->ops()->@*),
+            'numeric greater-equal has ge op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a <=> $b;');
+        ok(defined $tree, 'numeric spaceship parses');
+        ok((grep { $_->name() eq 'ncmp' } $tree->ops()->@*),
+            'numeric spaceship has ncmp op');
+    }
+
+    # --- String comparison operators ---
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = "y"; my $c = $a ne $b;');
+        ok(defined $tree, 'string ne parses');
+        ok((grep { $_->name() eq 'sne' } $tree->ops()->@*),
+            'string ne has sne op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = "y"; my $c = $a lt $b;');
+        ok(defined $tree, 'string lt parses');
+        ok((grep { $_->name() eq 'slt' } $tree->ops()->@*),
+            'string lt has slt op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = "y"; my $c = $a gt $b;');
+        ok(defined $tree, 'string gt parses');
+        ok((grep { $_->name() eq 'sgt' } $tree->ops()->@*),
+            'string gt has sgt op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = "y"; my $c = $a le $b;');
+        ok(defined $tree, 'string le parses');
+        ok((grep { $_->name() eq 'sle' } $tree->ops()->@*),
+            'string le has sle op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = "y"; my $c = $a ge $b;');
+        ok(defined $tree, 'string ge parses');
+        ok((grep { $_->name() eq 'sge' } $tree->ops()->@*),
+            'string ge has sge op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = "y"; my $c = $a cmp $b;');
+        ok(defined $tree, 'string cmp parses');
+        ok((grep { $_->name() eq 'scmp' } $tree->ops()->@*),
+            'string cmp has scmp op');
+    }
+
+    # --- Bitwise operators ---
+    {
+        my $tree = parse_concise('my $a = 5; my $b = 3; my $c = $a & $b;');
+        ok(defined $tree, 'bitwise AND parses');
+        ok((grep { $_->name() eq 'bit_and' } $tree->ops()->@*),
+            'bitwise AND has bit_and op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 5; my $b = 3; my $c = $a | $b;');
+        ok(defined $tree, 'bitwise OR parses');
+        ok((grep { $_->name() eq 'bit_or' } $tree->ops()->@*),
+            'bitwise OR has bit_or op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 5; my $b = 3; my $c = $a ^ $b;');
+        ok(defined $tree, 'bitwise XOR parses');
+        ok((grep { $_->name() eq 'bit_xor' } $tree->ops()->@*),
+            'bitwise XOR has bit_xor op');
+    }
+
+    # --- Shift operators ---
+    {
+        my $tree = parse_concise('my $a = 5; my $b = $a << 2;');
+        ok(defined $tree, 'left shift parses');
+        ok((grep { $_->name() eq 'left_shift' } $tree->ops()->@*),
+            'left shift has left_shift op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 20; my $b = $a >> 2;');
+        ok(defined $tree, 'right shift parses');
+        ok((grep { $_->name() eq 'right_shift' } $tree->ops()->@*),
+            'right shift has right_shift op');
+    }
+
+    # --- Word-form logical operators ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a xor $b;');
+        ok(defined $tree, 'xor operator parses');
+        ok((grep { $_->name() eq 'xor' } $tree->ops()->@*),
+            'xor has xor op');
+    }
+
+    # --- Type check ---
+    {
+        my $tree = parse_concise('my $a = 1; my $c = $a isa "HASH";');
+        ok(defined $tree, 'isa operator parses');
+        ok((grep { $_->name() eq 'isa' } $tree->ops()->@*),
+            'isa has isa op');
+    }
+
+    # --- String concatenation (structural only — Perl optimizes to multiconcat) ---
+    {
+        my $tree = parse_concise('my $a = "hello"; my $b = $a . "world";');
+        ok(defined $tree, 'concatenation parses');
+        ok((grep { $_->name() eq 'concat' } $tree->ops()->@*),
+            'concatenation has concat op');
+    }
+
+    # --- Additional compound assignment operators ---
+    {
+        my $tree = parse_concise('my $a = 10; $a -= 3;');
+        ok(defined $tree, 'compound -= parses');
+        ok((grep { $_->name() eq 'subtract' } $tree->ops()->@*),
+            'compound -= has subtract op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 10; $a /= 2;');
+        ok(defined $tree, 'compound /= parses');
+        ok((grep { $_->name() eq 'divide' } $tree->ops()->@*),
+            'compound /= has divide op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 10; $a %= 3;');
+        ok(defined $tree, 'compound %= parses');
+        ok((grep { $_->name() eq 'modulo' } $tree->ops()->@*),
+            'compound %= has modulo op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 2; $a **= 3;');
+        ok(defined $tree, 'compound **= parses');
+        ok((grep { $_->name() eq 'pow' } $tree->ops()->@*),
+            'compound **= has pow op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "hello"; $a .= "world";');
+        ok(defined $tree, 'compound .= parses');
+        ok((grep { $_->name() eq 'concat' } $tree->ops()->@*),
+            'compound .= has concat op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; $a &&= 2;');
+        ok(defined $tree, 'compound &&= parses');
+        ok((grep { $_->name() eq 'and' } $tree->ops()->@*),
+            'compound &&= has and op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 0; $a ||= 1;');
+        ok(defined $tree, 'compound ||= parses');
+        ok((grep { $_->name() eq 'or' } $tree->ops()->@*),
+            'compound ||= has or op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 5; $a &= 3;');
+        ok(defined $tree, 'compound &= parses');
+        ok((grep { $_->name() eq 'bit_and' } $tree->ops()->@*),
+            'compound &= has bit_and op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 5; $a |= 3;');
+        ok(defined $tree, 'compound |= parses');
+        ok((grep { $_->name() eq 'bit_or' } $tree->ops()->@*),
+            'compound |= has bit_or op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 5; $a ^= 3;');
+        ok(defined $tree, 'compound ^= parses');
+        ok((grep { $_->name() eq 'bit_xor' } $tree->ops()->@*),
+            'compound ^= has bit_xor op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 5; $a <<= 2;');
+        ok(defined $tree, 'compound <<= parses');
+        ok((grep { $_->name() eq 'left_shift' } $tree->ops()->@*),
+            'compound <<= has left_shift op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 20; $a >>= 2;');
+        ok(defined $tree, 'compound >>= parses');
+        ok((grep { $_->name() eq 'right_shift' } $tree->ops()->@*),
+            'compound >>= has right_shift op');
+    }
+
+    # --- Ambiguous operators (TODO: needs Precedence semiring) ---
+    TODO: {
+        local $TODO = 'binary + ambiguous with unary + without Precedence semiring';
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a + $b;');
+        ok(defined $tree && (grep { $_->name() eq 'add' } $tree->ops()->@*),
+            'binary addition has add op');
+    }
+
+    TODO: {
+        local $TODO = 'binary - ambiguous with unary - without Precedence semiring';
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a - $b;');
+        ok(defined $tree && (grep { $_->name() eq 'subtract' } $tree->ops()->@*),
+            'binary subtraction has subtract op');
+    }
+
+    TODO: {
+        local $TODO = '// ambiguous with empty regex literal without Precedence semiring';
+        my $tree = parse_concise('my $a = 0; my $b = 1; my $c = $a // $b;');
+        ok(defined $tree && (grep { $_->name() eq 'dor' } $tree->ops()->@*),
+            'defined-or has dor op');
+    }
+
+    TODO: {
+        local $TODO = '//= ambiguous with empty regex without Precedence semiring';
+        my $tree = parse_concise('my $a = 0; $a //= 1;');
+        ok(defined $tree && (grep { $_->name() eq 'dor' } $tree->ops()->@*),
+            'compound //= has dor op');
+    }
+
     # ========================================================================
     # Phase 4: Chained and nested expressions
     # ========================================================================
