@@ -352,29 +352,26 @@ SKIP: {
             'named sub produces enter stub leave');
     }
 
-    # --- Named sub with body: compile-time when SubroutineDefinition parse wins ---
-    # The ambiguous grammar can also parse this through alternative paths
-    # (keywords aren't reserved), so add() may pick a different parse.
-    # We verify the SubroutineDefinition action exists and works correctly
-    # by testing that parse succeeds and the result is reasonable.
+    # --- Named sub with body: compile-time (body ops in sub's own pad) ---
+    # TypeInference rejects 'sub' as Identifier, so SubroutineDefinition
+    # always wins. Body ops don't leak to the program-level optree.
     {
         my $tree = parse_concise('sub foo { return 42; }');
         ok(defined $tree, 'named sub with body parses');
 
         my @names = op_names($tree);
-        # Must have enter/leave envelope
-        is($names[0], 'enter', 'named sub with body: starts with enter');
-        is($names[-1], 'leave', 'named sub with body: ends with leave');
+        is_deeply(\@names, [qw(enter stub leave)],
+            'named sub with body: enter stub leave');
     }
 
-    # --- Named sub with signature: compile-time when SubroutineDefinition parse wins ---
+    # --- Named sub with signature: compile-time ---
     {
         my $tree = parse_concise('sub foo($x, $y) { return $x; }');
         ok(defined $tree, 'named sub with signature parses');
 
         my @names = op_names($tree);
-        is($names[0], 'enter', 'named sub with signature: starts with enter');
-        is($names[-1], 'leave', 'named sub with signature: ends with leave');
+        is_deeply(\@names, [qw(enter stub leave)],
+            'named sub with signature: enter stub leave');
     }
 
     # --- Multiple named subs: still compile-time ---
@@ -388,19 +385,22 @@ SKIP: {
     }
 
     # --- Anonymous sub assigned to variable ---
-    # The ambiguous grammar may or may not route through AnonymousSub action.
-    # With disambiguation (future semiring work), this should produce anoncode.
-    # For now, verify parsing succeeds and the result has a variable store.
+    # TypeInference rejects 'sub' as Identifier, so AnonymousSub action
+    # always fires and produces anoncode.
     {
         my $tree = parse_concise('my $x = sub { return 42; };');
         ok(defined $tree, 'anonymous sub assignment parses');
 
         my @names = op_names($tree);
-        is($names[0], 'enter', 'anon sub: starts with enter');
-        is($names[-1], 'leave', 'anon sub: ends with leave');
-        # Variable store should be present regardless of parse path
-        ok((grep { $_ =~ /^padsv/ } @names),
-            'anonymous sub assignment has padsv op');
+        is_deeply(\@names, [qw(enter nextstate anoncode padsv_store leave)],
+            'my $x = sub { return 42; } op sequence');
+
+        my @anoncode = grep { $_->name() eq 'anoncode' } $tree->ops()->@*;
+        is(scalar @anoncode, 1, 'exactly one anoncode op');
+        SKIP: {
+            skip 'no anoncode op found', 1 unless @anoncode;
+            is($anoncode[0]->type_info(), 'CV CODE', 'anoncode has CV CODE type_info');
+        }
     }
 
     # --- Anonymous sub with empty body ---
@@ -409,8 +409,8 @@ SKIP: {
         ok(defined $tree, 'empty anonymous sub parses');
 
         my @names = op_names($tree);
-        is($names[0], 'enter', 'empty anon sub: starts with enter');
-        is($names[-1], 'leave', 'empty anon sub: ends with leave');
+        is_deeply(\@names, [qw(enter nextstate anoncode padsv_store leave)],
+            'my $f = sub { } op sequence');
     }
 
     # --- AnonymousSub action unit test: verify it produces anoncode ---

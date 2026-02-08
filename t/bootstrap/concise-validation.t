@@ -199,20 +199,22 @@ SKIP: {
     }
 
     # --- Named sub with return value: compile-time only (oracle-stable) ---
-    # B::Concise: enter, stub, leave (body ops are in the sub's own optree)
+    # TypeInference rejects 'sub' as Identifier, so SubroutineDefinition
+    # always wins. B::Concise: enter, stub, leave (body in sub's own optree).
     {
         my $ours = our_tree('sub foo { return 42; }');
         ok(defined $ours, 'named sub with body: our parser produces tree');
 
-        # With ambiguous grammar, add() may pick a parse that leaks body ops.
-        # Test structural match only when our parser produces the correct result.
         my @names = op_names($ours);
+        is_deeply(\@names, [qw(enter stub leave)],
+            'named sub with body: enter stub leave');
+
         SKIP: {
-            skip "perl with B::Concise not available", 1 unless $has_concise;
-            skip "ambiguous parse produced non-stub result", 1
-                unless join(',', @names) eq 'enter,stub,leave';
+            skip "perl with B::Concise not available", 2 unless $has_concise;
 
             my $theirs = $oracle->concise_for('sub foo { return 42; }');
+            ok(defined $theirs, 'named sub with body: oracle produces tree');
+
             my $result = $comparator->compare($ours, $theirs);
             ok($result->{match}, 'named sub with body: structural match')
                 or diag(
@@ -228,12 +230,15 @@ SKIP: {
         ok(defined $ours, 'named sub with sig: our parser produces tree');
 
         my @names = op_names($ours);
+        is_deeply(\@names, [qw(enter stub leave)],
+            'named sub with sig: enter stub leave');
+
         SKIP: {
-            skip "perl with B::Concise not available", 1 unless $has_concise;
-            skip "ambiguous parse produced non-stub result", 1
-                unless join(',', @names) eq 'enter,stub,leave';
+            skip "perl with B::Concise not available", 2 unless $has_concise;
 
             my $theirs = $oracle->concise_for('sub foo($x, $y) { return $x + $y; }');
+            ok(defined $theirs, 'named sub with sig: oracle produces tree');
+
             my $result = $comparator->compare($ours, $theirs);
             ok($result->{match}, 'named sub with sig: structural match')
                 or diag(
@@ -243,21 +248,23 @@ SKIP: {
         }
     }
 
-    # --- Anonymous sub: oracle-stable when anoncode parse wins ---
-    # B::Concise: enter, nextstate, anoncode[CV CODE], padsv_store[$x]/LVINTRO, leave
+    # --- Anonymous sub: oracle-stable ---
+    # TypeInference rejects 'sub' as Identifier, so AnonymousSub action
+    # always fires. B::Concise: enter, nextstate, anoncode, padsv_store, leave.
     {
         my $ours = our_tree('my $x = sub { return 42; };');
         ok(defined $ours, 'anonymous sub: our parser produces tree');
 
         my @names = op_names($ours);
-        my $has_anoncode = grep { $_ eq 'anoncode' } @names;
+        is_deeply(\@names, [qw(enter nextstate anoncode padsv_store leave)],
+            'anonymous sub: correct op sequence');
 
         SKIP: {
-            skip "perl with B::Concise not available", 1 unless $has_concise;
-            skip "ambiguous parse did not produce anoncode", 1
-                unless $has_anoncode;
+            skip "perl with B::Concise not available", 2 unless $has_concise;
 
             my $theirs = $oracle->concise_for('my $x = sub { return 42; };');
+            ok(defined $theirs, 'anonymous sub: oracle produces tree');
+
             my $result = $comparator->compare($ours, $theirs);
             ok($result->{match}, 'anonymous sub: structural match')
                 or diag(
