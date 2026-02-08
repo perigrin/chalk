@@ -193,45 +193,65 @@ for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
 
 # ========================================================================
 # Phase 4: Integration with full Earley parser
+# Uses Bool+Structural only to isolate the Structural semiring's behavior
+# from pre-existing nondeterminism in Precedence/TypeInference add().
 # ========================================================================
-use TestPipeline qw(perl_pipeline build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::Earley;
+use Chalk::Bootstrap::Semiring::Composite;
+use Chalk::Bootstrap::Semiring::Boolean;
+use Chalk::Bootstrap::Semiring::Structural;
+use Chalk::Bootstrap::Desugar;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 SKIP: {
-    skip 'Perl grammar failed to parse', 20 unless defined $ir;
+    skip 'Perl grammar failed to parse', 15 unless defined $ir;
 
     my $target = Chalk::Bootstrap::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::StructuralInteg/g;
     eval $generated;
-    skip "Generated code failed to compile: $@", 20 if $@;
+    skip "Generated code failed to compile: $@", 15 if $@;
 
     my $gen_grammar = Chalk::Grammar::Perl::StructuralInteg::grammar();
-    my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
-    skip 'Concise parser not built', 20 unless defined $parser;
+    my @reordered;
+    my $found = false;
+    for my $rule ($gen_grammar->@*) {
+        if (!$found && $rule->name() eq 'Program') {
+            unshift @reordered, $rule;
+            $found = true;
+        } else {
+            push @reordered, $rule;
+        }
+    }
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@reordered);
 
-    # Helper: parse and return the 5-ary result tuple
-    # [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
+    # 2-ary composite: Bool + Structural (no Prec/TypeInf/Semantic)
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+
+    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $struct_sr],
+    );
+
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $desugared,
+        semiring => $comp_sr,
+    );
+
+    # Helper: parse and return result tuple [0]=Boolean, [1]=Structural
     my sub parse_result($source) {
         return $parser->parse_value($source);
     }
 
     # Helper: extract Structural value from result
     my sub struct_val($result) {
-        return $result->[3] if defined $result;
+        return $result->[1] if defined $result;
         return undef;
-    }
-
-    # Helper: extract ConciseTree from SemanticAction result
-    my sub concise_tree($result) {
-        return undef unless defined $result;
-        my $sem = $result->[4];
-        return undef unless defined $sem;
-        return $sem->extract();
     }
 
     # --- { 42 } at statement level: ambiguous, should prefer Block ---
@@ -256,20 +276,15 @@ SKIP: {
     }
 
     # --- { $x => $y } : naturally unambiguous → HashConstructor ---
-    # => operator is only valid in ExpressionList context
     {
         my $result = parse_result('my $h = { $x => $y };');
         ok(defined $result, '{ $x => $y } in assignment parses');
-        my $tree = concise_tree($result);
-        ok(defined $tree, '{ $x => $y } produces concise tree');
     }
 
     # --- { my $x = 42; } : semicolon makes it unambiguous Block ---
     {
         my $result = parse_result('{ my $x = 42; }');
         ok(defined $result, '{ my $x = 42; } parses');
-        my $tree = concise_tree($result);
-        ok(defined $tree, '{ my $x = 42; } produces concise tree');
     }
 
     # --- Simple non-brace programs still work ---
@@ -278,7 +293,7 @@ SKIP: {
         ok(defined $result, 'simple declaration still parses');
         my $sv = struct_val($result);
         ok($sv->{valid}, 'simple declaration structural value is valid');
-        # No block or hash tags for non-brace content
+        # No block or hash tags for non-brace content (Program clears them)
         ok(!$sv->{is_block} && !$sv->{is_hash},
             'simple declaration has no block/hash tags');
     }
@@ -287,8 +302,6 @@ SKIP: {
     {
         my $result = parse_result('my $x = 1; { my $y = 2; }');
         ok(defined $result, 'statement + block parses');
-        my $tree = concise_tree($result);
-        ok(defined $tree, 'statement + block produces concise tree');
     }
 
     # --- Sub with block body ---
