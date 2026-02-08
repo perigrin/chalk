@@ -619,6 +619,14 @@ SKIP: {
             'compound *= has multiply op');
     }
 
+    # --- Division (/ doesn't conflict with regex when followed by a number) ---
+    {
+        my $tree = parse_concise('my $a = 10; my $b = $a / 2;');
+        ok(defined $tree, 'division expression parses');
+        ok((grep { $_->name() eq 'divide' } $tree->ops()->@*),
+            'division has divide op');
+    }
+
     # --- Additional numeric comparison operators ---
     {
         my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a != $b;');
@@ -842,6 +850,36 @@ SKIP: {
         ok(defined $tree, 'compound >>= parses');
         ok((grep { $_->name() eq 'right_shift' } $tree->ops()->@*),
             'compound >>= has right_shift op');
+    }
+
+    # --- Word-form logical operators (low-precedence equivalents of && || xor) ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a and $b;');
+        ok(defined $tree, 'word-form and parses');
+        ok((grep { $_->name() eq 'and' } $tree->ops()->@*),
+            'word-form and has and op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 0; my $b = 2; my $c = $a or $b;');
+        ok(defined $tree, 'word-form or parses');
+        ok((grep { $_->name() eq 'or' } $tree->ops()->@*),
+            'word-form or has or op');
+    }
+
+    # --- Range operators ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 10; my $c = $a .. $b;');
+        ok(defined $tree, 'range operator (..) parses');
+        ok((grep { $_->name() eq 'range' } $tree->ops()->@*),
+            'range (..) has range op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 10; my $c = $a ... $b;');
+        ok(defined $tree, 'yada range operator (...) parses');
+        ok((grep { $_->name() eq 'range' } $tree->ops()->@*),
+            'yada range (...) has range op');
     }
 
     # --- Ambiguous operators (TODO: needs Precedence semiring) ---
