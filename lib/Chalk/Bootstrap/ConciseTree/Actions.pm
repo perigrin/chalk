@@ -143,6 +143,19 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         'not' => 'not',
     );
 
+    # Compound assign: map operator text to arithmetic op name
+    my %ASSIGN_OP_MAP = (
+        '+='   => 'add',      '-='   => 'subtract',
+        '*='   => 'multiply',  '/='   => 'divide',
+        '%='   => 'modulo',   '**='  => 'pow',
+        '.='   => 'concat',
+        '&&='  => 'and',      '||='  => 'or',
+        '//='  => 'dor',
+        '&='   => 'bit_and',  '|='   => 'bit_or',
+        '^='   => 'bit_xor',
+        '<<='  => 'left_shift', '>>=' => 'right_shift',
+    );
+
     # Short-circuit ops use branching arity '|'
     my %BRANCHING_OPS = map { $_ => true } qw(and or dor);
 
@@ -700,10 +713,23 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@trees);
     }
 
-    # §17 AssignmentExpression — transparent pass-through (ops from children)
+    # §17 AssignOp — extract operator text, return empty tree
+    method AssignOp($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §17 AssignmentExpression — transparent for plain '=', emits arithmetic op for compound assign.
+    # B::Concise uses the arithmetic op directly: $a += 2 → padsv, const, add (not sassign).
     method AssignmentExpression($ctx) {
+        my $assign_text = _extract_operator_text($ctx, \%ASSIGN_OP_MAP);
         my @trees = _collect_trees($ctx);
-        return _merge_trees(@trees);
+        my $result = _merge_trees(@trees);
+        if (defined $assign_text) {
+            my $op_name = $ASSIGN_OP_MAP{$assign_text};
+            my $arity = $BRANCHING_OPS{$op_name} ? '|' : '2';
+            $result->push_op(_op($op_name, $arity)->ops()->[0]);
+        }
+        return $result;
     }
 
     # §3 CompoundStatement — transparent pass-through

@@ -602,6 +602,22 @@ SKIP: {
         ok((grep { $_->name() eq 'postdec' } $tree->ops()->@*),
             'postfix decrement has postdec op');
     }
+
+    # --- Compound assignment (structural only) ---
+    # B::Concise uses the arithmetic op directly: $a += 2 → padsv, const, add
+    {
+        my $tree = parse_concise('my $a = 1; $a += 2;');
+        ok(defined $tree, 'compound add-assign parses');
+        ok((grep { $_->name() eq 'add' } $tree->ops()->@*),
+            'compound += has add op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; $a *= 3;');
+        ok(defined $tree, 'compound multiply-assign parses');
+        ok((grep { $_->name() eq 'multiply' } $tree->ops()->@*),
+            'compound *= has multiply op');
+    }
 }
 
 done_testing;
