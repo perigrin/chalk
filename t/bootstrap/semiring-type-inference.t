@@ -584,4 +584,114 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer);
     ok(!$result->{ambiguous_unary}, 'BinaryExpression without tag has no ambiguous_unary');
 }
 
+# ========================================================================
+# selects_alternative: prefer binary over ambiguous unary
+# ========================================================================
+
+{
+    my $unary_tagged = { valid => true, ambiguous_unary => true };
+    my $binary_clean = { valid => true };
+    my $z = $ti->zero();
+
+    # Left tagged, right clean → prefer right (binary)
+    my $r1 = $ti->selects_alternative($unary_tagged, $binary_clean);
+    is($r1, 'right', 'selects_alternative: left=unary, right=binary → right');
+
+    # Left clean, right tagged → prefer left (binary)
+    my $r2 = $ti->selects_alternative($binary_clean, $unary_tagged);
+    is($r2, 'left', 'selects_alternative: left=binary, right=unary → left');
+
+    # Both tagged → no preference
+    my $r3 = $ti->selects_alternative($unary_tagged, $unary_tagged);
+    is($r3, undef, 'selects_alternative: both tagged → undef');
+
+    # Both clean → no preference
+    my $r4 = $ti->selects_alternative($binary_clean, $binary_clean);
+    is($r4, undef, 'selects_alternative: both clean → undef');
+
+    # Left zero → no preference
+    my $r5 = $ti->selects_alternative($z, $binary_clean);
+    is($r5, undef, 'selects_alternative: left=zero → undef');
+
+    # Right zero → no preference
+    my $r6 = $ti->selects_alternative($binary_clean, $z);
+    is($r6, undef, 'selects_alternative: right=zero → undef');
+}
+
+# ========================================================================
+# add: prefer non-ambiguous-unary over ambiguous-unary
+# ========================================================================
+
+{
+    my $unary_tagged = { valid => true, ambiguous_unary => true };
+    my $binary_clean = { valid => true };
+
+    # Left tagged, right clean → returns right (binary)
+    my $r1 = $ti->add($unary_tagged, $binary_clean);
+    ok(!$r1->{ambiguous_unary}, 'add: left=unary, right=binary → returns binary (no tag)');
+
+    # Left clean, right tagged → returns left (binary)
+    my $r2 = $ti->add($binary_clean, $unary_tagged);
+    ok(!$r2->{ambiguous_unary}, 'add: left=binary, right=unary → returns binary (no tag)');
+
+    # Both tagged → returns left (no preference)
+    my $r3 = $ti->add($unary_tagged, $unary_tagged);
+    ok($r3->{ambiguous_unary}, 'add: both tagged → returns left (still tagged)');
+
+    # Both clean → returns left (no preference)
+    my $r4 = $ti->add($binary_clean, $binary_clean);
+    ok(!$r4->{ambiguous_unary}, 'add: both clean → returns left (no tag)');
+}
+
+# ========================================================================
+# Integration: binary +/- parse deterministically with TypeInference
+# ========================================================================
+
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $ir = perl_pipeline();
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIUnaryTest/g;
+    eval $generated;
+    die "Generated code failed to compile: $@" if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::TIUnaryTest::grammar();
+
+    # Test binary addition: $a + $b
+    {
+        my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
+        my $result = $recognizer->parse('my $a = 1; my $b = 2; my $c = $a + $b;');
+        ok($result, 'binary addition ($a + $b) parses with TypeInference pipeline');
+    }
+
+    # Test binary subtraction: $a - $b
+    {
+        my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
+        my $result = $recognizer->parse('my $a = 1; my $b = 2; my $c = $a - $b;');
+        ok($result, 'binary subtraction ($a - $b) parses with TypeInference pipeline');
+    }
+
+    # Test chained: $a + $b - $c
+    {
+        my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
+        my $result = $recognizer->parse('my $a = 1; my $b = 2; my $c = 3; my $d = $a + $b - $c;');
+        ok($result, 'chained addition-subtraction parses with TypeInference pipeline');
+    }
+
+    # Unambiguous unary still works: -$a
+    {
+        my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
+        my $result = $recognizer->parse('my $a = 1; my $b = -$a;');
+        ok($result, 'unary negation (-$a) still parses');
+    }
+
+    # Unambiguous unary still works: +$a (unary plus, no binary context)
+    {
+        my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
+        my $result = $recognizer->parse('my $a = 1; my $b = +$a;');
+        ok($result, 'unary plus (+$a) still parses');
+    }
+}
+
 done_testing;

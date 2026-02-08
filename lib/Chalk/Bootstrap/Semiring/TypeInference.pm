@@ -40,7 +40,38 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Return first non-zero alternative
         return $right if $self->is_zero($left);
         return $left if $self->is_zero($right);
+
+        # Prefer non-ambiguous-unary (binary) over ambiguous-unary
+        my $left_unary  = $left->{ambiguous_unary};
+        my $right_unary = $right->{ambiguous_unary};
+        if ($left_unary && !$right_unary) {
+            return $right;
+        }
+        if ($right_unary && !$left_unary) {
+            return $left;
+        }
+
         return $left;
+    }
+
+    # Signal to Composite which alternative to select for ALL components.
+    # Returns 'left', 'right', or undef (no preference).
+    method selects_alternative($left, $right) {
+        return undef if $self->is_zero($left);
+        return undef if $self->is_zero($right);
+
+        my $left_unary  = $left->{ambiguous_unary};
+        my $right_unary = $right->{ambiguous_unary};
+
+        # Prefer non-ambiguous-unary (binary) over ambiguous-unary
+        if ($left_unary && !$right_unary) {
+            return 'right';
+        }
+        if ($right_unary && !$left_unary) {
+            return 'left';
+        }
+
+        return undef;
     }
 
     method on_scan($item, $alt_idx, $pos, $matched_text) {
