@@ -87,8 +87,9 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
                 $private =~ s{^\s+|\s+$}{}g;
             }
 
-            # Strip numeric private flags (/1, /2) — these encode arity which
-            # is already captured in the arity field
+            # Strip numeric private flags (/1, /2) — defensive against future
+            # changes to Oracle parsing. Currently these end up in flags (not
+            # private) due to Oracle's uppercase-only regex, but guard here too.
             $private =~ s{/\d+}{}g;
 
             # Strip /COMPOUND flag (internal marker for compound assignment ops)

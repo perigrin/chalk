@@ -139,8 +139,9 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         '^'   => 'bit_xor',
         # Shift
         '<<'  => 'left_shift', '>>' => 'right_shift',
-        # Regex binding
-        '=~'  => 'regcomp',   '!~'  => 'regcomp',
+        # Regex binding: =~ and !~ are transparent — the regex op on the RHS
+        # (match/subst from RegexLiteral action) handles the binding.
+        # B::Concise does not produce a separate regcomp op for these.
         # Range
         '..'  => 'range',     '...' => 'range',
         # Type check
@@ -225,7 +226,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
 
         # Skip peephole for compound assignment: $a += 2 → padsv, const, add.
         # AssignmentExpression marks compound assign ops with /COMPOUND private flag.
-        if ($has_init && @expr_ops && $expr_ops[-1]->private() =~ m{/COMPOUND}) {
+        if ($has_init && $expr_ops[-1]->private() =~ m{/COMPOUND}) {
             return $tree;
         }
 
