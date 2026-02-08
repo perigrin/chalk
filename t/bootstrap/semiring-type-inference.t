@@ -426,4 +426,162 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer);
     }
 }
 
+# ========================================================================
+# on_scan: ambiguous unary +/- tagging
+# ========================================================================
+
+# UnaryExpression scanning '+' → tagged ambiguous_unary
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '+');
+    ok(!$ti->is_zero($result), 'scanning "+" as UnaryExpression is non-zero');
+    ok($result->{ambiguous_unary}, 'scanning "+" as UnaryExpression tags ambiguous_unary');
+}
+
+# UnaryExpression scanning '-' → tagged ambiguous_unary
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '-');
+    ok(!$ti->is_zero($result), 'scanning "-" as UnaryExpression is non-zero');
+    ok($result->{ambiguous_unary}, 'scanning "-" as UnaryExpression tags ambiguous_unary');
+}
+
+# UnaryExpression scanning '!' → NOT tagged (unambiguous unary)
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '!');
+    ok(!$ti->is_zero($result), 'scanning "!" as UnaryExpression is non-zero');
+    ok(!$result->{ambiguous_unary}, 'scanning "!" as UnaryExpression does NOT tag ambiguous_unary');
+}
+
+# UnaryExpression scanning '~' → NOT tagged
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '~');
+    ok(!$ti->is_zero($result), 'scanning "~" as UnaryExpression is non-zero');
+    ok(!$result->{ambiguous_unary}, 'scanning "~" as UnaryExpression does NOT tag ambiguous_unary');
+}
+
+# UnaryExpression scanning 'not' → NOT tagged
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'not');
+    ok(!$ti->is_zero($result), 'scanning "not" as UnaryExpression is non-zero');
+    ok(!$result->{ambiguous_unary}, 'scanning "not" as UnaryExpression does NOT tag ambiguous_unary');
+}
+
+# BinaryOp scanning '+' → NOT tagged (not a UnaryExpression)
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '+');
+    ok(!$ti->is_zero($result), 'scanning "+" as BinaryOp is non-zero');
+    ok(!$result->{ambiguous_unary}, 'scanning "+" as BinaryOp does NOT tag ambiguous_unary');
+}
+
+# ========================================================================
+# multiply: ambiguous_unary propagation
+# ========================================================================
+
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $o = $ti->one();
+
+    my $r1 = $ti->multiply($tagged, $o);
+    ok($r1->{ambiguous_unary}, 'ambiguous_unary propagates from left in multiply');
+
+    my $r2 = $ti->multiply($o, $tagged);
+    ok($r2->{ambiguous_unary}, 'ambiguous_unary propagates from right in multiply');
+
+    # Both tagged
+    my $r3 = $ti->multiply($tagged, $tagged);
+    ok($r3->{ambiguous_unary}, 'ambiguous_unary propagates when both sides tagged');
+
+    # Neither tagged
+    my $r4 = $ti->multiply($o, $o);
+    ok(!$r4->{ambiguous_unary}, 'ambiguous_unary not set when neither side tagged');
+}
+
+# ========================================================================
+# on_complete: ambiguous_unary preservation and boundary clearing
+# ========================================================================
+
+# Intermediate rule (Expression) preserves ambiguous_unary
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('Expression', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'Expression completion with ambiguous_unary is valid');
+    ok($result->{ambiguous_unary}, 'Expression preserves ambiguous_unary');
+}
+
+# StatementItem preserves ambiguous_unary
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('StatementItem', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'StatementItem completion with ambiguous_unary is valid');
+    ok($result->{ambiguous_unary}, 'StatementItem preserves ambiguous_unary');
+}
+
+# Boundary rule ParenExpr clears ambiguous_unary
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('ParenExpr', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'ParenExpr completion is valid');
+    ok(!$result->{ambiguous_unary}, 'ParenExpr clears ambiguous_unary');
+}
+
+# Boundary rule Block clears ambiguous_unary
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('Block', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'Block completion is valid');
+    ok(!$result->{ambiguous_unary}, 'Block clears ambiguous_unary');
+}
+
+# Boundary rule ArrayConstructor clears ambiguous_unary
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('ArrayConstructor', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'ArrayConstructor completion is valid');
+    ok(!$result->{ambiguous_unary}, 'ArrayConstructor clears ambiguous_unary');
+}
+
+# Boundary rule HashConstructor clears ambiguous_unary
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('HashConstructor', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'HashConstructor completion is valid');
+    ok(!$result->{ambiguous_unary}, 'HashConstructor clears ambiguous_unary');
+}
+
+# Boundary rule Signature clears ambiguous_unary
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('Signature', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'Signature completion is valid');
+    ok(!$result->{ambiguous_unary}, 'Signature clears ambiguous_unary');
+}
+
+# Identifier completion still rejects keyword_as_identifier (existing behavior preserved)
+{
+    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $item = make_item('Identifier', $tagged);
+    my $result = $ti->on_complete($item, 0, 3);
+    ok($ti->is_zero($result), 'Identifier rejection still works after on_complete refactor');
+}
+
+# Non-boundary rule without tag → no ambiguous_unary
+{
+    my $item = make_item('BinaryExpression', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'BinaryExpression completion is valid');
+    ok(!$result->{ambiguous_unary}, 'BinaryExpression without tag has no ambiguous_unary');
+}
+
 done_testing;

@@ -25,12 +25,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return $self->zero() if $self->is_zero($left);
         return $self->zero() if $self->is_zero($right);
 
-        # Propagate keyword_as_identifier from either child
+        # Propagate tags from either child
         my $tagged = $left->{keyword_as_identifier} || $right->{keyword_as_identifier};
+        my $unary  = $left->{ambiguous_unary}       || $right->{ambiguous_unary};
 
         return {
             valid => true,
             ($tagged ? (keyword_as_identifier => true) : ()),
+            ($unary  ? (ambiguous_unary       => true) : ()),
         };
     }
 
@@ -75,6 +77,16 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             });
         }
 
+        # Tag ambiguous unary +/- for later disambiguation
+        if ($rule_name eq 'UnaryExpression'
+            && $matched_text =~ /^[+-]$/)
+        {
+            return $self->multiply($existing, {
+                valid           => true,
+                ambiguous_unary => true,
+            });
+        }
+
         # Non-Identifier/QualifiedIdentifier or non-keyword: transparent
         return $self->multiply($existing, $self->one());
     }
@@ -92,7 +104,21 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $self->zero();
         }
 
-        # Other rules: clear the flag and pass through
-        return { valid => true };
+        # Boundary rules: clear ambiguous_unary tag (nested context)
+        if ($rule_name eq 'ParenExpr'
+            || $rule_name eq 'ArrayConstructor'
+            || $rule_name eq 'HashConstructor'
+            || $rule_name eq 'Block'
+            || $rule_name eq 'Signature')
+        {
+            return { valid => true };
+        }
+
+        # Preserve ambiguous_unary through intermediate rules
+        my $unary = $value->{ambiguous_unary};
+        return {
+            valid => true,
+            ($unary ? (ambiguous_unary => true) : ()),
+        };
     }
 }
