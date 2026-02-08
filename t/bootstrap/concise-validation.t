@@ -86,6 +86,14 @@ SKIP: {
             name   => 'bare scalar declaration',
             source => 'my $x;',
         },
+        {
+            name   => 'regex match assignment',
+            source => 'my $x = /foo/;',
+        },
+        {
+            name   => 'hash with fat comma',
+            source => 'my %h = (a => 1, b => 2);',
+        },
     );
 
     for my $case (@stable_cases) {
