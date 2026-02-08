@@ -344,6 +344,69 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _op('const', '$', type_info => qq{PV "$content"});
     }
 
+    # §19 RegexLiteral — match, qr, or subst ops with regex arity
+    method RegexLiteral($ctx) {
+        my $text = $ctx->scanned_text();
+        $text =~ s/^\s+|\s+$//g;
+
+        # s/pattern/replacement/flags or s{pattern}{replacement}flags
+        if ($text =~ m{^s\s*/(.+?)/(.*)/([msixpodualngcer]*)$}s) {
+            my ($pattern, $replacement) = ($1, $2);
+            my $result = Chalk::Bootstrap::ConciseTree->new();
+            $result->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name      => 'const',
+                arity     => '$',
+                type_info => qq{PV "$replacement"},
+            ));
+            $result->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name      => 'subst',
+                arity     => '/',
+                type_info => qq{/"$pattern"/},
+            ));
+            return $result;
+        }
+        if ($text =~ m{^s\s*\{(.+?)\}\s*\{(.*?)\}([msixpodualngcer]*)$}s) {
+            my ($pattern, $replacement) = ($1, $2);
+            my $result = Chalk::Bootstrap::ConciseTree->new();
+            $result->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name      => 'const',
+                arity     => '$',
+                type_info => qq{PV "$replacement"},
+            ));
+            $result->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name      => 'subst',
+                arity     => '/',
+                type_info => qq{/"$pattern"/},
+            ));
+            return $result;
+        }
+
+        # qr/pattern/flags
+        if ($text =~ m{^qr\s*/(.+?)/([msixpodualngcer]*)$}s) {
+            my $pattern = $1;
+            return _op('qr', '/', type_info => qq{/"$pattern"/});
+        }
+
+        # m/pattern/flags or m{pattern}flags
+        if ($text =~ m{^m\s*/(.+?)/([msixpodualngcer]*)$}s) {
+            my $pattern = $1;
+            return _op('match', '/', type_info => qq{/"$pattern"/});
+        }
+        if ($text =~ m{^m\s*\{(.+?)\}([msixpodualngcer]*)$}s) {
+            my $pattern = $1;
+            return _op('match', '/', type_info => qq{/"$pattern"/});
+        }
+
+        # bare /pattern/flags
+        if ($text =~ m{^/(.+?)/([msixpodualngcer]*)$}s) {
+            my $pattern = $1;
+            return _op('match', '/', type_info => qq{/"$pattern"/});
+        }
+
+        # Fallback: empty tree
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
     # §18 Variable — transparent pass-through
     method Variable($ctx) {
         my @trees = _collect_trees($ctx);

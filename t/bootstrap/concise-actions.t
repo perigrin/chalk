@@ -172,6 +172,82 @@ SKIP: {
     }
 
     # ========================================================================
+    # Regex literals
+    # ========================================================================
+
+    # --- RegexLiteral action exists ---
+    {
+        my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+        ok($actions->can('RegexLiteral'), 'RegexLiteral action method exists');
+    }
+
+    # --- Bare regex: my $x = /foo/; → match(/"foo"/) ---
+    {
+        my $tree = parse_concise('my $x = /foo/;');
+        ok(defined $tree, 'bare regex assignment parses');
+
+        my @names = op_names($tree);
+        is_deeply(\@names, [qw(enter nextstate match padsv_store leave)],
+            'my $x = /foo/ op sequence');
+
+        my @match = grep { $_->name() eq 'match' } $tree->ops()->@*;
+        is(scalar @match, 1, 'exactly one match op');
+        SKIP: {
+            skip 'no match op found', 2 unless @match;
+            is($match[0]->type_info(), '/"foo"/', 'match has type_info /"foo"/');
+            is($match[0]->arity(), '/', 'match has arity /');
+        }
+    }
+
+    # --- qr// regex: my $x = qr/foo/; → qr(/"foo"/) ---
+    {
+        my $tree = parse_concise('my $x = qr/foo/;');
+        ok(defined $tree, 'qr regex assignment parses');
+
+        my @qr = grep { $_->name() eq 'qr' } $tree->ops()->@*;
+        is(scalar @qr, 1, 'exactly one qr op');
+        SKIP: {
+            skip 'no qr op found', 2 unless @qr;
+            is($qr[0]->type_info(), '/"foo"/', 'qr has type_info /"foo"/');
+            is($qr[0]->arity(), '/', 'qr has arity /');
+        }
+    }
+
+    # --- s/// substitution: my $x = s/foo/bar/; → const[PV "bar"] + subst(/"foo"/) ---
+    {
+        my $tree = parse_concise('my $x = s/foo/bar/;');
+        ok(defined $tree, 'substitution assignment parses');
+
+        my @subst = grep { $_->name() eq 'subst' } $tree->ops()->@*;
+        is(scalar @subst, 1, 'exactly one subst op');
+        SKIP: {
+            skip 'no subst op found', 2 unless @subst;
+            is($subst[0]->type_info(), '/"foo"/', 'subst has type_info /"foo"/');
+            is($subst[0]->arity(), '/', 'subst has arity /');
+        }
+
+        # replacement string should be a const before the subst
+        my @consts = grep { $_->name() eq 'const' } $tree->ops()->@*;
+        ok((grep { $_->type_info() && $_->type_info() eq 'PV "bar"' } @consts),
+            'substitution has const[PV "bar"] for replacement');
+    }
+
+    # --- m// regex: my $x = m/foo/; → match(/"foo"/) ---
+    # Note: m{foo} is ambiguous with Identifier("m") + Block("{foo}"),
+    # and the Structural semiring prefers Block. Using m// avoids this.
+    {
+        my $tree = parse_concise('my $x = m/foo/;');
+        ok(defined $tree, 'm// regex assignment parses');
+
+        my @match = grep { $_->name() eq 'match' } $tree->ops()->@*;
+        is(scalar @match, 1, 'exactly one match op for m//');
+        SKIP: {
+            skip 'no match op found', 1 unless @match;
+            is($match[0]->type_info(), '/"foo"/', 'm// match has type_info /"foo"/');
+        }
+    }
+
+    # ========================================================================
     # Phase 3: Class definitions, subroutines, methods
     # ========================================================================
 
