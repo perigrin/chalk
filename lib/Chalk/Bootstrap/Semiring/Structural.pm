@@ -1,0 +1,100 @@
+# ABOUTME: Structural semiring for Block-vs-HashConstructor disambiguation in Earley parsing.
+# ABOUTME: Tags Block/HashConstructor completions, prefers Block at statement level via add().
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class Chalk::Bootstrap::Semiring::Structural {
+
+    method zero() {
+        return { valid => false };
+    }
+
+    method one() {
+        return { valid => true };
+    }
+
+    method is_zero($value) {
+        return !$value->{valid};
+    }
+
+    method multiply($left, $right) {
+        # Propagate zero
+        return $self->zero() if $self->is_zero($left);
+        return $self->zero() if $self->is_zero($right);
+
+        # Propagate tags from either child
+        my $is_block = $left->{is_block} || $right->{is_block};
+        my $is_hash  = $left->{is_hash}  || $right->{is_hash};
+
+        return {
+            valid => true,
+            ($is_block ? (is_block => true) : ()),
+            ($is_hash  ? (is_hash  => true) : ()),
+        };
+    }
+
+    method add($left, $right) {
+        # Return first non-zero alternative
+        return $right if $self->is_zero($left);
+        return $left  if $self->is_zero($right);
+
+        # Both valid: prefer is_block over is_hash
+        if ($left->{is_block} || $right->{is_block}) {
+            return { valid => true, is_block => true };
+        }
+
+        # Both valid, neither is block: prefer is_hash if present
+        if ($left->{is_hash} || $right->{is_hash}) {
+            return { valid => true, is_hash => true };
+        }
+
+        # Both valid, untagged
+        return { valid => true };
+    }
+
+    method on_scan($item, $alt_idx, $pos, $matched_text) {
+        my $existing = $item->{value};
+
+        # Propagate zero
+        return $self->zero() if $self->is_zero($existing);
+
+        # Transparent: just multiply with one()
+        return $self->multiply($existing, $self->one());
+    }
+
+    method on_complete($item, $alt_idx, $pos) {
+        my $value = $item->{value};
+        return $self->zero() if $self->is_zero($value);
+
+        my $rule_name = $item->{rule}->name();
+
+        # Tag Block completions
+        if ($rule_name eq 'Block') {
+            return { valid => true, is_block => true };
+        }
+
+        # Tag HashConstructor completions
+        if ($rule_name eq 'HashConstructor') {
+            return { valid => true, is_hash => true };
+        }
+
+        # Boundary rules: clear all structural tags
+        if ($rule_name eq 'ParenExpr'
+            || $rule_name eq 'ArrayConstructor'
+            || $rule_name eq 'Program'
+            || $rule_name eq 'StatementList') {
+            return { valid => true };
+        }
+
+        # Other rules: pass through tags from value
+        my $is_block = $value->{is_block};
+        my $is_hash  = $value->{is_hash};
+
+        return {
+            valid => true,
+            ($is_block ? (is_block => true) : ()),
+            ($is_hash  ? (is_hash  => true) : ()),
+        };
+    }
+}
