@@ -112,20 +112,48 @@ SKIP: {
     }
 
     # --- Hash assignment: my %h = (a => 1, b => 2) ---
+    # Fat comma LHS identifiers should produce const[PV "ident"]/BARE
     {
         my $tree = parse_concise('my %h = (a => 1, b => 2);');
         ok(defined $tree, 'hash assignment parses');
 
         my @names = op_names($tree);
-        # Hash keys may be parsed as identifiers (producing empty trees) or
-        # const ops depending on grammar ambiguity resolution
-        ok((grep { $_ eq 'padhv' } @names), 'hash assignment has padhv');
-        ok((grep { $_ eq 'aassign' } @names), 'hash assignment has aassign');
-        ok((grep { $_ eq 'pushmark' } @names), 'hash assignment has pushmark');
+        is_deeply(\@names,
+            [qw(enter nextstate pushmark const const const const pushmark padhv aassign leave)],
+            'my %h = (a => 1, b => 2) op sequence');
+
+        my @consts = grep { $_->name() eq 'const' } $tree->ops()->@*;
+        is(scalar @consts, 4, 'hash has 4 const ops (2 keys + 2 values)');
+
+        SKIP: {
+            skip 'wrong const count', 4 unless @consts == 4;
+            is($consts[0]->type_info(), 'PV "a"', 'first key is PV "a"');
+            like($consts[0]->private(), qr{/BARE}, 'first key has /BARE');
+            is($consts[1]->type_info(), 'IV 1', 'first value is IV 1');
+            is($consts[2]->type_info(), 'PV "b"', 'second key is PV "b"');
+            like($consts[2]->private(), qr{/BARE}, 'second key has /BARE');
+            is($consts[3]->type_info(), 'IV 2', 'second value is IV 2');
+        }
 
         my @padhv = grep { $_->name() eq 'padhv' } $tree->ops()->@*;
         like($padhv[0]->type_info(), qr/%h/, 'padhv has %h');
         like($padhv[0]->private(), qr{/LVINTRO}, 'padhv has /LVINTRO');
+    }
+
+    # --- Simple fat comma: my %h = (a => 1) ---
+    {
+        my $tree = parse_concise('my %h = (a => 1);');
+        ok(defined $tree, 'simple fat comma parses');
+
+        my @consts = grep { $_->name() eq 'const' } $tree->ops()->@*;
+        is(scalar @consts, 2, 'simple fat comma has 2 const ops');
+
+        SKIP: {
+            skip 'wrong const count', 3 unless @consts == 2;
+            is($consts[0]->type_info(), 'PV "a"', 'simple fat comma key is PV "a"');
+            like($consts[0]->private(), qr{/BARE}, 'simple fat comma key has /BARE');
+            is($consts[1]->type_info(), 'IV 1', 'simple fat comma value is IV 1');
+        }
     }
 
     # --- Multiple statements ---

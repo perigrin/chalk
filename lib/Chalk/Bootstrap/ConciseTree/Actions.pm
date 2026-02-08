@@ -33,6 +33,26 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return @trees;
     }
 
+    # Helper: collect ALL leaf items in order (both ConciseTree and text),
+    # needed for fat comma detection where text tokens like '=>' matter.
+    my sub _collect_items($ctx) {
+        my @items;
+        my $focus = $ctx->extract();
+        if (defined $focus && $focus isa Chalk::Bootstrap::ConciseTree) {
+            push @items, { type => 'tree', value => $focus, ctx => $ctx };
+            return @items;
+        }
+        if (defined $focus && !ref($focus)) {
+            push @items, { type => 'text', value => $focus, ctx => $ctx };
+            return @items;
+        }
+        # Recurse into children
+        for my $child ($ctx->children()->@*) {
+            push @items, __SUB__->($child);
+        }
+        return @items;
+    }
+
     # Helper: concatenate all child trees into one, filtering out empty trees
     my sub _merge_trees(@trees) {
         my $result = Chalk::Bootstrap::ConciseTree->new();
@@ -239,10 +259,82 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@trees);
     }
 
-    # §12 ExpressionList — collect all expressions
+    # §12 ExpressionList — collect all expressions.
+    # Detects fat comma (=>) and auto-quotes LHS bare identifiers as const[PV]/BARE.
     method ExpressionList($ctx) {
-        my @trees = _collect_trees($ctx);
-        return _merge_trees(@trees);
+        my @items = _collect_items($ctx);
+
+        # Check if any text item is a fat comma
+        my $has_fat_comma = false;
+        for my $item (@items) {
+            if ($item->{type} eq 'text' && $item->{value} =~ /^=>$/) {
+                $has_fat_comma = true;
+                last;
+            }
+        }
+
+        unless ($has_fat_comma) {
+            # No fat comma — fall through to standard tree merge
+            my @trees = _collect_trees($ctx);
+            return _merge_trees(@trees);
+        }
+
+        # Fat comma path: iterate items, auto-quote empty trees before =>
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        for my $i (0 .. $#items) {
+            my $item = $items[$i];
+            if ($item->{type} eq 'text') {
+                # Skip whitespace and operator text (=>, ,)
+                next;
+            }
+            # It's a tree item
+            my $tree = $item->{value};
+
+            # Check if the next non-whitespace text item is =>
+            my $before_fat_comma = false;
+            for my $j ($i + 1 .. $#items) {
+                my $next = $items[$j];
+                if ($next->{type} eq 'text') {
+                    if ($next->{value} =~ /^=>$/) {
+                        $before_fat_comma = true;
+                    }
+                    last if $next->{value} =~ /\S/;
+                }
+                last if $next->{type} eq 'tree';
+            }
+
+            if ($before_fat_comma && $tree->op_count() == 0) {
+                # Empty tree from bare identifier before =>
+                my $ident_text = $item->{ctx}->scanned_text();
+                $ident_text =~ s/^\s+|\s+$//g;
+                if (length $ident_text) {
+                    $result->push_op(Chalk::Bootstrap::ConciseOp->new(
+                        name      => 'const',
+                        arity     => '$',
+                        type_info => qq{PV "$ident_text"},
+                        private   => '/BARE',
+                    ));
+                }
+            } elsif ($before_fat_comma && $tree->op_count() > 0) {
+                # Non-empty tree before => — the tree is from a recursive
+                # ExpressionList that may have lost a trailing bare identifier.
+                # Check if scanned text ends with a bare identifier after comma.
+                $result->concat($tree);
+                my $scanned = $item->{ctx}->scanned_text();
+                if ($scanned =~ /,\s*([a-zA-Z_]\w*)\s*$/) {
+                    my $trailing_ident = $1;
+                    $result->push_op(Chalk::Bootstrap::ConciseOp->new(
+                        name      => 'const',
+                        arity     => '$',
+                        type_info => qq{PV "$trailing_ident"},
+                        private   => '/BARE',
+                    ));
+                }
+            } elsif ($tree->op_count() > 0) {
+                $result->concat($tree);
+            }
+        }
+        return $result;
     }
 
     # §13 Atom — transparent pass-through
