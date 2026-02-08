@@ -561,6 +561,47 @@ SKIP: {
         ok((grep { $_->name() eq 'not' } $tree->ops()->@*),
             'unary ! has not op');
     }
+
+    # --- Short-circuit operators (structural only — branching arity) ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a && $b;');
+        ok(defined $tree, 'logical and parses');
+        ok((grep { $_->name() eq 'and' } $tree->ops()->@*),
+            'logical and has and op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a || $b;');
+        ok(defined $tree, 'logical or parses');
+        ok((grep { $_->name() eq 'or' } $tree->ops()->@*),
+            'logical or has or op');
+    }
+
+    # Note: // (defined-or) is omitted because it's ambiguous with empty regex
+    # literal //. The RegexLiteral parse wins without Precedence semiring.
+
+    # --- Ternary expression (structural only — branching) ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a ? $b : 0;');
+        ok(defined $tree, 'ternary expression parses');
+        ok((grep { $_->name() eq 'cond_expr' } $tree->ops()->@*),
+            'ternary has cond_expr op');
+    }
+
+    # --- PostfixIncDec (value context — avoids void context preinc optimization) ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = $a++;');
+        ok(defined $tree, 'postfix increment parses');
+        ok((grep { $_->name() eq 'postinc' } $tree->ops()->@*),
+            'postfix increment has postinc op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = $a--;');
+        ok(defined $tree, 'postfix decrement parses');
+        ok((grep { $_->name() eq 'postdec' } $tree->ops()->@*),
+            'postfix decrement has postdec op');
+    }
 }
 
 done_testing;

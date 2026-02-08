@@ -449,6 +449,35 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return $result;
     }
 
+    # §16 TernaryExpression — condition ? then : else → child ops + cond_expr
+    # B::Concise interleaves branches; our flat model appends cond_expr at end.
+    method TernaryExpression($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+        $result->push_op(_op('cond_expr', '|')->ops()->[0]);
+        return $result;
+    }
+
+    # §16 PostfixIncDec — expression++ or expression-- → child ops + postinc/postdec
+    method PostfixIncDec($ctx) {
+        my $is_dec = false;
+        my $scanned = $ctx->scanned_text();
+        if (defined $scanned && $scanned =~ /--/) {
+            $is_dec = true;
+        }
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+        my $op_name = $is_dec ? 'postdec' : 'postinc';
+        $result->push_op(_op($op_name, '1')->ops()->[0]);
+        return $result;
+    }
+
+    # §16 PostfixExpression — transparent pass-through
+    method PostfixExpression($ctx) {
+        my @trees = _collect_trees($ctx);
+        return _merge_trees(@trees);
+    }
+
     # §7 UseDeclaration — compile-time only, produces empty tree
     method UseDeclaration($ctx) {
         return Chalk::Bootstrap::ConciseTree->new();
