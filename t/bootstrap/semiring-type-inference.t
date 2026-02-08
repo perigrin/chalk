@@ -13,7 +13,7 @@ use lib 't/bootstrap/lib';
 
 use_ok('Chalk::Grammar::Perl::KeywordTable');
 
-# All 33 keywords should be recognized
+# All 36 keywords should be recognized (33 \b keywords + 3 regex-prefix tokens)
 my @keywords = qw(
     use class sub method ADJUST
     if unless elsif else
@@ -22,6 +22,7 @@ my @keywords = qw(
     not and or xor
     eq ne lt gt le ge cmp isa x
     undef true false
+    m s qr
 );
 
 for my $kw (@keywords) {

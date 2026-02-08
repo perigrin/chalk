@@ -442,7 +442,8 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         $text =~ s/^\s+|\s+$//g;
 
         # s/pattern/replacement/flags or s{pattern}{replacement}flags
-        if ($text =~ m{^s\s*/(.+?)/(.*)/([msixpodualngcer]*)$}s) {
+        # Uses escape-aware character class to handle \/ in patterns
+        if ($text =~ m{^s\s*/((?:[^/\\]|\\.)*?)/((?:[^/\\]|\\.)*)/([msixpodualngcer]*)$}s) {
             my ($pattern, $replacement) = ($1, $2);
             my $result = Chalk::Bootstrap::ConciseTree->new();
             $result->push_op(Chalk::Bootstrap::ConciseOp->new(
@@ -473,14 +474,14 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             return $result;
         }
 
-        # qr/pattern/flags
-        if ($text =~ m{^qr\s*/(.+?)/([msixpodualngcer]*)$}s) {
+        # qr/pattern/flags — escape-aware
+        if ($text =~ m{^qr\s*/((?:[^/\\]|\\.)*)/([msixpodualngcer]*)$}s) {
             my $pattern = $1;
             return _op('qr', '/', type_info => qq{/"$pattern"/});
         }
 
-        # m/pattern/flags or m{pattern}flags
-        if ($text =~ m{^m\s*/(.+?)/([msixpodualngcer]*)$}s) {
+        # m/pattern/flags or m{pattern}flags — escape-aware
+        if ($text =~ m{^m\s*/((?:[^/\\]|\\.)*)/([msixpodualngcer]*)$}s) {
             my $pattern = $1;
             return _op('match', '/', type_info => qq{/"$pattern"/});
         }
@@ -489,8 +490,8 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             return _op('match', '/', type_info => qq{/"$pattern"/});
         }
 
-        # bare /pattern/flags
-        if ($text =~ m{^/(.+?)/([msixpodualngcer]*)$}s) {
+        # bare /pattern/flags — escape-aware
+        if ($text =~ m{^/((?:[^/\\]|\\.)*)/([msixpodualngcer]*)$}s) {
             my $pattern = $1;
             return _op('match', '/', type_info => qq{/"$pattern"/});
         }

@@ -126,7 +126,7 @@ SKIP: {
         is(scalar @consts, 4, 'hash has 4 const ops (2 keys + 2 values)');
 
         SKIP: {
-            skip 'wrong const count', 4 unless @consts == 4;
+            skip 'wrong const count', 6 unless @consts == 4;
             is($consts[0]->type_info(), 'PV "a"', 'first key is PV "a"');
             like($consts[0]->private(), qr{/BARE}, 'first key has /BARE');
             is($consts[1]->type_info(), 'IV 1', 'first value is IV 1');
@@ -272,6 +272,69 @@ SKIP: {
         SKIP: {
             skip 'no match op found', 1 unless @match;
             is($match[0]->type_info(), '/"foo"/', 'm// match has type_info /"foo"/');
+        }
+    }
+
+    # --- Regex with flags: my $x = /foo/gi; ---
+    {
+        my $tree = parse_concise('my $x = /foo/gi;');
+        ok(defined $tree, 'regex with flags parses');
+
+        my @match = grep { $_->name() eq 'match' } $tree->ops()->@*;
+        is(scalar @match, 1, 'flagged regex has one match op');
+        SKIP: {
+            skip 'no match op found', 1 unless @match;
+            is($match[0]->type_info(), '/"foo"/', 'flagged regex match has type_info /"foo"/');
+        }
+    }
+
+    # --- Regex with escaped slash: my $x = /foo\/bar/; ---
+    {
+        my $tree = parse_concise('my $x = /foo\/bar/;');
+        ok(defined $tree, 'escaped slash regex parses');
+
+        my @match = grep { $_->name() eq 'match' } $tree->ops()->@*;
+        is(scalar @match, 1, 'escaped slash regex has one match op');
+        SKIP: {
+            skip 'no match op found', 1 unless @match;
+            is($match[0]->type_info(), '/"foo\/bar"/', 'escaped slash preserved in type_info');
+        }
+    }
+
+    # --- s{}{} brace-delimited substitution: my $x = s{foo}{bar}; ---
+    {
+        my $tree = parse_concise('my $x = s{foo}{bar};');
+        ok(defined $tree, 's{}{} substitution parses');
+
+        my @subst = grep { $_->name() eq 'subst' } $tree->ops()->@*;
+        is(scalar @subst, 1, 's{}{} has one subst op');
+        SKIP: {
+            skip 'no subst op found', 1 unless @subst;
+            is($subst[0]->type_info(), '/"foo"/', 's{}{} subst has type_info /"foo"/');
+        }
+
+        my @consts = grep { $_->name() eq 'const' } $tree->ops()->@*;
+        ok((grep { $_->type_info() && $_->type_info() eq 'PV "bar"' } @consts),
+            's{}{} has const[PV "bar"] for replacement');
+    }
+
+    # --- Three-pair fat comma: my %h = (a => 1, b => 2, c => 3) ---
+    {
+        my $tree = parse_concise('my %h = (a => 1, b => 2, c => 3);');
+        ok(defined $tree, 'three-pair fat comma parses');
+
+        my @consts = grep { $_->name() eq 'const' } $tree->ops()->@*;
+        is(scalar @consts, 6, 'three pairs produce 6 const ops');
+
+        SKIP: {
+            skip 'wrong const count', 6 unless @consts == 6;
+            is($consts[0]->type_info(), 'PV "a"', 'three-pair: key a');
+            like($consts[0]->private(), qr{/BARE}, 'three-pair: key a has /BARE');
+            is($consts[1]->type_info(), 'IV 1', 'three-pair: value 1');
+            is($consts[2]->type_info(), 'PV "b"', 'three-pair: key b');
+            like($consts[2]->private(), qr{/BARE}, 'three-pair: key b has /BARE');
+            is($consts[4]->type_info(), 'PV "c"', 'three-pair: key c');
+            like($consts[4]->private(), qr{/BARE}, 'three-pair: key c has /BARE');
         }
     }
 
