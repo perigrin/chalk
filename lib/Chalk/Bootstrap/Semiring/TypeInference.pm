@@ -49,6 +49,13 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         my $rule_name = $item->{rule}->name();
 
+        # Reject empty regex // and m// — these are the defined-or operator, not a regex
+        if ($rule_name eq 'RegexLiteral'
+            && $matched_text =~ m{^(?:m)?//[msixpodualngcer]*$})
+        {
+            return $self->zero();
+        }
+
         # In Identifier context, check if the scanned text is a keyword
         if ($rule_name eq 'Identifier' && $keyword_check->($matched_text)) {
             return $self->multiply($existing, {

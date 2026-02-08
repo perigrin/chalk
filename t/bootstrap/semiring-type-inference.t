@@ -325,4 +325,105 @@ for my $kw (qw(use class sub method)) {
     ok(!$ti->is_zero($completed), 'QualifiedIdentifier qualified chain: completion is valid');
 }
 
+# ========================================================================
+# on_scan: empty regex // rejection
+# ========================================================================
+
+# Empty regex // scanned as RegexLiteral → zero (this is defined-or operator)
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '//');
+    ok($ti->is_zero($result), 'scanning "//" as RegexLiteral returns zero');
+}
+
+# Empty regex with flags → also zero
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '//i');
+    ok($ti->is_zero($result), 'scanning "//i" as RegexLiteral returns zero');
+}
+
+# Empty regex //msixpodualngcer → zero (all flags)
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '//msixpodualngcer');
+    ok($ti->is_zero($result), 'scanning "//msixpodualngcer" as RegexLiteral returns zero');
+}
+
+# Real regex with pattern → NOT zero (accepted)
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '/pattern/');
+    ok(!$ti->is_zero($result), 'scanning "/pattern/" as RegexLiteral is NOT zero');
+}
+
+# Real regex with flags → NOT zero (accepted)
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '/pattern/gi');
+    ok(!$ti->is_zero($result), 'scanning "/pattern/gi" as RegexLiteral is NOT zero');
+}
+
+# Empty m// → zero (still an empty regex, just the m-form)
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'm//');
+    ok($ti->is_zero($result), 'scanning "m//" as RegexLiteral returns zero');
+}
+
+# m// with flags → zero
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'm//i');
+    ok($ti->is_zero($result), 'scanning "m//i" as RegexLiteral returns zero');
+}
+
+# m/pattern/ → NOT zero (real regex)
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'm/pattern/');
+    ok(!$ti->is_zero($result), 'scanning "m/pattern/" as RegexLiteral is NOT zero');
+}
+
+# BinaryOp scanning // → NOT zero (TypeInference doesn't touch BinaryOp)
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '//');
+    ok(!$ti->is_zero($result), 'scanning "//" as BinaryOp is NOT zero');
+}
+
+# ========================================================================
+# Integration: // and //= parse deterministically with TypeInference
+# ========================================================================
+
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::Target::Perl;
+use TestPipeline qw(perl_pipeline build_perl_recognizer);
+
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $ir = perl_pipeline();
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIRegexTest/g;
+    eval $generated;
+    die "Generated code failed to compile: $@" if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::TIRegexTest::grammar();
+
+    # Test defined-or: $a // $b
+    {
+        my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
+        my $result = $recognizer->parse('my $a = 1; my $b = 2; my $c = $a // $b;');
+        ok($result, 'defined-or (//) parses with TypeInference pipeline');
+    }
+
+    # Test defined-or-assign: $a //= $b
+    {
+        my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
+        my $result = $recognizer->parse('my $a = 1; $a //= 2;');
+        ok($result, 'defined-or-assign (//=) parses with TypeInference pipeline');
+    }
+}
+
 done_testing;
