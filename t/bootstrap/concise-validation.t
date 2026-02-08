@@ -141,6 +141,22 @@ SKIP: {
             name   => 'compound add-assign',
             source => 'my $a = 1; $a += 2;',
         },
+        # Previously ambiguous operators (resolved by TypeInference)
+        {
+            name   => 'binary addition',
+            source => 'my $a = 1; my $b = 2; my $c = $a + $b;',
+        },
+        {
+            name   => 'binary subtraction',
+            source => 'my $a = 1; my $b = 2; my $c = $a - $b;',
+        },
+        {
+            name   => 'chained add-subtract',
+            source => 'my $a = 1; my $b = 2; my $c = $a + $b - 1;',
+        },
+        # Note: defined-or (//) not oracle-stable because branching ops
+        # (dor, and, or, ||, &&) have different exec order in B::Concise
+        # (branch-between-operands) vs our tree (flat left-right-op).
     );
 
     for my $case (@stable_cases) {

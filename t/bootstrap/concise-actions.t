@@ -882,30 +882,30 @@ SKIP: {
             'yada range (...) has range op');
     }
 
-    # --- Ambiguous operators (TODO: needs Precedence semiring) ---
-    TODO: {
-        local $TODO = 'binary + ambiguous with unary + without Precedence semiring';
+    # --- Previously ambiguous operators (resolved by TypeInference) ---
+    # Binary +: TypeInference rejects ambiguous unary + when BinaryOp scanned at same position
+    {
         my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a + $b;');
         ok(defined $tree && (grep { $_->name() eq 'add' } $tree->ops()->@*),
             'binary addition has add op');
     }
 
-    TODO: {
-        local $TODO = 'binary - ambiguous with unary - without Precedence semiring';
+    # Binary -: TypeInference rejects ambiguous unary - when BinaryOp scanned at same position
+    {
         my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a - $b;');
         ok(defined $tree && (grep { $_->name() eq 'subtract' } $tree->ops()->@*),
             'binary subtraction has subtract op');
     }
 
-    TODO: {
-        local $TODO = '// ambiguous with empty regex literal without Precedence semiring';
+    # Defined-or: TypeInference rejects empty regex // at scan time
+    {
         my $tree = parse_concise('my $a = 0; my $b = 1; my $c = $a // $b;');
         ok(defined $tree && (grep { $_->name() eq 'dor' } $tree->ops()->@*),
             'defined-or has dor op');
     }
 
-    TODO: {
-        local $TODO = '//= ambiguous with empty regex without Precedence semiring';
+    # Compound //=: TypeInference rejects empty regex // at scan time
+    {
         my $tree = parse_concise('my $a = 0; $a //= 1;');
         ok(defined $tree && (grep { $_->name() eq 'dor' } $tree->ops()->@*),
             'compound //= has dor op');
