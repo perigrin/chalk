@@ -191,6 +191,91 @@ for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
     ok($sr->is_zero($r), 'on_complete propagates zero');
 }
 
+# --- StatementItem: bare (alt_idx 1) sets is_bare_statement ---
+{
+    my $o = $sr->one();
+    my $item = mock_item('StatementItem', $o);
+
+    # alt_idx 0 = SimpleStatement ";" — NOT bare
+    my $r0 = $sr->on_complete($item, 0, 0);
+    ok(!$sr->is_zero($r0), 'StatementItem alt 0 (with semicolon) is valid');
+    ok(!$r0->{is_bare_statement}, 'StatementItem alt 0 does NOT set is_bare_statement');
+
+    # alt_idx 1 = SimpleStatement (no semicolon) — bare
+    my $r1 = $sr->on_complete($item, 1, 0);
+    ok(!$sr->is_zero($r1), 'StatementItem alt 1 (bare) is valid');
+    ok($r1->{is_bare_statement}, 'StatementItem alt 1 sets is_bare_statement');
+
+    # alt_idx 2 = CompoundStatement — NOT bare
+    my $r2 = $sr->on_complete($item, 2, 0);
+    ok(!$sr->is_zero($r2), 'StatementItem alt 2 (compound) is valid');
+    ok(!$r2->{is_bare_statement}, 'StatementItem alt 2 does NOT set is_bare_statement');
+}
+
+# --- multiply: is_bare_statement propagation ---
+{
+    my $bare = { valid => true, is_bare_statement => true };
+    my $plain = $sr->one();
+
+    my $r1 = $sr->multiply($bare, $plain);
+    ok($r1->{is_bare_statement}, 'is_bare_statement propagates from left through multiply');
+
+    my $r2 = $sr->multiply($plain, $bare);
+    ok($r2->{is_bare_statement}, 'is_bare_statement propagates from right through multiply');
+}
+
+# --- add: prefer non-bare over bare ---
+{
+    my $bare = { valid => true, is_bare_statement => true };
+    my $non_bare = { valid => true };
+
+    my $r1 = $sr->add($bare, $non_bare);
+    ok(!$r1->{is_bare_statement}, 'add(bare, non-bare) prefers non-bare');
+    ok($r1->{valid}, 'add(bare, non-bare) is valid');
+
+    my $r2 = $sr->add($non_bare, $bare);
+    ok(!$r2->{is_bare_statement}, 'add(non-bare, bare) prefers non-bare');
+    ok($r2->{valid}, 'add(non-bare, bare) is valid');
+}
+
+# --- add: both bare → stays bare ---
+{
+    my $bare1 = { valid => true, is_bare_statement => true };
+    my $bare2 = { valid => true, is_bare_statement => true };
+
+    my $r = $sr->add($bare1, $bare2);
+    ok($r->{is_bare_statement}, 'add(bare, bare) stays bare');
+}
+
+# --- Block clears is_bare_statement (last stmt in block is legitimately bare) ---
+{
+    my $bare = { valid => true, is_bare_statement => true };
+    my $item = mock_item('Block', $bare);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok(!$sr->is_zero($r), 'Block with bare content is valid');
+    ok($r->{is_block}, 'Block completion still sets is_block');
+    ok(!$r->{is_bare_statement}, 'Block clears is_bare_statement');
+}
+
+# --- Program clears is_bare_statement ---
+{
+    my $bare = { valid => true, is_bare_statement => true };
+    my $item = mock_item('Program', $bare);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok(!$r->{is_bare_statement}, 'Program clears is_bare_statement');
+}
+
+# --- StatementList does NOT clear is_bare_statement ---
+{
+    my $bare = { valid => true, is_bare_statement => true };
+    my $item = mock_item('StatementList', $bare);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok($r->{is_bare_statement},
+        'StatementList does NOT clear is_bare_statement (needed for propagation)');
+    ok(!$r->{is_block}, 'StatementList still clears is_block');
+    ok(!$r->{is_hash}, 'StatementList still clears is_hash');
+}
+
 # ========================================================================
 # Phase 4: Integration with full Earley parser
 # Uses Bool+Structural only to isolate the Structural semiring's behavior

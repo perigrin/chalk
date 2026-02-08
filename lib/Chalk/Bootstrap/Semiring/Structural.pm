@@ -1,5 +1,5 @@
-# ABOUTME: Structural semiring for Block-vs-HashConstructor disambiguation in Earley parsing.
-# ABOUTME: Tags Block/HashConstructor completions, prefers Block at statement level via add().
+# ABOUTME: Structural semiring for disambiguation in Earley parsing.
+# ABOUTME: Tags Block/Hash/bare-statement completions, prefers separated expressions via add().
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -26,11 +26,13 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Propagate tags from either child
         my $is_block = $left->{is_block} || $right->{is_block};
         my $is_hash  = $left->{is_hash}  || $right->{is_hash};
+        my $is_bare  = $left->{is_bare_statement} || $right->{is_bare_statement};
 
         return {
             valid => true,
-            ($is_block ? (is_block => true) : ()),
-            ($is_hash  ? (is_hash  => true) : ()),
+            ($is_block ? (is_block          => true) : ()),
+            ($is_hash  ? (is_hash           => true) : ()),
+            ($is_bare  ? (is_bare_statement => true) : ()),
         };
     }
 
@@ -38,6 +40,16 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Return first non-zero alternative
         return $right if $self->is_zero($left);
         return $left  if $self->is_zero($right);
+
+        # Both valid: prefer non-bare over bare (expression separator disambiguation)
+        my $left_bare  = $left->{is_bare_statement};
+        my $right_bare = $right->{is_bare_statement};
+        if ($left_bare && !$right_bare) {
+            return $right;
+        }
+        if ($right_bare && !$left_bare) {
+            return $left;
+        }
 
         # Both valid: prefer is_block over is_hash
         if ($left->{is_block} || $right->{is_block}) {
@@ -49,8 +61,12 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true, is_hash => true };
         }
 
-        # Both valid, untagged
-        return { valid => true };
+        # Both valid, untagged (or both bare)
+        my $is_bare = $left_bare || $right_bare;
+        return {
+            valid => true,
+            ($is_bare ? (is_bare_statement => true) : ()),
+        };
     }
 
     method on_scan($item, $alt_idx, $pos, $matched_text) {
@@ -79,22 +95,41 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true, is_hash => true };
         }
 
+        # Tag bare StatementItem (alt 1 = SimpleStatement without semicolon)
+        if ($rule_name eq 'StatementItem' && $alt_idx == 1) {
+            return {
+                valid => true,
+                is_bare_statement => true,
+                ($value->{is_block} ? (is_block => true) : ()),
+                ($value->{is_hash}  ? (is_hash  => true) : ()),
+            };
+        }
+
         # Boundary rules: clear all structural tags
         if ($rule_name eq 'ParenExpr'
             || $rule_name eq 'ArrayConstructor'
-            || $rule_name eq 'Program'
-            || $rule_name eq 'StatementList') {
+            || $rule_name eq 'Program') {
             return { valid => true };
+        }
+
+        # StatementList: clear block/hash tags but preserve is_bare_statement
+        if ($rule_name eq 'StatementList') {
+            return {
+                valid => true,
+                ($value->{is_bare_statement} ? (is_bare_statement => true) : ()),
+            };
         }
 
         # Other rules: pass through tags from value
         my $is_block = $value->{is_block};
         my $is_hash  = $value->{is_hash};
+        my $is_bare  = $value->{is_bare_statement};
 
         return {
             valid => true,
-            ($is_block ? (is_block => true) : ()),
-            ($is_hash  ? (is_hash  => true) : ()),
+            ($is_block ? (is_block          => true) : ()),
+            ($is_hash  ? (is_hash           => true) : ()),
+            ($is_bare  ? (is_bare_statement => true) : ()),
         };
     }
 }
