@@ -69,6 +69,33 @@ class Chalk::Bootstrap::Semiring::Structural {
         };
     }
 
+    # Signal to Composite which alternative to select for ALL components.
+    # Returns 'left', 'right', or undef (no preference).
+    method selects_alternative($left, $right) {
+        return undef if $self->is_zero($left);
+        return undef if $self->is_zero($right);
+
+        # Prefer non-bare over bare
+        my $left_bare  = $left->{is_bare_statement};
+        my $right_bare = $right->{is_bare_statement};
+        if ($left_bare && !$right_bare) {
+            return 'right';
+        }
+        if ($right_bare && !$left_bare) {
+            return 'left';
+        }
+
+        # Prefer block over hash
+        if ($left->{is_block} && !$right->{is_block}) {
+            return 'left';
+        }
+        if ($right->{is_block} && !$left->{is_block}) {
+            return 'right';
+        }
+
+        return undef;
+    }
+
     method on_scan($item, $alt_idx, $pos, $matched_text) {
         my $existing = $item->{value};
 
@@ -107,13 +134,13 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         # Boundary rules: clear all structural tags
         if ($rule_name eq 'ParenExpr'
-            || $rule_name eq 'ArrayConstructor'
-            || $rule_name eq 'Program') {
+            || $rule_name eq 'ArrayConstructor') {
             return { valid => true };
         }
 
-        # StatementList: clear block/hash tags but preserve is_bare_statement
-        if ($rule_name eq 'StatementList') {
+        # Statement boundaries: clear block/hash, preserve is_bare_statement
+        if ($rule_name eq 'StatementList'
+            || $rule_name eq 'Program') {
             return {
                 valid => true,
                 ($value->{is_bare_statement} ? (is_bare_statement => true) : ()),

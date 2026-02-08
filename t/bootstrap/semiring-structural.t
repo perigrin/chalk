@@ -257,23 +257,50 @@ for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
     ok(!$r->{is_bare_statement}, 'Block clears is_bare_statement');
 }
 
-# --- Program clears is_bare_statement ---
+# --- Program preserves is_bare_statement (needed for alternative selection) ---
 {
     my $bare = { valid => true, is_bare_statement => true };
     my $item = mock_item('Program', $bare);
     my $r = $sr->on_complete($item, 0, 0);
-    ok(!$r->{is_bare_statement}, 'Program clears is_bare_statement');
+    ok($r->{is_bare_statement},
+        'Program preserves is_bare_statement for alternative selection');
 }
 
-# --- StatementList does NOT clear is_bare_statement ---
+# --- StatementList preserves is_bare_statement ---
 {
     my $bare = { valid => true, is_bare_statement => true };
     my $item = mock_item('StatementList', $bare);
+
+    my $r0 = $sr->on_complete($item, 0, 0);
+    ok($r0->{is_bare_statement},
+        'StatementList alt 0 preserves is_bare_statement');
+    ok(!$r0->{is_block}, 'StatementList still clears is_block');
+    ok(!$r0->{is_hash}, 'StatementList still clears is_hash');
+}
+
+# --- StatementList without bare has no bare tag ---
+{
+    my $o = $sr->one();
+    my $item = mock_item('StatementList', $o);
     my $r = $sr->on_complete($item, 0, 0);
-    ok($r->{is_bare_statement},
-        'StatementList does NOT clear is_bare_statement (needed for propagation)');
-    ok(!$r->{is_block}, 'StatementList still clears is_block');
-    ok(!$r->{is_hash}, 'StatementList still clears is_hash');
+    ok(!$r->{is_bare_statement},
+        'StatementList without bare does not set is_bare_statement');
+}
+
+# --- StatementList alt 1 with is_bare_statement is still valid ---
+# (bare-preference disambiguation happens via add(), not on_complete zeroing)
+{
+    my $bare_only = { valid => true, is_bare_statement => true };
+    my $item = mock_item('StatementList', $bare_only);
+    my $r = $sr->on_complete($item, 1, 0);
+    ok(!$sr->is_zero($r),
+        'StatementList alt 1 with is_bare_statement is valid');
+
+    my $o = $sr->one();
+    my $item2 = mock_item('StatementList', $o);
+    my $r2 = $sr->on_complete($item2, 1, 0);
+    ok(!$sr->is_zero($r2),
+        'StatementList alt 1 without any bare tags is valid');
 }
 
 # ========================================================================
@@ -404,6 +431,52 @@ SKIP: {
     {
         my $result = parse_result('while ($x) { my $y = 1; }');
         ok(defined $result, 'while with block body parses');
+    }
+
+    # --- Expression separator disambiguation ---
+    # These test that ambiguous operators (+, -, //) are parsed as binary
+    # operators rather than starting a new unseparated statement.
+
+    # Binary + should not be split into bare $a + unary +$b
+    {
+        my $result = parse_result('my $a = 1; my $c = $a + 3;');
+        ok(defined $result, 'binary + in assignment parses');
+    }
+
+    # Binary - should not be split into bare $a + unary -$b
+    {
+        my $result = parse_result('my $a = 1; my $c = $a - 3;');
+        ok(defined $result, 'binary - in assignment parses');
+    }
+
+    # // (defined-or) should not be parsed as empty regex literal
+    {
+        my $result = parse_result('my $a = 0; my $b = $a // 1;');
+        ok(defined $result, 'defined-or (//) in assignment parses');
+    }
+
+    # //= (compound defined-or assign)
+    {
+        my $result = parse_result('my $a = 0; $a //= 1;');
+        ok(defined $result, 'compound //= parses');
+    }
+
+    # Last statement in block without semicolon is legitimate
+    {
+        my $result = parse_result('{ my $x = 42 }');
+        ok(defined $result, 'bare last statement in block parses');
+    }
+
+    # Last statement at end of program without semicolon
+    {
+        my $result = parse_result('my $x = 42');
+        ok(defined $result, 'bare last statement at EOF parses');
+    }
+
+    # Multiple statements where last is bare (legitimate)
+    {
+        my $result = parse_result('my $x = 1; my $y = $x + 2');
+        ok(defined $result, 'separated statements with bare final parses');
     }
 }
 

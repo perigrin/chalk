@@ -28,6 +28,25 @@ class Chalk::Bootstrap::Semiring::Composite {
     }
 
     method add($left, $right) {
+        # Check if any component selects a preferred alternative.
+        # When a preference is expressed, each component's add() receives
+        # the preferred side as BOTH arguments, ensuring component-specific
+        # merge logic still runs (e.g., SemanticAction's Context handling).
+        for my $i (0 .. $semirings->$#*) {
+            if ($semirings->[$i]->can('selects_alternative')) {
+                my $pref = $semirings->[$i]->selects_alternative(
+                    $left->[$i], $right->[$i],
+                );
+                if (defined $pref) {
+                    my $chosen = $pref eq 'left' ? $left : $right;
+                    return [ map {
+                        $semirings->[$_]->add($chosen->[$_], $chosen->[$_])
+                    } 0 .. $semirings->$#* ];
+                }
+            }
+        }
+
+        # No preference: merge each component independently
         return [ map { $semirings->[$_]->add($left->[$_], $right->[$_]) } 0 .. $semirings->$#* ];
     }
 
