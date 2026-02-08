@@ -156,6 +156,20 @@ SKIP: {
     ok($recognizer->parse('$obj->$method(@args);'),
         'Phase 5: accepts dynamic method call with args');
 
+    # Grammar gap: $#array (array last index)
+    ok($recognizer->parse('my @arr = (1, 2, 3); my $last = $#arr;'),
+        'Phase 5: accepts $#array last-index operator');
+    ok($recognizer->parse('for my $i (0 .. $#arr) { }'),
+        'Phase 5: accepts $#array in range expression');
+    ok($recognizer->parse('for my $i (0 .. $#$arrayref) { }'),
+        'Phase 5: accepts $#$ref deref last-index operator');
+
+    # Grammar gap: backtick (qx) string literal
+    ok($recognizer->parse('my $output = `ls -la`;'),
+        'Phase 5: accepts backtick command literal');
+    ok($recognizer->parse('my $result = `echo hello world`;'),
+        'Phase 5: accepts backtick with spaces');
+
     # Grammar gap: old-style hash/array dereference
     ok($recognizer->parse('my %h = %$hashref;'),
         'Phase 5: accepts old-style hash dereference %$ref');
@@ -173,13 +187,6 @@ SKIP: {
         'lib/Chalk'
     );
 
-    # Files using grammar constructs not yet supported
-    my %known_gaps = (
-        'lib/Chalk/Bootstrap/ConciseTree.pm'            => '$#array (last-index)',
-        'lib/Chalk/Bootstrap/ConciseTree/Actions.pm'    => '$#array (last-index)',
-        'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm'     => 'backtick (qx) operator',
-    );
-
     for my $file (sort @pm_files) {
         open my $fh, '<:utf8', $file or do {
             fail("Phase 5: cannot read $file: $!");
@@ -188,16 +195,8 @@ SKIP: {
         local $/;
         my $source = <$fh>;
         close $fh;
-        if ($known_gaps{$file}) {
-            TODO: {
-                local $TODO = "grammar gap: $known_gaps{$file} not yet supported";
-                ok($recognizer->parse($source),
-                    "Phase 5: recognizes $file");
-            }
-        } else {
-            ok($recognizer->parse($source),
-                "Phase 5: recognizes $file");
-        }
+        ok($recognizer->parse($source),
+            "Phase 5: recognizes $file");
     }
 
     # Negative cases

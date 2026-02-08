@@ -445,7 +445,9 @@ Variable ::= ScalarVariable
 
 ScalarVariable ::= /\$[a-zA-Z_]\w*/
     | /\$\d+/
-    | /\$\$[a-zA-Z_]\w*/ ;
+    | /\$\$[a-zA-Z_]\w*/
+    | /\$#[a-zA-Z_]\w*/
+    | /\$#\$[a-zA-Z_]\w*/ ;
 
 ArrayVariable ::= /@[a-zA-Z_]\w*/
     | /@\$[a-zA-Z_]\w*/ ;
