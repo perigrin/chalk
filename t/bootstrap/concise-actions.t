@@ -618,6 +618,71 @@ SKIP: {
         ok((grep { $_->name() eq 'multiply' } $tree->ops()->@*),
             'compound *= has multiply op');
     }
+
+    # ========================================================================
+    # Phase 4: Chained and nested expressions
+    # ========================================================================
+
+    # --- Chained binary: multiply then modulo (Precedence semiring disambiguates) ---
+    # Uses * and % which have no unary counterparts (unlike + and -)
+    # B::Concise: padsv, padsv, multiply, padsv, modulo, padsv_store
+    {
+        my $tree = parse_concise('my $a = 2; my $b = 3; my $c = 5; my $d = $a ** $b % $c;');
+        ok(defined $tree, 'chained pow+modulo parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'pow' } @ops), 'chained expr has pow op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'modulo' } @ops), 'chained expr has modulo op')
+            or diag("ops: @ops");
+    }
+
+    # --- Reversed precedence: modulo then pow (pow binds tighter) ---
+    {
+        my $tree = parse_concise('my $a = 2; my $b = 3; my $c = 5; my $d = $a % $b ** $c;');
+        ok(defined $tree, 'reversed precedence modulo+pow parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'pow' } @ops), 'reversed precedence has pow op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'modulo' } @ops), 'reversed precedence has modulo op')
+            or diag("ops: @ops");
+    }
+
+    # --- Ternary with comparison ---
+    # B::Concise: padsv, padsv, gt, cond_expr, padsv, goto, padsv, padsv_store
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a > $b ? $a : $b;');
+        ok(defined $tree, 'ternary with comparison parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'gt' } @ops), 'ternary+comparison has gt op');
+        ok((grep { $_ eq 'cond_expr' } @ops), 'ternary+comparison has cond_expr op');
+    }
+
+    # --- Unary negation with binary modulo (% has no unary counterpart) ---
+    {
+        my $tree = parse_concise('my $a = 2; my $b = 3; my $c = -$a % $b;');
+        ok(defined $tree, 'unary negation with modulo parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'negate' } @ops), 'negate+modulo has negate op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'modulo' } @ops), 'negate+modulo has modulo op')
+            or diag("ops: @ops");
+    }
+
+    # --- Bitwise complement (untested unary operator) ---
+    {
+        my $tree = parse_concise('my $a = 5; my $b = ~$a;');
+        ok(defined $tree, 'bitwise complement parses');
+        ok((grep { $_->name() eq 'complement' } $tree->ops()->@*),
+            'bitwise complement has complement op');
+    }
+
+    # --- Reference generation (untested unary operator) ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = \$a;');
+        ok(defined $tree, 'reference generation parses');
+        ok((grep { $_->name() eq 'srefgen' } $tree->ops()->@*),
+            'reference generation has srefgen op');
+    }
 }
 
 done_testing;

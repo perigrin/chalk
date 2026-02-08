@@ -84,7 +84,8 @@ class Chalk::Bootstrap::ConciseTree::Actions {
 
     # Helper: walk context tree to find a text leaf matching an operator in the given map.
     # Descends through empty ConciseTree nodes (from BinaryOp/UnaryOp/AssignOp actions)
-    # to find the underlying scanned text.
+    # to find the underlying scanned text. Stops at non-empty ConciseTree focuses
+    # to avoid finding operators from nested BinaryExpressions in chained expressions.
     my sub _extract_operator_text($ctx, $op_map) {
         my $focus = $ctx->extract();
         # Text leaf: check if it's a known operator
@@ -92,6 +93,14 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             my $v = $focus;
             $v =~ s/^\s+|\s+$//g;
             return $v if exists $op_map->{$v};
+        }
+        # Non-empty ConciseTree: this is a processed Expression result — don't descend
+        # into its children, which may contain operators from inner BinaryExpressions.
+        # Empty ConciseTrees (from BinaryOp/AssignOp) are transparent markers we
+        # need to descend through.
+        if (defined $focus && $focus isa Chalk::Bootstrap::ConciseTree
+                && $focus->op_count() > 0) {
+            return undef;
         }
         # Recurse into children (including through empty ConciseTrees)
         for my $child ($ctx->children()->@*) {
@@ -213,6 +222,12 @@ class Chalk::Bootstrap::ConciseTree::Actions {
 
         my $has_init = scalar @expr_ops > 0;
         my $pad_name = $pad_op->name();
+
+        # Skip peephole for compound assignment: $a += 2 → padsv, const, add.
+        # AssignmentExpression marks compound assign ops with /COMPOUND private flag.
+        if ($has_init && @expr_ops && $expr_ops[-1]->private() =~ m{/COMPOUND}) {
+            return $tree;
+        }
 
         if ($pad_name eq 'padsv' && $has_init) {
             # Scalar with initializer: expr_ops + padsv_store/LVINTRO
@@ -725,6 +740,8 @@ class Chalk::Bootstrap::ConciseTree::Actions {
 
     # §17 AssignmentExpression — transparent for plain '=', emits arithmetic op for compound assign.
     # B::Concise uses the arithmetic op directly: $a += 2 → padsv, const, add (not sassign).
+    # The arithmetic op gets /COMPOUND private flag so the peephole optimizer knows
+    # not to convert the padsv into a padsv_store.
     method AssignmentExpression($ctx) {
         my $assign_text = _extract_operator_text($ctx, \%ASSIGN_OP_MAP);
         my @trees = _collect_trees($ctx);
@@ -732,7 +749,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         if (defined $assign_text) {
             my $op_name = $ASSIGN_OP_MAP{$assign_text};
             my $arity = $BRANCHING_OPS{$op_name} ? '|' : '2';
-            $result->push_op(_make_op($op_name, $arity));
+            $result->push_op(_make_op($op_name, $arity, private => '/COMPOUND'));
         }
         return $result;
     }

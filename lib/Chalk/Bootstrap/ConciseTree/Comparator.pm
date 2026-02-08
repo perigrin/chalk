@@ -90,6 +90,10 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
             # Strip numeric private flags (/1, /2) — these encode arity which
             # is already captured in the arity field
             $private =~ s{/\d+}{}g;
+
+            # Strip /COMPOUND flag (internal marker for compound assignment ops)
+            $private =~ s{/COMPOUND}{}g;
+
             $private =~ s{^\s+|\s+$}{}g;
 
             push @normalized_ops, Chalk::Bootstrap::ConciseOp->new(

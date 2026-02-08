@@ -131,6 +131,16 @@ SKIP: {
             name   => 'postfix increment',
             source => 'my $a = 1; my $b = $a++;',
         },
+        # Chained binary expressions (Precedence semiring disambiguates)
+        {
+            name   => 'chained pow+modulo',
+            source => 'my $a = 2; my $b = 3; my $c = 5; my $d = $a ** $b % $c;',
+        },
+        # Compound assignment
+        {
+            name   => 'compound add-assign',
+            source => 'my $a = 1; $a += 2;',
+        },
     );
 
     for my $case (@stable_cases) {

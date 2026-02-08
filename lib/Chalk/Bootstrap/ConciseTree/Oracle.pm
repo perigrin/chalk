@@ -25,7 +25,8 @@ class Chalk::Bootstrap::ConciseTree::Oracle {
 
         for my $line (split /\n/, $text) {
             # Skip non-op lines (e.g., "-e syntax OK", blank lines)
-            next unless $line =~ /^\s*[0-9a-f]+\s+</;
+            # B::Concise uses base-36 sequence labels (0-9, a-z), not hex.
+            next unless $line =~ /^\s*[0-9a-z]+\s+</;
 
             # Parse the line:
             # SEQ  <ARITY> OPNAME[TYPEINFO] FLAGS/PRIVATE
@@ -33,7 +34,7 @@ class Chalk::Bootstrap::ConciseTree::Oracle {
             # Bracket/paren groups can contain spaces (e.g. "const[IV 42]",
             # "nextstate(main 3 -e:1)"), so we match them explicitly.
             next unless $line =~ m{
-                ^\s*[0-9a-f]+       # sequence number (decimal or hex)
+                ^\s*[0-9a-z]+       # sequence number (base-36: 0-9, a-z)
                 \s+
                 <([^>]+)>           # arity marker (capture group 1)
                 \s+
