@@ -106,6 +106,12 @@ class Chalk::Bootstrap::Earley {
                     my $c_origin = $item->{origin};
                     $completed_at{$c_rule}{$c_origin}{$pos} //= [];
                     push $completed_at{$c_rule}{$c_origin}{$pos}->@*, $key;
+                    # Skip propagation of zero-valued completions. A zero
+                    # from on_complete (e.g. TypeInference rejecting a
+                    # keyword-as-Identifier) must not poison parent items
+                    # via multiply — the valid parse path will supply
+                    # the correct value independently.
+                    next if $semiring->is_zero($completed_value);
                     # Complete
                     $self->_complete($item, $alt_idx, $pos, \@chart, $agenda);
                 } else {
@@ -247,11 +253,17 @@ class Chalk::Bootstrap::Earley {
             my ($waiting_item, $waiting_alt_idx) = $entry->@*;
 
             # Advance the waiting item
+            my $new_value = $semiring->multiply($waiting_item->{value}, $completed_item->{value});
+
+            # Skip if multiply produced zero — don't propagate rejected
+            # completions (e.g. keyword-as-Identifier) to parent items
+            next if $semiring->is_zero($new_value);
+
             my $new_item = $self->_make_item(
                 $waiting_item->{rule},
                 $waiting_item->{dot} + 1,
                 $waiting_item->{origin},
-                $semiring->multiply($waiting_item->{value}, $completed_item->{value})
+                $new_value
             );
 
             my $new_key = $self->_item_key($new_item, $waiting_alt_idx);
@@ -293,11 +305,17 @@ class Chalk::Bootstrap::Earley {
             my ($citem, $calt_idx) = $entry->@*;
 
             # Advance the waiting item past the completed reference
+            my $new_value = $semiring->multiply($item->{value}, $citem->{value});
+
+            # Skip if multiply produced zero — don't propagate rejected
+            # completions to parent items
+            next if $semiring->is_zero($new_value);
+
             my $new_item = $self->_make_item(
                 $item->{rule},
                 $item->{dot} + 1,
                 $item->{origin},
-                $semiring->multiply($item->{value}, $citem->{value})
+                $new_value
             );
 
             my $new_key = $self->_item_key($new_item, $alt_idx);
