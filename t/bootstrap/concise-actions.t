@@ -489,6 +489,56 @@ SKIP: {
         ok((grep { $_ eq 'padsv_store' } @names),
             'variable after sub produces padsv_store');
     }
+
+    # ========================================================================
+    # Phase 4: Expressions
+    # ========================================================================
+
+    # --- Binary arithmetic (uses variable operands to avoid constant folding) ---
+    # Note: + and - are omitted because they have unary counterparts (/\+/, /-/)
+    # that win disambiguation in the ambiguous grammar. Precedence semiring needed.
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a * $b;');
+        ok(defined $tree, 'multiplication expression parses');
+        ok((grep { $_->name() eq 'multiply' } $tree->ops()->@*),
+            'multiplication has multiply op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a ** $b;');
+        ok(defined $tree, 'exponentiation expression parses');
+        ok((grep { $_->name() eq 'pow' } $tree->ops()->@*),
+            'exponentiation has pow op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a % $b;');
+        ok(defined $tree, 'modulus expression parses');
+        ok((grep { $_->name() eq 'modulo' } $tree->ops()->@*),
+            'modulus has modulo op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = 3; my $c = $a x $b;');
+        ok(defined $tree, 'repeat expression parses');
+        ok((grep { $_->name() eq 'repeat' } $tree->ops()->@*),
+            'repeat has repeat op');
+    }
+
+    # --- Comparison operators ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a == $b;');
+        ok(defined $tree, 'numeric equality parses');
+        ok((grep { $_->name() eq 'eq' } $tree->ops()->@*),
+            'numeric equality has eq op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = "x"; my $b = "y"; my $c = $a eq $b;');
+        ok(defined $tree, 'string equality parses');
+        ok((grep { $_->name() eq 'seq' } $tree->ops()->@*),
+            'string equality has seq op');
+    }
 }
 
 done_testing;

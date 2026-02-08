@@ -77,6 +77,65 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return defined _find_op_in_trees($name, @trees);
     }
 
+    # Helper: walk context tree to find a text leaf matching an operator in the given map.
+    # Descends through empty ConciseTree nodes (from BinaryOp/UnaryOp/AssignOp actions)
+    # to find the underlying scanned text.
+    my sub _extract_operator_text($ctx, $op_map) {
+        my $focus = $ctx->extract();
+        # Text leaf: check if it's a known operator
+        if (defined $focus && !ref($focus)) {
+            my $v = $focus;
+            $v =~ s/^\s+|\s+$//g;
+            return $v if exists $op_map->{$v};
+        }
+        # Recurse into children (including through empty ConciseTrees)
+        for my $child ($ctx->children()->@*) {
+            my $found = __SUB__->($child, $op_map);
+            return $found if defined $found;
+        }
+        return undef;
+    }
+
+    # Operator → B::Concise op name mapping for binary expressions
+    my %OP_MAP = (
+        # Arithmetic (§15)
+        '+'   => 'add',       '-'   => 'subtract',
+        '*'   => 'multiply',  '/'   => 'divide',
+        '%'   => 'modulo',    '**'  => 'pow',
+        'x'   => 'repeat',
+        # String
+        '.'   => 'concat',
+        # Comparison numeric
+        '=='  => 'eq',        '!='  => 'ne',
+        '<'   => 'lt',        '>'   => 'gt',
+        '<='  => 'le',        '>='  => 'ge',
+        '<=>' => 'ncmp',
+        # Comparison string
+        'eq'  => 'seq',       'ne'  => 'sne',
+        'lt'  => 'slt',       'gt'  => 'sgt',
+        'le'  => 'sle',       'ge'  => 'sge',
+        'cmp' => 'scmp',
+        # Logical (short-circuit)
+        '&&'  => 'and',       '||'  => 'or',
+        '//'  => 'dor',
+        'and' => 'and',       'or'  => 'or',
+        'xor' => 'xor',
+        # Bitwise
+        '&'   => 'bit_and',   '|'   => 'bit_or',
+        '^'   => 'bit_xor',
+        # Shift
+        '<<'  => 'left_shift', '>>' => 'right_shift',
+        # Regex binding
+        '=~'  => 'regcomp',   '!~'  => 'regcomp',
+        # Range
+        '..'  => 'range',     '...' => 'range',
+        # Type check
+        'isa' => 'isa',
+    );
+
+    # Short-circuit ops use branching arity '|'
+    my %BRANCHING_OPS = map { $_ => true } qw(and or dor);
+
     # Remove consecutive duplicate nextstate ops (artifact of ambiguous add())
     my sub _dedup_nextstates($tree) {
         my @ops = $tree->ops()->@*;
@@ -347,6 +406,26 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     method ParenExpr($ctx) {
         my @trees = _collect_trees($ctx);
         return _merge_trees(@trees);
+    }
+
+    # §15 BinaryOp — extract operator text, return empty tree
+    method BinaryOp($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
+    # §15 BinaryExpression — operand op operand → child ops + arithmetic op
+    # Finds operator via _extract_operator_text which walks the context tree
+    # looking for text leaves that match known operators.
+    method BinaryExpression($ctx) {
+        my $op_text = _extract_operator_text($ctx, \%OP_MAP);
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+        if (defined $op_text && exists $OP_MAP{$op_text}) {
+            my $op_name = $OP_MAP{$op_text};
+            my $arity = $BRANCHING_OPS{$op_name} ? '|' : '2';
+            $result->push_op(_op($op_name, $arity)->ops()->[0]);
+        }
+        return $result;
     }
 
     # §7 UseDeclaration — compile-time only, produces empty tree
