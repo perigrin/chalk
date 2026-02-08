@@ -26,6 +26,7 @@ use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Bootstrap::Semiring::Structural;
 
 # Returns the canonical 10-rule BNF meta-grammar as a string
 sub bnf_text {
@@ -138,9 +139,9 @@ sub build_perl_recognizer {
     );
 }
 
-# Builds a Composite(Boolean, Precedence, TypeInference, SemanticAction(ConciseTree::Actions))
+# Builds a Composite(Boolean, Precedence, TypeInference, Structural, SemanticAction(ConciseTree::Actions))
 # parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
-# Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=SemanticAction
+# Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
 sub build_perl_concise_parser {
     my ($grammar, %opts) = @_;
     my $ordered = $grammar;
@@ -170,13 +171,14 @@ sub build_perl_concise_parser {
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
         keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
     );
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
         actions => $actions,
     );
 
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
+        semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
     );
 
     return Chalk::Bootstrap::Earley->new(
