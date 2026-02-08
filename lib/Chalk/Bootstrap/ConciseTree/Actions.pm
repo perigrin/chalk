@@ -9,15 +9,20 @@ use Chalk::Bootstrap::ConciseTree;
 
 class Chalk::Bootstrap::ConciseTree::Actions {
 
-    # Helper: create a single-op ConciseTree
-    my sub _op($name, $arity, %opts) {
-        my $tree = Chalk::Bootstrap::ConciseTree->new();
-        $tree->push_op(Chalk::Bootstrap::ConciseOp->new(
+    # Helper: create a bare ConciseOp without wrapping in a ConciseTree
+    my sub _make_op($name, $arity, %opts) {
+        return Chalk::Bootstrap::ConciseOp->new(
             name      => $name,
             arity     => $arity,
             type_info => $opts{type_info},
             private   => $opts{private} // '',
-        ));
+        );
+    }
+
+    # Helper: create a single-op ConciseTree
+    my sub _op($name, $arity, %opts) {
+        my $tree = Chalk::Bootstrap::ConciseTree->new();
+        $tree->push_op(_make_op($name, $arity, %opts));
         return $tree;
     }
 
@@ -446,7 +451,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         if (defined $op_text && exists $OP_MAP{$op_text}) {
             my $op_name = $OP_MAP{$op_text};
             my $arity = $BRANCHING_OPS{$op_name} ? '|' : '2';
-            $result->push_op(_op($op_name, $arity)->ops()->[0]);
+            $result->push_op(_make_op($op_name, $arity));
         }
         return $result;
     }
@@ -457,7 +462,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my @trees = _collect_trees($ctx);
         my $result = _merge_trees(@trees);
         if (defined $op_text && exists $UNARY_OP_MAP{$op_text}) {
-            $result->push_op(_op($UNARY_OP_MAP{$op_text}, '1')->ops()->[0]);
+            $result->push_op(_make_op($UNARY_OP_MAP{$op_text}, '1'));
         }
         return $result;
     }
@@ -467,7 +472,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     method TernaryExpression($ctx) {
         my @trees = _collect_trees($ctx);
         my $result = _merge_trees(@trees);
-        $result->push_op(_op('cond_expr', '|')->ops()->[0]);
+        $result->push_op(_make_op('cond_expr', '|'));
         return $result;
     }
 
@@ -481,7 +486,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my @trees = _collect_trees($ctx);
         my $result = _merge_trees(@trees);
         my $op_name = $is_dec ? 'postdec' : 'postinc';
-        $result->push_op(_op($op_name, '1')->ops()->[0]);
+        $result->push_op(_make_op($op_name, '1'));
         return $result;
     }
 
@@ -727,7 +732,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         if (defined $assign_text) {
             my $op_name = $ASSIGN_OP_MAP{$assign_text};
             my $arity = $BRANCHING_OPS{$op_name} ? '|' : '2';
-            $result->push_op(_op($op_name, $arity)->ops()->[0]);
+            $result->push_op(_make_op($op_name, $arity));
         }
         return $result;
     }

@@ -1,5 +1,5 @@
 # ABOUTME: Tests for ConciseTree::Actions that map Perl grammar rules to ConciseOps.
-# ABOUTME: Tests Phase 2 (declarations/literals) and Phase 3 (class/sub/method) via actual parsing.
+# ABOUTME: Tests Phase 2-4 (declarations, class/sub/method, expressions) via actual parsing.
 use 5.42.0;
 use utf8;
 use Test::More;
