@@ -191,4 +191,122 @@ for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
     ok($sr->is_zero($r), 'on_complete propagates zero');
 }
 
+# ========================================================================
+# Phase 4: Integration with full Earley parser
+# ========================================================================
+use TestPipeline qw(perl_pipeline build_perl_concise_parser);
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::Target::Perl;
+
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $ir = perl_pipeline();
+
+SKIP: {
+    skip 'Perl grammar failed to parse', 20 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::StructuralInteg/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 20 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::StructuralInteg::grammar();
+    my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+    skip 'Concise parser not built', 20 unless defined $parser;
+
+    # Helper: parse and return the 5-ary result tuple
+    # [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
+    my sub parse_result($source) {
+        return $parser->parse_value($source);
+    }
+
+    # Helper: extract Structural value from result
+    my sub struct_val($result) {
+        return $result->[3] if defined $result;
+        return undef;
+    }
+
+    # Helper: extract ConciseTree from SemanticAction result
+    my sub concise_tree($result) {
+        return undef unless defined $result;
+        my $sem = $result->[4];
+        return undef unless defined $sem;
+        return $sem->extract();
+    }
+
+    # --- { 42 } at statement level: ambiguous, should prefer Block ---
+    {
+        my $result = parse_result('{ 42 }');
+        ok(defined $result, '{ 42 } parses at statement level');
+        my $sv = struct_val($result);
+        ok($sv->{valid}, '{ 42 } structural value is valid');
+        # At statement level, Block should be preferred
+        ok($sv->{is_block} || !$sv->{is_hash},
+            '{ 42 } at statement level: block preferred or hash not tagged');
+    }
+
+    # --- { } at statement level: ambiguous, should prefer Block ---
+    {
+        my $result = parse_result('{ }');
+        ok(defined $result, '{ } parses at statement level');
+        my $sv = struct_val($result);
+        ok($sv->{valid}, '{ } structural value is valid');
+        ok($sv->{is_block} || !$sv->{is_hash},
+            '{ } at statement level: block preferred or hash not tagged');
+    }
+
+    # --- { $x => $y } : naturally unambiguous → HashConstructor ---
+    # => operator is only valid in ExpressionList context
+    {
+        my $result = parse_result('my $h = { $x => $y };');
+        ok(defined $result, '{ $x => $y } in assignment parses');
+        my $tree = concise_tree($result);
+        ok(defined $tree, '{ $x => $y } produces concise tree');
+    }
+
+    # --- { my $x = 42; } : semicolon makes it unambiguous Block ---
+    {
+        my $result = parse_result('{ my $x = 42; }');
+        ok(defined $result, '{ my $x = 42; } parses');
+        my $tree = concise_tree($result);
+        ok(defined $tree, '{ my $x = 42; } produces concise tree');
+    }
+
+    # --- Simple non-brace programs still work ---
+    {
+        my $result = parse_result('my $x = 42;');
+        ok(defined $result, 'simple declaration still parses');
+        my $sv = struct_val($result);
+        ok($sv->{valid}, 'simple declaration structural value is valid');
+        # No block or hash tags for non-brace content
+        ok(!$sv->{is_block} && !$sv->{is_hash},
+            'simple declaration has no block/hash tags');
+    }
+
+    # --- Multiple statements with blocks ---
+    {
+        my $result = parse_result('my $x = 1; { my $y = 2; }');
+        ok(defined $result, 'statement + block parses');
+        my $tree = concise_tree($result);
+        ok(defined $tree, 'statement + block produces concise tree');
+    }
+
+    # --- Sub with block body ---
+    {
+        my $result = parse_result('sub foo { }');
+        ok(defined $result, 'sub with empty block parses');
+    }
+
+    # --- if/while with blocks (control flow) ---
+    {
+        my $result = parse_result('if ($x) { my $y = 1; }');
+        ok(defined $result, 'if with block body parses');
+    }
+
+    {
+        my $result = parse_result('while ($x) { my $y = 1; }');
+        ok(defined $result, 'while with block body parses');
+    }
+}
+
 done_testing();
