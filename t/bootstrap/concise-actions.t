@@ -539,6 +539,28 @@ SKIP: {
         ok((grep { $_->name() eq 'seq' } $tree->ops()->@*),
             'string equality has seq op');
     }
+
+    # --- Unary operators ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = -$a;');
+        ok(defined $tree, 'unary negation parses');
+        ok((grep { $_->name() eq 'negate' } $tree->ops()->@*),
+            'unary negation has negate op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = not $a;');
+        ok(defined $tree, 'unary not parses');
+        ok((grep { $_->name() eq 'not' } $tree->ops()->@*),
+            'unary not has not op');
+    }
+
+    {
+        my $tree = parse_concise('my $a = 1; my $b = !$a;');
+        ok(defined $tree, 'unary ! parses');
+        ok((grep { $_->name() eq 'not' } $tree->ops()->@*),
+            'unary ! has not op');
+    }
 }
 
 done_testing;

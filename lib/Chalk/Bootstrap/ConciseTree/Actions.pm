@@ -133,6 +133,16 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         'isa' => 'isa',
     );
 
+    # Unary operator → op name
+    my %UNARY_OP_MAP = (
+        '-'   => 'negate',
+        '!'   => 'not',
+        '+'   => 'null',       # unary + is a no-op in B::Concise
+        '~'   => 'complement',
+        '\\'  => 'srefgen',
+        'not' => 'not',
+    );
+
     # Short-circuit ops use branching arity '|'
     my %BRANCHING_OPS = map { $_ => true } qw(and or dor);
 
@@ -424,6 +434,17 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             my $op_name = $OP_MAP{$op_text};
             my $arity = $BRANCHING_OPS{$op_name} ? '|' : '2';
             $result->push_op(_op($op_name, $arity)->ops()->[0]);
+        }
+        return $result;
+    }
+
+    # §14 UnaryExpression — prefix operator + expression → child ops + unary op
+    method UnaryExpression($ctx) {
+        my $op_text = _extract_operator_text($ctx, \%UNARY_OP_MAP);
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+        if (defined $op_text && exists $UNARY_OP_MAP{$op_text}) {
+            $result->push_op(_op($UNARY_OP_MAP{$op_text}, '1')->ops()->[0]);
         }
         return $result;
     }
