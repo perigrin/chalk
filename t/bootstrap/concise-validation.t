@@ -1,5 +1,5 @@
 # ABOUTME: End-to-end validation: parse Perl inputs, compare ConciseTree against B::Concise oracle.
-# ABOUTME: Tests Phase 2 (declarations) and Phase 3 (class/sub/method) stable + structural cases.
+# ABOUTME: Tests Phase 2-4 (declarations, class/sub/method, expressions) stable + structural cases.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -93,6 +93,43 @@ SKIP: {
         {
             name   => 'hash with fat comma',
             source => 'my %h = (a => 1, b => 2);',
+        },
+        # Phase 4: Expressions
+        # Binary arithmetic with variable operands (avoids constant folding + unary ambiguity)
+        {
+            name   => 'multiplication',
+            source => 'my $a = 1; my $b = 2; my $c = $a * $b;',
+        },
+        {
+            name   => 'exponentiation',
+            source => 'my $a = 1; my $b = 2; my $c = $a ** $b;',
+        },
+        {
+            name   => 'modulus',
+            source => 'my $a = 1; my $b = 2; my $c = $a % $b;',
+        },
+        # Comparison
+        {
+            name   => 'numeric equality',
+            source => 'my $a = 1; my $b = 2; my $c = $a == $b;',
+        },
+        {
+            name   => 'string equality',
+            source => 'my $a = "x"; my $b = "y"; my $c = $a eq $b;',
+        },
+        # Unary
+        {
+            name   => 'negation',
+            source => 'my $a = 1; my $b = -$a;',
+        },
+        {
+            name   => 'logical not',
+            source => 'my $a = 1; my $b = not $a;',
+        },
+        # PostfixIncDec (value context — void context optimizes to preinc)
+        {
+            name   => 'postfix increment',
+            source => 'my $a = 1; my $b = $a++;',
         },
     );
 

@@ -74,12 +74,23 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
                 }
             }
 
-            # Strip /REFC from leave private flags (ref count detail)
+            # Strip branch target references: other->X → undef
+            if (defined $type_info && $type_info =~ /^other->/) {
+                $type_info = undef;
+            }
+
             my $private = $op->private();
+
+            # Strip /REFC from leave private flags (ref count detail)
             if ($op->name() eq 'leave') {
                 $private =~ s{/REFC}{};
                 $private =~ s{^\s+|\s+$}{}g;
             }
+
+            # Strip numeric private flags (/1, /2) — these encode arity which
+            # is already captured in the arity field
+            $private =~ s{/\d+}{}g;
+            $private =~ s{^\s+|\s+$}{}g;
 
             push @normalized_ops, Chalk::Bootstrap::ConciseOp->new(
                 name      => $op->name(),
