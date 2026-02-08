@@ -7,6 +7,8 @@ use experimental 'class';
 class Chalk::Bootstrap::Semiring::TypeInference {
     # Callback: word => true if keyword, false otherwise
     field $keyword_check :param;
+    # Positions where BinaryOp scanned + or - (for unary disambiguation)
+    field %binary_op_positions;
 
     method zero() {
         return { valid => false };
@@ -108,9 +110,21 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             });
         }
 
-        # Tag ambiguous unary +/- for later disambiguation
+        # Track BinaryOp scans of +/- for cross-item disambiguation.
+        # BinaryOp items scan before UnaryExpression predictions at the
+        # same position because BinaryOp advances an existing item while
+        # UnaryExpression is freshly predicted from the right-hand Expression.
+        if ($rule_name eq 'BinaryOp' && $matched_text =~ /^[+-]$/) {
+            $binary_op_positions{$pos} = true;
+        }
+
+        # Tag UnaryExpression +/- only when BinaryOp also scanned at
+        # the same position — the binary interpretation should win.
+        # Standalone unary (e.g., `my $b = -$a`) has no BinaryOp at
+        # that position and is left untagged.
         if ($rule_name eq 'UnaryExpression'
-            && $matched_text =~ /^[+-]$/)
+            && $matched_text =~ /^[+-]$/
+            && $binary_op_positions{$pos})
         {
             return $self->multiply($existing, {
                 valid           => true,
@@ -132,6 +146,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         if (($rule_name eq 'Identifier' || $rule_name eq 'QualifiedIdentifier')
             && $value->{keyword_as_identifier})
         {
+            return $self->zero();
+        }
+
+        # UnaryExpression completion with ambiguous_unary tag → reject.
+        # The binary interpretation (BinaryExpression) at the same position
+        # is the correct parse; zero-propagation prevents this unary path
+        # from poisoning parent items.
+        if ($rule_name eq 'UnaryExpression' && $value->{ambiguous_unary}) {
             return $self->zero();
         }
 

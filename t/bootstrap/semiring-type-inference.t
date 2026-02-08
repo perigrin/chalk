@@ -430,20 +430,43 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer);
 # on_scan: ambiguous unary +/- tagging
 # ========================================================================
 
-# UnaryExpression scanning '+' → tagged ambiguous_unary
+# UnaryExpression scanning '+' with BinaryOp at same position → tagged ambiguous_unary
 {
+    # Simulate BinaryOp scanning at position 0 first (as happens in real parsing)
+    my $bin_item = make_item('BinaryOp', $ti->one());
+    $ti->on_scan($bin_item, 0, 0, '+');
+
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '+');
-    ok(!$ti->is_zero($result), 'scanning "+" as UnaryExpression is non-zero');
-    ok($result->{ambiguous_unary}, 'scanning "+" as UnaryExpression tags ambiguous_unary');
+    ok(!$ti->is_zero($result), 'scanning "+" as UnaryExpression (with BinaryOp) is non-zero');
+    ok($result->{ambiguous_unary}, 'scanning "+" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
 }
 
-# UnaryExpression scanning '-' → tagged ambiguous_unary
+# UnaryExpression scanning '-' with BinaryOp at same position → tagged ambiguous_unary
+{
+    my $bin_item = make_item('BinaryOp', $ti->one());
+    $ti->on_scan($bin_item, 0, 1, '-');
+
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 1, '-');
+    ok(!$ti->is_zero($result), 'scanning "-" as UnaryExpression (with BinaryOp) is non-zero');
+    ok($result->{ambiguous_unary}, 'scanning "-" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
+}
+
+# UnaryExpression scanning '+' WITHOUT BinaryOp at same position → NOT tagged (standalone unary)
 {
     my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '-');
-    ok(!$ti->is_zero($result), 'scanning "-" as UnaryExpression is non-zero');
-    ok($result->{ambiguous_unary}, 'scanning "-" as UnaryExpression tags ambiguous_unary');
+    my $result = $ti->on_scan($item, 0, 99, '+');
+    ok(!$ti->is_zero($result), 'scanning "+" as standalone UnaryExpression is non-zero');
+    ok(!$result->{ambiguous_unary}, 'standalone "+" UnaryExpression NOT tagged');
+}
+
+# UnaryExpression scanning '-' WITHOUT BinaryOp → NOT tagged (standalone unary)
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 100, '-');
+    ok(!$ti->is_zero($result), 'scanning "-" as standalone UnaryExpression is non-zero');
+    ok(!$result->{ambiguous_unary}, 'standalone "-" UnaryExpression NOT tagged');
 }
 
 # UnaryExpression scanning '!' → NOT tagged (unambiguous unary)
@@ -504,6 +527,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer);
 # ========================================================================
 # on_complete: ambiguous_unary preservation and boundary clearing
 # ========================================================================
+
+# UnaryExpression completion with ambiguous_unary tag → rejected (binary path wins)
+{
+    my $tagged = { valid => true, ambiguous_unary => true };
+    my $item = make_item('UnaryExpression', $tagged);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'UnaryExpression completion with ambiguous_unary returns zero');
+}
+
+# UnaryExpression completion WITHOUT tag → valid (standalone unary)
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'UnaryExpression completion without tag is valid');
+}
 
 # Intermediate rule (Expression) preserves ambiguous_unary
 {
