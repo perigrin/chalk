@@ -7,7 +7,7 @@
 #
 # This grammar is intentionally ambiguous. Disambiguation is delegated to
 # semirings (Precedence, Arity/TypeInference, Structural) not grammar
-# structure. 66 rules, ~75-80 after quantifier desugaring.
+# structure. 65 rules, ~75-80 after quantifier desugaring.
 #
 # ============================================================================
 
@@ -34,7 +34,6 @@ StatementItem ::= SimpleStatement _ /;/
 
 SimpleStatement ::= ExpressionStatement
     | UseDeclaration
-    | VariableDeclaration
     | FieldDeclaration ;
 
 CompoundStatement ::= Block
@@ -65,10 +64,7 @@ ElsifChain ::= _ /elsif\b/ _ ParenExpr _ Block ElsifChain?
 
 WhileStatement ::= /(?:while|until)\b/ _ ParenExpr _ Block ;
 
-ForInit ::= Expression
-    | VariableDeclaration ;
-
-ForStatement ::= /for\b/ _ /\(/ _ ForInit? _ /;/ _ Expression? _ /;/
+ForStatement ::= /for\b/ _ /\(/ _ Expression? _ /;/ _ Expression? _ /;/
     _ Expression? _ /\)/ _ Block ;
 
 ForeachStatement ::= /(?:for|foreach)\b/ WS IteratorVariable _ ParenExpr _ Block
@@ -91,9 +87,7 @@ ImportList ::= ExpressionList ;
 # §8  VARIABLE AND FIELD DECLARATIONS
 
 VariableDeclaration ::= /(?:my|our|state|local)\b/ WS Variable
-    | /(?:my|our|state|local)\b/ WS Variable _ /=/ _ Expression
-    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/
-    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/ _ /=/ _ Expression ;
+    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/ ;
 
 VariableList ::= Variable
     | VariableList _ /,/ _ Variable ;
@@ -147,7 +141,8 @@ Expression ::= Atom
     | BinaryExpression
     | PostfixExpression
     | TernaryExpression
-    | AssignmentExpression ;
+    | AssignmentExpression
+    | VariableDeclaration ;
 
 ExpressionList ::= Expression
     | ExpressionList _ /,/ _ Expression

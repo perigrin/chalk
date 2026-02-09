@@ -138,7 +138,6 @@ which naturally allows trailing and repeated semicolons.
 ```bnf
 SimpleStatement ::= ExpressionStatement
     | UseDeclaration
-    | VariableDeclaration
     | FieldDeclaration ;
 
 CompoundStatement ::= Block
@@ -181,10 +180,7 @@ The elsif chain is optional and recursive, terminated by an optional `else`.
 ```bnf
 WhileStatement ::= /(?:while|until)\b/ _ ParenExpr _ Block ;
 
-ForInit ::= Expression
-    | VariableDeclaration ;
-
-ForStatement ::= /for\b/ _ /\(/ _ ForInit? _ /;/ _ Expression? _ /;/
+ForStatement ::= /for\b/ _ /\(/ _ Expression? _ /;/ _ Expression? _ /;/
     _ Expression? _ /\)/ _ Block ;
 
 ForeachStatement ::= /(?:for|foreach)\b/ WS IteratorVariable _ ParenExpr _ Block
@@ -216,9 +212,7 @@ Handles: `use 5.42.0`, `use utf8`, `use experimental 'class'`.
 
 ```bnf
 VariableDeclaration ::= /(?:my|our|state|local)\b/ WS Variable
-    | /(?:my|our|state|local)\b/ WS Variable _ /=/ _ Expression
-    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/
-    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/ _ /=/ _ Expression ;
+    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/ ;
 
 VariableList ::= Variable
     | VariableList _ /,/ _ Variable ;
@@ -228,8 +222,10 @@ FieldDeclaration ::= /field\b/ WS Variable AttributeList? DefaultValue? ;
 DefaultValue ::= _ /=/ _ Expression ;
 ```
 
-Handles: `my $x`, `my $x = 1`, `our @EXPORT_OK = (...)`,
-`my ($x, $y) = @list`, `field $name :param :reader = undef`.
+Handles: `my $x`, `our @EXPORT_OK`, `my ($x, $y)`.
+Initialization (`my $x = 1`, `my ($x, $y) = @list`) is handled by
+`AssignmentExpression` since `VariableDeclaration` is an `Expression`.
+`field $name :param :reader = undef` uses `DefaultValue`.
 
 ### §9 Definitions
 
@@ -291,7 +287,8 @@ Expression ::= Atom
     | BinaryExpression
     | PostfixExpression
     | TernaryExpression
-    | AssignmentExpression ;
+    | AssignmentExpression
+    | VariableDeclaration ;
 
 ExpressionList ::= Expression
     | ExpressionList _ /,/ _ Expression
@@ -697,7 +694,7 @@ Track the set of accepted files and ensure it never shrinks.
 | §3 Statement Categories | `SimpleStatement`, `CompoundStatement` | 2 |
 | §4 Expression Statements | `ExpressionStatement`, `PostfixModifier` | 2 |
 | §5 Conditionals | `IfStatement`, `ElsifChain` | 2 |
-| §6 Loops | `WhileStatement`, `ForInit`, `ForStatement`, `ForeachStatement`, `IteratorVariable` | 5 |
+| §6 Loops | `WhileStatement`, `ForStatement`, `ForeachStatement`, `IteratorVariable` | 4 |
 | §7 Use | `UseDeclaration`, `ModuleName`, `ImportList` | 3 |
 | §8 Variables/Fields | `VariableDeclaration`, `VariableList`, `FieldDeclaration`, `DefaultValue` | 4 |
 | §9 Definitions | `ClassBlock`, `SubroutineDefinition`, `MethodDefinition`, `AdjustBlock` | 4 |
@@ -712,7 +709,7 @@ Track the set of accepted files and ensure it never shrinks.
 | §18 Variables | `Variable`, `ScalarVariable`, `ArrayVariable`, `HashVariable` | 4 |
 | §19 Literals | `Literal`, `NumericLiteral`, `StringLiteral`, `RegexLiteral` | 4 |
 | §20 Helpers | `Identifier`, `QualifiedIdentifier`, `Block`, `Version` | 4 |
-| **Total** | | **66** |
+| **Total** | | **65** |
 
 With quantifier desugaring (`?`, `*`, `+` → helper rules), the effective
 rule count at parse time will be approximately 74 rules.
