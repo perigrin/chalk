@@ -100,6 +100,9 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
             # Strip /COMPOUND flag (internal marker for compound assignment ops)
             $private =~ s{/COMPOUND}{}g;
 
+            # Strip /VARDECL flag (internal marker from VariableDeclaration)
+            $private =~ s{/VARDECL}{}g;
+
             $private =~ s{^\s+|\s+$}{}g;
 
             push @normalized_ops, Chalk::Bootstrap::ConciseOp->new(

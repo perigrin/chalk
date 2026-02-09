@@ -211,15 +211,17 @@ class Chalk::Bootstrap::ConciseTree::Actions {
 
     # Peephole optimizer for variable declaration patterns.
     # Recognizes pad+expr combinations and emits proper B::Concise patterns.
+    # Only operates on pad ops tagged with /VARDECL by VariableDeclaration.
     my sub _peephole_vardecl($tree) {
         my @ops = $tree->ops()->@*;
         return $tree unless @ops >= 1;
 
-        # Find pad op (padsv/padav/padhv) and classify
+        # Find pad op tagged with /VARDECL (from VariableDeclaration)
         my $pad_idx = undef;
         my $pad_op = undef;
         for my $i (0 .. $#ops) {
-            if ($ops[$i]->name() =~ /^(padsv|padav|padhv)$/) {
+            if ($ops[$i]->name() =~ /^(padsv|padav|padhv)$/
+                    && $ops[$i]->private() =~ m{/VARDECL}) {
                 $pad_idx = $i;
                 $pad_op = $ops[$i];
                 last;
@@ -348,24 +350,17 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         qw(and or cond_expr enterloop leaveloop enteriter iter);
 
     # §2 StatementItem — prepend nextstate, then peephole-optimize child ops.
-    # Peephole patterns (SimpleStatement only):
-    #   padsv + const → const + padsv_store (scalar init)
-    #   padav/padhv + const... → pushmark + const... + pushmark + pad/LVINTRO + aassign (list init)
+    # Peephole patterns (variable declarations only):
+    #   padsv/VARDECL + const → const + padsv_store (scalar init)
+    #   padav/padhv/VARDECL + const... → pushmark + const... + pushmark + pad/LVINTRO + aassign (list init)
+    # The peephole only operates on pad ops tagged with /VARDECL by
+    # VariableDeclaration, so it safely ignores condition variables in
+    # compound statements (if/while/for/foreach).
     method StatementItem($ctx) {
         my @trees = _collect_trees($ctx);
         my $body = _merge_trees(@trees);
 
-        # Only apply peephole to simple statements (variable declarations).
-        # Compound statements (if/while/for/foreach) contain branch ops and
-        # loop envelopes — the peephole would destructively reorder them.
-        my $is_compound = false;
-        for my $op ($body->ops()->@*) {
-            if ($COMPOUND_OPS{$op->name()}) {
-                $is_compound = true;
-                last;
-            }
-        }
-        my $optimized = $is_compound ? $body : _peephole_vardecl($body);
+        my $optimized = _peephole_vardecl($body);
 
         # An empty statement item (no body ops) should produce no ops.
         # B::Concise does not emit a nextstate for empty statements.
@@ -497,16 +492,30 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     # §15 BinaryExpression — operand op operand → child ops + arithmetic op
     # Finds operator via _extract_operator_text which walks the context tree
     # looking for text leaves that match known operators.
+    # For branching ops (&&, ||, //, and, or), B::Concise exec order is
+    # LHS → branch_op → RHS (not flat LHS RHS op).
     method BinaryExpression($ctx) {
         my $op_text = _extract_operator_text($ctx, \%OP_MAP);
         my @trees = _collect_trees($ctx);
-        my $result = _merge_trees(@trees);
+
         if (defined $op_text && exists $OP_MAP{$op_text}) {
             my $op_name = $OP_MAP{$op_text};
-            my $arity = $BRANCHING_OPS{$op_name} ? '|' : '2';
-            $result->push_op(_make_op($op_name, $arity));
+            if ($BRANCHING_OPS{$op_name} && @trees >= 2) {
+                # Branching: LHS → branch_op → RHS
+                my $result = Chalk::Bootstrap::ConciseTree->new();
+                $result->concat($trees[0]) if $trees[0]->op_count() > 0;
+                $result->push_op(_make_op($op_name, '|'));
+                for my $i (1 .. $#trees) {
+                    $result->concat($trees[$i]) if $trees[$i]->op_count() > 0;
+                }
+                return $result;
+            }
+            # Non-branching: flat merge + op at end
+            my $result = _merge_trees(@trees);
+            $result->push_op(_make_op($op_name, '2'));
+            return $result;
         }
-        return $result;
+        return _merge_trees(@trees);
     }
 
     # §14 UnaryExpression — prefix operator + expression → child ops + unary op
@@ -520,10 +529,19 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return $result;
     }
 
-    # §16 TernaryExpression — condition ? then : else → child ops + cond_expr
-    # B::Concise interleaves branches; our flat model appends cond_expr at end.
+    # §16 TernaryExpression — condition ? then : else
+    # B::Concise exec order: condition → cond_expr → true_branch → false_branch
     method TernaryExpression($ctx) {
         my @trees = _collect_trees($ctx);
+        if (@trees >= 2) {
+            my $result = Chalk::Bootstrap::ConciseTree->new();
+            $result->concat($trees[0]) if $trees[0]->op_count() > 0;
+            $result->push_op(_make_op('cond_expr', '|'));
+            for my $i (1 .. $#trees) {
+                $result->concat($trees[$i]) if $trees[$i]->op_count() > 0;
+            }
+            return $result;
+        }
         my $result = _merge_trees(@trees);
         $result->push_op(_make_op('cond_expr', '|'));
         return $result;
@@ -564,13 +582,32 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §8 VariableDeclaration — transparent pass-through.
-    # The grammar is ambiguous between bare and initialized forms; both may
-    # complete and add() picks one. The peephole optimizer at StatementItem
-    # level handles combining pad ops with initializers.
+    # §8 VariableDeclaration — tags pad ops with /VARDECL so the peephole
+    # optimizer at StatementItem level can distinguish declaration targets
+    # from condition/expression variables. The grammar is ambiguous between
+    # bare and initialized forms; both may complete and add() picks one.
     method VariableDeclaration($ctx) {
         my @child_trees = _collect_trees($ctx);
-        return _merge_trees(@child_trees);
+        my $result = _merge_trees(@child_trees);
+
+        # Tag the first pad op (padsv/padav/padhv) with /VARDECL
+        my @ops = $result->ops()->@*;
+        my @tagged;
+        my $tagged_one = false;
+        for my $op (@ops) {
+            if (!$tagged_one && $op->name() =~ /^(padsv|padav|padhv)$/) {
+                push @tagged, Chalk::Bootstrap::ConciseOp->new(
+                    name      => $op->name(),
+                    arity     => $op->arity(),
+                    type_info => $op->type_info(),
+                    private   => '/VARDECL',
+                );
+                $tagged_one = true;
+            } else {
+                push @tagged, $op;
+            }
+        }
+        return Chalk::Bootstrap::ConciseTree->new(ops => \@tagged);
     }
 
     # §8 VariableList — transparent

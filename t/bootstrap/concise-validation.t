@@ -154,9 +154,24 @@ SKIP: {
             name   => 'chained add-subtract',
             source => 'my $a = 1; my $b = 2; my $c = $a + $b - 1;',
         },
-        # Note: defined-or (//) not oracle-stable because branching ops
-        # (dor, and, or, ||, &&) have different exec order in B::Concise
-        # (branch-between-operands) vs our tree (flat left-right-op).
+        # Phase 5b: Branching binary ops — exec order fixed to match B::Concise
+        # B::Concise interleaves: LHS → branch_op → RHS (not flat LHS RHS op)
+        {
+            name   => 'logical and (&&)',
+            source => 'my $a = 1; my $b = 2; my $c = $a && $b;',
+        },
+        {
+            name   => 'logical or (||)',
+            source => 'my $a = 1; my $b = 2; my $c = $a || $b;',
+        },
+        {
+            name   => 'defined-or (//)',
+            source => 'my $a = 0; my $b = 1; my $c = $a // $b;',
+        },
+        {
+            name   => 'ternary expression',
+            source => 'my $a = 1; my $b = 2; my $c = $a ? $b : 0;',
+        },
 
         # Phase 5: Control flow — oracle-stable cases
         {
