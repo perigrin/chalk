@@ -454,11 +454,12 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $rule = Chalk::Grammar::Rule->new(
-        name        => 'Identifier',
+        name        => 'Atom',
         expressions => [[]],
     );
 
-    # Simulate: Identifier item with keyword_as_identifier tagged
+    # Simulate: Atom item with keyword_as_identifier tagged
+    # (keyword rejection now happens at Atom/CallExpression level, not Identifier)
     my $tagged_type = { valid => true, keyword_as_identifier => true };
     my $item = {
         rule   => $rule,
@@ -469,7 +470,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $result = $comp->on_complete($item, 0, 3);
     is(scalar($result->@*), 4, '4-ary on_complete returns 4-tuple');
-    ok($type_sr->is_zero($result->[2]), 'type inference rejects Identifier completion with keyword');
+    ok($type_sr->is_zero($result->[2]), 'type inference rejects Atom completion with keyword');
     ok($comp->is_zero($result), 'whole 4-tuple is zero when type inference rejects');
 }
 

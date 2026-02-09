@@ -172,14 +172,17 @@ for my $kw (@keywords) {
 
 # ========================================================================
 # on_complete: rejection of keyword-as-identifier
+# Rejection happens at Atom/CallExpression level, not Identifier.
+# Identifier propagates the keyword_as_identifier tag upward.
 # ========================================================================
 
-# Identifier complete with keyword_as_identifier → zero
+# Identifier complete with keyword_as_identifier → valid (tag propagates)
 {
     my $tagged = { valid => true, keyword_as_identifier => true };
     my $item = make_item('Identifier', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
-    ok($ti->is_zero($result), 'Identifier completion with keyword_as_identifier returns zero');
+    ok(!$ti->is_zero($result), 'Identifier completion with keyword_as_identifier propagates (valid)');
+    ok($result->{keyword_as_identifier}, 'Identifier preserves keyword_as_identifier tag');
 }
 
 # Identifier complete without tag → valid
@@ -189,17 +192,42 @@ for my $kw (@keywords) {
     ok(!$ti->is_zero($result), 'Identifier completion without tag returns valid');
 }
 
-# Non-Identifier complete with tag → valid (clears flag)
+# Non-Identifier complete with tag → valid (preserves tag for propagation)
 {
     my $tagged = { valid => true, keyword_as_identifier => true };
     my $item = make_item('BinaryExpression', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'non-Identifier completion ignores keyword flag');
-    ok(!$result->{keyword_as_identifier}, 'non-Identifier completion clears flag');
+    ok($result->{keyword_as_identifier}, 'non-Identifier completion preserves keyword_as_identifier tag');
+}
+
+# Atom complete with keyword_as_identifier → zero (expression-level rejection)
+{
+    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $item = make_item('Atom', $tagged);
+    my $result = $ti->on_complete($item, 0, 3);
+    ok($ti->is_zero($result), 'Atom completion with keyword_as_identifier returns zero');
+}
+
+# CallExpression complete with keyword_as_identifier → zero
+{
+    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $item = make_item('CallExpression', $tagged);
+    my $result = $ti->on_complete($item, 0, 3);
+    ok($ti->is_zero($result), 'CallExpression completion with keyword_as_identifier returns zero');
+}
+
+# Attribute complete with keyword_as_identifier → valid (boundary, clears tag)
+{
+    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $item = make_item('Attribute', $tagged);
+    my $result = $ti->on_complete($item, 0, 3);
+    ok(!$ti->is_zero($result), 'Attribute completion allows keyword identifiers');
+    ok(!$result->{keyword_as_identifier}, 'Attribute clears keyword_as_identifier tag');
 }
 
 # ========================================================================
-# Full chain: scan "use" as Identifier → complete → is_zero
+# Full chain: scan "use" as Identifier → complete → tag propagates → Atom rejects
 # ========================================================================
 
 {
@@ -210,7 +238,13 @@ for my $kw (@keywords) {
 
     my $completed_item = make_item('Identifier', $scanned);
     my $completed = $ti->on_complete($completed_item, 0, 3);
-    ok($ti->is_zero($completed), 'chain step 2: Identifier completion returns zero');
+    ok(!$ti->is_zero($completed), 'chain step 2: Identifier completion propagates tag');
+    ok($completed->{keyword_as_identifier}, 'chain step 2: tag preserved');
+
+    # Atom would reject it
+    my $atom_item = make_item('Atom', $completed);
+    my $atom_result = $ti->on_complete($atom_item, 0, 3);
+    ok($ti->is_zero($atom_result), 'chain step 3: Atom completion rejects keyword');
 }
 
 # Full chain for non-keyword: scan "foo" as Identifier → complete → valid
@@ -283,12 +317,13 @@ for my $kw (qw(use class sub method)) {
 # on_complete: QualifiedIdentifier keyword rejection
 # ========================================================================
 
-# QualifiedIdentifier complete with keyword_as_identifier → zero
+# QualifiedIdentifier complete with keyword_as_identifier → valid (tag propagates)
 {
     my $tagged = { valid => true, keyword_as_identifier => true };
     my $item = make_item('QualifiedIdentifier', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
-    ok($ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier returns zero');
+    ok(!$ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier propagates');
+    ok($result->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
 }
 
 # QualifiedIdentifier complete without tag → valid
@@ -310,7 +345,8 @@ for my $kw (qw(use class sub method)) {
 
     my $completed_item = make_item('QualifiedIdentifier', $scanned);
     my $completed = $ti->on_complete($completed_item, 0, 5);
-    ok($ti->is_zero($completed), 'QualifiedIdentifier chain: completion returns zero');
+    ok(!$ti->is_zero($completed), 'QualifiedIdentifier chain: completion propagates tag');
+    ok($completed->{keyword_as_identifier}, 'QualifiedIdentifier chain: tag preserved');
 }
 
 # Full chain for qualified name: scan "Foo::class" → complete → valid
@@ -606,12 +642,13 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer);
     ok(!$result->{ambiguous_unary}, 'Signature clears ambiguous_unary');
 }
 
-# Identifier completion still rejects keyword_as_identifier (existing behavior preserved)
+# Identifier completion now propagates keyword_as_identifier (rejection at Atom/CallExpression)
 {
     my $tagged = { valid => true, keyword_as_identifier => true };
     my $item = make_item('Identifier', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
-    ok($ti->is_zero($result), 'Identifier rejection still works after on_complete refactor');
+    ok(!$ti->is_zero($result), 'Identifier propagates keyword_as_identifier after refactor');
+    ok($result->{keyword_as_identifier}, 'keyword_as_identifier tag preserved through Identifier');
 }
 
 # Non-boundary rule without tag → no ambiguous_unary
