@@ -327,14 +327,33 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@child_trees);
     }
 
+    # Ops that indicate a compound statement (if/while/for/foreach) rather
+    # than a simple expression statement. The peephole vardecl optimizer
+    # must not run on compound statement trees because it would incorrectly
+    # transform condition variables (e.g., padsv[$x] in `if ($x)`) into
+    # padsv_store patterns meant for variable declarations.
+    my %COMPOUND_OPS = map { $_ => true }
+        qw(and or cond_expr enterloop leaveloop enteriter iter);
+
     # §2 StatementItem — prepend nextstate, then peephole-optimize child ops.
-    # Peephole patterns:
+    # Peephole patterns (SimpleStatement only):
     #   padsv + const → const + padsv_store (scalar init)
     #   padav/padhv + const... → pushmark + const... + pushmark + pad/LVINTRO + aassign (list init)
     method StatementItem($ctx) {
         my @trees = _collect_trees($ctx);
         my $body = _merge_trees(@trees);
-        my $optimized = _peephole_vardecl($body);
+
+        # Only apply peephole to simple statements (variable declarations).
+        # Compound statements (if/while/for/foreach) contain branch ops and
+        # loop envelopes — the peephole would destructively reorder them.
+        my $is_compound = false;
+        for my $op ($body->ops()->@*) {
+            if ($COMPOUND_OPS{$op->name()}) {
+                $is_compound = true;
+                last;
+            }
+        }
+        my $optimized = $is_compound ? $body : _peephole_vardecl($body);
 
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->push_op(Chalk::Bootstrap::ConciseOp->new(
