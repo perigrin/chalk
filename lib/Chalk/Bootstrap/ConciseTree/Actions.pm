@@ -472,6 +472,101 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return $result;
     }
 
+    # Builtin function name → B::Concise op name.
+    # List ops require a leading pushmark before arguments.
+    my %BUILTIN_OPS = (
+        'die'     => 'die',
+        'warn'    => 'warn',
+        'return'  => 'return',
+        'push'    => 'push',
+        'pop'     => 'pop',
+        'shift'   => 'shift',
+        'unshift' => 'unshift',
+        'splice'  => 'splice',
+        'print'   => 'print',
+        'say'     => 'say',
+        'chomp'   => 'chomp',
+        'chop'    => 'chop',
+        'defined' => 'defined',
+        'delete'  => 'delete',
+        'exists'  => 'exists',
+        'keys'    => 'keys',
+        'values'  => 'values',
+        'each'    => 'each',
+        'join'    => 'join',
+        'split'   => 'split',
+        'sort'    => 'sort',
+        'reverse' => 'reverse',
+        'grep'    => 'grep',
+        'map'     => 'map',
+        'chr'     => 'chr',
+        'ord'     => 'ord',
+        'length'  => 'length',
+        'substr'  => 'substr',
+        'index'   => 'index',
+        'rindex'  => 'rindex',
+        'sprintf' => 'sprintf',
+        'ref'     => 'ref',
+        'bless'   => 'bless',
+        'open'    => 'open',
+        'close'   => 'close',
+        'read'    => 'read',
+        'local'   => 'local',
+    );
+
+    # §13 CallExpression — function/builtin calls
+    # Identifier(args) or Identifier WS args → pushmark + args + call_op
+    # For known builtins, emits the specific op name (die, push, etc.).
+    # For unknown functions, emits pushmark + args + entersub.
+    method CallExpression($ctx) {
+        my @items = _collect_items($ctx);
+
+        # Extract function name from the first text item or empty-tree Identifier
+        my $func_name;
+        for my $item (@items) {
+            if ($item->{type} eq 'text') {
+                my $v = $item->{value};
+                $v =~ s/^\s+|\s+$//g;
+                # Skip punctuation (parens, commas)
+                next if $v =~ /^[(),]$/;
+                if ($v =~ /^[a-zA-Z_]\w*$/) {
+                    $func_name = $v;
+                    last;
+                }
+            } elsif ($item->{type} eq 'tree' && $item->{value}->op_count() == 0) {
+                # Empty tree from Identifier — check scanned text
+                my $scanned = $item->{ctx}->scanned_text();
+                if (defined $scanned) {
+                    $scanned =~ s/^\s+|\s+$//g;
+                    if ($scanned =~ /^[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*$/) {
+                        $func_name = $scanned;
+                        last;
+                    }
+                }
+            }
+        }
+
+        my @trees = _collect_trees($ctx);
+        my $args = _merge_trees(@trees);
+
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('pushmark', '0'));
+        $result->concat($args) if $args->op_count() > 0;
+
+        if (defined $func_name && exists $BUILTIN_OPS{$func_name}) {
+            $result->push_op(_make_op($BUILTIN_OPS{$func_name}, '@'));
+        } elsif (defined $func_name) {
+            # Non-builtin: entersub with GV
+            $result->push_op(_make_op('gv', '$',
+                type_info => "*$func_name"));
+            $result->push_op(_make_op('entersub', '@'));
+        } else {
+            # Fallback for unknown patterns
+            $result->push_op(_make_op('entersub', '@'));
+        }
+        return $result;
+    }
+
     # §13 Atom — transparent pass-through
     method Atom($ctx) {
         my @trees = _collect_trees($ctx);

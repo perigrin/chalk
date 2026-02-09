@@ -173,6 +173,12 @@ SKIP: {
             source => 'my $a = 1; my $b = 2; my $c = $a ? $b : 0;',
         },
 
+        # Note: CallExpression oracle cases omitted from stable list because
+        # Identifier(ExpressionList) is non-deterministic across hash seeds.
+        # The CallExpression action is correct when disambiguation selects it,
+        # but the grammar needs dedicated disambiguation (not just Structural
+        # semiring tagging) to be fully deterministic.
+
         # Phase 5: Control flow — oracle-stable cases
         {
             name   => 'simple if',

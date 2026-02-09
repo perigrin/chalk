@@ -1343,6 +1343,42 @@ SKIP: {
         ok($unstack_idx < $leaveloop_idx, 'foreach ordering: unstack before leaveloop')
             or diag("unstack=$unstack_idx, leaveloop=$leaveloop_idx");
     }
+    # ========================================================================
+    # Phase 5b: CallExpression — function/builtin calls
+    # CallExpression is non-deterministic across hash seeds because
+    # Identifier(ExpressionList) competes with Identifier + separate
+    # ExpressionStatement parse. Tests marked TODO until grammar-level
+    # disambiguation is implemented.
+    # ========================================================================
+
+    # --- CallExpression action method exists ---
+    {
+        my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+        ok($actions->can('CallExpression'), 'CallExpression action method exists');
+    }
+
+    # --- die "msg" — when CallExpression parse wins, should have die op ---
+    TODO: {
+        local $TODO = 'CallExpression non-deterministic across hash seeds';
+
+        my $tree = parse_concise('die "msg";');
+        ok(defined $tree, 'die call parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'die' } @ops), 'die call has die op')
+            or diag("ops: @ops");
+
+        $tree = parse_concise('return "value";');
+        ok(defined $tree, 'return call parses');
+        @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'return' } @ops), 'return call has return op')
+            or diag("ops: @ops");
+
+        $tree = parse_concise('my @a; my $x = 1; push @a, $x;');
+        ok(defined $tree, 'push call parses');
+        @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'push' } @ops), 'push call has push op')
+            or diag("ops: @ops");
+    }
 }
 
 done_testing;

@@ -27,12 +27,14 @@ class Chalk::Bootstrap::Semiring::Structural {
         my $is_block = $left->{is_block} || $right->{is_block};
         my $is_hash  = $left->{is_hash}  || $right->{is_hash};
         my $is_bare  = $left->{is_bare_statement} || $right->{is_bare_statement};
+        my $is_call  = $left->{is_call}  || $right->{is_call};
 
         return {
             valid => true,
             ($is_block ? (is_block          => true) : ()),
             ($is_hash  ? (is_hash           => true) : ()),
             ($is_bare  ? (is_bare_statement => true) : ()),
+            ($is_call  ? (is_call           => true) : ()),
         };
     }
 
@@ -51,6 +53,17 @@ class Chalk::Bootstrap::Semiring::Structural {
             return $left;
         }
 
+        # Both valid: prefer is_call over non-call
+        # CallExpression consumes more input than bare Identifier.
+        my $left_call  = $left->{is_call};
+        my $right_call = $right->{is_call};
+        if ($left_call && !$right_call) {
+            return $left;
+        }
+        if ($right_call && !$left_call) {
+            return $right;
+        }
+
         # Both valid: prefer is_block over is_hash
         if ($left->{is_block} || $right->{is_block}) {
             return { valid => true, is_block => true };
@@ -63,9 +76,11 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         # Both valid, untagged (or both bare)
         my $is_bare = $left_bare || $right_bare;
+        my $is_call = $left_call || $right_call;
         return {
             valid => true,
             ($is_bare ? (is_bare_statement => true) : ()),
+            ($is_call ? (is_call           => true) : ()),
         };
     }
 
@@ -83,6 +98,14 @@ class Chalk::Bootstrap::Semiring::Structural {
         }
         if ($right_bare && !$left_bare) {
             return 'left';
+        }
+
+        # Prefer CallExpression over non-call
+        if ($left->{is_call} && !$right->{is_call}) {
+            return 'left';
+        }
+        if ($right->{is_call} && !$left->{is_call}) {
+            return 'right';
         }
 
         # Prefer block over hash
@@ -122,6 +145,11 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true, is_hash => true };
         }
 
+        # Tag CallExpression completions — preferred over bare Identifier
+        if ($rule_name eq 'CallExpression') {
+            return { valid => true, is_call => true };
+        }
+
         # Tag bare StatementItem (alt 1 = SimpleStatement without semicolon)
         if ($rule_name eq 'StatementItem' && $alt_idx == 1) {
             return {
@@ -129,6 +157,7 @@ class Chalk::Bootstrap::Semiring::Structural {
                 is_bare_statement => true,
                 ($value->{is_block} ? (is_block => true) : ()),
                 ($value->{is_hash}  ? (is_hash  => true) : ()),
+                ($value->{is_call}  ? (is_call  => true) : ()),
             };
         }
 
@@ -138,12 +167,13 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true };
         }
 
-        # Statement boundaries: clear block/hash, preserve is_bare_statement
+        # Statement boundaries: clear block/hash, preserve is_bare_statement and is_call
         if ($rule_name eq 'StatementList'
             || $rule_name eq 'Program') {
             return {
                 valid => true,
                 ($value->{is_bare_statement} ? (is_bare_statement => true) : ()),
+                ($value->{is_call}           ? (is_call           => true) : ()),
             };
         }
 
@@ -151,12 +181,14 @@ class Chalk::Bootstrap::Semiring::Structural {
         my $is_block = $value->{is_block};
         my $is_hash  = $value->{is_hash};
         my $is_bare  = $value->{is_bare_statement};
+        my $is_call  = $value->{is_call};
 
         return {
             valid => true,
             ($is_block ? (is_block          => true) : ()),
             ($is_hash  ? (is_hash           => true) : ()),
             ($is_bare  ? (is_bare_statement => true) : ()),
+            ($is_call  ? (is_call           => true) : ()),
         };
     }
 }
