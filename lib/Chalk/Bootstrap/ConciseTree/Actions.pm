@@ -894,6 +894,31 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@trees);
     }
 
+    # §4 PostfixModifier — postfix control flow (if/unless/while/until/for/foreach)
+    method PostfixModifier($ctx) {
+        my $scanned = $ctx->scanned_text();
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+
+        if (defined $scanned && $scanned =~ /\bunless\b/) {
+            $result->push_op(_make_op('or', '|'));
+        } elsif (defined $scanned && $scanned =~ /\bwhile\b/) {
+            $result->push_op(_make_op('and', '|'));
+        } elsif (defined $scanned && $scanned =~ /\buntil\b/) {
+            $result->push_op(_make_op('or', '|'));
+        } elsif (defined $scanned && $scanned =~ /\b(?:for|foreach)\b/) {
+            $result->push_op(_make_op('enteriter', '{'));
+            $result->push_op(_make_op('iter', '0'));
+            $result->push_op(_make_op('and', '|'));
+            $result->push_op(_make_op('unstack', '0'));
+            $result->push_op(_make_op('leaveloop', '2'));
+        } else {
+            # Default: postfix if → and
+            $result->push_op(_make_op('and', '|'));
+        }
+        return $result;
+    }
+
     # §5 ElsifChain — transparent pass-through; adds cond_expr for elsif branches
     method ElsifChain($ctx) {
         my @trees = _collect_trees($ctx);

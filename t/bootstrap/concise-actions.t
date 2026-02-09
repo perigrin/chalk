@@ -1142,6 +1142,67 @@ SKIP: {
         ok((grep { $_ eq 'leaveloop' } @ops), 'foreach with var has leaveloop op')
             or diag("ops: @ops");
     }
+
+    # --- PostfixModifier: $x++ if $y; → has 'and' op ---
+    {
+        my $tree = parse_concise('my $x = 0; my $y = 1; $x++ if $y;');
+        ok(defined $tree, 'postfix if parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'and' } @ops), 'postfix if has and op')
+            or diag("ops: @ops");
+    }
+
+    # --- PostfixModifier: $x++ unless $y; → has 'or' op ---
+    {
+        my $tree = parse_concise('my $x = 0; my $y = 0; $x++ unless $y;');
+        ok(defined $tree, 'postfix unless parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'or' } @ops), 'postfix unless has or op')
+            or diag("ops: @ops");
+    }
+
+    # --- PostfixModifier: $x++ while $y; → has 'and' op ---
+    {
+        my $tree = parse_concise('my $x = 0; my $y = 1; $x++ while $y;');
+        ok(defined $tree, 'postfix while parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'and' } @ops), 'postfix while has and op')
+            or diag("ops: @ops");
+    }
+
+    # --- PostfixModifier: $x++ until $y; → has 'or' op ---
+    {
+        my $tree = parse_concise('my $x = 0; my $y = 0; $x++ until $y;');
+        ok(defined $tree, 'postfix until parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'or' } @ops), 'postfix until has or op')
+            or diag("ops: @ops");
+    }
+
+    # --- PostfixModifier: $x++ for @list; → has enteriter, iter, and, unstack, leaveloop ---
+    {
+        my $tree = parse_concise('my @list = (1, 2); my $x = 0; $x++ for @list;');
+        ok(defined $tree, 'postfix for parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enteriter' } @ops), 'postfix for has enteriter op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'iter' } @ops), 'postfix for has iter op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'postfix for has leaveloop op')
+            or diag("ops: @ops");
+    }
+
+    # --- Nested: if with while inside ---
+    {
+        my $tree = parse_concise('my $x = 1; my $y = 1; if ($x) { while ($y) { $x; } }');
+        ok(defined $tree, 'nested if+while parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        # Should have both an 'and' (from if) and an 'enterloop' (from while)
+        ok((grep { $_ eq 'and' } @ops), 'nested if+while has and op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'enterloop' } @ops), 'nested if+while has enterloop op')
+            or diag("ops: @ops");
+    }
 }
 
 done_testing;
