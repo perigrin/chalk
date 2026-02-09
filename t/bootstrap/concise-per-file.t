@@ -167,6 +167,107 @@ SKIP: {
         'lib/Chalk/Bootstrap/Context.pm',
         'Tier C: Context',
     );
+
+    # ========================================================================
+    # Tier D: All remaining oracle-matching files
+    # Includes classes with diverse method bodies, standalone modules with
+    # subs, and large files. B::Concise main-program optree matches ours.
+    # ========================================================================
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS/AST/CompositeNode.pm',
+        'Tier D: XS::AST::CompositeNode',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS/AST/VarDecl.pm',
+        'Tier D: XS::AST::VarDecl',
+    );
+
+    validate_file(
+        'lib/Chalk/Grammar/Symbol.pm',
+        'Tier D: Symbol',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS/AST/Preamble.pm',
+        'Tier D: XS::AST::Preamble',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Terminal.pm',
+        'Tier D: Terminal',
+    );
+
+    validate_file(
+        'lib/Chalk/Grammar/Rule.pm',
+        'Tier D: Rule',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/IR/Node.pm',
+        'Tier D: IR::Node',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Optimizer.pm',
+        'Tier D: Optimizer',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Semiring/Composite.pm',
+        'Tier D: Semiring::Composite',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm',
+        'Tier D: Semiring::SemanticAction',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',
+        'Tier D: XS::AST::XSUB',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Optimizer/DCE.pm',
+        'Tier D: Optimizer::DCE',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/Perl.pm',
+        'Tier D: Target::Perl',
+    );
+
+    validate_file(
+        'lib/Chalk/Grammar/BNF/Generated.pm',
+        'Tier D: BNF::Generated',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Desugar.pm',
+        'Tier D: Desugar',
+    );
+
+    validate_file(
+        'lib/Chalk/Grammar/BNF.pm',
+        'Tier D: Grammar::BNF',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Semiring/Structural.pm',
+        'Tier D: Semiring::Structural',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Semiring/TypeInference.pm',
+        'Tier D: Semiring::TypeInference',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Earley.pm',
+        'Tier D: Earley',
+    );
 }
 
 done_testing;
