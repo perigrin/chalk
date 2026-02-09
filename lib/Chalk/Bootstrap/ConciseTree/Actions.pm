@@ -197,6 +197,18 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new(ops => \@deduped);
     }
 
+    # Strip leading nextstate from a body tree. B::Concise does not emit
+    # a nextstate at the start of if/unless/elsif body blocks — the branch
+    # op jumps directly to the first body op. Loop bodies (while/for) DO
+    # have a leading nextstate and should NOT use this helper.
+    my sub _strip_leading_nextstate($tree) {
+        my @ops = $tree->ops()->@*;
+        if (@ops && $ops[0]->name() eq 'nextstate') {
+            shift @ops;
+        }
+        return Chalk::Bootstrap::ConciseTree->new(ops => \@ops);
+    }
+
     # Peephole optimizer for variable declaration patterns.
     # Recognizes pad+expr combinations and emits proper B::Concise patterns.
     my sub _peephole_vardecl($tree) {
@@ -355,11 +367,17 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         }
         my $optimized = $is_compound ? $body : _peephole_vardecl($body);
 
+        # An empty statement item (no body ops) should produce no ops.
+        # B::Concise does not emit a nextstate for empty statements.
+        if ($optimized->op_count() == 0) {
+            return Chalk::Bootstrap::ConciseTree->new();
+        }
+
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->push_op(Chalk::Bootstrap::ConciseOp->new(
             name => 'nextstate', arity => ';',
         ));
-        $result->concat($optimized) if $optimized->op_count() > 0;
+        $result->concat($optimized);
         return $result;
     }
 
@@ -873,8 +891,11 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->concat($condition) if $condition->op_count() > 0;
         $result->push_op(_make_op($branch_op, '|'));
+        # B::Concise does not emit a nextstate at the start of if/unless
+        # body blocks — strip them from each body tree.
         for my $bt (@body_trees) {
-            $result->concat($bt) if $bt->op_count() > 0;
+            my $stripped = _strip_leading_nextstate($bt);
+            $result->concat($stripped) if $stripped->op_count() > 0;
         }
         return $result;
     }
@@ -915,7 +936,9 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     }
 
     # §6 ForeachStatement — iterator loop with enteriter/iter/leaveloop envelope
-    # B::Concise exec order: list → enteriter → iter → and → body → unstack → leaveloop
+    # B::Concise exec order: list → enteriter[$var] → iter → and → body → unstack → leaveloop
+    # The iterator variable (padsv) is absorbed into enteriter's type_info in
+    # B::Concise — it does not appear as a separate op.
     method ForeachStatement($ctx) {
         my @trees = _collect_trees($ctx);
 
@@ -924,9 +947,27 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my $body = pop @trees;
         my $list_and_iter = _merge_trees(@trees);
 
+        # Extract iterator variable from list_and_iter: look for padsv op,
+        # remove it, and use its type_info on enteriter.
+        my $iter_var_info = undef;
+        my @filtered_ops;
+        for my $op ($list_and_iter->ops()->@*) {
+            if ($op->name() eq 'padsv' && !defined $iter_var_info) {
+                $iter_var_info = $op->type_info();
+            } else {
+                push @filtered_ops, $op;
+            }
+        }
+        my $list_tree = Chalk::Bootstrap::ConciseTree->new(ops => \@filtered_ops);
+
+        # B::Concise also prepends pushmark before the list for foreach
         my $result = Chalk::Bootstrap::ConciseTree->new();
-        $result->concat($list_and_iter) if $list_and_iter->op_count() > 0;
-        $result->push_op(_make_op('enteriter', '{'));
+        $result->push_op(_make_op('pushmark', '0'));
+        $result->concat($list_tree) if $list_tree->op_count() > 0;
+        # enteriter gets /LVINTRO when it declares the iterator variable
+        my $enteriter_private = defined $iter_var_info ? '/LVINTRO' : '';
+        $result->push_op(_make_op('enteriter', '{',
+            type_info => $iter_var_info, private => $enteriter_private));
         $result->push_op(_make_op('iter', '0'));
         $result->push_op(_make_op('and', '|'));
         $result->concat($body) if defined $body && $body->op_count() > 0;
@@ -979,12 +1020,21 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             my $result = Chalk::Bootstrap::ConciseTree->new();
             $result->concat($condition) if $condition->op_count() > 0;
             $result->push_op(_make_op('cond_expr', '|'));
+            # B::Concise does not emit a nextstate at the start of
+            # elsif/else body blocks — strip them from each body tree.
             for my $bt (@body_trees) {
-                $result->concat($bt) if $bt->op_count() > 0;
+                my $stripped = _strip_leading_nextstate($bt);
+                $result->concat($stripped) if $stripped->op_count() > 0;
             }
             return $result;
         }
-        # else: just the body block, no branch op
-        return _merge_trees(@trees);
+        # else: B::Concise wraps the else body in enter/leave scope,
+        # and retains the body's leading nextstate.
+        my $body = _merge_trees(@trees);
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('enter', '0'));
+        $result->concat($body) if $body->op_count() > 0;
+        $result->push_op(_make_op('leave', '@'));
+        return $result;
     }
 }

@@ -74,9 +74,14 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
                 }
             }
 
-            # Strip branch target references: other->X → undef
-            if (defined $type_info && $type_info =~ /^other->/) {
-                $type_info = undef;
+            # Strip branch target references: other->X, next->X, last->X, redo->X
+            # These appear on branching ops (and, or, cond_expr) and loop
+            # envelopes (enterloop, enteriter) as position-dependent labels.
+            if (defined $type_info) {
+                $type_info =~ s/\b(?:other|next|last|redo)->\w+//g;
+                $type_info =~ s/\s+/ /g;
+                $type_info =~ s/^\s+|\s+$//g;
+                $type_info = undef if $type_info eq '';
             }
 
             my $private = $op->private();

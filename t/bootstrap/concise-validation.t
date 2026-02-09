@@ -157,6 +157,36 @@ SKIP: {
         # Note: defined-or (//) not oracle-stable because branching ops
         # (dor, and, or, ||, &&) have different exec order in B::Concise
         # (branch-between-operands) vs our tree (flat left-right-op).
+
+        # Phase 5: Control flow — oracle-stable cases
+        {
+            name   => 'simple if',
+            source => 'my $x = 1; if ($x) { my $y = 2; }',
+        },
+        {
+            name   => 'unless',
+            source => 'my $x = 1; unless ($x) { my $y = 2; }',
+        },
+        {
+            name   => 'if-else',
+            source => 'my $x = 1; if ($x) { my $y = 2; } else { my $z = 3; }',
+        },
+        {
+            name   => 'if-elsif-else',
+            source => 'my $x = 1; if ($x > 0) { my $y = 1; } elsif ($x < 0) { my $y = 2; } else { my $y = 3; }',
+        },
+        {
+            name   => 'while loop',
+            source => 'my $x = 1; while ($x > 0) { my $y = 2; }',
+        },
+        {
+            name   => 'until loop',
+            source => 'my $x = 1; until ($x > 0) { my $y = 1; }',
+        },
+        {
+            name   => 'foreach loop',
+            source => 'my @a = (1, 2); for my $i (@a) { my $x = $i; }',
+        },
     );
 
     for my $case (@stable_cases) {
@@ -371,11 +401,9 @@ SKIP: {
 
     # ========================================================================
     # Phase 5: Control flow — structural ordering verification
-    # Oracle comparison not yet possible for control flow because:
-    # 1. Condition variable ops (padsv) leak through ambiguous add() paths
-    # 2. This creates trailing "ghost" ops absent from B::Concise output
-    # 3. Will be resolved when Precedence semiring disambiguates these cases
-    # Tests verify correct exec ordering: condition → branch → body.
+    # Oracle comparison is done via the stable_cases array above (7 cases).
+    # Additional ordering verification below uses index-based checks for
+    # cases that exercise specific op-ordering patterns.
     # ========================================================================
 
     # Helper to find first index of an op by name, optionally starting from offset

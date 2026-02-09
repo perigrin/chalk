@@ -40,17 +40,20 @@ class Chalk::Bootstrap::ConciseTree::Oracle {
                 \s+
                 ([a-z_]+)           # bare op name (capture group 2)
                 (?:                 # optional bracketed/parenthesized info
-                    \[([^\]]*)\]    # brackets: const[IV 42] (capture group 3)
-                  | \(([^\)]*)\)    # parens: nextstate(main 3 -e:1) (capture group 4)
+                    \(([^\)]*)\)    # parens: nextstate(main 3 -e:1) (capture group 3)
+                    (?:\[([^\]]*)\])? # optional brackets after parens: enteriter(...)[$i] (capture group 4)
+                  | \[([^\]]*)\]    # brackets only: const[IV 42] (capture group 5)
                 )?
-                (?:\s+(.*))?        # optional remaining flags (capture group 5)
+                (?:\s+(.*))?        # optional remaining flags (capture group 6)
                 $
             }x;
 
             my $arity = $1;
             my $name = $2;
-            my $type_info = $3 // $4;  # bracket info or paren info
-            my $remaining = $5 // '';
+            # Brackets take priority for type_info (variable name, constant value);
+            # parens contain branch targets which are stripped by Comparator.
+            my $type_info = $4 // $5 // $3;
+            my $remaining = $6 // '';
 
             # Extract private flags (start with /) from remaining
             my $private = '';
