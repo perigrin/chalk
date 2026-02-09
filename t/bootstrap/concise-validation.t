@@ -625,6 +625,43 @@ SKIP: {
                 or diag("Ours: ", join(", ", @op_names));
         }
     }
+
+    # Class with fields — B::Concise emits nextstate instead of stub in class body
+    # When field declarations exist, the class body has runtime content.
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nuse experimental 'class';\n\nclass Foo {\n    field \$x :param :reader;\n    field \$y :param :reader;\n    method bar() {\n        return 'baz';\n    }\n}\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'class with fields: parses')
+            or diag("Parse returned undef for class with fields");
+
+        SKIP: {
+            skip 'class with fields did not parse', 1 unless defined $ours;
+            my @op_names = map { $_->name() } $ours->ops()->@*;
+            is_deeply(\@op_names,
+                [qw(enter nextstate enterloop nextstate leaveloop leave)],
+                'class with fields: nextstate replaces stub in class body')
+                or diag("Ours: ", join(", ", @op_names));
+        }
+    }
+
+    # Const elision preserves nextstate — bare `1;` at end of file
+    # B::Concise keeps the nextstate even when the const body is elided.
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nmy \$x = 42;\n1;\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'const elision with preceding stmt: parses')
+            or diag("Parse returned undef for const elision test");
+
+        SKIP: {
+            skip 'const elision did not parse', 1 unless defined $ours;
+            my @op_names = map { $_->name() } $ours->ops()->@*;
+            # B::Concise: enter nextstate const padsv_store nextstate leave
+            # The nextstate for 1; should be preserved even though const is elided
+            ok((grep { $_ eq 'nextstate' } @op_names) >= 2,
+                'const elision: nextstate for bare 1; is preserved')
+                or diag("Ours: ", join(", ", @op_names));
+        }
+    }
 }
 
 done_testing;

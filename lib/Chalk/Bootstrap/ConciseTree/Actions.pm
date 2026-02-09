@@ -190,10 +190,9 @@ class Chalk::Bootstrap::ConciseTree::Actions {
                 $prev_was_nextstate = false;
             }
         }
-        # Also remove trailing nextstate (before leave)
-        if (@deduped && $deduped[-1]->name() eq 'nextstate') {
-            pop @deduped;
-        }
+        # Note: trailing nextstates are NOT removed — B::Concise preserves
+        # them when the last statement is a side-effect-free const (e.g., 1;)
+        # whose body is elided but whose nextstate remains.
         return Chalk::Bootstrap::ConciseTree->new(ops => \@deduped);
     }
 
@@ -310,16 +309,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             name => 'enter', arity => '0',
         ));
 
-        # Check if the program has any runtime ops (non-nextstate)
-        my $has_runtime_ops = false;
-        for my $op ($clean->ops()->@*) {
-            if ($op->name() ne 'nextstate') {
-                $has_runtime_ops = true;
-                last;
-            }
-        }
-
-        if ($has_runtime_ops) {
+        if ($clean->op_count() > 0) {
             $result->concat($clean);
         } else {
             # Compile-time only programs get a stub
@@ -370,11 +360,14 @@ class Chalk::Bootstrap::ConciseTree::Actions {
 
         # Perl's peephole optimizer eliminates side-effect-free statements.
         # A standalone const (e.g., 'string'; or 42;) is a no-op: B::Concise
-        # only emits the nextstate, not the const.  Drop the entire statement
-        # to match — the nextstate is also absent when nothing follows.
+        # elides the const but keeps the nextstate.
         if ($optimized->op_count() == 1
                 && $optimized->ops()->[0]->name() eq 'const') {
-            return Chalk::Bootstrap::ConciseTree->new();
+            my $result = Chalk::Bootstrap::ConciseTree->new();
+            $result->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'nextstate', arity => ';',
+            ));
+            return $result;
         }
 
         my $result = Chalk::Bootstrap::ConciseTree->new();
@@ -1033,11 +1026,25 @@ class Chalk::Bootstrap::ConciseTree::Actions {
 
     # §9 ClassBlock — feature class produces enterloop/stub/leaveloop at runtime.
     # Class body (methods, fields) is compiled at compile time and does not
-    # appear in the main optree.  B::Concise emits: enterloop → stub → leaveloop.
+    # appear in the main optree.  B::Concise emits: enterloop → stub → leaveloop
+    # for empty classes, or enterloop → nextstate → leaveloop when fields exist.
     method ClassBlock($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $has_fields = false;
+        for my $tree (@trees) {
+            if ($tree->op_count() > 0) {
+                $has_fields = true;
+                last;
+            }
+        }
+
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->push_op(_make_op('enterloop', '{'));
-        $result->push_op(_make_op('stub', '0'));
+        if ($has_fields) {
+            $result->push_op(_make_op('nextstate', ';'));
+        } else {
+            $result->push_op(_make_op('stub', '0'));
+        }
         $result->push_op(_make_op('leaveloop', '2'));
         return $result;
     }

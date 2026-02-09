@@ -105,6 +105,37 @@ SKIP: {
         'lib/Chalk/Bootstrap/Optimizer/Pass.pm',
         'Tier A: Optimizer::Pass',
     );
+
+    # ========================================================================
+    # Tier B: Classes with field declarations (17-22 lines)
+    # Same as Tier A but with field declarations, which cause B::Concise to
+    # emit nextstate instead of stub inside the class body.
+    # ========================================================================
+
+    validate_file(
+        'lib/Chalk/Bootstrap/IR/Node/Constant.pm',
+        'Tier B: IR::Node::Constant',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS/AST/Node.pm',
+        'Tier B: XS::AST::Node',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS/AST/Statement.pm',
+        'Tier B: XS::AST::Statement',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS/AST/Module.pm',
+        'Tier B: XS::AST::Module',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/IR/Node/Constructor.pm',
+        'Tier B: IR::Node::Constructor',
+    );
 }
 
 done_testing;
