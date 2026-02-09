@@ -847,6 +847,22 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return $result;
     }
 
+    # §6 WhileStatement — while/until loop with enterloop/leaveloop envelope
+    method WhileStatement($ctx) {
+        my $scanned = $ctx->scanned_text();
+        my $is_until = (defined $scanned && $scanned =~ /\buntil\b/);
+        my @trees = _collect_trees($ctx);
+
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('enterloop', '{'));
+        $result->concat(_merge_trees(@trees));
+        my $branch_op = $is_until ? 'or' : 'and';
+        $result->push_op(_make_op($branch_op, '|'));
+        $result->push_op(_make_op('unstack', '0'));
+        $result->push_op(_make_op('leaveloop', '2'));
+        return $result;
+    }
+
     # §5 ElsifChain — transparent pass-through; adds cond_expr for elsif branches
     method ElsifChain($ctx) {
         my @trees = _collect_trees($ctx);

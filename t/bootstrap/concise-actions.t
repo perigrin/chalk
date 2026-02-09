@@ -1047,6 +1047,36 @@ SKIP: {
         ok((grep { $_ eq 'cond_expr' } @ops), 'unless-else has cond_expr op')
             or diag("ops: @ops");
     }
+
+    # --- WhileStatement: while ($x) { $y; } → enterloop, and, unstack, leaveloop ---
+    {
+        my $tree = parse_concise('my $x = 1; my $y = 2; while ($x) { $y; }');
+        ok(defined $tree, 'while statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enterloop' } @ops), 'while has enterloop op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'and' } @ops), 'while has and op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'unstack' } @ops), 'while has unstack op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'while has leaveloop op')
+            or diag("ops: @ops");
+    }
+
+    # --- WhileStatement: until ($x) { $y; } → enterloop, or, unstack, leaveloop ---
+    {
+        my $tree = parse_concise('my $x = 0; my $y = 1; until ($x) { $y; }');
+        ok(defined $tree, 'until statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enterloop' } @ops), 'until has enterloop op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'or' } @ops), 'until has or op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'unstack' } @ops), 'until has unstack op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'until has leaveloop op')
+            or diag("ops: @ops");
+    }
 }
 
 done_testing;
