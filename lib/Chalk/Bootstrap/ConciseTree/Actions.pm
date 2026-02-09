@@ -863,6 +863,37 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return $result;
     }
 
+    # §6 ForStatement — C-style for loop with enterloop/leaveloop envelope
+    method ForStatement($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->concat(_merge_trees(@trees));
+        $result->push_op(_make_op('enterloop', '{'));
+        $result->push_op(_make_op('and', '|'));
+        $result->push_op(_make_op('unstack', '0'));
+        $result->push_op(_make_op('leaveloop', '2'));
+        return $result;
+    }
+
+    # §6 ForeachStatement — iterator loop with enteriter/iter/leaveloop envelope
+    method ForeachStatement($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->concat(_merge_trees(@trees));
+        $result->push_op(_make_op('enteriter', '{'));
+        $result->push_op(_make_op('iter', '0'));
+        $result->push_op(_make_op('and', '|'));
+        $result->push_op(_make_op('unstack', '0'));
+        $result->push_op(_make_op('leaveloop', '2'));
+        return $result;
+    }
+
+    # §6 IteratorVariable — transparent pass-through
+    method IteratorVariable($ctx) {
+        my @trees = _collect_trees($ctx);
+        return _merge_trees(@trees);
+    }
+
     # §5 ElsifChain — transparent pass-through; adds cond_expr for elsif branches
     method ElsifChain($ctx) {
         my @trees = _collect_trees($ctx);

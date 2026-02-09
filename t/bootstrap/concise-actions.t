@@ -1077,6 +1077,71 @@ SKIP: {
         ok((grep { $_ eq 'leaveloop' } @ops), 'until has leaveloop op')
             or diag("ops: @ops");
     }
+
+    # --- ForStatement (C-style): for ($i = 0; $i < 10; $i++) { } ---
+    # Grammar uses Expression? in init position; my-declarations are not Expressions.
+    {
+        my $tree = parse_concise('my $i = 0; for ($i = 0; $i < 10; $i++) { my $x = 1; }');
+        ok(defined $tree, 'C-style for statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enterloop' } @ops), 'C-style for has enterloop op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'C-style for has leaveloop op')
+            or diag("ops: @ops");
+    }
+
+    # --- ForStatement (infinite): for (;;) { $x; } ---
+    {
+        my $tree = parse_concise('my $x = 1; for (;;) { $x; }');
+        ok(defined $tree, 'infinite for statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enterloop' } @ops), 'infinite for has enterloop op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'infinite for has leaveloop op')
+            or diag("ops: @ops");
+    }
+
+    # --- ForStatement (condition only): for (; $x;) { } ---
+    {
+        my $tree = parse_concise('my $x = 1; for (; $x;) { $x; }');
+        ok(defined $tree, 'for with condition only parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enterloop' } @ops), 'for condition-only has enterloop op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'and' } @ops), 'for condition-only has and op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'for condition-only has leaveloop op')
+            or diag("ops: @ops");
+    }
+
+    # --- ForeachStatement: for my $i (@list) { $i; } ---
+    {
+        my $tree = parse_concise('my @list = (1, 2, 3); for my $i (@list) { $i; }');
+        ok(defined $tree, 'foreach statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enteriter' } @ops), 'foreach has enteriter op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'iter' } @ops), 'foreach has iter op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'and' } @ops), 'foreach has and op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'unstack' } @ops), 'foreach has unstack op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'foreach has leaveloop op')
+            or diag("ops: @ops");
+    }
+
+    # --- ForeachStatement (no variable): for (@list) { $x; } ---
+    # Without explicit iterator variable, perl uses $_
+    {
+        my $tree = parse_concise('my @list = (1, 2, 3); my $x = 0; for my $item (@list) { $x; }');
+        ok(defined $tree, 'foreach with variable parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'enteriter' } @ops), 'foreach with var has enteriter op')
+            or diag("ops: @ops");
+        ok((grep { $_ eq 'leaveloop' } @ops), 'foreach with var has leaveloop op')
+            or diag("ops: @ops");
+    }
 }
 
 done_testing;
