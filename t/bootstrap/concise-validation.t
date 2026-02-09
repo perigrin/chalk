@@ -262,22 +262,27 @@ SKIP: {
     }
 
     # ========================================================================
-    # Optimizer-volatile: test generation only, skip oracle comparison
-    # (Perl's optimizer removes const in void context)
+    # Standalone constants: Perl's optimizer removes const in void context.
+    # B::Concise produces: enter, nextstate, leave (no const op).
+    # Our StatementItem action matches this by eliding standalone const ops.
     # ========================================================================
 
     {
         my $ours = our_tree('42;');
-        ok(defined $ours, 'volatile: bare integer parses');
-        ok((grep { $_->name() eq 'const' } $ours->ops()->@*),
-            'volatile: bare integer has const (pre-optimization)');
+        ok(defined $ours, 'const-elision: bare integer parses');
+        my @op_names = map { $_->name() } $ours->ops()->@*;
+        ok(!(grep { $_ eq 'const' } @op_names),
+            'const-elision: bare integer const elided (matches B::Concise)')
+            or diag("Ops: ", join(", ", @op_names));
     }
 
     {
         my $ours = our_tree('"hello";');
-        ok(defined $ours, 'volatile: bare string parses');
-        ok((grep { $_->name() eq 'const' } $ours->ops()->@*),
-            'volatile: bare string has const (pre-optimization)');
+        ok(defined $ours, 'const-elision: bare string parses');
+        my @op_names = map { $_->name() } $ours->ops()->@*;
+        ok(!(grep { $_ eq 'const' } @op_names),
+            'const-elision: bare string const elided (matches B::Concise)')
+            or diag("Ops: ", join(", ", @op_names));
     }
 
     # ========================================================================
@@ -565,6 +570,44 @@ SKIP: {
             or diag("Ours:\n", $ours->to_exec_string());
         ok($unstack_idx < $leaveloop_idx, 'foreach ordering: unstack before leaveloop')
             or diag("Ours:\n", $ours->to_exec_string());
+    }
+
+    # --- Phase 5b: ClassBlock (feature class) oracle matching ---
+    # B::Concise wraps feature class blocks in enterloop/stub/leaveloop at runtime.
+    # The class body (methods, fields) is compiled at compile time.
+
+    # Simple class without :isa — enter → nextstate → enterloop → stub → leaveloop → leave
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nuse experimental 'class';\n\nclass Foo {\n    method bar() {\n        return 'baz';\n    }\n}\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'class without :isa: parses')
+            or diag("Parse returned undef for simple class");
+
+        SKIP: {
+            skip 'class without :isa did not parse', 1 unless defined $ours;
+            my @op_names = map { $_->name() } $ours->ops()->@*;
+            is_deeply(\@op_names,
+                [qw(enter nextstate enterloop stub leaveloop leave)],
+                'class without :isa: matches B::Concise structure')
+                or diag("Ours: ", join(", ", @op_names));
+        }
+    }
+
+    # Class with :isa — same runtime structure
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nuse experimental 'class';\n\nclass Foo :isa(Bar) {\n    method bar() {\n        return 'baz';\n    }\n}\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'class with :isa: parses')
+            or diag("Parse returned undef for class with :isa");
+
+        SKIP: {
+            skip 'class with :isa did not parse', 1 unless defined $ours;
+            my @op_names = map { $_->name() } $ours->ops()->@*;
+            is_deeply(\@op_names,
+                [qw(enter nextstate enterloop stub leaveloop leave)],
+                'class with :isa: matches B::Concise structure')
+                or diag("Ours: ", join(", ", @op_names));
+        }
     }
 }
 

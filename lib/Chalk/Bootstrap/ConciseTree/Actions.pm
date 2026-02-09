@@ -368,6 +368,15 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             return Chalk::Bootstrap::ConciseTree->new();
         }
 
+        # Perl's peephole optimizer eliminates side-effect-free statements.
+        # A standalone const (e.g., 'string'; or 42;) is a no-op: B::Concise
+        # only emits the nextstate, not the const.  Drop the entire statement
+        # to match — the nextstate is also absent when nothing follows.
+        if ($optimized->op_count() == 1
+                && $optimized->ops()->[0]->name() eq 'const') {
+            return Chalk::Bootstrap::ConciseTree->new();
+        }
+
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->push_op(Chalk::Bootstrap::ConciseOp->new(
             name => 'nextstate', arity => ';',
@@ -672,7 +681,9 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §7 ImportList — transparent (no runtime ops)
+    # §7 ImportList — compile-time only, produces empty tree.
+    # Returning empty tree prevents the import list's string literals
+    # from leaking into the runtime optree via ambiguous StatementList parsing.
     method ImportList($ctx) {
         return Chalk::Bootstrap::ConciseTree->new();
     }
@@ -941,9 +952,15 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §9 ClassBlock — compile-time only; class body compiled at compile time
+    # §9 ClassBlock — feature class produces enterloop/stub/leaveloop at runtime.
+    # Class body (methods, fields) is compiled at compile time and does not
+    # appear in the main optree.  B::Concise emits: enterloop → stub → leaveloop.
     method ClassBlock($ctx) {
-        return Chalk::Bootstrap::ConciseTree->new();
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('enterloop', '{'));
+        $result->push_op(_make_op('stub', '0'));
+        $result->push_op(_make_op('leaveloop', '2'));
+        return $result;
     }
 
     # §10 MethodDefinition — compile-time only; inside class block

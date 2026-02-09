@@ -448,7 +448,7 @@ SKIP: {
 
         # Compile-time only methods should return empty trees
         for my $method_name (qw(
-            SubroutineDefinition ClassBlock MethodDefinition AdjustBlock
+            SubroutineDefinition MethodDefinition AdjustBlock
             AttributeList Attribute
             Signature SignatureParams SignatureParam
             ScalarSignatureParam SlurpySignatureParam
@@ -457,6 +457,17 @@ SKIP: {
             my $tree = $actions->$method_name($empty_ctx);
             isa_ok($tree, 'Chalk::Bootstrap::ConciseTree');
             is($tree->op_count(), 0, "$method_name returns empty tree");
+        }
+
+        # ClassBlock produces enterloop/stub/leaveloop (feature class runtime envelope)
+        {
+            ok($actions->can('ClassBlock'), 'ClassBlock action method exists');
+            my $tree = $actions->ClassBlock($empty_ctx);
+            isa_ok($tree, 'Chalk::Bootstrap::ConciseTree');
+            is($tree->op_count(), 3, 'ClassBlock produces 3 ops');
+            my @op_names = map { $_->name() } $tree->ops()->@*;
+            is_deeply(\@op_names, [qw(enterloop stub leaveloop)],
+                'ClassBlock produces enterloop/stub/leaveloop');
         }
 
         # Transparent pass-through methods should work on empty context

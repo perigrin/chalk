@@ -142,8 +142,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         my $rule_name = $item->{rule}->name();
 
-        # Identifier or QualifiedIdentifier completion with keyword tag → reject
-        if (($rule_name eq 'Identifier' || $rule_name eq 'QualifiedIdentifier')
+        # Reject keyword-as-identifier at expression-level rules where a
+        # keyword should not be treated as a bare identifier.
+        # Atom (last alt = bare Identifier) and CallExpression (Identifier
+        # as function name) are the two contexts where keyword misuse occurs.
+        # Other rules that contain Identifier (Attribute, MethodCall,
+        # SubroutineDefinition, MethodDefinition) legitimately use keywords
+        # as identifiers (e.g., :isa(...), ->isa(...), sub eq {}).
+        if (($rule_name eq 'Atom' || $rule_name eq 'CallExpression')
             && $value->{keyword_as_identifier})
         {
             return $self->zero();
@@ -157,21 +163,25 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $self->zero();
         }
 
-        # Boundary rules: clear ambiguous_unary tag (nested context)
+        # Boundary rules: clear keyword_as_identifier and ambiguous_unary tags.
+        # Attribute and MethodCall allow keywords as identifiers (e.g., :isa).
         if ($rule_name eq 'ParenExpr'
             || $rule_name eq 'ArrayConstructor'
             || $rule_name eq 'HashConstructor'
             || $rule_name eq 'Block'
-            || $rule_name eq 'Signature')
+            || $rule_name eq 'Signature'
+            || $rule_name eq 'Attribute')
         {
             return { valid => true };
         }
 
-        # Preserve ambiguous_unary through intermediate rules
-        my $unary = $value->{ambiguous_unary};
+        # Preserve keyword_as_identifier and ambiguous_unary through intermediate rules
+        my $tagged = $value->{keyword_as_identifier};
+        my $unary  = $value->{ambiguous_unary};
         return {
             valid => true,
-            ($unary ? (ambiguous_unary => true) : ()),
+            ($tagged ? (keyword_as_identifier => true) : ()),
+            ($unary  ? (ambiguous_unary       => true) : ()),
         };
     }
 }
