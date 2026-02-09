@@ -38,7 +38,7 @@ class Chalk::Bootstrap::ConciseTree::Oracle {
                 \s+
                 <([^>]+)>           # arity marker (capture group 1)
                 \s+
-                ([a-z_]+)           # bare op name (capture group 2)
+                ([a-z_0-9]+)        # bare op name (capture group 2)
                 (?:                 # optional bracketed/parenthesized info
                     \(([^\)]*)\)    # parens: nextstate(main 3 -e:1) (capture group 3)
                     (?:\[([^\]]*)\])? # optional brackets after parens: enteriter(...)[$i] (capture group 4)

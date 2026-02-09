@@ -103,6 +103,9 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
             # Strip /VARDECL flag (internal marker from VariableDeclaration)
             $private =~ s{/VARDECL}{}g;
 
+            # Strip /TARG flag (compile-time target detail on entersub etc.)
+            $private =~ s{/TARG}{}g;
+
             $private =~ s{^\s+|\s+$}{}g;
 
             push @normalized_ops, Chalk::Bootstrap::ConciseOp->new(

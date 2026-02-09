@@ -150,6 +150,12 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true, is_call => true };
         }
 
+        # Tag MethodCall completions with parens (alts 0, 2) — preferred over
+        # bare method access (alts 1, 3) so args aren't lost as separate stmts.
+        if ($rule_name eq 'MethodCall' && ($alt_idx == 0 || $alt_idx == 2)) {
+            return { valid => true, is_call => true };
+        }
+
         # Tag bare StatementItem (alt 1 = SimpleStatement without semicolon)
         if ($rule_name eq 'StatementItem' && $alt_idx == 1) {
             return {

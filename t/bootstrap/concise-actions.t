@@ -1368,6 +1368,68 @@ SKIP: {
         ok($actions->can('CallExpression'), 'CallExpression action method exists');
     }
 
+    # ========================================================================
+    # Phase 5b: MethodCall — method invocation via ->
+    # $obj->method(args) → pushmark + invocant + args + method_named + entersub
+    # ========================================================================
+
+    # --- MethodCall action method exists ---
+    {
+        my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+        ok($actions->can('MethodCall'), 'MethodCall action method exists');
+    }
+
+    # --- $obj->method() — simple method call on lexical ---
+    {
+        my $tree = parse_concise('my $obj; $obj->method();');
+        ok(defined $tree, 'method call: parses');
+        SKIP: {
+            skip 'parse failed', 4 unless defined $tree;
+            my @ops = map { $_->name() } $tree->ops()->@*;
+            ok((grep { $_ eq 'pushmark' } @ops), 'method call: has pushmark');
+            ok((grep { $_ eq 'method_named' } @ops), 'method call: has method_named');
+            ok((grep { $_ eq 'entersub' } @ops), 'method call: has entersub');
+            # method_named should come before entersub
+            my ($mn_idx) = grep { $ops[$_] eq 'method_named' } 0 .. $#ops;
+            my ($es_idx) = grep { $ops[$_] eq 'entersub' } 0 .. $#ops;
+            ok($mn_idx < $es_idx, 'method call: method_named before entersub');
+        }
+    }
+
+    # --- $obj->method($arg) — method call with argument ---
+    {
+        my $tree = parse_concise('my $obj; my $arg; $obj->method($arg);');
+        ok(defined $tree, 'method call with arg: parses');
+        SKIP: {
+            skip 'parse failed', 2 unless defined $tree;
+            my @ops = map { $_->name() } $tree->ops()->@*;
+            ok((grep { $_ eq 'method_named' } @ops), 'method call with arg: has method_named');
+            ok((grep { $_ eq 'entersub' } @ops), 'method call with arg: has entersub');
+        }
+    }
+
+    # ========================================================================
+    # Phase 5b: Subscript — hash/array element access
+    # $ref->{key} → multideref or helem/aelem ops
+    # ========================================================================
+
+    # --- Subscript action method exists ---
+    {
+        my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+        ok($actions->can('Subscript'), 'Subscript action method exists');
+    }
+
+    # ========================================================================
+    # Phase 5b: PostfixDeref — postfix dereference ->@* ->%*
+    # $ref->@* → padsv + rv2av
+    # ========================================================================
+
+    # --- PostfixDeref action method exists ---
+    {
+        my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+        ok($actions->can('PostfixDeref'), 'PostfixDeref action method exists');
+    }
+
     # --- die "msg" — when CallExpression parse wins, should have die op ---
     TODO: {
         local $TODO = 'CallExpression non-deterministic across hash seeds';

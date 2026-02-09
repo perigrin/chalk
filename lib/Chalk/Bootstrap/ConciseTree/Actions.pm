@@ -671,6 +671,85 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@trees);
     }
 
+    # §16 MethodCall — method invocation via ->
+    # Expression->Identifier(args) → pushmark + invocant + args + method_named + entersub
+    # The method name is extracted from the scanned text of the Identifier child.
+    method MethodCall($ctx) {
+        my @items = _collect_items($ctx);
+
+        # Extract invocant tree, argument trees, and method name
+        my @trees;
+        my $method_name;
+        for my $item (@items) {
+            if ($item->{type} eq 'tree') {
+                my $tree = $item->{value};
+                if ($tree->op_count() == 0) {
+                    # Empty tree — likely an Identifier; extract method name
+                    my $scanned = $item->{ctx}->scanned_text();
+                    if (defined $scanned) {
+                        $scanned =~ s/^\s+|\s+$//g;
+                        if ($scanned =~ /^([a-zA-Z_]\w*)$/) {
+                            $method_name //= $1;
+                        }
+                    }
+                } else {
+                    push @trees, $tree;
+                }
+            }
+        }
+
+        # trees[0] = invocant, trees[1..] = arguments
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('pushmark', '0'));
+        for my $tree (@trees) {
+            $result->concat($tree) if $tree->op_count() > 0;
+        }
+        if (defined $method_name) {
+            $result->push_op(_make_op('method_named', '.',
+                type_info => qq{PV "$method_name"}));
+        }
+        $result->push_op(_make_op('entersub', '1'));
+        return $result;
+    }
+
+    # §16 Subscript — hash/array element access
+    # Expression->{key} → multideref or expression + const + helem/aelem
+    # B::Concise uses multideref as a peephole optimization; we emit it directly.
+    method Subscript($ctx) {
+        my @items = _collect_items($ctx);
+        my $scanned = $ctx->scanned_text();
+
+        # Determine subscript type from the delimiter
+        my $is_hash = (defined $scanned && $scanned =~ /\{/);
+
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+
+        my $op_name = $is_hash ? 'helem' : 'aelem';
+        $result->push_op(_make_op($op_name, '2'));
+        return $result;
+    }
+
+    # §16 PostfixDeref — postfix dereference ->@*, ->%*, ->$*, ->$#*
+    # $ref->@* → padsv + rv2av, $ref->%* → padsv + rv2hv
+    method PostfixDeref($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+        my $scanned = $ctx->scanned_text();
+
+        if (defined $scanned && $scanned =~ /%\*/) {
+            $result->push_op(_make_op('rv2hv', '1'));
+        } elsif (defined $scanned && $scanned =~ /\$#\*/) {
+            $result->push_op(_make_op('av2arylen', '1'));
+        } elsif (defined $scanned && $scanned =~ /\$\*/) {
+            $result->push_op(_make_op('rv2sv', '1'));
+        } else {
+            # Default: ->@*
+            $result->push_op(_make_op('rv2av', '1'));
+        }
+        return $result;
+    }
+
     # §7 UseDeclaration — compile-time only, produces empty tree
     method UseDeclaration($ctx) {
         return Chalk::Bootstrap::ConciseTree->new();

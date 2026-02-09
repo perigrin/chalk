@@ -122,6 +122,40 @@ CONCISE
     is($tree->op_count(), 13, 'handles hex sequence numbers (a, b, c, d)');
 }
 
+# --- parse_concise_output: op names with digits (rv2av, rv2hv) ---
+{
+    my $text = <<'CONCISE';
+1  <0> enter v
+2  <;> nextstate(main 1 -e:1) v:{
+3  <0> padsv[$r:1,2] vM/LVINTRO
+4  <;> nextstate(main 2 -e:1) v:{
+5  <0> padsv[$r:1,2] s
+6  <1> rv2av[t2] vK/1
+7  <@> leave[1 ref] vKP/REFC
+CONCISE
+
+    my $tree = $oracle->parse_concise_output($text);
+    is($tree->op_count(), 7, 'parses rv2av (op name with digits)');
+    is($tree->ops()->[5]->name(), 'rv2av', 'rv2av op name correct');
+    is($tree->ops()->[5]->type_info(), 't2', 'rv2av type_info is t2');
+}
+
+# --- parse_concise_output: method_named with dot arity ---
+{
+    my $text = <<'CONCISE';
+1  <0> pushmark s
+2  <0> padsv[$obj:1,2] sM
+3  <.> method_named[PV "method"]
+4  <1> entersub[t2] vKRS/TARG
+CONCISE
+
+    my $tree = $oracle->parse_concise_output($text);
+    is($tree->op_count(), 4, 'parses method_named');
+    is($tree->ops()->[2]->name(), 'method_named', 'method_named op name');
+    is($tree->ops()->[2]->arity(), '.', 'method_named arity is dot');
+    is($tree->ops()->[2]->type_info(), 'PV "method"', 'method_named type_info');
+}
+
 # --- concise_for: live invocation ---
 SKIP: {
     # Verify perl is available and supports B::Concise

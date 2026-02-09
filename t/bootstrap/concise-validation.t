@@ -179,6 +179,22 @@ SKIP: {
         # but the grammar needs dedicated disambiguation (not just Structural
         # semiring tagging) to be fully deterministic.
 
+        # Phase 5b: MethodCall (no args) and PostfixDeref — oracle-stable
+        # MethodCall with args ($obj->method(42)) is non-deterministic because
+        # MethodCall alt 1 ($obj->method) competes with alt 0 for the same input.
+        {
+            name   => 'method call (no args)',
+            source => 'my $obj; $obj->method();',
+        },
+        {
+            name   => 'postfix deref ->@*',
+            source => 'my $r; $r->@*;',
+        },
+        {
+            name   => 'postfix deref ->%*',
+            source => 'my $r; $r->%*;',
+        },
+
         # Phase 5: Control flow — oracle-stable cases
         {
             name   => 'simple if',
