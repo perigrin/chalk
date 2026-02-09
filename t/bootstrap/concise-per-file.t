@@ -136,6 +136,37 @@ SKIP: {
         'lib/Chalk/Bootstrap/IR/Node/Constructor.pm',
         'Tier B: IR::Node::Constructor',
     );
+
+    # ========================================================================
+    # Tier C: Classes with methods containing runtime logic (25-45 lines)
+    # Methods use string interpolation, conditionals, regex, join, push,
+    # etc. B::Concise sees compile-time class envelope only for main program.
+    # ========================================================================
+
+    validate_file(
+        'lib/Chalk/Bootstrap/ConciseOp.pm',
+        'Tier C: ConciseOp',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/ConciseTree.pm',
+        'Tier C: ConciseTree',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/ConciseTree/Comparator.pm',
+        'Tier C: ConciseTree::Comparator',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm',
+        'Tier C: ConciseTree::Oracle',
+    );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Context.pm',
+        'Tier C: Context',
+    );
 }
 
 done_testing;
