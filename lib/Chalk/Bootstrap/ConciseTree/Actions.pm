@@ -826,4 +826,35 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     method AnonymousSub($ctx) {
         return _op('anoncode', '$', type_info => 'CV CODE');
     }
+
+    # §5 IfStatement — if/unless with optional elsif/else
+    # Simple if → and, simple unless → or, with else/elsif → cond_expr
+    method IfStatement($ctx) {
+        my $scanned = $ctx->scanned_text();
+        my $is_unless = (defined $scanned && $scanned =~ /\bunless\b/);
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+
+        # Determine branching op based on else/elsif presence
+        my $has_else = _has_op('cond_expr', @trees);
+        if ($has_else || scalar @trees > 2) {
+            $result->push_op(_make_op('cond_expr', '|'));
+        } elsif ($is_unless) {
+            $result->push_op(_make_op('or', '|'));
+        } else {
+            $result->push_op(_make_op('and', '|'));
+        }
+        return $result;
+    }
+
+    # §5 ElsifChain — transparent pass-through; adds cond_expr for elsif branches
+    method ElsifChain($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $result = _merge_trees(@trees);
+        my $scanned = $ctx->scanned_text();
+        if (defined $scanned && $scanned =~ /\belsif\b/) {
+            $result->push_op(_make_op('cond_expr', '|'));
+        }
+        return $result;
+    }
 }

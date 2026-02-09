@@ -1,5 +1,5 @@
 # ABOUTME: Tests for ConciseTree::Actions that map Perl grammar rules to ConciseOps.
-# ABOUTME: Tests Phase 2-4 (declarations, class/sub/method, expressions) via actual parsing.
+# ABOUTME: Tests Phase 2-5 (declarations, class/sub/method, expressions, control flow) via actual parsing.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -974,6 +974,78 @@ SKIP: {
         ok(defined $tree, 'reference generation parses');
         ok((grep { $_->name() eq 'srefgen' } $tree->ops()->@*),
             'reference generation has srefgen op');
+    }
+
+    # ========================================================================
+    # Phase 5: Control flow
+    # ========================================================================
+
+    # --- IfStatement: if ($x) { $y; } → has 'and' op ---
+    {
+        my $tree = parse_concise('my $x = 1; my $y = 2; if ($x) { $y; }');
+        ok(defined $tree, 'if statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'and' } @ops), 'if statement has and op')
+            or diag("ops: @ops");
+    }
+
+    # --- IfStatement: unless ($x) { $y; } → has 'or' op ---
+    {
+        my $tree = parse_concise('my $x = 0; my $y = 1; unless ($x) { $y; }');
+        ok(defined $tree, 'unless statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'or' } @ops), 'unless statement has or op')
+            or diag("ops: @ops");
+    }
+
+    # --- IfStatement with else: if ($x) { $y; } else { $z; } → has 'cond_expr' ---
+    {
+        my $tree = parse_concise('my $x = 1; my $y = 2; my $z = 3; if ($x) { $y; } else { $z; }');
+        ok(defined $tree, 'if-else statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'cond_expr' } @ops), 'if-else has cond_expr op')
+            or diag("ops: @ops");
+    }
+
+    # --- IfStatement with elsif: if ($a) { } elsif ($b) { } else { } → has cond_expr ops ---
+    {
+        my $tree = parse_concise('my $a = 1; my $b = 2; my $c = 3; if ($a) { $b; } elsif ($b) { $c; } else { $a; }');
+        ok(defined $tree, 'if-elsif-else statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        my @cond_exprs = grep { $_ eq 'cond_expr' } @ops;
+        ok(scalar @cond_exprs >= 1, 'if-elsif-else has cond_expr ops')
+            or diag("ops: @ops");
+    }
+
+    # --- IfStatement: if without else, no child cond_expr → uses 'and' ---
+    {
+        my $tree = parse_concise('my $x = 1; if ($x) { my $y = 2; }');
+        ok(defined $tree, 'if without else parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'and' } @ops), 'if without else has and op')
+            or diag("ops: @ops");
+        ok(!(grep { $_ eq 'cond_expr' } @ops), 'if without else has no cond_expr')
+            or diag("ops: @ops");
+    }
+
+    # --- IfStatement: unless without else → uses 'or' not 'cond_expr' ---
+    {
+        my $tree = parse_concise('my $x = 0; unless ($x) { my $y = 1; }');
+        ok(defined $tree, 'unless without else parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'or' } @ops), 'unless without else has or op')
+            or diag("ops: @ops");
+        ok(!(grep { $_ eq 'cond_expr' } @ops), 'unless without else has no cond_expr')
+            or diag("ops: @ops");
+    }
+
+    # --- IfStatement: unless with else → uses 'cond_expr' ---
+    {
+        my $tree = parse_concise('my $x = 0; my $y = 1; unless ($x) { $y; } else { $x; }');
+        ok(defined $tree, 'unless-else statement parses');
+        my @ops = map { $_->name() } $tree->ops()->@*;
+        ok((grep { $_ eq 'cond_expr' } @ops), 'unless-else has cond_expr op')
+            or diag("ops: @ops");
     }
 }
 
