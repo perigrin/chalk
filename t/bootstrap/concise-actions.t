@@ -1078,11 +1078,10 @@ SKIP: {
             or diag("ops: @ops");
     }
 
-    # --- ForStatement (C-style): for ($i = 0; $i < 10; $i++) { } ---
-    # Grammar uses Expression? in init position; my-declarations are not Expressions.
+    # --- ForStatement (C-style): for (my $i = 0; $i < 10; $i++) { } ---
     {
-        my $tree = parse_concise('my $i = 0; for ($i = 0; $i < 10; $i++) { my $x = 1; }');
-        ok(defined $tree, 'C-style for statement parses');
+        my $tree = parse_concise('for (my $i = 0; $i < 10; $i++) { my $x = 1; }');
+        ok(defined $tree, 'C-style for with my-decl parses');
         my @ops = map { $_->name() } $tree->ops()->@*;
         ok((grep { $_ eq 'enterloop' } @ops), 'C-style for has enterloop op')
             or diag("ops: @ops");

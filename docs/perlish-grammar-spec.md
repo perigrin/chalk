@@ -181,7 +181,10 @@ The elsif chain is optional and recursive, terminated by an optional `else`.
 ```bnf
 WhileStatement ::= /(?:while|until)\b/ _ ParenExpr _ Block ;
 
-ForStatement ::= /for\b/ _ /\(/ _ Expression? _ /;/ _ Expression? _ /;/
+ForInit ::= Expression
+    | VariableDeclaration ;
+
+ForStatement ::= /for\b/ _ /\(/ _ ForInit? _ /;/ _ Expression? _ /;/
     _ Expression? _ /\)/ _ Block ;
 
 ForeachStatement ::= /(?:for|foreach)\b/ WS IteratorVariable _ ParenExpr _ Block
@@ -694,7 +697,7 @@ Track the set of accepted files and ensure it never shrinks.
 | §3 Statement Categories | `SimpleStatement`, `CompoundStatement` | 2 |
 | §4 Expression Statements | `ExpressionStatement`, `PostfixModifier` | 2 |
 | §5 Conditionals | `IfStatement`, `ElsifChain` | 2 |
-| §6 Loops | `WhileStatement`, `ForStatement`, `ForeachStatement`, `IteratorVariable` | 4 |
+| §6 Loops | `WhileStatement`, `ForInit`, `ForStatement`, `ForeachStatement`, `IteratorVariable` | 5 |
 | §7 Use | `UseDeclaration`, `ModuleName`, `ImportList` | 3 |
 | §8 Variables/Fields | `VariableDeclaration`, `VariableList`, `FieldDeclaration`, `DefaultValue` | 4 |
 | §9 Definitions | `ClassBlock`, `SubroutineDefinition`, `MethodDefinition`, `AdjustBlock` | 4 |
@@ -709,7 +712,7 @@ Track the set of accepted files and ensure it never shrinks.
 | §18 Variables | `Variable`, `ScalarVariable`, `ArrayVariable`, `HashVariable` | 4 |
 | §19 Literals | `Literal`, `NumericLiteral`, `StringLiteral`, `RegexLiteral` | 4 |
 | §20 Helpers | `Identifier`, `QualifiedIdentifier`, `Block`, `Version` | 4 |
-| **Total** | | **65** |
+| **Total** | | **66** |
 
 With quantifier desugaring (`?`, `*`, `+` → helper rules), the effective
-rule count at parse time will be approximately 74-79 rules.
+rule count at parse time will be approximately 74 rules.

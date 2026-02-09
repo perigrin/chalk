@@ -1,4 +1,4 @@
-# ABOUTME: Phase 0 test — feed 65-rule Perl grammar through existing BNF pipeline.
+# ABOUTME: Phase 0 test — feed 66-rule Perl grammar through existing BNF pipeline.
 # ABOUTME: Validates that chalk-bootstrap.bnf parses, produces IR, and generates compilable Perl.
 use 5.42.0;
 use utf8;
@@ -33,7 +33,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
         skip 'Parse failed — cannot validate IR', 7 unless defined $ir;
 
         is(ref($ir), 'ARRAY', 'Phase 0: IR is an arrayref of rules');
-        is(scalar($ir->@*), 65, 'Phase 0: IR contains 65 rules');
+        is(scalar($ir->@*), 66, 'Phase 0: IR contains 66 rules');
         diag sprintf("Parse time: %.3f seconds", $elapsed);
 
         # Phase 0 Gate 2: Code generation produces compilable output
@@ -56,7 +56,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
             # Verify the generated grammar has the expected number of rules
             my $gen_grammar = Chalk::Grammar::Perl::Generated::grammar();
             is(ref($gen_grammar), 'ARRAY', 'Phase 0: generated grammar() returns arrayref');
-            is(scalar($gen_grammar->@*), 65, 'Phase 0: generated grammar has 65 rules');
+            is(scalar($gen_grammar->@*), 66, 'Phase 0: generated grammar has 66 rules');
 
             # Phase 0 Gate 3: Generated recognizer is functional
             # Build a Boolean recognizer from the generated grammar and smoke test
@@ -97,7 +97,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
         my $opt_ir = $optimizer->optimize($ir);
 
         ok(defined $opt_ir, 'Phase 0: optimized pipeline produces IR');
-        is(scalar($opt_ir->@*), 65, 'Phase 0: optimized IR retains 65 rules');
+        is(scalar($opt_ir->@*), 66, 'Phase 0: optimized IR retains 66 rules');
 
         # Generate and compile optimized version
         my $target = Chalk::Bootstrap::Target::Perl->new();
@@ -131,8 +131,8 @@ SKIP: {
     use Chalk::Bootstrap::Desugar;
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($gen_grammar);
     my $expanded = scalar($desugared->@*);
-    ok($expanded > 65, "Phase 0: desugaring expands to $expanded rules (from 65)");
-    diag "Desugaring: 65 rules + quantifiers -> $expanded effective rules";
+    ok($expanded > 66, "Phase 0: desugaring expands to $expanded rules (from 66)");
+    diag "Desugaring: 66 rules + quantifiers -> $expanded effective rules";
 }
 
 done_testing();

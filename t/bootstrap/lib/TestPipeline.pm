@@ -93,7 +93,7 @@ sub optimized_pipeline {
     return $optimizer->optimize($ir);
 }
 
-# Returns the 65-rule Perl grammar as BNF text (reads from docs/chalk-bootstrap.bnf)
+# Returns the 66-rule Perl grammar as BNF text (reads from docs/chalk-bootstrap.bnf)
 sub perl_bnf_text {
     my $bnf_file = 'docs/chalk-bootstrap.bnf';
     open my $fh, '<:utf8', $bnf_file or die "Cannot read $bnf_file: $!";

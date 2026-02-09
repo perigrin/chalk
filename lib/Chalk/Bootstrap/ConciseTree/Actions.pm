@@ -863,6 +863,12 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return $result;
     }
 
+    # §6 ForInit — transparent pass-through (init slot of C-style for loop)
+    method ForInit($ctx) {
+        my @trees = _collect_trees($ctx);
+        return _merge_trees(@trees);
+    }
+
     # §6 ForStatement — C-style for loop with enterloop/leaveloop envelope
     method ForStatement($ctx) {
         my @trees = _collect_trees($ctx);
