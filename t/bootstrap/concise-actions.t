@@ -1202,6 +1202,147 @@ SKIP: {
         ok((grep { $_ eq 'enterloop' } @ops), 'nested if+while has enterloop op')
             or diag("ops: @ops");
     }
+
+    # ========================================================================
+    # Phase 5: Control flow — exec order verification
+    # B::Concise exec order places branch ops BETWEEN condition and body.
+    # These tests verify relative ordering of condition, branch, and body ops.
+    # Uses binary conditions (e.g., $x == 1) to produce unambiguous condition
+    # ops that survive the ambiguous grammar's add() merge.
+    # ========================================================================
+
+    # Helper to find the first index of an op with the given name,
+    # starting from a given offset (defaults to 0).
+    my sub _first_index($op_name, $ops_ref, $from = 0) {
+        for my $i ($from .. $#$ops_ref) {
+            return $i if $ops_ref->[$i]->name() eq $op_name;
+        }
+        return -1;
+    }
+
+    # --- IfStatement ordering: condition ops → and → body ops ---
+    {
+        my $tree = parse_concise('my $x = 1; if ($x == 1) { my $y = 2; }');
+        ok(defined $tree, 'if ordering: parses');
+        my @ops = $tree->ops()->@*;
+
+        my $eq_idx = _first_index('eq', \@ops);
+        my $and_idx = _first_index('and', \@ops);
+        ok($eq_idx >= 0, 'if ordering: has eq from condition')
+            or diag("ops: ", join(", ", map { $_->name() } @ops));
+        ok($and_idx >= 0, 'if ordering: has and');
+        ok($eq_idx < $and_idx, 'if ordering: condition eq before branch and')
+            or diag("eq at $eq_idx, and at $and_idx");
+
+        # Body ops (padsv_store for $y) should be after and
+        my $store_idx = _first_index('padsv_store', \@ops, $and_idx);
+        ok($store_idx > $and_idx, 'if ordering: body padsv_store after branch and')
+            or diag("and at $and_idx, padsv_store at $store_idx");
+    }
+
+    # --- IfStatement unless ordering: condition ops → or → body ops ---
+    {
+        my $tree = parse_concise('my $x = 0; unless ($x == 0) { my $y = 1; }');
+        ok(defined $tree, 'unless ordering: parses');
+        my @ops = $tree->ops()->@*;
+
+        my $eq_idx = _first_index('eq', \@ops);
+        my $or_idx = _first_index('or', \@ops);
+        ok($eq_idx >= 0 && $or_idx >= 0, 'unless ordering: has eq and or');
+        ok($eq_idx < $or_idx, 'unless ordering: condition eq before branch or')
+            or diag("eq at $eq_idx, or at $or_idx");
+    }
+
+    # --- IfStatement with else ordering: condition → cond_expr → true body / else body ---
+    {
+        my $tree = parse_concise('my $x = 1; my $y = 2; my $z = 3; if ($x == 1) { $y; } else { $z; }');
+        ok(defined $tree, 'if-else ordering: parses');
+        my @ops = $tree->ops()->@*;
+
+        my $eq_idx = _first_index('eq', \@ops);
+        my $cond_idx = _first_index('cond_expr', \@ops);
+        ok($eq_idx >= 0 && $cond_idx >= 0, 'if-else ordering: has eq and cond_expr');
+        ok($eq_idx < $cond_idx, 'if-else ordering: condition eq before cond_expr')
+            or diag("eq at $eq_idx, cond_expr at $cond_idx");
+    }
+
+    # --- WhileStatement ordering: enterloop → condition → and → body → unstack → leaveloop ---
+    {
+        my $tree = parse_concise('my $x = 1; while ($x > 0) { my $y = 2; }');
+        ok(defined $tree, 'while ordering: parses');
+        my @ops = $tree->ops()->@*;
+
+        my $enter_idx = _first_index('enterloop', \@ops);
+        my $gt_idx = _first_index('gt', \@ops);
+        my $and_idx = _first_index('and', \@ops);
+        my $unstack_idx = _first_index('unstack', \@ops);
+        my $leave_idx = _first_index('leaveloop', \@ops);
+
+        ok($enter_idx >= 0, 'while ordering: has enterloop');
+        ok($gt_idx >= 0, 'while ordering: has gt from condition');
+        ok($and_idx >= 0, 'while ordering: has and');
+
+        ok($enter_idx < $gt_idx, 'while ordering: enterloop before condition gt')
+            or diag("enterloop=$enter_idx, gt=$gt_idx");
+        ok($gt_idx < $and_idx, 'while ordering: condition gt before branch and')
+            or diag("gt=$gt_idx, and=$and_idx");
+        ok($and_idx < $unstack_idx, 'while ordering: branch and before unstack')
+            or diag("and=$and_idx, unstack=$unstack_idx");
+        ok($unstack_idx < $leave_idx, 'while ordering: unstack before leaveloop')
+            or diag("unstack=$unstack_idx, leaveloop=$leave_idx");
+
+        # Body ops should be between and and unstack
+        my $store_idx = _first_index('padsv_store', \@ops, $and_idx);
+        ok($store_idx > $and_idx && $store_idx < $unstack_idx,
+            'while ordering: body padsv_store between and and unstack')
+            or diag("and=$and_idx, padsv_store=$store_idx, unstack=$unstack_idx");
+    }
+
+    # --- Until ordering: enterloop → condition → or → body → unstack → leaveloop ---
+    {
+        my $tree = parse_concise('my $x = 0; until ($x > 0) { my $y = 1; }');
+        ok(defined $tree, 'until ordering: parses');
+        my @ops = $tree->ops()->@*;
+
+        my $enter_idx = _first_index('enterloop', \@ops);
+        my $gt_idx = _first_index('gt', \@ops);
+        my $or_idx = _first_index('or', \@ops);
+
+        ok($enter_idx >= 0 && $gt_idx >= 0 && $or_idx >= 0,
+            'until ordering: has enterloop, gt, and or');
+        ok($enter_idx < $gt_idx, 'until ordering: enterloop before condition gt')
+            or diag("enterloop=$enter_idx, gt=$gt_idx");
+        ok($gt_idx < $or_idx, 'until ordering: condition gt before branch or')
+            or diag("gt=$gt_idx, or=$or_idx");
+    }
+
+    # --- ForeachStatement ordering: list → enteriter → iter → and → body → unstack → leaveloop ---
+    {
+        my $tree = parse_concise('my @list = (1, 2, 3); for my $i (@list) { $i; }');
+        ok(defined $tree, 'foreach ordering: parses');
+        my @ops = $tree->ops()->@*;
+
+        # Find the second padav (list reference, not the declaration)
+        my $first_padav = _first_index('padav', \@ops);
+        my $list_padav = _first_index('padav', \@ops, $first_padav + 1);
+        my $enteriter_idx = _first_index('enteriter', \@ops);
+        my $iter_idx = _first_index('iter', \@ops);
+        my $and_idx = _first_index('and', \@ops);
+        my $unstack_idx = _first_index('unstack', \@ops);
+        my $leaveloop_idx = _first_index('leaveloop', \@ops);
+
+        ok($list_padav >= 0, 'foreach ordering: has list padav');
+        ok($list_padav < $enteriter_idx, 'foreach ordering: list padav before enteriter')
+            or diag("padav=$list_padav, enteriter=$enteriter_idx");
+        ok($enteriter_idx < $iter_idx, 'foreach ordering: enteriter before iter')
+            or diag("enteriter=$enteriter_idx, iter=$iter_idx");
+        ok($iter_idx < $and_idx, 'foreach ordering: iter before and')
+            or diag("iter=$iter_idx, and=$and_idx");
+        ok($and_idx < $unstack_idx, 'foreach ordering: and before unstack')
+            or diag("and=$and_idx, unstack=$unstack_idx");
+        ok($unstack_idx < $leaveloop_idx, 'foreach ordering: unstack before leaveloop')
+            or diag("unstack=$unstack_idx, leaveloop=$leaveloop_idx");
+    }
 }
 
 done_testing;

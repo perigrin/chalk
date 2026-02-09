@@ -1,5 +1,5 @@
 # ABOUTME: End-to-end validation: parse Perl inputs, compare ConciseTree against B::Concise oracle.
-# ABOUTME: Tests Phase 2-4 (declarations, class/sub/method, expressions) stable + structural cases.
+# ABOUTME: Tests Phase 2-5 (declarations, class/sub/method, expressions, control flow) stable + structural cases.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -367,6 +367,155 @@ SKIP: {
         # Block contents should pass through to program level
         ok((grep { $_ =~ /^padsv/ } @names),
             'bare block: child ops pass through');
+    }
+
+    # ========================================================================
+    # Phase 5: Control flow — structural ordering verification
+    # Oracle comparison not yet possible for control flow because:
+    # 1. Condition variable ops (padsv) leak through ambiguous add() paths
+    # 2. This creates trailing "ghost" ops absent from B::Concise output
+    # 3. Will be resolved when Precedence semiring disambiguates these cases
+    # Tests verify correct exec ordering: condition → branch → body.
+    # ========================================================================
+
+    # Helper to find first index of an op by name, optionally starting from offset
+    my sub first_op_index($name, $ops_ref, $from = 0) {
+        for my $i ($from .. $#$ops_ref) {
+            return $i if $ops_ref->[$i]->name() eq $name;
+        }
+        return -1;
+    }
+
+    # --- Simple if: condition → and → body ---
+    {
+        my $ours = our_tree('my $x = 1; if ($x == 1) { my $y = 2; }');
+        ok(defined $ours, 'if ordering: our parser produces tree');
+
+        my @ops = $ours->ops()->@*;
+        my $eq_idx = first_op_index('eq', \@ops);
+        my $and_idx = first_op_index('and', \@ops);
+        ok($eq_idx >= 0 && $and_idx >= 0, 'if ordering: has eq and and ops');
+        ok($eq_idx < $and_idx, 'if ordering: condition eq before branch and')
+            or diag("Ours:\n", $ours->to_exec_string());
+    }
+
+    # --- Unless: condition → or → body ---
+    {
+        my $ours = our_tree('my $x = 0; unless ($x == 0) { my $y = 1; }');
+        ok(defined $ours, 'unless ordering: our parser produces tree');
+
+        my @ops = $ours->ops()->@*;
+        my $eq_idx = first_op_index('eq', \@ops);
+        my $or_idx = first_op_index('or', \@ops);
+        ok($eq_idx >= 0 && $or_idx >= 0, 'unless ordering: has eq and or ops');
+        ok($eq_idx < $or_idx, 'unless ordering: condition eq before branch or')
+            or diag("Ours:\n", $ours->to_exec_string());
+    }
+
+    # --- If-else: condition → cond_expr → true body / else body ---
+    {
+        my $ours = our_tree('my $x = 1; my $y = 2; my $z = 3; if ($x == 1) { $y; } else { $z; }');
+        ok(defined $ours, 'if-else ordering: our parser produces tree');
+
+        my @ops = $ours->ops()->@*;
+        my $eq_idx = first_op_index('eq', \@ops);
+        my $cond_idx = first_op_index('cond_expr', \@ops);
+        ok($eq_idx >= 0 && $cond_idx >= 0, 'if-else ordering: has eq and cond_expr');
+        ok($eq_idx < $cond_idx, 'if-else ordering: condition eq before cond_expr')
+            or diag("Ours:\n", $ours->to_exec_string());
+    }
+
+    # --- If-elsif-else: two cond_expr ops in correct order ---
+    {
+        my $ours = our_tree('my $a = 1; my $b = 2; my $c = 3; if ($a == 1) { $b; } elsif ($b == 2) { $c; } else { $a; }');
+        ok(defined $ours, 'if-elsif-else ordering: our parser produces tree');
+
+        my @ops = $ours->ops()->@*;
+        my @cond_exprs;
+        for my $i (0 .. $#ops) {
+            push @cond_exprs, $i if $ops[$i]->name() eq 'cond_expr';
+        }
+        ok(scalar @cond_exprs >= 2, 'if-elsif-else ordering: has at least 2 cond_expr ops')
+            or diag("cond_expr count: ", scalar @cond_exprs,
+                    "\nOurs:\n", $ours->to_exec_string());
+
+        SKIP: {
+            skip 'need 2 cond_exprs for order check', 1 unless scalar @cond_exprs >= 2;
+            # Each condition's eq should precede its cond_expr
+            my $eq1_idx = first_op_index('eq', \@ops);
+            ok($eq1_idx >= 0 && $eq1_idx < $cond_exprs[0],
+                'if-elsif-else ordering: first condition before first cond_expr')
+                or diag("eq=$eq1_idx, cond_expr=$cond_exprs[0]");
+        }
+    }
+
+    # --- While: enterloop → condition → and → body → unstack → leaveloop ---
+    {
+        my $ours = our_tree('my $x = 1; while ($x > 0) { my $y = 2; }');
+        ok(defined $ours, 'while ordering: our parser produces tree');
+
+        my @ops = $ours->ops()->@*;
+        my $enter_idx = first_op_index('enterloop', \@ops);
+        my $gt_idx = first_op_index('gt', \@ops);
+        my $and_idx = first_op_index('and', \@ops);
+        my $unstack_idx = first_op_index('unstack', \@ops);
+        my $leave_idx = first_op_index('leaveloop', \@ops);
+
+        ok($enter_idx >= 0, 'while ordering: has enterloop');
+        ok($enter_idx < $gt_idx, 'while ordering: enterloop before condition gt')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($gt_idx < $and_idx, 'while ordering: condition gt before branch and')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($and_idx < $unstack_idx, 'while ordering: branch and before unstack')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($unstack_idx < $leave_idx, 'while ordering: unstack before leaveloop')
+            or diag("Ours:\n", $ours->to_exec_string());
+    }
+
+    # --- Until: enterloop → condition → or → body → unstack → leaveloop ---
+    {
+        my $ours = our_tree('my $x = 0; until ($x > 0) { my $y = 1; }');
+        ok(defined $ours, 'until ordering: our parser produces tree');
+
+        my @ops = $ours->ops()->@*;
+        my $enter_idx = first_op_index('enterloop', \@ops);
+        my $gt_idx = first_op_index('gt', \@ops);
+        my $or_idx = first_op_index('or', \@ops);
+
+        ok($enter_idx >= 0 && $gt_idx >= 0 && $or_idx >= 0,
+            'until ordering: has enterloop, gt, and or');
+        ok($enter_idx < $gt_idx, 'until ordering: enterloop before condition gt')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($gt_idx < $or_idx, 'until ordering: condition gt before branch or')
+            or diag("Ours:\n", $ours->to_exec_string());
+    }
+
+    # --- Foreach: list → enteriter → iter → and → body → unstack → leaveloop ---
+    {
+        my $ours = our_tree('my @list = (1, 2, 3); for my $i (@list) { $i; }');
+        ok(defined $ours, 'foreach ordering: our parser produces tree');
+
+        my @ops = $ours->ops()->@*;
+        # Find the second padav (list ref, not declaration)
+        my $first_padav = first_op_index('padav', \@ops);
+        my $list_padav = first_op_index('padav', \@ops, $first_padav + 1);
+        my $enteriter_idx = first_op_index('enteriter', \@ops);
+        my $iter_idx = first_op_index('iter', \@ops);
+        my $and_idx = first_op_index('and', \@ops);
+        my $unstack_idx = first_op_index('unstack', \@ops);
+        my $leaveloop_idx = first_op_index('leaveloop', \@ops);
+
+        ok($list_padav >= 0, 'foreach ordering: has list padav');
+        ok($list_padav < $enteriter_idx, 'foreach ordering: list before enteriter')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($enteriter_idx < $iter_idx, 'foreach ordering: enteriter before iter')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($iter_idx < $and_idx, 'foreach ordering: iter before and')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($and_idx < $unstack_idx, 'foreach ordering: and before unstack')
+            or diag("Ours:\n", $ours->to_exec_string());
+        ok($unstack_idx < $leaveloop_idx, 'foreach ordering: unstack before leaveloop')
+            or diag("Ours:\n", $ours->to_exec_string());
     }
 }
 

@@ -828,36 +828,55 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     }
 
     # §5 IfStatement — if/unless with optional elsif/else
-    # Simple if → and, simple unless → or, with else/elsif → cond_expr
+    # B::Concise exec order: condition → branch op → body trees.
+    # Simple if → and, simple unless → or, with else/elsif → cond_expr.
     method IfStatement($ctx) {
         my $scanned = $ctx->scanned_text();
         my $is_unless = (defined $scanned && $scanned =~ /\bunless\b/);
         my @trees = _collect_trees($ctx);
-        my $result = _merge_trees(@trees);
+
+        # trees[0] = condition (from ParenExpr), trees[1] = body (from Block),
+        # trees[2] = elsif/else chain (from ElsifChain, optional)
+        my $condition = $trees[0];
+        my @body_trees = @trees[1 .. $#trees];
 
         # Determine branching op based on else/elsif presence
         my $has_else = _has_op('cond_expr', @trees);
+        my $branch_op;
         if ($has_else || scalar @trees > 2) {
-            $result->push_op(_make_op('cond_expr', '|'));
+            $branch_op = 'cond_expr';
         } elsif ($is_unless) {
-            $result->push_op(_make_op('or', '|'));
+            $branch_op = 'or';
         } else {
-            $result->push_op(_make_op('and', '|'));
+            $branch_op = 'and';
+        }
+
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->concat($condition) if $condition->op_count() > 0;
+        $result->push_op(_make_op($branch_op, '|'));
+        for my $bt (@body_trees) {
+            $result->concat($bt) if $bt->op_count() > 0;
         }
         return $result;
     }
 
     # §6 WhileStatement — while/until loop with enterloop/leaveloop envelope
+    # B::Concise exec order: enterloop → condition → branch → body → unstack → leaveloop
     method WhileStatement($ctx) {
         my $scanned = $ctx->scanned_text();
         my $is_until = (defined $scanned && $scanned =~ /\buntil\b/);
         my @trees = _collect_trees($ctx);
 
+        # trees[0] = condition (from ParenExpr), trees[1] = body (from Block)
+        my $condition = $trees[0];
+        my $body = $trees[1];
+        my $branch_op = $is_until ? 'or' : 'and';
+
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->push_op(_make_op('enterloop', '{'));
-        $result->concat(_merge_trees(@trees));
-        my $branch_op = $is_until ? 'or' : 'and';
+        $result->concat($condition) if defined $condition && $condition->op_count() > 0;
         $result->push_op(_make_op($branch_op, '|'));
+        $result->concat($body) if defined $body && $body->op_count() > 0;
         $result->push_op(_make_op('unstack', '0'));
         $result->push_op(_make_op('leaveloop', '2'));
         return $result;
@@ -877,13 +896,21 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     }
 
     # §6 ForeachStatement — iterator loop with enteriter/iter/leaveloop envelope
+    # B::Concise exec order: list → enteriter → iter → and → body → unstack → leaveloop
     method ForeachStatement($ctx) {
         my @trees = _collect_trees($ctx);
+
+        # Body is always the last tree (from Block).
+        # Preceding trees are list expression and optional iterator variable.
+        my $body = pop @trees;
+        my $list_and_iter = _merge_trees(@trees);
+
         my $result = Chalk::Bootstrap::ConciseTree->new();
-        $result->concat(_merge_trees(@trees));
+        $result->concat($list_and_iter) if $list_and_iter->op_count() > 0;
         $result->push_op(_make_op('enteriter', '{'));
         $result->push_op(_make_op('iter', '0'));
         $result->push_op(_make_op('and', '|'));
+        $result->concat($body) if defined $body && $body->op_count() > 0;
         $result->push_op(_make_op('unstack', '0'));
         $result->push_op(_make_op('leaveloop', '2'));
         return $result;
@@ -920,14 +947,25 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return $result;
     }
 
-    # §5 ElsifChain — transparent pass-through; adds cond_expr for elsif branches
+    # §5 ElsifChain — elsif adds condition → cond_expr → body; else is just body
+    # B::Concise exec order for elsif: condition → cond_expr → body → [next chain]
     method ElsifChain($ctx) {
         my @trees = _collect_trees($ctx);
-        my $result = _merge_trees(@trees);
         my $scanned = $ctx->scanned_text();
         if (defined $scanned && $scanned =~ /\belsif\b/) {
+            # elsif: trees[0]=condition, trees[1]=body, trees[2]=next chain (optional)
+            my $condition = $trees[0];
+            my @body_trees = @trees[1 .. $#trees];
+
+            my $result = Chalk::Bootstrap::ConciseTree->new();
+            $result->concat($condition) if $condition->op_count() > 0;
             $result->push_op(_make_op('cond_expr', '|'));
+            for my $bt (@body_trees) {
+                $result->concat($bt) if $bt->op_count() > 0;
+            }
+            return $result;
         }
-        return $result;
+        # else: just the body block, no branch op
+        return _merge_trees(@trees);
     }
 }
