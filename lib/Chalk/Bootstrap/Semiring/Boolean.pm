@@ -5,8 +5,9 @@ use utf8;
 use experimental 'class';
 
 class Chalk::Bootstrap::Semiring::Boolean {
-    # Use a unique reference for zero value
-    my $ZERO = bless {}, 'Chalk::Bootstrap::Semiring::Boolean::Zero';
+    # Use a unique reference for zero value (identity checked via refaddr).
+    # Chalk does not support bless — we use feature class exclusively.
+    my $ZERO = [];
 
     method zero() {
         return $ZERO;

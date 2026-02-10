@@ -146,11 +146,8 @@ SKIP: {
         return \%result;
     }
 
-    # Files with known oracle mismatches (pre-existing issues exposed by parallelism
-    # allowing the full suite to complete without timeout)
-    my %TODO_FILES = (
-        'lib/Chalk/Bootstrap/Semiring/Boolean.pm' => 'emptyavhv/bless ordering mismatch',
-    );
+    # Files with known oracle mismatches — currently empty (all 37 pass)
+    my %TODO_FILES;
 
     # Emit TAP for a single file result
     my sub emit_tap_for_result($r) {

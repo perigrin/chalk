@@ -1191,6 +1191,22 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     }
 
     # §20 Block — transparent pass-through (children are statement ops)
+    # §12 ArrayConstructor — empty [] → emptyavhv (no /ANONHASH), non-empty → pushmark + items + anonlist
+    method ArrayConstructor($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $merged = _merge_trees(@trees);
+        if ($merged->op_count() == 0) {
+            # Empty array constructor: []
+            return _op('emptyavhv', '0');
+        }
+        # Non-empty: pushmark + items + anonlist
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('pushmark', '0'));
+        $result->concat($merged);
+        $result->push_op(_make_op('anonlist', '@'));
+        return $result;
+    }
+
     # §12 HashConstructor — empty {} → emptyavhv, non-empty → pushmark + pairs + anonhash
     method HashConstructor($ctx) {
         my @trees = _collect_trees($ctx);

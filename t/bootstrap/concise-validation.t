@@ -243,6 +243,10 @@ SKIP: {
             name   => 'empty hash constructor assignment',
             source => 'my $x = {};',
         },
+        {
+            name   => 'empty array constructor assignment',
+            source => 'my $x = [];',
+        },
         # Phase 5b: QwLiteral
         {
             name   => 'qw literal array assignment',

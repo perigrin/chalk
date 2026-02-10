@@ -1481,6 +1481,45 @@ SKIP: {
             ok(1, 'qw literal: basic structure verified');
         }
     }
+    # --- Array constructors ---
+    {
+        # Empty array constructor: my $x = [] → emptyavhv[$x] (target absorbed)
+        my $tree = parse_concise('my $x = [];');
+        ok(defined $tree, 'empty array constructor: parses');
+        SKIP: {
+            skip 'empty array constructor did not parse', 2 unless defined $tree;
+            my @ops = map { $_->name() } $tree->ops()->@*;
+            my $has_emptyavhv = grep { $_ eq 'emptyavhv' } @ops;
+            ok($has_emptyavhv,
+                'empty array constructor: has emptyavhv op')
+                or diag("ops: @ops");
+            # Should NOT have /ANONHASH flag (that's for hash constructors)
+            if ($has_emptyavhv) {
+                my ($emptyavhv) = grep { $_->name() eq 'emptyavhv' } $tree->ops()->@*;
+                ok(!defined $emptyavhv->private() || $emptyavhv->private() !~ /ANONHASH/,
+                    'empty array constructor: no /ANONHASH flag')
+                    or diag("private: " . ($emptyavhv->private() // 'undef'));
+            } else {
+                fail('empty array constructor: no /ANONHASH flag (skipped, no emptyavhv)');
+            }
+        }
+    }
+
+    {
+        # Non-empty array constructor: [1, 2, 3] → pushmark + consts + anonlist
+        my $tree = parse_concise('my $x = [1, 2, 3];');
+        ok(defined $tree, 'non-empty array constructor: parses');
+        SKIP: {
+            skip 'non-empty array constructor did not parse', 2 unless defined $tree;
+            my @ops = map { $_->name() } $tree->ops()->@*;
+            ok((grep { $_ eq 'pushmark' } @ops),
+                'non-empty array constructor: has pushmark')
+                or diag("ops: @ops");
+            ok((grep { $_ eq 'anonlist' } @ops),
+                'non-empty array constructor: has anonlist op')
+                or diag("ops: @ops");
+        }
+    }
 }
 
 done_testing;
