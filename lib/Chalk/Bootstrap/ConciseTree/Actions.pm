@@ -244,6 +244,14 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         }
 
         if ($pad_name eq 'padsv' && $has_init) {
+            # Special case: my $x = undef → undef[$x] (Perl absorbs target)
+            # B::Concise emits /LVINTRO,KEEP_PV,TARGMY as comma-separated flags
+            # which the Oracle regex doesn't capture, so we emit no private flag.
+            if (scalar @expr_ops == 1 && $expr_ops[0]->name() eq 'undef') {
+                return _op('undef', '0',
+                    type_info => $pad_op->type_info(),
+                );
+            }
             # Scalar with initializer: expr_ops + padsv_store/LVINTRO
             my $result = Chalk::Bootstrap::ConciseTree->new();
             for my $op (@expr_ops) {
@@ -794,10 +802,29 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@trees);
     }
 
-    # §19 Literal — transparent pass-through
+    # §19 Literal — handles boolean/undef builtins, delegates others
     method Literal($ctx) {
         my @trees = _collect_trees($ctx);
-        return _merge_trees(@trees);
+        # If we got child trees (NumericLiteral, StringLiteral, RegexLiteral),
+        # just pass through.
+        if (@trees) {
+            return _merge_trees(@trees);
+        }
+        # No child trees means a terminal regex matched (true/false/undef).
+        # Check the scanned text and produce the appropriate op.
+        my $text = $ctx->scanned_text();
+        $text =~ s/^\s+|\s+$//g;
+        if ($text eq 'false') {
+            return _op('const', '$', type_info => 'SPECIAL sv_no');
+        }
+        if ($text eq 'true') {
+            return _op('const', '$', type_info => 'SPECIAL sv_yes');
+        }
+        if ($text eq 'undef') {
+            return _op('undef', '0');
+        }
+        # Fallback: return empty tree for unknown literals
+        return Chalk::Bootstrap::ConciseTree->new();
     }
 
     # §19 NumericLiteral — const[IV N] or const[NV N]
@@ -957,7 +984,8 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §8 FieldDeclaration — similar to VariableDeclaration
+    # §8 FieldDeclaration — tagged with /FIELD so ClassBlock can filter them.
+    # Fields are compiled away by Perl and don't appear in B::Concise output.
     method FieldDeclaration($ctx) {
         my @child_trees = _collect_trees($ctx);
         my $var_op = undef;
@@ -973,7 +1001,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         if (defined $var_op) {
             return _op($var_op->name(), '0',
                 type_info => $var_op->type_info(),
-                private   => '/LVINTRO',
+                private   => '/FIELD',
             );
         }
 
@@ -1033,9 +1061,9 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my $merged = _merge_trees(@trees);
 
         # Separate field pad ops from runtime init ops.
-        # FieldDeclaration produces pad ops with /LVINTRO private flag.
-        # VariableDeclaration produces pad ops with /VARDECL private flag.
-        # Only filter out field ops (/LVINTRO); keep variable declarations.
+        # FieldDeclaration produces pad ops tagged with /FIELD.
+        # VariableDeclaration produces pad ops with /VARDECL (→ /LVINTRO after peephole).
+        # Only filter out field ops (/FIELD); keep variable declarations.
         my $has_fields = false;
         my @runtime_ops;
         my @all_ops = $merged->ops()->@*;
@@ -1043,7 +1071,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
             my $op = $all_ops[$i];
             if ($op->name() =~ /^(padsv|padav|padhv)$/
                     && defined $op->private()
-                    && $op->private() eq '/LVINTRO') {
+                    && $op->private() eq '/FIELD') {
                 # This is a field pad op — skip it.
                 # Also remove the preceding nextstate if it was added by StatementItem.
                 if (@runtime_ops && $runtime_ops[-1]->name() eq 'nextstate') {

@@ -273,6 +273,11 @@ SKIP: {
         'lib/Chalk/Bootstrap/Target/XS.pm',
         'Tier D: Target::XS',
     );
+
+    validate_file(
+        'lib/Chalk/Grammar/Perl/PrecedenceTable.pm',
+        'Tier D: PrecedenceTable',
+    );
 }
 
 done_testing;

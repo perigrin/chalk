@@ -220,6 +220,20 @@ SKIP: {
             name   => 'until loop',
             source => 'my $x = 1; until ($x > 0) { my $y = 1; }',
         },
+        # Phase 5b: Boolean literals (true/false/undef)
+        # These require use 5.42.0 so B::Concise sees builtins, not barewords.
+        {
+            name   => 'boolean false literal',
+            source => "use 5.42.0;\nuse utf8;\nmy \$x = false;\n",
+        },
+        {
+            name   => 'boolean true literal',
+            source => "use 5.42.0;\nuse utf8;\nmy \$x = true;\n",
+        },
+        {
+            name   => 'undef literal',
+            source => "use 5.42.0;\nuse utf8;\nmy \$x = undef;\n",
+        },
         {
             name   => 'foreach loop',
             source => 'my @a = (1, 2); for my $i (@a) { my $x = $i; }',
