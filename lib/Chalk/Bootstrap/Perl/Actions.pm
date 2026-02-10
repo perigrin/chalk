@@ -83,11 +83,13 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make('Constant', const_type => 'string', value => $value);
     }
 
-    # Post-process statement list to compose bare return/die identifiers
-    # with their arguments. The ambiguous grammar sometimes parses
-    # `return 'Start'` as two separate statements (Identifier + StringLiteral)
-    # instead of as a CallExpression. This fixup merges them.
-    my sub _fixup_return_die($factory, $stmts) {
+    # Post-process statement list to fix grammar ambiguity artifacts.
+    # The ambiguous grammar sometimes parses compound statements as
+    # separate items. These fixups merge them back together:
+    # - `return 'Start'` → ReturnStmt(Constant('Start'))
+    # - `die "message"` → DieCall([Constant('message')])
+    # - `use Foo 'bar'` (split) → UseDecl(Foo, ['bar'])
+    my sub _fixup_stmts($factory, $stmts) {
         my @result;
         my $i = 0;
         while ($i <= $#$stmts) {
@@ -119,6 +121,31 @@ class Chalk::Bootstrap::Perl::Actions {
                     args  => \@args,
                 );
                 next; # already advanced past args
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'UseDecl'
+                    && !defined $item->inputs()->[1]
+                    && $i + 1 <= $#$stmts
+                    && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node::Constant) {
+                # Merge UseDecl(module, undef) + bare Constant into
+                # UseDecl(module, [Constant]). Grammar ambiguity sometimes
+                # splits `use Foo 'bar'` into separate statements.
+                my @import_args;
+                while ($i + 1 <= $#$stmts
+                        && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node::Constant
+                        && !($stmts->[$i + 1]->value() =~ /^[a-zA-Z_]/
+                             && $i + 2 <= $#$stmts)) {
+                    $i++;
+                    push @import_args, $stmts->[$i];
+                }
+                if (@import_args) {
+                    push @result, $factory->make('Constructor',
+                        class       => 'UseDecl',
+                        module_name => $item->inputs()->[0],
+                        import_args => \@import_args,
+                    );
+                } else {
+                    push @result, $item;
+                }
             } else {
                 push @result, $item;
             }
@@ -157,7 +184,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        return \@stmts;
+        return _fixup_stmts($factory, \@stmts);
     }
 
     # §2 StatementItem — pass through the child IR value
@@ -619,7 +646,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        return _fixup_return_die($factory, \@stmts);
+        return _fixup_stmts($factory, \@stmts);
     }
 
     # §18 Variable — return variable name as Constant
