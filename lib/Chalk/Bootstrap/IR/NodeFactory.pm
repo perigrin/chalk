@@ -27,6 +27,12 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:Symbol'     => ['type', 'value', 'quantifier'],
         'Constructor:Expression' => ['elements'],
         'Constructor:Rule'       => ['name', 'expressions'],
+        'Constructor:Program'    => ['statements'],
+        'Constructor:UseDecl'    => ['module_name', 'import_args'],
+        'Constructor:ClassDecl'  => ['name', 'parent', 'body'],
+        'Constructor:MethodDecl' => ['name', 'params', 'body'],
+        'Constructor:ReturnStmt' => ['value'],
+        'Constructor:DieCall'    => ['args'],
     );
 
     # Get singleton instance
