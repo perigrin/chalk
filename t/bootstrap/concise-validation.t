@@ -238,6 +238,11 @@ SKIP: {
             name   => 'foreach loop',
             source => 'my @a = (1, 2); for my $i (@a) { my $x = $i; }',
         },
+        # Phase 5b: Hash/Array constructors
+        {
+            name   => 'empty hash constructor assignment',
+            source => 'my $x = {};',
+        },
     );
 
     for my $case (@stable_cases) {

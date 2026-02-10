@@ -278,6 +278,11 @@ SKIP: {
         'lib/Chalk/Grammar/Perl/PrecedenceTable.pm',
         'Tier D: PrecedenceTable',
     );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Semiring/Boolean.pm',
+        'Tier D: Semiring::Boolean',
+    );
 }
 
 done_testing;

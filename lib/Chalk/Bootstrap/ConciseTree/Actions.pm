@@ -252,6 +252,13 @@ class Chalk::Bootstrap::ConciseTree::Actions {
                     type_info => $pad_op->type_info(),
                 );
             }
+            # Special case: my $x = {} → emptyavhv[$x] (Perl absorbs target)
+            # Same comma-separated flag issue as undef.
+            if (scalar @expr_ops == 1 && $expr_ops[0]->name() eq 'emptyavhv') {
+                return _op('emptyavhv', '0',
+                    type_info => $pad_op->type_info(),
+                );
+            }
             # Scalar with initializer: expr_ops + padsv_store/LVINTRO
             my $result = Chalk::Bootstrap::ConciseTree->new();
             for my $op (@expr_ops) {
@@ -483,7 +490,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     }
 
     # Builtin function name → B::Concise op name.
-    # List ops require a leading pushmark before arguments.
+    # Split into list ops (need pushmark) and fixed-arity ops (no pushmark).
     my %BUILTIN_OPS = (
         'die'     => 'die',
         'warn'    => 'warn',
@@ -524,6 +531,11 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         'local'   => 'local',
     );
 
+    # Fixed-arity builtins that do NOT use pushmark.
+    my %NO_PUSHMARK_OPS = map { $_ => true }
+        qw(bless defined exists delete keys values each chomp chop
+           pop shift join split ref chr ord length);
+
     # §13 CallExpression — function/builtin calls
     # Identifier(args) or Identifier WS args → pushmark + args + call_op
     # For known builtins, emits the specific op name (die, push, etc.).
@@ -560,7 +572,11 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my $args = _merge_trees(@trees);
 
         my $result = Chalk::Bootstrap::ConciseTree->new();
-        $result->push_op(_make_op('pushmark', '0'));
+        my $skip_pushmark = defined $func_name
+            && exists $NO_PUSHMARK_OPS{$func_name};
+        if (!$skip_pushmark) {
+            $result->push_op(_make_op('pushmark', '0'));
+        }
         $result->concat($args) if $args->op_count() > 0;
 
         if (defined $func_name && exists $BUILTIN_OPS{$func_name}) {
@@ -1042,6 +1058,22 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     }
 
     # §20 Block — transparent pass-through (children are statement ops)
+    # §12 HashConstructor — empty {} → emptyavhv, non-empty → pushmark + pairs + anonhash
+    method HashConstructor($ctx) {
+        my @trees = _collect_trees($ctx);
+        my $merged = _merge_trees(@trees);
+        if ($merged->op_count() == 0) {
+            # Empty hash constructor: {}
+            return _op('emptyavhv', '0', private => '/ANONHASH');
+        }
+        # Non-empty: pushmark + items + anonhash
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('pushmark', '0'));
+        $result->concat($merged);
+        $result->push_op(_make_op('anonhash', '@'));
+        return $result;
+    }
+
     method Block($ctx) {
         my @trees = _collect_trees($ctx);
         return _merge_trees(@trees);
