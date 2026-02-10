@@ -644,6 +644,29 @@ SKIP: {
         }
     }
 
+    # Class with my variable at class scope — B::Concise emits ops for the init
+    # expression inside the class body (between enterloop/leaveloop).
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nuse experimental 'class';\n\nclass Foo {\n    my \$x = 1;\n    method bar() {\n        return \$x;\n    }\n}\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'class with my var: parses')
+            or diag("Parse returned undef for class with my var");
+
+        SKIP: {
+            skip 'class with my var did not parse', 1 unless defined $ours;
+            skip "perl with B::Concise not available", 1 unless $has_concise;
+            my $theirs = $oracle->concise_for($source);
+            my $result = $comparator->compare($ours, $theirs);
+            ok($result->{match}, 'class with my var: matches B::Concise oracle')
+                or diag(
+                    "Differences:\n",
+                    join("\n", $result->{differences}->@*),
+                    "\n\nOurs:\n", $ours->to_exec_string(),
+                    "\n\nTheirs:\n", $theirs->to_exec_string(),
+                );
+        }
+    }
+
     # Const elision preserves nextstate — bare `1;` at end of file
     # B::Concise keeps the nextstate even when the const body is elided.
     {

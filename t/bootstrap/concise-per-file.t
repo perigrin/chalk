@@ -268,6 +268,11 @@ SKIP: {
         'lib/Chalk/Bootstrap/Earley.pm',
         'Tier D: Earley',
     );
+
+    validate_file(
+        'lib/Chalk/Bootstrap/Target/XS.pm',
+        'Tier D: Target::XS',
+    );
 }
 
 done_testing;

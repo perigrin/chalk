@@ -1024,23 +1024,44 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §9 ClassBlock — feature class produces enterloop/stub/leaveloop at runtime.
-    # Class body (methods, fields) is compiled at compile time and does not
-    # appear in the main optree.  B::Concise emits: enterloop → stub → leaveloop
-    # for empty classes, or enterloop → nextstate → leaveloop when fields exist.
+    # §9 ClassBlock — feature class produces enterloop/[body]/leaveloop at runtime.
+    # Fields compile away (bare pad ops filtered). Methods/ADJUST are compile-time.
+    # Runtime init statements (my $x = ..., my sub, etc.) keep their ops.
+    # B::Concise emits: stub (empty), nextstate (fields only), or full ops (runtime init).
     method ClassBlock($ctx) {
         my @trees = _collect_trees($ctx);
+        my $merged = _merge_trees(@trees);
+
+        # Separate field pad ops from runtime init ops.
+        # FieldDeclaration produces pad ops with /LVINTRO private flag.
+        # VariableDeclaration produces pad ops with /VARDECL private flag.
+        # Only filter out field ops (/LVINTRO); keep variable declarations.
         my $has_fields = false;
-        for my $tree (@trees) {
-            if ($tree->op_count() > 0) {
+        my @runtime_ops;
+        my @all_ops = $merged->ops()->@*;
+        for my $i (0 .. $#all_ops) {
+            my $op = $all_ops[$i];
+            if ($op->name() =~ /^(padsv|padav|padhv)$/
+                    && defined $op->private()
+                    && $op->private() eq '/LVINTRO') {
+                # This is a field pad op — skip it.
+                # Also remove the preceding nextstate if it was added by StatementItem.
+                if (@runtime_ops && $runtime_ops[-1]->name() eq 'nextstate') {
+                    pop @runtime_ops;
+                }
                 $has_fields = true;
-                last;
+                next;
             }
+            push @runtime_ops, $op;
         }
 
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->push_op(_make_op('enterloop', '{'));
-        if ($has_fields) {
+        if (@runtime_ops) {
+            for my $op (@runtime_ops) {
+                $result->push_op($op);
+            }
+        } elsif ($has_fields) {
             $result->push_op(_make_op('nextstate', ';'));
         } else {
             $result->push_op(_make_op('stub', '0'));
