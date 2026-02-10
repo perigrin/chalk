@@ -577,23 +577,65 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §19 StringLiteral — extract string content
+    # For double-quoted strings with $variable interpolation, returns
+    # Constructor:InterpolatedString. Otherwise returns a plain Constant.
     method StringLiteral($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        # Strip quotes from single/double-quoted strings
+        # Strip quotes from single-quoted strings (no interpolation)
         if ($text =~ /^'((?:[^'\\]|\\.)*)'$/) {
             my $content = $1;
             $content =~ s/\\'/'/g;
             $content =~ s/\\\\/\\/g;
             return _make_const($factory, $content);
         }
+        # Double-quoted strings: check for $variable interpolation
         if ($text =~ /^"((?:[^"\\]|\\.)*)"$/) {
             my $content = $1;
+            # Process escape sequences for double-quoted strings
+            if ($content =~ /\$[a-zA-Z_]/) {
+                # Has variable interpolation — build InterpolatedString
+                my @parts;
+                my $remaining = $content;
+                while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$[a-zA-Z_]\w*)/gc) {
+                    my ($literal, $var) = ($1, $2);
+                    if (length($literal) > 0) {
+                        my $lit = $self->_unescape_double_quote($literal);
+                        push @parts, $factory->make('Constant',
+                            const_type => 'string', value => $lit);
+                    }
+                    push @parts, $factory->make('Constant',
+                        const_type => 'variable', value => $var);
+                }
+                # Remaining literal after last variable
+                my $tail = substr($remaining, pos($remaining) // 0);
+                if (length($tail) > 0) {
+                    my $lit = $self->_unescape_double_quote($tail);
+                    push @parts, $factory->make('Constant',
+                        const_type => 'string', value => $lit);
+                }
+                return $factory->make('Constructor',
+                    class => 'InterpolatedString',
+                    parts => \@parts,
+                );
+            }
+            # No interpolation — plain constant
             $content =~ s/\\"/"/g;
             $content =~ s/\\\\/\\/g;
+            $content =~ s/\\n/\n/g;
+            $content =~ s/\\t/\t/g;
             return _make_const($factory, $content);
         }
         return _make_const($factory, $text);
+    }
+
+    # Process escape sequences in double-quoted string content
+    method _unescape_double_quote($str) {
+        $str =~ s/\\n/\n/g;
+        $str =~ s/\\t/\t/g;
+        $str =~ s/\\"/"/g;
+        $str =~ s/\\\\/\\/g;
+        return $str;
     }
 
     # §19 NumericLiteral — return as Constant
@@ -690,9 +732,41 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §8 FieldDeclaration — not in Tier A
+    # §8 FieldDeclaration ::= /field\b/ WS Variable AttributeList? DefaultValue?
+    # Returns Constructor:FieldDecl with name Constant and attributes arrayref
     method FieldDeclaration($ctx) {
-        return undef;
+        my @leaves = _collect_ir_leaves($ctx);
+        my $field_name;
+        my @attributes;
+
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            my $rule = $leaf->rule();
+
+            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
+                    && !defined $field_name
+                    && defined $focus->value()
+                    && $focus->value() =~ /^[\$\@\%]/) {
+                # Variable name (starts with sigil)
+                $field_name = $focus;
+            } elsif (ref($focus) eq 'ARRAY') {
+                # AttributeList returns arrayref of _Attribute Constructors
+                for my $attr ($focus->@*) {
+                    if ($attr isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $attr->class() eq '_Attribute') {
+                        push @attributes, $attr;
+                    }
+                }
+            }
+        }
+
+        return undef unless defined $field_name;
+
+        return $factory->make('Constructor',
+            class      => 'FieldDecl',
+            name       => $field_name,
+            attributes => \@attributes,
+        );
     }
 
     # §13 ParenExpr — transparent

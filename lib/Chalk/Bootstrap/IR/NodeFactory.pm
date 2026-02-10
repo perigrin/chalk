@@ -34,6 +34,8 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:ReturnStmt' => ['value'],
         'Constructor:DieCall'    => ['args'],
         'Constructor:_Attribute' => ['name', 'parent', 'body'],
+        'Constructor:FieldDecl' => ['name', 'attributes'],
+        'Constructor:InterpolatedString' => ['parts'],
     );
 
     # Get singleton instance
