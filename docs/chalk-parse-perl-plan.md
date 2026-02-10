@@ -3,7 +3,7 @@
 ## Strategy
 
 Extend the existing BNF-to-Perl bootstrap pipeline to parse Perl 5.42.0 source
-code, ultimately self-hosting by compiling the ~31 `.pm` files under `lib/Chalk/`.
+code, ultimately self-hosting by compiling the 37+ `.pm` files under `lib/Chalk/`.
 
 The approach has two major stages:
 
@@ -563,80 +563,126 @@ file under `lib/Chalk/`. This is the first time the recognizer touches real code
 
 **Validation**:
 - [ ] All synthetic test inputs accepted
-- [ ] All 31 `.pm` files under `lib/Chalk/` recognized (accepted by the parser)
+- [ ] All `.pm` files under `lib/Chalk/` recognized (accepted by the parser)
 - [ ] ConciseTree validation for control flow structures
 - [ ] Performance: full-file recognition completes in acceptable time
 - [ ] If performance issues: implement Aycock optimizations per `docs/chalk-ayock-optimizations.md`
 
 -----
 
-## Phases 6-8: File-Driven Compilation
+## Phases 6-8: Tier-Driven Compilation
 
-These phases walk through actual bootstrap source files from least complex to
-most complex. The same file ordering is used for all three phases.
+These phases compile actual bootstrap source files end-to-end, organized by
+**tier** (vertical slices) rather than by phase (horizontal slices). Each tier
+takes its files through all three stages — IR, Perl lowering, XS lowering —
+before the next tier begins.
 
-### File Ordering (Least to Most Complex)
+### Why Tier-First
 
-**Tier A — Pure data classes and minimal interfaces (11 files)**:
+The original plan organized Phases 6-8 as horizontal slices: build IR for all
+files, then lower all to Perl, then lower all to XS. The tier-first approach
+has several advantages:
 
-| # | File | Lines | Key Constructs |
-|---|------|-------|----------------|
-| 1 | `Target/XS/AST/Node.pm` | 11 | Abstract interface, die |
-| 2 | `Optimizer/Pass.pm` | 15 | Abstract base, die |
-| 3 | `Grammar/Symbol.pm` | 21 | 3 fields, 3 readers, defined |
-| 4 | `Target.pm` | 15 | Abstract interface, die |
-| 5 | `IR/Node/Start.pm` | 11 | :isa, 1 override method |
-| 6 | `IR/Node/Return.pm` | 11 | :isa, 1 override method |
-| 7 | `Terminal.pm` | 24 | Static method, regex, pos(), length() |
-| 8 | `Target/XS/AST/Module.pm` | 16 | 2 fields, string interpolation |
-| 9 | `Target/XS/AST/CompositeNode.pm` | 15 | 1 field, map + join |
-| 10 | `Target/XS/AST/Statement.pm` | 15 | 1 field, string interpolation |
-| 11 | `Target/XS/AST/VarDecl.pm` | 18 | 2 fields, regex, ternary |
+1. **Earlier end-to-end validation.** IR design problems that prevent clean
+   lowering surface after 4 files, not 37.
+2. **Working software sooner.** After Tier A, 4 files go from parse to XS.
+3. **Incremental IR design.** IR node types grow organically as each tier
+   introduces new constructs, rather than being designed up-front.
+4. **Cheaper rework.** If lowering reveals IR issues, fewer files need fixing.
+5. **Natural commit boundaries.** Each tier is a coherent deliverable.
 
-**Tier B — Moderate logic, simple control flow (9 files)**:
+### File Tiers
 
-| # | File | Lines | Key Constructs |
-|---|------|-------|----------------|
-| 12 | `Grammar/Rule.pm` | 32 | Nested loops, map, join, scalar |
-| 13 | `IR/Node/Constant.pm` | 17 | :isa, 2 fields, override |
-| 14 | `IR/Node/Constructor.pm` | 15 | :isa, 1 field, override |
-| 15 | `Semiring/Boolean.pm` | 54 | bless, refaddr, reference equality |
-| 16 | `Context.pm` | 76 | 4 fields, recursion, push |
-| 17 | `Optimizer.pm` | 34 | Type checking (isa), push, die |
-| 18 | `Semiring/Composite.pm` | 51 | 2 fields, delegation pattern |
-| 19 | `Target/XS/AST/Preamble.pm` | 24 | Multi-line string constant |
-| 20 | `Semiring/SemanticAction.pm` | 97 | Context threading, can() dispatch |
+Tiers follow the validated ordering from `concise-per-file.t` (37/37 oracle
+match). Files are listed by their `lib/Chalk/Bootstrap/` or `lib/Chalk/`
+relative path.
 
-**Tier C — Complex multi-method logic (6 files)**:
+**Tier A — Pure data classes (4 files)**:
+Simplest files: `use` declarations, `feature class`, methods returning string
+constants. All constructs already have ConciseTree action methods.
 
-| # | File | Lines | Key Constructs |
-|---|------|-------|----------------|
-| 21 | `Grammar/BNF.pm` | 135 | Complex data construction, 10 rules |
-| 22 | `Grammar/BNF/Generated.pm` | 124 | Auto-generated, same shape as BNF.pm |
-| 23 | `IR/NodeFactory.pm` | 162 | Hash consing, delete, ref, die, sort |
-| 24 | `Desugar.pm` | 131 | Quantifier transform, exists, sort keys |
-| 25 | `Target/XS/AST/XSUB.pm` | 64 | 4 fields, split, map, push, join |
-| 26 | `Target/Perl.pm` | 124 | Recursive emit, regex escaping, map |
+| # | File | Key Constructs |
+|---|------|----------------|
+| 1 | `IR/Node/Start.pm` | :isa, 1 override method |
+| 2 | `IR/Node/Return.pm` | :isa, 1 override method |
+| 3 | `Target.pm` | Abstract interface, die |
+| 4 | `Optimizer/Pass.pm` | Abstract base, die |
 
-**Tier D — Most complex implementations (5 files)**:
+**Tier B — Classes with field declarations (5 files)**:
+Same as Tier A but with `field` declarations, which cause B::Concise to emit
+nextstate instead of stub inside the class body.
 
-| # | File | Lines | Key Constructs |
-|---|------|-------|----------------|
-| 27 | `IR/Node.pm` | 42 | Base class, refaddr, grep, push, postfix deref |
-| 28 | `Grammar/BNF/Actions.pm` | 263 | 12 methods, tree traversal, type dispatch |
-| 29 | `Earley.pm` | 249 | State machine, chart parsing, regex, substr |
-| 30 | `Optimizer/DCE.pm` | 76 | Mark-sweep graph traversal, worklist |
-| 31 | `Target/XS.pm` | 304 | XS generation, ord, sprintf, s///ge |
+| # | File | Key Constructs |
+|---|------|----------------|
+| 5 | `IR/Node/Constant.pm` | :isa, 2 fields, override |
+| 6 | `Target/XS/AST/Node.pm` | Abstract interface, die |
+| 7 | `Target/XS/AST/Statement.pm` | 1 field, string interpolation |
+| 8 | `Target/XS/AST/Module.pm` | 2 fields, string interpolation |
+| 9 | `IR/Node/Constructor.pm` | :isa, 1 field, override |
 
-### Phase 6: Perl IR
+**Tier C — Classes with runtime method logic (5 files)**:
+Methods use string interpolation, conditionals, regex, join, push, etc.
+B::Concise sees compile-time class envelope only for main program.
 
-**Goal**: Parse each bootstrap source file and produce a Perl-domain IR
-(Sea of Nodes or similar structured representation).
+| # | File | Key Constructs |
+|---|------|----------------|
+| 10 | `ConciseOp.pm` | Methods with regex, conditionals |
+| 11 | `ConciseTree.pm` | Multi-method class |
+| 12 | `ConciseTree/Comparator.pm` | Regex substitution, conditionals |
+| 13 | `ConciseTree/Oracle.pm` | Process execution, parsing |
+| 14 | `Context.pm` | 4 fields, recursion, push |
+
+**Tier D — All remaining files (23 files)**:
+Diverse method bodies, standalone modules with subs, and large files.
+
+| # | File | Key Constructs |
+|---|------|----------------|
+| 15 | `Target/XS/AST/CompositeNode.pm` | 1 field, map + join |
+| 16 | `Target/XS/AST/VarDecl.pm` | 2 fields, regex, ternary |
+| 17 | `Grammar/Symbol.pm` | 3 fields, 3 readers, defined |
+| 18 | `Target/XS/AST/Preamble.pm` | Multi-line string constant |
+| 19 | `Terminal.pm` | Static method, regex, pos(), length() |
+| 20 | `Grammar/Rule.pm` | Nested loops, map, join, scalar |
+| 21 | `IR/Node.pm` | Base class, refaddr, grep, push, postfix deref |
+| 22 | `Optimizer.pm` | Type checking (isa), push, die |
+| 23 | `Semiring/Composite.pm` | 2 fields, delegation pattern |
+| 24 | `Semiring/SemanticAction.pm` | Context threading, can() dispatch |
+| 25 | `Grammar/Perl/KeywordTable.pm` | Hash lookup table, exists |
+| 26 | `Target/XS/AST/XSUB.pm` | 4 fields, split, map, push, join |
+| 27 | `Optimizer/DCE.pm` | Mark-sweep graph traversal, worklist |
+| 28 | `Target/Perl.pm` | Recursive emit, regex escaping, map |
+| 29 | `Grammar/BNF/Generated.pm` | Auto-generated, same shape as BNF.pm |
+| 30 | `Desugar.pm` | Quantifier transform, exists, sort keys |
+| 31 | `Grammar/BNF.pm` | Complex data construction, 10 rules |
+| 32 | `Semiring/Structural.pm` | Block/hash disambiguation |
+| 33 | `Semiring/TypeInference.pm` | Keyword rejection, tag propagation |
+| 34 | `Earley.pm` | State machine, chart parsing, regex, substr |
+| 35 | `Target/XS.pm` | XS generation, ord, sprintf, s///ge |
+| 36 | `Grammar/Perl/PrecedenceTable.pm` | Operator precedence lookup table |
+| 37 | `Semiring/Boolean.pm` | bless, refaddr, reference equality |
+
+**Not yet in per-file oracle (4 files)** — these will be added to a tier
+once their ConciseTree actions stabilize:
+
+| File | Key Constructs |
+|------|----------------|
+| `Semiring/Precedence.pm` | Precedence validation, lookup dispatch |
+| `IR/NodeFactory.pm` | Hash consing, delete, ref, die, sort |
+| `Grammar/BNF/Actions.pm` | 12 methods, tree traversal, type dispatch |
+| `ConciseTree/Actions.pm` | 1505 lines, 40+ action methods |
+
+### Per-Tier Work
+
+Each tier performs three stages end-to-end before the next tier begins.
+
+#### Stage 1: Perl IR (corresponds to Phase 6)
+
+**Goal**: Parse each file and produce a Perl-domain IR (Sea of Nodes or
+similar structured representation).
 
 **Work**:
-- Design Perl IR node types (distinct from BNF IR nodes)
-- Build SemanticAction callbacks for Perl grammar rules
-- Walk files in order above, building IR for each
+- Design Perl IR node types as needed (extend from previous tiers)
+- Build SemanticAction callbacks for Perl grammar rules as needed
 - ConciseTree validation: compare IR structure against B::Concise
 
 **Validation per file**:
@@ -644,14 +690,13 @@ most complex. The same file ordering is used for all three phases.
 - [ ] IR is well-formed (no dangling references)
 - [ ] ConciseTree output matches B::Concise structurally
 
-### Phase 7: Lower to Perl
+#### Stage 2: Lower to Perl (corresponds to Phase 7)
 
 **Goal**: Generate Perl source from IR. Validate generated code matches
 existing source (diff-able or behaviorally equivalent).
 
 **Work**:
-- Build `Target::Perl` for Perl-domain IR (analogous to existing BNF Target::Perl)
-- Walk files in same order
+- Build `Target::Perl` for Perl-domain IR (extend from previous tiers)
 - Compare generated output against original source
 
 **Validation per file**:
@@ -659,19 +704,38 @@ existing source (diff-able or behaviorally equivalent).
 - [ ] Generated code passes same tests as original
 - [ ] Structural comparison: same methods, fields, class hierarchy
 
-### Phase 8: Lower to XS
+#### Stage 3: Lower to XS (corresponds to Phase 8)
 
 **Goal**: Generate XS/C from IR. Validate XS is functionally equivalent
 to existing Perl source.
 
 **Work**:
-- Build `Target::XS` for Perl-domain IR
-- Walk files in same order
-- Compile generated XS with `perl Makefile.PL && make`
+- Build `Target::XS` for Perl-domain IR (extend from previous tiers)
+- Compile generated XS with `perl Build.PL && ./Build`
 
 **Validation per file**:
 - [ ] Generated XS compiles without errors
-- [ ] `make test` passes — XS modules are functionally equivalent to Perl originals
+- [ ] Tests pass — XS modules are functionally equivalent to Perl originals
+
+### Tier-Specific Notes
+
+**Tier A** establishes the foundational IR type system and lowering patterns.
+These 4 files are pure data classes — the simplest possible end-to-end path.
+The IR node types, Target::Perl, and Target::XS created here form the base
+that subsequent tiers extend.
+
+**Tier B** adds `field` declarations and string interpolation. The IR gains
+field-related node types. Lowering must handle interpolated strings.
+
+**Tier C** adds runtime method logic: conditionals, regex, recursion, push.
+The IR gains control flow and builtin call node types. This tier is where
+lowering complexity jumps significantly.
+
+**Tier D** is the long tail — 23 files with diverse constructs. Tier A-C
+should have established all the infrastructure; Tier D is primarily exercising
+it across varied patterns. Files with unusual constructs (hash consing in
+NodeFactory, state machine in Earley, s///ge in Target::XS) may require
+targeted IR extensions.
 
 -----
 
@@ -708,10 +772,11 @@ to existing Perl source.
 | 2 | Declarations + literals | ConciseTree semiring | Parses `use`, `my`, literals |
 | 3 | Class definitions | — | Parses class/method/field |
 | 4 | Expressions | **Precedence + Structural semirings**, ChalkSyntax | Disambiguated expression parsing |
-| 5 | Control flow + full grammar | [Arity/TypeInference if needed] | All 31 .pm files recognized |
-| 6 | Perl IR | Perl IR node types, SemanticAction | Structured representation of source |
-| 7 | Lower to Perl | Perl Target::Perl | Generated Perl matches original |
-| 8 | Lower to XS | Perl Target::XS | XS functionally equivalent |
+| 5 | Control flow + full grammar | TypeInference semiring | All 37 .pm files recognized |
+| 6-8 Tier A | Pure data classes (4 files) | Perl IR node types, Target::Perl, Target::XS | End-to-end IR → Perl → XS |
+| 6-8 Tier B | Field declarations (5 files) | Field IR nodes | Interpolation + fields lowered |
+| 6-8 Tier C | Runtime method logic (5 files) | Control flow + builtin IR nodes | Conditionals + regex lowered |
+| 6-8 Tier D | All remaining (23 files) | Targeted IR extensions | Full self-hosting compilation |
 | 9 | Optimizations | Peephole, GCM, Aycock | Same correctness, better performance |
 
 -----
@@ -744,10 +809,13 @@ expression parsing causes performance issues, that's the trigger. The existing
 Earley parser should handle 65 rules; if it doesn't, measure first, then
 implement the highest-bang-for-buck optimization from the Aycock doc.
 
-**File ordering: Stable across Phases 6-8**
+**File ordering: Tier-first (vertical slices) for Phases 6-8**
 
-One canonical ordering from simplest to most complex, applied consistently.
-Tier A files can be batched; Tier D files each deserve individual attention.
+Each tier takes its files through IR → Perl → XS end-to-end before the next
+tier begins. This replaced the original horizontal-slice approach (all IR,
+then all Perl, then all XS) because it provides earlier end-to-end validation,
+incremental IR design, cheaper rework, and natural commit boundaries. Tier
+membership follows the validated ordering from `concise-per-file.t`.
 
 **String interpolation: OPAQUE**
 
