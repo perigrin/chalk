@@ -620,10 +620,13 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
             }
             # No interpolation — plain constant
-            $content =~ s/\\"/"/g;
-            $content =~ s/\\\\/\\/g;
+            $content =~ s/\\\\/\x00BS\x00/g;
             $content =~ s/\\n/\n/g;
             $content =~ s/\\t/\t/g;
+            $content =~ s/\\"/"/g;
+            $content =~ s/\\\$/\$/g;
+            $content =~ s/\\\@/\@/g;
+            $content =~ s/\x00BS\x00/\\/g;
             return _make_const($factory, $content);
         }
         return _make_const($factory, $text);
@@ -631,10 +634,13 @@ class Chalk::Bootstrap::Perl::Actions {
 
     # Process escape sequences in double-quoted string content
     method _unescape_double_quote($str) {
+        $str =~ s/\\\\/\x00BS\x00/g;
         $str =~ s/\\n/\n/g;
         $str =~ s/\\t/\t/g;
         $str =~ s/\\"/"/g;
-        $str =~ s/\\\\/\\/g;
+        $str =~ s/\\\$/\$/g;
+        $str =~ s/\\\@/\@/g;
+        $str =~ s/\x00BS\x00/\\/g;
         return $str;
     }
 

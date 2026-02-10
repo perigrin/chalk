@@ -83,8 +83,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             for my $item ($body->@*) {
                 if ($item isa Chalk::Bootstrap::IR::Node::Constructor
                         && $item->class() eq 'FieldDecl') {
-                    push @lines, $self->_emit_xs_field_reader($item)->@*;
-                    push @lines, '';
+                    my @reader_lines = $self->_emit_xs_field_reader($item)->@*;
+                    if (@reader_lines) {
+                        push @lines, @reader_lines;
+                        push @lines, '';
+                    }
                 } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                         && $item->class() eq 'MethodDecl') {
                     push @lines, $self->_emit_xs_method($item)->@*;

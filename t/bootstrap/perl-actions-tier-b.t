@@ -145,7 +145,7 @@ my sub is_constant($node, $expected_value, $msg) {
     ok(defined $ir, 'Statement.pm: parse produces IR');
 
     SKIP: {
-        skip 'Statement.pm: no IR', 20 unless defined $ir;
+        skip 'Statement.pm: no IR', 41 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Statement.pm Program');
         my $stmts = $ir->inputs()->[0];
@@ -181,7 +181,15 @@ my sub is_constant($node, $expected_value, $msg) {
         is_constructor($interp, 'InterpolatedString', 'Statement.pm interpolated string');
         my $parts = $interp->inputs()->[0];
         is(ref $parts, 'ARRAY', 'Statement.pm: parts is arrayref');
-        cmp_ok(scalar $parts->@*, '>=', 3, 'Statement.pm: at least 3 parts');
+        is(scalar $parts->@*, 3, 'Statement.pm: exactly 3 parts');
+
+        # Verify part types and values (validates escape handling)
+        is($parts->[0]->const_type(), 'string', 'Statement.pm: part 0 is string literal');
+        is($parts->[0]->value(), '    ', 'Statement.pm: part 0 is 4 spaces');
+        is($parts->[1]->const_type(), 'variable', 'Statement.pm: part 1 is variable');
+        is($parts->[1]->value(), '$code', 'Statement.pm: part 1 is $code');
+        is($parts->[2]->const_type(), 'string', 'Statement.pm: part 2 is string literal');
+        is($parts->[2]->value(), "\n", 'Statement.pm: part 2 is actual newline (not \\n)');
     }
 }
 
@@ -194,7 +202,7 @@ my sub is_constant($node, $expected_value, $msg) {
     ok(defined $ir, 'Module.pm: parse produces IR');
 
     SKIP: {
-        skip 'Module.pm: no IR', 20 unless defined $ir;
+        skip 'Module.pm: no IR', 46 unless defined $ir;
 
         is_constructor($ir, 'Program', 'Module.pm Program');
         my $stmts = $ir->inputs()->[0];
@@ -227,7 +235,19 @@ my sub is_constant($node, $expected_value, $msg) {
         my $interp = $ret->inputs()->[0];
         is_constructor($interp, 'InterpolatedString', 'Module.pm interpolated string');
         my $parts = $interp->inputs()->[0];
-        cmp_ok(scalar $parts->@*, '>=', 5, 'Module.pm: at least 5 parts (2 vars + 3 literals)');
+        is(scalar $parts->@*, 5, 'Module.pm: exactly 5 parts (2 vars + 3 literals)');
+
+        # Verify part types and values (validates multi-var interpolation)
+        is($parts->[0]->const_type(), 'string', 'Module.pm: part 0 is string');
+        is($parts->[0]->value(), 'MODULE = ', 'Module.pm: part 0 value');
+        is($parts->[1]->const_type(), 'variable', 'Module.pm: part 1 is variable');
+        is($parts->[1]->value(), '$module', 'Module.pm: part 1 is $module');
+        is($parts->[2]->const_type(), 'string', 'Module.pm: part 2 is string');
+        is($parts->[2]->value(), '  PACKAGE = ', 'Module.pm: part 2 value');
+        is($parts->[3]->const_type(), 'variable', 'Module.pm: part 3 is variable');
+        is($parts->[3]->value(), '$package', 'Module.pm: part 3 is $package');
+        is($parts->[4]->const_type(), 'string', 'Module.pm: part 4 is string');
+        is($parts->[4]->value(), "\n\n", 'Module.pm: part 4 is double newline');
     }
 }
 
