@@ -82,6 +82,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $body = $class_decl->inputs()->[2];
             for my $item ($body->@*) {
                 if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $item->class() eq 'FieldDecl') {
+                    push @lines, $self->_emit_xs_field_reader($item)->@*;
+                    push @lines, '';
+                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                         && $item->class() eq 'MethodDecl') {
                     push @lines, $self->_emit_xs_method($item)->@*;
                     push @lines, '';
@@ -111,15 +115,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         if ($returns_value) {
             my $value = $body_item->inputs()->[0];
-            my $str = $self->_escape_c_string($value->value());
 
-            push @lines, 'SV *';
-            push @lines, "${name}(self, ...)";
-            push @lines, '    SV *self';
-            push @lines, '  CODE:';
-            push @lines, "    RETVAL = newSVpvs(\"$str\");";
-            push @lines, '  OUTPUT:';
-            push @lines, '    RETVAL';
+            if ($value isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $value->class() eq 'InterpolatedString') {
+                # Interpolated string: emit C string concatenation
+                push @lines, $self->_emit_xs_interp_return($name, $value)->@*;
+            } else {
+                my $str = $self->_escape_c_string($value->value());
+                push @lines, 'SV *';
+                push @lines, "${name}(self, ...)";
+                push @lines, '    SV *self';
+                push @lines, '  CODE:';
+                push @lines, "    RETVAL = newSVpvs(\"$str\");";
+                push @lines, '  OUTPUT:';
+                push @lines, '    RETVAL';
+            }
         } elsif ($dies) {
             my $args = $body_item->inputs()->[0];
             my $msg = '';
@@ -150,6 +160,98 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, '  CODE:';
             push @lines, '    /* empty */';
         }
+
+        return \@lines;
+    }
+
+    # Emit an XSUB field reader for a FieldDecl with :reader attribute
+    method _emit_xs_field_reader($field_decl) {
+        my $name_node = $field_decl->inputs()->[0];
+        my $attrs     = $field_decl->inputs()->[1];
+
+        # Only emit reader if :reader attribute present
+        my $has_reader = false;
+        if (ref($attrs) eq 'ARRAY') {
+            for my $attr ($attrs->@*) {
+                if ($attr->inputs()->[0]->value() eq 'reader') {
+                    $has_reader = true;
+                    last;
+                }
+            }
+        }
+        return [] unless $has_reader;
+
+        my $var_name = $name_node->value();
+        $var_name =~ s/^\$//;  # Strip sigil for hash key and method name
+        my $escaped_key = $self->_escape_c_string($var_name);
+
+        my @lines;
+        push @lines, 'SV *';
+        push @lines, "${var_name}(self)";
+        push @lines, '    SV *self';
+        push @lines, '  CODE:';
+        push @lines, '    {';
+        push @lines, '        HV *hash = (HV*)SvRV(self);';
+        push @lines, "        SV **svp = hv_fetch(hash, \"$escaped_key\", " . length($var_name) . ", 0);";
+        push @lines, '        RETVAL = (svp && *svp) ? SvREFCNT_inc(*svp) : &PL_sv_undef;';
+        push @lines, '    }';
+        push @lines, '  OUTPUT:';
+        push @lines, '    RETVAL';
+
+        return \@lines;
+    }
+
+    # Emit an XSUB that returns an InterpolatedString via C string concatenation.
+    # Variables are read from the blessed hash via hv_fetch.
+    method _emit_xs_interp_return($method_name, $interp_node) {
+        my $parts = $interp_node->inputs()->[0];
+        my @lines;
+
+        push @lines, 'SV *';
+        push @lines, "${method_name}(self)";
+        push @lines, '    SV *self';
+        push @lines, '  CODE:';
+        push @lines, '    {';
+        push @lines, '        HV *hash = (HV*)SvRV(self);';
+
+        # Declare SV* variables for each field reference
+        my %seen_vars;
+        for my $part ($parts->@*) {
+            if ($part->const_type() eq 'variable') {
+                my $var = $part->value();
+                $var =~ s/^\$//;
+                next if $seen_vars{$var}++;
+                my $escaped = $self->_escape_c_string($var);
+                push @lines, "        SV **${var}_svp = hv_fetch(hash, \"$escaped\", " . length($var) . ", 0);";
+            }
+        }
+
+        # Build the result SV by concatenation
+        my $first = true;
+        for my $part ($parts->@*) {
+            if ($part->const_type() eq 'variable') {
+                my $var = $part->value();
+                $var =~ s/^\$//;
+                if ($first) {
+                    push @lines, "        RETVAL = newSVsv(${var}_svp ? *${var}_svp : &PL_sv_undef);";
+                    $first = false;
+                } else {
+                    push @lines, "        sv_catsv(RETVAL, ${var}_svp ? *${var}_svp : &PL_sv_undef);";
+                }
+            } else {
+                my $lit = $self->_escape_c_string($part->value());
+                if ($first) {
+                    push @lines, "        RETVAL = newSVpvs(\"$lit\");";
+                    $first = false;
+                } else {
+                    push @lines, "        sv_catpvs(RETVAL, \"$lit\");";
+                }
+            }
+        }
+
+        push @lines, '    }';
+        push @lines, '  OUTPUT:';
+        push @lines, '    RETVAL';
 
         return \@lines;
     }

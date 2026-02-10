@@ -66,6 +66,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'MethodDecl') { return $self->_emit_method_decl($node); }
             if ($class eq 'ReturnStmt') { return $self->_emit_return_stmt($node); }
             if ($class eq 'DieCall')    { return $self->_emit_die_call($node); }
+            if ($class eq 'FieldDecl')  { return $self->_emit_field_decl($node); }
+            if ($class eq 'InterpolatedString') { return $self->_emit_interpolated_string($node); }
             die "Unknown Constructor class: $class";
         }
 
@@ -157,6 +159,45 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $args = $node->inputs()->[0];
         my @arg_strs = map { $self->_emit_node($_) } $args->@*;
         return "die " . join(', ', @arg_strs) . ";";
+    }
+
+    method _emit_field_decl($node) {
+        my $name_node = $node->inputs()->[0];
+        my $attrs     = $node->inputs()->[1];
+
+        my $name = $name_node->value();
+        my $decl = "field $name";
+
+        if (ref($attrs) eq 'ARRAY' && $attrs->@*) {
+            for my $attr ($attrs->@*) {
+                my $attr_name = $attr->inputs()->[0]->value();
+                $decl .= " :$attr_name";
+            }
+        }
+
+        return "$decl;";
+    }
+
+    method _emit_interpolated_string($node) {
+        my $parts = $node->inputs()->[0];
+        my $result = '"';
+        for my $part ($parts->@*) {
+            if ($part->const_type() eq 'variable') {
+                $result .= $part->value();
+            } else {
+                # Literal string — escape for double-quoted context
+                my $lit = $part->value();
+                $lit =~ s/\\/\\\\/g;
+                $lit =~ s/"/\\"/g;
+                $lit =~ s/\n/\\n/g;
+                $lit =~ s/\t/\\t/g;
+                $lit =~ s/\$/\\\$/g;
+                $lit =~ s/\@/\\\@/g;
+                $result .= $lit;
+            }
+        }
+        $result .= '"';
+        return $result;
     }
 
     method _escape_single_quote($str) {
