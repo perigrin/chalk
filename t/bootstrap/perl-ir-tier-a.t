@@ -163,7 +163,7 @@ my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclas
 {
     my $ret1 = $f->make('Constructor', class => 'ReturnStmt', value => $str_hello);
     my $ret2 = $f->make('Constructor', class => 'ReturnStmt', value => $str_hello);
-    is(refaddr($ret1), refaddr($ret2), 'ReturnStmt hash consing: same inputs → same node');
+    is(refaddr($ret1), refaddr($ret2), 'ReturnStmt hash consing: same inputs -> same node');
 }
 
 done_testing();

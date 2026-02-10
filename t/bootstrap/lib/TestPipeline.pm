@@ -110,29 +110,60 @@ sub perl_pipeline {
     return parse_ir($parser, perl_bnf_text());
 }
 
+# Reorder grammar rules so the given start symbol is first.
+# Returns the original grammar arrayref if no start option given.
+my sub _reorder_grammar($grammar, %opts) {
+    return $grammar unless defined $opts{start};
+
+    my $start = $opts{start};
+    my @reordered;
+    my $found = false;
+    for my $rule ($grammar->@*) {
+        if (!$found && $rule->name() eq $start) {
+            unshift @reordered, $rule;
+            $found = true;
+        } else {
+            push @reordered, $rule;
+        }
+    }
+    die "Start rule '$start' not found in grammar" unless $found;
+    return \@reordered;
+}
+
+# Builds a 5-ary Composite Earley parser with the given actions object.
+# Composite: [Boolean, Precedence, TypeInference, Structural, SemanticAction]
+my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
+    my $ordered = _reorder_grammar($grammar, %opts);
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
+
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    );
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
+    );
+
+    return Chalk::Bootstrap::Earley->new(
+        grammar  => $desugared,
+        semiring => $comp_sr,
+    );
+}
+
 # Builds a Boolean recognizer from the generated Perl grammar IR.
 # Accepts optional start => 'RuleName' to select the start symbol.
 # Without start, uses the first rule in the grammar array (Earley default).
 sub build_perl_recognizer {
     my ($grammar, %opts) = @_;
-    my $ordered = $grammar;
-
-    if (defined $opts{start}) {
-        my $start = $opts{start};
-        my @reordered;
-        my $found = false;
-        for my $rule ($grammar->@*) {
-            if (!$found && $rule->name() eq $start) {
-                unshift @reordered, $rule;
-                $found = true;
-            } else {
-                push @reordered, $rule;
-            }
-        }
-        die "Start rule '$start' not found in grammar" unless $found;
-        $ordered = \@reordered;
-    }
-
+    my $ordered = _reorder_grammar($grammar, %opts);
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     return Chalk::Bootstrap::Earley->new(
@@ -146,46 +177,8 @@ sub build_perl_recognizer {
 # Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
 sub build_perl_concise_parser {
     my ($grammar, %opts) = @_;
-    my $ordered = $grammar;
-
-    if (defined $opts{start}) {
-        my $start = $opts{start};
-        my @reordered;
-        my $found = false;
-        for my $rule ($grammar->@*) {
-            if (!$found && $rule->name() eq $start) {
-                unshift @reordered, $rule;
-                $found = true;
-            } else {
-                push @reordered, $rule;
-            }
-        }
-        die "Start rule '$start' not found in grammar" unless $found;
-        $ordered = \@reordered;
-    }
-
-    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
-
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
-        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
-    );
-    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-    );
-    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
-    my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
-    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
-        actions => $actions,
-    );
-
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
-    );
-
-    return Chalk::Bootstrap::Earley->new(
-        grammar  => $desugared,
-        semiring => $comp_sr,
+    return _build_perl_parser_with_actions(
+        $grammar, Chalk::Bootstrap::ConciseTree::Actions->new(), %opts,
     );
 }
 
@@ -194,46 +187,8 @@ sub build_perl_concise_parser {
 # Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
 sub build_perl_ir_parser {
     my ($grammar, %opts) = @_;
-    my $ordered = $grammar;
-
-    if (defined $opts{start}) {
-        my $start = $opts{start};
-        my @reordered;
-        my $found = false;
-        for my $rule ($grammar->@*) {
-            if (!$found && $rule->name() eq $start) {
-                unshift @reordered, $rule;
-                $found = true;
-            } else {
-                push @reordered, $rule;
-            }
-        }
-        die "Start rule '$start' not found in grammar" unless $found;
-        $ordered = \@reordered;
-    }
-
-    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
-
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
-        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
-    );
-    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-    );
-    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
-    my $actions = Chalk::Bootstrap::Perl::Actions->new();
-    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
-        actions => $actions,
-    );
-
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
-    );
-
-    return Chalk::Bootstrap::Earley->new(
-        grammar  => $desugared,
-        semiring => $comp_sr,
+    return _build_perl_parser_with_actions(
+        $grammar, Chalk::Bootstrap::Perl::Actions->new(), %opts,
     );
 }
 

@@ -109,18 +109,14 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $item->value() eq 'die'
                     && $i + 1 <= $#$stmts) {
-                # Merge die + args into DieCall
-                my @args;
+                # Merge die + single argument into DieCall.
+                # Consumes only one following node to avoid absorbing
+                # unrelated statements in multi-statement bodies.
                 $i++;
-                while ($i <= $#$stmts) {
-                    push @args, $stmts->[$i];
-                    $i++;
-                }
                 push @result, $factory->make('Constructor',
                     class => 'DieCall',
-                    args  => \@args,
+                    args  => [$stmts->[$i]],
                 );
-                next; # already advanced past args
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && $item->class() eq 'UseDecl'
                     && !defined $item->inputs()->[1]
