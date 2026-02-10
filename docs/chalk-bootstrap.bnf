@@ -7,7 +7,7 @@
 #
 # This grammar is intentionally ambiguous. Disambiguation is delegated to
 # semirings (Precedence, Arity/TypeInference, Structural) not grammar
-# structure. 65 rules, ~75-80 after quantifier desugaring.
+# structure. 66 rules, ~75-80 after quantifier desugaring.
 #
 # ============================================================================
 
@@ -49,6 +49,7 @@ CompoundStatement ::= Block
 # §4  EXPRESSION STATEMENTS
 
 ExpressionStatement ::= Expression
+    | ExpressionList
     | Expression WS PostfixModifier ;
 
 PostfixModifier ::= /(?:if|unless|while|until|for|foreach)\b/ WS Expression ;
@@ -158,8 +159,12 @@ Atom ::= Variable
     | HashConstructor
     | QwLiteral
     | AnonymousSub
+    | MapGrepExpression
     | QualifiedIdentifier
     | Identifier ;
+
+MapGrepExpression ::= /(?:map|grep)\b/ _ Block _ ExpressionList
+    | /(?:map|grep)\b/ _ Block _ Expression ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
     | /\(/ _ ExpressionList _ /\)/

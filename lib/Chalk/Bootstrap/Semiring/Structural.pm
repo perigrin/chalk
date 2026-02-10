@@ -145,9 +145,15 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true, is_hash => true };
         }
 
-        # Tag CallExpression completions — preferred over bare Identifier
+        # Tag CallExpression completions — preferred over bare Identifier.
+        # Preserve is_block/is_hash from inner nonterminals so add() can
+        # prefer CallExpression-with-Block over CallExpression-with-Hash.
         if ($rule_name eq 'CallExpression') {
-            return { valid => true, is_call => true };
+            return {
+                valid => true,
+                is_call => true,
+                ($value->{is_block} ? (is_block => true) : ()),
+            };
         }
 
         # Tag MethodCall completions with parens (alts 0, 2) — preferred over

@@ -514,8 +514,6 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         'split'   => 'split',
         'sort'    => 'sort',
         'reverse' => 'reverse',
-        'grep'    => 'grep',
-        'map'     => 'map',
         'chr'     => 'chr',
         'ord'     => 'ord',
         'length'  => 'length',
@@ -535,6 +533,73 @@ class Chalk::Bootstrap::ConciseTree::Actions {
     my %NO_PUSHMARK_OPS = map { $_ => true }
         qw(bless defined exists delete keys values each chomp chop
            pop shift join split ref chr ord length);
+
+    # Block-first builtins: Identifier WS Block WS ExpressionList
+    # B::Concise splits these into start+while ops with block body after while.
+    # map/grep are handled by MapGrepExpression (they're keywords, not identifiers).
+    # sort is a builtin that still parses as CallExpression.
+    my %BLOCK_FIRST_OPS = (
+        'sort' => ['sort', undef],
+    );
+
+    # §13 MapGrepExpression — map/grep with block: map { BLOCK } LIST
+    # B::Concise: pushmark + list_ops + mapstart/grepstart + mapwhile/grepwhile + block_body_ops
+    my %MAP_GREP_OPS = (
+        'map'  => ['mapstart', 'mapwhile'],
+        'grep' => ['grepstart', 'grepwhile'],
+    );
+
+    method MapGrepExpression($ctx) {
+        my $text = $ctx->scanned_text() // '';
+        $text =~ s/^\s+|\s+$//g;
+        my $func_name;
+        if ($text =~ /^(map|grep)\b/) {
+            $func_name = $1;
+        }
+        $func_name //= 'map';
+
+        my @trees = _collect_trees($ctx);
+        my @nonempty = grep { $_->op_count() > 0 } @trees;
+
+        my ($start_op, $while_op) = $MAP_GREP_OPS{$func_name}->@*;
+
+        # Separate block body from list args.
+        # Trees: [block_tree, list_tree] — block first, list second.
+        my $block_tree;
+        my $list_tree;
+        if (@nonempty >= 2) {
+            $block_tree = $nonempty[0];
+            $list_tree = _merge_trees(@nonempty[1 .. $#nonempty]);
+        } elsif (@nonempty == 1) {
+            $block_tree = $nonempty[0];
+            $list_tree = Chalk::Bootstrap::ConciseTree->new();
+        } else {
+            return Chalk::Bootstrap::ConciseTree->new();
+        }
+
+        # If block was parsed as HashConstructor (contains anonhash at end),
+        # unwrap: strip leading pushmark and trailing anonhash to get body ops.
+        my @block_ops = $block_tree->ops()->@*;
+        if (@block_ops >= 2
+            && $block_ops[0]->name() eq 'pushmark'
+            && $block_ops[-1]->name() eq 'anonhash') {
+            @block_ops = @block_ops[1 .. $#block_ops - 1];
+            $block_tree = Chalk::Bootstrap::ConciseTree->new(ops => \@block_ops);
+        }
+
+        # Strip leading nextstate from block body (B::Concise omits it)
+        my $stripped_block = _strip_leading_nextstate($block_tree);
+
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('pushmark', '0'));
+        $result->concat($list_tree) if $list_tree->op_count() > 0;
+        $result->push_op(_make_op($start_op, '@'));
+        if (defined $while_op) {
+            $result->push_op(_make_op($while_op, '|'));
+        }
+        $result->concat($stripped_block) if $stripped_block->op_count() > 0;
+        return $result;
+    }
 
     # §13 CallExpression — function/builtin calls
     # Identifier(args) or Identifier WS args → pushmark + args + call_op
@@ -569,6 +634,51 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         }
 
         my @trees = _collect_trees($ctx);
+
+        # Handle block-first builtins: map { BLOCK } LIST, grep { BLOCK } LIST
+        # B::Concise exec order: pushmark + list_ops + start_op + while_op + block_body_ops
+        #
+        # Two parse paths reach here:
+        # 1. Identifier WS Block WS ExpressionList — block and list are separate trees
+        # 2. Identifier WS ExpressionList — block parsed as HashConstructor (when body
+        #    contains fat comma like $_ => true), list is separate tree or separate stmt
+        #
+        # For path 2, detect anonhash at the end of a tree and unwrap the hash
+        # constructor to get the block body (strip pushmark prefix and anonhash suffix).
+        if (defined $func_name && exists $BLOCK_FIRST_OPS{$func_name}) {
+            my @nonempty = grep { $_->op_count() > 0 } @trees;
+            my ($start_op, $while_op) = $BLOCK_FIRST_OPS{$func_name}->@*;
+
+            # Path 1: block and list are separate trees
+            if (@nonempty >= 2) {
+                my $block_tree = $nonempty[0];
+                my $list_tree = _merge_trees(@nonempty[1 .. $#nonempty]);
+
+                # If block was parsed as HashConstructor, unwrap it:
+                # strip leading pushmark and trailing anonhash to get body ops
+                my @block_ops = $block_tree->ops()->@*;
+                if (@block_ops >= 2
+                    && $block_ops[0]->name() eq 'pushmark'
+                    && $block_ops[-1]->name() eq 'anonhash') {
+                    @block_ops = @block_ops[1 .. $#block_ops - 1];
+                    $block_tree = Chalk::Bootstrap::ConciseTree->new(ops => \@block_ops);
+                }
+
+                # Strip leading nextstate from block body (B::Concise omits it)
+                my $stripped_block = _strip_leading_nextstate($block_tree);
+
+                my $result = Chalk::Bootstrap::ConciseTree->new();
+                $result->push_op(_make_op('pushmark', '0'));
+                $result->concat($list_tree) if $list_tree->op_count() > 0;
+                $result->push_op(_make_op($start_op, '@'));
+                if (defined $while_op) {
+                    $result->push_op(_make_op($while_op, '|'));
+                }
+                $result->concat($stripped_block) if $stripped_block->op_count() > 0;
+                return $result;
+            }
+        }
+
         my $args = _merge_trees(@trees);
 
         my $result = Chalk::Bootstrap::ConciseTree->new();
@@ -818,6 +928,25 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@trees);
     }
 
+    # §19 QwLiteral — qw(word word ...) expands to individual const[PV] ops
+    method QwLiteral($ctx) {
+        my $text = $ctx->scanned_text();
+        $text =~ s/^\s+|\s+$//g;
+        # Extract the word list from qw(...) syntax
+        if ($text =~ /^qw\s*\(([^)]*)\)$/) {
+            my $words_str = $1;
+            my @words = split /\s+/, $words_str;
+            @words = grep { $_ ne '' } @words;
+            my $result = Chalk::Bootstrap::ConciseTree->new();
+            for my $word (@words) {
+                $result->push_op(_make_op('const', '$',
+                    type_info => "PV \"$word\""));
+            }
+            return $result;
+        }
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
     # §19 Literal — handles boolean/undef builtins, delegates others
     method Literal($ctx) {
         my @trees = _collect_trees($ctx);
@@ -964,10 +1093,14 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return @trees ? _merge_trees(@trees) : Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §18 ScalarVariable — padsv[$name]
+    # §18 ScalarVariable — padsv[$name] for lexicals, gvsv[*name] for globals
     method ScalarVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
+        # $_ is a global variable, not a lexical pad variable
+        if ($text eq '$_') {
+            return _op('gvsv', '#', type_info => '*_');
+        }
         return _op('padsv', '0', type_info => $text);
     }
 

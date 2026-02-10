@@ -243,6 +243,16 @@ SKIP: {
             name   => 'empty hash constructor assignment',
             source => 'my $x = {};',
         },
+        # Phase 5b: QwLiteral
+        {
+            name   => 'qw literal array assignment',
+            source => 'my @x = qw(a b c);',
+        },
+        # Phase 5b: map builtin
+        {
+            name   => 'map with qw list',
+            source => "use 5.42.0;\nuse utf8;\nmy \%h = map { \$_ => true } qw(a b);",
+        },
     );
 
     for my $case (@stable_cases) {

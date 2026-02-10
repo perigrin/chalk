@@ -225,6 +225,11 @@ SKIP: {
     );
 
     validate_file(
+        'lib/Chalk/Grammar/Perl/KeywordTable.pm',
+        'Tier D: KeywordTable',
+    );
+
+    validate_file(
         'lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',
         'Tier D: XS::AST::XSUB',
     );
