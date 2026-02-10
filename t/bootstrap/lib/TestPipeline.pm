@@ -9,6 +9,7 @@ use Exporter 'import';
 our @EXPORT_OK = qw(
     build_parser parse_ir bnf_text full_pipeline optimized_pipeline grammars_match
     perl_bnf_text perl_pipeline build_perl_recognizer build_perl_concise_parser
+    build_perl_ir_parser
 );
 
 use Chalk::Bootstrap::Earley;
@@ -27,6 +28,7 @@ use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Bootstrap::Semiring::Structural;
+use Chalk::Bootstrap::Perl::Actions;
 
 # Returns the canonical 10-rule BNF meta-grammar as a string
 sub bnf_text {
@@ -173,6 +175,54 @@ sub build_perl_concise_parser {
     );
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
+    );
+
+    return Chalk::Bootstrap::Earley->new(
+        grammar  => $desugared,
+        semiring => $comp_sr,
+    );
+}
+
+# Builds a Composite(Boolean, Precedence, TypeInference, Structural, SemanticAction(Perl::Actions))
+# parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
+# Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
+sub build_perl_ir_parser {
+    my ($grammar, %opts) = @_;
+    my $ordered = $grammar;
+
+    if (defined $opts{start}) {
+        my $start = $opts{start};
+        my @reordered;
+        my $found = false;
+        for my $rule ($grammar->@*) {
+            if (!$found && $rule->name() eq $start) {
+                unshift @reordered, $rule;
+                $found = true;
+            } else {
+                push @reordered, $rule;
+            }
+        }
+        die "Start rule '$start' not found in grammar" unless $found;
+        $ordered = \@reordered;
+    }
+
+    my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
+
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    );
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
         actions => $actions,
     );

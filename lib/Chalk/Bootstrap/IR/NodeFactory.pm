@@ -33,6 +33,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:MethodDecl' => ['name', 'params', 'body'],
         'Constructor:ReturnStmt' => ['value'],
         'Constructor:DieCall'    => ['args'],
+        'Constructor:_Attribute' => ['name', 'parent', 'body'],
     );
 
     # Get singleton instance
