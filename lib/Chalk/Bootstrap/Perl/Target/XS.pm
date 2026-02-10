@@ -154,7 +154,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @lines, "    $p";
             }
             push @lines, '  CODE:';
-            push @lines, "    croak(\"$msg\");";
+            push @lines, "    croak(\"%s\", \"$msg\");";
         } else {
             # Fallback: void method
             push @lines, 'void';
