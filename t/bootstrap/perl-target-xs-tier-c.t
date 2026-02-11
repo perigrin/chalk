@@ -1,5 +1,5 @@
 # ABOUTME: Tests Perl IR to XS compilation for Tier C files.
-# ABOUTME: ConciseOp full behavioral equivalence; 4 other files structural + TODO build.
+# ABOUTME: ConciseOp full behavioral equivalence; 4 other files compile + structural checks.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -142,15 +142,9 @@ my sub build_and_load($ir, $module_name) {
         is($op->flags(), '', 'ConciseOp: flags reader');
         is($op->private(), '/BARE', 'ConciseOp: private reader');
 
-        # Behavioral: method calls — grammar fragmentation splits if-conditions
-        # from their bodies, so conditionals are lost. Methods execute all
-        # statements unconditionally. Full behavioral equivalence requires
-        # grammar disambiguation (Tier D prerequisite).
-        # The fragmented code uses eval_pv for regex which produces warnings
-        # about uninitialized $_ — suppress these since they are expected.
-        TODO: {
-            local $TODO = 'Grammar fragmentation splits if-conditions from bodies';
-            # Selectively suppress expected eval_pv warnings about uninitialized $_
+        # Behavioral: method calls with if-conditions, regex, and capture vars.
+        # Suppress eval_pv warnings about uninitialized $_ from regex matching.
+        {
             local $SIG{__WARN__} = sub {
                 my $msg = shift;
                 warn $msg unless $msg =~ /Use of uninitialized value/;
@@ -207,15 +201,9 @@ my sub build_and_load($ir, $module_name) {
         like($xs_code, qr/MODULE\s*=/, 'ConciseTree: XS has MODULE line');
         like($xs_code, qr/ops\(self\)/, 'ConciseTree: XS has ops reader');
 
-        # Build is TODO — method bodies use PostfixDeref, push, scalar builtins
-        # that fragment in the ambiguous grammar
-        TODO: {
-            local $TODO = 'Method bodies fragment due to PostfixDeref and builtins in ambiguous grammar';
-            my $module = 'Chalk::Bootstrap::Perl::XS::TierC::ConciseTree';
-            my ($loaded_dist, $err) = build_and_load($ir, $module);
-            ok(defined $loaded_dist, 'ConciseTree: XS builds');
-            diag $err if $err;
-        }
+        my $module = 'Chalk::Bootstrap::Perl::XS::TierC::ConciseTree';
+        my ($loaded_dist, $err) = build_and_load($ir, $module);
+        ok(defined $loaded_dist, 'ConciseTree: XS builds') or diag $err;
     }
 }
 
@@ -242,15 +230,9 @@ my sub build_and_load($ir, $module_name) {
 
         like($xs_code, qr/MODULE\s*=/, 'Comparator: XS has MODULE line');
 
-        # Build is TODO — method bodies use sprintf, s///g, ternary, complex
-        # method chains that fragment in the ambiguous grammar
-        TODO: {
-            local $TODO = 'Method bodies fragment due to complex constructs in ambiguous grammar';
-            my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Comparator';
-            my ($loaded_dist, $err) = build_and_load($ir, $module);
-            ok(defined $loaded_dist, 'Comparator: XS builds');
-            diag $err if $err;
-        }
+        my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Comparator';
+        my ($loaded_dist, $err) = build_and_load($ir, $module);
+        ok(defined $loaded_dist, 'Comparator: XS builds') or diag $err;
     }
 }
 
@@ -277,15 +259,9 @@ my sub build_and_load($ir, $module_name) {
 
         like($xs_code, qr/MODULE\s*=/, 'Oracle: XS has MODULE line');
 
-        # Build is TODO — method bodies use backticks, split, complex regex,
-        # next unless that fragment in the ambiguous grammar
-        TODO: {
-            local $TODO = 'Method bodies fragment due to backticks, regex, split in ambiguous grammar';
-            my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Oracle';
-            my ($loaded_dist, $err) = build_and_load($ir, $module);
-            ok(defined $loaded_dist, 'Oracle: XS builds');
-            diag $err if $err;
-        }
+        my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Oracle';
+        my ($loaded_dist, $err) = build_and_load($ir, $module);
+        ok(defined $loaded_dist, 'Oracle: XS builds') or diag $err;
     }
 }
 
@@ -312,15 +288,9 @@ my sub build_and_load($ir, $module_name) {
 
         like($xs_code, qr/MODULE\s*=/, 'Context: XS has MODULE line');
 
-        # Build is TODO — method bodies use anon sub, isa operator, recursion,
-        # ref(), PostfixDeref that fragment in the ambiguous grammar
-        TODO: {
-            local $TODO = 'Method bodies fragment due to anon sub, isa, recursion in ambiguous grammar';
-            my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Context';
-            my ($loaded_dist, $err) = build_and_load($ir, $module);
-            ok(defined $loaded_dist, 'Context: XS builds');
-            diag $err if $err;
-        }
+        my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Context';
+        my ($loaded_dist, $err) = build_and_load($ir, $module);
+        ok(defined $loaded_dist, 'Context: XS builds') or diag $err;
     }
 }
 
