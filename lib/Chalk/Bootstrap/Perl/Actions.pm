@@ -702,11 +702,11 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($text =~ /^"((?:[^"\\]|\\.)*)"$/) {
             my $content = $1;
             # Process escape sequences for double-quoted strings
-            if ($content =~ /\$[a-zA-Z_]/) {
+            if ($content =~ /\$[a-zA-Z_\d]/) {
                 # Has variable interpolation — build InterpolatedString
                 my @parts;
                 my $remaining = $content;
-                while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$[a-zA-Z_]\w*)/gc) {
+                while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$(?:[a-zA-Z_]\w*|\d+))/gc) {
                     my ($literal, $var) = ($1, $2);
                     if (length($literal) > 0) {
                         my $lit = $self->_unescape_double_quote($literal);

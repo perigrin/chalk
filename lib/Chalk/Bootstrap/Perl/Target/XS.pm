@@ -351,6 +351,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
             my $var = $val;
             $var =~ s/^[\$\@\%]//;
+            # Regex capture variables ($1, $2, ...) — fetch from package
+            # globals set by _emit_xs_regex_match wrapper
+            if ($var =~ /^\d+$/) {
+                return "get_sv(\"::_c$var\", GV_ADD)";
+            }
             if ($declared_vars && $declared_vars->{$var}) {
                 return "${var}_sv";
             }
@@ -395,7 +400,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $var = $part->value();
                 $var =~ s/^\$//;
                 my $src;
-                if ($declared_vars && $declared_vars->{$var}) {
+                # Regex capture variables ($1, $2, ...) — fetch from package
+                # globals set by _emit_xs_regex_match wrapper
+                if ($var =~ /^\d+$/) {
+                    $src = "get_sv(\"::_c$var\", GV_ADD)";
+                } elsif ($declared_vars && $declared_vars->{$var}) {
                     $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
                 } else {
                     my $escaped = $self->_escape_c_string($var);
@@ -451,13 +460,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq '<=') { return "(SvNV($left) <= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
         if ($op eq '>=') { return "(SvNV($left) >= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
 
+        # Range operator — construct an AV from integer start to end
+        if ($op eq '..') {
+            return "({ AV *_av = newAV(); SSize_t _s = SvIV($left); SSize_t _e = SvIV($right); SSize_t _j; for (_j = _s; _j <= _e; _j++) av_push(_av, newSViv(_j)); newRV_noinc((SV*)_av); })";
+        }
+
         # Assignment — sv_setsv returns void, wrap in GCC stmt expr
         if ($op eq '=') { return "({ sv_setsv($left, $right); $left; })"; }
 
-        # Regex binding — delegate to eval_pv
+        # Regex binding — set $_ to target, then eval_pv
         if ($op eq '=~') {
-            my $escaped = $self->_escape_c_string("(\$_) =~ $right");
-            return "eval_pv(\"$escaped\", TRUE)";
+            my $escaped = $self->_escape_c_string("\$_ =~ $right");
+            return "({ sv_setsv(DEFSV, $left); eval_pv(\"$escaped\", TRUE); })";
         }
 
         # Fallback
@@ -473,14 +487,45 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq 'not') { return "(SvTRUE($operand) ? &PL_sv_no : &PL_sv_yes)"; }
         if ($op eq '-')   { return "sv_2mortal(newSVnv(-SvNV($operand)))"; }
         if ($op eq '\\')  { return "newRV_inc($operand)"; }
+        if ($op eq '$#')  { return "sv_2mortal(newSViv(av_len((AV*)SvRV($operand))))"; }
 
         return "NULL /* unsupported unary: $op */";
     }
 
-    # Emit method call — requires PUSHMARK/call_method/SPAGAIN stack manipulation.
-    # TODO: implement call_method pattern for Tier D behavioral equivalence.
+    # Emit method call using dSP/PUSHMARK/call_method/SPAGAIN stack protocol.
+    # Uses GCC statement expression to return the method's scalar result.
     method _emit_xs_method_call_expr($node, $declared_vars) {
-        return "NULL /* TODO: method call needs call_method() */";
+        my $invocant_node = $node->inputs()->[0];
+        my $method_name   = $node->inputs()->[1]->value();
+        my $args          = $node->inputs()->[2];
+
+        # Determine invocant C expression ($self if undef)
+        my $invocant_expr;
+        if (defined $invocant_node) {
+            $invocant_expr = $self->_emit_xs_expr($invocant_node, $declared_vars);
+        } else {
+            $invocant_expr = 'self';
+        }
+
+        my $escaped_name = $self->_escape_c_string($method_name);
+
+        my @stmts;
+        push @stmts, 'dSP';
+        push @stmts, 'ENTER; SAVETMPS';
+        push @stmts, 'PUSHMARK(SP)';
+        push @stmts, "XPUSHs($invocant_expr)";
+        for my $arg ($args->@*) {
+            my $arg_expr = $self->_emit_xs_expr($arg, $declared_vars);
+            push @stmts, "XPUSHs($arg_expr)";
+        }
+        push @stmts, 'PUTBACK';
+        push @stmts, "call_method(\"$escaped_name\", G_SCALAR)";
+        push @stmts, 'SPAGAIN';
+        push @stmts, 'SV *_mcr = SvREFCNT_inc(POPs)';
+        push @stmts, 'PUTBACK; FREETMPS; LEAVE';
+        push @stmts, '_mcr';
+
+        return '({ ' . join('; ', @stmts) . '; })';
     }
 
     # Emit subscript access (hash or array)
@@ -556,20 +601,35 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "eval_pv(\"sub { }\", TRUE)";
     }
 
-    # Emit regex match via eval_pv
+    # Emit regex match via eval_pv, setting $_ to target first.
+    # Saves capture variables ($1-$3) into package globals so they
+    # persist after eval_pv returns (captures are scoped to eval).
     method _emit_xs_regex_match($node, $declared_vars) {
+        my $target  = $node->inputs()->[0];
         my $pattern = $node->inputs()->[1]->value();
-        my $escaped = $self->_escape_c_string("\$_ =~ $pattern");
+        # Wrap match to save captures into package globals before returning
+        my $match_perl = '$_ =~ ' . $pattern
+            . ' and do { $::_c1=$1; $::_c2=$2; $::_c3=$3; 1 }';
+        my $escaped = $self->_escape_c_string($match_perl);
+        if (defined $target) {
+            my $tgt = $self->_emit_xs_expr($target, $declared_vars);
+            return "({ sv_setsv(DEFSV, $tgt); eval_pv(\"$escaped\", TRUE); })";
+        }
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
-    # Emit regex substitution via eval_pv
+    # Emit regex substitution via eval_pv, setting $_ to target first
     method _emit_xs_regex_subst($node, $declared_vars) {
+        my $target      = $node->inputs()->[0];
         my $pattern     = $node->inputs()->[1]->value();
         my $replacement = $node->inputs()->[2]->value();
         my $flags       = $node->inputs()->[3]->value();
 
         my $escaped = $self->_escape_c_string("\$_ =~ s/$pattern/$replacement/$flags");
+        if (defined $target) {
+            my $tgt = $self->_emit_xs_expr($target, $declared_vars);
+            return "({ sv_setsv(DEFSV, $tgt); eval_pv(\"$escaped\", TRUE); sv_setsv($tgt, DEFSV); $tgt; })";
+        }
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
@@ -720,12 +780,35 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return join("\n", @lines);
     }
 
-    # Emit ForeachLoop as C for loop over AV
+    # Emit ForeachLoop as C for loop over AV, or integer for loop for ranges
     method _emit_xs_foreach_loop($node, $declared_vars) {
         my $iter = $node->inputs()->[0]->value();
         $iter =~ s/^[\$\@\%]//;
         my $list = $node->inputs()->[1];
         my $body = $node->inputs()->[2];
+
+        # Detect range operator (..) and emit optimized integer for loop
+        if ($list isa Chalk::Bootstrap::IR::Node::Constructor
+                && $list->class() eq 'BinaryExpr'
+                && $list->inputs()->[0]->value() eq '..') {
+            my $range_left  = $self->_emit_xs_expr($list->inputs()->[1], $declared_vars);
+            my $range_right = $self->_emit_xs_expr($list->inputs()->[2], $declared_vars);
+
+            my @lines;
+            push @lines, "{";
+            push @lines, "    SSize_t _start = SvIV($range_left);";
+            push @lines, "    SSize_t _end = SvIV($range_right);";
+            push @lines, "    SSize_t _i;";
+            push @lines, "    for (_i = _start; _i <= _end; _i++) {";
+            push @lines, "        ${iter}_sv = sv_2mortal(newSViv(_i));";
+            for my $stmt ($body->@*) {
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+                push @lines, "        $code" if defined $code;
+            }
+            push @lines, "    }";
+            push @lines, "}";
+            return join("\n", @lines);
+        }
 
         my $list_expr = $self->_emit_xs_expr($list, $declared_vars);
 
