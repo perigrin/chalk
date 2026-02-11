@@ -6,6 +6,12 @@ use experimental 'class';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 
+# Builtin keyword sets used by _fixup_stmts for statement merging
+my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
+my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
+my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl IfStmt ForeachLoop FieldDecl ReturnStmt DieCall);
+my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
+
 class Chalk::Bootstrap::Perl::Actions {
     field $factory;
 
@@ -163,11 +169,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Merge bare VarDecl(var, undef) + following expression → VarDecl(var, expr)
                 my $next = $stmts->[$i + 1];
                 if (!($next isa Chalk::Bootstrap::IR::Node::Constructor
-                        && ($next->class() eq 'ClassDecl'
-                            || $next->class() eq 'MethodDecl'
-                            || $next->class() eq 'IfStmt'
-                            || $next->class() eq 'ForeachLoop'
-                            || $next->class() eq 'FieldDecl'))) {
+                        && $STMT_BOUNDARY_CLASSES{$next->class()})) {
                     $i++;
                     push @result, $factory->make('Constructor',
                         class       => 'VarDecl',
@@ -179,7 +181,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $item->value()
-                    && $item->value() =~ /^(?:push|unshift|pop|shift|splice|print|say|warn|sort|reverse|chomp|chop)$/
+                    && $LIST_BUILTINS{$item->value()}
                     && $i + 1 <= $#$stmts) {
                 # Merge bare builtin keyword + following args → BuiltinCall
                 my $builtin = $item->value();
@@ -188,17 +190,11 @@ class Chalk::Bootstrap::Perl::Actions {
                     my $next = $stmts->[$i + 1];
                     # Stop at statement-level constructs
                     last if $next isa Chalk::Bootstrap::IR::Node::Constructor
-                        && ($next->class() eq 'ClassDecl'
-                            || $next->class() eq 'MethodDecl'
-                            || $next->class() eq 'IfStmt'
-                            || $next->class() eq 'ForeachLoop'
-                            || $next->class() eq 'FieldDecl'
-                            || $next->class() eq 'ReturnStmt'
-                            || $next->class() eq 'DieCall');
+                        && $STMT_BOUNDARY_CLASSES{$next->class()};
                     # Stop at other bare builtins
                     last if $next isa Chalk::Bootstrap::IR::Node::Constant
                         && defined $next->value()
-                        && $next->value() =~ /^(?:push|unshift|return|die|my|for|if|unless|while|until)$/;
+                        && $STOP_KEYWORDS{$next->value()};
                     $i++;
                     push @args, $next;
                 }
@@ -209,7 +205,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $item->value()
-                    && $item->value() =~ /^(?:scalar|defined|ref|exists|delete|keys|values|each|length|chr|ord|substr|sprintf|join|split)$/
+                    && $PREFIX_BUILTINS{$item->value()}
                     && $i + 1 <= $#$stmts) {
                 # Merge bare prefix-builtin + following expression → BuiltinCall
                 my $builtin = $item->value();

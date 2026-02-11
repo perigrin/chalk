@@ -372,10 +372,20 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $op      = $node->inputs()->[0]->value();
         my $operand = $node->inputs()->[1];
 
-        if ($op eq 'not') {
-            return "not " . $self->_emit_expr($operand);
+        # Parenthesize compound operands to preserve precedence
+        # (e.g., unless desugars to !cond, and !$a && $b != !($a && $b))
+        my $needs_parens = $operand isa Chalk::Bootstrap::IR::Node::Constructor
+            && ($operand->class() eq 'BinaryExpr' || $operand->class() eq 'TernaryExpr');
+
+        my $expr = $self->_emit_expr($operand);
+        if ($needs_parens) {
+            $expr = "($expr)";
         }
-        return "$op" . $self->_emit_expr($operand);
+
+        if ($op eq 'not') {
+            return "not $expr";
+        }
+        return "$op$expr";
     }
 
     method _emit_compound_assign($node) {
@@ -383,7 +393,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $target = $node->inputs()->[1];
         my $value  = $node->inputs()->[2];
 
-        return $self->_emit_expr($target) . " $op " . $self->_emit_expr($value) . ";";
+        return $self->_emit_expr($target) . " $op " . $self->_emit_expr($value);
     }
 
     method _emit_method_call_expr($node) {
