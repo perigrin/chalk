@@ -426,7 +426,7 @@ class Chalk::Bootstrap::Perl::Actions {
         );
     }
 
-    # §9 MethodDefinition ::= /method\b/ WS Identifier AttributeList? _ Signature? _ Block
+    # §9 MethodDefinition ::= /method\b/ WS QualifiedIdentifier AttributeList? _ Signature? _ Block
     method MethodDefinition($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
         my $method_name;
@@ -489,12 +489,12 @@ class Chalk::Bootstrap::Perl::Actions {
         return \@attrs;
     }
 
-    # §10 Attribute ::= /:/ _ Identifier | /:/ _ Identifier _ /\(/ _ QualifiedIdentifier _ /\)/
+    # §10 Attribute ::= /:/ _ QualifiedIdentifier | /:/ _ QualifiedIdentifier _ /\(/ _ QualifiedIdentifier _ /\)/
     # Returns _Attribute Constructor with name and optional value
     method Attribute($ctx) {
         my @constants = _collect_constants($ctx);
-        my $attr_name = $constants[0];  # Identifier
-        my $attr_value = $constants[1]; # QualifiedIdentifier (optional)
+        my $attr_name = $constants[0];  # QualifiedIdentifier (attribute name)
+        my $attr_value = $constants[1]; # QualifiedIdentifier (optional, e.g. parent in :isa(Parent))
 
         return $factory->make('Constructor',
             class  => '_Attribute',
@@ -588,10 +588,10 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §16 CallExpression — detect return/die builtins, produce IR nodes
-    # CallExpression ::= Identifier _ /\(/ _ ExpressionList? _ /\)/
-    #                   | Identifier WS ExpressionList
-    #                   | Identifier WS Block WS ExpressionList
-    #                   | Identifier WS Block
+    # CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    #                   | QualifiedIdentifier WS ExpressionList
+    #                   | QualifiedIdentifier WS Block WS ExpressionList
+    #                   | QualifiedIdentifier WS Block
     method CallExpression($ctx) {
         # Extract function name from scanned text
         my $func_name;
@@ -603,7 +603,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $rule = $leaf->rule();
             if ($focus isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $rule
-                    && ($rule eq 'Identifier' || $rule eq 'QualifiedIdentifier')) {
+                    && $rule eq 'QualifiedIdentifier') {
                 $func_name = $focus->value();
                 last;
             }
@@ -625,7 +625,7 @@ class Chalk::Bootstrap::Perl::Actions {
             # Skip the function name itself
             next if $focus isa Chalk::Bootstrap::IR::Node::Constant
                 && defined $rule
-                && ($rule eq 'Identifier' || $rule eq 'QualifiedIdentifier')
+                && $rule eq 'QualifiedIdentifier'
                 && defined $focus->value()
                 && $focus->value() eq $func_name;
 
@@ -762,13 +762,6 @@ class Chalk::Bootstrap::Perl::Actions {
 
     # §19 RegexLiteral — return as Constant
     method RegexLiteral($ctx) {
-        my $text = $ctx->scanned_text();
-        $text =~ s/^\s+|\s+$//g;
-        return _make_const($factory, $text);
-    }
-
-    # §20 Identifier — return as Constant
-    method Identifier($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
         return _make_const($factory, $text);
@@ -1161,8 +1154,8 @@ class Chalk::Bootstrap::Perl::Actions {
         return $result;
     }
 
-    # §16 MethodCall ::= /->/ _ Identifier _ /\(/ _ ExpressionList? _ /\)/
-    #                  | /->/ _ Identifier
+    # §16 MethodCall ::= /->/ _ QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    #                  | /->/ _ QualifiedIdentifier
     # Returns Constructor:MethodCallExpr
     method MethodCall($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
@@ -1176,7 +1169,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if (!defined $method_name
                     && $focus isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $rule
-                    && ($rule eq 'Identifier' || $rule eq 'QualifiedIdentifier')) {
+                    && $rule eq 'QualifiedIdentifier') {
                 $method_name = $focus;
             } elsif (defined $method_name) {
                 if (ref($focus) eq 'ARRAY') {

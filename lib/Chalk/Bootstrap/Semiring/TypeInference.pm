@@ -1,5 +1,5 @@
 # ABOUTME: TypeInference semiring for keyword-vs-identifier disambiguation in Earley parsing.
-# ABOUTME: Tags Identifier and QualifiedIdentifier scans matching bare keywords, rejects them at completion.
+# ABOUTME: Tags QualifiedIdentifier scans matching bare keywords, rejects them at completion.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -91,14 +91,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $self->zero();
         }
 
-        # In Identifier context, check if the scanned text is a keyword
-        if ($rule_name eq 'Identifier' && $keyword_check->($matched_text)) {
-            return $self->multiply($existing, {
-                valid                => true,
-                keyword_as_identifier => true,
-            });
-        }
-
         # In QualifiedIdentifier context, reject bare keywords (no :: separator)
         if ($rule_name eq 'QualifiedIdentifier'
             && $matched_text !~ /::/
@@ -132,7 +124,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             });
         }
 
-        # Non-Identifier/QualifiedIdentifier or non-keyword: transparent
+        # Non-QualifiedIdentifier or non-keyword: transparent
         return $self->multiply($existing, $self->one());
     }
 
@@ -144,11 +136,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         # Reject keyword-as-identifier at expression-level rules where a
         # keyword should not be treated as a bare identifier.
-        # Atom (last alt = bare Identifier) and CallExpression (Identifier
-        # as function name) are the two contexts where keyword misuse occurs.
-        # Other rules that contain Identifier (Attribute, MethodCall,
-        # SubroutineDefinition, MethodDefinition) legitimately use keywords
-        # as identifiers (e.g., :isa(...), ->isa(...), sub eq {}).
+        # Atom (last alt = bare QualifiedIdentifier) and CallExpression
+        # (QualifiedIdentifier as function name) are the contexts where
+        # keyword misuse occurs. Other rules that contain QualifiedIdentifier
+        # (Attribute, MethodCall, SubroutineDefinition, MethodDefinition)
+        # legitimately use keywords as identifiers (e.g., :isa(...), ->isa(...), sub eq {}).
         if (($rule_name eq 'Atom' || $rule_name eq 'CallExpression')
             && $value->{keyword_as_identifier})
         {

@@ -253,7 +253,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $rule = Chalk::Grammar::Rule->new(
-        name        => 'Identifier',
+        name        => 'QualifiedIdentifier',
         expressions => [[]],
     );
     my $item = {
@@ -426,7 +426,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     ok($comp->is_zero($bad), 'type inference zero in 4-tuple kills item');
 }
 
-# Test 16: 4-ary on_scan with keyword detection in Identifier rule
+# Test 16: 4-ary on_scan with keyword detection in QualifiedIdentifier rule
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
@@ -441,7 +441,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $rule = Chalk::Grammar::Rule->new(
-        name        => 'Identifier',
+        name        => 'QualifiedIdentifier',
         expressions => [[]],
     );
     my $item = {
@@ -451,7 +451,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         value  => $comp->one(),
     };
 
-    # Scan "use" as Identifier: TypeInference tags it
+    # Scan "use" as QualifiedIdentifier: TypeInference tags it
     my $result = $comp->on_scan($item, 0, 0, 'use');
     is(scalar($result->@*), 4, '4-ary on_scan returns 4-tuple');
     ok(!$bool_sr->is_zero($result->[0]), 'bool ok for keyword scan');
@@ -460,7 +460,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     ok($result->[2]->{keyword_as_identifier}, 'type inference tagged keyword_as_identifier');
 }
 
-# Test 17: 4-ary on_complete rejects keyword as Identifier
+# Test 17: 4-ary on_complete rejects keyword as QualifiedIdentifier in Atom
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(

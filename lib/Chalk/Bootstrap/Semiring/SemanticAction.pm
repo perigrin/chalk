@@ -6,6 +6,24 @@ use experimental 'class';
 
 use Chalk::Bootstrap::Context;
 
+my sub _describe_focus($focus) {
+    return '<undef>' unless defined $focus;
+    if ($focus isa Chalk::Bootstrap::IR::Node::Constant) {
+        my $val = $focus->value() // '<undef>';
+        return "Constant('$val')";
+    }
+    if ($focus isa Chalk::Bootstrap::IR::Node::Constructor) {
+        return "Constructor:" . $focus->class();
+    }
+    if ($focus isa Chalk::Bootstrap::IR::Node) {
+        return ref($focus);
+    }
+    if (ref($focus) eq 'ARRAY') {
+        return "ARRAY[" . scalar($focus->@*) . "]";
+    }
+    return ref($focus) || "'$focus'";
+}
+
 class Chalk::Bootstrap::Semiring::SemanticAction {
     field $actions :param = undef;
 
@@ -100,7 +118,18 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $left if $left == $right;
 
         # Both non-zero AND different: ambiguous parse — upstream disambiguation failed
-        die "Ambiguous parse: SemanticAction::add() received two non-zero alternatives. "
-            . "Upstream semirings must disambiguate before semantic actions run.";
+        my $left_rule  = $left->rule()  // '<no rule>';
+        my $right_rule = $right->rule() // '<no rule>';
+        my $left_pos   = $left->position()  // '?';
+        my $right_pos  = $right->position() // '?';
+        my $left_focus  = _describe_focus($left->extract());
+        my $right_focus = _describe_focus($right->extract());
+        my $left_kids   = scalar($left->children()->@*);
+        my $right_kids  = scalar($right->children()->@*);
+        use Carp;
+        Carp::confess("Ambiguous parse: SemanticAction::add() received two non-zero alternatives.\n"
+            . "  Left:  rule=$left_rule pos=$left_pos focus=$left_focus children=$left_kids\n"
+            . "  Right: rule=$right_rule pos=$right_pos focus=$right_focus children=$right_kids\n"
+            . "Upstream semirings must disambiguate before semantic actions run.");
     }
 }

@@ -271,7 +271,13 @@ class Chalk::Bootstrap::Earley {
             if (exists $chart->[$pos]->{$new_key}) {
                 # Merge with existing item using semiring add (create new item, don't mutate)
                 my $existing = $chart->[$pos]->{$new_key}->[0];
-                my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+                my $merged_value = eval { $semiring->add($existing->{value}, $new_item->{value}) };
+                if ($@) {
+                    my $rule_name = $existing->{rule}->name();
+                    my $dot = $existing->{dot};
+                    my $origin = $existing->{origin};
+                    die "Ambiguity in rule '$rule_name' (dot=$dot, origin=$origin, pos=$pos): $@";
+                }
                 my $merged_item = $self->_make_item(
                     $existing->{rule},
                     $existing->{dot},

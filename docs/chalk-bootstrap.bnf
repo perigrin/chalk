@@ -101,10 +101,10 @@ DefaultValue ::= _ /=/ _ Expression ;
 
 ClassBlock ::= /class\b/ WS QualifiedIdentifier AttributeList? _ Block ;
 
-SubroutineDefinition ::= /sub\b/ WS Identifier _ Signature? _ Block
-    | /(?:my|our|state)\b/ WS /sub\b/ WS Identifier _ Signature? _ Block ;
+SubroutineDefinition ::= /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
+    | /(?:my|our|state)\b/ WS /sub\b/ WS QualifiedIdentifier _ Signature? _ Block ;
 
-MethodDefinition ::= /method\b/ WS Identifier AttributeList? _ Signature? _ Block ;
+MethodDefinition ::= /method\b/ WS QualifiedIdentifier AttributeList? _ Signature? _ Block ;
 
 AdjustBlock ::= /ADJUST\b/ _ Block ;
 
@@ -113,8 +113,8 @@ AdjustBlock ::= /ADJUST\b/ _ Block ;
 AttributeList ::= WS Attribute
     | AttributeList WS Attribute ;
 
-Attribute ::= /:/ _ Identifier
-    | /:/ _ Identifier _ /\(/ _ QualifiedIdentifier _ /\)/ ;
+Attribute ::= /:/ _ QualifiedIdentifier
+    | /:/ _ QualifiedIdentifier _ /\(/ _ QualifiedIdentifier _ /\)/ ;
 
 # §11  SIGNATURES
 
@@ -160,8 +160,7 @@ Atom ::= Variable
     | QwLiteral
     | AnonymousSub
     | MapGrepExpression
-    | QualifiedIdentifier
-    | Identifier ;
+    | QualifiedIdentifier ;
 
 MapGrepExpression ::= /(?:map|grep)\b/ _ Block _ ExpressionList
     | /(?:map|grep)\b/ _ Block _ Expression ;
@@ -223,8 +222,8 @@ PostfixExpression ::= MethodCall
     | CallExpression
     | PostfixIncDec ;
 
-MethodCall ::= Expression _ /->/ _ Identifier _ /\(/ _ ExpressionList? _ /\)/
-    | Expression _ /->/ _ Identifier
+MethodCall ::= Expression _ /->/ _ QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    | Expression _ /->/ _ QualifiedIdentifier
     | Expression _ /->/ _ ScalarVariable _ /\(/ _ ExpressionList? _ /\)/
     | Expression _ /->/ _ ScalarVariable ;
 
@@ -239,11 +238,10 @@ PostfixDeref ::= Expression _ /->/ _ /@\*/
     | Expression _ /->/ _ /\$\*/
     | Expression _ /->/ _ /\$#\*/ ;
 
-CallExpression ::= Identifier _ /\(/ _ ExpressionList? _ /\)/
-    | QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
-    | Identifier WS ExpressionList
-    | Identifier WS Block WS ExpressionList
-    | Identifier WS Block ;
+CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    | QualifiedIdentifier WS ExpressionList
+    | QualifiedIdentifier WS Block WS ExpressionList
+    | QualifiedIdentifier WS Block ;
 
 PostfixIncDec ::= Expression _ /\+\+/
     | Expression _ /--/ ;
@@ -311,8 +309,6 @@ RegexLiteral ::= /\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /m\s*\{(?:[^}\\]|\\.)*\}[msixpodualngcer]*/ ;
 
 # §20  IDENTIFIERS AND HELPERS
-
-Identifier ::= /[a-zA-Z_]\w*/ ;
 
 QualifiedIdentifier ::= /[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/ ;
 
