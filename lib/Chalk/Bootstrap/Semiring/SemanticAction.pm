@@ -126,10 +126,9 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         my $right_focus = _describe_focus($right->extract());
         my $left_kids   = scalar($left->children()->@*);
         my $right_kids  = scalar($right->children()->@*);
-        use Carp;
-        Carp::confess("Ambiguous parse: SemanticAction::add() received two non-zero alternatives.\n"
+        die "Ambiguous parse: SemanticAction::add() received two non-zero alternatives.\n"
             . "  Left:  rule=$left_rule pos=$left_pos focus=$left_focus children=$left_kids\n"
             . "  Right: rule=$right_rule pos=$right_pos focus=$right_focus children=$right_kids\n"
-            . "Upstream semirings must disambiguate before semantic actions run.");
+            . "Upstream semirings must disambiguate before semantic actions run.\n";
     }
 }
