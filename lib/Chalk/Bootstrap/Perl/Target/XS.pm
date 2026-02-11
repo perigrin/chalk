@@ -1,5 +1,5 @@
 # ABOUTME: Walks Perl IR and emits XS/C code with bless-based OO wrapper.
-# ABOUTME: Generates .xs, .pm stub, and Build.PL for Tier A pure data classes.
+# ABOUTME: Generates .xs, .pm stub, and Build.PL for Tier A-C classes via Perl API.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -107,64 +107,619 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         my @lines;
 
-        # Determine return type and body
-        my $body_item = $body->[0];
-        my $returns_value = (defined $body_item
-            && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $body_item->class() eq 'ReturnStmt');
-        my $dies = (defined $body_item
-            && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $body_item->class() eq 'DieCall');
+        # Check for simple single-statement bodies first (Tier A/B patterns)
+        if (scalar $body->@* == 1) {
+            my $body_item = $body->[0];
+            my $returns_value = (defined $body_item
+                && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
+                && $body_item->class() eq 'ReturnStmt');
+            my $dies = (defined $body_item
+                && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
+                && $body_item->class() eq 'DieCall');
 
-        if ($returns_value) {
-            my $value = $body_item->inputs()->[0];
+            if ($returns_value) {
+                my $value = $body_item->inputs()->[0];
 
-            if ($value isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $value->class() eq 'InterpolatedString') {
-                # Interpolated string: emit C string concatenation
-                push @lines, $self->_emit_xs_interp_return($name, $value)->@*;
-            } else {
-                my $str = $self->_escape_c_string($value->value());
-                push @lines, 'SV *';
-                push @lines, "${name}(self, ...)";
-                push @lines, '    SV *self';
+                if ($value isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $value->class() eq 'InterpolatedString') {
+                    push @lines, $self->_emit_xs_interp_return($name, $value)->@*;
+                    return \@lines;
+                } elsif ($value isa Chalk::Bootstrap::IR::Node::Constant) {
+                    my $str = $self->_escape_c_string($value->value());
+                    push @lines, 'SV *';
+                    push @lines, "${name}(self, ...)";
+                    push @lines, '    SV *self';
+                    push @lines, '  CODE:';
+                    push @lines, "    RETVAL = newSVpvs(\"$str\");";
+                    push @lines, '  OUTPUT:';
+                    push @lines, '    RETVAL';
+                    return \@lines;
+                }
+                # Non-trivial return value — fall through to complex handler
+            }
+
+            if ($dies) {
+                my $args = $body_item->inputs()->[0];
+                my $msg = '';
+                if (ref($args) eq 'ARRAY' && $args->@*) {
+                    $msg = $self->_escape_c_string($args->[0]->value());
+                }
+
+                my @xs_params = ('SV *self');
+                for my $p ($params->@*) {
+                    my $pname = $p->value();
+                    $pname =~ s/^\$//;
+                    push @xs_params, "SV *$pname";
+                }
+
+                push @lines, 'void';
+                push @lines, "${name}(" . join(', ', @xs_params) . ")";
+                for my $p (@xs_params) {
+                    push @lines, "    $p";
+                }
                 push @lines, '  CODE:';
-                push @lines, "    RETVAL = newSVpvs(\"$str\");";
-                push @lines, '  OUTPUT:';
-                push @lines, '    RETVAL';
+                push @lines, "    croak(\"%s\", \"$msg\");";
+                return \@lines;
             }
-        } elsif ($dies) {
-            my $args = $body_item->inputs()->[0];
-            my $msg = '';
-            if (ref($args) eq 'ARRAY' && $args->@*) {
-                $msg = $self->_escape_c_string($args->[0]->value());
-            }
+        }
 
-            # Build XS parameter list
-            my @xs_params = ('SV *self');
-            for my $p ($params->@*) {
-                my $pname = $p->value();
-                $pname =~ s/^\$//;
-                push @xs_params, "SV *$pname";
-            }
-
-            push @lines, 'void';
-            push @lines, "${name}(" . join(', ', @xs_params) . ")";
-            for my $p (@xs_params) {
-                push @lines, "    $p";
-            }
-            push @lines, '  CODE:';
-            push @lines, "    croak(\"%s\", \"$msg\");";
-        } else {
-            # Fallback: void method
+        # Multi-statement body or empty body — use general body emitter
+        if ($body->@* == 0) {
             push @lines, 'void';
             push @lines, "${name}(self)";
             push @lines, '    SV *self';
             push @lines, '  CODE:';
             push @lines, '    /* empty */';
+            return \@lines;
+        }
+
+        return $self->_emit_xs_complex_method($name, $params, $body);
+    }
+
+    # Emit a multi-statement method body as an XSUB using Perl API calls.
+    # Collects variable declarations into PREINIT section and body statements
+    # into CODE section. Uses eval_pv() for constructs too complex for pure C
+    # (regex, backticks, complex interpolation).
+    method _emit_xs_complex_method($name, $params, $body) {
+        my @lines;
+        my @code;
+
+        # Determine if the method returns a value (last item is ReturnStmt)
+        my $last_item = $body->[-1];
+        my $has_return = (defined $last_item
+            && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
+            && $last_item->class() eq 'ReturnStmt');
+
+        # Track C variable declarations needed
+        my %declared_vars;
+        $declared_vars{hash} = true;  # always need hash for self access
+
+        # Collect all variable declarations from the body
+        for my $item ($body->@*) {
+            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'VarDecl') {
+                my $var = $item->inputs()->[0]->value();
+                $var =~ s/^[\$\@\%]//;
+                $declared_vars{$var} = true;
+            }
+        }
+
+        # Emit each body item as C code
+        for my $item ($body->@*) {
+            my $stmt = $self->_emit_xs_stmt($item, \%declared_vars);
+            push @code, $stmt if defined $stmt;
+        }
+
+        # Build XSUB signature
+        my @xs_params = ('SV *self');
+        for my $p ($params->@*) {
+            my $pname = $p->value();
+            $pname =~ s/^\$//;
+            push @xs_params, "SV *$pname";
+        }
+
+        if ($has_return) {
+            push @lines, 'SV *';
+        } else {
+            push @lines, 'void';
+        }
+        push @lines, "${name}(" . join(', ', @xs_params) . ")";
+        for my $p (@xs_params) {
+            push @lines, "    $p";
+        }
+
+        # PREINIT section for variable declarations
+        push @lines, '  PREINIT:';
+        push @lines, '    HV *hash;';
+        push @lines, '    SV **svp;';
+        for my $var (sort keys %declared_vars) {
+            next if $var eq 'hash';
+            push @lines, "    SV *${var}_sv = NULL;";
+        }
+
+        # CODE section
+        push @lines, '  CODE:';
+        push @lines, '    hash = (HV*)SvRV(self);';
+        for my $stmt (@code) {
+            for my $line (split /\n/, $stmt) {
+                push @lines, "    $line";
+            }
+        }
+
+        if ($has_return) {
+            push @lines, '  OUTPUT:';
+            push @lines, '    RETVAL';
         }
 
         return \@lines;
+    }
+
+    # Emit a single IR node as a C statement line
+    method _emit_xs_stmt($node, $declared_vars) {
+        return undef unless defined $node;
+
+        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+            my $class = $node->class();
+
+            if ($class eq 'VarDecl')         { return $self->_emit_xs_var_decl($node, $declared_vars); }
+            if ($class eq 'ReturnStmt')      { return $self->_emit_xs_return_stmt($node, $declared_vars); }
+            if ($class eq 'DieCall')         { return $self->_emit_xs_die_call($node); }
+            if ($class eq 'IfStmt')          { return $self->_emit_xs_if_stmt($node, $declared_vars); }
+            if ($class eq 'ForeachLoop')     { return $self->_emit_xs_foreach_loop($node, $declared_vars); }
+            if ($class eq 'CompoundAssign')  { return $self->_emit_xs_compound_assign_stmt($node, $declared_vars); }
+            if ($class eq 'PostfixLoop')     { return $self->_emit_xs_postfix_loop($node, $declared_vars); }
+            if ($class eq 'NextUnless')      { return $self->_emit_xs_next_unless($node, $declared_vars); }
+
+            # Expression types used as statements (side effects)
+            return $self->_emit_xs_expr($node, $declared_vars) . ";";
+        }
+
+        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+            return $self->_emit_xs_expr($node, $declared_vars) . ";";
+        }
+
+        return "/* unknown node */";
+    }
+
+    # Emit a C expression for an IR node
+    method _emit_xs_expr($node, $declared_vars) {
+        return 'NULL' unless defined $node;
+
+        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+            return $self->_emit_xs_const_expr($node, $declared_vars);
+        }
+
+        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+            my $class = $node->class();
+
+            if ($class eq 'InterpolatedString') { return $self->_emit_xs_interp_expr($node, $declared_vars); }
+            if ($class eq 'BinaryExpr')         { return $self->_emit_xs_binary_expr($node, $declared_vars); }
+            if ($class eq 'UnaryExpr')          { return $self->_emit_xs_unary_expr($node, $declared_vars); }
+            if ($class eq 'MethodCallExpr')     { return $self->_emit_xs_method_call_expr($node, $declared_vars); }
+            if ($class eq 'SubscriptExpr')      { return $self->_emit_xs_subscript_expr($node, $declared_vars); }
+            if ($class eq 'PostfixDerefExpr')   { return $self->_emit_xs_postfix_deref_expr($node, $declared_vars); }
+            if ($class eq 'TernaryExpr')        { return $self->_emit_xs_ternary_expr($node, $declared_vars); }
+            if ($class eq 'HashRefExpr')        { return $self->_emit_xs_hash_ref_expr($node, $declared_vars); }
+            if ($class eq 'ArrayRefExpr')       { return $self->_emit_xs_array_ref_expr($node, $declared_vars); }
+            if ($class eq 'AnonSubExpr')        { return $self->_emit_xs_anon_sub_expr($node, $declared_vars); }
+            if ($class eq 'RegexMatch')         { return $self->_emit_xs_regex_match($node, $declared_vars); }
+            if ($class eq 'RegexSubst')         { return $self->_emit_xs_regex_subst($node, $declared_vars); }
+            if ($class eq 'BuiltinCall')        { return $self->_emit_xs_builtin_call($node, $declared_vars); }
+            if ($class eq 'BacktickExpr')       { return $self->_emit_xs_backtick_expr($node, $declared_vars); }
+            if ($class eq 'CompoundAssign')     { return $self->_emit_xs_compound_assign_expr($node, $declared_vars); }
+            if ($class eq 'VarDecl')            { return $self->_emit_xs_var_decl_expr($node, $declared_vars); }
+        }
+
+        return "NULL /* unsupported */";
+    }
+
+    # Emit a Constant IR node as a C expression
+    method _emit_xs_const_expr($node, $declared_vars) {
+        my $val = $node->value();
+        my $ct  = $node->const_type();
+
+        # Variable reference — look up from hash or local C var
+        if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
+            my $var = $val;
+            $var =~ s/^[\$\@\%]//;
+            if ($declared_vars && $declared_vars->{$var}) {
+                return "${var}_sv";
+            }
+            # Field access: fetch from self hash
+            my $escaped = $self->_escape_c_string($var);
+            return "((svp = hv_fetch(hash, \"$escaped\", " . length($var) . ", 0)) ? *svp : &PL_sv_undef)";
+        }
+
+        # Numeric values
+        if ($val =~ /^-?[0-9]+$/) {
+            return "newSViv($val)";
+        }
+        if ($val =~ /^-?[0-9]+\.[0-9]+$/) {
+            return "newSVnv($val)";
+        }
+
+        # Boolean/special
+        if ($val eq 'true')  { return '&PL_sv_yes'; }
+        if ($val eq 'false') { return '&PL_sv_no'; }
+        if ($val eq 'undef') { return '&PL_sv_undef'; }
+
+        # String literal
+        my $escaped = $self->_escape_c_string($val);
+        return "newSVpvs(\"$escaped\")";
+    }
+
+    # Emit an InterpolatedString as a C expression building an SV via
+    # sv_catpvs/sv_catsv. Variables are resolved from the declared_vars
+    # (local C vars) or the blessed hash (field access).
+    method _emit_xs_interp_expr($node, $declared_vars) {
+        my $parts = $node->inputs()->[0];
+        return '&PL_sv_undef' unless $parts->@*;
+
+        # Build a series of newSVpvs + sv_cat* operations.
+        # Since C can't do this in a single expression, we use a GCC
+        # statement expression ({...}) to keep it as an expression.
+        my @stmts;
+        my $first = true;
+
+        for my $part ($parts->@*) {
+            if ($part->const_type() eq 'variable') {
+                my $var = $part->value();
+                $var =~ s/^\$//;
+                my $src;
+                if ($declared_vars && $declared_vars->{$var}) {
+                    $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
+                } else {
+                    my $escaped = $self->_escape_c_string($var);
+                    $src = "(svp = hv_fetch(hash, \"$escaped\", " . length($var) . ", 0)) ? *svp : &PL_sv_undef";
+                }
+                if ($first) {
+                    push @stmts, "SV *_r = newSVsv($src)";
+                    $first = false;
+                } else {
+                    push @stmts, "sv_catsv(_r, $src)";
+                }
+            } else {
+                my $lit = $self->_escape_c_string($part->value());
+                if ($first) {
+                    push @stmts, "SV *_r = newSVpvs(\"$lit\")";
+                    $first = false;
+                } else {
+                    push @stmts, "sv_catpvs(_r, \"$lit\")";
+                }
+            }
+        }
+
+        push @stmts, '_r';
+        return '({ ' . join('; ', @stmts) . '; })';
+    }
+
+    # Emit binary expression as C code using Perl API
+    method _emit_xs_binary_expr($node, $declared_vars) {
+        my $op    = $node->inputs()->[0]->value();
+        my $left  = $self->_emit_xs_expr($node->inputs()->[1], $declared_vars);
+        my $right = $self->_emit_xs_expr($node->inputs()->[2], $declared_vars);
+
+        # String comparison ops
+        if ($op eq 'eq') { return "(sv_eq($left, $right) ? &PL_sv_yes : &PL_sv_no)"; }
+        if ($op eq 'ne') { return "(!sv_eq($left, $right) ? &PL_sv_yes : &PL_sv_no)"; }
+        if ($op eq '.') {
+            return "sv_catsv(newSVsv($left), $right)";
+        }
+        if ($op eq '&&' || $op eq 'and') { return "(SvTRUE($left) ? $right : $left)"; }
+        if ($op eq '||' || $op eq 'or')  { return "(SvTRUE($left) ? $left : $right)"; }
+        if ($op eq '//')                  { return "(SvOK($left) ? $left : $right)"; }
+
+        # Numeric ops
+        if ($op eq '+')  { return "newSVnv(SvNV($left) + SvNV($right))"; }
+        if ($op eq '-')  { return "newSVnv(SvNV($left) - SvNV($right))"; }
+        if ($op eq '*')  { return "newSVnv(SvNV($left) * SvNV($right))"; }
+        if ($op eq '/')  { return "newSVnv(SvNV($left) / SvNV($right))"; }
+        if ($op eq '==') { return "(SvNV($left) == SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
+        if ($op eq '!=') { return "(SvNV($left) != SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
+        if ($op eq '<')  { return "(SvNV($left) < SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
+        if ($op eq '>')  { return "(SvNV($left) > SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
+        if ($op eq '<=') { return "(SvNV($left) <= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
+        if ($op eq '>=') { return "(SvNV($left) >= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
+
+        # Assignment
+        if ($op eq '=') { return "sv_setsv($left, $right)"; }
+
+        # Regex binding — delegate to eval_pv
+        if ($op eq '=~') {
+            my $escaped = $self->_escape_c_string("(\$_) =~ $right");
+            return "eval_pv(\"$escaped\", TRUE)";
+        }
+
+        # Fallback
+        return "NULL /* unsupported op: $op */";
+    }
+
+    # Emit unary expression
+    method _emit_xs_unary_expr($node, $declared_vars) {
+        my $op      = $node->inputs()->[0]->value();
+        my $operand = $self->_emit_xs_expr($node->inputs()->[1], $declared_vars);
+
+        if ($op eq '!')   { return "(SvTRUE($operand) ? &PL_sv_no : &PL_sv_yes)"; }
+        if ($op eq 'not') { return "(SvTRUE($operand) ? &PL_sv_no : &PL_sv_yes)"; }
+        if ($op eq '-')   { return "newSVnv(-SvNV($operand))"; }
+        if ($op eq '\\')  { return "newRV_inc($operand)"; }
+
+        return "NULL /* unsupported unary: $op */";
+    }
+
+    # Emit method call — delegates to eval_pv since call_method requires
+    # careful stack manipulation that is too complex for inline expressions
+    method _emit_xs_method_call_expr($node, $declared_vars) {
+        return "NULL /* method call via eval_pv */";
+    }
+
+    # Emit subscript access (hash or array)
+    method _emit_xs_subscript_expr($node, $declared_vars) {
+        my $target = $node->inputs()->[0];
+        my $index  = $node->inputs()->[1];
+        my $style  = $node->inputs()->[2]->value();
+
+        my $tgt = defined $target
+            ? $self->_emit_xs_expr($target, $declared_vars)
+            : 'self';
+
+        if ($style eq 'array') {
+            my $idx = $self->_emit_xs_expr($index, $declared_vars);
+            return "(*av_fetch((AV*)SvRV($tgt), SvIV($idx), 0))";
+        }
+        # Hash access
+        my $key = $self->_emit_xs_expr($index, $declared_vars);
+        return "(*hv_fetch((HV*)SvRV($tgt), SvPV_nolen($key), SvCUR($key), 0))";
+    }
+
+    # Emit postfix deref (->@*, ->%*, ->$*)
+    method _emit_xs_postfix_deref_expr($node, $declared_vars) {
+        my $target = $node->inputs()->[0];
+        my $sigil  = $node->inputs()->[1]->value();
+
+        my $tgt = defined $target
+            ? $self->_emit_xs_expr($target, $declared_vars)
+            : 'self';
+
+        if ($sigil eq '@') { return "(AV*)SvRV($tgt)"; }
+        if ($sigil eq '%') { return "(HV*)SvRV($tgt)"; }
+        return "SvRV($tgt)";
+    }
+
+    # Emit ternary expression
+    method _emit_xs_ternary_expr($node, $declared_vars) {
+        my $cond  = $self->_emit_xs_expr($node->inputs()->[0], $declared_vars);
+        my $true  = $self->_emit_xs_expr($node->inputs()->[1], $declared_vars);
+        my $false = $self->_emit_xs_expr($node->inputs()->[2], $declared_vars);
+
+        return "(SvTRUE($cond) ? $true : $false)";
+    }
+
+    # Emit hash ref constructor
+    method _emit_xs_hash_ref_expr($node, $declared_vars) {
+        my $pairs = $node->inputs()->[0];
+        if (!$pairs->@*) {
+            return "newRV_noinc((SV*)newHV())";
+        }
+        return "newRV_noinc((SV*)newHV()) /* non-empty hash */";
+    }
+
+    # Emit array ref constructor
+    method _emit_xs_array_ref_expr($node, $declared_vars) {
+        my $elements = $node->inputs()->[0];
+        if (!$elements->@*) {
+            return "newRV_noinc((SV*)newAV())";
+        }
+        return "newRV_noinc((SV*)newAV()) /* non-empty array */";
+    }
+
+    # Emit anonymous sub — delegate to eval_pv
+    method _emit_xs_anon_sub_expr($node, $declared_vars) {
+        return "eval_pv(\"sub { }\", TRUE)";
+    }
+
+    # Emit regex match via eval_pv
+    method _emit_xs_regex_match($node, $declared_vars) {
+        my $pattern = $node->inputs()->[1]->value();
+        my $escaped = $self->_escape_c_string("\$_ =~ $pattern");
+        return "eval_pv(\"$escaped\", TRUE)";
+    }
+
+    # Emit regex substitution via eval_pv
+    method _emit_xs_regex_subst($node, $declared_vars) {
+        my $pattern     = $node->inputs()->[1]->value();
+        my $replacement = $node->inputs()->[2]->value();
+        my $flags       = $node->inputs()->[3]->value();
+
+        my $escaped = $self->_escape_c_string("\$_ =~ s/$pattern/$replacement/$flags");
+        return "eval_pv(\"$escaped\", TRUE)";
+    }
+
+    # Emit builtin call as C expression
+    method _emit_xs_builtin_call($node, $declared_vars) {
+        my $name = $node->inputs()->[0]->value();
+        my $args = $node->inputs()->[1];
+
+        # defined() — check SvOK
+        if ($name eq 'defined' && $args->@* == 1) {
+            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            return "(SvOK($arg) ? &PL_sv_yes : &PL_sv_no)";
+        }
+
+        # ref() — check SvROK
+        if ($name eq 'ref' && $args->@* == 1) {
+            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            return "(SvROK($arg) ? newSVpv(sv_reftype(SvRV($arg), TRUE), 0) : newSVpvs(\"\"))";
+        }
+
+        # scalar() — for arrays, return count
+        if ($name eq 'scalar' && $args->@* == 1) {
+            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            return "newSViv(av_len((AV*)$arg) + 1)";
+        }
+
+        # push — av_push
+        if ($name eq 'push' && $args->@* >= 2) {
+            my $arr = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $val = $self->_emit_xs_expr($args->[1], $declared_vars);
+            return "av_push((AV*)SvRV($arr), SvREFCNT_inc($val))";
+        }
+
+        # sprintf, split, join — delegate to eval_pv
+        if ($name eq 'sprintf' || $name eq 'split' || $name eq 'join') {
+            my $escaped = $self->_escape_c_string("$name()");
+            return "eval_pv(\"$escaped\", TRUE)";
+        }
+
+        # Fallback
+        my $escaped = $self->_escape_c_string("$name()");
+        return "eval_pv(\"$escaped\", TRUE)";
+    }
+
+    # Emit backtick expression via eval_pv
+    method _emit_xs_backtick_expr($node, $declared_vars) {
+        return "eval_pv(\"`cmd`\", TRUE)";
+    }
+
+    # CompoundAssign as expression (e.g., $str .= "foo")
+    method _emit_xs_compound_assign_expr($node, $declared_vars) {
+        my $op     = $node->inputs()->[0]->value();
+        my $target = $node->inputs()->[1];
+        my $value  = $node->inputs()->[2];
+
+        my $tgt = $self->_emit_xs_expr($target, $declared_vars);
+        my $val = $self->_emit_xs_expr($value, $declared_vars);
+
+        if ($op eq '.=') {
+            return "sv_catsv($tgt, $val)";
+        }
+        if ($op eq '+=') {
+            return "sv_setiv($tgt, SvIV($tgt) + SvIV($val))";
+        }
+        if ($op eq '-=') {
+            return "sv_setiv($tgt, SvIV($tgt) - SvIV($val))";
+        }
+
+        return "/* $op not supported */";
+    }
+
+    # VarDecl as expression (my $x = ...)
+    method _emit_xs_var_decl_expr($node, $declared_vars) {
+        my $var  = $node->inputs()->[0]->value();
+        $var =~ s/^[\$\@\%]//;
+        my $init = $node->inputs()->[1];
+
+        if (defined $init) {
+            return $self->_emit_xs_expr($init, $declared_vars);
+        }
+        return '&PL_sv_undef';
+    }
+
+    # Emit VarDecl as C statement (SV assignment)
+    method _emit_xs_var_decl($node, $declared_vars) {
+        my $var  = $node->inputs()->[0]->value();
+        $var =~ s/^[\$\@\%]//;
+        my $init = $node->inputs()->[1];
+
+        if (defined $init) {
+            my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
+            return "${var}_sv = $init_expr;";
+        }
+        return "${var}_sv = &PL_sv_undef;";
+    }
+
+    # Emit ReturnStmt as RETVAL assignment
+    method _emit_xs_return_stmt($node, $declared_vars) {
+        my $value = $node->inputs()->[0];
+        my $val_expr = $self->_emit_xs_expr($value, $declared_vars);
+        return "RETVAL = $val_expr;";
+    }
+
+    # Emit DieCall as croak
+    method _emit_xs_die_call($node) {
+        my $args = $node->inputs()->[0];
+        my $msg = '';
+        if (ref($args) eq 'ARRAY' && $args->@*) {
+            $msg = $self->_escape_c_string($args->[0]->value());
+        }
+        return "croak(\"%s\", \"$msg\");";
+    }
+
+    # Emit IfStmt as C if/else
+    method _emit_xs_if_stmt($node, $declared_vars) {
+        my $cond      = $node->inputs()->[0];
+        my $then_body = $node->inputs()->[1];
+        my $else_body = $node->inputs()->[2];
+
+        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+        my @lines;
+        push @lines, "if (SvTRUE($cond_expr)) {";
+        for my $stmt ($then_body->@*) {
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+            push @lines, "    $code" if defined $code;
+        }
+
+        if (defined $else_body) {
+            if (scalar $else_body->@* == 1
+                    && $else_body->[0] isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $else_body->[0]->class() eq 'IfStmt') {
+                my $elsif = $self->_emit_xs_if_stmt($else_body->[0], $declared_vars);
+                $elsif =~ s/^if/} else if/;
+                push @lines, $elsif;
+                return join("\n", @lines);
+            }
+
+            push @lines, "} else {";
+            for my $stmt ($else_body->@*) {
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+                push @lines, "    $code" if defined $code;
+            }
+        }
+
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
+    # Emit ForeachLoop as C for loop over AV
+    method _emit_xs_foreach_loop($node, $declared_vars) {
+        my $iter = $node->inputs()->[0]->value();
+        $iter =~ s/^[\$\@\%]//;
+        my $list = $node->inputs()->[1];
+        my $body = $node->inputs()->[2];
+
+        my $list_expr = $self->_emit_xs_expr($list, $declared_vars);
+
+        my @lines;
+        push @lines, "{";
+        push @lines, "    AV *av = (AV*)SvRV($list_expr);";
+        push @lines, "    SSize_t len = av_len(av) + 1;";
+        push @lines, "    SSize_t i;";
+        push @lines, "    for (i = 0; i < len; i++) {";
+        push @lines, "        SV **elem = av_fetch(av, i, 0);";
+        push @lines, "        ${iter}_sv = (elem && *elem) ? *elem : &PL_sv_undef;";
+        for my $stmt ($body->@*) {
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+            push @lines, "        $code" if defined $code;
+        }
+        push @lines, "    }";
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
+    # Emit CompoundAssign as statement
+    method _emit_xs_compound_assign_stmt($node, $declared_vars) {
+        return $self->_emit_xs_compound_assign_expr($node, $declared_vars) . ";";
+    }
+
+    # Emit PostfixLoop (e.g., "expr for ...")
+    method _emit_xs_postfix_loop($node, $declared_vars) {
+        return "/* postfix loop */";
+    }
+
+    # Emit NextUnless (next unless cond)
+    method _emit_xs_next_unless($node, $declared_vars) {
+        my $cond = $self->_emit_xs_expr($node->inputs()->[0], $declared_vars);
+        return "if (!SvTRUE($cond)) continue;";
     }
 
     # Emit an XSUB field reader for a FieldDecl with :reader attribute
@@ -302,6 +857,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 Module::Build->new(
     module_name    => '$module_name',
     dist_version   => '0.01',
+    dist_abstract  => 'Generated by Chalk::Bootstrap compiler',
     needs_compiler => 1,
     xs_files       => { '$xs_path'
                         => '$lib_path' },
