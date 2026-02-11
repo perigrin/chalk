@@ -28,6 +28,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         my $is_hash  = $left->{is_hash}  || $right->{is_hash};
         my $is_bare  = $left->{is_bare_statement} || $right->{is_bare_statement};
         my $is_call  = $left->{is_call}  || $right->{is_call};
+        my $is_list  = $left->{is_list}  || $right->{is_list};
 
         return {
             valid => true,
@@ -35,6 +36,7 @@ class Chalk::Bootstrap::Semiring::Structural {
             ($is_hash  ? (is_hash           => true) : ()),
             ($is_bare  ? (is_bare_statement => true) : ()),
             ($is_call  ? (is_call           => true) : ()),
+            ($is_list  ? (is_list           => true) : ()),
         };
     }
 
@@ -53,8 +55,18 @@ class Chalk::Bootstrap::Semiring::Structural {
             return $left;
         }
 
+        # Both valid: prefer non-list over list (Expression vs ExpressionList)
+        my $left_list  = $left->{is_list};
+        my $right_list = $right->{is_list};
+        if ($left_list && !$right_list) {
+            return $right;
+        }
+        if ($right_list && !$left_list) {
+            return $left;
+        }
+
         # Both valid: prefer is_call over non-call
-        # CallExpression consumes more input than bare Identifier.
+        # CallExpression consumes more input than bare QualifiedIdentifier.
         my $left_call  = $left->{is_call};
         my $right_call = $right->{is_call};
         if ($left_call && !$right_call) {
@@ -77,10 +89,12 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Both valid, untagged (or both bare)
         my $is_bare = $left_bare || $right_bare;
         my $is_call = $left_call || $right_call;
+        my $is_list = $left_list || $right_list;
         return {
             valid => true,
             ($is_bare ? (is_bare_statement => true) : ()),
             ($is_call ? (is_call           => true) : ()),
+            ($is_list ? (is_list           => true) : ()),
         };
     }
 
@@ -90,6 +104,8 @@ class Chalk::Bootstrap::Semiring::Structural {
         return undef if $self->is_zero($left);
         return undef if $self->is_zero($right);
 
+
+
         # Prefer non-bare over bare
         my $left_bare  = $left->{is_bare_statement};
         my $right_bare = $right->{is_bare_statement};
@@ -97,6 +113,14 @@ class Chalk::Bootstrap::Semiring::Structural {
             return 'right';
         }
         if ($right_bare && !$left_bare) {
+            return 'left';
+        }
+
+        # Prefer non-list over list (Expression vs ExpressionList)
+        if ($left->{is_list} && !$right->{is_list}) {
+            return 'right';
+        }
+        if ($right->{is_list} && !$left->{is_list}) {
             return 'left';
         }
 
@@ -162,6 +186,27 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true, is_call => true };
         }
 
+        # Tag ExpressionStatement alt 1 (ExpressionList) — when a single
+        # expression matches both Expression and ExpressionList, prefer
+        # Expression (simpler parse). The list form is only correct when
+        # there are actual commas or fat arrows.
+        if ($rule_name eq 'ExpressionStatement' && $alt_idx == 1) {
+            return {
+                valid   => true,
+                is_list => true,
+                ($value->{is_block} ? (is_block => true) : ()),
+                ($value->{is_hash}  ? (is_hash  => true) : ()),
+                ($value->{is_call}  ? (is_call  => true) : ()),
+            };
+        }
+
+        # Tag UseDeclaration with imports (alt 1) as is_call to prefer
+        # it over the shorter alt 0 (without imports). This prevents
+        # `use Foo 'bar'` from fragmenting into `use Foo` + `'bar'`.
+        if ($rule_name eq 'UseDeclaration' && $alt_idx == 1) {
+            return { valid => true, is_call => true };
+        }
+
         # Tag bare StatementItem (alt 1 = SimpleStatement without semicolon)
         if ($rule_name eq 'StatementItem' && $alt_idx == 1) {
             return {
@@ -170,6 +215,7 @@ class Chalk::Bootstrap::Semiring::Structural {
                 ($value->{is_block} ? (is_block => true) : ()),
                 ($value->{is_hash}  ? (is_hash  => true) : ()),
                 ($value->{is_call}  ? (is_call  => true) : ()),
+                ($value->{is_list}  ? (is_list  => true) : ()),
             };
         }
 
@@ -179,13 +225,14 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true };
         }
 
-        # Statement boundaries: clear block/hash, preserve is_bare_statement and is_call
+        # Statement boundaries: clear block/hash, preserve is_bare_statement, is_call, is_list
         if ($rule_name eq 'StatementList'
             || $rule_name eq 'Program') {
             return {
                 valid => true,
                 ($value->{is_bare_statement} ? (is_bare_statement => true) : ()),
                 ($value->{is_call}           ? (is_call           => true) : ()),
+                ($value->{is_list}           ? (is_list           => true) : ()),
             };
         }
 
@@ -194,6 +241,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         my $is_hash  = $value->{is_hash};
         my $is_bare  = $value->{is_bare_statement};
         my $is_call  = $value->{is_call};
+        my $is_list  = $value->{is_list};
 
         return {
             valid => true,
@@ -201,6 +249,7 @@ class Chalk::Bootstrap::Semiring::Structural {
             ($is_hash  ? (is_hash           => true) : ()),
             ($is_bare  ? (is_bare_statement => true) : ()),
             ($is_call  ? (is_call           => true) : ()),
+            ($is_list  ? (is_list           => true) : ()),
         };
     }
 }
