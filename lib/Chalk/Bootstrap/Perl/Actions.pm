@@ -142,6 +142,95 @@ class Chalk::Bootstrap::Perl::Actions {
                 } else {
                     push @result, $item;
                 }
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'BinaryExpr'
+                    && $item->inputs()->[0]->value() eq '='
+                    && $item->inputs()->[1] isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->inputs()->[1]->class() eq 'VarDecl'
+                    && !defined $item->inputs()->[1]->inputs()->[1]) {
+                # Merge BinaryExpr(=, VarDecl(var, undef), expr) → VarDecl(var, expr)
+                my $var_decl = $item->inputs()->[1];
+                push @result, $factory->make('Constructor',
+                    class       => 'VarDecl',
+                    variable    => $var_decl->inputs()->[0],
+                    initializer => $item->inputs()->[2],
+                );
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'VarDecl'
+                    && !defined $item->inputs()->[1]
+                    && $i + 1 <= $#$stmts
+                    && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node) {
+                # Merge bare VarDecl(var, undef) + following expression → VarDecl(var, expr)
+                my $next = $stmts->[$i + 1];
+                if (!($next isa Chalk::Bootstrap::IR::Node::Constructor
+                        && ($next->class() eq 'ClassDecl'
+                            || $next->class() eq 'MethodDecl'
+                            || $next->class() eq 'IfStmt'
+                            || $next->class() eq 'ForeachLoop'
+                            || $next->class() eq 'FieldDecl'))) {
+                    $i++;
+                    push @result, $factory->make('Constructor',
+                        class       => 'VarDecl',
+                        variable    => $item->inputs()->[0],
+                        initializer => $next,
+                    );
+                } else {
+                    push @result, $item;
+                }
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $item->value()
+                    && $item->value() =~ /^(?:push|unshift|pop|shift|splice|print|say|warn|sort|reverse|chomp|chop)$/
+                    && $i + 1 <= $#$stmts) {
+                # Merge bare builtin keyword + following args → BuiltinCall
+                my $builtin = $item->value();
+                my @args;
+                while ($i + 1 <= $#$stmts) {
+                    my $next = $stmts->[$i + 1];
+                    # Stop at statement-level constructs
+                    last if $next isa Chalk::Bootstrap::IR::Node::Constructor
+                        && ($next->class() eq 'ClassDecl'
+                            || $next->class() eq 'MethodDecl'
+                            || $next->class() eq 'IfStmt'
+                            || $next->class() eq 'ForeachLoop'
+                            || $next->class() eq 'FieldDecl'
+                            || $next->class() eq 'ReturnStmt'
+                            || $next->class() eq 'DieCall');
+                    # Stop at other bare builtins
+                    last if $next isa Chalk::Bootstrap::IR::Node::Constant
+                        && defined $next->value()
+                        && $next->value() =~ /^(?:push|unshift|return|die|my|for|if|unless|while|until)$/;
+                    $i++;
+                    push @args, $next;
+                }
+                push @result, $factory->make('Constructor',
+                    class => 'BuiltinCall',
+                    name  => _make_const($factory, $builtin),
+                    args  => \@args,
+                );
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $item->value()
+                    && $item->value() =~ /^(?:scalar|defined|ref|exists|delete|keys|values|each|length|chr|ord|substr|sprintf|join|split)$/
+                    && $i + 1 <= $#$stmts) {
+                # Merge bare prefix-builtin + following expression → BuiltinCall
+                my $builtin = $item->value();
+                $i++;
+                my $arg = $stmts->[$i];
+                push @result, $factory->make('Constructor',
+                    class => 'BuiltinCall',
+                    name  => _make_const($factory, $builtin),
+                    args  => [$arg],
+                );
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $item->value()
+                    && $item->value() eq 'next'
+                    && $i + 1 <= $#$stmts) {
+                # Merge next + condition → NextUnless or PostfixLoop
+                $i++;
+                my $cond = $stmts->[$i];
+                push @result, $factory->make('Constructor',
+                    class     => 'NextUnless',
+                    condition => $cond,
+                );
             } else {
                 push @result, $item;
             }
@@ -183,22 +272,33 @@ class Chalk::Bootstrap::Perl::Actions {
         return _fixup_stmts($factory, \@stmts);
     }
 
-    # §2 StatementItem — pass through the child IR value
+    # §2 StatementItem — collect all IR values for fixup in StatementList/Block
     method StatementItem($ctx) {
         my @values = _collect_ir_values($ctx);
-        # Return the first non-trivial IR value
+        my @ir_nodes;
         for my $val (@values) {
-            return $val if $val isa Chalk::Bootstrap::IR::Node;
+            if ($val isa Chalk::Bootstrap::IR::Node) {
+                push @ir_nodes, $val;
+            }
         }
+        # Single value — return directly
+        return $ir_nodes[0] if @ir_nodes == 1;
+        # Multiple values — return as arrayref for StatementList to flatten
+        return \@ir_nodes if @ir_nodes > 1;
         return undef;
     }
 
     # §3 SimpleStatement — transparent pass-through
     method SimpleStatement($ctx) {
         my @values = _collect_ir_values($ctx);
+        my @ir_nodes;
         for my $val (@values) {
-            return $val if $val isa Chalk::Bootstrap::IR::Node;
+            if ($val isa Chalk::Bootstrap::IR::Node) {
+                push @ir_nodes, $val;
+            }
         }
+        return $ir_nodes[0] if @ir_nodes == 1;
+        return \@ir_nodes if @ir_nodes > 1;
         return undef;
     }
 
@@ -214,9 +314,14 @@ class Chalk::Bootstrap::Perl::Actions {
     # §4 ExpressionStatement — transparent pass-through
     method ExpressionStatement($ctx) {
         my @values = _collect_ir_values($ctx);
+        my @ir_nodes;
         for my $val (@values) {
-            return $val if $val isa Chalk::Bootstrap::IR::Node;
+            if ($val isa Chalk::Bootstrap::IR::Node) {
+                push @ir_nodes, $val;
+            }
         }
+        return $ir_nodes[0] if @ir_nodes == 1;
+        return \@ir_nodes if @ir_nodes > 1;
         return undef;
     }
 
@@ -705,28 +810,28 @@ class Chalk::Bootstrap::Perl::Actions {
     method Variable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return _make_const($factory, $text);
+        return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 ScalarVariable — return as Constant
+    # §18 ScalarVariable — return as Constant with variable type
     method ScalarVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return _make_const($factory, $text);
+        return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 ArrayVariable — return as Constant
+    # §18 ArrayVariable — return as Constant with variable type
     method ArrayVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return _make_const($factory, $text);
+        return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 HashVariable — return as Constant
+    # §18 HashVariable — return as Constant with variable type
     method HashVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return _make_const($factory, $text);
+        return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
     # §13 QwLiteral — return array of Constants
