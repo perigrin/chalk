@@ -71,6 +71,9 @@ my @FILES = (
     ['lib/Chalk/Bootstrap/Target/XS.pm',                  'Tier D: Target::XS'],
     ['lib/Chalk/Grammar/Perl/PrecedenceTable.pm',         'Tier D: PrecedenceTable'],
     ['lib/Chalk/Bootstrap/Semiring/Boolean.pm',           'Tier D: Semiring::Boolean'],
+    ['lib/Chalk/Bootstrap/Perl/Actions.pm',              'Tier D: Perl::Actions'],
+    ['lib/Chalk/Bootstrap/Perl/Target/Perl.pm',          'Tier D: Perl::Target::Perl'],
+    ['lib/Chalk/Bootstrap/Perl/Target/XS.pm',            'Tier D: Perl::Target::XS'],
 );
 
 # Check B::Concise is available
@@ -146,8 +149,10 @@ SKIP: {
         return \%result;
     }
 
-    # Files with known oracle mismatches — currently empty (all 37 pass)
-    my %TODO_FILES;
+    # Files with known oracle mismatches or parse failures
+    my %TODO_FILES = (
+        'lib/Chalk/Bootstrap/Perl/Actions.pm' => 'Complex my sub + regex constructs exceed grammar capacity',
+    );
 
     # Emit TAP for a single file result
     my sub emit_tap_for_result($r) {

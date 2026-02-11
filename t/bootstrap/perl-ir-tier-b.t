@@ -42,7 +42,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 
     my $inputs = $field->inputs();
     is(ref $inputs, 'ARRAY', 'FieldDecl: inputs is arrayref');
-    is(scalar $inputs->@*, 2, 'FieldDecl: has 2 inputs (name, attributes)');
+    is(scalar $inputs->@*, 3, 'FieldDecl: has 3 inputs (name, attributes, default_value)');
 
     is($inputs->[0]->value(), '$const_type', 'FieldDecl: name is $const_type');
     is(ref $inputs->[1], 'ARRAY', 'FieldDecl: attributes is arrayref');
