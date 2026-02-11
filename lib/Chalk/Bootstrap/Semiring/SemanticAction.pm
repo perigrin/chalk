@@ -83,8 +83,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         );
     }
 
-    # Add combines alternative derivations
-    # For now, just return first alternative (disambiguation later)
+    # Add combines alternative derivations.
+    # Upstream semirings (Precedence, TypeInference, Structural) MUST
+    # disambiguate before SemanticAction sees the alternatives. If both
+    # are non-zero here, the parse is genuinely ambiguous and we must
+    # reject it rather than silently picking one.
     method add($left, $right) {
         # If left is zero, return right
         return $right if !defined $left;
@@ -92,8 +95,12 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # If right is zero, return left
         return $left if !defined $right;
 
-        # Both non-zero: return first alternative
-        # TODO: Log that multiple parses exist if debug enabled
-        return $left;
+        # Same context on both sides means Composite already disambiguated
+        # via selects_alternative and is passing the winner through
+        return $left if $left == $right;
+
+        # Both non-zero AND different: ambiguous parse — upstream disambiguation failed
+        die "Ambiguous parse: SemanticAction::add() received two non-zero alternatives. "
+            . "Upstream semirings must disambiguate before semantic actions run.";
     }
 }

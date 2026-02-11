@@ -184,7 +184,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 # N-ary Composite: add delegates to all components
 # ========================================================================
 
-# Test 9: add delegates to both
+# Test 9: add dies when no semiring disambiguates two non-zero alternatives
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -211,12 +211,33 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $val1 = [$bool_sr->one(), $ctx1];
     my $val2 = [$bool_sr->one(), $ctx2];
 
-    my $result = $comp->add($val1, $val2);
+    eval { $comp->add($val1, $val2) };
+    like($@, qr/Ambiguous parse/, 'add dies on undisambiguated alternatives');
+}
 
-    isa_ok($result, 'ARRAY', 'add returns array ref');
+# Test 9b: add succeeds when same context on both sides (disambiguated)
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $sem_sr],
+    );
+
+    my $node = $factory->make('Constant', const_type => 'string', value => 'winner');
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => $node,
+        children => [],
+        position => 0,
+        rule     => 'Winner',
+    );
+
+    my $val = [$bool_sr->one(), $ctx];
+    my $result = $comp->add($val, $val);
+
+    isa_ok($result, 'ARRAY', 'add returns array ref for same-value merge');
     is(scalar($result->@*), 2, 'add returns 2-tuple');
     ok(!$bool_sr->is_zero($result->[0]), 'bool component is true');
-    is($result->[1]->extract()->value(), 'alt1', 'sem component returns first alt');
+    is($result->[1]->extract()->value(), 'winner', 'sem component returns disambiguated value');
 }
 
 # ========================================================================

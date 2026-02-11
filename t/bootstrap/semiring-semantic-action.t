@@ -61,7 +61,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result->children()->[1]->extract()->value(), 'right', 'second child preserved');
 }
 
-# Test 4: add combines alternative derivations (returns first for now)
+# Test 4: add dies on ambiguous parse (two different non-zero alternatives)
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
@@ -81,10 +81,25 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alt2',
     );
 
-    my $result = $sr->add($ctx1, $ctx2);
+    eval { $sr->add($ctx1, $ctx2) };
+    like($@, qr/Ambiguous parse/, 'add dies on two different non-zero alternatives');
+}
 
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'add returns Context');
-    is($result->extract()->value(), 'alt1', 'add returns first alternative');
+# Test 4b: add returns context when same object on both sides (disambiguated)
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $node = $factory->make('Constant', const_type => 'string', value => 'winner');
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => $node,
+        children => [],
+        position => 0,
+        rule     => 'Winner',
+    );
+
+    my $result = $sr->add($ctx, $ctx);
+    isa_ok($result, 'Chalk::Bootstrap::Context', 'add returns Context for same-object merge');
+    is($result->extract()->value(), 'winner', 'add returns the disambiguated context');
 }
 
 # Test 5: multiply with zero propagates zero
