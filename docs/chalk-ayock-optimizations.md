@@ -2,6 +2,8 @@
 # Chalk Parser with Aycock Optimizations — Pseudo-Perl Walkthrough
 # ============================================================================
 #
+# See Also: Aycock_JohnDaniel_PhD_2001.pdf
+#
 # This file shows how Aycock's dissertation techniques integrate into
 # Chalk's existing Earley parser + composite semiring architecture.
 #

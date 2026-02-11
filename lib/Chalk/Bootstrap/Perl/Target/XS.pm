@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+use bytes ();
 use Chalk::Bootstrap::Target;
 
 class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
@@ -194,15 +195,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my %declared_vars;
         $declared_vars{hash} = true;  # always need hash for self access
 
-        # Collect all variable declarations from the body
-        for my $item ($body->@*) {
-            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'VarDecl') {
-                my $var = $item->inputs()->[0]->value();
-                $var =~ s/^[\$\@\%]//;
-                $declared_vars{$var} = true;
-            }
-        }
+        # Recursively collect all variable declarations from the body,
+        # including those in nested scopes (if/foreach/etc.)
+        $self->_collect_var_decls($body, \%declared_vars);
 
         # Emit each body item as C code
         for my $item ($body->@*) {
@@ -252,6 +247,40 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         return \@lines;
+    }
+
+    # Recursively collect VarDecl and ForeachLoop iterator names from IR
+    # nodes at any nesting depth, so PREINIT has all needed declarations.
+    method _collect_var_decls($nodes, $declared_vars) {
+        for my $item ($nodes->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            my $class = $item->class();
+
+            if ($class eq 'VarDecl') {
+                my $var = $item->inputs()->[0]->value();
+                $var =~ s/^[\$\@\%]//;
+                $declared_vars->{$var} = true;
+            }
+            if ($class eq 'ForeachLoop') {
+                # Iterator variable
+                my $iter = $item->inputs()->[0]->value();
+                $iter =~ s/^[\$\@\%]//;
+                $declared_vars->{$iter} = true;
+                # Recurse into loop body
+                my $body = $item->inputs()->[2];
+                $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
+            }
+            if ($class eq 'IfStmt') {
+                my $then_body = $item->inputs()->[1];
+                $self->_collect_var_decls($then_body, $declared_vars) if ref($then_body) eq 'ARRAY';
+                my $else_body = $item->inputs()->[2];
+                $self->_collect_var_decls($else_body, $declared_vars) if defined($else_body) && ref($else_body) eq 'ARRAY';
+            }
+            if ($class eq 'PostfixLoop') {
+                my $body = $item->inputs()->[1];
+                $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
+            }
+        }
     }
 
     # Emit a single IR node as a C statement line
@@ -327,15 +356,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             # Field access: fetch from self hash
             my $escaped = $self->_escape_c_string($var);
-            return "((svp = hv_fetch(hash, \"$escaped\", " . length($var) . ", 0)) ? *svp : &PL_sv_undef)";
+            return "((svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0)) ? *svp : &PL_sv_undef)";
         }
 
-        # Numeric values
+        # Numeric values — sv_2mortal prevents leaks when used as sub-expressions
         if ($val =~ /^-?[0-9]+$/) {
-            return "newSViv($val)";
+            return "sv_2mortal(newSViv($val))";
         }
         if ($val =~ /^-?[0-9]+\.[0-9]+$/) {
-            return "newSVnv($val)";
+            return "sv_2mortal(newSVnv($val))";
         }
 
         # Boolean/special
@@ -343,9 +372,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($val eq 'false') { return '&PL_sv_no'; }
         if ($val eq 'undef') { return '&PL_sv_undef'; }
 
-        # String literal
+        # String literal — sv_2mortal prevents leaks when used as sub-expressions
         my $escaped = $self->_escape_c_string($val);
-        return "newSVpvs(\"$escaped\")";
+        return "sv_2mortal(newSVpvs(\"$escaped\"))";
     }
 
     # Emit an InterpolatedString as a C expression building an SV via
@@ -370,7 +399,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
                 } else {
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "(svp = hv_fetch(hash, \"$escaped\", " . length($var) . ", 0)) ? *svp : &PL_sv_undef";
+                    $src = "(svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0)) ? *svp : &PL_sv_undef";
                 }
                 if ($first) {
                     push @stmts, "SV *_r = newSVsv($src)";
@@ -403,17 +432,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq 'eq') { return "(sv_eq($left, $right) ? &PL_sv_yes : &PL_sv_no)"; }
         if ($op eq 'ne') { return "(!sv_eq($left, $right) ? &PL_sv_yes : &PL_sv_no)"; }
         if ($op eq '.') {
-            return "sv_catsv(newSVsv($left), $right)";
+            return "({ SV *_c = sv_2mortal(newSVsv($left)); sv_catsv(_c, $right); _c; })";
         }
-        if ($op eq '&&' || $op eq 'and') { return "(SvTRUE($left) ? $right : $left)"; }
-        if ($op eq '||' || $op eq 'or')  { return "(SvTRUE($left) ? $left : $right)"; }
-        if ($op eq '//')                  { return "(SvOK($left) ? $left : $right)"; }
+        # Short-circuit — evaluate $left once into temp to avoid double evaluation
+        if ($op eq '&&' || $op eq 'and') { return "({ SV *_l = $left; SvTRUE(_l) ? $right : _l; })"; }
+        if ($op eq '||' || $op eq 'or')  { return "({ SV *_l = $left; SvTRUE(_l) ? _l : $right; })"; }
+        if ($op eq '//')                  { return "({ SV *_l = $left; SvOK(_l) ? _l : $right; })"; }
 
-        # Numeric ops
-        if ($op eq '+')  { return "newSVnv(SvNV($left) + SvNV($right))"; }
-        if ($op eq '-')  { return "newSVnv(SvNV($left) - SvNV($right))"; }
-        if ($op eq '*')  { return "newSVnv(SvNV($left) * SvNV($right))"; }
-        if ($op eq '/')  { return "newSVnv(SvNV($left) / SvNV($right))"; }
+        # Numeric ops — sv_2mortal prevents leaks when used as sub-expressions
+        if ($op eq '+')  { return "sv_2mortal(newSVnv(SvNV($left) + SvNV($right)))"; }
+        if ($op eq '-')  { return "sv_2mortal(newSVnv(SvNV($left) - SvNV($right)))"; }
+        if ($op eq '*')  { return "sv_2mortal(newSVnv(SvNV($left) * SvNV($right)))"; }
+        if ($op eq '/')  { return "sv_2mortal(newSVnv(SvNV($left) / SvNV($right)))"; }
         if ($op eq '==') { return "(SvNV($left) == SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
         if ($op eq '!=') { return "(SvNV($left) != SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
         if ($op eq '<')  { return "(SvNV($left) < SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
@@ -421,8 +451,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq '<=') { return "(SvNV($left) <= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
         if ($op eq '>=') { return "(SvNV($left) >= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
 
-        # Assignment
-        if ($op eq '=') { return "sv_setsv($left, $right)"; }
+        # Assignment — sv_setsv returns void, wrap in GCC stmt expr
+        if ($op eq '=') { return "({ sv_setsv($left, $right); $left; })"; }
 
         # Regex binding — delegate to eval_pv
         if ($op eq '=~') {
@@ -441,16 +471,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         if ($op eq '!')   { return "(SvTRUE($operand) ? &PL_sv_no : &PL_sv_yes)"; }
         if ($op eq 'not') { return "(SvTRUE($operand) ? &PL_sv_no : &PL_sv_yes)"; }
-        if ($op eq '-')   { return "newSVnv(-SvNV($operand))"; }
+        if ($op eq '-')   { return "sv_2mortal(newSVnv(-SvNV($operand)))"; }
         if ($op eq '\\')  { return "newRV_inc($operand)"; }
 
         return "NULL /* unsupported unary: $op */";
     }
 
-    # Emit method call — delegates to eval_pv since call_method requires
-    # careful stack manipulation that is too complex for inline expressions
+    # Emit method call — requires PUSHMARK/call_method/SPAGAIN stack manipulation.
+    # TODO: implement call_method pattern for Tier D behavioral equivalence.
     method _emit_xs_method_call_expr($node, $declared_vars) {
-        return "NULL /* method call via eval_pv */";
+        return "NULL /* TODO: method call needs call_method() */";
     }
 
     # Emit subscript access (hash or array)
@@ -501,7 +531,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (!$pairs->@*) {
             return "newRV_noinc((SV*)newHV())";
         }
-        return "newRV_noinc((SV*)newHV()) /* non-empty hash */";
+        # TODO: populate hash with pairs via hv_store. Currently only
+        # empty hashes are generated correctly — non-empty hashes from
+        # fragmented method bodies are structurally incomplete anyway.
+        return "newRV_noinc((SV*)newHV()) /* non-empty hash: elements dropped */";
     }
 
     # Emit array ref constructor
@@ -510,10 +543,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (!$elements->@*) {
             return "newRV_noinc((SV*)newAV())";
         }
-        return "newRV_noinc((SV*)newAV()) /* non-empty array */";
+        # TODO: populate array with elements via av_push. Currently only
+        # empty arrays are generated correctly — non-empty arrays from
+        # fragmented method bodies are structurally incomplete anyway.
+        return "newRV_noinc((SV*)newAV()) /* non-empty array: elements dropped */";
     }
 
-    # Emit anonymous sub — delegate to eval_pv
+    # Emit anonymous sub — TODO: capture params and body for full codegen.
+    # Currently emits empty sub placeholder since anon subs in Tier C
+    # come from fragmented method bodies and lack complete IR.
     method _emit_xs_anon_sub_expr($node, $declared_vars) {
         return "eval_pv(\"sub { }\", TRUE)";
     }
@@ -549,13 +587,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # ref() — check SvROK
         if ($name eq 'ref' && $args->@* == 1) {
             my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
-            return "(SvROK($arg) ? newSVpv(sv_reftype(SvRV($arg), TRUE), 0) : newSVpvs(\"\"))";
+            return "(SvROK($arg) ? sv_2mortal(newSVpv(sv_reftype(SvRV($arg), TRUE), 0)) : sv_2mortal(newSVpvs(\"\")))";
         }
 
         # scalar() — for arrays, return count
         if ($name eq 'scalar' && $args->@* == 1) {
             my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
-            return "newSViv(av_len((AV*)$arg) + 1)";
+            return "sv_2mortal(newSViv(av_len((AV*)$arg) + 1))";
         }
 
         # push — av_push
@@ -576,9 +614,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
-    # Emit backtick expression via eval_pv
+    # Emit backtick expression — TODO: extract actual command from IR for
+    # full codegen. Currently a placeholder since backtick expressions in
+    # Tier C come from Oracle.pm's fragmented method bodies.
     method _emit_xs_backtick_expr($node, $declared_vars) {
-        return "eval_pv(\"`cmd`\", TRUE)";
+        return "eval_pv(\"`cmd`\", TRUE) /* TODO: extract command from IR */";
     }
 
     # CompoundAssign as expression (e.g., $str .= "foo")
@@ -711,9 +751,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return $self->_emit_xs_compound_assign_expr($node, $declared_vars) . ";";
     }
 
-    # Emit PostfixLoop (e.g., "expr for ...")
+    # Emit PostfixLoop (e.g., "expr for ...") — TODO: implement as C
+    # for loop. Currently a placeholder since postfix loops in Tier C
+    # come from fragmented method bodies.
     method _emit_xs_postfix_loop($node, $declared_vars) {
-        return "/* postfix loop */";
+        return "/* TODO: postfix loop not yet implemented */";
     }
 
     # Emit NextUnless (next unless cond)
@@ -750,7 +792,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '  CODE:';
         push @lines, '    {';
         push @lines, '        HV *hash = (HV*)SvRV(self);';
-        push @lines, "        SV **svp = hv_fetch(hash, \"$escaped_key\", " . length($var_name) . ", 0);";
+        push @lines, "        SV **svp = hv_fetch(hash, \"$escaped_key\", " . bytes::length($var_name) . ", 0);";
         push @lines, '        RETVAL = (svp && *svp) ? SvREFCNT_inc(*svp) : &PL_sv_undef;';
         push @lines, '    }';
         push @lines, '  OUTPUT:';
@@ -780,7 +822,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $var =~ s/^\$//;
                 next if $seen_vars{$var}++;
                 my $escaped = $self->_escape_c_string($var);
-                push @lines, "        SV **${var}_svp = hv_fetch(hash, \"$escaped\", " . length($var) . ", 0);";
+                push @lines, "        SV **${var}_svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0);";
             }
         }
 

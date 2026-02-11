@@ -7,7 +7,7 @@
 #
 # This grammar is intentionally ambiguous. Disambiguation is delegated to
 # semirings (Precedence, Arity/TypeInference, Structural) not grammar
-# structure. 66 rules, ~75-80 after quantifier desugaring.
+# structure. 63 rules, ~70-75 after quantifier desugaring.
 #
 # ============================================================================
 
@@ -26,15 +26,13 @@ StatementList ::= StatementItem
     | StatementList _ StatementItem ;
 
 StatementItem ::= SimpleStatement _ /;/
-    | SimpleStatement
     | CompoundStatement
     | /;/ ;
 
 # §3  STATEMENT CATEGORIES
 
 SimpleStatement ::= ExpressionStatement
-    | UseDeclaration
-    | FieldDeclaration ;
+    | UseDeclaration ;
 
 CompoundStatement ::= Block
     | IfStatement
@@ -85,17 +83,13 @@ ModuleName ::= QualifiedIdentifier
 
 ImportList ::= ExpressionList ;
 
-# §8  VARIABLE AND FIELD DECLARATIONS
+# §8  VARIABLE DECLARATIONS
 
-VariableDeclaration ::= /(?:my|our|state|local)\b/ WS Variable
-    | /(?:my|our|state|local)\b/ WS /\(/ _ VariableList _ /\)/ ;
+VariableDeclaration ::= /(?:my|our|state|local|field)\b/ WS Variable AttributeList?
+    | /(?:my|our|state|local|field)\b/ WS /\(/ _ VariableList _ /\)/ ;
 
 VariableList ::= Variable
     | VariableList _ /,/ _ Variable ;
-
-FieldDeclaration ::= /field\b/ WS Variable AttributeList? DefaultValue? ;
-
-DefaultValue ::= _ /=/ _ Expression ;
 
 # §9  DEFINITIONS
 
@@ -252,7 +246,7 @@ TernaryExpression ::= Expression _ /\?/ _ Expression _ /:/ _ Expression ;
 
 AssignmentExpression ::= Expression _ AssignOp _ Expression ;
 
-AssignOp ::= /=(?![=>])/
+AssignOp ::= /=(?![=>~])/
     | /\*\*=/
     | /[*\/%+\-&|^.]=/
     | /&&=/
@@ -301,7 +295,7 @@ StringLiteral ::= /'(?:[^'\\]|\\.)*'/
     | /qq\s*\[(?:[^\]\\]|\\.)*\]/
     | /`(?:[^`\\]|\\.)*`/ ;
 
-RegexLiteral ::= /\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
+RegexLiteral ::= /\/(?:[^\/\\\n]|\\.)*\/[msixpodualngcer]*/
     | /m\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /qr\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /s\s*\/(?:[^\/\\]|\\.)*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
@@ -312,6 +306,7 @@ RegexLiteral ::= /\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
 
 QualifiedIdentifier ::= /[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/ ;
 
-Block ::= /\{/ _ StatementList? _ /\}/ ;
+Block ::= /\{/ _ StatementList? _ /\}/
+    | /\{/ _ StatementList? _ SimpleStatement _ /\}/ ;
 
 Version ::= /v?[0-9]+(?:\.[0-9]+){2,}/ ;

@@ -150,7 +150,11 @@ my sub build_and_load($ir, $module_name) {
         # about uninitialized $_ — suppress these since they are expected.
         TODO: {
             local $TODO = 'Grammar fragmentation splits if-conditions from bodies';
-            local $SIG{__WARN__} = sub { };  # suppress expected eval_pv warnings
+            # Selectively suppress expected eval_pv warnings about uninitialized $_
+            local $SIG{__WARN__} = sub {
+                my $msg = shift;
+                warn $msg unless $msg =~ /Use of uninitialized value/;
+            };
 
             is($op->to_string(), '<0>  const[IV 42] /BARE',
                 'ConciseOp: to_string() with all fields');

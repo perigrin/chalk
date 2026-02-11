@@ -167,101 +167,90 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 16: Higher-precedence child inside lower-precedence parent is valid
 # e.g. a + (b * c) — * (level 2) inside + (level 3) is OK
+# Simulates the Earley flow: the parent BinaryExpression has accumulated
+# the + operator's level via on_scan/on_complete (without is_operator since
+# BinaryExpression's on_complete strips it). The child is a completed
+# BinaryExpression with * level, also without is_operator.
 {
-    # Simulate: BinaryExpression with + scans left expr, then has * as child
-    my $plus_item = make_item('BinaryOp', $prec->one());
-    my $plus_val = $prec->on_scan($plus_item, 0, 0, '+');
-    my $plus_completed = make_item('BinaryOp', $plus_val);
-    my $plus_passive = $prec->on_complete($plus_completed, 0, 1);
+    # Parent context: BinaryExpression completed with + (level 3)
+    my $parent_value = { valid => true, op => '+', level => 3, assoc => 'left' };
 
-    my $star_item = make_item('BinaryOp', $prec->one());
-    my $star_val = $prec->on_scan($star_item, 0, 2, '*');
-    my $star_completed = make_item('BinaryOp', $star_val);
-    my $star_passive = $prec->on_complete($star_completed, 0, 3);
+    # Child: completed BinaryExpression with * (level 2) — Expression pass-through
+    my $child_value = { valid => true, op => '*', level => 2, assoc => 'left' };
 
     # Parent + contains child * — valid (child has higher precedence)
-    my $result = $prec->multiply($plus_passive, $star_passive);
+    my $result = $prec->multiply($parent_value, $child_value);
     ok(!$prec->is_zero($result), '* (level 2) inside + (level 3) is valid');
 }
 
 # Test 17: Lower-precedence child inside higher-precedence parent is invalid
 # e.g. a * (b + c) without parens — + (level 3) inside * (level 2) should be rejected
 {
-    my $star_item = make_item('BinaryOp', $prec->one());
-    my $star_val = $prec->on_scan($star_item, 0, 0, '*');
-    my $star_completed = make_item('BinaryOp', $star_val);
-    my $star_passive = $prec->on_complete($star_completed, 0, 1);
+    # Parent context: BinaryExpression completed with * (level 2)
+    my $parent_value = { valid => true, op => '*', level => 2, assoc => 'left' };
 
-    my $plus_item = make_item('BinaryOp', $prec->one());
-    my $plus_val = $prec->on_scan($plus_item, 0, 2, '+');
-    my $plus_completed = make_item('BinaryOp', $plus_val);
-    my $plus_passive = $prec->on_complete($plus_completed, 0, 3);
+    # Child: completed BinaryExpression with + (level 3) — Expression pass-through
+    my $child_value = { valid => true, op => '+', level => 3, assoc => 'left' };
 
     # Parent * contains child + — invalid (child has lower precedence)
-    my $result = $prec->multiply($star_passive, $plus_passive);
+    my $result = $prec->multiply($parent_value, $child_value);
     ok($prec->is_zero($result), '+ (level 3) inside * (level 2) is invalid');
 }
 
-# Test 18: Same-precedence left-associative is valid on left, invalid on right
+# Test 18: Same-precedence left-associative associativity enforcement
 # e.g. a + b + c: (a + b) + c is valid, a + (b + c) is invalid for left-assoc
 {
-    # Left child with + (same as parent +)
-    my $inner_item = make_item('BinaryOp', $prec->one());
-    my $inner_val = $prec->on_scan($inner_item, 0, 0, '+');
-    my $inner_completed = make_item('BinaryOp', $inner_val);
-    my $inner_passive = $prec->on_complete($inner_completed, 0, 1);
+    # Simulates completed BinaryExpression values (no is_operator flag)
+    my $inner_value = { valid => true, op => '+', level => 3, assoc => 'left' };
+    my $outer_value = { valid => true, op => '+', level => 3, assoc => 'left' };
 
-    my $outer_item = make_item('BinaryOp', $prec->one());
-    my $outer_val = $prec->on_scan($outer_item, 0, 2, '+');
-    my $outer_completed = make_item('BinaryOp', $outer_val);
-    my $outer_passive = $prec->on_complete($outer_completed, 0, 3);
+    # Left-assoc: same-level right operand (inner inside outer) is INVALID.
+    # This prevents `a + (b + c)` grouping for left-associative operators.
+    # The right operand `b + c` as a BinaryExpression has the same level as
+    # the outer `+`, so it must be rejected.
+    my $right_result = $prec->multiply($outer_value, $inner_value);
+    ok($prec->is_zero($right_result),
+        'left-assoc: same-level right operand is invalid (prevents right-grouping)');
 
-    # In a left-assoc operator, left child with same op is valid
-    my $left_result = $prec->multiply($inner_passive, $outer_passive);
+    # Left-assoc: same-level left operand is valid (via is_operator path).
+    # The left operand `a + b` multiplies with the BinOp `+` (is_operator),
+    # and the existing check allows same-level left operands for left-assoc.
+    my $operator_val = { valid => true, op => '+', level => 3, assoc => 'left', is_operator => true };
+    my $left_result = $prec->multiply($inner_value, $operator_val);
     ok(!$prec->is_zero($left_result),
-        'left-assoc: same-level child on left is valid');
-
-    # Right child with same op is invalid for left-assoc
-    my $right_result = $prec->multiply($outer_passive, $inner_passive);
-    # Note: This tests whether the semiring correctly rejects right-nesting
-    # For now, basic precedence filtering: same level same assoc is OK
-    # Associativity direction filtering is a refinement
-    ok(!$prec->is_zero($right_result),
-        'left-assoc: same-level same-op multiply is not zero (direction checked at BinaryExpression level)');
+        'left-assoc: same-level left operand with operator is valid');
 }
 
 # Test 19: non-associative operators at same level cannot nest
 {
-    my $isa_item = make_item('BinaryOp', $prec->one());
-    my $isa_val = $prec->on_scan($isa_item, 0, 0, 'isa');
-    my $isa_completed = make_item('BinaryOp', $isa_val);
-    my $isa_passive = $prec->on_complete($isa_completed, 0, 3);
+    # Look up isa's level from the precedence table
+    my $isa_info = Chalk::Grammar::Perl::PrecedenceTable::lookup('isa');
+    my $isa_level = $isa_info->{level};
+    my $parent_value = { valid => true, op => 'isa', level => $isa_level, assoc => 'nonassoc' };
+    my $child_value  = { valid => true, op => 'isa', level => $isa_level, assoc => 'nonassoc' };
 
-    my $isa_item2 = make_item('BinaryOp', $prec->one());
-    my $isa_val2 = $prec->on_scan($isa_item2, 0, 4, 'isa');
-    my $isa_completed2 = make_item('BinaryOp', $isa_val2);
-    my $isa_passive2 = $prec->on_complete($isa_completed2, 0, 7);
-
-    my $result = $prec->multiply($isa_passive, $isa_passive2);
+    my $result = $prec->multiply($parent_value, $child_value);
     ok($prec->is_zero($result), 'nonassoc: isa inside isa is invalid');
 }
 
 # Test 20: right-associative operators nest on the right
 # e.g. a ** b ** c: a ** (b ** c) is valid
 {
-    my $pow_item = make_item('BinaryOp', $prec->one());
-    my $pow_val = $prec->on_scan($pow_item, 0, 0, '**');
-    my $pow_completed = make_item('BinaryOp', $pow_val);
-    my $pow_passive = $prec->on_complete($pow_completed, 0, 2);
+    # Simulates completed BinaryExpression values (no is_operator flag)
+    my $pow_value1 = { valid => true, op => '**', level => 0, assoc => 'right' };
+    my $pow_value2 = { valid => true, op => '**', level => 0, assoc => 'right' };
 
-    my $pow_item2 = make_item('BinaryOp', $prec->one());
-    my $pow_val2 = $prec->on_scan($pow_item2, 0, 3, '**');
-    my $pow_completed2 = make_item('BinaryOp', $pow_val2);
-    my $pow_passive2 = $prec->on_complete($pow_completed2, 0, 5);
-
-    # Combining two ** values — right-assoc allows nesting
-    my $result = $prec->multiply($pow_passive, $pow_passive2);
+    # Right-assoc: same-level right operand is valid (right-grouping is correct)
+    # This allows `$b ** $c` as right operand of `$a ** ...`
+    my $result = $prec->multiply($pow_value1, $pow_value2);
     ok(!$prec->is_zero($result), 'right-assoc: ** inside ** is valid');
+
+    # Right-assoc: same-level left operand via is_operator is INVALID.
+    # `($a ** $b) ** $c` is invalid — rejects left-grouping for right-assoc.
+    my $pow_op = { valid => true, op => '**', level => 0, assoc => 'right', is_operator => true };
+    my $left_reject = $prec->multiply($pow_value1, $pow_op);
+    ok($prec->is_zero($left_reject),
+        'right-assoc: same-level left operand with operator is invalid (prevents left-grouping)');
 }
 
 # ========================================================================
@@ -270,24 +259,18 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 21: on_complete for ParenExpr clears operator info
 {
-    # Start with an operator-bearing value
-    my $op_item = make_item('BinaryOp', $prec->one());
-    my $op_val = $prec->on_scan($op_item, 0, 0, '+');
-    my $op_completed = make_item('BinaryOp', $op_val);
-    my $op_passive = $prec->on_complete($op_completed, 0, 1);
+    # Start with an operator-bearing value (simulating BinaryExpression inside parens)
+    my $op_value = { valid => true, op => '+', level => 3, assoc => 'left' };
 
-    # Wrap in ParenExpr
-    my $paren_item = make_item('ParenExpr', $op_passive);
+    # Wrap in ParenExpr — on_complete should clear operator info
+    my $paren_item = make_item('ParenExpr', $op_value);
     my $paren_result = $prec->on_complete($paren_item, 0, 3);
 
     # After ParenExpr, the value should be "clean" — no operator restriction
-    # So multiplying with a low-precedence parent should be valid
-    my $star_item = make_item('BinaryOp', $prec->one());
-    my $star_val = $prec->on_scan($star_item, 0, 4, '*');
-    my $star_completed = make_item('BinaryOp', $star_val);
-    my $star_passive = $prec->on_complete($star_completed, 0, 5);
+    # So multiplying with a higher-precedence parent (* level 2) should be valid
+    my $star_context = { valid => true, op => '*', level => 2, assoc => 'left' };
 
-    my $result = $prec->multiply($star_passive, $paren_result);
+    my $result = $prec->multiply($star_context, $paren_result);
     ok(!$prec->is_zero($result),
         'parenthesized + inside * is valid (parens reset precedence)');
 }
@@ -301,13 +284,11 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
     my $unary_item = make_item('UnaryExpression', $prec->one());
     my $unary_result = $prec->on_complete($unary_item, 0, 2);
 
-    my $binary_item = make_item('BinaryOp', $prec->one());
-    my $binary_val = $prec->on_scan($binary_item, 0, 3, '+');
-    my $binary_completed = make_item('BinaryOp', $binary_val);
-    my $binary_passive = $prec->on_complete($binary_completed, 0, 4);
+    # Binary context with + (level 3)
+    my $binary_context = { valid => true, op => '+', level => 3, assoc => 'left' };
 
-    # Unary inside binary is valid
-    my $result = $prec->multiply($binary_passive, $unary_result);
+    # Unary inside binary is valid (unary level=-1, binary level=3: -1 < 3)
+    my $result = $prec->multiply($binary_context, $unary_result);
     ok(!$prec->is_zero($result), 'unary inside binary is valid');
 }
 
@@ -316,15 +297,49 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
     my $assign_item = make_item('AssignmentExpression', $prec->one());
     my $assign_result = $prec->on_complete($assign_item, 0, 5);
 
-    my $binary_item = make_item('BinaryOp', $prec->one());
-    my $binary_val = $prec->on_scan($binary_item, 0, 0, '+');
-    my $binary_completed = make_item('BinaryOp', $binary_val);
-    my $binary_passive = $prec->on_complete($binary_completed, 0, 3);
+    # Binary context with + (level 3)
+    my $binary_context = { valid => true, op => '+', level => 3, assoc => 'left' };
 
-    # Assignment inside binary is invalid (lower precedence)
-    my $result = $prec->multiply($binary_passive, $assign_result);
+    # Assignment inside binary is invalid (assign level=101, binary level=3: 101 > 3)
+    my $result = $prec->multiply($binary_context, $assign_result);
     ok($prec->is_zero($result),
         'assignment inside binary is invalid (lower precedence)');
+}
+
+# ========================================================================
+# Precedence semiring: is_operator validation in multiply
+# ========================================================================
+
+# Test: operator check rejects left operand with lower precedence
+# Simulates ($a && $b) =~ /x/ — the BinaryExpression for =~ has accumulated
+# left-Expression level=10 (from &&). When BinaryOp =~ (level=1) completes
+# with is_operator, multiply checks 10 > 1 and rejects.
+{
+    my $left_context = { valid => true, op => '&&', level => 10, assoc => 'left' };
+    my $bind_op = { valid => true, op => '=~', level => 1, assoc => 'left', is_operator => true };
+    my $result = $prec->multiply($left_context, $bind_op);
+    ok($prec->is_zero($result),
+        'is_operator: left level=10 (&&) > op level=1 (=~) is rejected');
+}
+
+# Test: operator check accepts left operand with higher precedence
+# Simulates ($a =~ /x/) && $b — left-Expression level=1 (from =~),
+# operator && (level=10). 1 <= 10 so it's valid.
+{
+    my $left_context = { valid => true, op => '=~', level => 1, assoc => 'left' };
+    my $and_op = { valid => true, op => '&&', level => 10, assoc => 'left', is_operator => true };
+    my $result = $prec->multiply($left_context, $and_op);
+    ok(!$prec->is_zero($result),
+        'is_operator: left level=1 (=~) <= op level=10 (&&) is valid');
+}
+
+# Test: operator check with no left level is valid (first operator in chain)
+{
+    my $left_context = { valid => true };
+    my $and_op = { valid => true, op => '&&', level => 10, assoc => 'left', is_operator => true };
+    my $result = $prec->multiply($left_context, $and_op);
+    ok(!$prec->is_zero($result),
+        'is_operator: no left level + operator is valid (first operator)');
 }
 
 # ========================================================================
@@ -336,6 +351,61 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
     my $item = make_item('Identifier', $prec->one());
     my $result = $prec->on_scan($item, 0, 0, 'my_var');
     ok(!$prec->is_zero($result), 'non-operator scan in non-BinaryOp is transparent');
+}
+
+# ========================================================================
+# selects_alternative: cross-semiring disambiguation
+# ========================================================================
+
+# Test 25: selects_alternative prefers value with defined level
+{
+    my $with_level = { valid => true, level => 5, op => '.', assoc => 'left' };
+    my $no_level   = { valid => true };
+
+    is($prec->selects_alternative($with_level, $no_level), 'left',
+        'selects_alternative prefers left when it has level');
+    is($prec->selects_alternative($no_level, $with_level), 'right',
+        'selects_alternative prefers right when it has level');
+}
+
+# Test 26: selects_alternative prefers higher level (lower precedence = more constraining)
+{
+    my $binexpr_dot  = { valid => true, level => 5, op => '.', assoc => 'left' };
+    my $postfix_expr = { valid => true, level => -2, op => undef, assoc => undef };
+
+    is($prec->selects_alternative($binexpr_dot, $postfix_expr), 'left',
+        'selects_alternative prefers BinaryExpr(.) over PostfixExpr');
+    is($prec->selects_alternative($postfix_expr, $binexpr_dot), 'right',
+        'selects_alternative prefers BinaryExpr(.) over PostfixExpr (reversed)');
+}
+
+# Test 27: selects_alternative returns undef when neither has level
+{
+    my $a = { valid => true };
+    my $b = { valid => true };
+
+    is($prec->selects_alternative($a, $b), undef,
+        'selects_alternative returns undef when both lack levels');
+}
+
+# Test 28: selects_alternative returns undef when same level
+{
+    my $a = { valid => true, level => 5, op => '.', assoc => 'left' };
+    my $b = { valid => true, level => 5, op => '.', assoc => 'left' };
+
+    is($prec->selects_alternative($a, $b), undef,
+        'selects_alternative returns undef when same level');
+}
+
+# Test 29: selects_alternative returns undef when either is zero
+{
+    my $z = $prec->zero();
+    my $v = { valid => true, level => 5 };
+
+    is($prec->selects_alternative($z, $v), undef,
+        'selects_alternative returns undef when left is zero');
+    is($prec->selects_alternative($v, $z), undef,
+        'selects_alternative returns undef when right is zero');
 }
 
 done_testing();

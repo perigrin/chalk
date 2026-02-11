@@ -149,24 +149,22 @@ SKIP: {
     # Negative cases
     # NOTE: Keywords (class, method, sub, ADJUST) are NOT reserved in this
     # grammar — they match Identifier and can appear in expression context
-    # (e.g., "class;" is valid as an expression statement). The Boolean semiring
-    # accepts all valid parses. These negative tests validate structural
-    # incompleteness, not keyword semantics.
-    # Note: 'class { }', 'method () { }', 'ADJUST', and 'class Foo { method }'
-    # are now accepted — keywords are not reserved in the grammar, and optional
-    # semicolons allow bare identifiers as statements. Disambiguation is via semirings.
-    ok($recognizer->parse('class { }'),
-        'Phase 3: accepts "class { }" (keyword not reserved, parses as identifier + block)');
-    ok($recognizer->parse('method () { }'),
-        'Phase 3: accepts "method () { }" (keyword not reserved)');
+    # Keywords are not reserved in the grammar, but bare identifiers at top
+    # level require a semicolon (StatementItem only allows SimpleStatement
+    # with /;/). Inside a Block, bare identifiers are accepted as the last
+    # statement via Block alt 1.
+    ok(!$recognizer->parse('class { }'),
+        'Phase 3: rejects "class { }" at top level (bare identifier needs semicolon)');
+    ok(!$recognizer->parse('method () { }'),
+        'Phase 3: rejects "method () { }" at top level (bare identifier needs semicolon)');
     ok(!$recognizer->parse('sub helper('),
         'Phase 3: rejects sub with unclosed signature');
     ok(!$recognizer->parse('class Foo {'),
         'Phase 3: rejects class with unclosed block');
     ok(!$recognizer->parse('method foo('),
         'Phase 3: rejects method with unclosed signature');
-    ok($recognizer->parse('ADJUST'),
-        'Phase 3: accepts bare ADJUST (keyword not reserved, identifier as statement)');
+    ok(!$recognizer->parse('ADJUST'),
+        'Phase 3: rejects bare ADJUST at top level (needs semicolon)');
     ok(!$recognizer->parse('class Foo :isa( { }'),
         'Phase 3: rejects unclosed attribute parens');
     ok($recognizer->parse('class Foo { method }'),

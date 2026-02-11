@@ -839,58 +839,30 @@ class Chalk::Bootstrap::Perl::Actions {
     #                          | /my\b/ WS Variable _ /=/ _ Expression
     #                          | /my\b/ WS VariableList _ /=/ _ Expression
     # Returns Constructor:VarDecl with variable name and optional initializer
+    # §8 VariableDeclaration ::= /(?:my|our|state|local|field)\b/ WS Variable AttributeList?
+    # For 'field' declarator: returns Constructor:FieldDecl with attributes.
+    # For other declarators: returns Constructor:VarDecl.
+    # Default values are handled by AssignmentExpression wrapping the declaration.
     method VariableDeclaration($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
+        my $is_field = false;
         my $var_name;
-        my $initializer;
+        my @attributes;
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
-            my $rule = $leaf->rule();
+
+            # Declarator keyword is a raw string from the terminal scan
+            if (!ref($focus) && defined $focus && $focus eq 'field') {
+                $is_field = true;
+                next;
+            }
 
             if ($focus isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $focus->value()
                     && $focus->value() =~ /^[\$\@\%]/) {
                 # Variable name (starts with sigil)
                 $var_name //= $focus;
-            } elsif ($focus isa Chalk::Bootstrap::IR::Node
-                    && !defined $var_name) {
-                # Skip non-variable nodes before we find the variable
-                next;
-            } elsif ($focus isa Chalk::Bootstrap::IR::Node && defined $var_name) {
-                # After variable name, this is the initializer
-                $initializer //= $focus;
-            }
-        }
-
-        return undef unless defined $var_name;
-
-        return $factory->make('Constructor',
-            class       => 'VarDecl',
-            variable    => $var_name,
-            initializer => $initializer,
-        );
-    }
-
-    # §8 FieldDeclaration ::= /field\b/ WS Variable AttributeList? DefaultValue?
-    # Returns Constructor:FieldDecl with name Constant, attributes arrayref,
-    # and optional default_value IR node
-    method FieldDeclaration($ctx) {
-        my @leaves = _collect_ir_leaves($ctx);
-        my $field_name;
-        my @attributes;
-        my $default_value;
-
-        for my $leaf (@leaves) {
-            my $focus = $leaf->extract();
-            my $rule = $leaf->rule();
-
-            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
-                    && !defined $field_name
-                    && defined $focus->value()
-                    && $focus->value() =~ /^[\$\@\%]/) {
-                # Variable name (starts with sigil)
-                $field_name = $focus;
             } elsif (ref($focus) eq 'ARRAY') {
                 # AttributeList returns arrayref of _Attribute Constructors
                 for my $attr ($focus->@*) {
@@ -899,26 +871,24 @@ class Chalk::Bootstrap::Perl::Actions {
                         push @attributes, $attr;
                     }
                 }
-            } elsif (defined $rule && $rule eq 'DefaultValue'
-                    && $focus isa Chalk::Bootstrap::IR::Node) {
-                $default_value = $focus;
-            } elsif (defined $field_name && !defined $default_value
-                    && $focus isa Chalk::Bootstrap::IR::Node
-                    && !($focus isa Chalk::Bootstrap::IR::Node::Constant
-                         && defined $focus->value()
-                         && $focus->value() =~ /^[\$\@\%]/)) {
-                # Non-variable IR node after field name — likely default value
-                $default_value = $focus;
             }
         }
 
-        return undef unless defined $field_name;
+        return undef unless defined $var_name;
+
+        if ($is_field) {
+            return $factory->make('Constructor',
+                class         => 'FieldDecl',
+                name          => $var_name,
+                attributes    => \@attributes,
+                default_value => undef,
+            );
+        }
 
         return $factory->make('Constructor',
-            class         => 'FieldDecl',
-            name          => $field_name,
-            attributes    => \@attributes,
-            default_value => $default_value,
+            class       => 'VarDecl',
+            variable    => $var_name,
+            initializer => undef,
         );
     }
 
@@ -1289,8 +1259,26 @@ class Chalk::Bootstrap::Perl::Actions {
 
         my $op_val = $op->value();
         if ($op_val eq '=') {
-            # Plain assignment — this is typically part of VariableDeclaration
-            # or standalone assignment. Return as VarDecl if target is variable.
+            # FieldDecl target: set its default_value and return it
+            if ($target isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $target->class() eq 'FieldDecl') {
+                return $factory->make('Constructor',
+                    class         => 'FieldDecl',
+                    name          => $target->inputs()->[0],
+                    attributes    => $target->inputs()->[1],
+                    default_value => $value,
+                );
+            }
+            # VarDecl target: set its initializer and return it
+            if ($target isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $target->class() eq 'VarDecl') {
+                return $factory->make('Constructor',
+                    class       => 'VarDecl',
+                    variable    => $target->inputs()->[0],
+                    initializer => $value,
+                );
+            }
+            # Plain assignment: Return as VarDecl if target is variable.
             if ($target isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $target->value()
                     && $target->value() =~ /^[\$\@\%]/) {
@@ -1514,15 +1502,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §8 DefaultValue ::= _ /=/ _ Expression
-    # Returns the expression IR node (strips the '=' token)
-    method DefaultValue($ctx) {
-        my @values = _collect_ir_values($ctx);
-        for my $val (@values) {
-            return $val if $val isa Chalk::Bootstrap::IR::Node;
-        }
-        return undef;
-    }
 }
 
 1;

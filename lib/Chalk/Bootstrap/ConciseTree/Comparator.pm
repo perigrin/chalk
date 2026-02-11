@@ -106,7 +106,7 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
             # Strip /TARG flag (compile-time target detail on entersub etc.)
             $private =~ s{/TARG}{}g;
 
-            # Strip /FIELD flag (internal marker from FieldDeclaration)
+            # Strip /FIELD flag (internal marker for field declarations)
             $private =~ s{/FIELD}{}g;
 
             $private =~ s{^\s+|\s+$}{}g;

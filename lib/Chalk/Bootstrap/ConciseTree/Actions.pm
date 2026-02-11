@@ -894,15 +894,24 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §8 VariableDeclaration — tags pad ops with /VARDECL so the peephole
-    # optimizer at StatementItem level can distinguish declaration targets
-    # from condition/expression variables. The grammar is ambiguous between
-    # bare and initialized forms; both may complete and add() picks one.
+    # §8 VariableDeclaration — tags pad ops with /VARDECL (or /FIELD for
+    # field declarator) so downstream can distinguish declaration targets.
     method VariableDeclaration($ctx) {
+        # Detect whether this is a 'field' declaration
+        my $is_field = false;
+        for my $item (_collect_items($ctx)) {
+            if ($item->{type} eq 'text' && $item->{value} eq 'field') {
+                $is_field = true;
+                last;
+            }
+        }
+
         my @child_trees = _collect_trees($ctx);
         my $result = _merge_trees(@child_trees);
 
-        # Tag the first pad op (padsv/padav/padhv) with /VARDECL
+        my $tag = $is_field ? '/FIELD' : '/VARDECL';
+
+        # Tag the first pad op (padsv/padav/padhv)
         my @ops = $result->ops()->@*;
         my @tagged;
         my $tagged_one = false;
@@ -912,7 +921,7 @@ class Chalk::Bootstrap::ConciseTree::Actions {
                     name      => $op->name(),
                     arity     => $op->arity(),
                     type_info => $op->type_info(),
-                    private   => '/VARDECL',
+                    private   => $tag,
                 );
                 $tagged_one = true;
             } else {
@@ -1133,35 +1142,6 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §8 FieldDeclaration — tagged with /FIELD so ClassBlock can filter them.
-    # Fields are compiled away by Perl and don't appear in B::Concise output.
-    method FieldDeclaration($ctx) {
-        my @child_trees = _collect_trees($ctx);
-        my $var_op = undef;
-
-        for my $tree (@child_trees) {
-            my $first_op = $tree->ops()->[0];
-            if (defined $first_op && $first_op->name() =~ /^(padsv|padav|padhv)$/) {
-                $var_op = $first_op;
-                last;
-            }
-        }
-
-        if (defined $var_op) {
-            return _op($var_op->name(), '0',
-                type_info => $var_op->type_info(),
-                private   => '/FIELD',
-            );
-        }
-
-        return _merge_trees(@child_trees);
-    }
-
-    # §8 DefaultValue — transparent
-    method DefaultValue($ctx) {
-        my @trees = _collect_trees($ctx);
-        return _merge_trees(@trees);
-    }
 
     # §17 AssignOp — extract operator text, return empty tree
     method AssignOp($ctx) {

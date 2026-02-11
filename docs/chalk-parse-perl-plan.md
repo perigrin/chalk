@@ -99,16 +99,17 @@ that's the signal.
 
 ### Reference Documentation
 
-| Document | Location | Relevance |
-|---|---|---|
-| Semiring Architecture | `pu:docs/semiring-architecture.md` | Cardinal rule: one parse before IR |
-| Precedence Semiring | `pu:docs/precedence-semiring.md` | Active/passive model, table-driven design |
-| Type System (Grammar) | `pu:docs/chalk-grammar-types.md` | Type lattice: Int <: Num <: Str <: Scalar |
-| Type Mapping (IR) | `pu:docs/chalk-ir-type-mapping.md` | Grammar ↔ IR type bridge |
-| Perl Types (Practical) | `pu:docs/perl-types-practical.md` | Round-trip + behavioral membership tests |
-| Aycock Optimizations | `docs/chalk-ayock-optimizations.md` | Parser performance techniques |
-| Perl Grammar Spec | `docs/perlish-grammar-spec.md` | 65-rule grammar, 20 sections |
-| BNF Grammar File | `docs/chalk-bootstrap.bnf` | Machine-readable grammar |
+| Document               | Location                              | Relevance                                 |
+|------------------------|---------------------------------------|-------------------------------------------|
+| Semiring Architecture  | `pu:docs/semiring-architecture.md`    | Cardinal rule: one parse before IR        |
+| Precedence Semiring    | `pu:docs/precedence-semiring.md`      | Active/passive model, table-driven design |
+| Type System (Grammar)  | `pu:docs/chalk-grammar-types.md`      | Type lattice: Int <: Num <: Str <: Scalar |
+| Type Mapping (IR)      | `pu:docs/chalk-ir-type-mapping.md`    | Grammar ↔ IR type bridge                  |
+| Perl Types (Practical) | `pu:docs/perl-types-practical.md`     | Round-trip + behavioral membership tests  |
+| Aycock Optimizations   | `docs/chalk-ayock-optimizations.md`   | Parser performance techniques             |
+| Aycock Dissertation    | `docs/Aycock_JohnDaniel_PhD_2001.pdf` | Parser design + performance               |
+| Perl Grammar Spec      | `docs/perlish-grammar-spec.md`        | 65-rule grammar, 20 sections              |
+| BNF Grammar File       | `docs/chalk-bootstrap.bnf`            | Machine-readable grammar                  |
 
 -----
 
@@ -122,33 +123,33 @@ The Precedence semiring uses this table for its active/passive validation model
 
 **Binary operators** (used in `BinaryOp` rule):
 
-| Level | Assoc | Operators | Grammar Pattern |
-|-------|-------|-----------|-----------------|
-| 0 | right | `**` | `/\*\*/` |
-| 1 | left | `=~` `!~` | `/=~/`, `/!~/` |
-| 2 | left | `*` `/` `%` `x` | `/[*\/%]/`, `/x\b/` |
-| 3 | left | `+` `-` `.` | `/[+-]/`, `/\.(?!\.)/` |
-| 4 | left | `<<` `>>` | `/<</`, `/>>/` |
-| 5 | nonassoc | `<` `>` `<=` `>=` `lt` `gt` `le` `ge` | `/[<>]=?/`, `/(?:lt\|gt\|le\|ge)\b/` |
-| 6 | chained | `==` `!=` `<=>` `eq` `ne` `cmp` | `/[!=]=/`, `/<=>/`, `/(?:eq\|ne\|cmp)\b/` |
-| 7 | nonassoc | `isa` | `/isa\b/` |
-| 8 | left | `&` | `/&(?!&)/` |
-| 9 | left | `\|` `^` | `/\|(?!\|)/`, `/\^/` |
-| 10 | left | `&&` | `/&&/` |
-| 11 | left | `\|\|` `//` | `/\|\|/`, `/\/\//` |
-| 12 | nonassoc | `..` `...` | `/\.\.\.?/` |
-| 13 | left | `and` `or` `xor` | `/(?:and\|or\|xor)\b/` |
+| Level | Assoc    | Operators                             | Grammar Pattern                           |
+|-------|----------|---------------------------------------|-------------------------------------------|
+| 0     | right    | `**`                                  | `/\*\*/`                                  |
+| 1     | left     | `=~` `!~`                             | `/=~/`, `/!~/`                            |
+| 2     | left     | `*` `/` `%` `x`                       | `/[*\/%]/`, `/x\b/`                       |
+| 3     | left     | `+` `-` `.`                           | `/[+-]/`, `/\.(?!\.)/`                    |
+| 4     | left     | `<<` `>>`                             | `/<</`, `/>>/`                            |
+| 5     | nonassoc | `<` `>` `<=` `>=` `lt` `gt` `le` `ge` | `/[<>]=?/`, `/(?:lt\|gt\|le\|ge)\b/`      |
+| 6     | chained  | `==` `!=` `<=>` `eq` `ne` `cmp`       | `/[!=]=/`, `/<=>/`, `/(?:eq\|ne\|cmp)\b/` |
+| 7     | nonassoc | `isa`                                 | `/isa\b/`                                 |
+| 8     | left     | `&`                                   | `/&(?!&)/`                                |
+| 9     | left     | `\|` `^`                              | `/\|(?!\|)/`, `/\^/`                      |
+| 10    | left     | `&&`                                  | `/&&/`                                    |
+| 11    | left     | `\|\|` `//`                           | `/\|\|/`, `/\/\//`                        |
+| 12    | nonassoc | `..` `...`                            | `/\.\.\.?/`                               |
+| 13    | left     | `and` `or` `xor`                      | `/(?:and\|or\|xor)\b/`                    |
 
 **Non-BinaryOp expression precedence** (relative positioning):
 
-| Precedence | Expression Type | Grammar Rule |
-|---|---|---|
-| Highest | Postfix (`->`, `[]`, `{}`, `++`, `--`) | `PostfixExpression` |
-| ↑ | Unary (`!`, `~`, `\`, unary `+`/`-`, `not`) | `UnaryExpression` |
-| ↑ | Binary operators (table above) | `BinaryExpression` |
-| ↑ | Ternary (`?:`) | `TernaryExpression` |
-| ↑ | Assignment (`=`, `+=`, etc.) | `AssignmentExpression` |
-| Lowest | (expression boundaries) | |
+| Precedence | Expression Type                             | Grammar Rule           |
+|------------|---------------------------------------------|------------------------|
+| Highest    | Postfix (`->`, `[]`, `{}`, `++`, `--`)      | `PostfixExpression`    |
+| ↑          | Unary (`!`, `~`, `\`, unary `+`/`-`, `not`) | `UnaryExpression`      |
+| ↑          | Binary operators (table above)              | `BinaryExpression`     |
+| ↑          | Ternary (`?:`)                              | `TernaryExpression`    |
+| ↑          | Assignment (`=`, `+=`, etc.)                | `AssignmentExpression` |
+| Lowest     | (expression boundaries)                     |                        |
 
 **Associativity rules** per `pu:docs/precedence-semiring.md`:
 - `left`: chains left-to-right (`a + b + c` → `(a+b)+c`)
@@ -161,32 +162,32 @@ The Precedence semiring uses this table for its active/passive validation model
 Signatures for all Perl builtins used in bootstrap source, derived from perldoc.
 Feeds the Arity/TypeInference semiring for disambiguation and type validation.
 
-| Builtin | Arity | Argument Types | Return Type | Call Style |
-|---------|-------|---------------|-------------|------------|
-| `bless` | 2 | (Ref, Str) | Object | Parenthesized |
-| `defined` | 1 | (Any) | Bool | Both |
-| `delete` | 1 | (HashElem\|ArrayElem) | Scalar | Bare |
-| `die` | 1+ | (Str\|List) | None (dies) | Bare |
-| `exists` | 1 | (HashElem\|ArrayElem) | Bool | Bare |
-| `grep` | 2 | (Block, List) | List | Block-first |
-| `join` | 2+ | (Str, List) | Str | Parenthesized |
-| `keys` | 1 | (Hash\|HashRef) | List | Bare |
-| `last` | 0 | — | Control | Bare keyword |
-| `length` | 1 | (Str) | Int | Parenthesized |
-| `map` | 2 | (Block, List) | List | Block-first |
-| `next` | 0 | — | Control | Bare keyword |
-| `ord` | 1 | (Str) | Int | Parenthesized |
-| `pos` | 1 | (Str) | Int (lvalue) | Parenthesized |
-| `push` | 2+ | (Array, List) | Int | Bare |
-| `ref` | 1 | (Any) | Str | Parenthesized |
-| `refaddr` | 1 | (Ref) | Int | Parenthesized |
-| `return` | 0-1 | (Any?) | Control | Bare keyword |
-| `scalar` | 1 | (Any) | Scalar | Both |
-| `shift` | 1 | (Array) | Scalar | Bare |
-| `sort` | 1-2 | (Block?, List) | List | Both |
-| `split` | 2+ | (Regex, Str, Int?) | List | Parenthesized |
-| `sprintf` | 2+ | (Str, List) | Str | Parenthesized |
-| `substr` | 3+ | (Str, Int, Int, Str?) | Str | Parenthesized |
+| Builtin   | Arity | Argument Types        | Return Type  | Call Style    |
+|-----------|-------|-----------------------|--------------|---------------|
+| `bless`   | 2     | (Ref, Str)            | Object       | Parenthesized |
+| `defined` | 1     | (Any)                 | Bool         | Both          |
+| `delete`  | 1     | (HashElem\|ArrayElem) | Scalar       | Bare          |
+| `die`     | 1+    | (Str\|List)           | None (dies)  | Bare          |
+| `exists`  | 1     | (HashElem\|ArrayElem) | Bool         | Bare          |
+| `grep`    | 2     | (Block, List)         | List         | Block-first   |
+| `join`    | 2+    | (Str, List)           | Str          | Parenthesized |
+| `keys`    | 1     | (Hash\|HashRef)       | List         | Bare          |
+| `last`    | 0     | —                     | Control      | Bare keyword  |
+| `length`  | 1     | (Str)                 | Int          | Parenthesized |
+| `map`     | 2     | (Block, List)         | List         | Block-first   |
+| `next`    | 0     | —                     | Control      | Bare keyword  |
+| `ord`     | 1     | (Str)                 | Int          | Parenthesized |
+| `pos`     | 1     | (Str)                 | Int (lvalue) | Parenthesized |
+| `push`    | 2+    | (Array, List)         | Int          | Bare          |
+| `ref`     | 1     | (Any)                 | Str          | Parenthesized |
+| `refaddr` | 1     | (Ref)                 | Int          | Parenthesized |
+| `return`  | 0-1   | (Any?)                | Control      | Bare keyword  |
+| `scalar`  | 1     | (Any)                 | Scalar       | Both          |
+| `shift`   | 1     | (Array)               | Scalar       | Bare          |
+| `sort`    | 1-2   | (Block?, List)        | List         | Both          |
+| `split`   | 2+    | (Regex, Str, Int?)    | List         | Parenthesized |
+| `sprintf` | 2+    | (Str, List)           | Str          | Parenthesized |
+| `substr`  | 3+    | (Str, Int, Int, Str?) | Str          | Parenthesized |
 
 **Key observation**: Bootstrap source consistently uses parenthesized calls for
 most builtins (`defined($x)`, `ref($x)`, `length($x)`). The exceptions are
@@ -224,15 +225,15 @@ signal for Aycock optimizations (`docs/chalk-ayock-optimizations.md`).
 
 **Grammar rules (10)**:
 
-| Section | Rules |
-|---------|-------|
-| §1 Whitespace | `_`, `WS` |
-| §2 Structure | `Program`, `StatementList`, `StatementItem` |
-| §3 Categories | `SimpleStatement`, `CompoundStatement` |
-| §4 Expr Stmt | `ExpressionStatement` |
-| §12 Expr (partial) | `Expression` → `Atom` only |
-| §13 Atoms (partial) | `Atom` → `Identifier` only |
-| §20 Helpers (partial) | `Identifier`, `Block` |
+| Section               | Rules                                       |
+|-----------------------|---------------------------------------------|
+| §1 Whitespace         | `_`, `WS`                                   |
+| §2 Structure          | `Program`, `StatementList`, `StatementItem` |
+| §3 Categories         | `SimpleStatement`, `CompoundStatement`      |
+| §4 Expr Stmt          | `ExpressionStatement`                       |
+| §12 Expr (partial)    | `Expression` → `Atom` only                  |
+| §13 Atoms (partial)   | `Atom` → `Identifier` only                  |
+| §20 Helpers (partial) | `Identifier`, `Block`                       |
 
 **Test data**:
 ```perl
@@ -259,15 +260,15 @@ and literal values.
 
 **Grammar rules added (22, total ~32)**:
 
-| Section | Rules |
-|---------|-------|
-| §7 Use | `UseDeclaration`, `ModuleName`, `ImportList` |
-| §8 Var/Field | `VariableDeclaration`, `VariableList`, `FieldDeclaration`, `DefaultValue` |
-| §12 Expr (extend) | `ExpressionList` |
-| §13 Atoms (extend) | `Atom` += `Variable`, `Literal`, `ParenExpr`, `QwLiteral`, `ArrayConstructor`, `HashConstructor` |
-| §18 Variables | `Variable`, `ScalarVariable`, `ArrayVariable`, `HashVariable` |
-| §19 Literals | `Literal`, `NumericLiteral`, `StringLiteral`, `RegexLiteral` |
-| §20 Helpers (extend) | `QualifiedIdentifier`, `Version` |
+| Section              | Rules                                                                                            |
+|----------------------|--------------------------------------------------------------------------------------------------|
+| §7 Use               | `UseDeclaration`, `ModuleName`, `ImportList`                                                     |
+| §8 Var/Field         | `VariableDeclaration`, `VariableList`, `FieldDeclaration`, `DefaultValue`                        |
+| §12 Expr (extend)    | `ExpressionList`                                                                                 |
+| §13 Atoms (extend)   | `Atom` += `Variable`, `Literal`, `ParenExpr`, `QwLiteral`, `ArrayConstructor`, `HashConstructor` |
+| §18 Variables        | `Variable`, `ScalarVariable`, `ArrayVariable`, `HashVariable`                                    |
+| §19 Literals         | `Literal`, `NumericLiteral`, `StringLiteral`, `RegexLiteral`                                     |
+| §20 Helpers (extend) | `QualifiedIdentifier`, `Version`                                                                 |
 
 **Test data**:
 ```perl
@@ -307,12 +308,12 @@ optrees that serve as baseline comparisons.
 
 **Grammar rules added (13, total ~45)**:
 
-| Section | Rules |
-|---------|-------|
-| §9 Definitions | `ClassBlock`, `SubroutineDefinition`, `MethodDefinition`, `AdjustBlock` |
-| §10 Attributes | `AttributeList`, `Attribute` |
-| §11 Signatures | `Signature`, `SignatureParams`, `SignatureParam`, `ScalarSignatureParam`, `SlurpySignatureParam` |
-| §13 Atoms (extend) | `Atom` += `AnonymousSub` |
+| Section            | Rules                                                                                            |
+|--------------------|--------------------------------------------------------------------------------------------------|
+| §9 Definitions     | `ClassBlock`, `SubroutineDefinition`, `MethodDefinition`, `AdjustBlock`                          |
+| §10 Attributes     | `AttributeList`, `Attribute`                                                                     |
+| §11 Signatures     | `Signature`, `SignatureParams`, `SignatureParam`, `ScalarSignatureParam`, `SlurpySignatureParam` |
+| §13 Atoms (extend) | `Atom` += `AnonymousSub`                                                                         |
 
 **Test data**:
 ```perl
@@ -377,14 +378,14 @@ disambiguation semirings become necessary.
 
 **Grammar rules added (14, total ~59)**:
 
-| Section | Rules |
-|---------|-------|
-| §4 Expr Stmt (extend) | `PostfixModifier` |
-| §12 Expr (extend) | `Expression` += all alternatives |
-| §14 Unary | `UnaryExpression` |
-| §15 Binary | `BinaryExpression`, `BinaryOp` |
-| §16 Postfix | `PostfixExpression`, `MethodCall`, `Subscript`, `PostfixDeref`, `CallExpression`, `PostfixIncDec` |
-| §17 Ternary/Assign | `TernaryExpression`, `AssignmentExpression`, `AssignOp` |
+| Section               | Rules                                                                                             |
+|-----------------------|---------------------------------------------------------------------------------------------------|
+| §4 Expr Stmt (extend) | `PostfixModifier`                                                                                 |
+| §12 Expr (extend)     | `Expression` += all alternatives                                                                  |
+| §14 Unary             | `UnaryExpression`                                                                                 |
+| §15 Binary            | `BinaryExpression`, `BinaryOp`                                                                    |
+| §16 Postfix           | `PostfixExpression`, `MethodCall`, `Subscript`, `PostfixDeref`, `CallExpression`, `PostfixIncDec` |
+| §17 Ternary/Assign    | `TernaryExpression`, `AssignmentExpression`, `AssignOp`                                           |
 
 **Requires before this phase**:
 
@@ -503,10 +504,10 @@ structural output against B::Concise for expression trees. Verify:
 
 **Grammar rules added (6, total 65)**:
 
-| Section | Rules |
-|---------|-------|
-| §5 Conditionals | `IfStatement`, `ElsifChain` |
-| §6 Loops | `WhileStatement`, `ForStatement`, `ForeachStatement`, `IteratorVariable` |
+| Section         | Rules                                                                    |
+|-----------------|--------------------------------------------------------------------------|
+| §5 Conditionals | `IfStatement`, `ElsifChain`                                              |
+| §6 Loops        | `WhileStatement`, `ForStatement`, `ForeachStatement`, `IteratorVariable` |
 
 **Test data**:
 ```perl
@@ -601,75 +602,75 @@ relative path.
 Simplest files: `use` declarations, `feature class`, methods returning string
 constants. All constructs already have ConciseTree action methods.
 
-| # | File | Key Constructs |
-|---|------|----------------|
-| 1 | `IR/Node/Start.pm` | :isa, 1 override method |
+| # | File                | Key Constructs          |
+|---|---------------------|-------------------------|
+| 1 | `IR/Node/Start.pm`  | :isa, 1 override method |
 | 2 | `IR/Node/Return.pm` | :isa, 1 override method |
-| 3 | `Target.pm` | Abstract interface, die |
-| 4 | `Optimizer/Pass.pm` | Abstract base, die |
+| 3 | `Target.pm`         | Abstract interface, die |
+| 4 | `Optimizer/Pass.pm` | Abstract base, die      |
 
 **Tier B — Classes with field declarations (5 files)**:
 Same as Tier A but with `field` declarations, which cause B::Concise to emit
 nextstate instead of stub inside the class body.
 
-| # | File | Key Constructs |
-|---|------|----------------|
-| 5 | `IR/Node/Constant.pm` | :isa, 2 fields, override |
-| 6 | `Target/XS/AST/Node.pm` | Abstract interface, die |
-| 7 | `Target/XS/AST/Statement.pm` | 1 field, string interpolation |
-| 8 | `Target/XS/AST/Module.pm` | 2 fields, string interpolation |
-| 9 | `IR/Node/Constructor.pm` | :isa, 1 field, override |
+| # | File                         | Key Constructs                 |
+|---|------------------------------|--------------------------------|
+| 5 | `IR/Node/Constant.pm`        | :isa, 2 fields, override       |
+| 6 | `Target/XS/AST/Node.pm`      | Abstract interface, die        |
+| 7 | `Target/XS/AST/Statement.pm` | 1 field, string interpolation  |
+| 8 | `Target/XS/AST/Module.pm`    | 2 fields, string interpolation |
+| 9 | `IR/Node/Constructor.pm`     | :isa, 1 field, override        |
 
 **Tier C — Classes with runtime method logic (5 files)**:
 Methods use string interpolation, conditionals, regex, join, push, etc.
 B::Concise sees compile-time class envelope only for main program.
 
-| # | File | Key Constructs |
-|---|------|----------------|
-| 10 | `ConciseOp.pm` | Methods with regex, conditionals |
-| 11 | `ConciseTree.pm` | Multi-method class |
+| #  | File                        | Key Constructs                   |
+|----|-----------------------------|----------------------------------|
+| 10 | `ConciseOp.pm`              | Methods with regex, conditionals |
+| 11 | `ConciseTree.pm`            | Multi-method class               |
 | 12 | `ConciseTree/Comparator.pm` | Regex substitution, conditionals |
-| 13 | `ConciseTree/Oracle.pm` | Process execution, parsing |
-| 14 | `Context.pm` | 4 fields, recursion, push |
+| 13 | `ConciseTree/Oracle.pm`     | Process execution, parsing       |
+| 14 | `Context.pm`                | 4 fields, recursion, push        |
 
 **Tier D — All remaining files (23 files)**:
 Diverse method bodies, standalone modules with subs, and large files.
 
-| # | File | Key Constructs |
-|---|------|----------------|
-| 15 | `Target/XS/AST/CompositeNode.pm` | 1 field, map + join |
-| 16 | `Target/XS/AST/VarDecl.pm` | 2 fields, regex, ternary |
-| 17 | `Grammar/Symbol.pm` | 3 fields, 3 readers, defined |
-| 18 | `Target/XS/AST/Preamble.pm` | Multi-line string constant |
-| 19 | `Terminal.pm` | Static method, regex, pos(), length() |
-| 20 | `Grammar/Rule.pm` | Nested loops, map, join, scalar |
-| 21 | `IR/Node.pm` | Base class, refaddr, grep, push, postfix deref |
-| 22 | `Optimizer.pm` | Type checking (isa), push, die |
-| 23 | `Semiring/Composite.pm` | 2 fields, delegation pattern |
-| 24 | `Semiring/SemanticAction.pm` | Context threading, can() dispatch |
-| 25 | `Grammar/Perl/KeywordTable.pm` | Hash lookup table, exists |
-| 26 | `Target/XS/AST/XSUB.pm` | 4 fields, split, map, push, join |
-| 27 | `Optimizer/DCE.pm` | Mark-sweep graph traversal, worklist |
-| 28 | `Target/Perl.pm` | Recursive emit, regex escaping, map |
-| 29 | `Grammar/BNF/Generated.pm` | Auto-generated, same shape as BNF.pm |
-| 30 | `Desugar.pm` | Quantifier transform, exists, sort keys |
-| 31 | `Grammar/BNF.pm` | Complex data construction, 10 rules |
-| 32 | `Semiring/Structural.pm` | Block/hash disambiguation |
-| 33 | `Semiring/TypeInference.pm` | Keyword rejection, tag propagation |
-| 34 | `Earley.pm` | State machine, chart parsing, regex, substr |
-| 35 | `Target/XS.pm` | XS generation, ord, sprintf, s///ge |
-| 36 | `Grammar/Perl/PrecedenceTable.pm` | Operator precedence lookup table |
-| 37 | `Semiring/Boolean.pm` | bless, refaddr, reference equality |
+| #  | File                              | Key Constructs                                 |
+|----|-----------------------------------|------------------------------------------------|
+| 15 | `Target/XS/AST/CompositeNode.pm`  | 1 field, map + join                            |
+| 16 | `Target/XS/AST/VarDecl.pm`        | 2 fields, regex, ternary                       |
+| 17 | `Grammar/Symbol.pm`               | 3 fields, 3 readers, defined                   |
+| 18 | `Target/XS/AST/Preamble.pm`       | Multi-line string constant                     |
+| 19 | `Terminal.pm`                     | Static method, regex, pos(), length()          |
+| 20 | `Grammar/Rule.pm`                 | Nested loops, map, join, scalar                |
+| 21 | `IR/Node.pm`                      | Base class, refaddr, grep, push, postfix deref |
+| 22 | `Optimizer.pm`                    | Type checking (isa), push, die                 |
+| 23 | `Semiring/Composite.pm`           | 2 fields, delegation pattern                   |
+| 24 | `Semiring/SemanticAction.pm`      | Context threading, can() dispatch              |
+| 25 | `Grammar/Perl/KeywordTable.pm`    | Hash lookup table, exists                      |
+| 26 | `Target/XS/AST/XSUB.pm`           | 4 fields, split, map, push, join               |
+| 27 | `Optimizer/DCE.pm`                | Mark-sweep graph traversal, worklist           |
+| 28 | `Target/Perl.pm`                  | Recursive emit, regex escaping, map            |
+| 29 | `Grammar/BNF/Generated.pm`        | Auto-generated, same shape as BNF.pm           |
+| 30 | `Desugar.pm`                      | Quantifier transform, exists, sort keys        |
+| 31 | `Grammar/BNF.pm`                  | Complex data construction, 10 rules            |
+| 32 | `Semiring/Structural.pm`          | Block/hash disambiguation                      |
+| 33 | `Semiring/TypeInference.pm`       | Keyword rejection, tag propagation             |
+| 34 | `Earley.pm`                       | State machine, chart parsing, regex, substr    |
+| 35 | `Target/XS.pm`                    | XS generation, ord, sprintf, s///ge            |
+| 36 | `Grammar/Perl/PrecedenceTable.pm` | Operator precedence lookup table               |
+| 37 | `Semiring/Boolean.pm`             | bless, refaddr, reference equality             |
 
 **Not yet in per-file oracle (4 files)** — these will be added to a tier
 once their ConciseTree actions stabilize:
 
-| File | Key Constructs |
-|------|----------------|
-| `Semiring/Precedence.pm` | Precedence validation, lookup dispatch |
-| `IR/NodeFactory.pm` | Hash consing, delete, ref, die, sort |
+| File                     | Key Constructs                            |
+|--------------------------|-------------------------------------------|
+| `Semiring/Precedence.pm` | Precedence validation, lookup dispatch    |
+| `IR/NodeFactory.pm`      | Hash consing, delete, ref, die, sort      |
 | `Grammar/BNF/Actions.pm` | 12 methods, tree traversal, type dispatch |
-| `ConciseTree/Actions.pm` | 1505 lines, 40+ action methods |
+| `ConciseTree/Actions.pm` | 1505 lines, 40+ action methods            |
 
 ### Per-Tier Work
 
@@ -765,19 +766,19 @@ targeted IR extensions.
 
 ## Cumulative Summary
 
-| Phase | Description | New Infrastructure | Key Deliverable |
-|-------|-------------|-------------------|-----------------|
-| 0 | Infrastructure | — | Perl grammar through BNF pipeline |
-| 1 | Program skeleton | — | 10-rule subset recognizer |
-| 2 | Declarations + literals | ConciseTree semiring | Parses `use`, `my`, literals |
-| 3 | Class definitions | — | Parses class/method/field |
-| 4 | Expressions | **Precedence + Structural semirings**, ChalkSyntax | Disambiguated expression parsing |
-| 5 | Control flow + full grammar | TypeInference semiring | All 37 .pm files recognized |
-| 6-8 Tier A | Pure data classes (4 files) | Perl IR node types, Target::Perl, Target::XS | End-to-end IR → Perl → XS |
-| 6-8 Tier B | Field declarations (5 files) | Field IR nodes | Interpolation + fields lowered |
-| 6-8 Tier C | Runtime method logic (5 files) | Control flow + builtin IR nodes | Conditionals + regex lowered |
-| 6-8 Tier D | All remaining (23 files) | Targeted IR extensions | Full self-hosting compilation |
-| 9 | Optimizations | Peephole, GCM, Aycock | Same correctness, better performance |
+| Phase      | Description                    | New Infrastructure                                 | Key Deliverable                      |
+|------------|--------------------------------|----------------------------------------------------|--------------------------------------|
+| 0          | Infrastructure                 | —                                                  | Perl grammar through BNF pipeline    |
+| 1          | Program skeleton               | —                                                  | 10-rule subset recognizer            |
+| 2          | Declarations + literals        | ConciseTree semiring                               | Parses `use`, `my`, literals         |
+| 3          | Class definitions              | —                                                  | Parses class/method/field            |
+| 4          | Expressions                    | **Precedence + Structural semirings**, ChalkSyntax | Disambiguated expression parsing     |
+| 5          | Control flow + full grammar    | TypeInference semiring                             | All 37 .pm files recognized          |
+| 6-8 Tier A | Pure data classes (4 files)    | Perl IR node types, Target::Perl, Target::XS       | End-to-end IR → Perl → XS            |
+| 6-8 Tier B | Field declarations (5 files)   | Field IR nodes                                     | Interpolation + fields lowered       |
+| 6-8 Tier C | Runtime method logic (5 files) | Control flow + builtin IR nodes                    | Conditionals + regex lowered         |
+| 6-8 Tier D | All remaining (23 files)       | Targeted IR extensions                             | Full self-hosting compilation        |
+| 9          | Optimizations                  | Peephole, GCM, Aycock                              | Same correctness, better performance |
 
 -----
 

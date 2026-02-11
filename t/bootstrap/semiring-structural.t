@@ -54,6 +54,64 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     ok($r3->{is_hash}, 'both tags: hash propagates through multiply');
 }
 
+# --- multiply: is_deref tag propagation ---
+{
+    my $deref_val = { valid => true, is_deref => true };
+    my $plain     = $sr->one();
+
+    my $r1 = $sr->multiply($deref_val, $plain);
+    ok($r1->{is_deref}, 'is_deref propagates from left through multiply');
+
+    my $r2 = $sr->multiply($plain, $deref_val);
+    ok($r2->{is_deref}, 'is_deref propagates from right through multiply');
+
+    my $call_deref = { valid => true, is_call => true, is_deref => true };
+    my $r3 = $sr->multiply($call_deref, $plain);
+    ok($r3->{is_call}, 'is_call preserved alongside is_deref in multiply');
+    ok($r3->{is_deref}, 'is_deref preserved alongside is_call in multiply');
+}
+
+# --- multiply: is_method tag propagation ---
+{
+    my $method_val = { valid => true, is_method => true };
+    my $plain      = $sr->one();
+
+    my $r1 = $sr->multiply($method_val, $plain);
+    ok($r1->{is_method}, 'is_method propagates from left through multiply');
+
+    my $r2 = $sr->multiply($plain, $method_val);
+    ok($r2->{is_method}, 'is_method propagates from right through multiply');
+
+    my $call_method = { valid => true, is_call => true, is_method => true };
+    my $r3 = $sr->multiply($call_method, $plain);
+    ok($r3->{is_call}, 'is_call preserved alongside is_method in multiply');
+    ok($r3->{is_method}, 'is_method preserved alongside is_call in multiply');
+}
+
+# --- multiply: is_binop tag propagation ---
+{
+    my $binop_val = { valid => true, is_binop => true };
+    my $plain     = $sr->one();
+
+    my $r1 = $sr->multiply($binop_val, $plain);
+    ok($r1->{is_binop}, 'is_binop propagates from left through multiply');
+
+    my $r2 = $sr->multiply($plain, $binop_val);
+    ok($r2->{is_binop}, 'is_binop propagates from right through multiply');
+}
+
+# --- multiply: is_vardecl tag propagation ---
+{
+    my $vardecl_val = { valid => true, is_vardecl => true };
+    my $plain       = $sr->one();
+
+    my $r1 = $sr->multiply($vardecl_val, $plain);
+    ok($r1->{is_vardecl}, 'is_vardecl propagates from left through multiply');
+
+    my $r2 = $sr->multiply($plain, $vardecl_val);
+    ok($r2->{is_vardecl}, 'is_vardecl propagates from right through multiply');
+}
+
 # --- add: first non-zero when one is zero ---
 {
     my $z = $sr->zero();
@@ -82,6 +140,70 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     ok(!$r2->{is_hash}, 'add(hash, block) does not carry hash tag');
 }
 
+# --- add: prefer is_call over is_call+is_deref ---
+# When both alternatives have is_call, prefer the one WITHOUT is_deref.
+# This disambiguates CallExpression vs PostfixDeref-on-CallExpression.
+{
+    my $call_only = { valid => true, is_call => true };
+    my $call_deref = { valid => true, is_call => true, is_deref => true };
+
+    my $r1 = $sr->add($call_only, $call_deref);
+    ok($r1->{is_call}, 'add(call, call+deref): has is_call');
+    ok(!$r1->{is_deref}, 'add(call, call+deref): prefers no is_deref');
+
+    my $r2 = $sr->add($call_deref, $call_only);
+    ok($r2->{is_call}, 'add(call+deref, call): has is_call');
+    ok(!$r2->{is_deref}, 'add(call+deref, call): prefers no is_deref');
+}
+
+# --- add: prefer is_call over is_call+is_method ---
+# When both alternatives have is_call, prefer the one WITHOUT is_method.
+# This disambiguates CallExpression vs MethodCall at PostfixExpression level.
+{
+    my $call_only   = { valid => true, is_call => true };
+    my $call_method = { valid => true, is_call => true, is_method => true };
+
+    my $r1 = $sr->add($call_only, $call_method);
+    ok($r1->{is_call}, 'add(call, call+method): has is_call');
+    ok(!$r1->{is_method}, 'add(call, call+method): prefers no is_method');
+
+    my $r2 = $sr->add($call_method, $call_only);
+    ok($r2->{is_call}, 'add(call+method, call): has is_call');
+    ok(!$r2->{is_method}, 'add(call+method, call): prefers no is_method');
+}
+
+# --- add: prefer is_call over is_call+is_binop ---
+# When both alternatives have is_call, prefer the one WITHOUT is_binop.
+# This disambiguates CallExpression vs BinaryExpression with inherited is_call.
+{
+    my $call_only  = { valid => true, is_call => true };
+    my $call_binop = { valid => true, is_call => true, is_binop => true };
+
+    my $r1 = $sr->add($call_only, $call_binop);
+    ok($r1->{is_call}, 'add(call, call+binop): has is_call');
+    ok(!$r1->{is_binop}, 'add(call, call+binop): prefers no is_binop');
+
+    my $r2 = $sr->add($call_binop, $call_only);
+    ok($r2->{is_call}, 'add(call+binop, call): has is_call');
+    ok(!$r2->{is_binop}, 'add(call+binop, call): prefers no is_binop');
+}
+
+# --- add: prefer is_vardecl over non-is_vardecl ---
+# When both alternatives have is_binop (or identical tags), prefer the one
+# with is_vardecl. This disambiguates VariableDeclaration-based statements
+# from bogus parses where `my` is treated as a bare identifier.
+{
+    my $binop_only    = { valid => true, is_binop => true };
+    my $binop_vardecl = { valid => true, is_binop => true, is_vardecl => true };
+
+    my $r1 = $sr->add($binop_only, $binop_vardecl);
+    ok($r1->{is_vardecl}, 'add(binop, binop+vardecl): prefers is_vardecl');
+    ok($r1->{is_binop}, 'add(binop, binop+vardecl): preserves is_binop');
+
+    my $r2 = $sr->add($binop_vardecl, $binop_only);
+    ok($r2->{is_vardecl}, 'add(binop+vardecl, binop): prefers is_vardecl');
+}
+
 # --- add: both valid, neither tagged ---
 {
     my $o1 = $sr->one();
@@ -90,6 +212,66 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $r = $sr->add($o1, $o2);
     ok(!$sr->is_zero($r), 'add(one, one) is not zero');
     ok($r->{valid}, 'add(one, one) is valid');
+}
+
+# --- selects_alternative: is_deref disambiguation ---
+{
+    my $call_only  = { valid => true, is_call => true };
+    my $call_deref = { valid => true, is_call => true, is_deref => true };
+
+    is($sr->selects_alternative($call_only, $call_deref), 'left',
+        'selects_alternative(call, call+deref) returns left');
+    is($sr->selects_alternative($call_deref, $call_only), 'right',
+        'selects_alternative(call+deref, call) returns right');
+
+    # Both have is_deref — no preference
+    is($sr->selects_alternative($call_deref, $call_deref), undef,
+        'selects_alternative(call+deref, call+deref) returns undef');
+}
+
+# --- selects_alternative: is_method disambiguation ---
+{
+    my $call_only   = { valid => true, is_call => true };
+    my $call_method = { valid => true, is_call => true, is_method => true };
+
+    is($sr->selects_alternative($call_only, $call_method), 'left',
+        'selects_alternative(call, call+method) returns left');
+    is($sr->selects_alternative($call_method, $call_only), 'right',
+        'selects_alternative(call+method, call) returns right');
+
+    # Both have is_method — no preference
+    is($sr->selects_alternative($call_method, $call_method), undef,
+        'selects_alternative(call+method, call+method) returns undef');
+}
+
+# --- selects_alternative: is_binop disambiguation ---
+{
+    my $call_only  = { valid => true, is_call => true };
+    my $call_binop = { valid => true, is_call => true, is_binop => true };
+
+    is($sr->selects_alternative($call_only, $call_binop), 'left',
+        'selects_alternative(call, call+binop) returns left');
+    is($sr->selects_alternative($call_binop, $call_only), 'right',
+        'selects_alternative(call+binop, call) returns right');
+
+    # Both have is_binop — no preference
+    is($sr->selects_alternative($call_binop, $call_binop), undef,
+        'selects_alternative(call+binop, call+binop) returns undef');
+}
+
+# --- selects_alternative: is_vardecl disambiguation ---
+{
+    my $binop_only    = { valid => true, is_binop => true };
+    my $binop_vardecl = { valid => true, is_binop => true, is_vardecl => true };
+
+    is($sr->selects_alternative($binop_only, $binop_vardecl), 'right',
+        'selects_alternative(binop, binop+vardecl) returns right');
+    is($sr->selects_alternative($binop_vardecl, $binop_only), 'left',
+        'selects_alternative(binop+vardecl, binop) returns left');
+
+    # Both have is_vardecl — no preference
+    is($sr->selects_alternative($binop_vardecl, $binop_vardecl), undef,
+        'selects_alternative(binop+vardecl, binop+vardecl) returns undef');
 }
 
 # ========================================================================
@@ -156,6 +338,134 @@ my sub mock_item($rule_name, $value) {
     ok(!$r->{is_block}, 'HashConstructor completion does not set is_block');
 }
 
+# --- PostfixDeref completion → is_deref tag (clears is_call from child) ---
+# PostfixDeref is a dereference, not a function call. Clearing is_call allows
+# add() to prefer CallExpression (is_call) over PostfixDeref (is_deref only)
+# via the "prefer is_call over non-call" rule.
+{
+    my $call_val = { valid => true, is_call => true };
+    my $item = mock_item('PostfixDeref', $call_val);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok(!$sr->is_zero($r), 'PostfixDeref completion is valid');
+    ok($r->{is_deref}, 'PostfixDeref completion sets is_deref');
+    ok(!$r->{is_call}, 'PostfixDeref completion clears is_call from child');
+}
+
+{
+    my $plain = $sr->one();
+    my $item = mock_item('PostfixDeref', $plain);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok(!$sr->is_zero($r), 'PostfixDeref with plain value is valid');
+    ok($r->{is_deref}, 'PostfixDeref with plain value sets is_deref');
+    ok(!$r->{is_call}, 'PostfixDeref with plain value has no is_call');
+}
+
+# --- MethodCall completion → is_method tag ---
+# All alts get is_method. Alts 0, 2 (with parens) also get is_call.
+{
+    my $plain = $sr->one();
+
+    # Alt 0: method call with parens
+    my $item0 = mock_item('MethodCall', $plain);
+    my $r0 = $sr->on_complete($item0, 0, 0);
+    ok(!$sr->is_zero($r0), 'MethodCall alt 0 is valid');
+    ok($r0->{is_method}, 'MethodCall alt 0 sets is_method');
+    ok($r0->{is_call}, 'MethodCall alt 0 (with parens) sets is_call');
+
+    # Alt 1: bare method access (no parens)
+    my $item1 = mock_item('MethodCall', $plain);
+    my $r1 = $sr->on_complete($item1, 1, 0);
+    ok(!$sr->is_zero($r1), 'MethodCall alt 1 is valid');
+    ok($r1->{is_method}, 'MethodCall alt 1 sets is_method');
+    ok(!$r1->{is_call}, 'MethodCall alt 1 (bare) does not set is_call');
+
+    # Alt 2: method call with parens (arrow variant)
+    my $item2 = mock_item('MethodCall', $plain);
+    my $r2 = $sr->on_complete($item2, 2, 0);
+    ok($r2->{is_method}, 'MethodCall alt 2 sets is_method');
+    ok($r2->{is_call}, 'MethodCall alt 2 (with parens) sets is_call');
+
+    # Alt 3: bare method access (arrow variant)
+    my $item3 = mock_item('MethodCall', $plain);
+    my $r3 = $sr->on_complete($item3, 3, 0);
+    ok($r3->{is_method}, 'MethodCall alt 3 sets is_method');
+    ok(!$r3->{is_call}, 'MethodCall alt 3 (bare) does not set is_call');
+}
+
+# --- MethodCall inherits is_call from child ---
+{
+    my $call_val = { valid => true, is_call => true };
+    my $item = mock_item('MethodCall', $call_val);
+    my $r = $sr->on_complete($item, 1, 0);
+    ok($r->{is_method}, 'MethodCall with is_call child sets is_method');
+    ok($r->{is_call}, 'MethodCall inherits is_call from child even on bare alt');
+}
+
+# --- BinaryExpression completion → is_binop tag ---
+{
+    my $call_val = { valid => true, is_call => true };
+    my $item = mock_item('BinaryExpression', $call_val);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok(!$sr->is_zero($r), 'BinaryExpression completion is valid');
+    ok($r->{is_binop}, 'BinaryExpression sets is_binop');
+    ok($r->{is_call}, 'BinaryExpression preserves is_call from child');
+}
+
+# --- VariableDeclaration tags is_vardecl ---
+{
+    my $plain = { valid => true };
+    my $item = mock_item('VariableDeclaration', $plain);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok($r->{is_vardecl}, 'VariableDeclaration sets is_vardecl');
+    ok(!$r->{is_block}, 'VariableDeclaration does not set is_block');
+}
+
+# --- CallExpression clears is_deref, is_method, and is_binop ---
+{
+    my $tagged = { valid => true, is_deref => true, is_method => true, is_binop => true };
+    my $item = mock_item('CallExpression', $tagged);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok($r->{is_call}, 'CallExpression sets is_call');
+    ok(!$r->{is_deref}, 'CallExpression clears is_deref from child');
+    ok(!$r->{is_method}, 'CallExpression clears is_method from child');
+    ok(!$r->{is_binop}, 'CallExpression clears is_binop from child');
+}
+
+# --- ExpressionList alts 1+ → is_list tag ---
+# ExpressionList:0 (single Expression) has no is_list.
+# ExpressionList:1 (comma-separated) gets is_list so add() prefers single Expression.
+{
+    my $deref_val = { valid => true, is_deref => true };
+    my $item0 = mock_item('ExpressionList', $deref_val);
+    my $r0 = $sr->on_complete($item0, 0, 0);
+    ok(!$r0->{is_list}, 'ExpressionList alt 0 (single) has no is_list');
+    ok($r0->{is_deref}, 'ExpressionList alt 0 preserves is_deref');
+
+    my $item1 = mock_item('ExpressionList', $deref_val);
+    my $r1 = $sr->on_complete($item1, 1, 0);
+    ok($r1->{is_list}, 'ExpressionList alt 1 (comma) sets is_list');
+    ok($r1->{is_deref}, 'ExpressionList alt 1 preserves is_deref');
+
+    my $item2 = mock_item('ExpressionList', { valid => true, is_call => true });
+    my $r2 = $sr->on_complete($item2, 2, 0);
+    ok($r2->{is_list}, 'ExpressionList alt 2 (fat arrow) sets is_list');
+    ok($r2->{is_call}, 'ExpressionList alt 2 preserves is_call');
+
+    my $item3 = mock_item('ExpressionList', { valid => true });
+    my $r3 = $sr->on_complete($item3, 3, 0);
+    ok($r3->{is_list}, 'ExpressionList alt 3 (trailing comma) sets is_list');
+}
+
+# --- CallExpression clears is_deref and is_method ---
+{
+    my $deref_method = { valid => true, is_deref => true, is_method => true };
+    my $item = mock_item('CallExpression', $deref_method);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok($r->{is_call}, 'CallExpression sets is_call');
+    ok(!$r->{is_deref}, 'CallExpression clears is_deref from child');
+    ok(!$r->{is_method}, 'CallExpression clears is_method from child');
+}
+
 # --- Boundary rules clear tags ---
 for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
     my $tagged = { valid => true, is_block => true, is_hash => true };
@@ -191,116 +501,53 @@ for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
     ok($sr->is_zero($r), 'on_complete propagates zero');
 }
 
-# --- StatementItem: bare (alt_idx 1) sets is_bare_statement ---
+# --- StatementItem: alts are all valid, no special tagging ---
+# (bare statement alt was removed from grammar — all statements need semicolons)
 {
     my $o = $sr->one();
     my $item = mock_item('StatementItem', $o);
 
-    # alt_idx 0 = SimpleStatement ";" — NOT bare
+    # alt_idx 0 = SimpleStatement ";"
     my $r0 = $sr->on_complete($item, 0, 0);
     ok(!$sr->is_zero($r0), 'StatementItem alt 0 (with semicolon) is valid');
-    ok(!$r0->{is_bare_statement}, 'StatementItem alt 0 does NOT set is_bare_statement');
 
-    # alt_idx 1 = SimpleStatement (no semicolon) — bare
+    # alt_idx 1 = CompoundStatement
     my $r1 = $sr->on_complete($item, 1, 0);
-    ok(!$sr->is_zero($r1), 'StatementItem alt 1 (bare) is valid');
-    ok($r1->{is_bare_statement}, 'StatementItem alt 1 sets is_bare_statement');
+    ok(!$sr->is_zero($r1), 'StatementItem alt 1 (compound) is valid');
 
-    # alt_idx 2 = CompoundStatement — NOT bare
+    # alt_idx 2 = bare ";"
     my $r2 = $sr->on_complete($item, 2, 0);
-    ok(!$sr->is_zero($r2), 'StatementItem alt 2 (compound) is valid');
-    ok(!$r2->{is_bare_statement}, 'StatementItem alt 2 does NOT set is_bare_statement');
+    ok(!$sr->is_zero($r2), 'StatementItem alt 2 (bare semicolon) is valid');
 }
 
-# --- multiply: is_bare_statement propagation ---
+# --- Block completion ---
 {
-    my $bare = { valid => true, is_bare_statement => true };
-    my $plain = $sr->one();
-
-    my $r1 = $sr->multiply($bare, $plain);
-    ok($r1->{is_bare_statement}, 'is_bare_statement propagates from left through multiply');
-
-    my $r2 = $sr->multiply($plain, $bare);
-    ok($r2->{is_bare_statement}, 'is_bare_statement propagates from right through multiply');
-}
-
-# --- add: prefer non-bare over bare ---
-{
-    my $bare = { valid => true, is_bare_statement => true };
-    my $non_bare = { valid => true };
-
-    my $r1 = $sr->add($bare, $non_bare);
-    ok(!$r1->{is_bare_statement}, 'add(bare, non-bare) prefers non-bare');
-    ok($r1->{valid}, 'add(bare, non-bare) is valid');
-
-    my $r2 = $sr->add($non_bare, $bare);
-    ok(!$r2->{is_bare_statement}, 'add(non-bare, bare) prefers non-bare');
-    ok($r2->{valid}, 'add(non-bare, bare) is valid');
-}
-
-# --- add: both bare → stays bare ---
-{
-    my $bare1 = { valid => true, is_bare_statement => true };
-    my $bare2 = { valid => true, is_bare_statement => true };
-
-    my $r = $sr->add($bare1, $bare2);
-    ok($r->{is_bare_statement}, 'add(bare, bare) stays bare');
-}
-
-# --- Block clears is_bare_statement (last stmt in block is legitimately bare) ---
-{
-    my $bare = { valid => true, is_bare_statement => true };
-    my $item = mock_item('Block', $bare);
+    my $o = $sr->one();
+    my $item = mock_item('Block', $o);
     my $r = $sr->on_complete($item, 0, 0);
-    ok(!$sr->is_zero($r), 'Block with bare content is valid');
+    ok(!$sr->is_zero($r), 'Block with content is valid');
     ok($r->{is_block}, 'Block completion still sets is_block');
-    ok(!$r->{is_bare_statement}, 'Block clears is_bare_statement');
 }
 
-# --- Program preserves is_bare_statement (needed for alternative selection) ---
+# --- StatementList clears block/hash tags ---
 {
-    my $bare = { valid => true, is_bare_statement => true };
-    my $item = mock_item('Program', $bare);
-    my $r = $sr->on_complete($item, 0, 0);
-    ok($r->{is_bare_statement},
-        'Program preserves is_bare_statement for alternative selection');
-}
-
-# --- StatementList preserves is_bare_statement ---
-{
-    my $bare = { valid => true, is_bare_statement => true };
-    my $item = mock_item('StatementList', $bare);
+    my $tagged = { valid => true, is_block => true, is_hash => true };
+    my $item = mock_item('StatementList', $tagged);
 
     my $r0 = $sr->on_complete($item, 0, 0);
-    ok($r0->{is_bare_statement},
-        'StatementList alt 0 preserves is_bare_statement');
-    ok(!$r0->{is_block}, 'StatementList still clears is_block');
-    ok(!$r0->{is_hash}, 'StatementList still clears is_hash');
+    ok(!$r0->{is_block}, 'StatementList clears is_block');
+    ok(!$r0->{is_hash}, 'StatementList clears is_hash');
 }
 
-# --- StatementList without bare has no bare tag ---
+# --- StatementList alts are valid ---
 {
     my $o = $sr->one();
     my $item = mock_item('StatementList', $o);
-    my $r = $sr->on_complete($item, 0, 0);
-    ok(!$r->{is_bare_statement},
-        'StatementList without bare does not set is_bare_statement');
-}
+    my $r0 = $sr->on_complete($item, 0, 0);
+    ok(!$sr->is_zero($r0), 'StatementList alt 0 is valid');
 
-# --- StatementList alt 1 with is_bare_statement is still valid ---
-# (bare-preference disambiguation happens via add(), not on_complete zeroing)
-{
-    my $bare_only = { valid => true, is_bare_statement => true };
-    my $item = mock_item('StatementList', $bare_only);
-    my $r = $sr->on_complete($item, 1, 0);
-    ok(!$sr->is_zero($r),
-        'StatementList alt 1 with is_bare_statement is valid');
-
-    my $o = $sr->one();
-    my $item2 = mock_item('StatementList', $o);
-    my $r2 = $sr->on_complete($item2, 1, 0);
-    ok(!$sr->is_zero($r2),
-        'StatementList alt 1 without any bare tags is valid');
+    my $r1 = $sr->on_complete($item, 1, 0);
+    ok(!$sr->is_zero($r1), 'StatementList alt 1 is valid');
 }
 
 # ========================================================================
@@ -366,15 +613,15 @@ SKIP: {
         return undef;
     }
 
-    # --- { 42 } at statement level: ambiguous, should prefer Block ---
+    # --- { 42; } at statement level: with semicolon, unambiguous Block ---
     {
-        my $result = parse_result('{ 42 }');
-        ok(defined $result, '{ 42 } parses at statement level');
+        my $result = parse_result('{ 42; }');
+        ok(defined $result, '{ 42; } parses at statement level');
         my $sv = struct_val($result);
-        ok($sv->{valid}, '{ 42 } structural value is valid');
+        ok($sv->{valid}, '{ 42; } structural value is valid');
         # At statement level, Block should be preferred
         ok($sv->{is_block} || !$sv->{is_hash},
-            '{ 42 } at statement level: block preferred or hash not tagged');
+            '{ 42; } at statement level: block preferred or hash not tagged');
     }
 
     # --- { } at statement level: ambiguous, should prefer Block ---
@@ -461,22 +708,56 @@ SKIP: {
         ok(defined $result, 'compound //= parses');
     }
 
-    # Last statement in block without semicolon is legitimate
+    # --- PostfixDeref vs CallExpression disambiguation ---
+    # push $ops->@*, $op  should parse as CallExpression (push takes the list),
+    # not as PostfixDeref on CallExpression result ((push $ops)->@*).
     {
-        my $result = parse_result('{ my $x = 42 }');
-        ok(defined $result, 'bare last statement in block parses');
+        my $result = parse_result('push $ops->@*, $op;');
+        ok(defined $result, 'push with postfix deref arg parses without ambiguity');
     }
 
-    # Last statement at end of program without semicolon
+    # --- Consecutive variable declarations with // ---
+    # `my $x = $a // $b // $c;\n my $y = $d // '';` should not be parsed as
+    # a single statement where `/ $c;\n my $y = $d /` becomes a regex literal.
+    {
+        my $result = parse_result("my \$x = \$a // \$b // \$c;\nmy \$y = \$d // '';");
+        ok(defined $result, 'consecutive vardecls with // parse without ambiguity');
+    }
+
+    # Bare statements at top-level (outside blocks) are rejected because
+    # StatementItem requires a semicolon for SimpleStatement. Only Block
+    # alt 1 allows a trailing SimpleStatement without semicolon.
     {
         my $result = parse_result('my $x = 42');
-        ok(defined $result, 'bare last statement at EOF parses');
+        ok(!defined $result, 'bare last statement at EOF is rejected (no semicolon)');
     }
-
-    # Multiple statements where last is bare (legitimate)
     {
         my $result = parse_result('my $x = 1; my $y = $x + 2');
-        ok(defined $result, 'separated statements with bare final parses');
+        ok(!defined $result, 'bare final statement at EOF is rejected (no semicolon)');
+    }
+
+    # Block alt 1 allows a trailing SimpleStatement without semicolon.
+    # This is needed for anonymous subs like `sub { return $x }` where the
+    # last expression omits the trailing semicolon before `}`.
+    {
+        my $result = parse_result('{ my $x = 42 }');
+        ok(defined $result, 'bare last statement in block is accepted (no semicolon before })');
+    }
+    {
+        my $result = parse_result('{ $x; $y }');
+        ok(defined $result, 'block with semicolon-terminated stmt + bare last stmt');
+    }
+    {
+        my $result = parse_result('sub { return $ctx };');
+        ok(defined $result, 'anon sub with bare return in body');
+    }
+    {
+        my $result = parse_result('sub ($x) { return $x };');
+        ok(defined $result, 'anon sub with sig and bare return in body');
+    }
+    {
+        my $result = parse_result('$self->extend(sub ($ctx) { return $ctx });');
+        ok(defined $result, 'method call with anon sub arg');
     }
 }
 

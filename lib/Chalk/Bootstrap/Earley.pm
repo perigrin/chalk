@@ -276,7 +276,10 @@ class Chalk::Bootstrap::Earley {
                     my $rule_name = $existing->{rule}->name();
                     my $dot = $existing->{dot};
                     my $origin = $existing->{origin};
-                    die "Ambiguity in rule '$rule_name' (dot=$dot, origin=$origin, pos=$pos): $@";
+                    my $comp_rule = $completed_item->{rule}->name();
+                    my $comp_origin = $completed_item->{origin};
+                    die "Ambiguity in rule '$rule_name' (dot=$dot, origin=$origin, pos=$pos) "
+                        . "completing='$comp_rule' (origin=$comp_origin): $@";
                 }
                 my $merged_item = $self->_make_item(
                     $existing->{rule},

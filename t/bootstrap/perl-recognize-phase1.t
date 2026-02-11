@@ -66,9 +66,10 @@ SKIP: {
         'Phase 1: rejects unclosed brace');
     ok(!$recognizer->parse(':::'),
         'Phase 1: rejects invalid syntax');
-    # 'foo' is now accepted — optional semicolons allow bare expressions as statements
-    ok($recognizer->parse('foo'),
-        'Phase 1: accepts bare identifier (optional semicolon)');
+    # 'foo' is not accepted at top level — StatementItem requires ';' for SimpleStatement.
+    # Bare expressions without semicolons are only allowed as the last statement in a Block.
+    ok(!$recognizer->parse('foo'),
+        'Phase 1: rejects bare identifier at top level (no semicolon)');
     ok(!$recognizer->parse('{ { foo; }'),
         'Phase 1: rejects unbalanced nested blocks');
     ok(!$recognizer->parse('} foo; {'),
