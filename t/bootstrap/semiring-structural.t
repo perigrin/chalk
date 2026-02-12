@@ -759,6 +759,32 @@ SKIP: {
         my $result = parse_result('$self->extend(sub ($ctx) { return $ctx });');
         ok(defined $result, 'method call with anon sub arg');
     }
+
+    # --- MapGrepExpression: map/grep with block and list ---
+    {
+        my $result = parse_result('my @r = map { $_ } @list;');
+        ok(defined $result, 'map with block and array parses');
+    }
+    {
+        my $result = parse_result('my %h = map { $_ => 1 } qw(foo bar);');
+        ok(defined $result, 'map with fat-comma block and qw list parses');
+    }
+    {
+        my $result = parse_result('my @r = grep { $_ } @items;');
+        ok(defined $result, 'grep with block and array parses');
+    }
+
+    # --- __SUB__: recursive closure pattern ---
+    {
+        my $result = parse_result('my $f = sub { __SUB__->($x); };');
+        ok(defined $result, '__SUB__->() recursive call parses');
+    }
+
+    # --- isa: binary operator ---
+    {
+        my $result = parse_result('my $r = $x isa q{Foo};');
+        ok(defined $result, 'isa binary expression parses');
+    }
 }
 
 done_testing();

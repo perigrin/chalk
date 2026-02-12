@@ -168,6 +168,10 @@ class Chalk::Bootstrap::Semiring::Structural {
         if ($right->{is_list} && !$left->{is_list}) {
             return 'left';
         }
+        # Both is_list: duplicate ExpressionList paths — pick left arbitrarily
+        if ($left->{is_list} && $right->{is_list}) {
+            return 'left';
+        }
 
         # Prefer CallExpression over non-call
         if ($left->{is_call} && !$right->{is_call}) {
