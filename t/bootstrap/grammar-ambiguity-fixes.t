@@ -62,10 +62,19 @@ SKIP: {
     }
 
     # --- isa binary operator ---
-    # `$x isa q{Foo}` creates BinaryExpression ambiguity
+    # `$x isa q{Foo}` creates BinaryExpression ambiguity when `q` is not
+    # a keyword — it parses as both QualifiedIdentifier and string prefix.
     {
         my $result = parse_ok('my $r = $x isa q{Foo};');
         ok(defined $result, 'isa with q{} string parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = $x eq q[Bar];');
+        ok(defined $result, 'eq with q[] string parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = qq{hello $x};');
+        ok(defined $result, 'qq{} string literal parses without ambiguity');
     }
 
     # --- __SUB__ recursive closure ---

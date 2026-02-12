@@ -18,7 +18,7 @@ class Chalk::Grammar::Perl::KeywordTable {
         eq ne lt gt le ge cmp isa x
         undef true false
         map grep
-        qw m s qr
+        qw q qq m s qr
     );
 
     # Returns true if the word is a grammar keyword, false otherwise.
