@@ -156,8 +156,7 @@ Atom ::= Variable
     | MapGrepExpression
     | QualifiedIdentifier ;
 
-MapGrepExpression ::= /(?:map|grep)\b/ _ Block _ ExpressionList
-    | /(?:map|grep)\b/ _ Block _ Expression ;
+MapGrepExpression ::= /(?:map|grep)\b/ _ Block _ ExpressionList ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
     | /\(/ _ ExpressionList _ /\)/
