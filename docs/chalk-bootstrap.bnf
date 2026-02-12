@@ -154,6 +154,7 @@ Atom ::= Variable
     | QwLiteral
     | AnonymousSub
     | MapGrepExpression
+    | /__SUB__\b/
     | QualifiedIdentifier ;
 
 MapGrepExpression ::= /(?:map|grep)\b/ _ Block _ ExpressionList ;

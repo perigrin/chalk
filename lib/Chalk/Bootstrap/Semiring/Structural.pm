@@ -281,6 +281,20 @@ class Chalk::Bootstrap::Semiring::Structural {
             };
         }
 
+        # Tag Subscript -> variants (alts 0-2) with is_deref.
+        # This distinguishes `$f->($x)` (deref call on a variable) from
+        # `push(@a, $f)->($x)` (deref call on a CallExpression result).
+        # The latter is structurally valid but semantically wrong; add()
+        # prefers the non-deref CallExpression interpretation.
+        if ($rule_name eq 'Subscript' && $alt_idx <= 2) {
+            return {
+                valid => true,
+                is_deref => true,
+                ($value->{is_call}    ? (is_call    => true) : ()),
+                ($value->{is_block}   ? (is_block   => true) : ()),
+            };
+        }
+
         # Tag CallExpression completions — preferred over bare Identifier.
         # Preserve is_block/is_hash from inner nonterminals so add() can
         # prefer CallExpression-with-Block over CallExpression-with-Hash.
