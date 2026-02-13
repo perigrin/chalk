@@ -1,5 +1,5 @@
 # ABOUTME: Tests for grammar ambiguity fixes in the full 5-ary composite semiring.
-# ABOUTME: Covers MapGrepExpression, ExpressionStatement, isa, and __SUB__ disambiguation.
+# ABOUTME: Covers Subscript, BinaryExpression, MapGrepExpression, ExpressionStatement, isa, __SUB__ disambiguation.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -83,6 +83,73 @@ SKIP: {
     {
         my $result = parse_ok('my $f = sub { __SUB__->($x); };');
         ok(defined $result, '__SUB__->() recursive call parses without ambiguity');
+    }
+
+    # --- Category 1: Non-arrow Subscript ambiguity ---
+    # `return $h{$k}` creates two PostfixExpression parses when non-arrow
+    # Subscript (alts 3-4) lacks is_deref tag:
+    #   Path A: CallExpression(return, Subscript($h, {$k})) — return takes hash value
+    #   Path B: Subscript(CallExpression(return, $h), {$k}) — subscript return's result
+    # Tagging all Subscript alts with is_deref lets add() prefer non-deref (Path A).
+    {
+        my $result = parse_ok('my $v = $h{$k};');
+        ok(defined $result, '$h{$k} bare hash subscript parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('return $h{$k};');
+        ok(defined $result, 'return $h{$k} parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('return $h[$i];');
+        ok(defined $result, 'return $h[$i] parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('return $h{$k} // 0;');
+        ok(defined $result, 'return $h{$k} // 0 parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $v = exists $helpers{$name};');
+        ok(defined $result, 'exists $h{$k} parses without ambiguity');
+    }
+
+    # --- Category 2: Chained BinaryExpression + PostfixExpression ---
+    # `$a && $b && $c->foo()` creates two BinaryExpression parses:
+    #   Path A (correct): ($a && $b) && ($c->foo()) — left-associative
+    #   Path B (wrong): $a && (($b && $c)->foo()) — method wraps inner &&
+    # Path B survives because PostfixExpression on_complete assigns level=-2,
+    # erasing the inner BinaryExpression's level=10.
+    {
+        my $result = parse_ok('my $r = $a && $b->foo();');
+        ok(defined $result, '$a && $b->foo() (non-chained) parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = $a && $b && $c->foo();');
+        ok(defined $result, '$a && $b && $c->foo() (chained) parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = $a && $b && $c->{$k};');
+        ok(defined $result, '$a && $b && $c->{$k} (chained + subscript) parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = defined($ir) && $ir isa q{Foo} && $ir->class() eq q{Program};');
+        ok(defined $result, 'defined() && isa && method chain parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = $x . $self->_escape($name) . $y;');
+        ok(defined $result, 'string concat chain with method call parses without ambiguity');
+    }
+
+    # --- Category 3: MapGrepExpression Block ambiguity ---
+    # `map { {} } (0 .. $n)` — inner {} is ambiguous between HashConstructor
+    # and Block. When inner completes as Block inside MapGrepExpression,
+    # the outer {} becomes MapGrepExpression's Block.
+    {
+        my $result = parse_ok('my @x = map { {} } (0 .. $n);');
+        ok(defined $result, 'map { {} } (0 .. $n) parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('return [ map { $_->zero() } $semirings->@* ];');
+        ok(defined $result, 'map { method } postfix_deref parses without ambiguity');
     }
 }
 

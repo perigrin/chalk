@@ -281,12 +281,13 @@ class Chalk::Bootstrap::Semiring::Structural {
             };
         }
 
-        # Tag Subscript -> variants (alts 0-2) with is_deref.
-        # This distinguishes `$f->($x)` (deref call on a variable) from
-        # `push(@a, $f)->($x)` (deref call on a CallExpression result).
-        # The latter is structurally valid but semantically wrong; add()
-        # prefers the non-deref CallExpression interpretation.
-        if ($rule_name eq 'Subscript' && $alt_idx <= 2) {
+        # Tag ALL Subscript completions with is_deref.
+        # Arrow variants (alts 0-2): $f->($x), $f->[$i], $f->{$k}
+        # Non-arrow variants (alts 3-4): $h[$i], $h{$k}
+        # Both are dereference operations. Tagging them allows add() to
+        # prefer CallExpression (is_call, no is_deref) over
+        # Subscript(CallExpression, ...) (is_call + is_deref).
+        if ($rule_name eq 'Subscript') {
             return {
                 valid => true,
                 is_deref => true,
