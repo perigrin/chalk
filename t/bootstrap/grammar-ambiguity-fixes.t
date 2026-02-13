@@ -201,6 +201,25 @@ SKIP: {
         my $result = parse_ok('my @r = map { $x } 0 .. $list->$#*;');
         ok(defined $result, 'map { } 0 .. $list->$#* parses without ambiguity');
     }
+
+    # --- Category 7: if/else before CallExpression ---
+    # `if (...) { push @a, 'x'; } else { push @a, 'y'; } push @a, "z";`
+    # creates two CallExpression parses with identical structural tags
+    # [is_block,is_call,valid] because the is_block from the completed
+    # if/else block propagates into both alternatives. When tags are
+    # identical, selects_alternative must break the tie.
+    {
+        my $result = parse_ok('if (1) { push @a, "x"; } else { push @a, "y"; } push @a, "z";');
+        ok(defined $result, 'if/else + push: identical is_block+is_call tags disambiguated');
+    }
+    {
+        my $result = parse_ok('if ($x) { $a = 1; } else { $a = 2; } push @lines, "hello";');
+        ok(defined $result, 'if/else + push (different bodies): disambiguated');
+    }
+    {
+        my $result = parse_ok('if ($x) { foo(); } elsif ($y) { bar(); } else { baz(); } push @r, $z;');
+        ok(defined $result, 'if/elsif/else + push: disambiguated');
+    }
 }
 
 done_testing();

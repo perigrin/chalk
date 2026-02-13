@@ -224,9 +224,9 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     is($sr->selects_alternative($call_deref, $call_only), 'right',
         'selects_alternative(call+deref, call) returns right');
 
-    # Both have is_deref — no preference
-    is($sr->selects_alternative($call_deref, $call_deref), undef,
-        'selects_alternative(call+deref, call+deref) returns undef');
+    # Both have is_deref — identical tags, pick left to break tie
+    is($sr->selects_alternative($call_deref, $call_deref), 'left',
+        'selects_alternative(call+deref, call+deref) returns left (identical tags)');
 }
 
 # --- selects_alternative: is_method disambiguation ---
@@ -239,9 +239,9 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     is($sr->selects_alternative($call_method, $call_only), 'right',
         'selects_alternative(call+method, call) returns right');
 
-    # Both have is_method — no preference
-    is($sr->selects_alternative($call_method, $call_method), undef,
-        'selects_alternative(call+method, call+method) returns undef');
+    # Both have is_method — identical tags, pick left to break tie
+    is($sr->selects_alternative($call_method, $call_method), 'left',
+        'selects_alternative(call+method, call+method) returns left (identical tags)');
 }
 
 # --- selects_alternative: is_binop disambiguation ---
@@ -254,9 +254,9 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     is($sr->selects_alternative($call_binop, $call_only), 'right',
         'selects_alternative(call+binop, call) returns right');
 
-    # Both have is_binop — no preference
-    is($sr->selects_alternative($call_binop, $call_binop), undef,
-        'selects_alternative(call+binop, call+binop) returns undef');
+    # Both have is_binop — identical tags, pick left to break tie
+    is($sr->selects_alternative($call_binop, $call_binop), 'left',
+        'selects_alternative(call+binop, call+binop) returns left (identical tags)');
 }
 
 # --- selects_alternative: is_vardecl disambiguation ---

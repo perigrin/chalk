@@ -155,7 +155,6 @@ SKIP: {
         # Parse failures — remaining ambiguities
         'lib/Chalk/Bootstrap/Perl/Actions.pm'      => 'Complex my sub + regex constructs exceed grammar capacity',
         'lib/Chalk/Bootstrap/Earley.pm'             => 'Pre-existing phase5 Earley parse failure',
-        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'     => 'Remaining parse ambiguity in complex patterns',
     );
 
     # Emit TAP for a single file result

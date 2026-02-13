@@ -199,7 +199,6 @@ class Chalk::Bootstrap::Semiring::Structural {
         return undef if $self->is_zero($left);
         return undef if $self->is_zero($right);
 
-
         # Prefer non-list over list (Expression vs ExpressionList)
         if ($left->{is_list} && !$right->{is_list}) {
             return 'right';
@@ -247,6 +246,19 @@ class Chalk::Bootstrap::Semiring::Structural {
             }
             if ($left->{is_binop} && !$right->{is_binop}) {
                 return 'right';
+            }
+        }
+
+        # Both is_call with identical tag sets: duplicate CallExpression
+        # paths — pick left arbitrarily. This arises when an if/else block
+        # precedes a CallExpression: the is_block tag from the completed
+        # control structure propagates into both alternatives identically,
+        # so none of the differentiating rules above fire.
+        if ($left->{is_call} && $right->{is_call}) {
+            my $left_tags  = join(',', sort grep { $left->{$_} }  keys %$left);
+            my $right_tags = join(',', sort grep { $right->{$_} } keys %$right);
+            if ($left_tags eq $right_tags) {
+                return 'left';
             }
         }
 
