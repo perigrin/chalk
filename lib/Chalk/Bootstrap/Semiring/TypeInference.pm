@@ -157,12 +157,15 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         # Boundary rules: clear keyword_as_identifier and ambiguous_unary tags.
         # Attribute and MethodCall allow keywords as identifiers (e.g., :isa).
+        # Subscript clears tags because hash subscript keys can be keywords
+        # (e.g., $h{x} where `x` is the repeat operator keyword).
         if ($rule_name eq 'ParenExpr'
             || $rule_name eq 'ArrayConstructor'
             || $rule_name eq 'HashConstructor'
             || $rule_name eq 'Block'
             || $rule_name eq 'Signature'
-            || $rule_name eq 'Attribute')
+            || $rule_name eq 'Attribute'
+            || $rule_name eq 'Subscript')
         {
             return { valid => true };
         }

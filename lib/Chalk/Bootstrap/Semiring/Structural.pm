@@ -115,6 +115,19 @@ class Chalk::Bootstrap::Semiring::Structural {
             }
         }
 
+        # Prefer non-binop over binop when is_call is absent.
+        # Chained BinaryExpressions with hash subscripts on both sides
+        # produce two Expression alternatives that differ only in grouping.
+        # The non-binop alternative is the correct simpler parse.
+        if (!$left_call && !$right_call) {
+            if ($right_binop && !$left_binop) {
+                return $left;
+            }
+            if ($left_binop && !$right_binop) {
+                return $right;
+            }
+        }
+
         # Both valid: prefer non-deref over deref when is_call is absent.
         # PostfixDeref wrapping a larger expression (e.g.,
         # `(map {...} $x)->@*`) should lose to the simpler parse where
@@ -186,6 +199,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         return undef if $self->is_zero($left);
         return undef if $self->is_zero($right);
 
+
         # Prefer non-list over list (Expression vs ExpressionList)
         if ($left->{is_list} && !$right->{is_list}) {
             return 'right';
@@ -228,6 +242,20 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         # Both is_call: prefer non-binop over binop
         if ($left->{is_call} && $right->{is_call}) {
+            if ($right->{is_binop} && !$left->{is_binop}) {
+                return 'left';
+            }
+            if ($left->{is_binop} && !$right->{is_binop}) {
+                return 'right';
+            }
+        }
+
+        # Prefer non-binop over binop (without is_call guard).
+        # When a chained BinaryExpression produces two Expression alternatives
+        # that differ only in grouping (e.g., `$a->{k} && !$b->{k}` as one
+        # BinaryExpression vs nested), the non-binop alternative is the simpler
+        # parse where the subscript completes before the binary operator.
+        if (!$left->{is_call} && !$right->{is_call}) {
             if ($right->{is_binop} && !$left->{is_binop}) {
                 return 'left';
             }

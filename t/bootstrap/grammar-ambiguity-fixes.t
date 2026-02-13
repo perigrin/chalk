@@ -151,6 +151,30 @@ SKIP: {
         my $result = parse_ok('return [ map { $_->zero() } $semirings->@* ];');
         ok(defined $result, 'map { method } postfix_deref parses without ambiguity');
     }
+    # --- Category 4: Chained && with hash subscripts on both sides ---
+    # `$right->{is_hash} && !$left->{is_hash}` creates two BinaryExpression
+    # parses with is_deref tags that Structural must disambiguate via
+    # non-binop preference.
+    {
+        my $result = parse_ok('my $r = $left->{is_block} && $right->{is_block};');
+        ok(defined $result, '$left->{k} && $right->{k} parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = $right->{is_hash} && !$left->{is_hash};');
+        ok(defined $result, '$right->{k} && !$left->{k} parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('my $r = $a->{foo} && $b->{bar} && $c->{baz};');
+        ok(defined $result, 'triple chained && with hash subscripts parses without ambiguity');
+    }
+
+    # --- Category 5: Postfix $#* deref in map/grep ---
+    # `map { ... } 0 .. $list->$#*` creates ExpressionList ambiguity
+    # from the $#* PostfixDeref.
+    {
+        my $result = parse_ok('my @r = map { $x } 0 .. $list->$#*;');
+        ok(defined $result, 'map { } 0 .. $list->$#* parses without ambiguity');
+    }
 }
 
 done_testing();
