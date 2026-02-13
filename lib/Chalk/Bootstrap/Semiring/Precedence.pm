@@ -263,12 +263,21 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return { valid => true };
         }
 
-        # Expression-type rules get their conceptual precedence level
+        # Expression-type rules get their conceptual precedence level.
+        # PostfixExpression rejects targets that carry a BinaryExpression
+        # level (level >= 0): an unparenthesized BinaryExpression cannot
+        # be a postfix target. This kills `($a && $b)->foo()` where
+        # `$a && $b` has level=10, while allowing `$x->foo()` (no level)
+        # and `($a + $b)->foo()` via parenthesized ParenExpr (resets level).
         if (defined $EXPR_LEVELS->{$rule_name}) {
+            my $expr_level = $EXPR_LEVELS->{$rule_name};
+            if ($expr_level < 0 && defined $value->{level} && $value->{level} >= 0) {
+                return $self->zero();
+            }
             return {
                 valid => true,
                 op    => undef,
-                level => $EXPR_LEVELS->{$rule_name},
+                level => $expr_level,
                 assoc => undef,
             };
         }
@@ -298,6 +307,16 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # a BinaryExpression's operator level survives the Expression
         # wrapper and can be checked by an outer BinaryExpression.
         if ($rule_name eq 'Expression') {
+            return $value;
+        }
+
+        # MethodCall/Subscript: pass through precedence info so
+        # PostfixExpression's on_complete can reject invalid targets.
+        if ($rule_name eq 'MethodCall'
+            || $rule_name eq 'Subscript'
+            || $rule_name eq 'CallExpression'
+            || $rule_name eq 'PostfixDeref'
+            || $rule_name eq 'PostfixIncDec') {
             return $value;
         }
 
