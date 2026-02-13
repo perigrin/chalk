@@ -1221,27 +1221,47 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         my @trees = _collect_trees($ctx);
         my $merged = _merge_trees(@trees);
 
-        # Separate field pad ops from runtime init ops.
+        # Separate field statement groups from runtime init ops.
         # FieldDeclaration produces pad ops tagged with /FIELD.
         # VariableDeclaration produces pad ops with /VARDECL (→ /LVINTRO after peephole).
-        # Only filter out field ops (/FIELD); keep variable declarations.
+        # Only filter out field groups; keep variable declarations.
+        #
+        # Statement-group filtering: split ops by nextstate boundaries.
+        # Each group = [nextstate, body_op, body_op, ...].
+        # If ANY op in a group has /FIELD tag, drop the ENTIRE group —
+        # this removes both the field pad op and its default value ops
+        # (undef, const, emptyavhv, sassign) that B::Concise elides.
         my $has_fields = false;
         my @runtime_ops;
         my @all_ops = $merged->ops()->@*;
-        for my $i (0 .. $#all_ops) {
-            my $op = $all_ops[$i];
-            if ($op->name() =~ /^(padsv|padav|padhv)$/
-                    && defined $op->private()
-                    && $op->private() eq '/FIELD') {
-                # This is a field pad op — skip it.
-                # Also remove the preceding nextstate if it was added by StatementItem.
-                if (@runtime_ops && $runtime_ops[-1]->name() eq 'nextstate') {
-                    pop @runtime_ops;
-                }
-                $has_fields = true;
-                next;
+
+        # Split into statement groups by nextstate boundaries
+        my @groups;
+        my @current_group;
+        for my $op (@all_ops) {
+            if ($op->name() eq 'nextstate' && @current_group) {
+                push @groups, [@current_group];
+                @current_group = ();
             }
-            push @runtime_ops, $op;
+            push @current_group, $op;
+        }
+        push @groups, [@current_group] if @current_group;
+
+        # Filter: keep groups that don't contain /FIELD ops
+        for my $group (@groups) {
+            my $group_has_field = false;
+            for my $op (@$group) {
+                if ($op->name() =~ /^(padsv|padav|padhv)$/
+                        && defined $op->private()
+                        && $op->private() eq '/FIELD') {
+                    $group_has_field = true;
+                    $has_fields = true;
+                    last;
+                }
+            }
+            unless ($group_has_field) {
+                push @runtime_ops, @$group;
+            }
         }
 
         my $result = Chalk::Bootstrap::ConciseTree->new();

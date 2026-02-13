@@ -700,6 +700,75 @@ SKIP: {
         }
     }
 
+    # Class with field defaults — field default value expressions (= undef, = '', = [])
+    # compile away at runtime. B::Concise shows only nextstate inside the class body,
+    # not the default value ops. The ClassBlock statement-group filter should drop the
+    # entire nextstate group when any op in it has /FIELD tag.
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nuse experimental 'class';\n\nclass Foo {\n    field \$x :param :reader = undef;\n    method bar() {\n        return \$x;\n    }\n}\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'class with field default undef: parses')
+            or diag("Parse returned undef for class with field default undef");
+
+        SKIP: {
+            skip 'class with field default undef did not parse', 1 unless defined $ours;
+            skip "perl with B::Concise not available", 1 unless $has_concise;
+            my $theirs = $oracle->concise_for($source);
+            my $result = $comparator->compare($ours, $theirs);
+            ok($result->{match}, 'class with field default undef: matches B::Concise oracle')
+                or diag(
+                    "Differences:\n",
+                    join("\n", $result->{differences}->@*),
+                    "\n\nOurs:\n", $ours->to_exec_string(),
+                    "\n\nTheirs:\n", $theirs->to_exec_string(),
+                );
+        }
+    }
+
+    # Class with field default '' (string) — same pattern as undef.
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nuse experimental 'class';\n\nclass Foo {\n    field \$name :param :reader;\n    field \$flags :param :reader = '';\n    method bar() {\n        return \$name;\n    }\n}\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'class with field default string: parses')
+            or diag("Parse returned undef for class with field default string");
+
+        SKIP: {
+            skip 'class with field default string did not parse', 1 unless defined $ours;
+            skip "perl with B::Concise not available", 1 unless $has_concise;
+            my $theirs = $oracle->concise_for($source);
+            my $result = $comparator->compare($ours, $theirs);
+            ok($result->{match}, 'class with field default string: matches B::Concise oracle')
+                or diag(
+                    "Differences:\n",
+                    join("\n", $result->{differences}->@*),
+                    "\n\nOurs:\n", $ours->to_exec_string(),
+                    "\n\nTheirs:\n", $theirs->to_exec_string(),
+                );
+        }
+    }
+
+    # Class with multiple field defaults — all default ops should be filtered.
+    {
+        my $source = qq{use 5.42.0;\nuse utf8;\nuse experimental 'class';\n\nclass Foo {\n    field \$x :param :reader = undef;\n    field \$y :param :reader = [];\n    method bar() {\n        return \$x;\n    }\n}\n};
+        my $ours = our_tree($source);
+        ok(defined $ours, 'class with multiple field defaults: parses')
+            or diag("Parse returned undef for class with multiple field defaults");
+
+        SKIP: {
+            skip 'class with multiple field defaults did not parse', 1 unless defined $ours;
+            skip "perl with B::Concise not available", 1 unless $has_concise;
+            my $theirs = $oracle->concise_for($source);
+            my $result = $comparator->compare($ours, $theirs);
+            ok($result->{match}, 'class with multiple field defaults: matches B::Concise oracle')
+                or diag(
+                    "Differences:\n",
+                    join("\n", $result->{differences}->@*),
+                    "\n\nOurs:\n", $ours->to_exec_string(),
+                    "\n\nTheirs:\n", $theirs->to_exec_string(),
+                );
+        }
+    }
+
     # Const elision preserves nextstate — bare `1;` at end of file
     # B::Concise keeps the nextstate even when the const body is elided.
     {
