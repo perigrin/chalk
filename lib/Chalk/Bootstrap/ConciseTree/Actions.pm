@@ -319,15 +319,35 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         # Deduplicate consecutive nextstates
         my $clean = _dedup_nextstates($body);
 
+        # Separate scope-entry prologue ops (introcv/clonecv from my sub)
+        # from body ops. Prologue ops appear after enter, before body.
+        my @prologue_ops;
+        my @body_ops;
+        for my $op ($clean->ops()->@*) {
+            if (defined $op->private() && $op->private() =~ m{/SCOPE_ENTRY}) {
+                push @prologue_ops, $op;
+            } else {
+                push @body_ops, $op;
+            }
+        }
+
         my $result = Chalk::Bootstrap::ConciseTree->new();
         $result->push_op(Chalk::Bootstrap::ConciseOp->new(
             name => 'enter', arity => '0',
         ));
 
-        if ($clean->op_count() > 0) {
-            $result->concat($clean);
+        # Emit prologue ops (introcv/clonecv) right after enter
+        for my $op (@prologue_ops) {
+            $result->push_op($op);
+        }
+
+        if (@body_ops > 0) {
+            for my $op (@body_ops) {
+                $result->push_op($op);
+            }
         } else {
-            # Compile-time only programs get a stub
+            # No body ops — compile-time only programs get a stub.
+            # This applies to both bare `sub foo {}` and `my sub foo {}`.
             $result->push_op(Chalk::Bootstrap::ConciseOp->new(
                 name => 'stub', arity => '0',
             ));
@@ -371,6 +391,20 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         # B::Concise does not emit a nextstate for empty statements.
         if ($optimized->op_count() == 0) {
             return Chalk::Bootstrap::ConciseTree->new();
+        }
+
+        # Scope-entry ops (introcv/clonecv from my sub) are prologue ops
+        # that appear before any nextstate. Pass them through without
+        # prepending nextstate; Program will hoist them to scope prologue.
+        my $all_scope_entry = true;
+        for my $op ($optimized->ops()->@*) {
+            unless (defined $op->private() && $op->private() =~ m{/SCOPE_ENTRY}) {
+                $all_scope_entry = false;
+                last;
+            }
+        }
+        if ($all_scope_entry) {
+            return $optimized;
         }
 
         # Perl's peephole optimizer eliminates side-effect-free statements.
@@ -1208,8 +1242,19 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return _merge_trees(@trees);
     }
 
-    # §9 SubroutineDefinition — compile-time only; body ops belong to the sub's pad
+    # §9 SubroutineDefinition — compile-time for bare `sub`, but `my/our/state sub`
+    # emits introcv + clonecv ops for the lexical code reference pad slot.
+    # These ops are tagged /SCOPE_ENTRY so StatementItem skips the nextstate
+    # and Program can hoist them to scope prologue (after enter, before body).
     method SubroutineDefinition($ctx) {
+        my $scanned = $ctx->scanned_text();
+        if (defined $scanned && $scanned =~ /^(?:my|our|state)\s+sub\s+(\w+)/) {
+            my $name = $1;
+            my $tree = Chalk::Bootstrap::ConciseTree->new();
+            $tree->push_op(_make_op('introcv', '0', type_info => "&$name", private => '/SCOPE_ENTRY'));
+            $tree->push_op(_make_op('clonecv', '0', type_info => "&$name", private => '/SCOPE_ENTRY'));
+            return $tree;
+        }
         return Chalk::Bootstrap::ConciseTree->new();
     }
 

@@ -442,6 +442,71 @@ SKIP: {
         }
     }
 
+    # --- Lexical sub (my sub): emits introcv + clonecv ops ---
+    # B::Concise produces: enter, introcv, clonecv, stub, leave
+    # for `my sub foo { }`. The introcv introduces the pad slot for the
+    # code reference, and clonecv clones it for the current closure scope.
+    {
+        my $ours = our_tree('my sub foo { }');
+        ok(defined $ours, 'my sub: our parser produces tree');
+
+        SKIP: {
+            skip 'my sub did not parse', 1 unless defined $ours;
+            my @names = op_names($ours);
+            ok((grep { $_ eq 'introcv' } @names),
+                'my sub: produces introcv op')
+                or diag("Ours: ", join(", ", @names));
+        }
+
+        SKIP: {
+            skip "perl with B::Concise not available", 2 unless $has_concise;
+            skip 'my sub did not parse', 2 unless defined $ours;
+
+            my $theirs = $oracle->concise_for('my sub foo { }');
+            ok(defined $theirs, 'my sub: oracle produces tree');
+
+            my $result = $comparator->compare($ours, $theirs);
+            ok($result->{match}, 'my sub: structural match')
+                or diag(
+                    "Differences:\n",
+                    join("\n", $result->{differences}->@*),
+                    "\n\nOurs:\n", $ours->to_exec_string(),
+                    "\n\nTheirs:\n", $theirs->to_exec_string(),
+                );
+        }
+    }
+
+    # --- Lexical sub with body: introcv + clonecv + stub ---
+    {
+        my $ours = our_tree('my sub foo { return 42; }');
+        ok(defined $ours, 'my sub with body: our parser produces tree');
+
+        SKIP: {
+            skip 'my sub with body did not parse', 1 unless defined $ours;
+            my @names = op_names($ours);
+            ok((grep { $_ eq 'clonecv' } @names),
+                'my sub with body: produces clonecv op')
+                or diag("Ours: ", join(", ", @names));
+        }
+
+        SKIP: {
+            skip "perl with B::Concise not available", 2 unless $has_concise;
+            skip 'my sub with body did not parse', 2 unless defined $ours;
+
+            my $theirs = $oracle->concise_for('my sub foo { return 42; }');
+            ok(defined $theirs, 'my sub with body: oracle produces tree');
+
+            my $result = $comparator->compare($ours, $theirs);
+            ok($result->{match}, 'my sub with body: structural match')
+                or diag(
+                    "Differences:\n",
+                    join("\n", $result->{differences}->@*),
+                    "\n\nOurs:\n", $ours->to_exec_string(),
+                    "\n\nTheirs:\n", $theirs->to_exec_string(),
+                );
+        }
+    }
+
     # --- Multiple subs: compile-time only ---
     {
         my $ours = our_tree('sub foo { } sub bar { }');

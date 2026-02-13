@@ -55,8 +55,8 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
             my $type_info = $op->type_info();
 
             if (defined $type_info) {
-                # Strip pad slot numbers: $x:3,4 → $x
-                $type_info =~ s/([\$\@\%]\w+):\d+,\d+/$1/g;
+                # Strip pad slot numbers: $x:3,4 → $x, &foo:3,4 → &foo
+                $type_info =~ s/([\$\@\%\&]\w+):\d+,\d+/$1/g;
 
                 # Strip nextstate details entirely
                 if ($op->name() eq 'nextstate') {
@@ -108,6 +108,9 @@ class Chalk::Bootstrap::ConciseTree::Comparator {
 
             # Strip /FIELD flag (internal marker for field declarations)
             $private =~ s{/FIELD}{}g;
+
+            # Strip /SCOPE_ENTRY flag (internal marker for prologue ops like introcv/clonecv)
+            $private =~ s{/SCOPE_ENTRY}{}g;
 
             $private =~ s{^\s+|\s+$}{}g;
 

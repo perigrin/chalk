@@ -151,14 +151,11 @@ SKIP: {
 
     # Files with known oracle mismatches or parse failures.
     # Parse failures: ambiguity patterns not yet resolved by semiring disambiguation.
-    # Oracle mismatch: ConciseTree ops differ from B::Concise (introcv/clonecv for my sub).
     my %TODO_FILES = (
         # Parse failures — remaining ambiguities
         'lib/Chalk/Bootstrap/Perl/Actions.pm'      => 'Complex my sub + regex constructs exceed grammar capacity',
         'lib/Chalk/Bootstrap/Earley.pm'             => 'Pre-existing phase5 Earley parse failure',
         'lib/Chalk/Bootstrap/Perl/Target/XS.pm'     => 'Remaining parse ambiguity in complex patterns',
-        # Oracle mismatch — my sub introcv/clonecv not modeled
-        'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm' => 'Oracle mismatch: my sub introcv/clonecv ops',
     );
 
     # Emit TAP for a single file result
