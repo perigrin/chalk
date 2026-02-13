@@ -93,6 +93,14 @@ class Chalk::Bootstrap::Semiring::Precedence {
         my $child_level = $right->{level};
         my $parent_assoc = $left->{assoc} // 'left';
 
+        # Negative levels are conceptual expression-type levels
+        # (PostfixExpression=-2, UnaryExpression=-1), not binary operator
+        # levels. Skip precedence nesting checks for negative-level pairs —
+        # they carry no operator semantics.
+        if ($parent_level < 0 && $child_level < 0) {
+            return { valid => true, op => $left->{op}, level => $parent_level, assoc => $parent_assoc };
+        }
+
         # Child with higher precedence (lower level number) inside parent is always valid
         if ($child_level < $parent_level) {
             # Child binds tighter — valid. Carry parent's operator info.
@@ -162,8 +170,21 @@ class Chalk::Bootstrap::Semiring::Precedence {
         if (defined $rl && !defined $ll) {
             return $right;
         }
-        if (defined $ll && defined $rl && $rl > $ll) {
-            return $right;
+        if (defined $ll && defined $rl) {
+            # When a PostfixExpression (level<0) merges with an
+            # AssignmentExpression (level>=100), prefer the PostfixExpression
+            # level. The assignment level would otherwise kill valid
+            # method-call/subscript parse paths downstream (PostfixExpression
+            # on_complete rejects values with level>=0).
+            if ($ll < 0 && $rl >= 100) {
+                return $left;
+            }
+            if ($rl < 0 && $ll >= 100) {
+                return $right;
+            }
+            if ($rl > $ll) {
+                return $right;
+            }
         }
 
         return $left;
@@ -189,8 +210,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return 'right';
         }
 
-        # Both have levels: prefer higher level number
+        # Both have levels: prefer higher level number, except when
+        # PostfixExpression (level<0) merges with AssignmentExpression
+        # (level>=100) — prefer PostfixExpression to preserve method-call
+        # parse paths.
         if (defined $ll && defined $rl) {
+            if ($ll < 0 && $rl >= 100) {
+                return 'left';
+            }
+            if ($rl < 0 && $ll >= 100) {
+                return 'right';
+            }
             if ($rl > $ll) {
                 return 'right';
             }

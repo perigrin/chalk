@@ -168,7 +168,33 @@ SKIP: {
         ok(defined $result, 'triple chained && with hash subscripts parses without ambiguity');
     }
 
-    # --- Category 5: Postfix $#* deref in map/grep ---
+    # --- Category 5: Hash-deref assignment with method call on RHS ---
+    # `$h->{k} = Foo->new()` creates a Precedence conflict where
+    # AssignmentExpression (level=101) merges with PostfixExpression
+    # (level=-2) via add(), and the assignment level wins, killing
+    # valid method-call parse paths downstream.
+    {
+        my $result = parse_ok('my $x = Foo->new();');
+        ok(defined $result, '$x = Foo->new() (baseline) parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('$h->{k} = Foo->new();');
+        ok(defined $result, '$h->{k} = Foo->new() parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('$h->{k} = $x->foo();');
+        ok(defined $result, '$h->{k} = $x->foo() parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('$h->{k} = Foo->new(a => $b);');
+        ok(defined $result, '$h->{k} = Foo->new(a => $b) parses without ambiguity');
+    }
+    {
+        my $result = parse_ok('$h->[0] = Foo->new();');
+        ok(defined $result, '$h->[0] = Foo->new() parses without ambiguity');
+    }
+
+    # --- Category 6: Postfix $#* deref in map/grep ---
     # `map { ... } 0 .. $list->$#*` creates ExpressionList ambiguity
     # from the $#* PostfixDeref.
     {
