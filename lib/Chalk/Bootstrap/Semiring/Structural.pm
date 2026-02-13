@@ -115,8 +115,33 @@ class Chalk::Bootstrap::Semiring::Structural {
             }
         }
 
+        # Both valid: prefer non-deref over deref when is_call is absent.
+        # PostfixDeref wrapping a larger expression (e.g.,
+        # `(map {...} $x)->@*`) should lose to the simpler parse where
+        # the deref is part of the inner expression (e.g., `map {...} $x->@*`).
+        if (!$left_call && !$right_call) {
+            if ($right_deref && !$left_deref) {
+                return $left;
+            }
+            if ($left_deref && !$right_deref) {
+                return $right;
+            }
+        }
+
         # Both valid: prefer is_block over is_hash
         if ($left->{is_block} || $right->{is_block}) {
+            # When both are is_block, prefer the one without is_hash.
+            # This resolves `{ {} }` where one Block alt has inner Block
+            # (pure is_block) and another has trailing HashConstructor
+            # (is_block + is_hash).
+            if ($left->{is_block} && $right->{is_block}) {
+                if ($right->{is_hash} && !$left->{is_hash}) {
+                    return { valid => true, is_block => true };
+                }
+                if ($left->{is_hash} && !$right->{is_hash}) {
+                    return { valid => true, is_block => true };
+                }
+            }
             return { valid => true, is_block => true };
         }
 
@@ -211,12 +236,34 @@ class Chalk::Bootstrap::Semiring::Structural {
             }
         }
 
+        # Both valid, no is_call: prefer non-deref over deref.
+        # Simpler parse without PostfixDeref wrapping wins.
+        if (!$left->{is_call} && !$right->{is_call}) {
+            if ($right->{is_deref} && !$left->{is_deref}) {
+                return 'left';
+            }
+            if ($left->{is_deref} && !$right->{is_deref}) {
+                return 'right';
+            }
+        }
+
         # Prefer block over hash
         if ($left->{is_block} && !$right->{is_block}) {
             return 'left';
         }
         if ($right->{is_block} && !$left->{is_block}) {
             return 'right';
+        }
+
+        # Both is_block: prefer the one without is_hash (pure Block over
+        # Block-containing-HashConstructor).
+        if ($left->{is_block} && $right->{is_block}) {
+            if ($right->{is_hash} && !$left->{is_hash}) {
+                return 'left';
+            }
+            if ($left->{is_hash} && !$right->{is_hash}) {
+                return 'right';
+            }
         }
 
         # Prefer is_vardecl over non-is_vardecl
@@ -246,14 +293,36 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         my $rule_name = $item->{rule}->name();
 
-        # Tag Block completions
+        # Tag Block completions. Preserve is_hash from inner content so that
+        # add() can prefer a pure-Block interpretation over one where a
+        # HashConstructor acts as a trailing SimpleStatement. In `{ {} }`,
+        # alt 0 (inner Block) has is_block only; alt 1 (trailing HashConstructor)
+        # has is_block + is_hash. The preference for pure-Block resolves this.
         if ($rule_name eq 'Block') {
-            return { valid => true, is_block => true };
+            return {
+                valid    => true,
+                is_block => true,
+                ($value->{is_hash} ? (is_hash => true) : ()),
+            };
         }
 
         # Tag HashConstructor completions
         if ($rule_name eq 'HashConstructor') {
             return { valid => true, is_hash => true };
+        }
+
+        # MapGrepExpression is a self-contained syntactic unit. Clear is_deref
+        # from inner content (e.g., $list->@*) so it doesn't propagate to
+        # the Expression level and confuse disambiguation with PostfixDeref
+        # wrapping the entire map/grep.
+        if ($rule_name eq 'MapGrepExpression') {
+            return {
+                valid    => true,
+                is_block => true,
+                ($value->{is_call}    ? (is_call    => true) : ()),
+                ($value->{is_list}    ? (is_list    => true) : ()),
+                ($value->{is_vardecl} ? (is_vardecl => true) : ()),
+            };
         }
 
         # Tag VariableDeclaration completions — marks a `my`/`our`/`state`/`local`
@@ -392,13 +461,17 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true };
         }
 
-        # Statement boundaries: clear block/hash, preserve is_call, is_list
+        # Statement boundaries: preserve is_block/is_hash for disambiguation
+        # of nested empty {} (Block vs HashConstructor). Also preserve
+        # is_call and is_list for their existing uses.
         if ($rule_name eq 'StatementList'
             || $rule_name eq 'Program') {
             return {
                 valid => true,
-                ($value->{is_call} ? (is_call => true) : ()),
-                ($value->{is_list} ? (is_list => true) : ()),
+                ($value->{is_block} ? (is_block => true) : ()),
+                ($value->{is_hash}  ? (is_hash  => true) : ()),
+                ($value->{is_call}  ? (is_call  => true) : ()),
+                ($value->{is_list}  ? (is_list  => true) : ()),
             };
         }
 
