@@ -467,13 +467,23 @@ my sub mock_item($rule_name, $value) {
 }
 
 # --- Boundary rules clear tags ---
-for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
+for my $boundary_rule (qw(ParenExpr ArrayConstructor)) {
     my $tagged = { valid => true, is_block => true, is_hash => true };
     my $item = mock_item($boundary_rule, $tagged);
     my $r = $sr->on_complete($item, 0, 0);
     ok(!$sr->is_zero($r), "$boundary_rule completion is valid");
     ok(!$r->{is_block}, "$boundary_rule clears is_block tag");
     ok(!$r->{is_hash}, "$boundary_rule clears is_hash tag");
+}
+
+# --- Program/StatementList preserve is_block/is_hash for Block-vs-Hash disambiguation ---
+for my $preserve_rule (qw(Program StatementList)) {
+    my $tagged = { valid => true, is_block => true, is_hash => true };
+    my $item = mock_item($preserve_rule, $tagged);
+    my $r = $sr->on_complete($item, 0, 0);
+    ok(!$sr->is_zero($r), "$preserve_rule completion is valid");
+    ok($r->{is_block}, "$preserve_rule preserves is_block tag");
+    ok($r->{is_hash}, "$preserve_rule preserves is_hash tag");
 }
 
 # --- Other rules pass through ---
@@ -529,14 +539,14 @@ for my $boundary_rule (qw(ParenExpr ArrayConstructor Program StatementList)) {
     ok($r->{is_block}, 'Block completion still sets is_block');
 }
 
-# --- StatementList clears block/hash tags ---
+# --- StatementList preserves block/hash tags for disambiguation ---
 {
     my $tagged = { valid => true, is_block => true, is_hash => true };
     my $item = mock_item('StatementList', $tagged);
 
     my $r0 = $sr->on_complete($item, 0, 0);
-    ok(!$r0->{is_block}, 'StatementList clears is_block');
-    ok(!$r0->{is_hash}, 'StatementList clears is_hash');
+    ok($r0->{is_block}, 'StatementList preserves is_block');
+    ok($r0->{is_hash}, 'StatementList preserves is_hash');
 }
 
 # --- StatementList alts are valid ---
