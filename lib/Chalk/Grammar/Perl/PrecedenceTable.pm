@@ -10,20 +10,21 @@ class Chalk::Grammar::Perl::PrecedenceTable {
     # Lower index = higher precedence (tighter binding).
     sub get_table() {
         return (
-            { assoc => 'right',    ops => ['**'] },                                  # 0
-            { assoc => 'left',     ops => ['=~', '!~'] },                            # 1
-            { assoc => 'left',     ops => ['*', '/', '%', 'x'] },                    # 2
-            { assoc => 'left',     ops => ['+', '-', '.'] },                          # 3
-            { assoc => 'left',     ops => ['<<', '>>'] },                             # 4
-            { assoc => 'nonassoc', ops => ['<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'] }, # 5
-            { assoc => 'chained',  ops => ['==', '!=', '<=>', 'eq', 'ne', 'cmp'] },  # 6
-            { assoc => 'nonassoc', ops => ['isa'] },                                  # 7
-            { assoc => 'left',     ops => ['&'] },                                    # 8
-            { assoc => 'left',     ops => ['|', '^'] },                               # 9
-            { assoc => 'left',     ops => ['&&'] },                                   # 10
-            { assoc => 'left',     ops => ['||', '//'] },                             # 11
-            { assoc => 'nonassoc', ops => ['..', '...'] },                            # 12
-            { assoc => 'left',     ops => ['and', 'or', 'xor'] },                    # 13
+            { assoc => 'right',    ops => ['**'] },                                    # 0
+            { assoc => 'left',     ops => ['=~', '!~'] },                              # 1
+            { assoc => 'left',     ops => ['*', '/', '%', 'x'] },                      # 2
+            { assoc => 'left',     ops => ['+', '-', '.'] },                            # 3
+            { assoc => 'left',     ops => ['<<', '>>'] },                               # 4
+            { assoc => 'nonassoc', ops => ['isa'] },                                    # 5
+            { assoc => 'chained',  ops => ['<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'] }, # 6
+            { assoc => 'nonassoc', ops => ['==', '!=', '<=>', 'eq', 'ne', 'cmp'] },    # 7
+            { assoc => 'left',     ops => ['&'] },                                      # 8
+            { assoc => 'left',     ops => ['|', '^'] },                                 # 9
+            { assoc => 'left',     ops => ['&&'] },                                     # 10
+            { assoc => 'left',     ops => ['||', '//'] },                               # 11
+            { assoc => 'nonassoc', ops => ['..', '...'] },                              # 12
+            { assoc => 'left',     ops => ['and'] },                                    # 13
+            { assoc => 'left',     ops => ['or', 'xor'] },                              # 14
         );
     }
 

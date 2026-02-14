@@ -47,11 +47,34 @@ use Chalk::Grammar::Symbol;
     ok((grep { $_ eq '||' } $table[11]->{ops}->@*), '|| is at level 11');
 }
 
-# Test 6: 'and', 'or' are lowest binary precedence (level 13)
+# Test 6: 'and' is at level 13, 'or' at level 14 (matching perlop)
 {
     my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
     ok((grep { $_ eq 'and' } $table[13]->{ops}->@*), 'and is at level 13');
-    ok((grep { $_ eq 'or' } $table[13]->{ops}->@*), 'or is at level 13');
+    ok((grep { $_ eq 'or' } $table[14]->{ops}->@*), 'or is at level 14');
+}
+
+# Test 6b: 'isa' is at level 5 (above comparisons, matching perlop)
+{
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
+    ok((grep { $_ eq 'isa' } $table[5]->{ops}->@*), 'isa is at level 5');
+    is($table[5]->{assoc}, 'nonassoc', 'isa level is nonassoc');
+}
+
+# Test 6c: Comparisons at level 6 are chained (matching perlop)
+{
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
+    ok((grep { $_ eq '<' } $table[6]->{ops}->@*), '< is at level 6');
+    ok((grep { $_ eq '>=' } $table[6]->{ops}->@*), '>= is at level 6');
+    is($table[6]->{assoc}, 'chained', 'comparison level is chained');
+}
+
+# Test 6d: Equality at level 7 is nonassoc (matching perlop)
+{
+    my @table = Chalk::Grammar::Perl::PrecedenceTable::get_table();
+    ok((grep { $_ eq '==' } $table[7]->{ops}->@*), '== is at level 7');
+    ok((grep { $_ eq 'ne' } $table[7]->{ops}->@*), 'ne is at level 7');
+    is($table[7]->{assoc}, 'nonassoc', 'equality level is nonassoc');
 }
 
 # ========================================================================
