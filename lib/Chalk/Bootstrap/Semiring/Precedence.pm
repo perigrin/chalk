@@ -340,10 +340,19 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $value;
         }
 
-        # MethodCall/Subscript: pass through precedence info so
-        # PostfixExpression's on_complete can reject invalid targets.
+        # Subscript brackets [...] and {...} are delimiter boundaries
+        # that reset precedence context. Without this, a BinaryExpression
+        # inside the subscript (e.g., `$i + 1` in `$x->[$i + 1]`) leaks
+        # its operator level through the Subscript and causes
+        # PostfixExpression to reject the parse.
+        if ($rule_name eq 'Subscript') {
+            return { valid => true };
+        }
+
+        # MethodCall/CallExpression/PostfixDeref/PostfixIncDec: pass through
+        # precedence info so PostfixExpression's on_complete can reject
+        # invalid targets (e.g., unparenthesized BinaryExpression as target).
         if ($rule_name eq 'MethodCall'
-            || $rule_name eq 'Subscript'
             || $rule_name eq 'CallExpression'
             || $rule_name eq 'PostfixDeref'
             || $rule_name eq 'PostfixIncDec') {

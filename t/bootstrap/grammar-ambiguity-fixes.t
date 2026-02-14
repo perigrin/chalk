@@ -220,6 +220,33 @@ SKIP: {
         my $result = parse_ok('if ($x) { foo(); } elsif ($y) { bar(); } else { baz(); } push @r, $z;');
         ok(defined $result, 'if/elsif/else + push: disambiguated');
     }
+
+    # --- Category 8: Binary expression inside subscript ---
+    # `$x->[$i + 1]` fails because the `+` operator level from the
+    # BinaryExpression inside the subscript leaks through Subscript's
+    # on_complete, causing PostfixExpression to reject the parse
+    # (level >= 0 inside a PostfixExpression context).
+    # Subscript brackets [...] and {...} should reset precedence context.
+    {
+        my $result = parse_ok('my $r = $x->[$i + 1];');
+        ok(defined $result, '$x->[$i + 1] arrow subscript with arithmetic parses');
+    }
+    {
+        my $result = parse_ok('my $r = $a[$i + 1];');
+        ok(defined $result, '$a[$i + 1] bare subscript with arithmetic parses');
+    }
+    {
+        my $result = parse_ok('my $r = $h{$k . $v};');
+        ok(defined $result, '$h{$k . $v} bare hash subscript with concat parses');
+    }
+    {
+        my $result = parse_ok('my $r = $x->[$i + 1]->value();');
+        ok(defined $result, '$x->[$i + 1]->value() subscript + method chain parses');
+    }
+    {
+        my $result = parse_ok('my $r = $x->[$i + 1] =~ /foo/;');
+        ok(defined $result, '$x->[$i + 1] =~ /foo/ subscript + regex match parses');
+    }
 }
 
 done_testing();
