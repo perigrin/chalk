@@ -264,6 +264,23 @@ SKIP: {
         my $result = parse_ok('my $r = "prefix" . $self->method($x) . "suffix";');
         ok(defined $result, '3-way string concat with method call parses');
     }
+
+    # --- Category 10: Chained AssignmentExpression right-associativity ---
+    # `my $x = $y //= 1` must parse as `my $x = ($y //= 1)` (right-assoc).
+    # Without is_operator on AssignOp, both groupings survive with identical
+    # level=101, causing an ambiguity crash.
+    {
+        my $result = parse_ok('my $x = $y //= 1;');
+        ok(defined $result, 'chained = ... //= parses (right-associative)');
+    }
+    {
+        my $result = parse_ok('my $pattern = $h{$k} //= qr/foo/;');
+        ok(defined $result, 'vardecl = hash //= qr// parses');
+    }
+    {
+        my $result = parse_ok('$x = $y = $z = 1;');
+        ok(defined $result, 'triple chained = is right-associative');
+    }
 }
 
 done_testing();

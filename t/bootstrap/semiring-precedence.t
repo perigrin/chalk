@@ -408,4 +408,49 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
         'selects_alternative returns undef when right is zero');
 }
 
+# ========================================================================
+# Precedence semiring: AssignOp on_scan sets is_operator for disambiguation
+# ========================================================================
+
+# Test 30: AssignOp //= gets level 101, right-assoc, and is_operator via on_scan
+{
+    my $assign_item = make_item('AssignOp', $prec->one());
+    my $assign_scan = $prec->on_scan($assign_item, 0, 0, '//=');
+    ok($assign_scan->{is_operator}, 'AssignOp //= sets is_operator');
+    is($assign_scan->{level}, 101, 'AssignOp //= has level 101');
+    is($assign_scan->{assoc}, 'right', 'AssignOp //= has right assoc');
+}
+
+# Test 31: AssignOp = also gets is_operator
+{
+    my $assign_item = make_item('AssignOp', $prec->one());
+    my $assign_scan = $prec->on_scan($assign_item, 0, 0, '=');
+    ok($assign_scan->{is_operator}, 'AssignOp = sets is_operator');
+    is($assign_scan->{level}, 101, 'AssignOp = has level 101');
+    is($assign_scan->{assoc}, 'right', 'AssignOp = has right assoc');
+}
+
+# Test 32: Chained assignment right-associativity rejection at on_scan
+# `(my $x = $y) //= 1` is invalid — the left operand of //= is an
+# AssignmentExpression (level 101), same level as //=.
+# The on_scan itself rejects this when $existing carries level=101.
+{
+    my $left_assign = { valid => true, level => 101, assoc => 'right' };
+    my $assign_item = make_item('AssignOp', $left_assign);
+    my $result = $prec->on_scan($assign_item, 0, 0, '//=');
+    ok($prec->is_zero($result),
+        'on_scan rejects AssignOp //= when left operand is AssignmentExpression (level=101)');
+}
+
+# Test 33: Valid chained assignment: right-nesting is allowed
+# `my $x = ($y //= 1)` — the right operand of = is an AssignmentExpression,
+# which is fine because right-assoc allows same-level right operands.
+{
+    my $outer_op = { valid => true, op => '=', level => 101, assoc => 'right' };
+    my $inner_assign = { valid => true, op => '//=', level => 101, assoc => 'right' };
+    my $result = $prec->multiply($outer_op, $inner_assign);
+    ok(!$prec->is_zero($result),
+        'assignment as right operand of same-level right-assoc = is valid');
+}
+
 done_testing();

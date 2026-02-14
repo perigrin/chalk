@@ -274,8 +274,40 @@ class Chalk::Bootstrap::Semiring::Precedence {
                     is_operator => true,
                 };
             }
-            # Unknown operator in BinaryOp — treat as valid, no level info
-            # (AssignOp operators are not in the binary precedence table)
+            # AssignOp operators are not in the binary precedence table.
+            # Give them level 101 (assignment precedence) with right-associativity
+            # and is_operator, so multiply can reject left-grouping of chained
+            # assignments: `(my $x = $y) //= 1` is invalid because the left
+            # operand is an AssignmentExpression (level 101, right-assoc).
+            if ($rule_name eq 'AssignOp') {
+                my $assign_level = 101;  # $EXPR_LEVELS->{AssignmentExpression}
+
+                # Validate left operand: reject if its level exceeds assignment
+                # precedence. Also reject same-level left operands (right-assoc):
+                # `(my $x = $y) //= 1` has left level=101 == op level=101.
+                if (defined $existing->{level}) {
+                    if ($existing->{level} > $assign_level) {
+                        if ($ENV{DEBUG_PRECEDENCE}) {
+                            warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$assign_level ($matched_text)\n";
+                        }
+                        return $self->zero();
+                    }
+                    if ($existing->{level} == $assign_level) {
+                        if ($ENV{DEBUG_PRECEDENCE}) {
+                            warn "  PREC_REJECT_RASSOC: left_level=$existing->{level} == op_level=$assign_level ($matched_text)\n";
+                        }
+                        return $self->zero();
+                    }
+                }
+
+                return {
+                    valid       => true,
+                    op          => $matched_text,
+                    level       => $assign_level,
+                    assoc       => 'right',
+                    is_operator => true,
+                };
+            }
         }
 
         # Non-operator scan: multiply with one (transparent)
@@ -312,9 +344,9 @@ class Chalk::Bootstrap::Semiring::Precedence {
             };
         }
 
-        # BinaryOp completion: the value already carries operator info from on_scan.
-        # Mark it so multiply can use it.
-        if ($rule_name eq 'BinaryOp') {
+        # BinaryOp/AssignOp completion: the value already carries operator info
+        # from on_scan. Pass it through so multiply can use is_operator.
+        if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
             return $value;
         }
 
@@ -340,12 +372,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $value;
         }
 
-        # Subscript brackets [...] and {...} are delimiter boundaries
-        # that reset precedence context. Without this, a BinaryExpression
-        # inside the subscript (e.g., `$i + 1` in `$x->[$i + 1]`) leaks
-        # its operator level through the Subscript and causes
-        # PostfixExpression to reject the parse.
+        # Subscript brackets [...] and {...} are delimiter boundaries.
+        # Inner binary expressions (e.g., `$i + 1` in `$x->[$i + 1]`)
+        # must not leak their operator level through the Subscript into
+        # PostfixExpression. However, if the left operand of the Subscript
+        # is an AssignmentExpression or TernaryExpression (level >= 100),
+        # that level must survive so PostfixExpression can reject it:
+        # `($x = $h){$k}` is invalid without parens.
         if ($rule_name eq 'Subscript') {
+            if (defined $value->{level} && $value->{level} >= 100) {
+                return { valid => true, level => $value->{level}, assoc => $value->{assoc} };
+            }
             return { valid => true };
         }
 
