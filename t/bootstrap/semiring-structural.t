@@ -269,9 +269,22 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     is($sr->selects_alternative($binop_vardecl, $binop_only), 'left',
         'selects_alternative(binop+vardecl, binop) returns left');
 
-    # Both have is_vardecl — no preference
-    is($sr->selects_alternative($binop_vardecl, $binop_vardecl), undef,
-        'selects_alternative(binop+vardecl, binop+vardecl) returns undef');
+    # Both have is_vardecl — identical tags, fall through to binop tie-breaker
+    is($sr->selects_alternative($binop_vardecl, $binop_vardecl), 'left',
+        'selects_alternative(binop+vardecl, binop+vardecl) returns left (identical binop tags)');
+}
+
+# --- selects_alternative: is_binop identical-tag tie-breaking ---
+# Chained BinaryExpressions (e.g. $a && $b && $c) produce two alternatives
+# with identical structural tags. Pick left for left-associative grouping.
+{
+    my $binop_only  = { valid => true, is_binop => true };
+    my $binop_deref = { valid => true, is_binop => true, is_deref => true };
+
+    is($sr->selects_alternative($binop_only, $binop_only), 'left',
+        'selects_alternative(binop, binop) identical tags returns left');
+    is($sr->selects_alternative($binop_deref, $binop_deref), 'left',
+        'selects_alternative(binop+deref, binop+deref) identical tags returns left');
 }
 
 # ========================================================================

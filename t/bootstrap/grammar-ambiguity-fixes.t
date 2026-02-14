@@ -247,6 +247,23 @@ SKIP: {
         my $result = parse_ok('my $r = $x->[$i + 1] =~ /foo/;');
         ok(defined $result, '$x->[$i + 1] =~ /foo/ subscript + regex match parses');
     }
+
+    # --- Category 9: Chained BinaryExpression identical-tag tie-breaking ---
+    # When chained && or . operators have subscripts/method calls on both
+    # sides, both BinaryExpression alternatives carry identical structural
+    # tags. The tie-breaker picks left (left-associative grouping).
+    {
+        my $result = parse_ok('if ($a == 1 && $b->[0] isa Foo && $b->[0]->class() eq q{X}) { $r = 1; }');
+        ok(defined $result, '3-way && with subscript + isa + method eq parses');
+    }
+    {
+        my $result = parse_ok('if ($a eq q{X} && $b !~ /::/ && $c->($d)) { $r = 1; }');
+        ok(defined $result, 'eq + !~ regex + coderef call 3-way && parses');
+    }
+    {
+        my $result = parse_ok('my $r = "prefix" . $self->method($x) . "suffix";');
+        ok(defined $result, '3-way string concat with method call parses');
+    }
 }
 
 done_testing();

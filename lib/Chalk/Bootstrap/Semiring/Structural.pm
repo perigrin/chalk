@@ -314,6 +314,16 @@ class Chalk::Bootstrap::Semiring::Structural {
             return 'right';
         }
 
+        # Both is_binop with identical tag sets: duplicate BinaryExpression
+        # paths from chained operators. Pick left (left-associative grouping).
+        if ($left->{is_binop} && $right->{is_binop}) {
+            my $left_tags  = join(',', sort grep { $left->{$_} }  keys %$left);
+            my $right_tags = join(',', sort grep { $right->{$_} } keys %$right);
+            if ($left_tags eq $right_tags) {
+                return 'left';
+            }
+        }
+
         return undef;
     }
 
