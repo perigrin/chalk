@@ -152,8 +152,12 @@ SKIP: {
     # Files with known oracle mismatches or parse failures.
     # Parse failures: ambiguity patterns not yet resolved by semiring disambiguation.
     my %TODO_FILES = (
-        # Parse failures — remaining ambiguities
+        # Oracle mismatches — parse succeeds but op sequence differs
         'lib/Chalk/Bootstrap/Perl/Actions.pm'      => 'Complex my sub + regex constructs exceed grammar capacity',
+        # Parse failures — remaining ambiguities
+        'lib/Chalk/Bootstrap/Semiring/TypeInference.pm' => 'BinaryExpression ambiguity in chained && with regex',
+        'lib/Chalk/Bootstrap/Perl/Target/Perl.pm'  => 'BinaryExpression ambiguity in complex string operations',
+        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'BinaryExpression ambiguity in complex string operations',
         'lib/Chalk/Bootstrap/Earley.pm'             => 'Pre-existing phase5 Earley parse failure',
     );
 

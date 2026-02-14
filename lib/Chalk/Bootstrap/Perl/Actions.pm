@@ -108,7 +108,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 $i++;
                 my $value = $stmts->[$i];
                 push @result, $factory->make('Constructor',
-                    class => 'ReturnStmt',
+                    'class' => 'ReturnStmt',
                     value => $value,
                 );
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
@@ -120,7 +120,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # unrelated statements in multi-statement bodies.
                 $i++;
                 push @result, $factory->make('Constructor',
-                    class => 'DieCall',
+                    'class' => 'DieCall',
                     args  => [$stmts->[$i]],
                 );
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
@@ -141,7 +141,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 if (@import_args) {
                     push @result, $factory->make('Constructor',
-                        class       => 'UseDecl',
+                        'class'       => 'UseDecl',
                         module_name => $item->inputs()->[0],
                         import_args => \@import_args,
                     );
@@ -157,7 +157,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Merge BinaryExpr(=, VarDecl(var, undef), expr) → VarDecl(var, expr)
                 my $var_decl = $item->inputs()->[1];
                 push @result, $factory->make('Constructor',
-                    class       => 'VarDecl',
+                    'class'       => 'VarDecl',
                     variable    => $var_decl->inputs()->[0],
                     initializer => $item->inputs()->[2],
                 );
@@ -172,7 +172,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         && $STMT_BOUNDARY_CLASSES{$next->class()})) {
                     $i++;
                     push @result, $factory->make('Constructor',
-                        class       => 'VarDecl',
+                        'class'       => 'VarDecl',
                         variable    => $item->inputs()->[0],
                         initializer => $next,
                     );
@@ -199,7 +199,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     push @args, $next;
                 }
                 push @result, $factory->make('Constructor',
-                    class => 'BuiltinCall',
+                    'class' => 'BuiltinCall',
                     name  => _make_const($factory, $builtin),
                     args  => \@args,
                 );
@@ -212,7 +212,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 $i++;
                 my $arg = $stmts->[$i];
                 push @result, $factory->make('Constructor',
-                    class => 'BuiltinCall',
+                    'class' => 'BuiltinCall',
                     name  => _make_const($factory, $builtin),
                     args  => [$arg],
                 );
@@ -224,7 +224,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 $i++;
                 my $cond = $stmts->[$i];
                 push @result, $factory->make('Constructor',
-                    class     => 'NextUnless',
+                    'class'     => 'NextUnless',
                     condition => $cond,
                 );
             } else {
@@ -248,7 +248,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
         return $factory->make('Constructor',
-            class      => 'Program',
+            'class'      => 'Program',
             statements => \@stmts,
         );
     }
@@ -347,7 +347,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $factory->make('Constructor',
-            class       => 'UseDecl',
+            'class'       => 'UseDecl',
             module_name => $module_name,
             import_args => $import_args,
         );
@@ -419,7 +419,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $factory->make('Constructor',
-            class  => 'ClassDecl',
+            'class'  => 'ClassDecl',
             name   => $class_name,
             parent => $parent,
             body   => \@body,
@@ -457,7 +457,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $factory->make('Constructor',
-            class  => 'MethodDecl',
+            'class'  => 'MethodDecl',
             name   => $method_name,
             params => \@params,
             body   => \@body,
@@ -497,7 +497,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $attr_value = $constants[1]; # QualifiedIdentifier (optional, e.g. parent in :isa(Parent))
 
         return $factory->make('Constructor',
-            class  => '_Attribute',
+            'class'  => '_Attribute',
             name   => $attr_name,
             parent => $attr_value, # reuse parent slot for attribute value
             body   => undef,       # unused
@@ -640,7 +640,7 @@ class Chalk::Bootstrap::Perl::Actions {
             # return EXPR → ReturnStmt
             my $value = $args[0]; # single value for Tier A
             return $factory->make('Constructor',
-                class => 'ReturnStmt',
+                'class' => 'ReturnStmt',
                 value => $value,
             );
         }
@@ -648,7 +648,7 @@ class Chalk::Bootstrap::Perl::Actions {
         if (defined $func_name && $func_name eq 'die') {
             # die EXPR → DieCall
             return $factory->make('Constructor',
-                class => 'DieCall',
+                'class' => 'DieCall',
                 args  => \@args,
             );
         }
@@ -656,7 +656,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Generic builtin or function call → BuiltinCall
         if (defined $func_name) {
             return $factory->make('Constructor',
-                class => 'BuiltinCall',
+                'class' => 'BuiltinCall',
                 name  => _make_const($factory, $func_name),
                 args  => \@args,
             );
@@ -724,7 +724,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         const_type => 'string', value => $lit);
                 }
                 return $factory->make('Constructor',
-                    class => 'InterpolatedString',
+                    'class' => 'InterpolatedString',
                     parts => \@parts,
                 );
             }
@@ -878,7 +878,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         if ($is_field) {
             return $factory->make('Constructor',
-                class         => 'FieldDecl',
+                'class'         => 'FieldDecl',
                 name          => $var_name,
                 attributes    => \@attributes,
                 default_value => undef,
@@ -886,7 +886,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $factory->make('Constructor',
-            class       => 'VarDecl',
+            'class'       => 'VarDecl',
             variable    => $var_name,
             initializer => undef,
         );
@@ -915,7 +915,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
         return $factory->make('Constructor',
-            class    => 'ArrayRefExpr',
+            'class'    => 'ArrayRefExpr',
             elements => \@elements,
         );
     }
@@ -933,7 +933,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
         return $factory->make('Constructor',
-            class => 'HashRefExpr',
+            'class' => 'HashRefExpr',
             pairs => \@pairs,
         );
     }
@@ -961,7 +961,7 @@ class Chalk::Bootstrap::Perl::Actions {
         $body = _fixup_stmts($factory, $body // []);
 
         return $factory->make('Constructor',
-            class  => 'AnonSubExpr',
+            'class'  => 'AnonSubExpr',
             params => \@params,
             body   => $body,
         );
@@ -993,7 +993,7 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $op && defined $operand;
 
         return $factory->make('Constructor',
-            class   => 'UnaryExpr',
+            'class'   => 'UnaryExpr',
             op      => _make_const($factory, $op),
             operand => $operand,
         );
@@ -1036,7 +1036,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # s/pat/repl/flags
                 if ($pat =~ m{^s/((?:[^/\\]|\\.)*)/((?:[^/\\]|\\.)*)/([\w]*)$}) {
                     return $factory->make('Constructor',
-                        class       => 'RegexSubst',
+                        'class'       => 'RegexSubst',
                         target      => $left,
                         pattern     => _make_const($factory, $1),
                         replacement => _make_const($factory, $2),
@@ -1046,7 +1046,7 @@ class Chalk::Bootstrap::Perl::Actions {
             } else {
                 # /pattern/flags or m/pattern/flags
                 return $factory->make('Constructor',
-                    class   => 'RegexMatch',
+                    'class'   => 'RegexMatch',
                     target  => $left,
                     pattern => $right,
                     flags   => _make_const($factory, ''),
@@ -1055,7 +1055,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $factory->make('Constructor',
-            class => 'BinaryExpr',
+            'class' => 'BinaryExpr',
             op    => $op,
             left  => $left,
             right => $right,
@@ -1096,21 +1096,21 @@ class Chalk::Bootstrap::Perl::Actions {
                 if ($op->class() eq 'MethodCallExpr') {
                     # Set invocant to current result
                     $result = $factory->make('Constructor',
-                        class       => 'MethodCallExpr',
+                        'class'       => 'MethodCallExpr',
                         invocant    => $result,
                         method_name => $op->inputs()->[1],
                         args        => $op->inputs()->[2],
                     );
                 } elsif ($op->class() eq 'SubscriptExpr') {
                     $result = $factory->make('Constructor',
-                        class  => 'SubscriptExpr',
+                        'class'  => 'SubscriptExpr',
                         target => $result,
                         index  => $op->inputs()->[1],
                         style  => $op->inputs()->[2],
                     );
                 } elsif ($op->class() eq 'PostfixDerefExpr') {
                     $result = $factory->make('Constructor',
-                        class  => 'PostfixDerefExpr',
+                        'class'  => 'PostfixDerefExpr',
                         target => $result,
                         sigil  => $op->inputs()->[1],
                     );
@@ -1155,7 +1155,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Return just method_name and args — the invocant will be attached
         # by PostfixExpression which chains method calls with the target
         return $factory->make('Constructor',
-            class       => 'MethodCallExpr',
+            'class'       => 'MethodCallExpr',
             invocant    => undef,  # set by PostfixExpression
             method_name => $method_name,
             args        => \@args,
@@ -1179,7 +1179,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $factory->make('Constructor',
-            class  => 'SubscriptExpr',
+            'class'  => 'SubscriptExpr',
             target => undef,  # set by PostfixExpression
             index  => $index,
             style  => _make_const($factory, $style),
@@ -1200,7 +1200,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $factory->make('Constructor',
-            class  => 'PostfixDerefExpr',
+            'class'  => 'PostfixDerefExpr',
             target => undef,  # set by PostfixExpression
             sigil  => _make_const($factory, $sigil // '@'),
         );
@@ -1226,7 +1226,7 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless @ir_nodes >= 3;
 
         return $factory->make('Constructor',
-            class      => 'TernaryExpr',
+            'class'      => 'TernaryExpr',
             condition  => $ir_nodes[0],
             true_expr  => $ir_nodes[1],
             false_expr => $ir_nodes[2],
@@ -1263,7 +1263,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if ($target isa Chalk::Bootstrap::IR::Node::Constructor
                     && $target->class() eq 'FieldDecl') {
                 return $factory->make('Constructor',
-                    class         => 'FieldDecl',
+                    'class'         => 'FieldDecl',
                     name          => $target->inputs()->[0],
                     attributes    => $target->inputs()->[1],
                     default_value => $value,
@@ -1273,7 +1273,7 @@ class Chalk::Bootstrap::Perl::Actions {
             if ($target isa Chalk::Bootstrap::IR::Node::Constructor
                     && $target->class() eq 'VarDecl') {
                 return $factory->make('Constructor',
-                    class       => 'VarDecl',
+                    'class'       => 'VarDecl',
                     variable    => $target->inputs()->[0],
                     initializer => $value,
                 );
@@ -1283,14 +1283,14 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $target->value()
                     && $target->value() =~ /^[\$\@\%]/) {
                 return $factory->make('Constructor',
-                    class       => 'VarDecl',
+                    'class'       => 'VarDecl',
                     variable    => $target,
                     initializer => $value,
                 );
             }
             # Otherwise binary expression for assignment
             return $factory->make('Constructor',
-                class => 'BinaryExpr',
+                'class' => 'BinaryExpr',
                 op    => $op,
                 left  => $target,
                 right => $value,
@@ -1299,7 +1299,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
         # Compound assignment (.=, //=, +=, etc.)
         return $factory->make('Constructor',
-            class  => 'CompoundAssign',
+            'class'  => 'CompoundAssign',
             op     => $op,
             target => $target,
             value  => $value,
@@ -1336,7 +1336,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Return a hash-like structure the parent statement can use
         # For now, store as a special marker using Constant
         return $factory->make('Constructor',
-            class     => 'PostfixLoop',
+            'class'     => 'PostfixLoop',
             body      => undef,  # set by parent
             modifier  => _make_const($factory, $keyword),
             condition => $condition,
@@ -1388,14 +1388,14 @@ class Chalk::Bootstrap::Perl::Actions {
         # For 'unless', wrap condition in UnaryExpr with '!'
         if (defined $keyword && $keyword eq 'unless') {
             $condition = $factory->make('Constructor',
-                class   => 'UnaryExpr',
+                'class'   => 'UnaryExpr',
                 op      => _make_const($factory, '!'),
                 operand => $condition,
             );
         }
 
         return $factory->make('Constructor',
-            class     => 'IfStmt',
+            'class'     => 'IfStmt',
             condition => $condition,
             then_body => $then_body,
             else_body => $else_body,
@@ -1433,7 +1433,7 @@ class Chalk::Bootstrap::Perl::Actions {
         $else_body = defined $else_body ? _fixup_stmts($factory, $else_body) : undef;
 
         return $factory->make('Constructor',
-            class     => 'IfStmt',
+            'class'     => 'IfStmt',
             condition => $condition,
             then_body => $then_body,
             else_body => $else_body,
@@ -1480,7 +1480,7 @@ class Chalk::Bootstrap::Perl::Actions {
         $body = _fixup_stmts($factory, $body // []);
 
         return $factory->make('Constructor',
-            class    => 'ForeachLoop',
+            'class'    => 'ForeachLoop',
             iterator => $iterator,
             list     => $list,
             body     => $body,
