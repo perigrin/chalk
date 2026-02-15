@@ -185,25 +185,84 @@ my sub build_and_load($ir, $module_name) {
     ok(defined $ir, 'ConciseTree: parse produces IR');
 
     SKIP: {
-        skip 'ConciseTree: no IR', 6 unless defined $ir;
+        skip 'ConciseTree: no IR', 13 unless defined $ir;
 
-        my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
-            module_name => 'Chalk::Bootstrap::Perl::XS::TierC::ConciseTree',
-        );
-        my $dist = $xs_target->generate_distribution($ir);
-        ok(ref($dist) eq 'HASH', 'ConciseTree: generates distribution');
+        my $module = 'Chalk::Bootstrap::Perl::XS::TierC::ConciseTree';
+        my ($dist, $err) = build_and_load($ir, $module);
+        ok(defined $dist, 'ConciseTree: XS builds') or do {
+            diag $err;
+            skip 'ConciseTree: build failed', 11;
+        };
 
         # Structural checks on the XS file
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        ok(defined $xs_file, 'ConciseTree: distribution has .xs file');
         my $xs_code = $dist->{$xs_file};
-
         like($xs_code, qr/MODULE\s*=/, 'ConciseTree: XS has MODULE line');
         like($xs_code, qr/ops\(self\)/, 'ConciseTree: XS has ops reader');
 
-        my $module = 'Chalk::Bootstrap::Perl::XS::TierC::ConciseTree';
-        my ($loaded_dist, $err) = build_and_load($ir, $module);
-        ok(defined $loaded_dist, 'ConciseTree: XS builds') or diag $err;
+        # Behavioral: new() with default empty ops
+        my $tree = eval { $module->new() };
+        is($@, '', 'ConciseTree: new() succeeds') or do {
+            diag $@;
+            skip 'ConciseTree: new failed', 9;
+        };
+
+        TODO: {
+            local $TODO = 'XS emitter: field default [], push on array fields, scalar $ref->@*, method calls on array elements';
+
+            # ops() reader returns arrayref
+            my $ops = $tree->ops();
+            is(ref($ops), 'ARRAY', 'ConciseTree: ops() returns arrayref');
+            is(scalar($ops && ref($ops) eq 'ARRAY' ? $ops->@* : 0), 0,
+                'ConciseTree: default ops is empty');
+
+            # op_count()
+            is($tree->op_count(), 0, 'ConciseTree: op_count() is 0 for empty tree');
+
+            # push_op() with a real ConciseOp
+            use Chalk::Bootstrap::ConciseOp;
+            my $op1 = Chalk::Bootstrap::ConciseOp->new(
+                name => 'enter', arity => '0',
+            );
+            eval { $tree->push_op($op1) };
+            is($tree->op_count(), 1, 'ConciseTree: op_count() is 1 after push_op');
+
+            my $op2 = Chalk::Bootstrap::ConciseOp->new(
+                name => 'const', arity => '0', type_info => 'IV 42',
+            );
+            eval { $tree->push_op($op2) };
+            is($tree->op_count(), 2, 'ConciseTree: op_count() is 2 after second push_op');
+
+            # to_exec_string() renders numbered lines
+            {
+                local $SIG{__WARN__} = sub {
+                    my $msg = shift;
+                    warn $msg unless $msg =~ /Use of uninitialized value/;
+                };
+                my $exec = eval { $tree->to_exec_string() } // '';
+                like($exec, qr/^1\s+.*enter/m,
+                    'ConciseTree: to_exec_string() line 1 has enter');
+                like($exec, qr/^2\s+.*const/m,
+                    'ConciseTree: to_exec_string() line 2 has const');
+            }
+
+            # concat() merges another tree's ops
+            use Chalk::Bootstrap::ConciseTree;
+            my $tree2 = Chalk::Bootstrap::ConciseTree->new();
+            my $op3 = Chalk::Bootstrap::ConciseOp->new(
+                name => 'leave', arity => '0',
+            );
+            $tree2->push_op($op3);
+            eval { $tree->concat($tree2) };
+            is($tree->op_count(), 3, 'ConciseTree: op_count() is 3 after concat');
+
+            # Verify ops are in order after concat
+            my @ops_list = $tree->ops() && ref($tree->ops()) eq 'ARRAY'
+                ? $tree->ops()->@* : ();
+            my @names = map { $_->name() } @ops_list;
+            is_deeply(\@names, ['enter', 'const', 'leave'],
+                'ConciseTree: ops in correct order after push_op + concat');
+        }
     }
 }
 
@@ -216,23 +275,88 @@ my sub build_and_load($ir, $module_name) {
     ok(defined $ir, 'Comparator: parse produces IR');
 
     SKIP: {
-        skip 'Comparator: no IR', 5 unless defined $ir;
-
-        my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
-            module_name => 'Chalk::Bootstrap::Perl::XS::TierC::Comparator',
-        );
-        my $dist = $xs_target->generate_distribution($ir);
-        ok(ref($dist) eq 'HASH', 'Comparator: generates distribution');
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        ok(defined $xs_file, 'Comparator: distribution has .xs file');
-        my $xs_code = $dist->{$xs_file};
-
-        like($xs_code, qr/MODULE\s*=/, 'Comparator: XS has MODULE line');
+        skip 'Comparator: no IR', 11 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Comparator';
-        my ($loaded_dist, $err) = build_and_load($ir, $module);
-        ok(defined $loaded_dist, 'Comparator: XS builds') or diag $err;
+        my ($dist, $err) = build_and_load($ir, $module);
+        ok(defined $dist, 'Comparator: XS builds') or do {
+            diag $err;
+            skip 'Comparator: build failed', 9;
+        };
+
+        # Structural check
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        like($dist->{$xs_file}, qr/MODULE\s*=/, 'Comparator: XS has MODULE line');
+
+        my $cmp = eval { $module->new() };
+        is($@, '', 'Comparator: new() succeeds') or do {
+            diag $@;
+            skip 'Comparator: new failed', 8;
+        };
+
+        # Behavioral tests — XS method bodies for compare/normalize have
+        # complex patterns (for loops, push, sprintf, regex substitution)
+        # that the XS emitter doesn't handle yet. These can segfault, so
+        # skip entirely until the emitter is fixed.
+        SKIP: {
+            skip 'TODO: XS emitter cannot compile compare/normalize method bodies yet', 8;
+
+            # Build two identical trees and compare
+            my $tree_a = Chalk::Bootstrap::ConciseTree->new();
+            $tree_a->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'enter', arity => '0',
+            ));
+            $tree_a->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'const', arity => '0', type_info => 'IV 42',
+            ));
+
+            my $tree_b = Chalk::Bootstrap::ConciseTree->new();
+            $tree_b->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'enter', arity => '0',
+            ));
+            $tree_b->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'const', arity => '0', type_info => 'IV 42',
+            ));
+
+            my $result = $cmp->compare($tree_a, $tree_b);
+            ok(ref($result) eq 'HASH', 'Comparator: compare() returns hashref');
+            ok($result->{match}, 'Comparator: identical trees match');
+            is(scalar $result->{differences}->@*, 0,
+                'Comparator: no differences for identical trees');
+
+            # Build differing trees and compare
+            my $tree_c = Chalk::Bootstrap::ConciseTree->new();
+            $tree_c->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'enter', arity => '0',
+            ));
+            $tree_c->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'padsv', arity => '0', type_info => '$x',
+            ));
+
+            my $diff_result = $cmp->compare($tree_a, $tree_c);
+            ok(!$diff_result->{match}, 'Comparator: different trees do not match');
+            ok(scalar $diff_result->{differences}->@* > 0,
+                'Comparator: differences reported for non-matching trees');
+
+            # Op count mismatch
+            my $tree_d = Chalk::Bootstrap::ConciseTree->new();
+            $tree_d->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'enter', arity => '0',
+            ));
+            my $count_result = $cmp->compare($tree_a, $tree_d);
+            ok(!$count_result->{match}, 'Comparator: count mismatch detected');
+            like($count_result->{differences}->[0], qr/count mismatch/i,
+                'Comparator: reports op count mismatch');
+
+            # Normalize strips pad slot numbers
+            my $tree_pad = Chalk::Bootstrap::ConciseTree->new();
+            $tree_pad->push_op(Chalk::Bootstrap::ConciseOp->new(
+                name => 'padsv', arity => '0', type_info => '$x:3,4',
+            ));
+            my $normalized = $cmp->normalize($tree_pad);
+            is($normalized->ops()->[0]->type_info(), '$x',
+                'Comparator: normalize() strips pad slot numbers');
+        }
     }
 }
 
@@ -245,23 +369,53 @@ my sub build_and_load($ir, $module_name) {
     ok(defined $ir, 'Oracle: parse produces IR');
 
     SKIP: {
-        skip 'Oracle: no IR', 5 unless defined $ir;
-
-        my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
-            module_name => 'Chalk::Bootstrap::Perl::XS::TierC::Oracle',
-        );
-        my $dist = $xs_target->generate_distribution($ir);
-        ok(ref($dist) eq 'HASH', 'Oracle: generates distribution');
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        ok(defined $xs_file, 'Oracle: distribution has .xs file');
-        my $xs_code = $dist->{$xs_file};
-
-        like($xs_code, qr/MODULE\s*=/, 'Oracle: XS has MODULE line');
+        skip 'Oracle: no IR', 10 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Oracle';
-        my ($loaded_dist, $err) = build_and_load($ir, $module);
-        ok(defined $loaded_dist, 'Oracle: XS builds') or diag $err;
+        my ($dist, $err) = build_and_load($ir, $module);
+        ok(defined $dist, 'Oracle: XS builds') or do {
+            diag $err;
+            skip 'Oracle: build failed', 8;
+        };
+
+        # Structural check
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        like($dist->{$xs_file}, qr/MODULE\s*=/, 'Oracle: XS has MODULE line');
+
+        my $oracle = eval { $module->new() };
+        is($@, '', 'Oracle: new() succeeds') or do {
+            diag $@;
+            skip 'Oracle: new failed', 7;
+        };
+
+        # Behavioral tests — XS method bodies for parse_concise_output
+        # use for loops, split, regex, next unless that the emitter doesn't
+        # handle yet. These can segfault, so skip until the emitter is fixed.
+        SKIP: {
+            skip 'TODO: XS emitter cannot compile parse_concise_output method body yet', 7;
+
+            # parse_concise_output() with synthetic B::Concise -exec output
+            my $concise_text = <<'CONCISE';
+1  <0> enter
+2  <;> nextstate(main 1 -e:1)
+3  <$> const[IV 42]
+4  <1> print sK/VOID
+5  <@> leave[1 ref] vKP/REFC
+CONCISE
+
+            my $tree = $oracle->parse_concise_output($concise_text);
+            ok(defined $tree, 'Oracle: parse_concise_output returns defined');
+            is($tree->op_count(), 5,
+                'Oracle: parsed 5 ops from concise output');
+
+            # Verify parsed op details
+            my $ops = $tree->ops();
+            is($ops->[0]->name(), 'enter', 'Oracle: op 1 is enter');
+            is($ops->[1]->name(), 'nextstate', 'Oracle: op 2 is nextstate');
+            is($ops->[2]->name(), 'const', 'Oracle: op 3 is const');
+            is($ops->[2]->type_info(), 'IV 42', 'Oracle: const has type_info IV 42');
+            is($ops->[3]->name(), 'print', 'Oracle: op 4 is print');
+        }
     }
 }
 
@@ -274,23 +428,84 @@ my sub build_and_load($ir, $module_name) {
     ok(defined $ir, 'Context: parse produces IR');
 
     SKIP: {
-        skip 'Context: no IR', 5 unless defined $ir;
-
-        my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
-            module_name => 'Chalk::Bootstrap::Perl::XS::TierC::Context',
-        );
-        my $dist = $xs_target->generate_distribution($ir);
-        ok(ref($dist) eq 'HASH', 'Context: generates distribution');
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        ok(defined $xs_file, 'Context: distribution has .xs file');
-        my $xs_code = $dist->{$xs_file};
-
-        like($xs_code, qr/MODULE\s*=/, 'Context: XS has MODULE line');
+        skip 'Context: no IR', 16 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Context';
-        my ($loaded_dist, $err) = build_and_load($ir, $module);
-        ok(defined $loaded_dist, 'Context: XS builds') or diag $err;
+        my ($dist, $err) = build_and_load($ir, $module);
+        ok(defined $dist, 'Context: XS builds') or do {
+            diag $err;
+            skip 'Context: build failed', 14;
+        };
+
+        # Structural check
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        like($dist->{$xs_file}, qr/MODULE\s*=/, 'Context: XS has MODULE line');
+
+        # Basic construction with focus
+        my $ctx = eval { $module->new(focus => 'hello') };
+        is($@, '', 'Context: new(focus) succeeds') or do {
+            diag $@;
+            skip 'Context: new failed', 12;
+        };
+
+        # Field readers — focus() and rule() work (hash fetch for :param fields),
+        # but extract() returns literal '$focus' instead of field value, and
+        # defaults (children=[], position=0) aren't stored on construction.
+        is($ctx->focus(), 'hello', 'Context: focus() reader');
+        is($ctx->rule(), undef, 'Context: rule() defaults to undef');
+
+        TODO: {
+            local $TODO = 'XS emitter: method field access returns literal name, field defaults not stored';
+
+            is($ctx->extract(), 'hello', 'Context: extract() returns focus');
+            is(ref($ctx->children()), 'ARRAY', 'Context: children() returns arrayref');
+            is($ctx->position(), 0, 'Context: position() defaults to 0');
+        }
+
+        # Behavioral tests for extend/duplicate/scanned_text/leaves —
+        # XS method bodies use coderef invocation, recursion, isa operator,
+        # conditional push. These can segfault, so skip until the emitter is fixed.
+        SKIP: {
+            skip 'TODO: XS emitter cannot compile extend/duplicate/leaves/scanned_text yet', 8;
+
+            # extend() applies function and returns new context
+            my $extended = $ctx->extend(sub ($c) { return uc($c->extract()) });
+            is($extended->extract(), 'HELLO',
+                'Context: extend() applies function to produce new focus');
+            is($ctx->extract(), 'hello',
+                'Context: original context unchanged after extend');
+
+            # duplicate() wraps context in context
+            my $duped = $ctx->duplicate();
+            ok(defined $duped, 'Context: duplicate() returns defined');
+            # duplicate returns a context whose focus is the original context
+            my $inner = $duped->extract();
+            ok(ref($inner), 'Context: duplicate() focus is a reference');
+
+            # scanned_text() on a string-focus leaf
+            is($ctx->scanned_text(), 'hello',
+                'Context: scanned_text() returns string focus');
+
+            # scanned_text() on a tree with children
+            my $child1 = $module->new(focus => 'foo');
+            my $child2 = $module->new(focus => 'bar');
+            my $parent = $module->new(
+                focus    => undef,
+                children => [$child1, $child2],
+            );
+            is($parent->scanned_text(), 'foobar',
+                'Context: scanned_text() concatenates children');
+
+            # leaves() on a leaf returns itself
+            my @leaf_results = $ctx->leaves();
+            is(scalar @leaf_results, 1,
+                'Context: leaves() on leaf returns 1 result');
+
+            # leaves() on an intermediate node recurses into children
+            my @parent_leaves = $parent->leaves();
+            is(scalar @parent_leaves, 2,
+                'Context: leaves() on parent returns 2 child leaves');
+        }
     }
 }
 
