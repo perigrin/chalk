@@ -1,4 +1,4 @@
-# ABOUTME: Build integration test for XS code generation of the 66-rule Perl grammar.
+# ABOUTME: Build integration test for XS code generation of the 63-rule Perl grammar.
 # ABOUTME: Compiles generated XS and validates two-way recognizer equivalence (M4=M5).
 use 5.42.0;
 use utf8;
@@ -24,7 +24,7 @@ unless ($have_compiler) {
 eval { require Module::Build; 1 }
     or plan skip_all => 'Module::Build not installed';
 
-# === Generate distribution from 66-rule Perl grammar ===
+# === Generate distribution from 63-rule Perl grammar ===
 
 use TestPipeline qw(perl_pipeline build_perl_recognizer grammars_match);
 use Chalk::Bootstrap::Target::XS;
@@ -41,7 +41,7 @@ $optimizer->add_pass(Chalk::Bootstrap::Optimizer::DCE->new());
 my $ir = $optimizer->optimize($raw_ir);
 ok(defined $ir, 'DCE optimization produces IR');
 is(ref($ir), 'ARRAY', 'optimized IR is an arrayref');
-is(scalar $ir->@*, 66, 'optimized IR has 66 rules');
+is(scalar $ir->@*, 63, 'optimized IR has 63 rules');
 
 my $target = Chalk::Bootstrap::Target::XS->new(
     module_name => 'Chalk::Grammar::Perl::Rules',
@@ -93,7 +93,7 @@ unshift @INC, "$tmpdir/blib/lib", "$tmpdir/blib/arch";
     is($@, '', 'Chalk::Grammar::Perl::Rules loads without error') or diag $@;
 }
 
-# === Verify all 66 rule methods ===
+# === Verify all 63 rule methods ===
 
 # M4: Generate Perl-target grammar for rule name extraction and equivalence
 my $perl_target = Chalk::Bootstrap::Target::Perl->new();
@@ -104,7 +104,7 @@ eval $perl_code;
 is($@, '', 'M4: generated Perl evals without error') or diag $@;
 my $m4_grammar = Chalk::Grammar::Perl::XSBuildGenerated::grammar();
 ok(defined $m4_grammar, 'M4: Perl-generated grammar loaded');
-is(scalar $m4_grammar->@*, 66, 'M4: 66 rules');
+is(scalar $m4_grammar->@*, 63, 'M4: 63 rules');
 
 # Extract rule names from M4 grammar dynamically
 my @rule_names = map { $_->name() } $m4_grammar->@*;
@@ -126,7 +126,7 @@ for my $name (@rule_names) {
 
 # === Two-way grammar equivalence (M4 = M5) ===
 
-is(scalar @xs_rules, 66, 'M5: XS-generated grammar has 66 rules');
+is(scalar @xs_rules, 63, 'M5: XS-generated grammar has 63 rules');
 ok(grammars_match($m4_grammar, \@xs_rules), 'M4 == M5: Perl-generated matches XS-generated');
 
 # === Recognizer acceptance tests ===
