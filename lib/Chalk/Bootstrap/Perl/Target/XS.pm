@@ -986,18 +986,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, 'use warnings;';
         push @lines, 'use XSLoader;';
 
-        # Emit use declarations from Program IR (skip pragmas and versions)
-        my $stmts = $ir->inputs()->[0];
-        for my $stmt ($stmts->@*) {
-            next unless $stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                && $stmt->class() eq 'UseDecl';
-            my $mod = $stmt->inputs()->[0]->value();
-            # Skip pragmas and version strings
-            next if $mod =~ /^(?:utf8|experimental|strict|warnings|bytes)$/;
-            next if $mod =~ /^v?[0-9]/;
-            push @lines, "use $mod;";
-        }
-
         if (defined $parent) {
             push @lines, "our \@ISA = ('$parent');";
         }
