@@ -177,14 +177,14 @@ my sub find_field($class_decl, $name) {
     ok(defined $ir, 'ConciseTree.pm: parse produces IR');
 
     SKIP: {
-        skip 'ConciseTree.pm: no IR', 25 unless defined $ir;
+        skip 'ConciseTree.pm: no IR', 30 unless defined $ir;
 
         is_constructor($ir, 'Program', 'ConciseTree Program');
         my $cls = find_class_decl($ir);
         ok(defined $cls, 'ConciseTree.pm: found ClassDecl');
 
         SKIP: {
-            skip 'ConciseTree.pm: no ClassDecl', 20 unless defined $cls;
+            skip 'ConciseTree.pm: no ClassDecl', 25 unless defined $cls;
 
             is_constant($cls->inputs()->[0],
                 'Chalk::Bootstrap::ConciseTree', 'ConciseTree class name');
@@ -208,6 +208,34 @@ my sub find_field($class_decl, $name) {
 
             my $to_exec = find_method($cls, 'to_exec_string');
             ok(defined $to_exec, 'ConciseTree.pm: has method to_exec_string');
+
+            # Verify push in to_exec_string body is BuiltinCall, not
+            # BinaryExpr wrapping BuiltinCall (grammar ambiguity fix)
+            if (defined $to_exec) {
+                my $mbody = $to_exec->inputs()->[2];
+                ok(ref $mbody eq 'ARRAY', 'ConciseTree.pm: to_exec_string body is array');
+                # Find the ForeachLoop in the method body
+                my ($foreach) = grep {
+                    $_ isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $_->class() eq 'ForeachLoop'
+                } $mbody->@*;
+                ok(defined $foreach, 'ConciseTree.pm: to_exec_string has ForeachLoop');
+                if (defined $foreach) {
+                    my $loop_body = $foreach->inputs()->[2];
+                    # Find the push statement in the loop body
+                    my ($push_stmt) = grep {
+                        $_ isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $_->class() eq 'BuiltinCall'
+                        && $_->inputs()->[0]->value() eq 'push'
+                    } $loop_body->@*;
+                    ok(defined $push_stmt,
+                        'ConciseTree.pm: push in foreach is BuiltinCall (not BinaryExpr)');
+                    if (defined $push_stmt) {
+                        is($push_stmt->class(), 'BuiltinCall',
+                            'ConciseTree.pm: push stmt class is BuiltinCall');
+                    }
+                }
+            }
 
             my $op_count = find_method($cls, 'op_count');
             ok(defined $op_count, 'ConciseTree.pm: has method op_count');

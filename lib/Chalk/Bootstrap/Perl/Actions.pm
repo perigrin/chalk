@@ -162,6 +162,34 @@ class Chalk::Bootstrap::Perl::Actions {
                     initializer => $item->inputs()->[2],
                 );
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'BinaryExpr'
+                    && $item->inputs()->[1] isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->inputs()->[1]->class() eq 'BuiltinCall'
+                    && $LIST_BUILTINS{$item->inputs()->[1]->inputs()->[0]->value()}) {
+                # Restructure BinaryExpr(op, BuiltinCall(name, [..., last]), right)
+                # into BuiltinCall(name, [..., BinaryExpr(op, last, right)])
+                # Fixes grammar ambiguity where `push @arr, EXPR . EXPR` is
+                # parsed as BinaryExpr(".", push(@arr, EXPR), EXPR) instead of
+                # push(@arr, BinaryExpr(".", EXPR, EXPR))
+                my $binop = $item->inputs()->[0];
+                my $builtin = $item->inputs()->[1];
+                my $right = $item->inputs()->[2];
+                my $name = $builtin->inputs()->[0];
+                my @args = $builtin->inputs()->[1]->@*;
+                my $last_arg = pop @args;
+                my $new_last = $factory->make('Constructor',
+                    'class' => 'BinaryExpr',
+                    op      => $binop,
+                    left    => $last_arg,
+                    right   => $right,
+                );
+                push @args, $new_last;
+                push @result, $factory->make('Constructor',
+                    'class' => 'BuiltinCall',
+                    name    => $name,
+                    args    => \@args,
+                );
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && $item->class() eq 'VarDecl'
                     && !defined $item->inputs()->[1]
                     && $i + 1 <= $#$stmts
