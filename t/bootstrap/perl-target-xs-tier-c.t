@@ -207,14 +207,14 @@ my sub build_and_load($ir, $module_name) {
             skip 'ConciseTree: new failed', 9;
         };
 
-        TODO: {
-            local $TODO = 'XS emitter: field default [], push on array fields, scalar $ref->@*, method calls on array elements';
+        # ops() reader returns arrayref (field default [] now emitted in PM stub)
+        my $ops = $tree->ops();
+        is(ref($ops), 'ARRAY', 'ConciseTree: ops() returns arrayref');
+        is(scalar($ops && ref($ops) eq 'ARRAY' ? $ops->@* : 0), 0,
+            'ConciseTree: default ops is empty');
 
-            # ops() reader returns arrayref
-            my $ops = $tree->ops();
-            is(ref($ops), 'ARRAY', 'ConciseTree: ops() returns arrayref');
-            is(scalar($ops && ref($ops) eq 'ARRAY' ? $ops->@* : 0), 0,
-                'ConciseTree: default ops is empty');
+        TODO: {
+            local $TODO = 'IR-level bug: push $ops->@*, $op loses push keyword in Actions.pm';
 
             # op_count()
             is($tree->op_count(), 0, 'ConciseTree: op_count() is 0 for empty tree');
@@ -448,19 +448,14 @@ CONCISE
             skip 'Context: new failed', 12;
         };
 
-        # Field readers — focus() and rule() work (hash fetch for :param fields),
-        # but extract() returns literal '$focus' instead of field value, and
-        # defaults (children=[], position=0) aren't stored on construction.
+        # Field readers
         is($ctx->focus(), 'hello', 'Context: focus() reader');
         is($ctx->rule(), undef, 'Context: rule() defaults to undef');
 
-        TODO: {
-            local $TODO = 'XS emitter: method field access returns literal name, field defaults not stored';
-
-            is($ctx->extract(), 'hello', 'Context: extract() returns focus');
-            is(ref($ctx->children()), 'ARRAY', 'Context: children() returns arrayref');
-            is($ctx->position(), 0, 'Context: position() defaults to 0');
-        }
+        # extract() returns field value, defaults populated in PM stub new()
+        is($ctx->extract(), 'hello', 'Context: extract() returns focus');
+        is(ref($ctx->children()), 'ARRAY', 'Context: children() returns arrayref');
+        is($ctx->position(), 0, 'Context: position() defaults to 0');
 
         # Behavioral tests for extend/duplicate/scanned_text/leaves —
         # XS method bodies use coderef invocation, recursion, isa operator,

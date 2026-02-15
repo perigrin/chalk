@@ -125,7 +125,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         && $value->class() eq 'InterpolatedString') {
                     push @lines, $self->_emit_xs_interp_return($name, $value)->@*;
                     return \@lines;
-                } elsif ($value isa Chalk::Bootstrap::IR::Node::Constant) {
+                } elsif ($value isa Chalk::Bootstrap::IR::Node::Constant
+                         && ($value->const_type() // '') ne 'variable'
+                         && $value->value() !~ /^[\$\@\%]/) {
                     my $str = $self->_escape_c_string($value->value());
                     push @lines, 'SV *';
                     push @lines, "${name}(self, ...)";
@@ -939,6 +941,35 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@lines;
     }
 
+    # Convert an IR default value node to a Perl literal string for PM stub
+    method _ir_default_to_perl($node) {
+        return undef unless defined $node;
+
+        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+            my $class = $node->class();
+            if ($class eq 'ArrayRefExpr') {
+                my $elements = $node->inputs()->[0];
+                return '[]' if !$elements->@*;
+            }
+            if ($class eq 'HashRefExpr') {
+                my $pairs = $node->inputs()->[0];
+                return '{}' if !$pairs->@*;
+            }
+        }
+
+        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+            my $val = $node->value();
+            # undef is already Perl's default — skip
+            return undef if $val eq 'undef';
+            # Numeric literal
+            return $val if $val =~ /^-?[0-9]+(?:\.[0-9]+)?$/;
+            # String literal
+            return "'$val'";
+        }
+
+        return undef;
+    }
+
     # Emit the .pm stub (bless-based OO with XSLoader)
     method _emit_pm_stub($ir) {
         my $class_decl = $self->_find_class_decl($ir);
@@ -955,6 +986,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, 'use warnings;';
         push @lines, 'use XSLoader;';
 
+        # Emit use declarations from Program IR (skip pragmas and versions)
+        my $stmts = $ir->inputs()->[0];
+        for my $stmt ($stmts->@*) {
+            next unless $stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                && $stmt->class() eq 'UseDecl';
+            my $mod = $stmt->inputs()->[0]->value();
+            # Skip pragmas and version strings
+            next if $mod =~ /^(?:utf8|experimental|strict|warnings|bytes)$/;
+            next if $mod =~ /^v?[0-9]/;
+            push @lines, "use $mod;";
+        }
+
         if (defined $parent) {
             push @lines, "our \@ISA = ('$parent');";
         }
@@ -963,6 +1006,23 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '';
         push @lines, 'sub new {';
         push @lines, '    my ($class, %args) = @_;';
+
+        # Emit field defaults for fields with default values
+        if (defined $class_decl) {
+            my $body = $class_decl->inputs()->[2];
+            for my $item ($body->@*) {
+                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'FieldDecl';
+                my $default_node = $item->inputs()->[2];
+                next unless defined $default_node;
+                my $perl_default = $self->_ir_default_to_perl($default_node);
+                next unless defined $perl_default;
+                my $field_name = $item->inputs()->[0]->value();
+                $field_name =~ s/^\$//;
+                push @lines, "    \$args{$field_name} //= $perl_default;";
+            }
+        }
+
         push @lines, '    return bless \%args, $class;';
         push @lines, '}';
         push @lines, '';
