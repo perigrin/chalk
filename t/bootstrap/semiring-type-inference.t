@@ -1141,6 +1141,94 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 }
 
 # ========================================================================
+# Hash builtin validation (keys, values, each)
+# ========================================================================
+
+# Scanning 'keys' as QualifiedIdentifier → call_symbol = 'keys'
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'keys');
+    is($result->{call_symbol}, 'keys',
+        'scanning "keys" as QualifiedIdentifier tags call_symbol => keys');
+}
+
+# CallExpression with call_symbol=keys, is_hash_typed → valid
+{
+    my $val = { valid => true, call_symbol => 'keys', is_hash_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: keys with hash arg → valid');
+}
+
+# CallExpression with call_symbol=keys, is_scalar_typed → zero (kill)
+{
+    my $val = { valid => true, call_symbol => 'keys', is_scalar_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'CallExpression: keys with scalar arg → zero (killed)');
+}
+
+# CallExpression with call_symbol=keys, is_array_typed → zero (kill)
+{
+    my $val = { valid => true, call_symbol => 'keys', is_array_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'CallExpression: keys with array arg → zero (killed)');
+}
+
+# CallExpression with call_symbol=keys, no type tags → zero (kill, strict)
+{
+    my $val = { valid => true, call_symbol => 'keys' };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'CallExpression: keys with no type tags → zero (killed)');
+}
+
+# CallExpression with call_symbol=values, is_hash_typed → valid
+{
+    my $val = { valid => true, call_symbol => 'values', is_hash_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: values with hash arg → valid');
+}
+
+# CallExpression with call_symbol=each, is_hash_typed → valid
+{
+    my $val = { valid => true, call_symbol => 'each', is_hash_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: each with hash arg → valid');
+}
+
+# ========================================================================
+# Non-array/hash builtins with Any arg type pass with any tags
+# ========================================================================
+
+# CallExpression with call_symbol=defined, is_scalar_typed → valid (Any accepts all)
+{
+    my $val = { valid => true, call_symbol => 'defined', is_scalar_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: defined with scalar arg → valid');
+}
+
+# CallExpression with call_symbol=die, no tags → valid (Any + min_arity 0)
+{
+    my $val = { valid => true, call_symbol => 'die' };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: die with no args → valid');
+}
+
+# CallExpression with call_symbol=warn, is_scalar_typed → valid
+{
+    my $val = { valid => true, call_symbol => 'warn', is_scalar_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: warn with scalar arg → valid');
+}
+
+# ========================================================================
 # Integration: push/unshift with array args parse correctly
 # ========================================================================
 
@@ -1195,6 +1283,50 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('splice @arr, 0, 1;');
         ok(defined $result && $result->[0], 'splice @arr, 0, 1: parses');
+    }
+
+    # Hash builtins: keys, values, each
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('keys %hash;');
+        ok(defined $result && $result->[0], 'keys %hash: parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('values %hash;');
+        ok(defined $result && $result->[0], 'values %hash: parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('each %hash;');
+        ok(defined $result && $result->[0], 'each %hash: parses');
+    }
+
+    # Other new builtins: defined, warn, die, ref, length
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('defined $x;');
+        ok(defined $result && $result->[0], 'defined $x: parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('warn "oops";');
+        ok(defined $result && $result->[0], 'warn "oops": parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('die "fatal";');
+        ok(defined $result && $result->[0], 'die "fatal": parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('ref $obj;');
+        ok(defined $result && $result->[0], 'ref $obj: parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('length $str;');
+        ok(defined $result && $result->[0], 'length $str: parses');
     }
 
     # Regression: existing expressions still parse
