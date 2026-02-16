@@ -12,6 +12,7 @@ use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Grammar::Rule;
@@ -389,7 +390,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(
@@ -414,7 +417,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(
@@ -433,7 +438,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(
@@ -467,7 +474,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(

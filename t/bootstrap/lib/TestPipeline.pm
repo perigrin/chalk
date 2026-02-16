@@ -27,6 +27,7 @@ use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Perl::Actions;
 
@@ -141,7 +142,9 @@ my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
     );
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(

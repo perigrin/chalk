@@ -12,6 +12,7 @@ use lib 't/bootstrap/lib';
 # ========================================================================
 
 use_ok('Chalk::Grammar::Perl::KeywordTable');
+use_ok('Chalk::Grammar::Perl::TypeLibrary');
 
 # All 39 keywords should be recognized (33 \b keywords + 3 builtins + 3 regex-prefix tokens)
 my @keywords = qw(
@@ -52,7 +53,9 @@ for my $word (@non_keywords) {
 use_ok('Chalk::Bootstrap::Semiring::TypeInference');
 
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
-    keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+    builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
 );
 
 # zero/one/is_zero

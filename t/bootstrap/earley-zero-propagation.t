@@ -12,6 +12,7 @@ use Chalk::Bootstrap::Semiring::Composite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Grammar::Perl::TypeLibrary;
 use TestPipeline qw(perl_pipeline);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
@@ -45,7 +46,9 @@ SKIP: {
 
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
     );
     my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
         semirings => [$bool_sr, $type_sr],

@@ -7,19 +7,12 @@ use experimental 'class';
 class Chalk::Bootstrap::Semiring::TypeInference {
     # Callback: word => true if keyword, false otherwise
     field $keyword_check :param;
+    # Callback: name => signature hash or undef (from TypeLibrary)
+    field $builtin_lookup :param;
+    # Callback: (value, required_type) => true if value's tags satisfy required type
+    field $type_check :param;
     # Positions where BinaryOp scanned + or - (for unary disambiguation)
     field %binary_op_positions;
-
-    # Builtin signatures: argument types, minimum arity, and return type.
-    # arg_types describes the positional type pattern (e.g., first arg
-    # must be array, rest form a list). return_type describes the result.
-    my %BUILTIN_SIGNATURES = (
-        push    => { min_arity => 2, arg_types => ['array', 'list'], return_type => ['list'] },
-        unshift => { min_arity => 2, arg_types => ['array', 'list'], return_type => ['list'] },
-        pop     => { min_arity => 1, arg_types => ['array'],         return_type => ['scalar'] },
-        shift   => { min_arity => 1, arg_types => ['array'],         return_type => ['scalar'] },
-        splice  => { min_arity => 1, arg_types => ['array', 'list'], return_type => ['list'] },
-    );
 
 
     method zero() {
@@ -117,7 +110,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # so CallExpression can look up the full signature for validation.
         if ($rule_name eq 'QualifiedIdentifier'
             && $matched_text !~ /::/
-            && exists $BUILTIN_SIGNATURES{$matched_text})
+            && $builtin_lookup->($matched_text))
         {
             return $self->multiply($existing, {
                 valid       => true,
@@ -231,11 +224,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             # Builtin signature validation: check arg types and min arity
             if ($value->{call_symbol}) {
                 my $builtin_name = $value->{call_symbol};
-                my $sig = $BUILTIN_SIGNATURES{$builtin_name};
+                my $sig = $builtin_lookup->($builtin_name);
                 if ($sig) {
                     # Validate first arg type from signature
                     my $first_type = $sig->{arg_types}[0];
-                    if ($first_type eq 'array' && !$value->{is_array_typed}) {
+                    if (!$type_check->($value, $first_type)) {
                         return $self->zero();
                     }
                     # Validate min arity

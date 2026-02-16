@@ -129,13 +129,17 @@ class Chalk::Grammar::Perl::TypeLibrary {
     }
 
     # Checks whether a semiring value's type tags satisfy a required type.
-    # Returns true if any tag on the value is a subtype of the required type,
-    # or if no type tags are present (permissive: unknown type passes).
+    # Returns true if any tag on the value is a subtype of the required type.
+    # When required_type is 'Any', always returns true (anything satisfies Any).
+    # When no type tags are present and a specific type is required, returns
+    # false (strict: absence of type info means we can't confirm the type).
     sub tags_satisfy_type($value, $required_type) {
+        return true if $required_type eq 'Any';
+
         my @tags = grep { $value->{$_} } keys %TAG_TO_TYPE;
 
-        # No type tags: unknown type, be permissive
-        return true if !@tags;
+        # No type tags with specific type required: strict fail
+        return false if !@tags;
 
         for my $tag (@tags) {
             my $actual_type = $TAG_TO_TYPE{$tag};

@@ -224,15 +224,15 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
     { valid => true, is_array_typed => true }, 'Hash'),
     'array-tagged value does NOT satisfy Hash');
 
-# Untagged value satisfies Any requirement (no tags = unknown type, permissive)
+# Untagged value satisfies Any requirement (anything satisfies Any)
 ok(Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
     { valid => true }, 'Any'),
     'untagged value satisfies Any');
 
-# Untagged value satisfies Array requirement (permissive: no tags means unknown)
-ok(Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
+# Untagged value does NOT satisfy Array requirement (strict: no tags = can't confirm)
+ok(!Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
     { valid => true }, 'Array'),
-    'untagged value satisfies Array (permissive)');
+    'untagged value does NOT satisfy Array (strict)');
 
 # ========================================================================
 # Binary operator signatures - get_binary_op
