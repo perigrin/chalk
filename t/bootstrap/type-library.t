@@ -117,8 +117,14 @@ for my $name (qw(push pop shift unshift splice keys values delete exists
         "has_builtin('$name') returns true");
 }
 
+# has_builtin returns true for map/grep/sort (block-first builtins)
+for my $name (qw(map grep sort)) {
+    ok(Chalk::Grammar::Perl::TypeLibrary::has_builtin($name),
+        "has_builtin('$name') returns true");
+}
+
 # has_builtin returns false for non-builtins and keywords
-for my $name (qw(foo bar class if my map grep sort)) {
+for my $name (qw(foo bar class if my)) {
     ok(!Chalk::Grammar::Perl::TypeLibrary::has_builtin($name),
         "has_builtin('$name') returns false");
 }
@@ -161,6 +167,33 @@ for my $name (qw(foo bar class if my map grep sort)) {
     is($bless_sig->{min_arity}, 1, 'bless min_arity is 1');
     is($bless_sig->{arg_types}[0], 'Ref', 'bless first arg type is Ref');
     is($bless_sig->{return_type}, 'Object', 'bless return type is Object');
+}
+
+# Block-first builtins: map, grep, sort
+{
+    my $map_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('map');
+    ok(defined $map_sig, 'get_builtin(map) returns defined value');
+    is($map_sig->{min_arity}, 2, 'map min_arity is 2');
+    is($map_sig->{arg_types}[0], 'Code', 'map first arg type is Code');
+    is($map_sig->{arg_types}[1], 'List', 'map second arg type is List');
+    is($map_sig->{return_type}, 'List', 'map return type is List');
+}
+
+{
+    my $grep_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('grep');
+    ok(defined $grep_sig, 'get_builtin(grep) returns defined value');
+    is($grep_sig->{min_arity}, 2, 'grep min_arity is 2');
+    is($grep_sig->{arg_types}[0], 'Code', 'grep first arg type is Code');
+    is($grep_sig->{arg_types}[1], 'List', 'grep second arg type is List');
+    is($grep_sig->{return_type}, 'List', 'grep return type is List');
+}
+
+{
+    my $sort_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('sort');
+    ok(defined $sort_sig, 'get_builtin(sort) returns defined value');
+    is($sort_sig->{min_arity}, 1, 'sort min_arity is 1');
+    is($sort_sig->{arg_types}[0], 'List', 'sort first arg type is List');
+    is($sort_sig->{return_type}, 'List', 'sort return type is List');
 }
 
 # get_builtin returns undef for unknown names

@@ -82,6 +82,11 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # I/O
         print   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
         say     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
+
+        # Block-first builtins (parse via CallExpression alt 2/3)
+        map     => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List' },
+        grep    => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List' },
+        sort    => { min_arity => 1, arg_types => ['List'],                      return_type => 'List' },
     );
 
     # Returns the signature hash for a builtin, or undef if not a builtin.
