@@ -21,8 +21,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         splice  => { min_arity => 1, arg_types => ['array', 'list'], return_type => ['list'] },
     );
 
-    # Set of builtin names with signatures (for quick lookup at scan time)
-    my %BUILTIN_WITH_SIGNATURE = map { $_ => true } keys %BUILTIN_SIGNATURES;
 
     method zero() {
         return { valid => false };
@@ -119,7 +117,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # so CallExpression can look up the full signature for validation.
         if ($rule_name eq 'QualifiedIdentifier'
             && $matched_text !~ /::/
-            && exists $BUILTIN_WITH_SIGNATURE{$matched_text})
+            && exists $BUILTIN_SIGNATURES{$matched_text})
         {
             return $self->multiply($existing, {
                 valid       => true,
