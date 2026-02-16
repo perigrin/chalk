@@ -225,4 +225,28 @@ my sub find_method_in_class($class_decl, $name) {
     }
 }
 
+# ============================================================
+# 6. push @arr, $x; produces single BuiltinCall with 2 args
+#    NOT fragmented [BuiltinCall(push, [@arr]), Constant($x)]
+# ============================================================
+
+{
+    my $source = qq{push \@arr, \$x;\n};
+    my $ir = parse_source($source);
+    ok(defined $ir, 'push multi-arg: parses');
+
+    SKIP: {
+        skip 'push multi-arg: no IR', 3 unless defined $ir;
+
+        my $stmts = $ir->inputs()->[0];
+        is(scalar $stmts->@*, 1, 'push multi-arg: one statement (not fragmented)');
+
+        my $call = $stmts->[0];
+        is($call->class(), 'BuiltinCall', 'push multi-arg: statement is BuiltinCall');
+
+        my $args = $call->inputs()->[1];
+        is(scalar $args->@*, 2, 'push multi-arg: BuiltinCall has 2 args');
+    }
+}
+
 done_testing();

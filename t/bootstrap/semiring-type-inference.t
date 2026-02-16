@@ -435,7 +435,7 @@ for my $kw (qw(use class sub method)) {
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
-use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser);
+use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser build_perl_ir_parser);
 
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -908,118 +908,118 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # --- on_scan: builtin name tagging ---
 
-# Scanning 'push' as QualifiedIdentifier → builtin_first_arg = 'array'
+# Scanning 'push' as QualifiedIdentifier → call_symbol = 'push'
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'push');
     ok(!$ti->is_zero($result), 'scanning "push" as QualifiedIdentifier is non-zero');
-    is($result->{builtin_first_arg}, 'array',
-        'scanning "push" as QualifiedIdentifier tags builtin_first_arg => array');
+    is($result->{call_symbol}, 'push',
+        'scanning "push" as QualifiedIdentifier tags call_symbol => push');
     # push is NOT a keyword so it should NOT be keyword_as_identifier
     ok(!$result->{keyword_as_identifier},
         'scanning "push" as QualifiedIdentifier does NOT tag keyword_as_identifier');
 }
 
-# Scanning 'unshift' as QualifiedIdentifier → builtin_first_arg = 'array'
+# Scanning 'unshift' as QualifiedIdentifier → call_symbol = 'unshift'
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'unshift');
-    is($result->{builtin_first_arg}, 'array',
-        'scanning "unshift" tags builtin_first_arg => array');
+    is($result->{call_symbol}, 'unshift',
+        'scanning "unshift" tags call_symbol => unshift');
 }
 
-# Scanning 'pop' as QualifiedIdentifier → builtin_first_arg = 'array'
+# Scanning 'pop' as QualifiedIdentifier → call_symbol = 'pop'
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'pop');
-    is($result->{builtin_first_arg}, 'array',
-        'scanning "pop" tags builtin_first_arg => array');
+    is($result->{call_symbol}, 'pop',
+        'scanning "pop" tags call_symbol => pop');
 }
 
-# Scanning 'shift' as QualifiedIdentifier → builtin_first_arg = 'array'
+# Scanning 'shift' as QualifiedIdentifier → call_symbol = 'shift'
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'shift');
-    is($result->{builtin_first_arg}, 'array',
-        'scanning "shift" tags builtin_first_arg => array');
+    is($result->{call_symbol}, 'shift',
+        'scanning "shift" tags call_symbol => shift');
 }
 
-# Scanning 'splice' as QualifiedIdentifier → builtin_first_arg = 'array'
+# Scanning 'splice' as QualifiedIdentifier → call_symbol = 'splice'
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'splice');
-    is($result->{builtin_first_arg}, 'array',
-        'scanning "splice" tags builtin_first_arg => array');
+    is($result->{call_symbol}, 'splice',
+        'scanning "splice" tags call_symbol => splice');
 }
 
-# Scanning 'foo' → no builtin_first_arg
+# Scanning 'foo' → no call_symbol
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'foo');
-    ok(!$result->{builtin_first_arg},
-        'scanning "foo" does NOT tag builtin_first_arg');
+    ok(!$result->{call_symbol},
+        'scanning "foo" does NOT tag call_symbol');
 }
 
-# Qualified names (Foo::push) → no builtin_first_arg
+# Qualified names (Foo::push) → no call_symbol
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'Foo::push');
-    ok(!$result->{builtin_first_arg},
-        'scanning "Foo::push" does NOT tag builtin_first_arg');
+    ok(!$result->{call_symbol},
+        'scanning "Foo::push" does NOT tag call_symbol');
 }
 
-# --- multiply: builtin_first_arg propagation ---
+# --- multiply: call_symbol propagation ---
 
 {
-    my $builtin = { valid => true, builtin_first_arg => 'array' };
+    my $builtin = { valid => true, call_symbol => 'push' };
     my $o = $ti->one();
 
     my $r1 = $ti->multiply($builtin, $o);
-    is($r1->{builtin_first_arg}, 'array',
-        'builtin_first_arg propagates from left in multiply');
+    is($r1->{call_symbol}, 'push',
+        'call_symbol propagates from left in multiply');
 
     my $r2 = $ti->multiply($o, $builtin);
-    is($r2->{builtin_first_arg}, 'array',
-        'builtin_first_arg propagates from right in multiply');
+    is($r2->{call_symbol}, 'push',
+        'call_symbol propagates from right in multiply');
 }
 
 # --- on_complete: CallExpression validates builtin first arg ---
 
-# CallExpression with builtin_first_arg=array and is_array_typed → valid
+# CallExpression with call_symbol=push, is_array_typed, list_arity 2 → valid
 {
-    my $val = { valid => true, builtin_first_arg => 'array', is_array_typed => true };
+    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 2 };
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: push with array arg → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: push with array arg and arity 2 → valid');
 }
 
-# CallExpression with builtin_first_arg=array but only is_scalar_typed → zero (kill)
+# CallExpression with call_symbol=push but only is_scalar_typed → zero (kill)
 {
-    my $val = { valid => true, builtin_first_arg => 'array', is_scalar_typed => true };
+    my $val = { valid => true, call_symbol => 'push', is_scalar_typed => true };
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'CallExpression: push with scalar-only arg → zero (killed)');
 }
 
-# CallExpression with builtin_first_arg=array and NO type tags → zero (kill)
+# CallExpression with call_symbol=push and NO type tags → zero (kill)
 {
-    my $val = { valid => true, builtin_first_arg => 'array' };
+    my $val = { valid => true, call_symbol => 'push' };
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'CallExpression: push with no type tags → zero (killed)');
 }
 
-# CallExpression with builtin_first_arg=array, both scalar and array typed → valid
+# CallExpression with call_symbol=push, both scalar and array typed, list_arity 2 → valid
 # (e.g., push @arr, $x — has both tags from multiply)
 {
-    my $val = { valid => true, builtin_first_arg => 'array',
-                is_array_typed => true, is_scalar_typed => true };
+    my $val = { valid => true, call_symbol => 'push',
+                is_array_typed => true, is_scalar_typed => true, list_arity => 2 };
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: push with array+scalar args → valid');
 }
 
-# CallExpression without builtin_first_arg → normal (no validation)
+# CallExpression without call_symbol → normal (no validation)
 {
     my $val = { valid => true, is_scalar_typed => true };
     my $item = make_item('CallExpression', $val);
@@ -1027,20 +1027,114 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     ok(!$ti->is_zero($result), 'CallExpression: non-builtin with scalar → valid (no validation)');
 }
 
-# --- on_complete: builtin_first_arg cleared at boundary rules ---
+# --- on_complete: ExpressionList tracks list_arity ---
 
+# ExpressionList alt 0 (single Expression) → list_arity 1
 {
-    my $val = { valid => true, builtin_first_arg => 'array' };
+    my $val = { valid => true, is_array_typed => true };
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'ExpressionList alt 0: valid');
+    is($result->{list_arity}, 1, 'ExpressionList alt 0: list_arity = 1');
+}
+
+# ExpressionList alt 1 (ExpressionList , Expression) → list_arity from child + 1
+{
+    my $val = { valid => true, is_array_typed => true, list_arity => 1 };
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 1, 10);
+    ok(!$ti->is_zero($result), 'ExpressionList alt 1: valid');
+    is($result->{list_arity}, 2, 'ExpressionList alt 1: list_arity = 2');
+}
+
+# ExpressionList alt 2 (ExpressionList => Expression) → list_arity from child + 1
+{
+    my $val = { valid => true, list_arity => 2 };
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 2, 10);
+    ok(!$ti->is_zero($result), 'ExpressionList alt 2: valid');
+    is($result->{list_arity}, 3, 'ExpressionList alt 2: list_arity = 3');
+}
+
+# ExpressionList alt 3 (trailing comma) → list_arity preserved
+{
+    my $val = { valid => true, list_arity => 3 };
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 3, 10);
+    ok(!$ti->is_zero($result), 'ExpressionList alt 3: valid');
+    is($result->{list_arity}, 3, 'ExpressionList alt 3: list_arity preserved');
+}
+
+# list_arity propagates through multiply
+{
+    my $left = { valid => true, list_arity => 2 };
+    my $right = { valid => true, is_scalar_typed => true };
+    my $result = $ti->multiply($left, $right);
+    is($result->{list_arity}, 2, 'multiply: list_arity propagates from left');
+}
+{
+    my $left = { valid => true };
+    my $right = { valid => true, list_arity => 3 };
+    my $result = $ti->multiply($left, $right);
+    is($result->{list_arity}, 3, 'multiply: list_arity propagates from right');
+}
+
+# --- on_complete: CallExpression validates builtin min_arity ---
+
+# push with list_arity 1 (only @arr, no values) → rejected (min_arity 2)
+{
+    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 1 };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 1, 10);
+    ok($ti->is_zero($result), 'CallExpression: push with list_arity 1 → rejected (min_arity 2)');
+}
+
+# push with list_arity 2 (@arr, $val) → accepted
+{
+    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 2 };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 1, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 2 → accepted');
+}
+
+# push with list_arity 3 (@arr, $val1, $val2) → accepted
+{
+    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 3 };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 1, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 3 → accepted');
+}
+
+# pop with list_arity 1 (@arr) → accepted (min_arity 1)
+{
+    my $val = { valid => true, call_symbol => 'pop', is_array_typed => true, list_arity => 1 };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 1, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: pop with list_arity 1 → accepted');
+}
+
+# list_arity cleared at boundary rules (ParenExpr, Block, etc.)
+{
+    my $val = { valid => true, list_arity => 3 };
     my $item = make_item('ParenExpr', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$result->{builtin_first_arg}, 'ParenExpr clears builtin_first_arg');
+    ok(!$result->{list_arity}, 'ParenExpr clears list_arity');
+}
+
+# --- on_complete: call_symbol cleared at boundary rules ---
+
+{
+    my $val = { valid => true, call_symbol => 'push' };
+    my $item = make_item('ParenExpr', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$result->{call_symbol}, 'ParenExpr clears call_symbol');
 }
 
 {
-    my $val = { valid => true, builtin_first_arg => 'array' };
+    my $val = { valid => true, call_symbol => 'push' };
     my $item = make_item('Block', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$result->{builtin_first_arg}, 'Block clears builtin_first_arg');
+    ok(!$result->{call_symbol}, 'Block clears call_symbol');
 }
 
 # ========================================================================
@@ -1115,6 +1209,67 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
         my $result = $parser->parse_value('my $v = $h{$k};');
         ok(defined $result && $result->[0], 'regression: $h{$k} still parses');
+    }
+}
+
+# ========================================================================
+# Integration: push @arr, $x produces single BuiltinCall with 2 args
+# (Validates that Earley fixed-point iteration propagates merged values
+# to parent items, rather than fragmenting into separate statements.)
+# ========================================================================
+
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $ir = perl_pipeline();
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIBuiltinIRTest/g;
+    eval $generated;
+    die "Generated code failed to compile: $@" if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::TIBuiltinIRTest::grammar();
+
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $result = $parser->parse_value('push @arr, $x;');
+    ok(defined $result, 'push multi-arg IR: parse succeeds');
+
+    if (defined $result) {
+        my $sem_ctx = $result->[4];
+        ok(defined $sem_ctx, 'push multi-arg IR: semantic context defined');
+
+        if (defined $sem_ctx) {
+            my $ir_node = $sem_ctx->extract();
+            ok(defined $ir_node, 'push multi-arg IR: extract returns IR');
+
+            if (defined $ir_node) {
+                my $stmts = $ir_node->inputs()->[0];
+                ok(ref $stmts eq 'ARRAY', 'push multi-arg IR: statements is array');
+
+                if (ref $stmts eq 'ARRAY') {
+                    is(scalar($stmts->@*), 1,
+                        'push multi-arg IR: one statement (not fragmented)');
+
+                    if (scalar($stmts->@*) >= 1) {
+                        my $call = $stmts->[0];
+                        ok($call isa Chalk::Bootstrap::IR::Node::Constructor,
+                            'push multi-arg IR: stmt is Constructor');
+
+                        if ($call isa Chalk::Bootstrap::IR::Node::Constructor) {
+                            is($call->class(), 'BuiltinCall',
+                                'push multi-arg IR: stmt is BuiltinCall');
+
+                            if ($call->class() eq 'BuiltinCall') {
+                                my $args = $call->inputs()->[1];
+                                ok(ref $args eq 'ARRAY',
+                                    'push multi-arg IR: args is array');
+                                is(scalar($args->@*), 2,
+                                    'push multi-arg IR: BuiltinCall has 2 args');
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

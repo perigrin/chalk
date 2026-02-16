@@ -10,9 +10,19 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Positions where BinaryOp scanned + or - (for unary disambiguation)
     field %binary_op_positions;
 
-    # Builtins whose first argument must be an array (push, pop, shift, etc.)
-    my %BUILTIN_FIRST_ARG = map { $_ => 'array' }
-        qw(push unshift pop shift splice);
+    # Builtin signatures: argument types, minimum arity, and return type.
+    # arg_types describes the positional type pattern (e.g., first arg
+    # must be array, rest form a list). return_type describes the result.
+    my %BUILTIN_SIGNATURES = (
+        push    => { min_arity => 2, arg_types => ['array', 'list'], return_type => ['list'] },
+        unshift => { min_arity => 2, arg_types => ['array', 'list'], return_type => ['list'] },
+        pop     => { min_arity => 1, arg_types => ['array'],         return_type => ['scalar'] },
+        shift   => { min_arity => 1, arg_types => ['array'],         return_type => ['scalar'] },
+        splice  => { min_arity => 1, arg_types => ['array', 'list'], return_type => ['list'] },
+    );
+
+    # Set of builtin names with signatures (for quick lookup at scan time)
+    my %BUILTIN_WITH_SIGNATURE = map { $_ => true } keys %BUILTIN_SIGNATURES;
 
     method zero() {
         return { valid => false };
@@ -37,7 +47,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $is_arr  = $left->{is_array_typed}        || $right->{is_array_typed};
         my $is_hash = $left->{is_hash_typed}         || $right->{is_hash_typed};
         my $is_scl  = $left->{is_scalar_typed}       || $right->{is_scalar_typed};
-        my $builtin = $left->{builtin_first_arg}     || $right->{builtin_first_arg};
+        my $builtin = $left->{call_symbol}     || $right->{call_symbol};
+        my $arity   = $left->{list_arity}            || $right->{list_arity};
 
         return {
             valid => true,
@@ -46,7 +57,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             ($is_arr  ? (is_array_typed        => true)     : ()),
             ($is_hash ? (is_hash_typed         => true)     : ()),
             ($is_scl  ? (is_scalar_typed       => true)     : ()),
-            ($builtin ? (builtin_first_arg     => $builtin) : ()),
+            ($builtin ? (call_symbol     => $builtin) : ()),
+            ($arity   ? (list_arity            => $arity)   : ()),
         };
     }
 
@@ -103,14 +115,15 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $self->zero();
         }
 
-        # In QualifiedIdentifier context, tag bare builtins requiring array first arg
+        # In QualifiedIdentifier context, tag bare builtins with their name
+        # so CallExpression can look up the full signature for validation.
         if ($rule_name eq 'QualifiedIdentifier'
             && $matched_text !~ /::/
-            && exists $BUILTIN_FIRST_ARG{$matched_text})
+            && exists $BUILTIN_WITH_SIGNATURE{$matched_text})
         {
             return $self->multiply($existing, {
-                valid             => true,
-                builtin_first_arg => $BUILTIN_FIRST_ARG{$matched_text},
+                valid       => true,
+                call_symbol => $matched_text,
             });
         }
 
@@ -188,17 +201,50 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return $self->zero();
         }
 
+        # ExpressionList: track list arity (number of items in the list)
+        # alt 0 = single Expression (arity 1)
+        # alt 1 = ExpressionList , Expression (arity = child + 1)
+        # alt 2 = ExpressionList => Expression (arity = child + 1)
+        # alt 3 = trailing comma (arity preserved)
+        if ($rule_name eq 'ExpressionList') {
+            my $arity;
+            if ($alt_idx == 0) {
+                $arity = 1;
+            } elsif ($alt_idx == 1 || $alt_idx == 2) {
+                $arity = ($value->{list_arity} // 1) + 1;
+            } else {
+                $arity = $value->{list_arity};
+            }
+            return {
+                valid => true,
+                ($value->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                ($value->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                ($value->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                ($value->{call_symbol} ? (call_symbol => $value->{call_symbol}) : ()),
+                ($arity ? (list_arity => $arity) : ()),
+            };
+        }
+
         # CallExpression: validate builtin signatures, then check keyword rejection
         if ($rule_name eq 'CallExpression') {
             if ($value->{keyword_as_identifier}) {
                 return $self->zero();
             }
-            # Builtin signature validation: if builtin expects array first arg,
-            # kill the parse when no array-typed expression is present.
-            if ($value->{builtin_first_arg}) {
-                my $expected = $value->{builtin_first_arg};
-                if ($expected eq 'array' && !$value->{is_array_typed}) {
-                    return $self->zero();
+            # Builtin signature validation: check arg types and min arity
+            if ($value->{call_symbol}) {
+                my $builtin_name = $value->{call_symbol};
+                my $sig = $BUILTIN_SIGNATURES{$builtin_name};
+                if ($sig) {
+                    # Validate first arg type from signature
+                    my $first_type = $sig->{arg_types}[0];
+                    if ($first_type eq 'array' && !$value->{is_array_typed}) {
+                        return $self->zero();
+                    }
+                    # Validate min arity
+                    my $arity = $value->{list_arity} // 1;
+                    if ($arity < $sig->{min_arity}) {
+                        return $self->zero();
+                    }
                 }
                 # Validation passed: clear builtin tag, preserve type tags
                 return {
@@ -239,7 +285,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
 
         # Boundary rules: clear keyword_as_identifier, ambiguous_unary, and
-        # builtin_first_arg tags. Type tags (is_array_typed, etc.) are
+        # call_symbol tags. Type tags (is_array_typed, etc.) are
         # PRESERVED through boundaries because a parenthesized array is
         # still array-typed (e.g., ($ops->@*) is still array).
         # Attribute and MethodCall allow keywords as identifiers (e.g., :isa).
@@ -267,7 +313,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $is_arr  = $value->{is_array_typed};
         my $is_hash = $value->{is_hash_typed};
         my $is_scl  = $value->{is_scalar_typed};
-        my $builtin = $value->{builtin_first_arg};
+        my $builtin = $value->{call_symbol};
         return {
             valid => true,
             ($tagged  ? (keyword_as_identifier => true)     : ()),
@@ -275,7 +321,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             ($is_arr  ? (is_array_typed        => true)     : ()),
             ($is_hash ? (is_hash_typed         => true)     : ()),
             ($is_scl  ? (is_scalar_typed       => true)     : ()),
-            ($builtin ? (builtin_first_arg     => $builtin) : ()),
+            ($builtin ? (call_symbol     => $builtin) : ()),
         };
     }
 }

@@ -95,6 +95,13 @@ class Chalk::Bootstrap::Earley {
                 next if $processed->{$key};
                 $processed->{$key} = true;
 
+                # Re-read from chart: the value may have been updated by a
+                # merge (via add() in _complete or _advance_from_completed)
+                # since this entry was pushed to the agenda. Using the chart
+                # value ensures we process the fully-merged value, not the
+                # stale pre-merge value from the agenda entry.
+                ($item, $alt_idx) = $chart[$pos]->{$key}->@*;
+
                 if ($self->_is_complete($item, $alt_idx)) {
                     # Apply on_complete for completed rule before propagating
                     my $completed_value = $semiring->on_complete($item, $alt_idx, $pos);
@@ -135,7 +142,7 @@ class Chalk::Bootstrap::Earley {
                         );
                     } else {
                         # Scan (allow at end of input for zero-width matches)
-                        $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart, $agenda, $n);
+                        $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart, $n, $agenda);
                     }
                 }
             }
@@ -187,7 +194,7 @@ class Chalk::Bootstrap::Earley {
     }
 
     # Scan: match terminal and advance to next position
-    method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $agenda, $n) {
+    method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $n, $agenda = undef) {
         my $pattern_str = $symbol->value();
         my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
         my $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
@@ -223,15 +230,13 @@ class Chalk::Bootstrap::Earley {
             );
             $chart->[$end_pos]->{$key} = [$merged_item, $alt_idx];
             # If zero-width match, add to current agenda for immediate processing
-            # (The $processed hash prevents infinite loops from repeated zero-width matches)
-            if ($end_pos == $pos) {
+            if ($end_pos == $pos && $agenda) {
                 push $agenda->@*, [$merged_item, $alt_idx];
             }
         } else {
             $chart->[$end_pos]->{$key} = [$new_item, $alt_idx];
             # If zero-width match, add to current agenda for immediate processing
-            # (The $processed hash prevents infinite loops from repeated zero-width matches)
-            if ($end_pos == $pos) {
+            if ($end_pos == $pos && $agenda) {
                 push $agenda->@*, [$new_item, $alt_idx];
             }
         }
