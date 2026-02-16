@@ -14,17 +14,20 @@ use lib 't/bootstrap/lib';
 use_ok('Chalk::Grammar::Perl::KeywordTable');
 use_ok('Chalk::Grammar::Perl::TypeLibrary');
 
-# All 39 keywords should be recognized (33 \b keywords + 3 builtins + 3 regex-prefix tokens)
+# All keywords: declarators, conjunctions, phase blocks, operators, literals,
+# builtins, quoting prefixes, and special tokens
 my @keywords = qw(
-    use class sub method ADJUST
+    use class sub method ADJUST package
     if unless elsif else
     while until for foreach
     my our state local field
+    BEGIN CHECK UNITCHECK INIT END
     not and or xor
     eq ne lt gt le ge cmp isa x
     undef true false
     map grep
-    qw m s qr
+    qw q qq m s qr
+    __SUB__
 );
 
 for my $kw (@keywords) {
