@@ -435,7 +435,7 @@ for my $kw (qw(use class sub method)) {
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
-use TestPipeline qw(perl_pipeline build_perl_recognizer);
+use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser);
 
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -767,6 +767,354 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer);
         my $recognizer = build_perl_recognizer($gen_grammar, start => 'Program');
         my $result = $recognizer->parse('my $a = 1; my $b = +$a;');
         ok($result, 'unary plus (+$a) still parses');
+    }
+}
+
+# ========================================================================
+# Phase 1: Type tag propagation on Variables and PostfixDeref
+# ========================================================================
+
+# --- on_scan: variable type tagging ---
+
+# ScalarVariable scanned → is_scalar_typed
+{
+    my $item = make_item('ScalarVariable', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '$x');
+    ok(!$ti->is_zero($result), 'scanning $x as ScalarVariable is non-zero');
+    ok($result->{is_scalar_typed}, 'scanning $x as ScalarVariable tags is_scalar_typed');
+    ok(!$result->{is_array_typed}, 'scanning $x as ScalarVariable has no is_array_typed');
+    ok(!$result->{is_hash_typed}, 'scanning $x as ScalarVariable has no is_hash_typed');
+}
+
+# ArrayVariable scanned → is_array_typed
+{
+    my $item = make_item('ArrayVariable', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '@arr');
+    ok(!$ti->is_zero($result), 'scanning @arr as ArrayVariable is non-zero');
+    ok($result->{is_array_typed}, 'scanning @arr as ArrayVariable tags is_array_typed');
+    ok(!$result->{is_scalar_typed}, 'scanning @arr as ArrayVariable has no is_scalar_typed');
+    ok(!$result->{is_hash_typed}, 'scanning @arr as ArrayVariable has no is_hash_typed');
+}
+
+# HashVariable scanned → is_hash_typed
+{
+    my $item = make_item('HashVariable', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '%h');
+    ok(!$ti->is_zero($result), 'scanning %h as HashVariable is non-zero');
+    ok($result->{is_hash_typed}, 'scanning %h as HashVariable tags is_hash_typed');
+    ok(!$result->{is_scalar_typed}, 'scanning %h as HashVariable has no is_scalar_typed');
+    ok(!$result->{is_array_typed}, 'scanning %h as HashVariable has no is_array_typed');
+}
+
+# --- multiply: type tag propagation ---
+
+{
+    my $scalar = { valid => true, is_scalar_typed => true };
+    my $array  = { valid => true, is_array_typed => true };
+    my $hash   = { valid => true, is_hash_typed => true };
+    my $o = $ti->one();
+
+    my $r1 = $ti->multiply($scalar, $o);
+    ok($r1->{is_scalar_typed}, 'is_scalar_typed propagates from left in multiply');
+
+    my $r2 = $ti->multiply($o, $array);
+    ok($r2->{is_array_typed}, 'is_array_typed propagates from right in multiply');
+
+    my $r3 = $ti->multiply($hash, $o);
+    ok($r3->{is_hash_typed}, 'is_hash_typed propagates from left in multiply');
+
+    # Multiple tags propagate together
+    my $r4 = $ti->multiply($scalar, $array);
+    ok($r4->{is_scalar_typed}, 'multiply: both scalar and array survive (scalar)');
+    ok($r4->{is_array_typed}, 'multiply: both scalar and array survive (array)');
+}
+
+# --- on_complete: PostfixDeref type tagging ---
+
+# PostfixDeref alt 0 (->@*) → is_array_typed
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'PostfixDeref alt 0 completion is valid');
+    ok($result->{is_array_typed}, 'PostfixDeref alt 0 (->@*) tags is_array_typed');
+}
+
+# PostfixDeref alt 1 (->%*) → is_hash_typed
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 1, 10);
+    ok(!$ti->is_zero($result), 'PostfixDeref alt 1 completion is valid');
+    ok($result->{is_hash_typed}, 'PostfixDeref alt 1 (->%*) tags is_hash_typed');
+}
+
+# PostfixDeref alt 2 (->$*) → is_scalar_typed
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 2, 10);
+    ok(!$ti->is_zero($result), 'PostfixDeref alt 2 completion is valid');
+    ok($result->{is_scalar_typed}, 'PostfixDeref alt 2 (->$*) tags is_scalar_typed');
+}
+
+# PostfixDeref alt 3 (->$#*) → is_scalar_typed (array count is scalar)
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 3, 10);
+    ok(!$ti->is_zero($result), 'PostfixDeref alt 3 completion is valid');
+    ok($result->{is_scalar_typed}, 'PostfixDeref alt 3 (->$#*) tags is_scalar_typed');
+}
+
+# --- on_complete: Variable propagates child type tags ---
+
+{
+    my $scalar_val = { valid => true, is_scalar_typed => true };
+    my $item = make_item('Variable', $scalar_val);
+    my $result = $ti->on_complete($item, 0, 5);
+    ok(!$ti->is_zero($result), 'Variable completion with is_scalar_typed is valid');
+    ok($result->{is_scalar_typed}, 'Variable preserves is_scalar_typed from child');
+}
+
+{
+    my $array_val = { valid => true, is_array_typed => true };
+    my $item = make_item('Variable', $array_val);
+    my $result = $ti->on_complete($item, 0, 5);
+    ok(!$ti->is_zero($result), 'Variable completion with is_array_typed is valid');
+    ok($result->{is_array_typed}, 'Variable preserves is_array_typed from child');
+}
+
+# --- on_complete: boundary rules preserve type tags ---
+# Type tags pass through boundary rules (unlike keyword_as_identifier)
+
+{
+    my $typed = { valid => true, is_array_typed => true };
+    my $item = make_item('ParenExpr', $typed);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'ParenExpr with is_array_typed is valid');
+    ok($result->{is_array_typed}, 'ParenExpr preserves is_array_typed');
+    ok(!$result->{keyword_as_identifier}, 'ParenExpr still clears keyword_as_identifier');
+}
+
+{
+    my $typed = { valid => true, is_scalar_typed => true, keyword_as_identifier => true };
+    my $item = make_item('Block', $typed);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'Block with is_scalar_typed is valid');
+    ok($result->{is_scalar_typed}, 'Block preserves is_scalar_typed');
+    ok(!$result->{keyword_as_identifier}, 'Block still clears keyword_as_identifier');
+}
+
+# ========================================================================
+# Phase 2: Builtin signature table and CallExpression validation
+# ========================================================================
+
+# --- on_scan: builtin name tagging ---
+
+# Scanning 'push' as QualifiedIdentifier → builtin_first_arg = 'array'
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'push');
+    ok(!$ti->is_zero($result), 'scanning "push" as QualifiedIdentifier is non-zero');
+    is($result->{builtin_first_arg}, 'array',
+        'scanning "push" as QualifiedIdentifier tags builtin_first_arg => array');
+    # push is NOT a keyword so it should NOT be keyword_as_identifier
+    ok(!$result->{keyword_as_identifier},
+        'scanning "push" as QualifiedIdentifier does NOT tag keyword_as_identifier');
+}
+
+# Scanning 'unshift' as QualifiedIdentifier → builtin_first_arg = 'array'
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'unshift');
+    is($result->{builtin_first_arg}, 'array',
+        'scanning "unshift" tags builtin_first_arg => array');
+}
+
+# Scanning 'pop' as QualifiedIdentifier → builtin_first_arg = 'array'
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'pop');
+    is($result->{builtin_first_arg}, 'array',
+        'scanning "pop" tags builtin_first_arg => array');
+}
+
+# Scanning 'shift' as QualifiedIdentifier → builtin_first_arg = 'array'
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'shift');
+    is($result->{builtin_first_arg}, 'array',
+        'scanning "shift" tags builtin_first_arg => array');
+}
+
+# Scanning 'splice' as QualifiedIdentifier → builtin_first_arg = 'array'
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'splice');
+    is($result->{builtin_first_arg}, 'array',
+        'scanning "splice" tags builtin_first_arg => array');
+}
+
+# Scanning 'foo' → no builtin_first_arg
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'foo');
+    ok(!$result->{builtin_first_arg},
+        'scanning "foo" does NOT tag builtin_first_arg');
+}
+
+# Qualified names (Foo::push) → no builtin_first_arg
+{
+    my $item = make_item('QualifiedIdentifier', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'Foo::push');
+    ok(!$result->{builtin_first_arg},
+        'scanning "Foo::push" does NOT tag builtin_first_arg');
+}
+
+# --- multiply: builtin_first_arg propagation ---
+
+{
+    my $builtin = { valid => true, builtin_first_arg => 'array' };
+    my $o = $ti->one();
+
+    my $r1 = $ti->multiply($builtin, $o);
+    is($r1->{builtin_first_arg}, 'array',
+        'builtin_first_arg propagates from left in multiply');
+
+    my $r2 = $ti->multiply($o, $builtin);
+    is($r2->{builtin_first_arg}, 'array',
+        'builtin_first_arg propagates from right in multiply');
+}
+
+# --- on_complete: CallExpression validates builtin first arg ---
+
+# CallExpression with builtin_first_arg=array and is_array_typed → valid
+{
+    my $val = { valid => true, builtin_first_arg => 'array', is_array_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: push with array arg → valid');
+}
+
+# CallExpression with builtin_first_arg=array but only is_scalar_typed → zero (kill)
+{
+    my $val = { valid => true, builtin_first_arg => 'array', is_scalar_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'CallExpression: push with scalar-only arg → zero (killed)');
+}
+
+# CallExpression with builtin_first_arg=array and NO type tags → zero (kill)
+{
+    my $val = { valid => true, builtin_first_arg => 'array' };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'CallExpression: push with no type tags → zero (killed)');
+}
+
+# CallExpression with builtin_first_arg=array, both scalar and array typed → valid
+# (e.g., push @arr, $x — has both tags from multiply)
+{
+    my $val = { valid => true, builtin_first_arg => 'array',
+                is_array_typed => true, is_scalar_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: push with array+scalar args → valid');
+}
+
+# CallExpression without builtin_first_arg → normal (no validation)
+{
+    my $val = { valid => true, is_scalar_typed => true };
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'CallExpression: non-builtin with scalar → valid (no validation)');
+}
+
+# --- on_complete: builtin_first_arg cleared at boundary rules ---
+
+{
+    my $val = { valid => true, builtin_first_arg => 'array' };
+    my $item = make_item('ParenExpr', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$result->{builtin_first_arg}, 'ParenExpr clears builtin_first_arg');
+}
+
+{
+    my $val = { valid => true, builtin_first_arg => 'array' };
+    my $item = make_item('Block', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$result->{builtin_first_arg}, 'Block clears builtin_first_arg');
+}
+
+# ========================================================================
+# Integration: push/unshift with array args parse correctly
+# ========================================================================
+
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $ir = perl_pipeline();
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIBuiltinTest/g;
+    eval $generated;
+    die "Generated code failed to compile: $@" if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::TIBuiltinTest::grammar();
+
+    # push @arr, $x
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('push @arr, $x;');
+        ok(defined $result && $result->[0], 'push @arr, $x: parses');
+    }
+
+    # push $ops->@*, $op (PostfixDeref provides array type)
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('push $ops->@*, $op;');
+        ok(defined $result && $result->[0], 'push $ops->@*, $op: parses');
+    }
+
+    # unshift @arr, $x
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('unshift @arr, $x;');
+        ok(defined $result && $result->[0], 'unshift @arr, $x: parses');
+    }
+
+    # pop @arr
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('pop @arr;');
+        ok(defined $result && $result->[0], 'pop @arr: parses');
+    }
+
+    # shift @arr
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('shift @arr;');
+        ok(defined $result && $result->[0], 'shift @arr: parses');
+    }
+
+    # splice @arr, 0, 1
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('splice @arr, 0, 1;');
+        ok(defined $result && $result->[0], 'splice @arr, 0, 1: parses');
+    }
+
+    # Regression: existing expressions still parse
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('my $x = $a + $b;');
+        ok(defined $result && $result->[0], 'regression: $a + $b still parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('my @r = map { $_ } @items;');
+        ok(defined $result && $result->[0], 'regression: map {} @items still parses');
+    }
+    {
+        my $parser = build_perl_concise_parser($gen_grammar, start => 'Program');
+        my $result = $parser->parse_value('my $v = $h{$k};');
+        ok(defined $result && $result->[0], 'regression: $h{$k} still parses');
     }
 }
 
