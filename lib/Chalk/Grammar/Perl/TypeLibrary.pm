@@ -94,6 +94,21 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return exists $BUILTIN_SIGNATURES{$name} ? true : false;
     }
 
+    # Returns the signature for a builtin whose first arg type can be
+    # validated at parse time via scan-time type tags.
+    # Currently restricted to Array-typed first args (push/pop/shift/
+    # unshift/splice) because Hash-typed builtins like keys/values/each
+    # conflict with keyword expressions (e.g., `sort keys %h` — the
+    # call_symbol tag on `keys` interferes with the sort parse).
+    # Returns undef for builtins not eligible for parse-time validation.
+    # Used by TypeInference on_scan to decide which builtins to tag.
+    sub get_validated_builtin($name) {
+        my $sig = $BUILTIN_SIGNATURES{$name} // return undef;
+        my $first_type = $sig->{arg_types}[0] // return undef;
+        return $sig if $first_type eq 'Array';
+        return undef;
+    }
+
     # Returns true if $child is a subtype of (or equal to) $parent.
     # Walks the parent chain. None is subtype of everything.
     sub is_subtype($child, $parent) {
@@ -128,18 +143,29 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return $TAG_TO_TYPE{$tag};
     }
 
+    # Types that have corresponding scan-time tags in TypeInference.
+    # Only these types can be validated strictly at parse time because
+    # the parser produces tags for them (is_array_typed, is_hash_typed,
+    # is_scalar_typed). Other types (Str, Int, Ref, etc.) have no
+    # scan-time tags, so untagged values must pass permissively.
+    my %TAGGABLE_TYPES = map { $_ => true } qw(Array Hash);
+
     # Checks whether a semiring value's type tags satisfy a required type.
     # Returns true if any tag on the value is a subtype of the required type.
     # When required_type is 'Any', always returns true (anything satisfies Any).
-    # When no type tags are present and a specific type is required, returns
-    # false (strict: absence of type info means we can't confirm the type).
+    # When no type tags are present: strict fail only for taggable types
+    # (Array, Hash) that have scan-time tags; permissive for other types
+    # since the parser can't detect them.
     sub tags_satisfy_type($value, $required_type) {
         return true if $required_type eq 'Any';
 
         my @tags = grep { $value->{$_} } keys %TAG_TO_TYPE;
 
-        # No type tags with specific type required: strict fail
-        return false if !@tags;
+        # No type tags: strict fail only for types with scan-time tags
+        if (!@tags) {
+            return false if $TAGGABLE_TYPES{$required_type};
+            return true;
+        }
 
         for my $tag (@tags) {
             my $actual_type = $TAG_TO_TYPE{$tag};

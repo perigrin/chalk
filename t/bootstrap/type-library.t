@@ -229,10 +229,35 @@ ok(Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
     { valid => true }, 'Any'),
     'untagged value satisfies Any');
 
-# Untagged value does NOT satisfy Array requirement (strict: no tags = can't confirm)
+# Untagged value does NOT satisfy Array requirement (strict: taggable type)
 ok(!Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
     { valid => true }, 'Array'),
-    'untagged value does NOT satisfy Array (strict)');
+    'untagged value does NOT satisfy Array (strict taggable)');
+
+# Untagged value does NOT satisfy Hash requirement (strict: taggable type)
+ok(!Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
+    { valid => true }, 'Hash'),
+    'untagged value does NOT satisfy Hash (strict taggable)');
+
+# Untagged value satisfies Str requirement (permissive: no scan-time tag for Str)
+ok(Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
+    { valid => true }, 'Str'),
+    'untagged value satisfies Str (permissive non-taggable)');
+
+# Untagged value satisfies Scalar requirement (permissive: Scalar not in taggable set)
+ok(Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
+    { valid => true }, 'Scalar'),
+    'untagged value satisfies Scalar (permissive non-taggable)');
+
+# Untagged value satisfies Ref requirement (permissive)
+ok(Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
+    { valid => true }, 'Ref'),
+    'untagged value satisfies Ref (permissive non-taggable)');
+
+# Untagged value satisfies Int requirement (permissive)
+ok(Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type(
+    { valid => true }, 'Int'),
+    'untagged value satisfies Int (permissive non-taggable)');
 
 # ========================================================================
 # Binary operator signatures - get_binary_op
