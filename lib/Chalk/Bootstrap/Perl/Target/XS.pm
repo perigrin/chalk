@@ -211,9 +211,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # including those in nested scopes (if/foreach/etc.)
         $self->_collect_var_decls($body, \%declared_vars);
 
-        # Emit each body item as C code
-        for my $item ($body->@*) {
-            my $stmt = $self->_emit_xs_stmt($item, \%declared_vars);
+        # Detect early returns (ReturnStmt inside IfStmt or non-final position)
+        my $has_early_return = $self->_has_early_return($body);
+
+        # Emit each body item as C code, marking the last statement
+        for my $idx (0 .. $body->@* - 1) {
+            my $is_last = ($idx == $body->@* - 1);
+            my $stmt = $self->_emit_xs_stmt($body->[$idx], \%declared_vars, $is_last);
             push @code, $stmt if defined $stmt;
         }
 
@@ -222,7 +226,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         } else {
             push @lines, 'void';
         }
-        push @lines, "${name}(" . join(', ', @xs_params) . ")";
+        # XS signature line uses bare names; typed declarations go below
+        my @bare_params = map { /^SV \*(.*)/ ? $1 : $_ } @xs_params;
+        push @lines, "${name}(" . join(', ', @bare_params) . ")";
         for my $p (@xs_params) {
             push @lines, "    $p";
         }
@@ -247,11 +253,51 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         if ($has_return) {
+            # Label for early returns to jump to before OUTPUT section
+            if ($has_early_return) {
+                push @lines, '    xsreturn:';
+            }
             push @lines, '  OUTPUT:';
             push @lines, '    RETVAL';
         }
 
         return \@lines;
+    }
+
+    # Check if a body contains early returns (ReturnStmt inside IfStmt)
+    method _has_early_return($nodes) {
+        for my $item ($nodes->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            my $class = $item->class();
+            if ($class eq 'IfStmt') {
+                my $then_body = $item->inputs()->[1];
+                if ($self->_body_contains_return($then_body)) {
+                    return true;
+                }
+                my $else_body = $item->inputs()->[2];
+                if (defined($else_body) && ref($else_body) eq 'ARRAY'
+                        && $self->_body_contains_return($else_body)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    # Check if a body array contains any ReturnStmt
+    method _body_contains_return($body) {
+        return false unless ref($body) eq 'ARRAY';
+        for my $item ($body->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            return true if $item->class() eq 'ReturnStmt';
+            if ($item->class() eq 'IfStmt') {
+                my $then = $item->inputs()->[1];
+                return true if $self->_body_contains_return($then);
+                my $else = $item->inputs()->[2];
+                return true if defined($else) && $self->_body_contains_return($else);
+            }
+        }
+        return false;
     }
 
     # Recursively collect VarDecl and ForeachLoop iterator names from IR
@@ -288,15 +334,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
     }
 
-    # Emit a single IR node as a C statement line
-    method _emit_xs_stmt($node, $declared_vars) {
+    # Emit a single IR node as a C statement line.
+    # $is_last indicates whether this is the final statement in the method body.
+    method _emit_xs_stmt($node, $declared_vars, $is_last = true) {
         return undef unless defined $node;
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
             if ($class eq 'VarDecl')         { return $self->_emit_xs_var_decl($node, $declared_vars); }
-            if ($class eq 'ReturnStmt')      { return $self->_emit_xs_return_stmt($node, $declared_vars); }
+            if ($class eq 'ReturnStmt')      { return $self->_emit_xs_return_stmt($node, $declared_vars, $is_last); }
             if ($class eq 'DieCall')         { return $self->_emit_xs_die_call($node); }
             if ($class eq 'IfStmt')          { return $self->_emit_xs_if_stmt($node, $declared_vars); }
             if ($class eq 'ForeachLoop')     { return $self->_emit_xs_foreach_loop($node, $declared_vars); }
@@ -473,6 +520,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq '<=') { return "(SvNV($left) <= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
         if ($op eq '>=') { return "(SvNV($left) >= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
 
+        # isa — check if left derives from the class named in right
+        if ($op eq 'isa') {
+            return "(sv_derived_from_sv($left, $right, 0) ? &PL_sv_yes : &PL_sv_no)";
+        }
+
         # Range operator — construct an AV from integer start to end
         if ($op eq '..') {
             return "({ AV *_av = newAV(); SSize_t _s = SvIV($left); SSize_t _e = SvIV($right); SSize_t _j; for (_j = _s; _j <= _e; _j++) av_push(_av, newSViv(_j)); newRV_noinc((SV*)_av); })";
@@ -546,6 +598,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $target = $node->inputs()->[0];
         my $index  = $node->inputs()->[1];
         my $style  = $node->inputs()->[2]->value();
+
+        # Handle broken coderef call IR: SubscriptExpr with undef index
+        # comes from $f->($self) where parser loses the argument
+        if (!defined $index) {
+            my $tgt = defined $target
+                ? $self->_emit_xs_expr($target, $declared_vars)
+                : 'self';
+            return "({ dSP; ENTER; SAVETMPS; PUSHMARK(SP); PUTBACK; "
+                 . "call_sv($tgt, G_SCALAR); SPAGAIN; SV *_cr = SvREFCNT_inc(POPs); "
+                 . "PUTBACK; FREETMPS; LEAVE; _cr; })";
+        }
 
         my $tgt = defined $target
             ? $self->_emit_xs_expr($target, $declared_vars)
@@ -747,11 +810,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "${var}_sv = &PL_sv_undef;";
     }
 
-    # Emit ReturnStmt as RETVAL assignment
-    method _emit_xs_return_stmt($node, $declared_vars) {
+    # Emit ReturnStmt as RETVAL assignment.
+    # Non-final returns jump to xsreturn: label before OUTPUT section.
+    method _emit_xs_return_stmt($node, $declared_vars, $is_last = true) {
         my $value = $node->inputs()->[0];
         my $val_expr = $self->_emit_xs_expr($value, $declared_vars);
-        return "RETVAL = $val_expr;";
+        if ($is_last) {
+            return "RETVAL = $val_expr;";
+        }
+        return "RETVAL = $val_expr; goto xsreturn;";
     }
 
     # Emit DieCall as croak
@@ -774,7 +841,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines;
         push @lines, "if (SvTRUE($cond_expr)) {";
         for my $stmt ($then_body->@*) {
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+            # Returns inside if blocks are always early (non-final)
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
             push @lines, "    $code" if defined $code;
         }
 
@@ -790,7 +858,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             push @lines, "} else {";
             for my $stmt ($else_body->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
             }
         }
