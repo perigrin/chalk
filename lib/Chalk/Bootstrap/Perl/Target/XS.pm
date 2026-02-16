@@ -197,6 +197,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my %declared_vars;
         $declared_vars{hash} = true;  # always need hash for self access
 
+        # Track method parameters as declared vars before body emission,
+        # so _emit_xs_const_expr can resolve them as C parameters
+        my @xs_params = ('SV *self');
+        for my $p ($params->@*) {
+            my $pname = $p->value();
+            $pname =~ s/^\$//;
+            push @xs_params, "SV *$pname";
+            $declared_vars{"param:$pname"} = true;
+        }
+
         # Recursively collect all variable declarations from the body,
         # including those in nested scopes (if/foreach/etc.)
         $self->_collect_var_decls($body, \%declared_vars);
@@ -205,14 +215,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         for my $item ($body->@*) {
             my $stmt = $self->_emit_xs_stmt($item, \%declared_vars);
             push @code, $stmt if defined $stmt;
-        }
-
-        # Build XSUB signature
-        my @xs_params = ('SV *self');
-        for my $p ($params->@*) {
-            my $pname = $p->value();
-            $pname =~ s/^\$//;
-            push @xs_params, "SV *$pname";
         }
 
         if ($has_return) {
@@ -231,6 +233,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    SV **svp;';
         for my $var (sort keys %declared_vars) {
             next if $var eq 'hash';
+            next if $var =~ /^param:/;  # method params are XS parameters, not PREINIT vars
             push @lines, "    SV *${var}_sv = NULL;";
         }
 
@@ -353,6 +356,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
             my $var = $val;
             $var =~ s/^[\$\@\%]//;
+            # $self is the XS method receiver — use the C parameter directly
+            if ($var eq 'self') {
+                return 'self';
+            }
             # Regex capture variables ($1, $2, ...) — fetch from package
             # globals set by _emit_xs_regex_match wrapper
             if ($var =~ /^\d+$/) {
@@ -360,6 +367,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             if ($declared_vars && $declared_vars->{$var}) {
                 return "${var}_sv";
+            }
+            # Method parameters are bare C variables (no _sv suffix)
+            if ($declared_vars && $declared_vars->{"param:$var"}) {
+                return $var;
             }
             # Field access: fetch from self hash
             my $escaped = $self->_escape_c_string($var);
@@ -660,8 +671,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # push — av_push
         if ($name eq 'push' && $args->@* >= 2) {
-            my $arr = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arr_node = $args->[0];
+            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
             my $val = $self->_emit_xs_expr($args->[1], $declared_vars);
+            # PostfixDerefExpr ->@* already returns (AV*)SvRV(...), no need to double-deref
+            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $arr_node->class() eq 'PostfixDerefExpr') {
+                return "av_push($arr, SvREFCNT_inc($val))";
+            }
             return "av_push((AV*)SvRV($arr), SvREFCNT_inc($val))";
         }
 

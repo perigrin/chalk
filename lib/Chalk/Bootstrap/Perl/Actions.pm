@@ -89,6 +89,269 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make('Constant', const_type => 'string', value => $value);
     }
 
+    # Helper: check if a BuiltinCall node should be unwrapped during push-inward
+    my sub _is_unwrappable_builtin($node) {
+        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return false unless $node->class() eq 'BuiltinCall';
+        my $name = $node->inputs()->[0]->value();
+        return $PREFIX_BUILTINS{$name} || $LIST_BUILTINS{$name};
+    }
+
+    # Helper: push PostfixDerefExpr inward past prefix wrappers.
+    # The Earley parser's stale-value merge can misparent prefix constructs
+    # (return, scalar, die, list builtins) and method calls inside
+    # PostfixDeref's target. Iteratively unwraps wrapper layers, creates
+    # the deref at the innermost target, then rewraps in correct order.
+    #
+    # Handles these misparenting patterns:
+    #   PostfixDeref(ReturnStmt(X), @) → ReturnStmt(PostfixDeref(X, @))
+    #   PostfixDeref(BuiltinCall(scalar, [X]), @) → BuiltinCall(scalar, [PostfixDeref(X, @)])
+    #   PostfixDeref(MethodCall(BuiltinCall(push, [A, B]), m, []), @)
+    #     → BuiltinCall(push, [A, PostfixDeref(MethodCall(B, m, []), @)])
+    my sub _push_deref_inward($factory, $target, $sigil_node) {
+        # Collect wrappers to rewrap later
+        my @wrappers;
+        my $current = $target;
+        while (defined $current && $current isa Chalk::Bootstrap::IR::Node::Constructor) {
+            if ($current->class() eq 'ReturnStmt') {
+                push @wrappers, ['ReturnStmt'];
+                $current = $current->inputs()->[0];
+            } elsif ($current->class() eq 'DieCall') {
+                push @wrappers, ['DieCall', $current->inputs()->[0]];
+                my $args = $current->inputs()->[0];
+                $current = $args->[-1];
+            } elsif (_is_unwrappable_builtin($current)) {
+                push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
+                my $args = $current->inputs()->[1];
+                $current = $args->[-1];
+            } elsif ($current->class() eq 'MethodCallExpr') {
+                # MethodCall wrapping a prefix construct — peel it off
+                push @wrappers, ['MethodCallExpr', $current->inputs()->[1], $current->inputs()->[2]];
+                $current = $current->inputs()->[0];  # invocant
+            } else {
+                last;
+            }
+        }
+
+        # Create deref at the innermost target
+        my $result = $factory->make('Constructor',
+            'class'  => 'PostfixDerefExpr',
+            target => $current,
+            sigil  => $sigil_node,
+        );
+
+        # Rewrap layers from inside out
+        for my $wrapper (reverse @wrappers) {
+            if ($wrapper->[0] eq 'ReturnStmt') {
+                $result = $factory->make('Constructor',
+                    'class' => 'ReturnStmt',
+                    value   => $result,
+                );
+            } elsif ($wrapper->[0] eq 'DieCall') {
+                my @args = ($wrapper->[1]->@*);
+                $args[-1] = $result;
+                $result = $factory->make('Constructor',
+                    'class' => 'DieCall',
+                    args    => \@args,
+                );
+            } elsif ($wrapper->[0] eq 'BuiltinCall') {
+                my @args = ($wrapper->[2]->@*);
+                $args[-1] = $result;
+                $result = $factory->make('Constructor',
+                    'class' => 'BuiltinCall',
+                    name    => $wrapper->[1],
+                    args    => \@args,
+                );
+            } elsif ($wrapper->[0] eq 'MethodCallExpr') {
+                $result = $factory->make('Constructor',
+                    'class'       => 'MethodCallExpr',
+                    invocant    => $result,
+                    method_name => $wrapper->[1],
+                    args        => $wrapper->[2],
+                );
+            }
+        }
+
+        return $result;
+    }
+
+    # Helper: push MethodCallExpr inward past prefix wrappers.
+    # Same Earley stale-value merge issue as PostfixDeref: a MethodCall
+    # can end up with a BuiltinCall or other prefix construct as its
+    # invocant when the correct structure should have the prefix
+    # wrapping the method call.
+    #   MethodCall(BuiltinCall(push, [A, B]), m, [])
+    #     → BuiltinCall(push, [A, MethodCall(B, m, [])])
+    my sub _push_methodcall_inward($factory, $invocant, $method_name, $args) {
+        my @wrappers;
+        my $current = $invocant;
+        while (defined $current && $current isa Chalk::Bootstrap::IR::Node::Constructor) {
+            if ($current->class() eq 'ReturnStmt') {
+                push @wrappers, ['ReturnStmt'];
+                $current = $current->inputs()->[0];
+            } elsif ($current->class() eq 'DieCall') {
+                push @wrappers, ['DieCall', $current->inputs()->[0]];
+                my $die_args = $current->inputs()->[0];
+                $current = $die_args->[-1];
+            } elsif (_is_unwrappable_builtin($current)) {
+                push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
+                my $bi_args = $current->inputs()->[1];
+                $current = $bi_args->[-1];
+            } elsif ($current->class() eq 'PostfixDerefExpr') {
+                # PostfixDeref wrapping target — peel off and rewrap outside
+                push @wrappers, ['PostfixDerefExpr', $current->inputs()->[1]];
+                $current = $current->inputs()->[0];  # target
+            } else {
+                last;
+            }
+        }
+
+        # No wrappers found — return plain MethodCallExpr
+        unless (@wrappers) {
+            return $factory->make('Constructor',
+                'class'       => 'MethodCallExpr',
+                invocant    => $invocant,
+                method_name => $method_name,
+                args        => $args,
+            );
+        }
+
+        # Create method call at the innermost invocant
+        my $result = $factory->make('Constructor',
+            'class'       => 'MethodCallExpr',
+            invocant    => $current,
+            method_name => $method_name,
+            args        => $args,
+        );
+
+        # Rewrap layers from inside out
+        for my $wrapper (reverse @wrappers) {
+            if ($wrapper->[0] eq 'ReturnStmt') {
+                $result = $factory->make('Constructor',
+                    'class' => 'ReturnStmt',
+                    value   => $result,
+                );
+            } elsif ($wrapper->[0] eq 'DieCall') {
+                my @die_args = ($wrapper->[1]->@*);
+                $die_args[-1] = $result;
+                $result = $factory->make('Constructor',
+                    'class' => 'DieCall',
+                    args    => \@die_args,
+                );
+            } elsif ($wrapper->[0] eq 'BuiltinCall') {
+                my @bi_args = ($wrapper->[2]->@*);
+                $bi_args[-1] = $result;
+                $result = $factory->make('Constructor',
+                    'class' => 'BuiltinCall',
+                    name    => $wrapper->[1],
+                    args    => \@bi_args,
+                );
+            } elsif ($wrapper->[0] eq 'PostfixDerefExpr') {
+                $result = $factory->make('Constructor',
+                    'class'  => 'PostfixDerefExpr',
+                    target => $result,
+                    sigil  => $wrapper->[1],
+                );
+            }
+        }
+
+        return $result;
+    }
+
+    # Post-process: fix misparented postfix chains in the IR tree.
+    # The Earley parser's stale-value merge can produce
+    # MethodCallExpr(PostfixDerefExpr(X, S), M, A) when the correct
+    # structure is PostfixDerefExpr(MethodCallExpr(X, M, A), S).
+    # This walks the tree and swaps any such misparentings.
+    sub _fix_postfix_chain {
+        my ($factory, $node) = @_;
+        return $node unless defined $node;
+        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+
+        # Recursively fix inputs first (bottom-up)
+        my @new_inputs;
+        my $changed = false;
+        for my $inp ($node->inputs()->@*) {
+            if (ref($inp) eq 'ARRAY') {
+                my @fixed;
+                for my $elem ($inp->@*) {
+                    my $f = _fix_postfix_chain($factory, $elem);
+                    push @fixed, $f;
+                    $changed = true if !defined $f || !defined $elem || $f != $elem;
+                }
+                push @new_inputs, \@fixed;
+            } else {
+                my $f = _fix_postfix_chain($factory, $inp);
+                push @new_inputs, $f;
+                $changed = true if !defined $f || !defined $inp
+                    || (ref($f) && ref($inp) && $f != $inp);
+            }
+        }
+
+        if ($changed) {
+            # Rebuild the node with fixed inputs
+            if ($node->class() eq 'MethodCallExpr') {
+                $node = $factory->make('Constructor',
+                    'class'       => 'MethodCallExpr',
+                    invocant    => $new_inputs[0],
+                    method_name => $new_inputs[1],
+                    args        => $new_inputs[2],
+                );
+            } elsif ($node->class() eq 'PostfixDerefExpr') {
+                $node = $factory->make('Constructor',
+                    'class'  => 'PostfixDerefExpr',
+                    target => $new_inputs[0],
+                    sigil  => $new_inputs[1],
+                );
+            } elsif ($node->class() eq 'BuiltinCall') {
+                $node = $factory->make('Constructor',
+                    'class' => 'BuiltinCall',
+                    name    => $new_inputs[0],
+                    args    => $new_inputs[1],
+                );
+            } elsif ($node->class() eq 'SubscriptExpr') {
+                $node = $factory->make('Constructor',
+                    'class'  => 'SubscriptExpr',
+                    target => $new_inputs[0],
+                    index  => $new_inputs[1],
+                    style  => $new_inputs[2],
+                );
+            } elsif ($node->class() eq 'ReturnStmt') {
+                $node = $factory->make('Constructor',
+                    'class' => 'ReturnStmt',
+                    value   => $new_inputs[0],
+                );
+            }
+            # Other classes: leave unchanged (inputs are positional anyway)
+        }
+
+        # Fix the actual misparenting:
+        # MethodCallExpr(PostfixDerefExpr(X, S), M, A)
+        #   → PostfixDerefExpr(MethodCallExpr(X, M, A), S)
+        if ($node->class() eq 'MethodCallExpr') {
+            my $invocant = $node->inputs()->[0];
+            if (defined $invocant
+                    && $invocant isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $invocant->class() eq 'PostfixDerefExpr') {
+                my $inner_target = $invocant->inputs()->[0];
+                my $sigil = $invocant->inputs()->[1];
+                my $new_method = $factory->make('Constructor',
+                    'class'       => 'MethodCallExpr',
+                    invocant    => $inner_target,
+                    method_name => $node->inputs()->[1],
+                    args        => $node->inputs()->[2],
+                );
+                return $factory->make('Constructor',
+                    'class'  => 'PostfixDerefExpr',
+                    target => $new_method,
+                    sigil  => $sigil,
+                );
+            }
+        }
+
+        return $node;
+    }
+
     # Post-process statement list to fix grammar ambiguity artifacts.
     # The ambiguous grammar sometimes parses compound statements as
     # separate items. These fixups merge them back together:
@@ -275,6 +538,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
+        # Fix misparented postfix chains from Earley stale-value merge
+        @stmts = map { _fix_postfix_chain($factory, $_) } @stmts;
         return $factory->make('Constructor',
             'class'      => 'Program',
             statements => \@stmts,
@@ -293,7 +558,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        return _fixup_stmts($factory, \@stmts);
+        my $fixed = _fixup_stmts($factory, \@stmts);
+        # Fix misparented postfix chains from Earley stale-value merge
+        return [ map { _fix_postfix_chain($factory, $_) } $fixed->@* ];
     }
 
     # §2 StatementItem — collect all IR values for fixup in StatementList/Block
@@ -1122,12 +1389,10 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $op (@postfix_ops) {
             if ($op isa Chalk::Bootstrap::IR::Node::Constructor) {
                 if ($op->class() eq 'MethodCallExpr') {
-                    # Set invocant to current result
-                    $result = $factory->make('Constructor',
-                        'class'       => 'MethodCallExpr',
-                        invocant    => $result,
-                        method_name => $op->inputs()->[1],
-                        args        => $op->inputs()->[2],
+                    # Set invocant to current result, pushing inward
+                    # past any prefix wrappers from stale-value merge
+                    $result = _push_methodcall_inward(
+                        $factory, $result, $op->inputs()->[1], $op->inputs()->[2],
                     );
                 } elsif ($op->class() eq 'SubscriptExpr') {
                     $result = $factory->make('Constructor',
@@ -1152,11 +1417,14 @@ class Chalk::Bootstrap::Perl::Actions {
         return $result;
     }
 
-    # §16 MethodCall ::= /->/ _ QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
-    #                  | /->/ _ QualifiedIdentifier
-    # Returns Constructor:MethodCallExpr
+    # §16 MethodCall ::= Expression _ /->/ _ QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    #                  | Expression _ /->/ _ QualifiedIdentifier
+    #                  | Expression _ /->/ _ ScalarVariable _ /\(/ _ ExpressionList? _ /\)/
+    #                  | Expression _ /->/ _ ScalarVariable
+    # Returns Constructor:MethodCallExpr with invocant from child Expression
     method MethodCall($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
+        my $invocant;
         my $method_name;
         my @args;
 
@@ -1169,6 +1437,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $rule
                     && $rule eq 'QualifiedIdentifier') {
                 $method_name = $focus;
+            } elsif (!defined $method_name
+                    && $focus isa Chalk::Bootstrap::IR::Node) {
+                # Leaves before QualifiedIdentifier are the invocant expression
+                $invocant = $focus;
             } elsif (defined $method_name) {
                 if (ref($focus) eq 'ARRAY') {
                     push @args, $focus->@*;
@@ -1180,42 +1452,48 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $method_name;
 
-        # Return just method_name and args — the invocant will be attached
-        # by PostfixExpression which chains method calls with the target
-        return $factory->make('Constructor',
-            'class'       => 'MethodCallExpr',
-            invocant    => undef,  # set by PostfixExpression
-            method_name => $method_name,
-            args        => \@args,
-        );
+        # Push MethodCall inward past prefix wrappers when the Earley
+        # stale-value merge misparents a BuiltinCall as the invocant
+        return _push_methodcall_inward($factory, $invocant, $method_name, \@args);
     }
 
-    # §16 Subscript ::= /->/ _ /\[/ _ Expression _ /\]/
-    #                 | /->/ _ /\{/ _ Expression _ /\}/
-    # Returns Constructor:SubscriptExpr
+    # §16 Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
+    #                 | Expression _ /->/ _ /\{/ _ Expression _ /\}/
+    #                 | Expression _ /->/ _ /\(/ _ ExpressionList? _ /\)/
+    #                 | Expression _ /\[/ _ Expression _ /\]/
+    #                 | Expression _ /\{/ _ Expression _ /\}/
+    # Returns Constructor:SubscriptExpr with target from first child Expression
     method Subscript($ctx) {
         my $text = $ctx->scanned_text();
         my $style = ($text =~ /\[/) ? 'array' : 'hash';
 
         my @values = _collect_ir_values($ctx);
+        my $target;
         my $index;
         for my $val (@values) {
             if ($val isa Chalk::Bootstrap::IR::Node) {
-                $index = $val;
-                last;
+                if (!defined $target) {
+                    $target = $val;
+                } elsif (!defined $index) {
+                    $index = $val;
+                    last;
+                }
             }
         }
 
         return $factory->make('Constructor',
             'class'  => 'SubscriptExpr',
-            target => undef,  # set by PostfixExpression
+            target => $target,
             index  => $index,
             style  => _make_const($factory, $style),
         );
     }
 
-    # §16 PostfixDeref ::= /->/ _ /@\*/ | /->/ _ /%\*/ | /->/ _ /\$\*/
-    # Returns Constructor:PostfixDerefExpr
+    # §16 PostfixDeref ::= Expression _ /->/ _ /@\*/
+    #                     | Expression _ /->/ _ /%\*/
+    #                     | Expression _ /->/ _ /\$\*/
+    #                     | Expression _ /->/ _ /\$#\*/
+    # Returns Constructor:PostfixDerefExpr with target from child Expression
     method PostfixDeref($ctx) {
         my $text = $ctx->scanned_text();
         my $sigil;
@@ -1223,15 +1501,34 @@ class Chalk::Bootstrap::Perl::Actions {
             $sigil = '@';
         } elsif ($text =~ /%\*/) {
             $sigil = '%';
+        } elsif ($text =~ /\$#\*/) {
+            $sigil = '$#';
         } elsif ($text =~ /\$\*/) {
             $sigil = '$';
         }
 
-        return $factory->make('Constructor',
-            'class'  => 'PostfixDerefExpr',
-            target => undef,  # set by PostfixExpression
-            sigil  => _make_const($factory, $sigil // '@'),
-        );
+        # Extract base Expression from children
+        my $target;
+        for my $val (_collect_ir_values($ctx)) {
+            if ($val isa Chalk::Bootstrap::IR::Node) {
+                $target = $val;
+                last;
+            }
+        }
+
+        my $sigil_node = _make_const($factory, $sigil // '@');
+
+        # When the Earley parser produces a stale-value merge, prefix
+        # constructs (return, scalar, etc.) can end up as the target of
+        # PostfixDeref instead of wrapping it. Recursively push the deref
+        # inward past prefix wrappers until it reaches the actual target:
+        #   PostfixDeref(ReturnStmt(X), @)
+        #     → ReturnStmt(PostfixDeref(X, @))
+        #   PostfixDeref(BuiltinCall(scalar, [X]), @)
+        #     → BuiltinCall(scalar, [PostfixDeref(X, @)])
+        #   PostfixDeref(ReturnStmt(BuiltinCall(scalar, [X])), @)
+        #     → ReturnStmt(BuiltinCall(scalar, [PostfixDeref(X, @)]))
+        return _push_deref_inward($factory, $target, $sigil_node);
     }
 
     # §16 PostfixIncDec — not in Tier A

@@ -249,4 +249,166 @@ my sub find_method_in_class($class_decl, $name) {
     }
 }
 
+# === PostfixDeref base expression capture ===
+# PostfixDeref grammar: Expression _ /->/ _ /@\*/
+# The base Expression must be captured as the target of PostfixDerefExpr.
+
+{
+    subtest 'PostfixDeref captures base expression' => sub {
+        my $ir = parse_source('$ops->@*;');
+        ok(defined $ir, 'PostfixDeref: parses');
+
+        my $stmts = $ir->inputs()->[0];
+        is(scalar $stmts->@*, 1, 'PostfixDeref: one statement');
+
+        my $deref = $stmts->[0];
+        is($deref->class(), 'PostfixDerefExpr', 'PostfixDeref: class');
+
+        my $target = $deref->inputs()->[0];
+        ok(defined $target, 'PostfixDeref: target is defined');
+        is($target->value(), '$ops', 'PostfixDeref: target is $ops');
+        is($deref->inputs()->[1]->value(), '@', 'PostfixDeref: sigil is @');
+    };
+}
+
+{
+    subtest 'PostfixDeref with method chain base' => sub {
+        my $ir = parse_source('$self->ops()->@*;');
+        ok(defined $ir, 'PostfixDeref chain: parses');
+
+        my $stmts = $ir->inputs()->[0];
+        is(scalar $stmts->@*, 1, 'PostfixDeref chain: one statement');
+
+        my $deref = $stmts->[0];
+        is($deref->class(), 'PostfixDerefExpr', 'PostfixDeref chain: class');
+
+        my $target = $deref->inputs()->[0];
+        ok(defined $target, 'PostfixDeref chain: target is defined');
+        is($target->class(), 'MethodCallExpr', 'PostfixDeref chain: target is MethodCallExpr');
+    };
+}
+
+# === MethodCall base expression capture ===
+# MethodCall grammar: Expression _ /->/ _ QualifiedIdentifier ...
+# The base Expression must be captured as the invocant of MethodCallExpr.
+
+{
+    subtest 'MethodCall captures invocant' => sub {
+        my $ir = parse_source('$x->foo();');
+        ok(defined $ir, 'MethodCall: parses');
+
+        my $stmts = $ir->inputs()->[0];
+        is(scalar $stmts->@*, 1, 'MethodCall: one statement');
+
+        my $call = $stmts->[0];
+        is($call->class(), 'MethodCallExpr', 'MethodCall: class');
+
+        my $invocant = $call->inputs()->[0];
+        ok(defined $invocant, 'MethodCall: invocant is defined');
+        is($invocant->value(), '$x', 'MethodCall: invocant is $x');
+        is($call->inputs()->[1]->value(), 'foo', 'MethodCall: method name');
+    };
+}
+
+{
+    subtest 'MethodCall chain captures invocant' => sub {
+        my $ir = parse_source('$x->foo()->bar();');
+        ok(defined $ir, 'MethodCall chain: parses');
+
+        my $stmts = $ir->inputs()->[0];
+        is(scalar $stmts->@*, 1, 'MethodCall chain: one statement');
+
+        my $call = $stmts->[0];
+        is($call->class(), 'MethodCallExpr', 'MethodCall chain: class is outer');
+        is($call->inputs()->[1]->value(), 'bar', 'MethodCall chain: outer method is bar');
+
+        my $invocant = $call->inputs()->[0];
+        ok(defined $invocant, 'MethodCall chain: invocant is defined');
+        is($invocant->class(), 'MethodCallExpr', 'MethodCall chain: invocant is MethodCallExpr');
+        is($invocant->inputs()->[1]->value(), 'foo', 'MethodCall chain: inner method is foo');
+    };
+}
+
+# === Subscript base expression capture ===
+# Subscript grammar: Expression _ /->/ _ /\{/ _ Expression _ /\}/
+# The base Expression must be captured as the target of SubscriptExpr.
+
+{
+    subtest 'Subscript captures target' => sub {
+        my $ir = parse_source('$h->{key};');
+        ok(defined $ir, 'Subscript: parses');
+
+        my $stmts = $ir->inputs()->[0];
+        is(scalar $stmts->@*, 1, 'Subscript: one statement');
+
+        my $sub = $stmts->[0];
+        is($sub->class(), 'SubscriptExpr', 'Subscript: class');
+
+        my $target = $sub->inputs()->[0];
+        ok(defined $target, 'Subscript: target is defined');
+        is($target->value(), '$h', 'Subscript: target is $h');
+    };
+}
+
+# === return scalar $ops->@* captures all parts ===
+
+{
+    subtest 'return scalar PostfixDeref' => sub {
+        my $ir = parse_source('return scalar $ops->@*;');
+        ok(defined $ir, 'return scalar deref: parses');
+
+        my $stmts = $ir->inputs()->[0];
+        is(scalar $stmts->@*, 1, 'return scalar deref: one statement');
+
+        my $ret = $stmts->[0];
+        is($ret->class(), 'ReturnStmt', 'return scalar deref: class is ReturnStmt');
+
+        my $value = $ret->inputs()->[0];
+        ok(defined $value, 'return scalar deref: return value defined');
+        is($value->class(), 'BuiltinCall', 'return scalar deref: value is BuiltinCall(scalar)');
+        is($value->inputs()->[0]->value(), 'scalar', 'return scalar deref: builtin name');
+
+        my $scalar_arg = $value->inputs()->[1]->[0];
+        ok(defined $scalar_arg, 'return scalar deref: scalar arg defined');
+        is($scalar_arg->class(), 'PostfixDerefExpr', 'return scalar deref: arg is PostfixDerefExpr');
+
+        my $deref_target = $scalar_arg->inputs()->[0];
+        ok(defined $deref_target, 'return scalar deref: deref target defined');
+        is($deref_target->value(), '$ops', 'return scalar deref: deref target is $ops');
+    };
+}
+
+# === push with method chain PostfixDeref: push $ops->@*, $other->ops()->@* ===
+# The Earley stale-value merge can cause MethodCallExpr to wrap BuiltinCall
+# instead of being a standalone argument. Verify the IR is correctly structured.
+
+{
+    subtest 'push with method-chain PostfixDeref arg' => sub {
+        my $ir = parse_source('push $ops->@*, $other->ops()->@*;');
+        ok(defined $ir, 'push method-deref: parses');
+
+        SKIP: {
+            skip 'push method-deref: no IR', 6 unless defined $ir;
+
+            my $stmts = $ir->inputs()->[0];
+            is(scalar $stmts->@*, 1, 'push method-deref: one statement');
+
+            my $call = $stmts->[0];
+            is($call->class(), 'BuiltinCall', 'push method-deref: statement is BuiltinCall');
+            is($call->inputs()->[0]->value(), 'push', 'push method-deref: builtin name');
+
+            my $args = $call->inputs()->[1];
+            is(scalar $args->@*, 2, 'push method-deref: 2 args');
+
+            # First arg should be PostfixDerefExpr($ops, @)
+            my $arg1 = $args->[0];
+            is($arg1->class(), 'PostfixDerefExpr', 'push method-deref: arg1 is PostfixDerefExpr');
+
+            # Second arg should be PostfixDerefExpr(MethodCallExpr($other, ops, []), @)
+            my $arg2 = $args->[1];
+            is($arg2->class(), 'PostfixDerefExpr', 'push method-deref: arg2 is PostfixDerefExpr');
+        }
+    };
+}
+
 done_testing();
