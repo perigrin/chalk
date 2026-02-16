@@ -783,7 +783,7 @@ SKIP: {
         ok(defined $result, 'method call with anon sub arg');
     }
 
-    # --- MapGrepExpression: map/grep with block and list ---
+    # --- map/grep as CallExpression: block-first builtins ---
     {
         my $result = parse_result('my @r = map { $_ } @list;');
         ok(defined $result, 'map with block and array parses');

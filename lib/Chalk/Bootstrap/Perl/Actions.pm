@@ -960,11 +960,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §13 MapGrepExpression — not in Tier A
-    method MapGrepExpression($ctx) {
-        return undef;
-    }
-
     # §19 Literal — transparent pass-through
     method Literal($ctx) {
         my @values = _collect_ir_values($ctx);

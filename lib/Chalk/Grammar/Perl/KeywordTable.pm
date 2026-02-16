@@ -16,7 +16,6 @@ class Chalk::Grammar::Perl::KeywordTable {
     #   Phase blocks: BEGIN CHECK UNITCHECK INIT END
     #   Operators:    not and or xor eq ne lt gt le ge cmp isa x
     #   Literals:     undef true false
-    #   Builtins:     map grep (parse via MapGrepExpression, not CallExpression)
     #   Quoting:      qw q qq m s qr (prefix tokens for quoting/regex)
     #   Special:      __SUB__
     my %KEYWORDS = map { $_ => true } qw(
@@ -28,7 +27,6 @@ class Chalk::Grammar::Perl::KeywordTable {
         not and or xor
         eq ne lt gt le ge cmp isa x
         undef true false
-        map grep
         qw q qq m s qr
         __SUB__
     );

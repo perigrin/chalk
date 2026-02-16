@@ -361,20 +361,6 @@ class Chalk::Bootstrap::Semiring::Structural {
             return { valid => true, is_hash => true };
         }
 
-        # MapGrepExpression is a self-contained syntactic unit. Clear is_deref
-        # from inner content (e.g., $list->@*) so it doesn't propagate to
-        # the Expression level and confuse disambiguation with PostfixDeref
-        # wrapping the entire map/grep.
-        if ($rule_name eq 'MapGrepExpression') {
-            return {
-                valid    => true,
-                is_block => true,
-                ($value->{is_call}    ? (is_call    => true) : ()),
-                ($value->{is_list}    ? (is_list    => true) : ()),
-                ($value->{is_vardecl} ? (is_vardecl => true) : ()),
-            };
-        }
-
         # Tag VariableDeclaration completions — marks a `my`/`our`/`state`/`local`
         # declaration. This distinguishes correct parses (where `my` is a
         # declarator keyword) from bogus parses where `my` is treated as a

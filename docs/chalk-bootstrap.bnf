@@ -153,11 +153,8 @@ Atom ::= Variable
     | HashConstructor
     | QwLiteral
     | AnonymousSub
-    | MapGrepExpression
     | /__SUB__\b/
     | QualifiedIdentifier ;
-
-MapGrepExpression ::= /(?:map|grep)\b/ _ Block _ ExpressionList ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
     | /\(/ _ ExpressionList _ /\)/

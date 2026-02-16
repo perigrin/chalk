@@ -1,5 +1,5 @@
 # ABOUTME: Tests for grammar ambiguity fixes in the full 5-ary composite semiring.
-# ABOUTME: Covers Subscript, BinaryExpression, MapGrepExpression, ExpressionStatement, isa, __SUB__ disambiguation.
+# ABOUTME: Covers Subscript, BinaryExpression, CallExpression, ExpressionStatement, isa, __SUB__ disambiguation.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -37,9 +37,9 @@ SKIP: {
         return $result;
     }
 
-    # --- MapGrepExpression: map/grep with block and list ---
-    # These trigger Atom ambiguity completing MapGrepExpression when there are
-    # two alternatives: `map Block ExpressionList | map Block Expression`
+    # --- map/grep as CallExpression: block-first builtins ---
+    # These parse via CallExpression alt 2 (QualifiedIdentifier WS Block WS ExpressionList)
+    # triggering Block vs HashConstructor ambiguity resolved by Structural
     {
         my $result = parse_ok('my %h = map { $_ => 1 } qw(foo bar baz);');
         ok(defined $result, 'map { fat_comma } qw(...) parses without ambiguity');
@@ -139,10 +139,10 @@ SKIP: {
         ok(defined $result, 'string concat chain with method call parses without ambiguity');
     }
 
-    # --- Category 3: MapGrepExpression Block ambiguity ---
+    # --- Category 3: CallExpression Block ambiguity ---
     # `map { {} } (0 .. $n)` — inner {} is ambiguous between HashConstructor
-    # and Block. When inner completes as Block inside MapGrepExpression,
-    # the outer {} becomes MapGrepExpression's Block.
+    # and Block. When inner completes as Block inside CallExpression,
+    # the outer {} becomes CallExpression's Block.
     {
         my $result = parse_ok('my @x = map { {} } (0 .. $n);');
         ok(defined $result, 'map { {} } (0 .. $n) parses without ambiguity');

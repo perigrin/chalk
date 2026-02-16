@@ -25,7 +25,6 @@ my @keywords = qw(
     not and or xor
     eq ne lt gt le ge cmp isa x
     undef true false
-    map grep
     qw q qq m s qr
     __SUB__
 );
@@ -40,6 +39,7 @@ my @non_keywords = qw(
     return die warn push pop shift unshift
     keys values defined ref length chomp
     join split sort print say sprintf
+    map grep
     foo bar baz hello world
     _  WS Program Expression
 );
