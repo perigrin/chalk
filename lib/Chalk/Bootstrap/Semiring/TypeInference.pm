@@ -44,6 +44,42 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         );
     }
 
+    # Walk right spine of multiply tree to find the rightmost type tag.
+    # In a multiply tree (left * right), the rightmost child typically
+    # holds the most recent expression's type.
+    # Uses coderef for recursive calls within class scope.
+    my $_get_rightmost_type;
+    $_get_rightmost_type = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus && exists $focus->{type}) {
+            return $focus->{type};
+        }
+        # Walk children right-to-left
+        my @children = $ctx->children()->@*;
+        for my $child (reverse @children) {
+            my $t = $_get_rightmost_type->($child);
+            return $t if defined $t;
+        }
+        return undef;
+    };
+
+    # Search the multiply tree for a child with item_types in focus.
+    # Returns the item_types arrayref or undef.
+    my $_get_prev_item_types;
+    $_get_prev_item_types = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus && exists $focus->{item_types}) {
+            return $focus->{item_types};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_prev_item_types->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
     method zero() {
         return undef;
     }
@@ -255,19 +291,28 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return undef;
         }
 
-        # ExpressionList: track list arity (number of items in the list)
+        # ExpressionList: track list arity and per-item types
         # alt 0 = single Expression (arity 1)
         # alt 1 = ExpressionList , Expression (arity = child + 1)
         # alt 2 = ExpressionList => Expression (arity = child + 1)
         # alt 3 = trailing comma (arity preserved)
         if ($rule_name eq 'ExpressionList') {
-            my $arity;
+            my ($arity, $item_types);
             if ($alt_idx == 0) {
                 $arity = 1;
+                # Single expression: its type is the only item
+                my $type = $tags->{type};
+                $item_types = [$type];
             } elsif ($alt_idx == 1 || $alt_idx == 2) {
                 $arity = ($tags->{list_arity} // 1) + 1;
+                # Comma/fat-arrow: previous item_types + new item's type
+                my $prev = $_get_prev_item_types->($value) // [];
+                my $new_type = $_get_rightmost_type->($value);
+                $item_types = [$prev->@*, $new_type];
             } else {
                 $arity = $tags->{list_arity};
+                # Trailing comma: preserve item_types
+                $item_types = $tags->{item_types} // $_get_prev_item_types->($value);
             }
             return Chalk::Bootstrap::Context->new(
                 focus    => {
@@ -277,6 +322,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                     ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
                     ($arity ? (list_arity => $arity) : ()),
+                    ($item_types ? (item_types => $item_types) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),

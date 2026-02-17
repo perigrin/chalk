@@ -1956,4 +1956,97 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'MethodCall tags type => undef');
 }
 
+# ========================================================================
+# Phase 6: ExpressionList item_types accumulation
+# ========================================================================
+
+# ExpressionList alt 0 (single Expression) with type => 'Array'
+# → item_types => ['Array']
+{
+    my $val = make_ctx(is_array_typed => true, type => 'Array');
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'ExpressionList alt 0 with type: valid');
+    my $rtags = get_tags($result);
+    is_deeply($rtags->{item_types}, ['Array'],
+        'ExpressionList alt 0: item_types => [Array]');
+}
+
+# ExpressionList alt 0 with type => 'Int'
+{
+    my $val = make_ctx(type => 'Int');
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is_deeply(get_tags($result)->{item_types}, ['Int'],
+        'ExpressionList alt 0: item_types => [Int]');
+}
+
+# ExpressionList alt 0 with no type tag
+{
+    my $val = make_ctx(is_scalar_typed => true);
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is_deeply(get_tags($result)->{item_types}, [undef],
+        'ExpressionList alt 0 without type: item_types => [undef]');
+}
+
+# ExpressionList alt 1 (comma): previous item_types + new item
+# Simulate: ExpressionList(item_types => ['Array']) , Expression(type => 'Scalar')
+{
+    # Build a multiply tree: left has item_types, right has type
+    my $left = Chalk::Bootstrap::Context->new(
+        focus    => { valid => true, item_types => ['Array'], list_arity => 1, is_array_typed => true, type => 'Array' },
+        children => [],
+        position => 0,
+        rule     => 'ExpressionList',
+    );
+    my $right = Chalk::Bootstrap::Context->new(
+        focus    => { valid => true, type => 'Scalar', is_scalar_typed => true },
+        children => [],
+        position => 5,
+        rule     => undef,
+    );
+    my $combined = $ti->multiply($left, $right);
+    my $item = make_item('ExpressionList', $combined);
+    my $result = $ti->on_complete($item, 1, 10);
+    ok(!$ti->is_zero($result), 'ExpressionList alt 1 (comma): valid');
+    is_deeply(get_tags($result)->{item_types}, ['Array', 'Scalar'],
+        'ExpressionList alt 1: item_types => [Array, Scalar]');
+}
+
+# ExpressionList alt 2 (fat-arrow): same accumulation
+{
+    my $left = Chalk::Bootstrap::Context->new(
+        focus    => { valid => true, item_types => ['Str'], list_arity => 1, type => 'Str' },
+        children => [],
+        position => 0,
+        rule     => 'ExpressionList',
+    );
+    my $right = Chalk::Bootstrap::Context->new(
+        focus    => { valid => true, type => 'Int' },
+        children => [],
+        position => 5,
+        rule     => undef,
+    );
+    my $combined = $ti->multiply($left, $right);
+    my $item = make_item('ExpressionList', $combined);
+    my $result = $ti->on_complete($item, 2, 10);
+    is_deeply(get_tags($result)->{item_types}, ['Str', 'Int'],
+        'ExpressionList alt 2 (fat-arrow): item_types => [Str, Int]');
+}
+
+# ExpressionList alt 3 (trailing comma): item_types preserved
+{
+    my $val = Chalk::Bootstrap::Context->new(
+        focus    => { valid => true, item_types => ['Array', 'Scalar'], list_arity => 2 },
+        children => [],
+        position => 0,
+        rule     => 'ExpressionList',
+    );
+    my $item = make_item('ExpressionList', $val);
+    my $result = $ti->on_complete($item, 3, 10);
+    is_deeply(get_tags($result)->{item_types}, ['Array', 'Scalar'],
+        'ExpressionList alt 3 (trailing comma): item_types preserved');
+}
+
 done_testing;
