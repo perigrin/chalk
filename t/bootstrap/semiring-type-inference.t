@@ -1444,4 +1444,174 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     }
 }
 
+# ========================================================================
+# Phase 2: Scan-time type tags (type => 'TypeName')
+# ========================================================================
+
+# --- Variables get type tags alongside existing is_*_typed ---
+
+# ScalarVariable → type => 'Scalar'
+{
+    my $item = make_item('ScalarVariable', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '$x');
+    is(get_tags($result)->{type}, 'Scalar',
+        'ScalarVariable scan tags type => Scalar');
+}
+
+# ArrayVariable → type => 'Array'
+{
+    my $item = make_item('ArrayVariable', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '@arr');
+    is(get_tags($result)->{type}, 'Array',
+        'ArrayVariable scan tags type => Array');
+}
+
+# HashVariable → type => 'Hash'
+{
+    my $item = make_item('HashVariable', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '%h');
+    is(get_tags($result)->{type}, 'Hash',
+        'HashVariable scan tags type => Hash');
+}
+
+# --- Literal type tags ---
+
+# NumericLiteral: integer → type => 'Int'
+{
+    my $item = make_item('NumericLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '42');
+    ok(!$ti->is_zero($result), 'NumericLiteral scan of "42" is non-zero');
+    is(get_tags($result)->{type}, 'Int',
+        'NumericLiteral "42" tags type => Int');
+}
+
+# NumericLiteral: hex integer → type => 'Int'
+{
+    my $item = make_item('NumericLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '0xFF');
+    is(get_tags($result)->{type}, 'Int',
+        'NumericLiteral "0xFF" tags type => Int');
+}
+
+# NumericLiteral: binary integer → type => 'Int'
+{
+    my $item = make_item('NumericLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '0b1010');
+    is(get_tags($result)->{type}, 'Int',
+        'NumericLiteral "0b1010" tags type => Int');
+}
+
+# NumericLiteral: octal integer → type => 'Int'
+{
+    my $item = make_item('NumericLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '0777');
+    is(get_tags($result)->{type}, 'Int',
+        'NumericLiteral "0777" tags type => Int');
+}
+
+# NumericLiteral: float → type => 'Num'
+{
+    my $item = make_item('NumericLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '3.14');
+    is(get_tags($result)->{type}, 'Num',
+        'NumericLiteral "3.14" tags type => Num');
+}
+
+# NumericLiteral: scientific notation → type => 'Num'
+{
+    my $item = make_item('NumericLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '1e10');
+    is(get_tags($result)->{type}, 'Num',
+        'NumericLiteral "1e10" tags type => Num');
+}
+
+# NumericLiteral: negative exponent → type => 'Num'
+{
+    my $item = make_item('NumericLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '2.5E-3');
+    is(get_tags($result)->{type}, 'Num',
+        'NumericLiteral "2.5E-3" tags type => Num');
+}
+
+# StringLiteral → type => 'Str'
+{
+    my $item = make_item('StringLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '"hello"');
+    ok(!$ti->is_zero($result), 'StringLiteral scan of "hello" is non-zero');
+    is(get_tags($result)->{type}, 'Str',
+        'StringLiteral tags type => Str');
+}
+
+# StringLiteral: single-quoted → type => 'Str'
+{
+    my $item = make_item('StringLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, "'hello'");
+    is(get_tags($result)->{type}, 'Str',
+        'StringLiteral single-quoted tags type => Str');
+}
+
+# RegexLiteral (non-empty) → type => 'Regex'
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '/pattern/');
+    is(get_tags($result)->{type}, 'Regex',
+        'RegexLiteral "/pattern/" tags type => Regex');
+}
+
+# RegexLiteral (empty, still rejected) → zero
+{
+    my $item = make_item('RegexLiteral', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '//');
+    ok($ti->is_zero($result), 'RegexLiteral "//" still rejected');
+}
+
+# Literal: undef → type => 'Undef'
+{
+    my $item = make_item('Literal', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'undef');
+    ok(!$ti->is_zero($result), 'Literal "undef" scan is non-zero');
+    is(get_tags($result)->{type}, 'Undef',
+        'Literal "undef" tags type => Undef');
+}
+
+# Literal: true → type => 'Bool'
+{
+    my $item = make_item('Literal', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'true');
+    is(get_tags($result)->{type}, 'Bool',
+        'Literal "true" tags type => Bool');
+}
+
+# Literal: false → type => 'Bool'
+{
+    my $item = make_item('Literal', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'false');
+    is(get_tags($result)->{type}, 'Bool',
+        'Literal "false" tags type => Bool');
+}
+
+# Atom: __SUB__ → type => 'CodeRef'
+{
+    my $item = make_item('Atom', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '__SUB__');
+    ok(!$ti->is_zero($result), 'Atom __SUB__ scan is non-zero');
+    is(get_tags($result)->{type}, 'CodeRef',
+        'Atom "__SUB__" tags type => CodeRef');
+}
+
+# --- type tag propagation through multiply ---
+
+{
+    my $typed = make_ctx(type => 'Array');
+    my $o = $ti->one();
+
+    my $r1 = $ti->multiply($typed, $o);
+    is(get_tags($r1)->{type}, 'Array',
+        'type tag propagates from left in multiply');
+
+    my $r2 = $ti->multiply($o, $typed);
+    is(get_tags($r2)->{type}, 'Array',
+        'type tag propagates from right in multiply');
+}
+
 done_testing;

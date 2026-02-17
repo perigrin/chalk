@@ -127,6 +127,12 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return undef;
         }
 
+        # Non-empty RegexLiteral → type => 'Regex'
+        if ($rule_name eq 'RegexLiteral') {
+            return $self->multiply($existing,
+                _ctx({ valid => true, type => 'Regex' }));
+        }
+
         # In QualifiedIdentifier context, tag bare builtins with their name
         # so CallExpression can look up the full signature for validation.
         if ($rule_name eq 'QualifiedIdentifier'
@@ -146,18 +152,60 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 _ctx({ valid => true, keyword_as_identifier => true }));
         }
 
-        # Tag variable scans with their type
+        # Tag variable scans with their type (both legacy is_*_typed and new type tag)
         if ($rule_name eq 'ScalarVariable') {
             return $self->multiply($existing,
-                _ctx({ valid => true, is_scalar_typed => true }));
+                _ctx({ valid => true, is_scalar_typed => true, type => 'Scalar' }));
         }
         if ($rule_name eq 'ArrayVariable') {
             return $self->multiply($existing,
-                _ctx({ valid => true, is_array_typed => true }));
+                _ctx({ valid => true, is_array_typed => true, type => 'Array' }));
         }
         if ($rule_name eq 'HashVariable') {
             return $self->multiply($existing,
-                _ctx({ valid => true, is_hash_typed => true }));
+                _ctx({ valid => true, is_hash_typed => true, type => 'Hash' }));
+        }
+
+        # NumericLiteral: distinguish Int vs Num based on pattern
+        if ($rule_name eq 'NumericLiteral') {
+            # Hex (0x), binary (0b), octal (0[0-7]), or plain integer → Int
+            # Float (has .) or scientific (has e/E but not hex 0x) → Num
+            my $num_type;
+            if ($matched_text =~ /[.]/
+                || ($matched_text =~ /[eE]/ && $matched_text !~ /^0[xX]/))
+            {
+                $num_type = 'Num';
+            } else {
+                $num_type = 'Int';
+            }
+            return $self->multiply($existing,
+                _ctx({ valid => true, type => $num_type }));
+        }
+
+        # StringLiteral → type => 'Str'
+        if ($rule_name eq 'StringLiteral') {
+            return $self->multiply($existing,
+                _ctx({ valid => true, type => 'Str' }));
+        }
+
+        # Literal: undef/true/false
+        if ($rule_name eq 'Literal') {
+            my $lit_type;
+            if ($matched_text eq 'undef') {
+                $lit_type = 'Undef';
+            } elsif ($matched_text eq 'true' || $matched_text eq 'false') {
+                $lit_type = 'Bool';
+            }
+            if (defined $lit_type) {
+                return $self->multiply($existing,
+                    _ctx({ valid => true, type => $lit_type }));
+            }
+        }
+
+        # Atom: __SUB__ → type => 'CodeRef'
+        if ($rule_name eq 'Atom' && $matched_text eq '__SUB__') {
+            return $self->multiply($existing,
+                _ctx({ valid => true, type => 'CodeRef' }));
         }
 
         # Track BinaryOp scans of +/- for cross-item disambiguation.
