@@ -117,6 +117,15 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return undef;
     }
 
+    # Returns true if $actual_type satisfies $required_type.
+    # undef actual passes permissively (unknown type at parse time).
+    # 'Any' required always passes. Otherwise delegates to is_subtype.
+    sub type_satisfies($actual_type, $required_type) {
+        return true if $required_type eq 'Any';
+        return true if !defined $actual_type;
+        return is_subtype($actual_type, $required_type);
+    }
+
     # Returns true if $child is a subtype of (or equal to) $parent.
     # Walks the parent chain. None is subtype of everything.
     sub is_subtype($child, $parent) {

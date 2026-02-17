@@ -413,4 +413,50 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_binary_op('???'), undef,
 is(Chalk::Grammar::Perl::TypeLibrary::get_unary_op('???'), undef,
     'get_unary_op(???) returns undef');
 
+# ========================================================================
+# type_satisfies - check actual type against required type
+# ========================================================================
+
+# undef actual type passes permissively (unknown type)
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Array'),
+    'type_satisfies(undef, Array) returns true (permissive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Scalar'),
+    'type_satisfies(undef, Scalar) returns true (permissive)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies(undef, 'Any'),
+    'type_satisfies(undef, Any) returns true (permissive)');
+
+# Any required type always passes
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Int', 'Any'),
+    'type_satisfies(Int, Any) returns true');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Any'),
+    'type_satisfies(Array, Any) returns true');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Code', 'Any'),
+    'type_satisfies(Code, Any) returns true');
+
+# Subtype relationships
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Int', 'Scalar'),
+    'type_satisfies(Int, Scalar) returns true (subtype)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'List'),
+    'type_satisfies(Array, List) returns true (subtype)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Hash', 'List'),
+    'type_satisfies(Hash, List) returns true (subtype)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Num', 'Str'),
+    'type_satisfies(Num, Str) returns true (subtype)');
+
+# Exact match
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Array'),
+    'type_satisfies(Array, Array) returns true (exact)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Scalar'),
+    'type_satisfies(Scalar, Scalar) returns true (exact)');
+
+# Non-subtypes fail
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Array'),
+    'type_satisfies(Scalar, Array) returns false');
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Hash'),
+    'type_satisfies(Array, Hash) returns false');
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Code', 'Scalar'),
+    'type_satisfies(Code, Scalar) returns false');
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Str', 'Int'),
+    'type_satisfies(Str, Int) returns false (parent, not child)');
+
 done_testing;
