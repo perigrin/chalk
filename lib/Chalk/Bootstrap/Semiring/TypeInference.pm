@@ -16,76 +16,64 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Positions where BinaryOp scanned + or - (for unary disambiguation)
     field %binary_op_positions;
 
-    # Extract tag hash from a TypeInference value.
-    # Handles both plain hash (legacy) and Context (new) formats.
+    # Extract tag hash from a TypeInference value (Context with tag hash focus).
+    # For intermediate multiply nodes (undef focus), collects tags from leaves.
     my sub _tags($val) {
         return undef unless defined $val;
-        return $val if ref($val) eq 'HASH';
-        # Context object: extract focus (which is the tag hash)
-        if ($val isa Chalk::Bootstrap::Context) {
-            my $focus = $val->extract();
-            return $focus if defined $focus && ref($focus) eq 'HASH';
-            # Intermediate multiply node with undef focus: collect from leaves
-            my %merged;
-            for my $leaf ($val->leaves()) {
-                my $f = $leaf->extract();
-                next unless defined $f && ref($f) eq 'HASH';
-                for my $k (keys %$f) {
-                    $merged{$k} = $f->{$k} if $f->{$k};
-                }
+        my $focus = $val->extract();
+        return $focus if defined $focus;
+        # Intermediate multiply node with undef focus: collect from leaves
+        my %merged;
+        for my $leaf ($val->leaves()) {
+            my $f = $leaf->extract();
+            next unless defined $f;
+            for my $k (keys %$f) {
+                $merged{$k} = $f->{$k} if $f->{$k};
             }
-            return \%merged;
         }
-        return undef;
+        return \%merged;
     }
 
-    # Build a tag hash from extracted tags, always including valid => true.
-    my sub _make_tags(%tags) {
-        return { valid => true, %tags };
+    # Create a leaf Context with the given tag hash as focus.
+    my sub _ctx($tags) {
+        return Chalk::Bootstrap::Context->new(
+            focus    => $tags,
+            children => [],
+            position => 0,
+            rule     => undef,
+        );
     }
 
     method zero() {
-        return { valid => false };
+        return undef;
     }
 
     method one() {
-        return { valid => true };
+        return _ctx({ valid => true });
     }
 
     method is_zero($value) {
-        return !$value->{valid};
+        return !defined $value;
     }
 
     method multiply($left, $right) {
         # Propagate zero
-        return $self->zero() if $self->is_zero($left);
-        return $self->zero() if $self->is_zero($right);
+        return undef if !defined $left;
+        return undef if !defined $right;
 
-        # Propagate tags from either child
-        my $tagged  = $left->{keyword_as_identifier} || $right->{keyword_as_identifier};
-        my $unary   = $left->{ambiguous_unary}       || $right->{ambiguous_unary};
-        my $is_arr  = $left->{is_array_typed}        || $right->{is_array_typed};
-        my $is_hash = $left->{is_hash_typed}         || $right->{is_hash_typed};
-        my $is_scl  = $left->{is_scalar_typed}       || $right->{is_scalar_typed};
-        my $builtin = $left->{call_symbol}     || $right->{call_symbol};
-        my $arity   = $left->{list_arity}            || $right->{list_arity};
-
-        return {
-            valid => true,
-            ($tagged  ? (keyword_as_identifier => true)     : ()),
-            ($unary   ? (ambiguous_unary       => true)     : ()),
-            ($is_arr  ? (is_array_typed        => true)     : ()),
-            ($is_hash ? (is_hash_typed         => true)     : ()),
-            ($is_scl  ? (is_scalar_typed       => true)     : ()),
-            ($builtin ? (call_symbol     => $builtin) : ()),
-            ($arity   ? (list_arity            => $arity)   : ()),
-        };
+        # Build Context tree preserving children
+        return Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [$left, $right],
+            position => $right->position(),
+            rule     => undef,
+        );
     }
 
     method add($left, $right) {
         # Return first non-zero alternative
-        return $right if $self->is_zero($left);
-        return $left if $self->is_zero($right);
+        return $right if !defined $left;
+        return $left if !defined $right;
 
         # Prefer non-ambiguous-unary (binary) over ambiguous-unary
         my $left_tags  = _tags($left);
@@ -105,8 +93,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Signal to Composite which alternative to select for ALL components.
     # Returns 'left', 'right', or undef (no preference).
     method selects_alternative($left, $right) {
-        return undef if $self->is_zero($left);
-        return undef if $self->is_zero($right);
+        return undef if !defined $left;
+        return undef if !defined $right;
 
         my $left_tags  = _tags($left);
         my $right_tags = _tags($right);
@@ -128,7 +116,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $existing = $item->{value};
 
         # Propagate zero
-        return $self->zero() if $self->is_zero($existing);
+        return undef if !defined $existing;
 
         my $rule_name = $item->{rule}->name();
 
@@ -136,7 +124,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         if ($rule_name eq 'RegexLiteral'
             && $matched_text =~ m{^(?:m)?//[msixpodualngcer]*$})
         {
-            return $self->zero();
+            return undef;
         }
 
         # In QualifiedIdentifier context, tag bare builtins with their name
@@ -145,10 +133,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             && $matched_text !~ /::/
             && $builtin_lookup->($matched_text))
         {
-            return $self->multiply($existing, {
-                valid       => true,
-                call_symbol => $matched_text,
-            });
+            return $self->multiply($existing,
+                _ctx({ valid => true, call_symbol => $matched_text }));
         }
 
         # In QualifiedIdentifier context, reject bare keywords (no :: separator)
@@ -156,30 +142,22 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             && $matched_text !~ /::/
             && $keyword_check->($matched_text))
         {
-            return $self->multiply($existing, {
-                valid                => true,
-                keyword_as_identifier => true,
-            });
+            return $self->multiply($existing,
+                _ctx({ valid => true, keyword_as_identifier => true }));
         }
 
         # Tag variable scans with their type
         if ($rule_name eq 'ScalarVariable') {
-            return $self->multiply($existing, {
-                valid          => true,
-                is_scalar_typed => true,
-            });
+            return $self->multiply($existing,
+                _ctx({ valid => true, is_scalar_typed => true }));
         }
         if ($rule_name eq 'ArrayVariable') {
-            return $self->multiply($existing, {
-                valid         => true,
-                is_array_typed => true,
-            });
+            return $self->multiply($existing,
+                _ctx({ valid => true, is_array_typed => true }));
         }
         if ($rule_name eq 'HashVariable') {
-            return $self->multiply($existing, {
-                valid        => true,
-                is_hash_typed => true,
-            });
+            return $self->multiply($existing,
+                _ctx({ valid => true, is_hash_typed => true }));
         }
 
         # Track BinaryOp scans of +/- for cross-item disambiguation.
@@ -198,10 +176,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             && $matched_text =~ /^[+-]$/
             && $binary_op_positions{$pos})
         {
-            return $self->multiply($existing, {
-                valid           => true,
-                ambiguous_unary => true,
-            });
+            return $self->multiply($existing,
+                _ctx({ valid => true, ambiguous_unary => true }));
         }
 
         # Non-QualifiedIdentifier or non-keyword: transparent
@@ -210,8 +186,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     method on_complete($item, $alt_idx, $pos) {
         my $value = $item->{value};
-        return $self->zero() if $self->is_zero($value);
+        return undef if !defined $value;
 
+        my $tags = _tags($value);
         my $rule_name = $item->{rule}->name();
 
         # Reject keyword-as-identifier at expression-level rules where a
@@ -221,8 +198,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # keyword misuse occurs. Other rules that contain QualifiedIdentifier
         # (Attribute, MethodCall, SubroutineDefinition, MethodDefinition)
         # legitimately use keywords as identifiers (e.g., :isa(...), ->isa(...), sub eq {}).
-        if ($rule_name eq 'Atom' && $value->{keyword_as_identifier}) {
-            return $self->zero();
+        if ($rule_name eq 'Atom' && $tags->{keyword_as_identifier}) {
+            return undef;
         }
 
         # ExpressionList: track list arity (number of items in the list)
@@ -235,77 +212,99 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             if ($alt_idx == 0) {
                 $arity = 1;
             } elsif ($alt_idx == 1 || $alt_idx == 2) {
-                $arity = ($value->{list_arity} // 1) + 1;
+                $arity = ($tags->{list_arity} // 1) + 1;
             } else {
-                $arity = $value->{list_arity};
+                $arity = $tags->{list_arity};
             }
-            return {
-                valid => true,
-                ($value->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                ($value->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                ($value->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
-                ($value->{call_symbol} ? (call_symbol => $value->{call_symbol}) : ()),
-                ($arity ? (list_arity => $arity) : ()),
-            };
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                    ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
+                    ($arity ? (list_arity => $arity) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
         }
 
         # CallExpression: validate builtin signatures, then check keyword rejection
         if ($rule_name eq 'CallExpression') {
-            if ($value->{keyword_as_identifier}) {
-                return $self->zero();
+            if ($tags->{keyword_as_identifier}) {
+                return undef;
             }
             # Builtin signature validation: check arg types and min arity
-            if ($value->{call_symbol}) {
-                my $builtin_name = $value->{call_symbol};
+            if ($tags->{call_symbol}) {
+                my $builtin_name = $tags->{call_symbol};
                 my $sig = $builtin_lookup->($builtin_name);
                 if ($sig) {
                     # Validate first arg type from signature
                     my $first_type = $sig->{arg_types}[0];
-                    if (!$type_check->($value, $first_type)) {
-                        return $self->zero();
+                    if (!$type_check->($tags, $first_type)) {
+                        return undef;
                     }
                     # Validate min arity
-                    my $arity = $value->{list_arity} // 1;
+                    my $arity = $tags->{list_arity} // 1;
                     if ($arity < $sig->{min_arity}) {
-                        return $self->zero();
+                        return undef;
                     }
                 }
                 # Validation passed: clear builtin tag, preserve type tags
-                return {
-                    valid => true,
-                    ($value->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($value->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($value->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
-                };
+                return Chalk::Bootstrap::Context->new(
+                    focus    => {
+                        valid => true,
+                        ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                        ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                        ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                    },
+                    children => $value->children(),
+                    position => $value->position(),
+                    rule     => $rule_name,
+                );
             }
             # Non-builtin CallExpression: preserve type tags
-            return {
-                valid => true,
-                ($value->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                ($value->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                ($value->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
-            };
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
         }
 
         # UnaryExpression completion with ambiguous_unary tag → reject.
         # The binary interpretation (BinaryExpression) at the same position
         # is the correct parse; zero-propagation prevents this unary path
         # from poisoning parent items.
-        if ($rule_name eq 'UnaryExpression' && $value->{ambiguous_unary}) {
-            return $self->zero();
+        if ($rule_name eq 'UnaryExpression' && $tags->{ambiguous_unary}) {
+            return undef;
         }
 
         # PostfixDeref: tag with the type of the dereference result.
         # alt 0 = ->@* (array), alt 1 = ->%* (hash),
         # alt 2 = ->$* (scalar), alt 3 = ->$#* (scalar count)
         if ($rule_name eq 'PostfixDeref') {
+            my $type_tag;
             if ($alt_idx == 0) {
-                return { valid => true, is_array_typed => true };
+                $type_tag = { valid => true, is_array_typed => true };
             } elsif ($alt_idx == 1) {
-                return { valid => true, is_hash_typed => true };
+                $type_tag = { valid => true, is_hash_typed => true };
             } else {
-                return { valid => true, is_scalar_typed => true };
+                $type_tag = { valid => true, is_scalar_typed => true };
             }
+            return Chalk::Bootstrap::Context->new(
+                focus    => $type_tag,
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
         }
 
         # Boundary rules: clear keyword_as_identifier, ambiguous_unary, and
@@ -323,29 +322,33 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             || $rule_name eq 'Attribute'
             || $rule_name eq 'Subscript')
         {
-            return {
-                valid => true,
-                ($value->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                ($value->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                ($value->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
-            };
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
         }
 
         # Preserve all tags through intermediate rules
-        my $tagged  = $value->{keyword_as_identifier};
-        my $unary   = $value->{ambiguous_unary};
-        my $is_arr  = $value->{is_array_typed};
-        my $is_hash = $value->{is_hash_typed};
-        my $is_scl  = $value->{is_scalar_typed};
-        my $builtin = $value->{call_symbol};
-        return {
-            valid => true,
-            ($tagged  ? (keyword_as_identifier => true)     : ()),
-            ($unary   ? (ambiguous_unary       => true)     : ()),
-            ($is_arr  ? (is_array_typed        => true)     : ()),
-            ($is_hash ? (is_hash_typed         => true)     : ()),
-            ($is_scl  ? (is_scalar_typed       => true)     : ()),
-            ($builtin ? (call_symbol     => $builtin) : ()),
-        };
+        return Chalk::Bootstrap::Context->new(
+            focus    => {
+                valid => true,
+                ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true)     : ()),
+                ($tags->{ambiguous_unary}       ? (ambiguous_unary       => true)     : ()),
+                ($tags->{is_array_typed}        ? (is_array_typed        => true)     : ()),
+                ($tags->{is_hash_typed}         ? (is_hash_typed         => true)     : ()),
+                ($tags->{is_scalar_typed}       ? (is_scalar_typed       => true)     : ()),
+                ($tags->{call_symbol}           ? (call_symbol => $tags->{call_symbol}) : ()),
+            },
+            children => $value->children(),
+            position => $value->position(),
+            rule     => $rule_name,
+        );
     }
 }

@@ -54,12 +54,41 @@ for my $word (@non_keywords) {
 # ========================================================================
 
 use_ok('Chalk::Bootstrap::Semiring::TypeInference');
+use_ok('Chalk::Bootstrap::Context');
 
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
     builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_validated_builtin,
     type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
 );
+
+# Helper: create a leaf Context with tag hash focus (for test value construction)
+my sub make_ctx(%tags) {
+    return Chalk::Bootstrap::Context->new(
+        focus    => { valid => true, %tags },
+        children => [],
+        position => 0,
+        rule     => undef,
+    );
+}
+
+# Helper: extract tag hash from a TypeInference value (Context tree).
+# Mirrors the _tags() helper inside TypeInference.
+my sub get_tags($val) {
+    return undef unless defined $val;
+    my $focus = $val->extract();
+    return $focus if defined $focus;
+    # Intermediate multiply node: collect from leaves
+    my %merged;
+    for my $leaf ($val->leaves()) {
+        my $f = $leaf->extract();
+        next unless defined $f;
+        for my $k (keys %$f) {
+            $merged{$k} = $f->{$k} if $f->{$k};
+        }
+    }
+    return \%merged;
+}
 
 # zero/one/is_zero
 {
@@ -69,8 +98,9 @@ my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     my $o = $ti->one();
     ok(!$ti->is_zero($o), 'one is not zero');
 
-    ok(!$z->{valid}, 'zero has valid=false');
-    ok($o->{valid}, 'one has valid=true');
+    ok(!defined $z, 'zero is undef');
+    my $o_tags = get_tags($o);
+    ok($o_tags->{valid}, 'one has valid=true');
 }
 
 # multiply
@@ -91,13 +121,13 @@ my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     ok($ti->is_zero($r3), 'one * zero is zero');
 
     # keyword_as_identifier propagation
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
 
     my $r4 = $ti->multiply($tagged, $o);
-    ok($r4->{keyword_as_identifier}, 'keyword_as_identifier propagates from left');
+    ok(get_tags($r4)->{keyword_as_identifier}, 'keyword_as_identifier propagates from left');
 
     my $r5 = $ti->multiply($o, $tagged);
-    ok($r5->{keyword_as_identifier}, 'keyword_as_identifier propagates from right');
+    ok(get_tags($r5)->{keyword_as_identifier}, 'keyword_as_identifier propagates from right');
 }
 
 # add
@@ -144,7 +174,7 @@ my sub make_item($rule_name, $value) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'use');
     ok(!$ti->is_zero($result), 'scanning keyword as QualifiedIdentifier is non-zero at scan time');
-    ok($result->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
+    ok(get_tags($result)->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
 }
 
 # Scanning a non-keyword as QualifiedIdentifier → no tag
@@ -152,7 +182,7 @@ my sub make_item($rule_name, $value) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'foo');
     ok(!$ti->is_zero($result), 'scanning non-keyword as QualifiedIdentifier is non-zero');
-    ok(!$result->{keyword_as_identifier}, 'scanning "foo" as QualifiedIdentifier does not tag');
+    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning "foo" as QualifiedIdentifier does not tag');
 }
 
 # Scanning a keyword in a non-QualifiedIdentifier rule → no tag
@@ -160,7 +190,7 @@ my sub make_item($rule_name, $value) {
     my $item = make_item('BinaryOp', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'and');
     ok(!$ti->is_zero($result), 'scanning keyword in BinaryOp is non-zero');
-    ok(!$result->{keyword_as_identifier}, 'scanning keyword in BinaryOp does not tag');
+    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning keyword in BinaryOp does not tag');
 }
 
 # Scanning with zero value propagates zero
@@ -174,7 +204,7 @@ my sub make_item($rule_name, $value) {
 for my $kw (@keywords) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, $kw);
-    ok($result->{keyword_as_identifier}, "on_scan tags '$kw' as keyword_as_identifier");
+    ok(get_tags($result)->{keyword_as_identifier}, "on_scan tags '$kw' as keyword_as_identifier");
 }
 
 # ========================================================================
@@ -185,11 +215,11 @@ for my $kw (@keywords) {
 
 # QualifiedIdentifier complete with keyword_as_identifier → valid (tag propagates)
 {
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
     my $item = make_item('QualifiedIdentifier', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
     ok(!$ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier propagates (valid)');
-    ok($result->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
+    ok(get_tags($result)->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
 }
 
 # QualifiedIdentifier complete without tag → valid
@@ -201,16 +231,16 @@ for my $kw (@keywords) {
 
 # Non-QualifiedIdentifier complete with tag → valid (preserves tag for propagation)
 {
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
     my $item = make_item('BinaryExpression', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'non-QualifiedIdentifier completion ignores keyword flag');
-    ok($result->{keyword_as_identifier}, 'non-QualifiedIdentifier completion preserves keyword_as_identifier tag');
+    ok(get_tags($result)->{keyword_as_identifier}, 'non-QualifiedIdentifier completion preserves keyword_as_identifier tag');
 }
 
 # Atom complete with keyword_as_identifier → zero (expression-level rejection)
 {
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
     my $item = make_item('Atom', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
     ok($ti->is_zero($result), 'Atom completion with keyword_as_identifier returns zero');
@@ -218,7 +248,7 @@ for my $kw (@keywords) {
 
 # CallExpression complete with keyword_as_identifier → zero
 {
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
     my $item = make_item('CallExpression', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
     ok($ti->is_zero($result), 'CallExpression completion with keyword_as_identifier returns zero');
@@ -226,11 +256,11 @@ for my $kw (@keywords) {
 
 # Attribute complete with keyword_as_identifier → valid (boundary, clears tag)
 {
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
     my $item = make_item('Attribute', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
     ok(!$ti->is_zero($result), 'Attribute completion allows keyword identifiers');
-    ok(!$result->{keyword_as_identifier}, 'Attribute clears keyword_as_identifier tag');
+    ok(!get_tags($result)->{keyword_as_identifier}, 'Attribute clears keyword_as_identifier tag');
 }
 
 # ========================================================================
@@ -241,12 +271,12 @@ for my $kw (@keywords) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $scanned = $ti->on_scan($item, 0, 0, 'use');
     ok(!$ti->is_zero($scanned), 'chain step 1: scan "use" as QualifiedIdentifier is non-zero');
-    ok($scanned->{keyword_as_identifier}, 'chain step 1: tagged');
+    ok(get_tags($scanned)->{keyword_as_identifier}, 'chain step 1: tagged');
 
     my $completed_item = make_item('QualifiedIdentifier', $scanned);
     my $completed = $ti->on_complete($completed_item, 0, 3);
     ok(!$ti->is_zero($completed), 'chain step 2: QualifiedIdentifier completion propagates tag');
-    ok($completed->{keyword_as_identifier}, 'chain step 2: tag preserved');
+    ok(get_tags($completed)->{keyword_as_identifier}, 'chain step 2: tag preserved');
 
     # Atom would reject it
     my $atom_item = make_item('Atom', $completed);
@@ -271,7 +301,7 @@ for my $kw (@keywords) {
     my $item = make_item('UseDeclaration', $ti->one());
     my $scanned = $ti->on_scan($item, 0, 0, 'use');
     ok(!$ti->is_zero($scanned), 'keyword in proper context: scan is non-zero');
-    ok(!$scanned->{keyword_as_identifier}, 'keyword in proper context: not tagged');
+    ok(!get_tags($scanned)->{keyword_as_identifier}, 'keyword in proper context: not tagged');
 
     my $completed_item = make_item('UseDeclaration', $scanned);
     my $completed = $ti->on_complete($completed_item, 0, 10);
@@ -287,7 +317,7 @@ for my $kw (@keywords) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'use');
     ok(!$ti->is_zero($result), 'scanning bare keyword as QualifiedIdentifier is non-zero at scan time');
-    ok($result->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
+    ok(get_tags($result)->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
 }
 
 # Scanning a qualified name containing a keyword → NOT tagged
@@ -295,7 +325,7 @@ for my $kw (@keywords) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'Foo::class');
     ok(!$ti->is_zero($result), 'scanning qualified name as QualifiedIdentifier is non-zero');
-    ok(!$result->{keyword_as_identifier}, 'scanning "Foo::class" as QualifiedIdentifier does NOT tag');
+    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning "Foo::class" as QualifiedIdentifier does NOT tag');
 }
 
 # Scanning a non-keyword as QualifiedIdentifier → NOT tagged
@@ -303,21 +333,21 @@ for my $kw (@keywords) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'foo');
     ok(!$ti->is_zero($result), 'scanning non-keyword as QualifiedIdentifier is non-zero');
-    ok(!$result->{keyword_as_identifier}, 'scanning "foo" as QualifiedIdentifier does NOT tag');
+    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning "foo" as QualifiedIdentifier does NOT tag');
 }
 
 # All 33 keywords scanned as QualifiedIdentifier (bare) get tagged
 for my $kw (@keywords) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, $kw);
-    ok($result->{keyword_as_identifier}, "on_scan QualifiedIdentifier tags bare '$kw' as keyword_as_identifier");
+    ok(get_tags($result)->{keyword_as_identifier}, "on_scan QualifiedIdentifier tags bare '$kw' as keyword_as_identifier");
 }
 
 # Qualified forms of keywords are NOT tagged
 for my $kw (qw(use class sub method)) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, "Foo::$kw");
-    ok(!$result->{keyword_as_identifier}, "on_scan QualifiedIdentifier does NOT tag 'Foo::$kw'");
+    ok(!get_tags($result)->{keyword_as_identifier}, "on_scan QualifiedIdentifier does NOT tag 'Foo::$kw'");
 }
 
 # ========================================================================
@@ -326,11 +356,11 @@ for my $kw (qw(use class sub method)) {
 
 # QualifiedIdentifier complete with keyword_as_identifier → valid (tag propagates)
 {
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
     my $item = make_item('QualifiedIdentifier', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
     ok(!$ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier propagates');
-    ok($result->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
+    ok(get_tags($result)->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
 }
 
 # QualifiedIdentifier complete without tag → valid
@@ -348,12 +378,12 @@ for my $kw (qw(use class sub method)) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $scanned = $ti->on_scan($item, 0, 0, 'class');
     ok(!$ti->is_zero($scanned), 'QualifiedIdentifier chain: scan "class" is non-zero');
-    ok($scanned->{keyword_as_identifier}, 'QualifiedIdentifier chain: tagged');
+    ok(get_tags($scanned)->{keyword_as_identifier}, 'QualifiedIdentifier chain: tagged');
 
     my $completed_item = make_item('QualifiedIdentifier', $scanned);
     my $completed = $ti->on_complete($completed_item, 0, 5);
     ok(!$ti->is_zero($completed), 'QualifiedIdentifier chain: completion propagates tag');
-    ok($completed->{keyword_as_identifier}, 'QualifiedIdentifier chain: tag preserved');
+    ok(get_tags($completed)->{keyword_as_identifier}, 'QualifiedIdentifier chain: tag preserved');
 }
 
 # Full chain for qualified name: scan "Foo::class" → complete → valid
@@ -361,7 +391,7 @@ for my $kw (qw(use class sub method)) {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $scanned = $ti->on_scan($item, 0, 0, 'Foo::class');
     ok(!$ti->is_zero($scanned), 'QualifiedIdentifier qualified chain: scan is non-zero');
-    ok(!$scanned->{keyword_as_identifier}, 'QualifiedIdentifier qualified chain: not tagged');
+    ok(!get_tags($scanned)->{keyword_as_identifier}, 'QualifiedIdentifier qualified chain: not tagged');
 
     my $completed_item = make_item('QualifiedIdentifier', $scanned);
     my $completed = $ti->on_complete($completed_item, 0, 10);
@@ -482,7 +512,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '+');
     ok(!$ti->is_zero($result), 'scanning "+" as UnaryExpression (with BinaryOp) is non-zero');
-    ok($result->{ambiguous_unary}, 'scanning "+" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
+    ok(get_tags($result)->{ambiguous_unary}, 'scanning "+" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
 }
 
 # UnaryExpression scanning '-' with BinaryOp at same position → tagged ambiguous_unary
@@ -493,7 +523,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 1, '-');
     ok(!$ti->is_zero($result), 'scanning "-" as UnaryExpression (with BinaryOp) is non-zero');
-    ok($result->{ambiguous_unary}, 'scanning "-" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
+    ok(get_tags($result)->{ambiguous_unary}, 'scanning "-" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
 }
 
 # UnaryExpression scanning '+' WITHOUT BinaryOp at same position → NOT tagged (standalone unary)
@@ -501,7 +531,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 99, '+');
     ok(!$ti->is_zero($result), 'scanning "+" as standalone UnaryExpression is non-zero');
-    ok(!$result->{ambiguous_unary}, 'standalone "+" UnaryExpression NOT tagged');
+    ok(!get_tags($result)->{ambiguous_unary}, 'standalone "+" UnaryExpression NOT tagged');
 }
 
 # UnaryExpression scanning '-' WITHOUT BinaryOp → NOT tagged (standalone unary)
@@ -509,7 +539,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 100, '-');
     ok(!$ti->is_zero($result), 'scanning "-" as standalone UnaryExpression is non-zero');
-    ok(!$result->{ambiguous_unary}, 'standalone "-" UnaryExpression NOT tagged');
+    ok(!get_tags($result)->{ambiguous_unary}, 'standalone "-" UnaryExpression NOT tagged');
 }
 
 # UnaryExpression scanning '!' → NOT tagged (unambiguous unary)
@@ -517,7 +547,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '!');
     ok(!$ti->is_zero($result), 'scanning "!" as UnaryExpression is non-zero');
-    ok(!$result->{ambiguous_unary}, 'scanning "!" as UnaryExpression does NOT tag ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "!" as UnaryExpression does NOT tag ambiguous_unary');
 }
 
 # UnaryExpression scanning '~' → NOT tagged
@@ -525,7 +555,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '~');
     ok(!$ti->is_zero($result), 'scanning "~" as UnaryExpression is non-zero');
-    ok(!$result->{ambiguous_unary}, 'scanning "~" as UnaryExpression does NOT tag ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "~" as UnaryExpression does NOT tag ambiguous_unary');
 }
 
 # UnaryExpression scanning 'not' → NOT tagged
@@ -533,7 +563,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'not');
     ok(!$ti->is_zero($result), 'scanning "not" as UnaryExpression is non-zero');
-    ok(!$result->{ambiguous_unary}, 'scanning "not" as UnaryExpression does NOT tag ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "not" as UnaryExpression does NOT tag ambiguous_unary');
 }
 
 # BinaryOp scanning '+' → NOT tagged (not a UnaryExpression)
@@ -541,7 +571,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('BinaryOp', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '+');
     ok(!$ti->is_zero($result), 'scanning "+" as BinaryOp is non-zero');
-    ok(!$result->{ambiguous_unary}, 'scanning "+" as BinaryOp does NOT tag ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "+" as BinaryOp does NOT tag ambiguous_unary');
 }
 
 # ========================================================================
@@ -549,22 +579,22 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ========================================================================
 
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $o = $ti->one();
 
     my $r1 = $ti->multiply($tagged, $o);
-    ok($r1->{ambiguous_unary}, 'ambiguous_unary propagates from left in multiply');
+    ok(get_tags($r1)->{ambiguous_unary}, 'ambiguous_unary propagates from left in multiply');
 
     my $r2 = $ti->multiply($o, $tagged);
-    ok($r2->{ambiguous_unary}, 'ambiguous_unary propagates from right in multiply');
+    ok(get_tags($r2)->{ambiguous_unary}, 'ambiguous_unary propagates from right in multiply');
 
     # Both tagged
     my $r3 = $ti->multiply($tagged, $tagged);
-    ok($r3->{ambiguous_unary}, 'ambiguous_unary propagates when both sides tagged');
+    ok(get_tags($r3)->{ambiguous_unary}, 'ambiguous_unary propagates when both sides tagged');
 
     # Neither tagged
     my $r4 = $ti->multiply($o, $o);
-    ok(!$r4->{ambiguous_unary}, 'ambiguous_unary not set when neither side tagged');
+    ok(!get_tags($r4)->{ambiguous_unary}, 'ambiguous_unary not set when neither side tagged');
 }
 
 # ========================================================================
@@ -573,7 +603,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # UnaryExpression completion with ambiguous_unary tag → rejected (binary path wins)
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('UnaryExpression', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'UnaryExpression completion with ambiguous_unary returns zero');
@@ -588,74 +618,74 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Intermediate rule (Expression) preserves ambiguous_unary
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('Expression', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'Expression completion with ambiguous_unary is valid');
-    ok($result->{ambiguous_unary}, 'Expression preserves ambiguous_unary');
+    ok(get_tags($result)->{ambiguous_unary}, 'Expression preserves ambiguous_unary');
 }
 
 # StatementItem preserves ambiguous_unary
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('StatementItem', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'StatementItem completion with ambiguous_unary is valid');
-    ok($result->{ambiguous_unary}, 'StatementItem preserves ambiguous_unary');
+    ok(get_tags($result)->{ambiguous_unary}, 'StatementItem preserves ambiguous_unary');
 }
 
 # Boundary rule ParenExpr clears ambiguous_unary
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('ParenExpr', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'ParenExpr completion is valid');
-    ok(!$result->{ambiguous_unary}, 'ParenExpr clears ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'ParenExpr clears ambiguous_unary');
 }
 
 # Boundary rule Block clears ambiguous_unary
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('Block', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'Block completion is valid');
-    ok(!$result->{ambiguous_unary}, 'Block clears ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'Block clears ambiguous_unary');
 }
 
 # Boundary rule ArrayConstructor clears ambiguous_unary
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('ArrayConstructor', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'ArrayConstructor completion is valid');
-    ok(!$result->{ambiguous_unary}, 'ArrayConstructor clears ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'ArrayConstructor clears ambiguous_unary');
 }
 
 # Boundary rule HashConstructor clears ambiguous_unary
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('HashConstructor', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'HashConstructor completion is valid');
-    ok(!$result->{ambiguous_unary}, 'HashConstructor clears ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'HashConstructor clears ambiguous_unary');
 }
 
 # Boundary rule Signature clears ambiguous_unary
 {
-    my $tagged = { valid => true, ambiguous_unary => true };
+    my $tagged = make_ctx(ambiguous_unary => true);
     my $item = make_item('Signature', $tagged);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'Signature completion is valid');
-    ok(!$result->{ambiguous_unary}, 'Signature clears ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'Signature clears ambiguous_unary');
 }
 
 # QualifiedIdentifier completion propagates keyword_as_identifier (rejection at Atom/CallExpression)
 {
-    my $tagged = { valid => true, keyword_as_identifier => true };
+    my $tagged = make_ctx(keyword_as_identifier => true);
     my $item = make_item('QualifiedIdentifier', $tagged);
     my $result = $ti->on_complete($item, 0, 3);
     ok(!$ti->is_zero($result), 'QualifiedIdentifier propagates keyword_as_identifier');
-    ok($result->{keyword_as_identifier}, 'keyword_as_identifier tag preserved through QualifiedIdentifier');
+    ok(get_tags($result)->{keyword_as_identifier}, 'keyword_as_identifier tag preserved through QualifiedIdentifier');
 }
 
 # Non-boundary rule without tag → no ambiguous_unary
@@ -663,7 +693,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('BinaryExpression', $ti->one());
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'BinaryExpression completion is valid');
-    ok(!$result->{ambiguous_unary}, 'BinaryExpression without tag has no ambiguous_unary');
+    ok(!get_tags($result)->{ambiguous_unary}, 'BinaryExpression without tag has no ambiguous_unary');
 }
 
 # ========================================================================
@@ -671,8 +701,8 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ========================================================================
 
 {
-    my $unary_tagged = { valid => true, ambiguous_unary => true };
-    my $binary_clean = { valid => true };
+    my $unary_tagged = make_ctx(ambiguous_unary => true);
+    my $binary_clean = make_ctx();
     my $z = $ti->zero();
 
     # Left tagged, right clean → prefer right (binary)
@@ -705,24 +735,24 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ========================================================================
 
 {
-    my $unary_tagged = { valid => true, ambiguous_unary => true };
-    my $binary_clean = { valid => true };
+    my $unary_tagged = make_ctx(ambiguous_unary => true);
+    my $binary_clean = make_ctx();
 
     # Left tagged, right clean → returns right (binary)
     my $r1 = $ti->add($unary_tagged, $binary_clean);
-    ok(!$r1->{ambiguous_unary}, 'add: left=unary, right=binary → returns binary (no tag)');
+    ok(!get_tags($r1)->{ambiguous_unary}, 'add: left=unary, right=binary → returns binary (no tag)');
 
     # Left clean, right tagged → returns left (binary)
     my $r2 = $ti->add($binary_clean, $unary_tagged);
-    ok(!$r2->{ambiguous_unary}, 'add: left=binary, right=unary → returns binary (no tag)');
+    ok(!get_tags($r2)->{ambiguous_unary}, 'add: left=binary, right=unary → returns binary (no tag)');
 
     # Both tagged → returns left (no preference)
     my $r3 = $ti->add($unary_tagged, $unary_tagged);
-    ok($r3->{ambiguous_unary}, 'add: both tagged → returns left (still tagged)');
+    ok(get_tags($r3)->{ambiguous_unary}, 'add: both tagged → returns left (still tagged)');
 
     # Both clean → returns left (no preference)
     my $r4 = $ti->add($binary_clean, $binary_clean);
-    ok(!$r4->{ambiguous_unary}, 'add: both clean → returns left (no tag)');
+    ok(!get_tags($r4)->{ambiguous_unary}, 'add: both clean → returns left (no tag)');
 }
 
 # ========================================================================
@@ -787,9 +817,10 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('ScalarVariable', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '$x');
     ok(!$ti->is_zero($result), 'scanning $x as ScalarVariable is non-zero');
-    ok($result->{is_scalar_typed}, 'scanning $x as ScalarVariable tags is_scalar_typed');
-    ok(!$result->{is_array_typed}, 'scanning $x as ScalarVariable has no is_array_typed');
-    ok(!$result->{is_hash_typed}, 'scanning $x as ScalarVariable has no is_hash_typed');
+    my $tags = get_tags($result);
+    ok($tags->{is_scalar_typed}, 'scanning $x as ScalarVariable tags is_scalar_typed');
+    ok(!$tags->{is_array_typed}, 'scanning $x as ScalarVariable has no is_array_typed');
+    ok(!$tags->{is_hash_typed}, 'scanning $x as ScalarVariable has no is_hash_typed');
 }
 
 # ArrayVariable scanned → is_array_typed
@@ -797,9 +828,10 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('ArrayVariable', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '@arr');
     ok(!$ti->is_zero($result), 'scanning @arr as ArrayVariable is non-zero');
-    ok($result->{is_array_typed}, 'scanning @arr as ArrayVariable tags is_array_typed');
-    ok(!$result->{is_scalar_typed}, 'scanning @arr as ArrayVariable has no is_scalar_typed');
-    ok(!$result->{is_hash_typed}, 'scanning @arr as ArrayVariable has no is_hash_typed');
+    my $tags = get_tags($result);
+    ok($tags->{is_array_typed}, 'scanning @arr as ArrayVariable tags is_array_typed');
+    ok(!$tags->{is_scalar_typed}, 'scanning @arr as ArrayVariable has no is_scalar_typed');
+    ok(!$tags->{is_hash_typed}, 'scanning @arr as ArrayVariable has no is_hash_typed');
 }
 
 # HashVariable scanned → is_hash_typed
@@ -807,32 +839,33 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('HashVariable', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '%h');
     ok(!$ti->is_zero($result), 'scanning %h as HashVariable is non-zero');
-    ok($result->{is_hash_typed}, 'scanning %h as HashVariable tags is_hash_typed');
-    ok(!$result->{is_scalar_typed}, 'scanning %h as HashVariable has no is_scalar_typed');
-    ok(!$result->{is_array_typed}, 'scanning %h as HashVariable has no is_array_typed');
+    my $tags = get_tags($result);
+    ok($tags->{is_hash_typed}, 'scanning %h as HashVariable tags is_hash_typed');
+    ok(!$tags->{is_scalar_typed}, 'scanning %h as HashVariable has no is_scalar_typed');
+    ok(!$tags->{is_array_typed}, 'scanning %h as HashVariable has no is_array_typed');
 }
 
 # --- multiply: type tag propagation ---
 
 {
-    my $scalar = { valid => true, is_scalar_typed => true };
-    my $array  = { valid => true, is_array_typed => true };
-    my $hash   = { valid => true, is_hash_typed => true };
+    my $scalar = make_ctx(is_scalar_typed => true);
+    my $array  = make_ctx(is_array_typed => true);
+    my $hash   = make_ctx(is_hash_typed => true);
     my $o = $ti->one();
 
     my $r1 = $ti->multiply($scalar, $o);
-    ok($r1->{is_scalar_typed}, 'is_scalar_typed propagates from left in multiply');
+    ok(get_tags($r1)->{is_scalar_typed}, 'is_scalar_typed propagates from left in multiply');
 
     my $r2 = $ti->multiply($o, $array);
-    ok($r2->{is_array_typed}, 'is_array_typed propagates from right in multiply');
+    ok(get_tags($r2)->{is_array_typed}, 'is_array_typed propagates from right in multiply');
 
     my $r3 = $ti->multiply($hash, $o);
-    ok($r3->{is_hash_typed}, 'is_hash_typed propagates from left in multiply');
+    ok(get_tags($r3)->{is_hash_typed}, 'is_hash_typed propagates from left in multiply');
 
     # Multiple tags propagate together
     my $r4 = $ti->multiply($scalar, $array);
-    ok($r4->{is_scalar_typed}, 'multiply: both scalar and array survive (scalar)');
-    ok($r4->{is_array_typed}, 'multiply: both scalar and array survive (array)');
+    ok(get_tags($r4)->{is_scalar_typed}, 'multiply: both scalar and array survive (scalar)');
+    ok(get_tags($r4)->{is_array_typed}, 'multiply: both scalar and array survive (array)');
 }
 
 # --- on_complete: PostfixDeref type tagging ---
@@ -842,7 +875,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 0 completion is valid');
-    ok($result->{is_array_typed}, 'PostfixDeref alt 0 (->@*) tags is_array_typed');
+    ok(get_tags($result)->{is_array_typed}, 'PostfixDeref alt 0 (->@*) tags is_array_typed');
 }
 
 # PostfixDeref alt 1 (->%*) → is_hash_typed
@@ -850,7 +883,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 1 completion is valid');
-    ok($result->{is_hash_typed}, 'PostfixDeref alt 1 (->%*) tags is_hash_typed');
+    ok(get_tags($result)->{is_hash_typed}, 'PostfixDeref alt 1 (->%*) tags is_hash_typed');
 }
 
 # PostfixDeref alt 2 (->$*) → is_scalar_typed
@@ -858,7 +891,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 2, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 2 completion is valid');
-    ok($result->{is_scalar_typed}, 'PostfixDeref alt 2 (->$*) tags is_scalar_typed');
+    ok(get_tags($result)->{is_scalar_typed}, 'PostfixDeref alt 2 (->$*) tags is_scalar_typed');
 }
 
 # PostfixDeref alt 3 (->$#*) → is_scalar_typed (array count is scalar)
@@ -866,46 +899,46 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 3, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 3 completion is valid');
-    ok($result->{is_scalar_typed}, 'PostfixDeref alt 3 (->$#*) tags is_scalar_typed');
+    ok(get_tags($result)->{is_scalar_typed}, 'PostfixDeref alt 3 (->$#*) tags is_scalar_typed');
 }
 
 # --- on_complete: Variable propagates child type tags ---
 
 {
-    my $scalar_val = { valid => true, is_scalar_typed => true };
+    my $scalar_val = make_ctx(is_scalar_typed => true);
     my $item = make_item('Variable', $scalar_val);
     my $result = $ti->on_complete($item, 0, 5);
     ok(!$ti->is_zero($result), 'Variable completion with is_scalar_typed is valid');
-    ok($result->{is_scalar_typed}, 'Variable preserves is_scalar_typed from child');
+    ok(get_tags($result)->{is_scalar_typed}, 'Variable preserves is_scalar_typed from child');
 }
 
 {
-    my $array_val = { valid => true, is_array_typed => true };
+    my $array_val = make_ctx(is_array_typed => true);
     my $item = make_item('Variable', $array_val);
     my $result = $ti->on_complete($item, 0, 5);
     ok(!$ti->is_zero($result), 'Variable completion with is_array_typed is valid');
-    ok($result->{is_array_typed}, 'Variable preserves is_array_typed from child');
+    ok(get_tags($result)->{is_array_typed}, 'Variable preserves is_array_typed from child');
 }
 
 # --- on_complete: boundary rules preserve type tags ---
 # Type tags pass through boundary rules (unlike keyword_as_identifier)
 
 {
-    my $typed = { valid => true, is_array_typed => true };
+    my $typed = make_ctx(is_array_typed => true);
     my $item = make_item('ParenExpr', $typed);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'ParenExpr with is_array_typed is valid');
-    ok($result->{is_array_typed}, 'ParenExpr preserves is_array_typed');
-    ok(!$result->{keyword_as_identifier}, 'ParenExpr still clears keyword_as_identifier');
+    ok(get_tags($result)->{is_array_typed}, 'ParenExpr preserves is_array_typed');
+    ok(!get_tags($result)->{keyword_as_identifier}, 'ParenExpr still clears keyword_as_identifier');
 }
 
 {
-    my $typed = { valid => true, is_scalar_typed => true, keyword_as_identifier => true };
+    my $typed = make_ctx(is_scalar_typed => true, keyword_as_identifier => true);
     my $item = make_item('Block', $typed);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'Block with is_scalar_typed is valid');
-    ok($result->{is_scalar_typed}, 'Block preserves is_scalar_typed');
-    ok(!$result->{keyword_as_identifier}, 'Block still clears keyword_as_identifier');
+    ok(get_tags($result)->{is_scalar_typed}, 'Block preserves is_scalar_typed');
+    ok(!get_tags($result)->{keyword_as_identifier}, 'Block still clears keyword_as_identifier');
 }
 
 # ========================================================================
@@ -919,10 +952,10 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'push');
     ok(!$ti->is_zero($result), 'scanning "push" as QualifiedIdentifier is non-zero');
-    is($result->{call_symbol}, 'push',
+    is(get_tags($result)->{call_symbol}, 'push',
         'scanning "push" as QualifiedIdentifier tags call_symbol => push');
     # push is NOT a keyword so it should NOT be keyword_as_identifier
-    ok(!$result->{keyword_as_identifier},
+    ok(!get_tags($result)->{keyword_as_identifier},
         'scanning "push" as QualifiedIdentifier does NOT tag keyword_as_identifier');
 }
 
@@ -930,7 +963,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'unshift');
-    is($result->{call_symbol}, 'unshift',
+    is(get_tags($result)->{call_symbol}, 'unshift',
         'scanning "unshift" tags call_symbol => unshift');
 }
 
@@ -938,7 +971,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'pop');
-    is($result->{call_symbol}, 'pop',
+    is(get_tags($result)->{call_symbol}, 'pop',
         'scanning "pop" tags call_symbol => pop');
 }
 
@@ -946,7 +979,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'shift');
-    is($result->{call_symbol}, 'shift',
+    is(get_tags($result)->{call_symbol}, 'shift',
         'scanning "shift" tags call_symbol => shift');
 }
 
@@ -954,7 +987,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'splice');
-    is($result->{call_symbol}, 'splice',
+    is(get_tags($result)->{call_symbol}, 'splice',
         'scanning "splice" tags call_symbol => splice');
 }
 
@@ -962,7 +995,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'foo');
-    ok(!$result->{call_symbol},
+    ok(!get_tags($result)->{call_symbol},
         'scanning "foo" does NOT tag call_symbol');
 }
 
@@ -970,22 +1003,22 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'Foo::push');
-    ok(!$result->{call_symbol},
+    ok(!get_tags($result)->{call_symbol},
         'scanning "Foo::push" does NOT tag call_symbol');
 }
 
 # --- multiply: call_symbol propagation ---
 
 {
-    my $builtin = { valid => true, call_symbol => 'push' };
+    my $builtin = make_ctx(call_symbol => 'push');
     my $o = $ti->one();
 
     my $r1 = $ti->multiply($builtin, $o);
-    is($r1->{call_symbol}, 'push',
+    is(get_tags($r1)->{call_symbol}, 'push',
         'call_symbol propagates from left in multiply');
 
     my $r2 = $ti->multiply($o, $builtin);
-    is($r2->{call_symbol}, 'push',
+    is(get_tags($r2)->{call_symbol}, 'push',
         'call_symbol propagates from right in multiply');
 }
 
@@ -993,7 +1026,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=push, is_array_typed, list_arity 2 → valid
 {
-    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 2 };
+    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 2);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: push with array arg and arity 2 → valid');
@@ -1001,7 +1034,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=push but only is_scalar_typed → zero (kill)
 {
-    my $val = { valid => true, call_symbol => 'push', is_scalar_typed => true };
+    my $val = make_ctx(call_symbol => 'push', is_scalar_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'CallExpression: push with scalar-only arg → zero (killed)');
@@ -1009,7 +1042,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=push and NO type tags → zero (kill)
 {
-    my $val = { valid => true, call_symbol => 'push' };
+    my $val = make_ctx(call_symbol => 'push');
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'CallExpression: push with no type tags → zero (killed)');
@@ -1018,8 +1051,8 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # CallExpression with call_symbol=push, both scalar and array typed, list_arity 2 → valid
 # (e.g., push @arr, $x — has both tags from multiply)
 {
-    my $val = { valid => true, call_symbol => 'push',
-                is_array_typed => true, is_scalar_typed => true, list_arity => 2 };
+    my $val = make_ctx(call_symbol => 'push',
+                is_array_typed => true, is_scalar_typed => true, list_arity => 2);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: push with array+scalar args → valid');
@@ -1027,7 +1060,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression without call_symbol → normal (no validation)
 {
-    my $val = { valid => true, is_scalar_typed => true };
+    my $val = make_ctx(is_scalar_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: non-builtin with scalar → valid (no validation)');
@@ -1037,59 +1070,59 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ExpressionList alt 0 (single Expression) → list_arity 1
 {
-    my $val = { valid => true, is_array_typed => true };
+    my $val = make_ctx(is_array_typed => true);
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'ExpressionList alt 0: valid');
-    is($result->{list_arity}, 1, 'ExpressionList alt 0: list_arity = 1');
+    is(get_tags($result)->{list_arity}, 1, 'ExpressionList alt 0: list_arity = 1');
 }
 
 # ExpressionList alt 1 (ExpressionList , Expression) → list_arity from child + 1
 {
-    my $val = { valid => true, is_array_typed => true, list_arity => 1 };
+    my $val = make_ctx(is_array_typed => true, list_arity => 1);
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'ExpressionList alt 1: valid');
-    is($result->{list_arity}, 2, 'ExpressionList alt 1: list_arity = 2');
+    is(get_tags($result)->{list_arity}, 2, 'ExpressionList alt 1: list_arity = 2');
 }
 
 # ExpressionList alt 2 (ExpressionList => Expression) → list_arity from child + 1
 {
-    my $val = { valid => true, list_arity => 2 };
+    my $val = make_ctx(list_arity => 2);
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 2, 10);
     ok(!$ti->is_zero($result), 'ExpressionList alt 2: valid');
-    is($result->{list_arity}, 3, 'ExpressionList alt 2: list_arity = 3');
+    is(get_tags($result)->{list_arity}, 3, 'ExpressionList alt 2: list_arity = 3');
 }
 
 # ExpressionList alt 3 (trailing comma) → list_arity preserved
 {
-    my $val = { valid => true, list_arity => 3 };
+    my $val = make_ctx(list_arity => 3);
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 3, 10);
     ok(!$ti->is_zero($result), 'ExpressionList alt 3: valid');
-    is($result->{list_arity}, 3, 'ExpressionList alt 3: list_arity preserved');
+    is(get_tags($result)->{list_arity}, 3, 'ExpressionList alt 3: list_arity preserved');
 }
 
 # list_arity propagates through multiply
 {
-    my $left = { valid => true, list_arity => 2 };
-    my $right = { valid => true, is_scalar_typed => true };
+    my $left = make_ctx(list_arity => 2);
+    my $right = make_ctx(is_scalar_typed => true);
     my $result = $ti->multiply($left, $right);
-    is($result->{list_arity}, 2, 'multiply: list_arity propagates from left');
+    is(get_tags($result)->{list_arity}, 2, 'multiply: list_arity propagates from left');
 }
 {
-    my $left = { valid => true };
-    my $right = { valid => true, list_arity => 3 };
+    my $left = make_ctx();
+    my $right = make_ctx(list_arity => 3);
     my $result = $ti->multiply($left, $right);
-    is($result->{list_arity}, 3, 'multiply: list_arity propagates from right');
+    is(get_tags($result)->{list_arity}, 3, 'multiply: list_arity propagates from right');
 }
 
 # --- on_complete: CallExpression validates builtin min_arity ---
 
 # push with list_arity 1 (only @arr, no values) → rejected (min_arity 2)
 {
-    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 1 };
+    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok($ti->is_zero($result), 'CallExpression: push with list_arity 1 → rejected (min_arity 2)');
@@ -1097,7 +1130,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # push with list_arity 2 (@arr, $val) → accepted
 {
-    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 2 };
+    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 2);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 2 → accepted');
@@ -1105,7 +1138,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # push with list_arity 3 (@arr, $val1, $val2) → accepted
 {
-    my $val = { valid => true, call_symbol => 'push', is_array_typed => true, list_arity => 3 };
+    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 3);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 3 → accepted');
@@ -1113,7 +1146,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # pop with list_arity 1 (@arr) → accepted (min_arity 1)
 {
-    my $val = { valid => true, call_symbol => 'pop', is_array_typed => true, list_arity => 1 };
+    my $val = make_ctx(call_symbol => 'pop', is_array_typed => true, list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'CallExpression: pop with list_arity 1 → accepted');
@@ -1121,26 +1154,26 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # list_arity cleared at boundary rules (ParenExpr, Block, etc.)
 {
-    my $val = { valid => true, list_arity => 3 };
+    my $val = make_ctx(list_arity => 3);
     my $item = make_item('ParenExpr', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$result->{list_arity}, 'ParenExpr clears list_arity');
+    ok(!get_tags($result)->{list_arity}, 'ParenExpr clears list_arity');
 }
 
 # --- on_complete: call_symbol cleared at boundary rules ---
 
 {
-    my $val = { valid => true, call_symbol => 'push' };
+    my $val = make_ctx(call_symbol => 'push');
     my $item = make_item('ParenExpr', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$result->{call_symbol}, 'ParenExpr clears call_symbol');
+    ok(!get_tags($result)->{call_symbol}, 'ParenExpr clears call_symbol');
 }
 
 {
-    my $val = { valid => true, call_symbol => 'push' };
+    my $val = make_ctx(call_symbol => 'push');
     my $item = make_item('Block', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$result->{call_symbol}, 'Block clears call_symbol');
+    ok(!get_tags($result)->{call_symbol}, 'Block clears call_symbol');
 }
 
 # ========================================================================
@@ -1151,13 +1184,13 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $item = make_item('QualifiedIdentifier', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'keys');
-    is($result->{call_symbol}, 'keys',
+    is(get_tags($result)->{call_symbol}, 'keys',
         'scanning "keys" as QualifiedIdentifier tags call_symbol => keys');
 }
 
 # CallExpression with call_symbol=keys, is_hash_typed → valid
 {
-    my $val = { valid => true, call_symbol => 'keys', is_hash_typed => true };
+    my $val = make_ctx(call_symbol => 'keys', is_hash_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: keys with hash arg → valid');
@@ -1165,7 +1198,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=keys, is_scalar_typed → zero (kill)
 {
-    my $val = { valid => true, call_symbol => 'keys', is_scalar_typed => true };
+    my $val = make_ctx(call_symbol => 'keys', is_scalar_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'CallExpression: keys with scalar arg → zero (killed)');
@@ -1173,7 +1206,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=keys, is_array_typed → zero (kill)
 {
-    my $val = { valid => true, call_symbol => 'keys', is_array_typed => true };
+    my $val = make_ctx(call_symbol => 'keys', is_array_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'CallExpression: keys with array arg → zero (killed)');
@@ -1181,7 +1214,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=keys, no type tags → zero (kill, strict)
 {
-    my $val = { valid => true, call_symbol => 'keys' };
+    my $val = make_ctx(call_symbol => 'keys');
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'CallExpression: keys with no type tags → zero (killed)');
@@ -1189,7 +1222,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=values, is_hash_typed → valid
 {
-    my $val = { valid => true, call_symbol => 'values', is_hash_typed => true };
+    my $val = make_ctx(call_symbol => 'values', is_hash_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: values with hash arg → valid');
@@ -1197,7 +1230,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=each, is_hash_typed → valid
 {
-    my $val = { valid => true, call_symbol => 'each', is_hash_typed => true };
+    my $val = make_ctx(call_symbol => 'each', is_hash_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: each with hash arg → valid');
@@ -1209,7 +1242,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=defined, is_scalar_typed → valid (Any accepts all)
 {
-    my $val = { valid => true, call_symbol => 'defined', is_scalar_typed => true };
+    my $val = make_ctx(call_symbol => 'defined', is_scalar_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: defined with scalar arg → valid');
@@ -1217,7 +1250,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=die, no tags → valid (Any + min_arity 0)
 {
-    my $val = { valid => true, call_symbol => 'die' };
+    my $val = make_ctx(call_symbol => 'die');
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: die with no args → valid');
@@ -1225,7 +1258,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # CallExpression with call_symbol=warn, is_scalar_typed → valid
 {
-    my $val = { valid => true, call_symbol => 'warn', is_scalar_typed => true };
+    my $val = make_ctx(call_symbol => 'warn', is_scalar_typed => true);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: warn with scalar arg → valid');
