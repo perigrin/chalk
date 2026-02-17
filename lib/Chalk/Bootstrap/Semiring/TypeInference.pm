@@ -344,16 +344,68 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # alt 0 = ->@* (array), alt 1 = ->%* (hash),
         # alt 2 = ->$* (scalar), alt 3 = ->$#* (scalar count)
         if ($rule_name eq 'PostfixDeref') {
-            my $type_tag;
+            my ($type_tag, $type);
             if ($alt_idx == 0) {
-                $type_tag = { valid => true, is_array_typed => true };
+                $type_tag = { valid => true, is_array_typed => true, type => 'Array' };
             } elsif ($alt_idx == 1) {
-                $type_tag = { valid => true, is_hash_typed => true };
+                $type_tag = { valid => true, is_hash_typed => true, type => 'Hash' };
             } else {
-                $type_tag = { valid => true, is_scalar_typed => true };
+                $type_tag = { valid => true, is_scalar_typed => true, type => 'Scalar' };
             }
             return Chalk::Bootstrap::Context->new(
                 focus    => $type_tag,
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # AnonymousSub → type => 'Code'
+        if ($rule_name eq 'AnonymousSub') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => { valid => true, type => 'Code' },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # QwLiteral → type => 'List'
+        if ($rule_name eq 'QwLiteral') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => { valid => true, type => 'List' },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # ArrayConstructor: type => 'ArrayRef', also acts as boundary rule
+        if ($rule_name eq 'ArrayConstructor') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    type => 'ArrayRef',
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # HashConstructor: type => 'HashRef', also acts as boundary rule
+        if ($rule_name eq 'HashConstructor') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    type => 'HashRef',
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
                 children => $value->children(),
                 position => $value->position(),
                 rule     => $rule_name,
@@ -368,8 +420,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Subscript clears tags because hash subscript keys can be keywords
         # (e.g., $h{x} where `x` is the repeat operator keyword).
         if ($rule_name eq 'ParenExpr'
-            || $rule_name eq 'ArrayConstructor'
-            || $rule_name eq 'HashConstructor'
             || $rule_name eq 'Block'
             || $rule_name eq 'Signature'
             || $rule_name eq 'Attribute'

@@ -1708,4 +1708,76 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'op_text propagates from right in multiply');
 }
 
+# ========================================================================
+# Phase 4: Complete-time type tags for compound Atoms
+# ========================================================================
+
+# AnonymousSub → type => 'Code'
+{
+    my $item = make_item('AnonymousSub', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'AnonymousSub completion is valid');
+    is(get_tags($result)->{type}, 'Code',
+        'AnonymousSub tags type => Code');
+}
+
+# ArrayConstructor → type => 'ArrayRef'
+{
+    my $item = make_item('ArrayConstructor', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'ArrayConstructor completion is valid');
+    is(get_tags($result)->{type}, 'ArrayRef',
+        'ArrayConstructor tags type => ArrayRef');
+}
+
+# HashConstructor → type => 'HashRef'
+{
+    my $item = make_item('HashConstructor', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'HashConstructor completion is valid');
+    is(get_tags($result)->{type}, 'HashRef',
+        'HashConstructor tags type => HashRef');
+}
+
+# QwLiteral → type => 'List'
+{
+    my $item = make_item('QwLiteral', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'QwLiteral completion is valid');
+    is(get_tags($result)->{type}, 'List',
+        'QwLiteral tags type => List');
+}
+
+# PostfixDeref alt 0 (->@*) → type => 'Array' (in addition to is_array_typed)
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'Array',
+        'PostfixDeref alt 0 (->@*) tags type => Array');
+}
+
+# PostfixDeref alt 1 (->%*) → type => 'Hash'
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 1, 10);
+    is(get_tags($result)->{type}, 'Hash',
+        'PostfixDeref alt 1 (->%*) tags type => Hash');
+}
+
+# PostfixDeref alt 2 (->$*) → type => 'Scalar'
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 2, 10);
+    is(get_tags($result)->{type}, 'Scalar',
+        'PostfixDeref alt 2 (->$*) tags type => Scalar');
+}
+
+# PostfixDeref alt 3 (->$#*) → type => 'Scalar'
+{
+    my $item = make_item('PostfixDeref', $ti->one());
+    my $result = $ti->on_complete($item, 3, 10);
+    is(get_tags($result)->{type}, 'Scalar',
+        'PostfixDeref alt 3 (->$#*) tags type => Scalar');
+}
+
 done_testing;
