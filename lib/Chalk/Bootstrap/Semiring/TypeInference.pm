@@ -348,25 +348,37 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     : $builtin_lookup->($builtin_name);
                 if ($sig) {
                     if ($item_types) {
-                        # Per-position validation using item_types
+                        # Per-position validation using item_types.
+                        # For block-first alts (2/3), the Block is arg[0] (Code type)
+                        # and ExpressionList's item_types covers remaining args starting
+                        # at signature position 1.
                         my $arg_types = $sig->{arg_types};
+                        my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
                         for my $i (0 .. $#$item_types) {
                             my $actual = $item_types->[$i];
+                            my $sig_idx = $i + $sig_offset;
                             # Variadic: last arg_type applies to remaining positions
-                            my $expected = $arg_types->[$i] // $arg_types->[-1];
+                            my $expected = $arg_types->[$sig_idx] // $arg_types->[-1];
                             if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
                                 return undef;
                             }
                         }
                     } else {
-                        # Legacy fallback: flat first-arg check via type_check callback
+                        # Legacy fallback: flat first-arg check via type_check callback.
+                        # Only validate when first arg type is taggable (Array/Hash) —
+                        # other types can't be reliably checked with flat merged tags.
                         my $first_type = $sig->{arg_types}[0];
-                        if (!$type_check->($tags, $first_type)) {
-                            return undef;
+                        if ($first_type eq 'Array' || $first_type eq 'Hash') {
+                            if (!$type_check->($tags, $first_type)) {
+                                return undef;
+                            }
                         }
                     }
-                    # Validate min arity
+                    # Validate min arity.
+                    # For block-first alts (2/3), the Block is an implicit first arg
+                    # not counted in ExpressionList's list_arity.
                     my $arity = $tags->{list_arity} // 1;
+                    $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
                     if ($arity < $sig->{min_arity}) {
                         return undef;
                     }
@@ -611,22 +623,21 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             );
         }
 
-        # Boundary rules: clear keyword_as_identifier, ambiguous_unary, and
-        # call_symbol tags. Type tags (is_array_typed, etc.) are
-        # PRESERVED through boundaries because a parenthesized array is
-        # still array-typed (e.g., ($ops->@*) is still array).
-        # Attribute and MethodCall allow keywords as identifiers (e.g., :isa).
-        # Subscript clears tags because hash subscript keys can be keywords
-        # (e.g., $h{x} where `x` is the repeat operator keyword).
+        # Boundary rules: clear keyword_as_identifier, ambiguous_unary,
+        # call_symbol, and op_text tags. Type tags (is_*_typed and type)
+        # are PRESERVED through boundaries because a parenthesized array
+        # is still array-typed (e.g., ($ops->@*) is still array).
+        # Attribute allows keywords as identifiers (e.g., :isa).
+        # Subscript is handled separately above (sets type for subscript access).
         if ($rule_name eq 'ParenExpr'
             || $rule_name eq 'Block'
             || $rule_name eq 'Signature'
-            || $rule_name eq 'Attribute'
-            || $rule_name eq 'Subscript')
+            || $rule_name eq 'Attribute')
         {
             return Chalk::Bootstrap::Context->new(
                 focus    => {
                     valid => true,
+                    ($tags->{type}            ? (type            => $tags->{type}) : ()),
                     ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
                     ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
                     ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
@@ -643,6 +654,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 valid => true,
                 ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true)     : ()),
                 ($tags->{ambiguous_unary}       ? (ambiguous_unary       => true)     : ()),
+                ($tags->{type}                  ? (type            => $tags->{type})   : ()),
+                ($tags->{op_text}               ? (op_text         => $tags->{op_text}) : ()),
                 ($tags->{is_array_typed}        ? (is_array_typed        => true)     : ()),
                 ($tags->{is_hash_typed}         ? (is_hash_typed         => true)     : ()),
                 ($tags->{is_scalar_typed}       ? (is_scalar_typed       => true)     : ()),

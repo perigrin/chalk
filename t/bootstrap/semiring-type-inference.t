@@ -58,7 +58,7 @@ use_ok('Chalk::Bootstrap::Context');
 
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-    builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_validated_builtin,
+    builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
 );
 
@@ -2211,6 +2211,48 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok($ti->is_zero($result), 'per-position: push(Array) with arity 1 → rejected (min_arity 2)');
+}
+
+# Block-first builtins: CallExpression alt 2/3 (map/grep/sort)
+# For alt 2, Block is arg[0] (Code), ExpressionList covers remaining args.
+# item_types from ExpressionList should be compared against arg_types[1..].
+{
+    my $val = make_ctx(
+        call_symbol => 'map',
+        item_types  => ['Array'],
+        list_arity  => 2,  # Block + 1 ExpressionList arg
+        is_array_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 2, 10);  # alt 2 = block-first with args
+    ok(!$ti->is_zero($result), 'per-position: map(Block, Array) alt 2 → valid');
+    my $focus = $result->extract();
+    is($focus->{type}, 'List', 'per-position: map return type => List');
+}
+
+# Alt 3 = block-only (map BLOCK), no ExpressionList.
+# list_arity defaults to 1, +1 for block = 2, meeting map's min_arity of 2.
+{
+    my $val = make_ctx(
+        call_symbol => 'map',
+        # No list_arity or item_types — only a Block child
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 3, 10);  # alt 3 = block-only
+    ok(!$ti->is_zero($result), 'per-position: map(Block) alt 3 → valid');
+}
+
+# Block-first with wrong type in ExpressionList: grep(Block, Scalar) → rejected
+{
+    my $val = make_ctx(
+        call_symbol    => 'grep',
+        item_types     => ['Scalar'],
+        list_arity     => 2,
+        is_scalar_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 2, 10);
+    ok($ti->is_zero($result), 'per-position: grep(Block, Scalar) alt 2 → rejected (Scalar is not List)');
 }
 
 done_testing;
