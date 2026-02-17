@@ -208,24 +208,29 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 _ctx({ valid => true, type => 'CodeRef' }));
         }
 
-        # Track BinaryOp scans of +/- for cross-item disambiguation.
-        # BinaryOp items scan before UnaryExpression predictions at the
-        # same position because BinaryOp advances an existing item while
-        # UnaryExpression is freshly predicted from the right-hand Expression.
-        if ($rule_name eq 'BinaryOp' && $matched_text =~ /^[+-]$/) {
-            $binary_op_positions{$pos} = true;
+        # BinaryOp: capture operator text for later consumption at
+        # BinaryExpression on_complete, and track +/- positions for
+        # cross-item disambiguation.
+        if ($rule_name eq 'BinaryOp') {
+            if ($matched_text =~ /^[+-]$/) {
+                $binary_op_positions{$pos} = true;
+            }
+            return $self->multiply($existing,
+                _ctx({ valid => true, op_text => $matched_text }));
         }
 
-        # Tag UnaryExpression +/- only when BinaryOp also scanned at
-        # the same position — the binary interpretation should win.
-        # Standalone unary (e.g., `my $b = -$a`) has no BinaryOp at
-        # that position and is left untagged.
+        # UnaryExpression operator scan: capture op_text and handle
+        # ambiguous +/- disambiguation.
         if ($rule_name eq 'UnaryExpression'
-            && $matched_text =~ /^[+-]$/
-            && $binary_op_positions{$pos})
+            && $matched_text =~ /^(?:[!~\\]|not|[+-])$/)
         {
-            return $self->multiply($existing,
-                _ctx({ valid => true, ambiguous_unary => true }));
+            my %tags = (valid => true, op_text => $matched_text);
+            # Tag ambiguous +/- only when BinaryOp also scanned at
+            # the same position — the binary interpretation should win.
+            if ($matched_text =~ /^[+-]$/ && $binary_op_positions{$pos}) {
+                $tags{ambiguous_unary} = true;
+            }
+            return $self->multiply($existing, _ctx(\%tags));
         }
 
         # Non-QualifiedIdentifier or non-keyword: transparent

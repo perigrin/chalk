@@ -1614,4 +1614,98 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'type tag propagates from right in multiply');
 }
 
+# ========================================================================
+# Phase 3: Scan-time op_text tags
+# ========================================================================
+
+# BinaryOp scans capture op_text
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '+');
+    ok(!$ti->is_zero($result), 'BinaryOp "+" scan is non-zero');
+    is(get_tags($result)->{op_text}, '+',
+        'BinaryOp "+" tags op_text => +');
+}
+
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '==');
+    is(get_tags($result)->{op_text}, '==',
+        'BinaryOp "==" tags op_text => ==');
+}
+
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '.');
+    is(get_tags($result)->{op_text}, '.',
+        'BinaryOp "." tags op_text => .');
+}
+
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, 'eq');
+    is(get_tags($result)->{op_text}, 'eq',
+        'BinaryOp "eq" tags op_text => eq');
+}
+
+{
+    my $item = make_item('BinaryOp', $ti->one());
+    my $result = $ti->on_scan($item, 0, 0, '&&');
+    is(get_tags($result)->{op_text}, '&&',
+        'BinaryOp "&&" tags op_text => &&');
+}
+
+# UnaryExpression operator scans capture op_text
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 200, '!');
+    is(get_tags($result)->{op_text}, '!',
+        'UnaryExpression "!" tags op_text => !');
+}
+
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 201, 'not');
+    is(get_tags($result)->{op_text}, 'not',
+        'UnaryExpression "not" tags op_text => not');
+}
+
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 202, '~');
+    is(get_tags($result)->{op_text}, '~',
+        'UnaryExpression "~" tags op_text => ~');
+}
+
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 203, '\\');
+    is(get_tags($result)->{op_text}, '\\',
+        'UnaryExpression "\\" tags op_text => \\');
+}
+
+# Standalone unary - (no binary at same pos) still gets op_text but no ambiguous_unary
+{
+    my $item = make_item('UnaryExpression', $ti->one());
+    my $result = $ti->on_scan($item, 0, 204, '-');
+    is(get_tags($result)->{op_text}, '-',
+        'standalone UnaryExpression "-" tags op_text => -');
+    ok(!get_tags($result)->{ambiguous_unary},
+        'standalone UnaryExpression "-" NOT tagged ambiguous_unary');
+}
+
+# op_text propagation through multiply
+{
+    my $op_tagged = make_ctx(op_text => '+');
+    my $o = $ti->one();
+
+    my $r1 = $ti->multiply($op_tagged, $o);
+    is(get_tags($r1)->{op_text}, '+',
+        'op_text propagates from left in multiply');
+
+    my $r2 = $ti->multiply($o, $op_tagged);
+    is(get_tags($r2)->{op_text}, '+',
+        'op_text propagates from right in multiply');
+}
+
 done_testing;
