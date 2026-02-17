@@ -201,19 +201,6 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_builtin('foo'), undef,
     'get_builtin(foo) returns undef');
 
 # ========================================================================
-# Tag-to-type mapping
-# ========================================================================
-
-is(Chalk::Grammar::Perl::TypeLibrary::tag_to_type('is_array_typed'), 'Array',
-    'tag_to_type(is_array_typed) returns Array');
-is(Chalk::Grammar::Perl::TypeLibrary::tag_to_type('is_hash_typed'), 'Hash',
-    'tag_to_type(is_hash_typed) returns Hash');
-is(Chalk::Grammar::Perl::TypeLibrary::tag_to_type('is_scalar_typed'), 'Scalar',
-    'tag_to_type(is_scalar_typed) returns Scalar');
-is(Chalk::Grammar::Perl::TypeLibrary::tag_to_type('unknown_tag'), undef,
-    'tag_to_type(unknown_tag) returns undef');
-
-# ========================================================================
 # tags_satisfy_type - check semiring value tags against required type
 # ========================================================================
 

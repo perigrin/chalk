@@ -149,16 +149,12 @@ class Chalk::Grammar::Perl::TypeLibrary {
     }
 
     # Maps a TypeInference semiring tag to a type name.
+    # Used by tags_satisfy_type() for legacy flat-tag validation.
     my %TAG_TO_TYPE = (
         is_array_typed  => 'Array',
         is_hash_typed   => 'Hash',
         is_scalar_typed => 'Scalar',
     );
-
-    # Returns the type name for a semiring tag, or undef if unknown.
-    sub tag_to_type($tag) {
-        return $TAG_TO_TYPE{$tag};
-    }
 
     # Types that have corresponding scan-time tags in TypeInference.
     # Only these types can be validated strictly at parse time because
