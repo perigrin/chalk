@@ -99,18 +99,21 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return exists $BUILTIN_SIGNATURES{$name} ? true : false;
     }
 
-    # Returns the signature for a builtin whose first arg type can be
-    # validated at parse time via scan-time type tags.
-    # Currently restricted to Array-typed first args (push/pop/shift/
-    # unshift/splice) because Hash-typed builtins like keys/values/each
-    # conflict with keyword expressions (e.g., `sort keys %h` — the
-    # call_symbol tag on `keys` interferes with the sort parse).
-    # Returns undef for builtins not eligible for parse-time validation.
-    # Used by TypeInference on_scan to decide which builtins to tag.
+    # Returns the signature for a builtin eligible for parse-time validation
+    # via scan-time type tags. Used by TypeInference on_scan to tag builtins
+    # with call_symbol, and at CallExpression on_complete to validate
+    # first-arg types.
+    #
+    # Only returns signatures whose first arg type has a scan-time tag
+    # (Array, Hash). Builtins with non-taggable first args (Code, List,
+    # Str, Any, etc.) can't be validated because the merged semiring value
+    # conflates tags from all children — e.g., map { ... } @items merges
+    # is_array_typed from the second arg, which would incorrectly fail
+    # the Code check for the first arg.
     sub get_validated_builtin($name) {
         my $sig = $BUILTIN_SIGNATURES{$name} // return undef;
         my $first_type = $sig->{arg_types}[0] // return undef;
-        return $sig if $first_type eq 'Array';
+        return $sig if $first_type eq 'Array' || $first_type eq 'Hash';
         return undef;
     }
 
