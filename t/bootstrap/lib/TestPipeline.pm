@@ -143,7 +143,7 @@ my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
         keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_validated_builtin,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
         type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
     );
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();

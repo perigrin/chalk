@@ -660,6 +660,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 ($tags->{is_hash_typed}         ? (is_hash_typed         => true)     : ()),
                 ($tags->{is_scalar_typed}       ? (is_scalar_typed       => true)     : ()),
                 ($tags->{call_symbol}           ? (call_symbol => $tags->{call_symbol}) : ()),
+                ($tags->{item_types}            ? (item_types  => $tags->{item_types}) : ()),
+                ($tags->{list_arity}            ? (list_arity  => $tags->{list_arity}) : ()),
             },
             children => $value->children(),
             position => $value->position(),

@@ -117,13 +117,28 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return undef;
     }
 
+    # Types that represent polymorphic containers at parse time — a variable
+    # typed as Scalar could hold Str, Int, Num, etc. at runtime. These pass
+    # permissively against any subtype requirement within their branch.
+    my %POLYMORPHIC_TYPES = map { $_ => true } qw(Scalar Any List);
+
     # Returns true if $actual_type satisfies $required_type.
     # undef actual passes permissively (unknown type at parse time).
-    # 'Any' required always passes. Otherwise delegates to is_subtype.
+    # 'Any' required always passes.
+    # For polymorphic types (Scalar, Any, List — assigned to variables),
+    # also pass when the required type is a subtype of actual, since the
+    # variable could hold any value within its type at runtime.
     sub type_satisfies($actual_type, $required_type) {
         return true if $required_type eq 'Any';
         return true if !defined $actual_type;
-        return is_subtype($actual_type, $required_type);
+        # Subtype: Int satisfies Num (child → parent)
+        return true if is_subtype($actual_type, $required_type);
+        # Polymorphic supertype: Scalar satisfies Str (variable could hold Str at runtime)
+        # but Str does NOT satisfy Int (concrete type mismatch)
+        if ($POLYMORPHIC_TYPES{$actual_type}) {
+            return true if is_subtype($required_type, $actual_type);
+        }
+        return false;
     }
 
     # Returns true if $child is a subtype of (or equal to) $parent.

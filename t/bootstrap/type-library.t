@@ -443,7 +443,19 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Hash'),
     'type_satisfies(Array, Hash) returns false');
 ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Code', 'Scalar'),
     'type_satisfies(Code, Scalar) returns false');
+# Str is concrete (not polymorphic), so Str does NOT satisfy Int
 ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Str', 'Int'),
-    'type_satisfies(Str, Int) returns false (parent, not child)');
+    'type_satisfies(Str, Int) returns false (concrete supertype, not polymorphic)');
+
+# Scalar is polymorphic — a Scalar variable could hold an Int at runtime
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Int'),
+    'type_satisfies(Scalar, Int) returns true (polymorphic supertype)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Str'),
+    'type_satisfies(Scalar, Str) returns true (polymorphic supertype)');
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Regex'),
+    'type_satisfies(Scalar, Regex) returns true (polymorphic supertype)');
+# But Scalar does NOT satisfy Array (different branches)
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Array'),
+    'type_satisfies(Scalar, Array) returns false (incompatible branches)');
 
 done_testing;
