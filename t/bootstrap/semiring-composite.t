@@ -391,8 +391,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
         keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_validated_builtin,
-        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(
@@ -418,8 +417,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
         keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_validated_builtin,
-        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(
@@ -439,8 +437,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
         keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_validated_builtin,
-        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(
@@ -478,8 +475,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
     my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
         keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_validated_builtin,
-        type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
     my $comp = Chalk::Bootstrap::Semiring::Composite->new(

@@ -99,24 +99,6 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return exists $BUILTIN_SIGNATURES{$name} ? true : false;
     }
 
-    # Returns the signature for a builtin eligible for parse-time validation
-    # via scan-time type tags. Used by TypeInference on_scan to tag builtins
-    # with call_symbol, and at CallExpression on_complete to validate
-    # first-arg types.
-    #
-    # Only returns signatures whose first arg type has a scan-time tag
-    # (Array, Hash). Builtins with non-taggable first args (Code, List,
-    # Str, Any, etc.) can't be validated because the merged semiring value
-    # conflates tags from all children — e.g., map { ... } @items merges
-    # is_array_typed from the second arg, which would incorrectly fail
-    # the Code check for the first arg.
-    sub get_validated_builtin($name) {
-        my $sig = $BUILTIN_SIGNATURES{$name} // return undef;
-        my $first_type = $sig->{arg_types}[0] // return undef;
-        return $sig if $first_type eq 'Array' || $first_type eq 'Hash';
-        return undef;
-    }
-
     # Types that represent polymorphic containers at parse time — a variable
     # typed as Scalar could hold Str, Int, Num, etc. at runtime. These pass
     # permissively against any subtype requirement within their branch.
@@ -160,46 +142,6 @@ class Chalk::Grammar::Perl::TypeLibrary {
         }
 
         $subtype_cache{$cache_key} = false;
-        return false;
-    }
-
-    # Maps a TypeInference semiring tag to a type name.
-    # Used by tags_satisfy_type() for legacy flat-tag validation.
-    my %TAG_TO_TYPE = (
-        is_array_typed  => 'Array',
-        is_hash_typed   => 'Hash',
-        is_scalar_typed => 'Scalar',
-    );
-
-    # Types that have corresponding scan-time tags in TypeInference.
-    # Only these types can be validated strictly at parse time because
-    # the parser produces tags for them (is_array_typed, is_hash_typed,
-    # is_scalar_typed). Other types (Str, Int, Ref, etc.) have no
-    # scan-time tags, so untagged values must pass permissively.
-    my %TAGGABLE_TYPES = map { $_ => true } qw(Array Hash);
-
-    # Checks whether a semiring value's type tags satisfy a required type.
-    # Returns true if any tag on the value is a subtype of the required type.
-    # When required_type is 'Any', always returns true (anything satisfies Any).
-    # When no type tags are present: strict fail only for taggable types
-    # (Array, Hash) that have scan-time tags; permissive for other types
-    # since the parser can't detect them.
-    sub tags_satisfy_type($value, $required_type) {
-        return true if $required_type eq 'Any';
-
-        my @tags = grep { $value->{$_} } keys %TAG_TO_TYPE;
-
-        # No type tags: strict fail only for types with scan-time tags
-        if (!@tags) {
-            return false if $TAGGABLE_TYPES{$required_type};
-            return true;
-        }
-
-        for my $tag (@tags) {
-            my $actual_type = $TAG_TO_TYPE{$tag};
-            return true if is_subtype($actual_type, $required_type);
-        }
-
         return false;
     }
 

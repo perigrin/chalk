@@ -59,7 +59,6 @@ use_ok('Chalk::Bootstrap::Context');
 my $ti = Chalk::Bootstrap::Semiring::TypeInference->new(
     keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
     builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
-    type_check     => \&Chalk::Grammar::Perl::TypeLibrary::tags_satisfy_type,
 );
 
 # Helper: create a leaf Context with tag hash focus (for test value construction)
@@ -812,132 +811,121 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # --- on_scan: variable type tagging ---
 
-# ScalarVariable scanned → is_scalar_typed
+# ScalarVariable scanned → type => 'Scalar'
 {
     my $item = make_item('ScalarVariable', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '$x');
     ok(!$ti->is_zero($result), 'scanning $x as ScalarVariable is non-zero');
     my $tags = get_tags($result);
-    ok($tags->{is_scalar_typed}, 'scanning $x as ScalarVariable tags is_scalar_typed');
-    ok(!$tags->{is_array_typed}, 'scanning $x as ScalarVariable has no is_array_typed');
-    ok(!$tags->{is_hash_typed}, 'scanning $x as ScalarVariable has no is_hash_typed');
+    is($tags->{type}, 'Scalar', 'scanning $x as ScalarVariable tags type => Scalar');
 }
 
-# ArrayVariable scanned → is_array_typed
+# ArrayVariable scanned → type => 'Array'
 {
     my $item = make_item('ArrayVariable', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '@arr');
     ok(!$ti->is_zero($result), 'scanning @arr as ArrayVariable is non-zero');
     my $tags = get_tags($result);
-    ok($tags->{is_array_typed}, 'scanning @arr as ArrayVariable tags is_array_typed');
-    ok(!$tags->{is_scalar_typed}, 'scanning @arr as ArrayVariable has no is_scalar_typed');
-    ok(!$tags->{is_hash_typed}, 'scanning @arr as ArrayVariable has no is_hash_typed');
+    is($tags->{type}, 'Array', 'scanning @arr as ArrayVariable tags type => Array');
 }
 
-# HashVariable scanned → is_hash_typed
+# HashVariable scanned → type => 'Hash'
 {
     my $item = make_item('HashVariable', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '%h');
     ok(!$ti->is_zero($result), 'scanning %h as HashVariable is non-zero');
     my $tags = get_tags($result);
-    ok($tags->{is_hash_typed}, 'scanning %h as HashVariable tags is_hash_typed');
-    ok(!$tags->{is_scalar_typed}, 'scanning %h as HashVariable has no is_scalar_typed');
-    ok(!$tags->{is_array_typed}, 'scanning %h as HashVariable has no is_array_typed');
+    is($tags->{type}, 'Hash', 'scanning %h as HashVariable tags type => Hash');
 }
 
 # --- multiply: type tag propagation ---
 
 {
-    my $scalar = make_ctx(is_scalar_typed => true);
-    my $array  = make_ctx(is_array_typed => true);
-    my $hash   = make_ctx(is_hash_typed => true);
+    my $scalar = make_ctx(type => 'Scalar');
+    my $array  = make_ctx(type => 'Array');
+    my $hash   = make_ctx(type => 'Hash');
     my $o = $ti->one();
 
     my $r1 = $ti->multiply($scalar, $o);
-    ok(get_tags($r1)->{is_scalar_typed}, 'is_scalar_typed propagates from left in multiply');
+    is(get_tags($r1)->{type}, 'Scalar', 'type => Scalar propagates from left in multiply');
 
     my $r2 = $ti->multiply($o, $array);
-    ok(get_tags($r2)->{is_array_typed}, 'is_array_typed propagates from right in multiply');
+    is(get_tags($r2)->{type}, 'Array', 'type => Array propagates from right in multiply');
 
     my $r3 = $ti->multiply($hash, $o);
-    ok(get_tags($r3)->{is_hash_typed}, 'is_hash_typed propagates from left in multiply');
-
-    # Multiple tags propagate together
-    my $r4 = $ti->multiply($scalar, $array);
-    ok(get_tags($r4)->{is_scalar_typed}, 'multiply: both scalar and array survive (scalar)');
-    ok(get_tags($r4)->{is_array_typed}, 'multiply: both scalar and array survive (array)');
+    is(get_tags($r3)->{type}, 'Hash', 'type => Hash propagates from left in multiply');
 }
 
 # --- on_complete: PostfixDeref type tagging ---
 
-# PostfixDeref alt 0 (->@*) → is_array_typed
+# PostfixDeref alt 0 (->@*) → type => 'Array'
 {
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 0 completion is valid');
-    ok(get_tags($result)->{is_array_typed}, 'PostfixDeref alt 0 (->@*) tags is_array_typed');
+    is(get_tags($result)->{type}, 'Array', 'PostfixDeref alt 0 (->@*) tags type => Array');
 }
 
-# PostfixDeref alt 1 (->%*) → is_hash_typed
+# PostfixDeref alt 1 (->%*) → type => 'Hash'
 {
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 1 completion is valid');
-    ok(get_tags($result)->{is_hash_typed}, 'PostfixDeref alt 1 (->%*) tags is_hash_typed');
+    is(get_tags($result)->{type}, 'Hash', 'PostfixDeref alt 1 (->%*) tags type => Hash');
 }
 
-# PostfixDeref alt 2 (->$*) → is_scalar_typed
+# PostfixDeref alt 2 (->$*) → type => 'Scalar'
 {
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 2, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 2 completion is valid');
-    ok(get_tags($result)->{is_scalar_typed}, 'PostfixDeref alt 2 (->$*) tags is_scalar_typed');
+    is(get_tags($result)->{type}, 'Scalar', 'PostfixDeref alt 2 (->$*) tags type => Scalar');
 }
 
-# PostfixDeref alt 3 (->$#*) → is_scalar_typed (array count is scalar)
+# PostfixDeref alt 3 (->$#*) → type => 'Scalar' (array count is scalar)
 {
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 3, 10);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 3 completion is valid');
-    ok(get_tags($result)->{is_scalar_typed}, 'PostfixDeref alt 3 (->$#*) tags is_scalar_typed');
+    is(get_tags($result)->{type}, 'Scalar', 'PostfixDeref alt 3 (->$#*) tags type => Scalar');
 }
 
 # --- on_complete: Variable propagates child type tags ---
 
 {
-    my $scalar_val = make_ctx(is_scalar_typed => true);
+    my $scalar_val = make_ctx(type => 'Scalar');
     my $item = make_item('Variable', $scalar_val);
     my $result = $ti->on_complete($item, 0, 5);
-    ok(!$ti->is_zero($result), 'Variable completion with is_scalar_typed is valid');
-    ok(get_tags($result)->{is_scalar_typed}, 'Variable preserves is_scalar_typed from child');
+    ok(!$ti->is_zero($result), 'Variable completion with type => Scalar is valid');
+    is(get_tags($result)->{type}, 'Scalar', 'Variable preserves type => Scalar from child');
 }
 
 {
-    my $array_val = make_ctx(is_array_typed => true);
+    my $array_val = make_ctx(type => 'Array');
     my $item = make_item('Variable', $array_val);
     my $result = $ti->on_complete($item, 0, 5);
-    ok(!$ti->is_zero($result), 'Variable completion with is_array_typed is valid');
-    ok(get_tags($result)->{is_array_typed}, 'Variable preserves is_array_typed from child');
+    ok(!$ti->is_zero($result), 'Variable completion with type => Array is valid');
+    is(get_tags($result)->{type}, 'Array', 'Variable preserves type => Array from child');
 }
 
 # --- on_complete: boundary rules preserve type tags ---
 # Type tags pass through boundary rules (unlike keyword_as_identifier)
 
 {
-    my $typed = make_ctx(is_array_typed => true);
+    my $typed = make_ctx(type => 'Array');
     my $item = make_item('ParenExpr', $typed);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'ParenExpr with is_array_typed is valid');
-    ok(get_tags($result)->{is_array_typed}, 'ParenExpr preserves is_array_typed');
+    ok(!$ti->is_zero($result), 'ParenExpr with type => Array is valid');
+    is(get_tags($result)->{type}, 'Array', 'ParenExpr preserves type => Array');
     ok(!get_tags($result)->{keyword_as_identifier}, 'ParenExpr still clears keyword_as_identifier');
 }
 
 {
-    my $typed = make_ctx(is_scalar_typed => true, keyword_as_identifier => true);
+    my $typed = make_ctx(type => 'Scalar', keyword_as_identifier => true);
     my $item = make_item('Block', $typed);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'Block with is_scalar_typed is valid');
-    ok(get_tags($result)->{is_scalar_typed}, 'Block preserves is_scalar_typed');
+    ok(!$ti->is_zero($result), 'Block with type => Scalar is valid');
+    is(get_tags($result)->{type}, 'Scalar', 'Block preserves type => Scalar');
     ok(!get_tags($result)->{keyword_as_identifier}, 'Block still clears keyword_as_identifier');
 }
 
@@ -1024,43 +1012,43 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # --- on_complete: CallExpression validates builtin first arg ---
 
-# CallExpression with call_symbol=push, is_array_typed, list_arity 2 → valid
+# CallExpression with call_symbol=push, item_types [Array, Scalar], arity 2 → valid
 {
-    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 2);
+    my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar'], list_arity => 2);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: push with array arg and arity 2 → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: push with array,scalar item_types → valid');
 }
 
-# CallExpression with call_symbol=push but only is_scalar_typed → zero (kill)
+# CallExpression with call_symbol=push, item_types [Scalar] → zero (kill)
 {
-    my $val = make_ctx(call_symbol => 'push', is_scalar_typed => true);
+    my $val = make_ctx(call_symbol => 'push', item_types => ['Scalar']);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok($ti->is_zero($result), 'CallExpression: push with scalar-only arg → zero (killed)');
+    ok($ti->is_zero($result), 'CallExpression: push with scalar-only item_types → zero (killed)');
 }
 
-# CallExpression with call_symbol=push and NO type tags → zero (kill)
+# CallExpression with call_symbol=push and no item_types → valid (no per-position check)
 {
     my $val = make_ctx(call_symbol => 'push');
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok($ti->is_zero($result), 'CallExpression: push with no type tags → zero (killed)');
+    ok($ti->is_zero($result), 'CallExpression: push with no item_types → zero (arity check fails)');
 }
 
-# CallExpression with call_symbol=push, both scalar and array typed, list_arity 2 → valid
-# (e.g., push @arr, $x — has both tags from multiply)
+# CallExpression with call_symbol=push, item_types [Array, Scalar], arity 2 → valid
+# (e.g., push @arr, $x — two items in ExpressionList)
 {
     my $val = make_ctx(call_symbol => 'push',
-                is_array_typed => true, is_scalar_typed => true, list_arity => 2);
+                item_types => ['Array', 'Scalar'], list_arity => 2);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: push with array+scalar args → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: push with array+scalar item_types → valid');
 }
 
 # CallExpression without call_symbol → normal (no validation)
 {
-    my $val = make_ctx(is_scalar_typed => true);
+    my $val = make_ctx(type => 'Scalar');
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'CallExpression: non-builtin with scalar → valid (no validation)');
@@ -1070,7 +1058,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ExpressionList alt 0 (single Expression) → list_arity 1
 {
-    my $val = make_ctx(is_array_typed => true);
+    my $val = make_ctx(type => 'Array');
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'ExpressionList alt 0: valid');
@@ -1079,7 +1067,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ExpressionList alt 1 (ExpressionList , Expression) → list_arity from child + 1
 {
-    my $val = make_ctx(is_array_typed => true, list_arity => 1);
+    my $val = make_ctx(type => 'Array', list_arity => 1);
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'ExpressionList alt 1: valid');
@@ -1107,7 +1095,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # list_arity propagates through multiply
 {
     my $left = make_ctx(list_arity => 2);
-    my $right = make_ctx(is_scalar_typed => true);
+    my $right = make_ctx(type => 'Scalar');
     my $result = $ti->multiply($left, $right);
     is(get_tags($result)->{list_arity}, 2, 'multiply: list_arity propagates from left');
 }
@@ -1122,7 +1110,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # push with list_arity 1 (only @arr, no values) → rejected (min_arity 2)
 {
-    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 1);
+    my $val = make_ctx(call_symbol => 'push', item_types => ['Array'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok($ti->is_zero($result), 'CallExpression: push with list_arity 1 → rejected (min_arity 2)');
@@ -1130,7 +1118,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # push with list_arity 2 (@arr, $val) → accepted
 {
-    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 2);
+    my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar'], list_arity => 2);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 2 → accepted');
@@ -1138,7 +1126,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # push with list_arity 3 (@arr, $val1, $val2) → accepted
 {
-    my $val = make_ctx(call_symbol => 'push', is_array_typed => true, list_arity => 3);
+    my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar', 'Scalar'], list_arity => 3);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 3 → accepted');
@@ -1146,7 +1134,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # pop with list_arity 1 (@arr) → accepted (min_arity 1)
 {
-    my $val = make_ctx(call_symbol => 'pop', is_array_typed => true, list_arity => 1);
+    my $val = make_ctx(call_symbol => 'pop', item_types => ['Array'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 1, 10);
     ok(!$ti->is_zero($result), 'CallExpression: pop with list_arity 1 → accepted');
@@ -1188,67 +1176,67 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'scanning "keys" as QualifiedIdentifier tags call_symbol => keys');
 }
 
-# CallExpression with call_symbol=keys, is_hash_typed → valid
+# CallExpression with call_symbol=keys, item_types [Hash] → valid
 {
-    my $val = make_ctx(call_symbol => 'keys', is_hash_typed => true);
+    my $val = make_ctx(call_symbol => 'keys', item_types => ['Hash'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: keys with hash arg → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: keys with hash item_types → valid');
 }
 
-# CallExpression with call_symbol=keys, is_scalar_typed → zero (kill)
+# CallExpression with call_symbol=keys, item_types [Scalar] → zero (kill)
 {
-    my $val = make_ctx(call_symbol => 'keys', is_scalar_typed => true);
+    my $val = make_ctx(call_symbol => 'keys', item_types => ['Scalar'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok($ti->is_zero($result), 'CallExpression: keys with scalar arg → zero (killed)');
+    ok($ti->is_zero($result), 'CallExpression: keys with scalar item_types → zero (killed)');
 }
 
-# CallExpression with call_symbol=keys, is_array_typed → zero (kill)
+# CallExpression with call_symbol=keys, item_types [Array] → zero (kill)
 {
-    my $val = make_ctx(call_symbol => 'keys', is_array_typed => true);
+    my $val = make_ctx(call_symbol => 'keys', item_types => ['Array'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok($ti->is_zero($result), 'CallExpression: keys with array arg → zero (killed)');
+    ok($ti->is_zero($result), 'CallExpression: keys with array item_types → zero (killed)');
 }
 
-# CallExpression with call_symbol=keys, no type tags → zero (kill, strict)
+# CallExpression with call_symbol=keys, no item_types → rejected (arity check)
 {
     my $val = make_ctx(call_symbol => 'keys');
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok($ti->is_zero($result), 'CallExpression: keys with no type tags → zero (killed)');
+    ok(!$ti->is_zero($result), 'CallExpression: keys with no item_types → valid (no per-position check)');
 }
 
-# CallExpression with call_symbol=values, is_hash_typed → valid
+# CallExpression with call_symbol=values, item_types [Hash] → valid
 {
-    my $val = make_ctx(call_symbol => 'values', is_hash_typed => true);
+    my $val = make_ctx(call_symbol => 'values', item_types => ['Hash'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: values with hash arg → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: values with hash item_types → valid');
 }
 
-# CallExpression with call_symbol=each, is_hash_typed → valid
+# CallExpression with call_symbol=each, item_types [Hash] → valid
 {
-    my $val = make_ctx(call_symbol => 'each', is_hash_typed => true);
+    my $val = make_ctx(call_symbol => 'each', item_types => ['Hash'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: each with hash arg → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: each with hash item_types → valid');
 }
 
 # ========================================================================
-# Non-array/hash builtins with Any arg type pass with any tags
+# Non-array/hash builtins with Any arg type pass with any item_types
 # ========================================================================
 
-# CallExpression with call_symbol=defined, is_scalar_typed → valid (Any accepts all)
+# CallExpression with call_symbol=defined, item_types [Scalar] → valid (Any accepts all)
 {
-    my $val = make_ctx(call_symbol => 'defined', is_scalar_typed => true);
+    my $val = make_ctx(call_symbol => 'defined', item_types => ['Scalar'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: defined with scalar arg → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: defined with scalar item_types → valid');
 }
 
-# CallExpression with call_symbol=die, no tags → valid (Any + min_arity 0)
+# CallExpression with call_symbol=die, no item_types → valid (Any + min_arity 0)
 {
     my $val = make_ctx(call_symbol => 'die');
     my $item = make_item('CallExpression', $val);
@@ -1256,12 +1244,12 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     ok(!$ti->is_zero($result), 'CallExpression: die with no args → valid');
 }
 
-# CallExpression with call_symbol=warn, is_scalar_typed → valid
+# CallExpression with call_symbol=warn, item_types [Scalar] → valid
 {
-    my $val = make_ctx(call_symbol => 'warn', is_scalar_typed => true);
+    my $val = make_ctx(call_symbol => 'warn', item_types => ['Scalar'], list_arity => 1);
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'CallExpression: warn with scalar arg → valid');
+    ok(!$ti->is_zero($result), 'CallExpression: warn with scalar item_types → valid');
 }
 
 # ========================================================================
@@ -1748,7 +1736,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'QwLiteral tags type => List');
 }
 
-# PostfixDeref alt 0 (->@*) → type => 'Array' (in addition to is_array_typed)
+# PostfixDeref alt 0 (->@*) → type => 'Array'
 {
     my $item = make_item('PostfixDeref', $ti->one());
     my $result = $ti->on_complete($item, 0, 10);
@@ -1963,7 +1951,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 0 (single Expression) with type => 'Array'
 # → item_types => ['Array']
 {
-    my $val = make_ctx(is_array_typed => true, type => 'Array');
+    my $val = make_ctx(type => 'Array');
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'ExpressionList alt 0 with type: valid');
@@ -1983,7 +1971,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ExpressionList alt 0 with no type tag
 {
-    my $val = make_ctx(is_scalar_typed => true);
+    my $val = make_ctx();
     my $item = make_item('ExpressionList', $val);
     my $result = $ti->on_complete($item, 0, 10);
     is_deeply(get_tags($result)->{item_types}, [undef],
@@ -1995,13 +1983,13 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     # Build a multiply tree: left has item_types, right has type
     my $left = Chalk::Bootstrap::Context->new(
-        focus    => { valid => true, item_types => ['Array'], list_arity => 1, is_array_typed => true, type => 'Array' },
+        focus    => { valid => true, item_types => ['Array'], list_arity => 1, type => 'Array' },
         children => [],
         position => 0,
         rule     => 'ExpressionList',
     );
     my $right = Chalk::Bootstrap::Context->new(
-        focus    => { valid => true, type => 'Scalar', is_scalar_typed => true },
+        focus    => { valid => true, type => 'Scalar' },
         children => [],
         position => 5,
         rule     => undef,
@@ -2059,8 +2047,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'push',
         item_types  => ['Array', 'Scalar'],
         list_arity  => 2,
-        is_array_typed => true,
-        is_scalar_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
@@ -2075,7 +2061,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'push',
         item_types  => ['Scalar', 'Scalar'],
         list_arity  => 2,
-        is_scalar_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
@@ -2089,8 +2074,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'join',
         item_types  => ['Str', 'Array'],
         list_arity  => 2,
-        is_scalar_typed => true,
-        is_array_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
@@ -2152,7 +2135,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'keys',
         item_types  => ['Hash'],
         list_arity  => 1,
-        is_hash_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
@@ -2167,7 +2149,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'keys',
         item_types  => ['Scalar'],
         list_arity  => 1,
-        is_scalar_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
@@ -2180,7 +2161,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'defined',
         item_types  => ['Scalar'],
         list_arity  => 1,
-        is_scalar_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
@@ -2206,7 +2186,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'push',
         item_types  => ['Array'],
         list_arity  => 1,
-        is_array_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 0, 10);
@@ -2221,7 +2200,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'map',
         item_types  => ['Array'],
         list_arity  => 2,  # Block + 1 ExpressionList arg
-        is_array_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 2, 10);  # alt 2 = block-first with args
@@ -2248,7 +2226,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol    => 'grep',
         item_types     => ['Scalar'],
         list_arity     => 2,
-        is_scalar_typed => true,
     );
     my $item = make_item('CallExpression', $val);
     my $result = $ti->on_complete($item, 2, 10);

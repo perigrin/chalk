@@ -11,8 +11,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     field $keyword_check :param;
     # Callback: name => signature hash or undef (from TypeLibrary)
     field $builtin_lookup :param;
-    # Callback: (value, required_type) => true if value's tags satisfy required type
-    field $type_check :param;
     # Positions where BinaryOp scanned + or - (for unary disambiguation)
     field %binary_op_positions;
 
@@ -188,18 +186,18 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 _ctx({ valid => true, keyword_as_identifier => true }));
         }
 
-        # Tag variable scans with their type (both legacy is_*_typed and new type tag)
+        # Tag variable scans with their type
         if ($rule_name eq 'ScalarVariable') {
             return $self->multiply($existing,
-                _ctx({ valid => true, is_scalar_typed => true, type => 'Scalar' }));
+                _ctx({ valid => true, type => 'Scalar' }));
         }
         if ($rule_name eq 'ArrayVariable') {
             return $self->multiply($existing,
-                _ctx({ valid => true, is_array_typed => true, type => 'Array' }));
+                _ctx({ valid => true, type => 'Array' }));
         }
         if ($rule_name eq 'HashVariable') {
             return $self->multiply($existing,
-                _ctx({ valid => true, is_hash_typed => true, type => 'Hash' }));
+                _ctx({ valid => true, type => 'Hash' }));
         }
 
         # NumericLiteral: distinguish Int vs Num based on pattern
@@ -317,9 +315,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return Chalk::Bootstrap::Context->new(
                 focus    => {
                     valid => true,
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                     ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
                     ($arity ? (list_arity => $arity) : ()),
                     ($item_types ? (item_types => $item_types) : ()),
@@ -336,16 +331,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 return undef;
             }
             my $return_type;
-            # Builtin signature validation
+            # Builtin signature validation via per-position item_types
             if ($tags->{call_symbol}) {
                 my $builtin_name = $tags->{call_symbol};
                 my $item_types = $tags->{item_types};
-                # When item_types available, use get_builtin directly for full
-                # per-position validation (all builtins). Otherwise fall back
-                # to the legacy $builtin_lookup (get_validated_builtin) gate.
-                my $sig = $item_types
-                    ? Chalk::Grammar::Perl::TypeLibrary::get_builtin($builtin_name)
-                    : $builtin_lookup->($builtin_name);
+                my $sig = $builtin_lookup->($builtin_name);
                 if ($sig) {
                     if ($item_types) {
                         # Per-position validation using item_types.
@@ -360,16 +350,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                             # Variadic: last arg_type applies to remaining positions
                             my $expected = $arg_types->[$sig_idx] // $arg_types->[-1];
                             if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
-                                return undef;
-                            }
-                        }
-                    } else {
-                        # Legacy fallback: flat first-arg check via type_check callback.
-                        # Only validate when first arg type is taggable (Array/Hash) —
-                        # other types can't be reliably checked with flat merged tags.
-                        my $first_type = $sig->{arg_types}[0];
-                        if ($first_type eq 'Array' || $first_type eq 'Hash') {
-                            if (!$type_check->($tags, $first_type)) {
                                 return undef;
                             }
                         }
@@ -392,9 +372,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     ($return_type ? (type => $return_type) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -429,9 +406,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                     ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
                 },
                 children => $value->children(),
@@ -453,9 +427,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                     ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
                 },
                 children => $value->children(),
@@ -470,9 +441,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true, type => 'Num',
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -493,9 +461,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     ($sub_type ? (type => $sub_type) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -509,9 +474,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -525,9 +487,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -541,9 +500,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -555,13 +511,13 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # alt 0 = ->@* (array), alt 1 = ->%* (hash),
         # alt 2 = ->$* (scalar), alt 3 = ->$#* (scalar count)
         if ($rule_name eq 'PostfixDeref') {
-            my ($type_tag, $type);
+            my $type_tag;
             if ($alt_idx == 0) {
-                $type_tag = { valid => true, is_array_typed => true, type => 'Array' };
+                $type_tag = { valid => true, type => 'Array' };
             } elsif ($alt_idx == 1) {
-                $type_tag = { valid => true, is_hash_typed => true, type => 'Hash' };
+                $type_tag = { valid => true, type => 'Hash' };
             } else {
-                $type_tag = { valid => true, is_scalar_typed => true, type => 'Scalar' };
+                $type_tag = { valid => true, type => 'Scalar' };
             }
             return Chalk::Bootstrap::Context->new(
                 focus    => $type_tag,
@@ -597,9 +553,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     type => 'ArrayRef',
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -613,9 +566,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     type => 'HashRef',
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -624,9 +574,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
 
         # Boundary rules: clear keyword_as_identifier, ambiguous_unary,
-        # call_symbol, and op_text tags. Type tags (is_*_typed and type)
-        # are PRESERVED through boundaries because a parenthesized array
-        # is still array-typed (e.g., ($ops->@*) is still array).
+        # call_symbol, and op_text tags. The type tag is PRESERVED through
+        # boundaries because a parenthesized array is still array-typed
+        # (e.g., ($ops->@*) is still array).
         # Attribute allows keywords as identifiers (e.g., :isa).
         # Subscript is handled separately above (sets type for subscript access).
         if ($rule_name eq 'ParenExpr'
@@ -638,9 +588,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 focus    => {
                     valid => true,
                     ($tags->{type}            ? (type            => $tags->{type}) : ()),
-                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -656,9 +603,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 ($tags->{ambiguous_unary}       ? (ambiguous_unary       => true)     : ()),
                 ($tags->{type}                  ? (type            => $tags->{type})   : ()),
                 ($tags->{op_text}               ? (op_text         => $tags->{op_text}) : ()),
-                ($tags->{is_array_typed}        ? (is_array_typed        => true)     : ()),
-                ($tags->{is_hash_typed}         ? (is_hash_typed         => true)     : ()),
-                ($tags->{is_scalar_typed}       ? (is_scalar_typed       => true)     : ()),
                 ($tags->{call_symbol}           ? (call_symbol => $tags->{call_symbol}) : ()),
                 ($tags->{item_types}            ? (item_types  => $tags->{item_types}) : ()),
                 ($tags->{list_arity}            ? (list_arity  => $tags->{list_arity}) : ()),
