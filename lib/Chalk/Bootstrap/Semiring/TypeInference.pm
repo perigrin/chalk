@@ -335,39 +335,51 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             if ($tags->{keyword_as_identifier}) {
                 return undef;
             }
-            # Builtin signature validation: check arg types and min arity
+            my $return_type;
+            # Builtin signature validation
             if ($tags->{call_symbol}) {
                 my $builtin_name = $tags->{call_symbol};
-                my $sig = $builtin_lookup->($builtin_name);
+                my $item_types = $tags->{item_types};
+                # When item_types available, use get_builtin directly for full
+                # per-position validation (all builtins). Otherwise fall back
+                # to the legacy $builtin_lookup (get_validated_builtin) gate.
+                my $sig = $item_types
+                    ? Chalk::Grammar::Perl::TypeLibrary::get_builtin($builtin_name)
+                    : $builtin_lookup->($builtin_name);
                 if ($sig) {
-                    # Validate first arg type from signature
-                    my $first_type = $sig->{arg_types}[0];
-                    if (!$type_check->($tags, $first_type)) {
-                        return undef;
+                    if ($item_types) {
+                        # Per-position validation using item_types
+                        my $arg_types = $sig->{arg_types};
+                        for my $i (0 .. $#$item_types) {
+                            my $actual = $item_types->[$i];
+                            # Variadic: last arg_type applies to remaining positions
+                            my $expected = $arg_types->[$i] // $arg_types->[-1];
+                            if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
+                                return undef;
+                            }
+                        }
+                    } else {
+                        # Legacy fallback: flat first-arg check via type_check callback
+                        my $first_type = $sig->{arg_types}[0];
+                        if (!$type_check->($tags, $first_type)) {
+                            return undef;
+                        }
                     }
                     # Validate min arity
                     my $arity = $tags->{list_arity} // 1;
                     if ($arity < $sig->{min_arity}) {
                         return undef;
                     }
+                    # Set return type from signature
+                    $return_type = $sig->{return_type};
+                    $return_type = undef if defined $return_type && $return_type eq 'Any';
                 }
-                # Validation passed: clear builtin tag, preserve type tags
-                return Chalk::Bootstrap::Context->new(
-                    focus    => {
-                        valid => true,
-                        ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
-                        ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
-                        ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
-                    },
-                    children => $value->children(),
-                    position => $value->position(),
-                    rule     => $rule_name,
-                );
             }
-            # Non-builtin CallExpression: preserve type tags
+            # Clear builtin tag, set return type
             return Chalk::Bootstrap::Context->new(
                 focus    => {
                     valid => true,
+                    ($return_type ? (type => $return_type) : ()),
                     ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
                     ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
                     ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),

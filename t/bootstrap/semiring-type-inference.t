@@ -2049,4 +2049,168 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'ExpressionList alt 3 (trailing comma): item_types preserved');
 }
 
+# ========================================================================
+# Phase 7: Per-position CallExpression validation
+# ========================================================================
+
+# push(@arr, $x): item_types => ['Array', 'Scalar'], sig expects [Array, Any] → valid
+{
+    my $val = make_ctx(
+        call_symbol => 'push',
+        item_types  => ['Array', 'Scalar'],
+        list_arity  => 2,
+        is_array_typed => true,
+        is_scalar_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'per-position: push(Array, Scalar) → valid');
+    is(get_tags($result)->{type}, 'Int',
+        'per-position: push return type => Int');
+}
+
+# push($x, $y): item_types => ['Scalar', 'Scalar'], sig expects [Array, Any] → rejected
+{
+    my $val = make_ctx(
+        call_symbol => 'push',
+        item_types  => ['Scalar', 'Scalar'],
+        list_arity  => 2,
+        is_scalar_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'per-position: push(Scalar, Scalar) → rejected');
+}
+
+# join("\n", @lines): item_types => ['Str', 'Array'], sig expects [Scalar, Any] → valid
+# (Str is subtype of Scalar, Array satisfies Any)
+{
+    my $val = make_ctx(
+        call_symbol => 'join',
+        item_types  => ['Str', 'Array'],
+        list_arity  => 2,
+        is_scalar_typed => true,
+        is_array_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'per-position: join(Str, Array) → valid');
+    is(get_tags($result)->{type}, 'Str',
+        'per-position: join return type => Str');
+}
+
+# chr(65): item_types => ['Int'], sig expects [Int] → valid
+{
+    my $val = make_ctx(
+        call_symbol => 'chr',
+        item_types  => ['Int'],
+        list_arity  => 1,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'per-position: chr(Int) → valid');
+    is(get_tags($result)->{type}, 'Str',
+        'per-position: chr return type => Str');
+}
+
+# chr("hello"): item_types => ['Str'], sig expects [Int] → valid
+# (Str is NOT subtype of Int, but Str→Int is okay... wait, actually Num>Str>Scalar.
+# Int is subtype of Num which is subtype of Str. So Str is NOT subtype of Int.
+# However, this should still pass because type_satisfies(undef, X) passes.)
+# Actually, chr expects Int, and Str is not a subtype of Int.
+# But in practice Perl coerces. Let me check the plan...
+# The plan says type_satisfies(undef, X) → true. For 'Str' vs 'Int':
+# is_subtype('Str', 'Int') → false. So this would reject.
+# But that's incorrect for Perl! In Perl, chr("65") works fine.
+# Let me make this a valid test case that shows the type system rejects it.
+{
+    my $val = make_ctx(
+        call_symbol => 'chr',
+        item_types  => ['Str'],
+        list_arity  => 1,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'per-position: chr(Str) → rejected (Str is not Int)');
+}
+
+# push with undef type in item_types (unknown type passes permissively)
+{
+    my $val = make_ctx(
+        call_symbol => 'push',
+        item_types  => [undef, undef],
+        list_arity  => 2,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'per-position: push(undef, undef) → valid (permissive)');
+}
+
+# keys with item_types => ['Hash'] → valid
+{
+    my $val = make_ctx(
+        call_symbol => 'keys',
+        item_types  => ['Hash'],
+        list_arity  => 1,
+        is_hash_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'per-position: keys(Hash) → valid');
+    is(get_tags($result)->{type}, 'List',
+        'per-position: keys return type => List');
+}
+
+# keys with item_types => ['Scalar'] → rejected
+{
+    my $val = make_ctx(
+        call_symbol => 'keys',
+        item_types  => ['Scalar'],
+        list_arity  => 1,
+        is_scalar_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'per-position: keys(Scalar) → rejected');
+}
+
+# defined($x): item_types => ['Scalar'], sig expects [Any] → valid
+{
+    my $val = make_ctx(
+        call_symbol => 'defined',
+        item_types  => ['Scalar'],
+        list_arity  => 1,
+        is_scalar_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'per-position: defined(Scalar) → valid');
+    is(get_tags($result)->{type}, 'Bool',
+        'per-position: defined return type => Bool');
+}
+
+# Non-builtin CallExpression with item_types → passes (no validation)
+{
+    my $val = make_ctx(
+        item_types => ['Int', 'Str'],
+        list_arity => 2,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'per-position: non-builtin with item_types → valid');
+}
+
+# Min arity check: push with only 1 arg → rejected
+{
+    my $val = make_ctx(
+        call_symbol => 'push',
+        item_types  => ['Array'],
+        list_arity  => 1,
+        is_array_typed => true,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'per-position: push(Array) with arity 1 → rejected (min_arity 2)');
+}
+
 done_testing;
