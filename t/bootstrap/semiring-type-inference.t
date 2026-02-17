@@ -1780,4 +1780,180 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'PostfixDeref alt 3 (->$#*) tags type => Scalar');
 }
 
+# ========================================================================
+# Phase 5: Expression-level return types
+# ========================================================================
+
+# BinaryExpression with op_text '+' → type => 'Num' (consumes op_text)
+{
+    my $val = make_ctx(op_text => '+', type => 'Int');
+    my $item = make_item('BinaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'BinaryExpression "+" is valid');
+    is(get_tags($result)->{type}, 'Num',
+        'BinaryExpression "+" tags type => Num');
+    ok(!get_tags($result)->{op_text},
+        'BinaryExpression consumes op_text');
+}
+
+# BinaryExpression with op_text '==' → type => 'Bool'
+{
+    my $val = make_ctx(op_text => '==');
+    my $item = make_item('BinaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'Bool',
+        'BinaryExpression "==" tags type => Bool');
+}
+
+# BinaryExpression with op_text '.' → type => 'Str'
+{
+    my $val = make_ctx(op_text => '.');
+    my $item = make_item('BinaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'Str',
+        'BinaryExpression "." tags type => Str');
+}
+
+# BinaryExpression with op_text '&&' → type => 'Any'
+{
+    my $val = make_ctx(op_text => '&&');
+    my $item = make_item('BinaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, undef,
+        'BinaryExpression "&&" tags type => undef (Any means unknown)');
+}
+
+# BinaryExpression with op_text '=~' → type => 'Bool'
+{
+    my $val = make_ctx(op_text => '=~');
+    my $item = make_item('BinaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'Bool',
+        'BinaryExpression "=~" tags type => Bool');
+}
+
+# BinaryExpression with op_text '..' → type => 'List'
+{
+    my $val = make_ctx(op_text => '..');
+    my $item = make_item('BinaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'List',
+        'BinaryExpression ".." tags type => List');
+}
+
+# BinaryExpression without op_text → type preserved from children
+{
+    my $val = make_ctx(type => 'Int');
+    my $item = make_item('BinaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'Int',
+        'BinaryExpression without op_text preserves child type');
+}
+
+# UnaryExpression with op_text '!' → type => 'Bool' (consumes op_text)
+{
+    my $val = make_ctx(op_text => '!');
+    my $item = make_item('UnaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'UnaryExpression "!" is valid');
+    is(get_tags($result)->{type}, 'Bool',
+        'UnaryExpression "!" tags type => Bool');
+    ok(!get_tags($result)->{op_text},
+        'UnaryExpression consumes op_text');
+}
+
+# UnaryExpression with op_text '-' (standalone, no ambiguous) → type => 'Num'
+{
+    my $val = make_ctx(op_text => '-');
+    my $item = make_item('UnaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'Num',
+        'UnaryExpression "-" tags type => Num');
+}
+
+# UnaryExpression with op_text '\\' → type => 'Ref'
+{
+    my $val = make_ctx(op_text => '\\');
+    my $item = make_item('UnaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    is(get_tags($result)->{type}, 'Ref',
+        'UnaryExpression "\\" tags type => Ref');
+}
+
+# UnaryExpression with ambiguous_unary still rejected
+{
+    my $val = make_ctx(op_text => '+', ambiguous_unary => true);
+    my $item = make_item('UnaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result), 'UnaryExpression with ambiguous_unary still rejected');
+}
+
+# PostfixIncDec → type => 'Num'
+{
+    my $val = make_ctx(type => 'Scalar');
+    my $item = make_item('PostfixIncDec', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'PostfixIncDec is valid');
+    is(get_tags($result)->{type}, 'Num',
+        'PostfixIncDec tags type => Num');
+}
+
+# Subscript (array []) → type => 'Scalar'
+{
+    my $val = make_ctx(type => 'Array');
+    my $item = make_item('Subscript', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'Subscript alt 0 is valid');
+    is(get_tags($result)->{type}, 'Scalar',
+        'Subscript alt 0 (array []) tags type => Scalar');
+}
+
+# Subscript (hash {}) → type => 'Scalar'
+{
+    my $val = make_ctx(type => 'Hash');
+    my $item = make_item('Subscript', $val);
+    my $result = $ti->on_complete($item, 1, 10);
+    is(get_tags($result)->{type}, 'Scalar',
+        'Subscript alt 1 (hash {}) tags type => Scalar');
+}
+
+# Subscript (deref-call ->()) → type => undef
+{
+    my $val = make_ctx(type => 'CodeRef');
+    my $item = make_item('Subscript', $val);
+    my $result = $ti->on_complete($item, 2, 10);
+    is(get_tags($result)->{type}, undef,
+        'Subscript alt 2 (->()) tags type => undef');
+}
+
+# TernaryExpression → type => undef
+{
+    my $val = make_ctx(type => 'Int');
+    my $item = make_item('TernaryExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'TernaryExpression is valid');
+    is(get_tags($result)->{type}, undef,
+        'TernaryExpression tags type => undef');
+}
+
+# AssignmentExpression → type => undef
+{
+    my $val = make_ctx(type => 'Scalar');
+    my $item = make_item('AssignmentExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'AssignmentExpression is valid');
+    is(get_tags($result)->{type}, undef,
+        'AssignmentExpression tags type => undef');
+}
+
+# MethodCall → type => undef
+{
+    my $val = make_ctx(type => 'Object');
+    my $item = make_item('MethodCall', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'MethodCall is valid');
+    is(get_tags($result)->{type}, undef,
+        'MethodCall tags type => undef');
+}
+
 done_testing;

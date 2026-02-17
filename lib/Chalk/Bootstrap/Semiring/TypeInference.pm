@@ -340,6 +340,147 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return undef;
         }
 
+        # BinaryExpression: consume op_text, set result type from TypeLibrary
+        if ($rule_name eq 'BinaryExpression') {
+            my $op = $tags->{op_text};
+            my $result_type;
+            if (defined $op) {
+                my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op($op);
+                if ($sig && $sig->{result} ne 'Any') {
+                    $result_type = $sig->{result};
+                }
+                # result 'Any' → leave type undef (unknown)
+            } else {
+                # No op_text: preserve child type (intermediate completion)
+                $result_type = $tags->{type};
+            }
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($result_type ? (type => $result_type) : ()),
+                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                    ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # UnaryExpression: consume op_text, set result type from TypeLibrary
+        if ($rule_name eq 'UnaryExpression') {
+            my $op = $tags->{op_text};
+            my $result_type;
+            if (defined $op) {
+                my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op($op);
+                $result_type = $sig->{result} if $sig;
+            }
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($result_type ? (type => $result_type) : ()),
+                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                    ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # PostfixIncDec (++/--): result is Num
+        if ($rule_name eq 'PostfixIncDec') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true, type => 'Num',
+                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # Subscript: array/hash subscript → Scalar, deref-call → undef
+        # Also acts as boundary rule (clears keyword/unary/call tags)
+        if ($rule_name eq 'Subscript') {
+            my $sub_type;
+            if ($alt_idx <= 1) {
+                # alt 0 = [...] (array), alt 1 = {...} (hash) → element is Scalar
+                $sub_type = 'Scalar';
+            }
+            # alt 2+ = ->() deref-call: type unknown (undef)
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($sub_type ? (type => $sub_type) : ()),
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # TernaryExpression: type unknown (could be either branch)
+        if ($rule_name eq 'TernaryExpression') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # AssignmentExpression: type unknown
+        if ($rule_name eq 'AssignmentExpression') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
+        # MethodCall: type unknown (return type of method not knowable at parse time)
+        if ($rule_name eq 'MethodCall') {
+            return Chalk::Bootstrap::Context->new(
+                focus    => {
+                    valid => true,
+                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
+                    ($tags->{is_array_typed}  ? (is_array_typed  => true) : ()),
+                    ($tags->{is_hash_typed}   ? (is_hash_typed   => true) : ()),
+                    ($tags->{is_scalar_typed} ? (is_scalar_typed => true) : ()),
+                },
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $rule_name,
+            );
+        }
+
         # PostfixDeref: tag with the type of the dereference result.
         # alt 0 = ->@* (array), alt 1 = ->%* (hash),
         # alt 2 = ->$* (scalar), alt 3 = ->$#* (scalar count)
