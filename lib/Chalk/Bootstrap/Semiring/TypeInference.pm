@@ -4,6 +4,8 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+use Chalk::Bootstrap::Context;
+
 class Chalk::Bootstrap::Semiring::TypeInference {
     # Callback: word => true if keyword, false otherwise
     field $keyword_check :param;
@@ -14,6 +16,33 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Positions where BinaryOp scanned + or - (for unary disambiguation)
     field %binary_op_positions;
 
+    # Extract tag hash from a TypeInference value.
+    # Handles both plain hash (legacy) and Context (new) formats.
+    my sub _tags($val) {
+        return undef unless defined $val;
+        return $val if ref($val) eq 'HASH';
+        # Context object: extract focus (which is the tag hash)
+        if ($val isa Chalk::Bootstrap::Context) {
+            my $focus = $val->extract();
+            return $focus if defined $focus && ref($focus) eq 'HASH';
+            # Intermediate multiply node with undef focus: collect from leaves
+            my %merged;
+            for my $leaf ($val->leaves()) {
+                my $f = $leaf->extract();
+                next unless defined $f && ref($f) eq 'HASH';
+                for my $k (keys %$f) {
+                    $merged{$k} = $f->{$k} if $f->{$k};
+                }
+            }
+            return \%merged;
+        }
+        return undef;
+    }
+
+    # Build a tag hash from extracted tags, always including valid => true.
+    my sub _make_tags(%tags) {
+        return { valid => true, %tags };
+    }
 
     method zero() {
         return { valid => false };
@@ -59,8 +88,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return $left if $self->is_zero($right);
 
         # Prefer non-ambiguous-unary (binary) over ambiguous-unary
-        my $left_unary  = $left->{ambiguous_unary};
-        my $right_unary = $right->{ambiguous_unary};
+        my $left_tags  = _tags($left);
+        my $right_tags = _tags($right);
+        my $left_unary  = $left_tags->{ambiguous_unary};
+        my $right_unary = $right_tags->{ambiguous_unary};
         if ($left_unary && !$right_unary) {
             return $right;
         }
@@ -77,8 +108,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return undef if $self->is_zero($left);
         return undef if $self->is_zero($right);
 
-        my $left_unary  = $left->{ambiguous_unary};
-        my $right_unary = $right->{ambiguous_unary};
+        my $left_tags  = _tags($left);
+        my $right_tags = _tags($right);
+        my $left_unary  = $left_tags->{ambiguous_unary};
+        my $right_unary = $right_tags->{ambiguous_unary};
 
         # Prefer non-ambiguous-unary (binary) over ambiguous-unary
         if ($left_unary && !$right_unary) {
