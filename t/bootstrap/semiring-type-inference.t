@@ -995,19 +995,34 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'scanning "Foo::push" does NOT tag call_symbol');
 }
 
-# --- multiply: call_symbol propagation ---
+# --- on_complete: CallExpression tree-walk extraction ---
+# CallExpression extracts call_symbol from child leaf via tree-walk,
+# not from flat tag merge. This tests a multiply tree where call_symbol
+# is in one child and ExpressionList info in another.
 
+# CallExpression with call_symbol in child leaf, item_types in sibling leaf → valid
 {
-    my $builtin = make_ctx(call_symbol => 'push');
-    my $o = $ti->one();
+    my $qi_leaf  = make_ctx(call_symbol => 'push');
+    my $el_leaf  = make_ctx(item_types  => ['Array', 'Scalar'], list_arity => 2);
+    my $val = $ti->multiply($qi_leaf, $el_leaf);
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result),
+        'CallExpression: tree-walk finds call_symbol in child leaf → valid');
+    is(get_tags($result)->{type}, 'Int',
+        'CallExpression: tree-walk push return type => Int');
+}
 
-    my $r1 = $ti->multiply($builtin, $o);
-    is(get_tags($r1)->{call_symbol}, 'push',
-        'call_symbol propagates from left in multiply');
-
-    my $r2 = $ti->multiply($o, $builtin);
-    is(get_tags($r2)->{call_symbol}, 'push',
-        'call_symbol propagates from right in multiply');
+# CallExpression with call_symbol deep in multiply tree → still found
+{
+    my $qi_leaf = make_ctx(call_symbol => 'push');
+    my $mid     = $ti->multiply($ti->one(), $qi_leaf);
+    my $el_leaf = make_ctx(item_types  => ['Array', 'Scalar'], list_arity => 2);
+    my $val = $ti->multiply($mid, $el_leaf);
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result),
+        'CallExpression: deep tree-walk finds call_symbol → valid');
 }
 
 # --- on_complete: CallExpression validates builtin first arg ---
@@ -1146,22 +1161,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('ParenExpr', $val);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!get_tags($result)->{list_arity}, 'ParenExpr clears list_arity');
-}
-
-# --- on_complete: call_symbol cleared at boundary rules ---
-
-{
-    my $val = make_ctx(call_symbol => 'push');
-    my $item = make_item('ParenExpr', $val);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!get_tags($result)->{call_symbol}, 'ParenExpr clears call_symbol');
-}
-
-{
-    my $val = make_ctx(call_symbol => 'push');
-    my $item = make_item('Block', $val);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!get_tags($result)->{call_symbol}, 'Block clears call_symbol');
 }
 
 # ========================================================================

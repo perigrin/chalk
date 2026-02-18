@@ -78,6 +78,28 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return undef;
     };
 
+    # Search the multiply tree leaves for one with call_symbol in its focus.
+    # Returns the call_symbol string or undef. Used by CallExpression
+    # on_complete to extract the function name directly from the tree
+    # instead of relying on propagated tags.
+    # Follows leaf-finding semantics: stops at focused nodes (on_complete
+    # results) and only recurses through unfocused multiply nodes.
+    my $_get_call_symbol;
+    $_get_call_symbol = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus) {
+            # Focused node (leaf): check for call_symbol and stop
+            return $focus->{call_symbol};
+        }
+        # Unfocused multiply node: recurse into children
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_call_symbol->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
     method zero() {
         return undef;
     }
@@ -315,7 +337,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return Chalk::Bootstrap::Context->new(
                 focus    => {
                     valid => true,
-                    ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
                     ($arity ? (list_arity => $arity) : ()),
                     ($item_types ? (item_types => $item_types) : ()),
                 },
@@ -331,9 +352,12 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 return undef;
             }
             my $return_type;
-            # Builtin signature validation via per-position item_types
-            if ($tags->{call_symbol}) {
-                my $builtin_name = $tags->{call_symbol};
+            # Builtin signature validation via per-position item_types.
+            # Extract call_symbol from the tree (QualifiedIdentifier leaf)
+            # instead of relying on propagated tags.
+            my $call_sym = $_get_call_symbol->($value);
+            if ($call_sym) {
+                my $builtin_name = $call_sym;
                 my $item_types = $tags->{item_types};
                 my $sig = $builtin_lookup->($builtin_name);
                 if ($sig) {
@@ -406,7 +430,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
@@ -427,7 +450,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
-                    ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
                 },
                 children => $value->children(),
                 position => $value->position(),
