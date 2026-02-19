@@ -135,13 +135,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return undef if !defined $left;
         return undef if !defined $right;
 
-        # Build Context tree preserving children
-        return Chalk::Bootstrap::Context->new(
+        # Hash-cons by children refaddrs: same inputs → same output object
+        my $key = "mul:" . refaddr($left) . ":" . refaddr($right);
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => undef,
             children => [$left, $right],
             position => $right->position(),
             rule     => undef,
-        );
+        ));
     }
 
     method add($left, $right) {

@@ -123,6 +123,16 @@ my sub get_tags($val) {
     my $r3 = $ti->multiply($o, $z);
     ok($ti->is_zero($r3), 'one * zero is zero');
 
+    # Hash-consing: multiply with same children → same refaddr
+    my $m1 = $ti->multiply($o, $o);
+    my $m2 = $ti->multiply($o, $o);
+    is(refaddr($m1), refaddr($m2), 'multiply(one,one) returns same object (hash-consed)');
+
+    my $c = make_ctx(type => 'Scalar');
+    my $m3 = $ti->multiply($c, $o);
+    my $m4 = $ti->multiply($c, $o);
+    is(refaddr($m3), refaddr($m4), 'multiply(ctx,one) returns same object (hash-consed)');
+
     # keyword_as_identifier propagation
     my $tagged = make_ctx(keyword_as_identifier => true);
 
