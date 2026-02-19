@@ -27,19 +27,56 @@ my sub _describe_focus($focus) {
 class Chalk::Bootstrap::Semiring::SemanticAction {
     field $actions :param = undef;
 
+    # Hash-cons cache: maps stringified key to Context object.
+    # Ensures identical derivations share the same refaddr, so Composite add()
+    # can detect identity collapse via refaddr equality.
+    my %_ctx_cache;
+
+    # Singleton for one(): a Context with undef focus and no children.
+    my $_one_singleton;
+
+    # Return a singleton one() Context, creating it on first call.
+    my sub _one_ctx() {
+        return ($_one_singleton //= Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [],
+            position => 0,
+            rule     => undef,
+        ));
+    }
+
+    # Return a hash-consed scan leaf Context for the given text and position.
+    # Two calls with the same text+pos return the same object (same refaddr).
+    my sub _scan_ctx($text, $pos) {
+        my $key = "scan:$pos:" . ($text // '');
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus    => $text,
+            children => [],
+            position => $pos,
+            rule     => undef,
+        ));
+    }
+
+    # Return a hash-consed multiply Context for the given left+right children.
+    # Two calls with the same children (same refaddrs) return the same object.
+    my sub _mul_ctx($left, $right) {
+        my $key = "mul:" . refaddr($left) . ":" . refaddr($right);
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [$left, $right],
+            position => $right->position(),
+            rule     => undef,
+        ));
+    }
+
     # zero returns undef (parse failure)
     method zero() {
         return undef;
     }
 
-    # one returns empty context with undef focus
+    # one returns the singleton empty context with undef focus
     method one() {
-        return Chalk::Bootstrap::Context->new(
-            focus    => undef,
-            children => [],
-            position => 0,
-            rule     => undef,
-        );
+        return _one_ctx();
     }
 
     # Check if value is zero (undef)
@@ -47,36 +84,27 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return !defined $value;
     }
 
-    # Multiply combines two contexts in sequence
-    # Creates parent context with both as children
+    # Multiply combines two contexts in sequence.
+    # Creates a parent context with both as children, hash-consed by child identity.
     method multiply($left, $right) {
         # Propagate zero
         return undef if !defined $left;
         return undef if !defined $right;
 
-        # Create parent context with both children
-        # Focus will be computed by semantic action later
-        return Chalk::Bootstrap::Context->new(
-            focus    => undef,
-            children => [$left, $right],
-            position => $right->position(),
-            rule     => undef,
-        );
+        return _mul_ctx($left, $right);
     }
 
-    # on_scan: create a Context for the matched text and multiply with existing value
+    # on_scan: create a hash-consed Context for the matched text and multiply
+    # with existing value
     method on_scan($item, $alt_idx, $pos, $matched_text) {
-        my $scan_ctx = Chalk::Bootstrap::Context->new(
-            focus    => $matched_text,
-            children => [],
-            position => 0,
-            rule     => undef,
-        );
+        my $scan_ctx = _scan_ctx($matched_text, $pos);
         return $self->multiply($item->{value}, $scan_ctx);
     }
 
-    # on_complete: apply semantic action for a completed rule
-    # Looks up action by rule_name via can(), applies via extend, sets rule field
+    # on_complete: apply semantic action for a completed rule.
+    # Looks up action by rule_name via can(), applies via extend, sets rule field.
+    # Not hash-consed: semantic actions may have side effects and the result
+    # focus depends on the actions object, so caching by input refaddr is unsafe.
     method on_complete($item, $alt_idx, $pos) {
         my $value = $item->{value};
         return undef if !defined $value;
@@ -101,34 +129,23 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         );
     }
 
-    # Add combines alternative derivations.
-    # Upstream semirings (Precedence, TypeInference, Structural) MUST
-    # disambiguate before SemanticAction sees the alternatives. If both
-    # are non-zero here, the parse is genuinely ambiguous and we must
-    # reject it rather than silently picking one.
+    # Add combines alternative derivations, returning an arrayref of survivors.
+    # This follows the FilterComposite convention: [$winner] for one survivor,
+    # [$left, $right] when both survive (genuine ambiguity for Phase 3 to handle).
+    # The Composite shim _unwrap_add_result() accepts single-element arrayrefs
+    # and dies on multi-element arrayrefs (Phase 3 not yet implemented).
     method add($left, $right) {
-        # If left is zero, return right
-        return $right if !defined $left;
+        return [$right] if !defined $left;
+        return [$left]  if !defined $right;
 
-        # If right is zero, return left
-        return $left if !defined $right;
+        # Identity collapse: same refaddr means same derivation (Composite
+        # preference-detection protocol passes the winner to both sides)
+        return [$left] if refaddr($left) == refaddr($right);
 
-        # Same context on both sides means Composite already disambiguated
-        # via selects_alternative and is passing the winner through
-        return $left if $left == $right;
-
-        # Both non-zero AND different: ambiguous parse — upstream disambiguation failed
-        my $left_rule  = $left->rule()  // '<no rule>';
-        my $right_rule = $right->rule() // '<no rule>';
-        my $left_pos   = $left->position()  // '?';
-        my $right_pos  = $right->position() // '?';
-        my $left_focus  = _describe_focus($left->extract());
-        my $right_focus = _describe_focus($right->extract());
-        my $left_kids   = scalar($left->children()->@*);
-        my $right_kids  = scalar($right->children()->@*);
-        die "Ambiguous parse: SemanticAction::add() received two non-zero alternatives.\n"
-            . "  Left:  rule=$left_rule pos=$left_pos focus=$left_focus children=$left_kids\n"
-            . "  Right: rule=$right_rule pos=$right_pos focus=$right_focus children=$right_kids\n"
-            . "Upstream semirings must disambiguate before semantic actions run.\n";
+        # Both non-zero and different: return both as survivors.
+        # In practice, upstream semirings (Precedence, TypeInference, Structural)
+        # should disambiguate before reaching here. If this fires, Composite's
+        # _unwrap_add_result() will die with a clear error message.
+        return [$left, $right];
     }
 }

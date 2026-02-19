@@ -185,7 +185,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 # N-ary Composite: add delegates to all components
 # ========================================================================
 
-# Test 9: add dies when no semiring disambiguates two non-zero alternatives
+# Test 9: Composite dies when SemanticAction returns multiple survivors
+# SemanticAction.add() now returns [$left, $right] (FilterComposite convention)
+# when both are non-zero. Composite._unwrap_add_result() dies on multi-element
+# arrayrefs until Phase 3 (FilterComposite) is implemented.
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -213,7 +216,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $val2 = [$bool_sr->one(), $ctx2];
 
     eval { $comp->add($val1, $val2) };
-    like($@, qr/Ambiguous parse/, 'add dies on undisambiguated alternatives');
+    like($@, qr/Multiple survivors from semiring/, 'add dies on undisambiguated alternatives');
 }
 
 # Test 9b: add succeeds when same context on both sides (disambiguated)

@@ -61,7 +61,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result->children()->[1]->extract()->value(), 'right', 'second child preserved');
 }
 
-# Test 4: add dies on ambiguous parse (two different non-zero alternatives)
+# Test 4: add returns both survivors for ambiguous parse (two different non-zero alternatives)
+# The Composite _unwrap_add_result() shim will die if this actually fires during parsing,
+# but add() itself returns the arrayref to follow the FilterComposite convention.
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
@@ -81,11 +83,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => 'Alt2',
     );
 
-    eval { $sr->add($ctx1, $ctx2) };
-    like($@, qr/Ambiguous parse/, 'add dies on two different non-zero alternatives');
+    my $result = $sr->add($ctx1, $ctx2);
+    ok(ref($result) eq 'ARRAY', 'add returns arrayref for two different non-zero alternatives');
+    is(scalar($result->@*), 2, 'add returns both survivors for ambiguous parse');
+    is(refaddr($result->[0]), refaddr($ctx1), 'first survivor is ctx1');
+    is(refaddr($result->[1]), refaddr($ctx2), 'second survivor is ctx2');
 }
 
-# Test 4b: add returns context when same object on both sides (disambiguated)
+# Test 4b: add returns [$ctx] for identity collapse (same object on both sides)
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
@@ -98,8 +103,9 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     );
 
     my $result = $sr->add($ctx, $ctx);
-    isa_ok($result, 'Chalk::Bootstrap::Context', 'add returns Context for same-object merge');
-    is($result->extract()->value(), 'winner', 'add returns the disambiguated context');
+    ok(ref($result) eq 'ARRAY', 'add returns arrayref for same-object identity collapse');
+    is(scalar($result->@*), 1, 'add returns single-element arrayref for identity collapse');
+    is(refaddr($result->[0]), refaddr($ctx), 'add returns the disambiguated context');
 }
 
 # Test 5: multiply with zero propagates zero
@@ -122,7 +128,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     ok($sr->is_zero($result2), 'multiply(ctx, zero) is zero');
 }
 
-# Test 6: add with zero returns other context
+# Test 6: add with zero returns single-element arrayref containing the non-zero ctx
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
@@ -138,8 +144,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $result1 = $sr->add($zero, $ctx);
     my $result2 = $sr->add($ctx, $zero);
 
-    is($result1->extract()->value(), 'test', 'add(zero, ctx) returns ctx');
-    is($result2->extract()->value(), 'test', 'add(ctx, zero) returns ctx');
+    ok(ref($result1) eq 'ARRAY', 'add(zero, ctx) returns arrayref');
+    is(scalar($result1->@*), 1, 'add(zero, ctx) arrayref has 1 element');
+    is(refaddr($result1->[0]), refaddr($ctx), 'add(zero, ctx) arrayref contains ctx');
+
+    ok(ref($result2) eq 'ARRAY', 'add(ctx, zero) returns arrayref');
+    is(scalar($result2->@*), 1, 'add(ctx, zero) arrayref has 1 element');
+    is(refaddr($result2->[0]), refaddr($ctx), 'add(ctx, zero) arrayref contains ctx');
 }
 
 # Helper to build a mock item for on_scan/on_complete
@@ -231,6 +242,181 @@ my sub make_sem_item($rule_name, $value) {
     my $result = $sr->on_complete($item, 0, 5);
 
     ok(!defined $result, 'on_complete with undef value returns undef');
+}
+
+# Test 12: one() is a singleton — same refaddr on repeated calls
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $one_a = $sr->one();
+    my $one_b = $sr->one();
+
+    ok(defined $one_a, 'one() returns defined value');
+    is(refaddr($one_a), refaddr($one_b), 'one() is a singleton (same refaddr each call)');
+}
+
+# Test 13: on_scan produces hash-consed scan context
+# Same matched_text + pos → same refaddr for the resulting Context
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $item_a = make_sem_item('SomeRule', $sr->one());
+    my $item_b = make_sem_item('SomeRule', $sr->one());
+
+    my $scan_a = $sr->on_scan($item_a, 0, 3, 'foo');
+    my $scan_b = $sr->on_scan($item_b, 0, 3, 'foo');
+
+    is(refaddr($scan_a), refaddr($scan_b),
+        'on_scan with same text+pos produces same refaddr (hash-consed)');
+}
+
+# Test 14: on_scan with different text produces different refaddr
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $item_a = make_sem_item('SomeRule', $sr->one());
+    my $item_b = make_sem_item('SomeRule', $sr->one());
+
+    my $scan_a = $sr->on_scan($item_a, 0, 3, 'foo');
+    my $scan_b = $sr->on_scan($item_b, 0, 3, 'bar');
+
+    isnt(refaddr($scan_a), refaddr($scan_b),
+        'on_scan with different text produces different refaddr');
+}
+
+# Test 15: multiply produces hash-consed result
+# Same children pair (same refaddrs) → same refaddr for result
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $item = make_sem_item('SomeRule', $sr->one());
+    my $ctx_a = $sr->on_scan($item, 0, 0, 'left');
+    my $ctx_b = $sr->on_scan($item, 0, 5, 'right');
+
+    my $mul1 = $sr->multiply($ctx_a, $ctx_b);
+    my $mul2 = $sr->multiply($ctx_a, $ctx_b);
+
+    is(refaddr($mul1), refaddr($mul2),
+        'multiply with same children produces same refaddr (hash-consed)');
+}
+
+# Test 16: multiply with different children produces different refaddr
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $item = make_sem_item('SomeRule', $sr->one());
+    my $ctx_a = $sr->on_scan($item, 0, 0, 'left');
+    my $ctx_b = $sr->on_scan($item, 0, 5, 'right');
+    my $ctx_c = $sr->on_scan($item, 0, 10, 'other');
+
+    my $mul1 = $sr->multiply($ctx_a, $ctx_b);
+    my $mul2 = $sr->multiply($ctx_a, $ctx_c);
+
+    isnt(refaddr($mul1), refaddr($mul2),
+        'multiply with different children produces different refaddr');
+}
+
+# Test 17: on_complete produces a new Context each call (not hash-consed)
+# on_complete is not hash-consed because semantic actions depend on the
+# actions object and the result focus is not stable across different parses.
+# Each call produces a new Context with the rule name and focus set correctly.
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => 'hello',
+        children => [],
+        position => 0,
+        rule     => undef,
+    );
+
+    my $item_a = make_sem_item('SomeRule', $ctx);
+    my $item_b = make_sem_item('SomeRule', $ctx);
+
+    my $result_a = $sr->on_complete($item_a, 0, 5);
+    my $result_b = $sr->on_complete($item_b, 0, 5);
+
+    isa_ok($result_a, 'Chalk::Bootstrap::Context',
+        'on_complete returns Context');
+    is($result_a->rule(), 'SomeRule',
+        'on_complete sets rule name');
+    is($result_a->extract(), 'hello',
+        'on_complete preserves focus (no action registered)');
+    # Two separate calls produce structurally equivalent but distinct objects
+    # (not hash-consed — unsafe to cache due to actions-object dependency)
+    is($result_b->rule(), 'SomeRule',
+        'second on_complete call also sets rule name');
+    is($result_b->extract(), 'hello',
+        'second on_complete call also preserves focus');
+}
+
+# Test 18: add() returns arrayref for zero/non-zero cases
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => 'test',
+        children => [],
+        position => 0,
+        rule     => 'Test',
+    );
+
+    my $zero = $sr->zero();
+
+    my $r1 = $sr->add($zero, $ctx);
+    my $r2 = $sr->add($ctx, $zero);
+
+    ok(ref($r1) eq 'ARRAY', 'add(zero, ctx) returns arrayref');
+    is(scalar($r1->@*), 1, 'add(zero, ctx) arrayref has 1 element');
+    is(refaddr($r1->[0]), refaddr($ctx), 'add(zero, ctx) arrayref contains ctx');
+
+    ok(ref($r2) eq 'ARRAY', 'add(ctx, zero) returns arrayref');
+    is(scalar($r2->@*), 1, 'add(ctx, zero) arrayref has 1 element');
+    is(refaddr($r2->[0]), refaddr($ctx), 'add(ctx, zero) arrayref contains ctx');
+}
+
+# Test 19: add() returns [$left] for identity collapse (same refaddr)
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => 'winner',
+        children => [],
+        position => 0,
+        rule     => 'Winner',
+    );
+
+    my $result = $sr->add($ctx, $ctx);
+
+    ok(ref($result) eq 'ARRAY', 'add(ctx, ctx) returns arrayref');
+    is(scalar($result->@*), 1, 'add(ctx, ctx) arrayref has 1 element');
+    is(refaddr($result->[0]), refaddr($ctx), 'add(ctx, ctx) arrayref contains ctx');
+}
+
+# Test 20: add() returns [$left, $right] for two different non-zero values
+{
+    my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $ctx_a = Chalk::Bootstrap::Context->new(
+        focus    => 'alt_a',
+        children => [],
+        position => 0,
+        rule     => 'AltA',
+    );
+
+    my $ctx_b = Chalk::Bootstrap::Context->new(
+        focus    => 'alt_b',
+        children => [],
+        position => 0,
+        rule     => 'AltB',
+    );
+
+    my $result = $sr->add($ctx_a, $ctx_b);
+
+    ok(ref($result) eq 'ARRAY', 'add(ctx_a, ctx_b) returns arrayref');
+    is(scalar($result->@*), 2, 'add(ctx_a, ctx_b) arrayref has 2 elements');
+    is(refaddr($result->[0]), refaddr($ctx_a), 'first element is ctx_a');
+    is(refaddr($result->[1]), refaddr($ctx_b), 'second element is ctx_b');
 }
 
 done_testing();
