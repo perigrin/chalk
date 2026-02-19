@@ -724,40 +724,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 }
 
 # ========================================================================
-# selects_alternative: prefer binary over ambiguous unary
-# ========================================================================
-
-{
-    my $unary_tagged = make_ctx(ambiguous_unary => true);
-    my $binary_clean = make_ctx();
-    my $z = $ti->zero();
-
-    # Left tagged, right clean → prefer right (binary)
-    my $r1 = $ti->selects_alternative($unary_tagged, $binary_clean);
-    is($r1, 'right', 'selects_alternative: left=unary, right=binary → right');
-
-    # Left clean, right tagged → prefer left (binary)
-    my $r2 = $ti->selects_alternative($binary_clean, $unary_tagged);
-    is($r2, 'left', 'selects_alternative: left=binary, right=unary → left');
-
-    # Both tagged → no preference
-    my $r3 = $ti->selects_alternative($unary_tagged, $unary_tagged);
-    is($r3, undef, 'selects_alternative: both tagged → undef');
-
-    # Both clean → no preference
-    my $r4 = $ti->selects_alternative($binary_clean, $binary_clean);
-    is($r4, undef, 'selects_alternative: both clean → undef');
-
-    # Left zero → no preference
-    my $r5 = $ti->selects_alternative($z, $binary_clean);
-    is($r5, undef, 'selects_alternative: left=zero → undef');
-
-    # Right zero → no preference
-    my $r6 = $ti->selects_alternative($binary_clean, $z);
-    is($r6, undef, 'selects_alternative: right=zero → undef');
-}
-
-# ========================================================================
 # add: prefer non-ambiguous-unary over ambiguous-unary (returns arrayref)
 # ========================================================================
 
@@ -775,15 +741,26 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     ok(ref($r2) eq 'ARRAY', 'add: left=binary, right=unary → returns arrayref');
     ok(!get_tags($r2->[0])->{ambiguous_unary}, 'add: left=binary, right=unary → binary survives (no tag)');
 
-    # Both tagged → returns [left] (no preference, left wins by default)
-    my $r3 = $ti->add($unary_tagged, $unary_tagged);
+    # Both tagged → returns [merged] (no preference, merged != either input)
+    # (Both ambiguous_unary: no disambiguation possible, defer to next semiring)
+    my $unary_tagged2 = make_ctx(ambiguous_unary => true);
+    my $r3 = $ti->add($unary_tagged, $unary_tagged2);
     ok(ref($r3) eq 'ARRAY', 'add: both tagged → returns arrayref');
-    ok(get_tags($r3->[0])->{ambiguous_unary}, 'add: both tagged → left survives (still tagged)');
+    ok(refaddr($r3->[0]) != refaddr($unary_tagged),  'add: both tagged → merged != left');
+    ok(refaddr($r3->[0]) != refaddr($unary_tagged2), 'add: both tagged → merged != right');
 
-    # Both clean → returns [left] (no preference, left wins by default)
-    my $r4 = $ti->add($binary_clean, $binary_clean);
+    # Identity collapse: same object → [$left]
+    my $r3b = $ti->add($unary_tagged, $unary_tagged);
+    ok(ref($r3b) eq 'ARRAY', 'add: same object → returns arrayref');
+    is(scalar($r3b->@*), 1, 'add: same object → single survivor');
+    is(refaddr($r3b->[0]), refaddr($unary_tagged), 'add: same object → left survives');
+
+    # Both clean (different objects) → returns [merged] (no preference)
+    my $binary_clean2 = make_ctx();
+    my $r4 = $ti->add($binary_clean, $binary_clean2);
     ok(ref($r4) eq 'ARRAY', 'add: both clean → returns arrayref');
-    ok(!get_tags($r4->[0])->{ambiguous_unary}, 'add: both clean → left survives (no tag)');
+    ok(refaddr($r4->[0]) != refaddr($binary_clean),  'add: both clean → merged != left');
+    ok(refaddr($r4->[0]) != refaddr($binary_clean2), 'add: both clean → merged != right');
 }
 
 # ========================================================================

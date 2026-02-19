@@ -162,8 +162,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     method add($left, $right) {
         # Return arrayref of survivors (FilterComposite convention).
-        # Single-element [$winner] means one alternative preferred.
-        # Two-element [$left, $right] means no preference (both survive).
+        # [$winner] means this semiring prefers one alternative.
+        # [$merged] where merged != left and merged != right means no preference
+        # (Composite detects "result equals neither input" and continues to
+        # the next semiring for tie-breaking).
         return [$right] if !defined $left;
         return [$left]  if !defined $right;
 
@@ -182,29 +184,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return [$left];
         }
 
-        return [$left];
-    }
-
-    # Signal to Composite which alternative to select for ALL components.
-    # Returns 'left', 'right', or undef (no preference).
-    method selects_alternative($left, $right) {
-        return undef if !defined $left;
-        return undef if !defined $right;
-
-        my $left_tags  = _tags($left);
-        my $right_tags = _tags($right);
-        my $left_unary  = $left_tags->{ambiguous_unary};
-        my $right_unary = $right_tags->{ambiguous_unary};
-
-        # Prefer non-ambiguous-unary (binary) over ambiguous-unary
-        if ($left_unary && !$right_unary) {
-            return 'right';
-        }
-        if ($right_unary && !$left_unary) {
-            return 'left';
-        }
-
-        return undef;
+        # No preference: return a merged Context (not equal to either input).
+        # Composite sees "result equals neither" and defers to the next semiring.
+        return [$self->multiply($left, $right)];
     }
 
     method on_scan($item, $alt_idx, $pos, $matched_text) {
