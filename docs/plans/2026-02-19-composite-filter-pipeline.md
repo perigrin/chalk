@@ -1,5 +1,10 @@
 # Composite Semiring: Progressive Filter Pipeline
 
+**SUPERSEDED** by `2026-02-19-semiring-architecture-correction.md`. The
+"die at add() time" approach below was replaced by the survivor-list design
+with hash-consed identity comparison to handle cases where disambiguation
+requires context not yet available at first-meet time.
+
 ## History
 
 On January 10, 2026 (conversation 7fefc48f), we designed a sequential filtering
