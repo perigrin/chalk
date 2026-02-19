@@ -185,7 +185,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
 
         # No preference: return a merged Context (not equal to either input).
-        # Composite sees "result equals neither" and defers to the next semiring.
+        # FilterComposite sees "result equals neither" and defers to the next semiring.
         return [$self->multiply($left, $right)];
     }
 

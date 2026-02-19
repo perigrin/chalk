@@ -13,7 +13,7 @@ our @EXPORT_OK = qw(
 );
 
 use Chalk::Bootstrap::Earley;
-use Chalk::Bootstrap::Semiring::Composite;
+use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Grammar::BNF::Actions;
@@ -58,7 +58,7 @@ sub build_parser {
         actions => $actions,
     );
 
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -131,8 +131,8 @@ my sub _reorder_grammar($grammar, %opts) {
     return \@reordered;
 }
 
-# Builds a 5-ary Composite Earley parser with the given actions object.
-# Composite: [Boolean, Precedence, TypeInference, Structural, SemanticAction]
+# Builds a 5-ary FilterComposite Earley parser with the given actions object.
+# FilterComposite: [Boolean, Precedence, TypeInference, Structural, SemanticAction]
 my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
     my $ordered = _reorder_grammar($grammar, %opts);
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($ordered);
@@ -150,7 +150,7 @@ my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
         actions => $actions,
     );
 
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
     );
 
@@ -174,7 +174,7 @@ sub build_perl_recognizer {
     );
 }
 
-# Builds a Composite(Boolean, Precedence, TypeInference, Structural, SemanticAction(ConciseTree::Actions))
+# Builds a FilterComposite(Boolean, Precedence, TypeInference, Structural, SemanticAction(ConciseTree::Actions))
 # parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
 # Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
 sub build_perl_concise_parser {
@@ -184,7 +184,7 @@ sub build_perl_concise_parser {
     );
 }
 
-# Builds a Composite(Boolean, Precedence, TypeInference, Structural, SemanticAction(Perl::Actions))
+# Builds a FilterComposite(Boolean, Precedence, TypeInference, Structural, SemanticAction(Perl::Actions))
 # parser from the generated Perl grammar IR. Accepts optional start => 'RuleName'.
 # Result tuple indices: [0]=Boolean, [1]=Precedence, [2]=TypeInference, [3]=Structural, [4]=SemanticAction
 sub build_perl_ir_parser {

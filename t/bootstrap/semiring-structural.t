@@ -277,7 +277,7 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
 # When both alternatives have identical Structural tags (same bitfield integer),
 # add() picks left to break the tie deterministically. This is load-bearing:
 # the two alternatives may differ in other semiring components (Precedence,
-# SemanticAction) and Composite uses the result to return the whole left tuple.
+# SemanticAction) and FilterComposite uses the result to return the whole left tuple.
 {
     my $call_deref = STRUCT_IS_CALL | STRUCT_IS_DEREF;
     my $r = $sr->add($call_deref, $call_deref);
@@ -322,7 +322,7 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
 
 # --- add: returns actual winner object (not synthesized constants) ---
 # When block wins over hash (or vice versa), add() must return the actual
-# $left or $right object, not a new synthesized constant. Composite relies
+# $left or $right object, not a new synthesized constant. FilterComposite relies
 # on numeric identity ($result == $li vs $result == $ri) to determine
 # which whole tuple to select for all semirings.
 {
@@ -638,7 +638,7 @@ use TestPipeline qw(perl_pipeline);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
 use Chalk::Bootstrap::Earley;
-use Chalk::Bootstrap::Semiring::Composite;
+use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Desugar;
@@ -672,7 +672,7 @@ SKIP: {
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
 
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $struct_sr],
     );
 

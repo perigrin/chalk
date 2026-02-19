@@ -155,7 +155,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         }
 
         # Both valid: prefer is_block over is_hash.
-        # Returns the actual winning object ($left or $right) so that Composite
+        # Returns the actual winning object ($left or $right) so that FilterComposite
         # can detect the preference via numeric identity comparison.
         my $left_block  = $left  & STRUCT_IS_BLOCK;
         my $right_block = $right & STRUCT_IS_BLOCK;
@@ -181,7 +181,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         }
 
         # Both valid, neither is block: prefer is_hash if present.
-        # Returns the actual winning object for Composite identity detection.
+        # Returns the actual winning object for FilterComposite identity detection.
         if ($left_hash || $right_hash) {
             if ($left_hash && !$right_hash) {
                 return $left;

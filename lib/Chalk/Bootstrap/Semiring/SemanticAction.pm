@@ -6,29 +6,11 @@ use experimental 'class';
 
 use Chalk::Bootstrap::Context;
 
-my sub _describe_focus($focus) {
-    return '<undef>' unless defined $focus;
-    if ($focus isa Chalk::Bootstrap::IR::Node::Constant) {
-        my $val = $focus->value() // '<undef>';
-        return "Constant('$val')";
-    }
-    if ($focus isa Chalk::Bootstrap::IR::Node::Constructor) {
-        return "Constructor:" . $focus->class();
-    }
-    if ($focus isa Chalk::Bootstrap::IR::Node) {
-        return ref($focus);
-    }
-    if (ref($focus) eq 'ARRAY') {
-        return "ARRAY[" . scalar($focus->@*) . "]";
-    }
-    return ref($focus) || "'$focus'";
-}
-
 class Chalk::Bootstrap::Semiring::SemanticAction {
     field $actions :param = undef;
 
     # Hash-cons cache: maps stringified key to Context object.
-    # Ensures identical derivations share the same refaddr, so Composite add()
+    # Ensures identical derivations share the same refaddr, so FilterComposite add()
     # can detect identity collapse via refaddr equality.
     my %_ctx_cache;
 
@@ -48,7 +30,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # Return a hash-consed scan leaf Context for the given text and position.
     # Two calls with the same text+pos return the same object (same refaddr).
     my sub _scan_ctx($text, $pos) {
-        my $key = "scan:$pos:" . ($text // '');
+        my $key = defined($text) ? "scan:$pos:t:$text" : "scan:$pos:u";
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $text,
             children => [],
@@ -131,21 +113,20 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # Add combines alternative derivations, returning an arrayref of survivors.
     # This follows the FilterComposite convention: [$winner] for one survivor,
-    # [$left, $right] when both survive (genuine ambiguity for Phase 3 to handle).
-    # The Composite shim _unwrap_add_result() accepts single-element arrayrefs
-    # and dies on multi-element arrayrefs (Phase 3 not yet implemented).
+    # [$left, $right] when both survive (genuine ambiguity that FilterComposite
+    # resolves by picking left as a deterministic tie-break).
     method add($left, $right) {
         return [$right] if !defined $left;
         return [$left]  if !defined $right;
 
-        # Identity collapse: same refaddr means same derivation (Composite
+        # Identity collapse: same refaddr means same derivation (FilterComposite
         # preference-detection protocol passes the winner to both sides)
         return [$left] if refaddr($left) == refaddr($right);
 
         # Both non-zero and different: return both as survivors.
         # In practice, upstream semirings (Precedence, TypeInference, Structural)
-        # should disambiguate before reaching here. If this fires, Composite's
-        # _unwrap_add_result() will die with a clear error message.
+        # should disambiguate before reaching here. FilterComposite picks left
+        # as a deterministic tie-break when no semiring expresses a preference.
         return [$left, $right];
     }
 }

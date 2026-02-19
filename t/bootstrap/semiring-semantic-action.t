@@ -62,8 +62,8 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # Test 4: add returns both survivors for ambiguous parse (two different non-zero alternatives)
-# The Composite _unwrap_add_result() shim will die if this actually fires during parsing,
-# but add() itself returns the arrayref to follow the FilterComposite convention.
+# FilterComposite uses _filter_compare to find a preference; when none is found it
+# picks left as a deterministic tie-break, so both survivors won't reach SemanticAction.
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 

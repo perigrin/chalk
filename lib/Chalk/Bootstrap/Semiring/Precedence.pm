@@ -174,8 +174,8 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
     method add($left, $right) {
         # Return first non-zero alternative, wrapped in a single-element arrayref.
-        # This enables Composite's identity-detection protocol: when the result
-        # is the same object as one of the inputs, Composite knows which side won.
+        # This enables FilterComposite's identity-detection protocol: when the result
+        # is the same object as one of the inputs, FilterComposite knows which side won.
         return [$right] if $self->is_zero($left);
         return [$left]  if $self->is_zero($right);
 

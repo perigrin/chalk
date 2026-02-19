@@ -6,7 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::Earley;
-use Chalk::Bootstrap::Semiring::Composite;
+use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Context;
@@ -52,7 +52,7 @@ my $grammar = [
 
 my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
 my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
     semirings => [$bool_sr, $sem_sr],
 );
 

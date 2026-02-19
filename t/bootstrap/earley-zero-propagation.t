@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::Bootstrap::Earley;
-use Chalk::Bootstrap::Semiring::Composite;
+use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Grammar::Perl::KeywordTable;
@@ -49,7 +49,7 @@ SKIP: {
         keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
         builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $type_sr],
     );
 

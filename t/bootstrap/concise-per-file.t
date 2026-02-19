@@ -56,7 +56,7 @@ my @FILES = (
     ['lib/Chalk/Grammar/Rule.pm',                         'Tier D: Rule'],
     ['lib/Chalk/Bootstrap/IR/Node.pm',                    'Tier D: IR::Node'],
     ['lib/Chalk/Bootstrap/Optimizer.pm',                  'Tier D: Optimizer'],
-    ['lib/Chalk/Bootstrap/Semiring/Composite.pm',         'Tier D: Semiring::Composite'],
+    ['lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',   'Tier D: Semiring::FilterComposite'],
     ['lib/Chalk/Bootstrap/Semiring/SemanticAction.pm',    'Tier D: Semiring::SemanticAction'],
     ['lib/Chalk/Grammar/Perl/KeywordTable.pm',            'Tier D: KeywordTable'],
     ['lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',        'Tier D: XS::AST::XSUB'],

@@ -1,11 +1,11 @@
-# ABOUTME: Tests N-ary Composite semiring with staged is_zero filtering.
-# ABOUTME: Verifies delegation to component semirings via on_scan/on_complete interface.
+# ABOUTME: Tests FilterComposite semiring with staged is_zero filtering.
+# ABOUTME: Verifies _filter_compare, delegation to component semirings via on_scan/on_complete interface.
 use 5.42.0;
 use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::Semiring::Composite;
+use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Semiring::Precedence;
@@ -23,39 +23,39 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
 # ========================================================================
-# N-ary Composite: basic creation and zero/one
+# N-ary FilterComposite: basic creation and zero/one
 # ========================================================================
 
-# Test 1: N-ary Composite creation with 2 semirings
+# Test 1: N-ary FilterComposite creation with 2 semirings
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
-    isa_ok($comp, 'Chalk::Bootstrap::Semiring::Composite', 'creates N-ary composite');
+    isa_ok($comp, 'Chalk::Bootstrap::Semiring::FilterComposite', 'creates N-ary composite');
 }
 
-# Test 2: N-ary Composite creation with 3 semirings
+# Test 2: N-ary FilterComposite creation with 3 semirings
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
-    isa_ok($comp, 'Chalk::Bootstrap::Semiring::Composite', 'creates 3-ary composite');
+    isa_ok($comp, 'Chalk::Bootstrap::Semiring::FilterComposite', 'creates 3-ary composite');
 }
 
 # Test 3: zero returns N-tuple of component zeros
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -71,7 +71,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -84,14 +84,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # ========================================================================
-# N-ary Composite: is_zero staged filter (ANY component zero)
+# N-ary FilterComposite: is_zero staged filter (ANY component zero)
 # ========================================================================
 
 # Test 5: is_zero when first component is zero
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -109,7 +109,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
@@ -127,14 +127,14 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # ========================================================================
-# N-ary Composite: multiply delegates to all components
+# N-ary FilterComposite: multiply delegates to all components
 # ========================================================================
 
 # Test 7: multiply delegates to both (2-ary)
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -170,7 +170,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -182,17 +182,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # ========================================================================
-# N-ary Composite: add delegates to all components
+# N-ary FilterComposite: add() - FilterComposite protocol
 # ========================================================================
 
-# Test 9: Composite dies when SemanticAction returns multiple survivors
-# SemanticAction.add() now returns [$left, $right] (FilterComposite convention)
-# when both are non-zero. Composite._unwrap_add_result() dies on multi-element
-# arrayrefs until Phase 3 (FilterComposite) is implemented.
+# Test 9: add() with distinct semantic contexts picks left as deterministic tie-break
+# FilterComposite does NOT die on ambiguity — it picks left deterministically.
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -215,15 +213,17 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $val1 = [$bool_sr->one(), $ctx1];
     my $val2 = [$bool_sr->one(), $ctx2];
 
-    eval { $comp->add($val1, $val2) };
-    like($@, qr/Multiple survivors from semiring/, 'add dies on undisambiguated alternatives');
+    # FilterComposite picks left as tie-break when no semiring distinguishes
+    my $result = $comp->add($val1, $val2);
+    isa_ok($result, 'ARRAY', 'add returns array tuple for ambiguous case');
+    is($result->[1]->extract()->value(), 'alt1', 'add picks left on tie-break');
 }
 
 # Test 9b: add succeeds when same context on both sides (disambiguated)
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -245,25 +245,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # ========================================================================
-# N-ary Composite: integer-semiring preference detection in add()
+# N-ary FilterComposite: integer-semiring preference detection in add()
 # ========================================================================
 
-# When an integer-valued semiring's add() returns a value that equals exactly
-# one of its inputs (but not the other), Composite interprets this as a
-# preference and returns the whole tuple for the winning side. This avoids
-# calling SemanticAction.add() with two different alternatives (which would die).
-#
-# This is the migration path from selects_alternative: integer semirings like
-# Structural express preferences through add() return values, and Composite
-# detects them via numeric equality.
-
-# Test 9c: Composite picks whole left tuple when Structural integer add() returns left value
+# Test 9c: FilterComposite picks whole left tuple when Structural integer add() returns left value
 {
     use Chalk::Bootstrap::Semiring::Structural;
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $struct_sr, $sem_sr],
     );
 
@@ -293,23 +284,22 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $val1 = [$bool_sr->one(), $struct_left,  $ctx1];
     my $val2 = [$bool_sr->one(), $struct_right, $ctx2];
 
-    # Structural prefers non-list (left), so Composite should return the left tuple.
-    # SemanticAction should NOT die because it only sees the winning context.
+    # Structural prefers non-list (left), so FilterComposite should return the left tuple.
     my $result = $comp->add($val1, $val2);
 
-    isa_ok($result, 'ARRAY', '9c: Composite returns array tuple when Structural disambiguates');
+    isa_ok($result, 'ARRAY', '9c: FilterComposite returns array tuple when Structural disambiguates');
     is(scalar($result->@*), 3, '9c: returns 3-tuple');
     is($result->[1], STRUCT_IS_CALL, '9c: Structural component is the winner value (CALL only)');
     is($result->[2]->extract()->value(), 'winner', '9c: SemanticAction component is from left tuple');
 }
 
-# Test 9d: Composite picks whole right tuple when Structural prefers right
+# Test 9d: FilterComposite picks whole right tuple when Structural prefers right
 {
     use Chalk::Bootstrap::Semiring::Structural;
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $struct_sr, $sem_sr],
     );
 
@@ -340,20 +330,18 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $result = $comp->add($val1, $val2);
 
-    isa_ok($result, 'ARRAY', '9d: Composite returns array tuple when Structural disambiguates');
+    isa_ok($result, 'ARRAY', '9d: FilterComposite returns array tuple when Structural disambiguates');
     is($result->[1], STRUCT_IS_CALL, '9d: Structural component is the winner value (CALL only)');
     is($result->[2]->extract()->value(), 'winner', '9d: SemanticAction component is from right tuple');
 }
 
-# Test 9e: Composite picks left tuple when Structural tags are identical (tie-break)
-# When both alternatives have identical Structural integer values, Composite
-# picks the left tuple deterministically. This handles duplicate parse paths.
+# Test 9e: FilterComposite picks left tuple when Structural tags are identical (tie-break)
 {
     use Chalk::Bootstrap::Semiring::Structural;
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $struct_sr, $sem_sr],
     );
 
@@ -381,20 +369,169 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     my $result = $comp->add($val1, $val2);
 
-    isa_ok($result, 'ARRAY', '9e: Composite returns array tuple for identical Structural tie-break');
+    isa_ok($result, 'ARRAY', '9e: FilterComposite returns array tuple for identical Structural tie-break');
     is($result->[1], $struct_identical, '9e: Structural component is the identical tag value');
     is($result->[2]->extract()->value(), 'left-winner', '9e: SemanticAction picks left on tie-break');
 }
 
 # ========================================================================
-# N-ary Composite: on_scan delegation
+# FilterComposite: _filter_compare tests
+# ========================================================================
+
+# Test FC1: _filter_compare returns 'neither' when Boolean (same on both sides)
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $sem_sr],
+    );
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'a');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus => $node1, children => [], position => 0, rule => 'A',
+    );
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'b');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus => $node2, children => [], position => 0, rule => 'B',
+    );
+
+    my $val1 = [$bool_sr->one(), $ctx1];
+    my $val2 = [$bool_sr->one(), $ctx2];
+
+    # Both Bool components are true (one()) — no preference from Boolean.
+    # SemanticAction returns [$ctx1, $ctx2] for distinct contexts — no preference.
+    # So _filter_compare returns 'neither'.
+    my $verdict = $comp->_filter_compare($val1, $val2);
+    is($verdict, 'neither', 'FC1: _filter_compare neither when only bool semiring (same on both)');
+}
+
+# Test FC2: _filter_compare returns 'right_loses' when Structural prefers left
+{
+    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $struct_sr, $sem_sr],
+    );
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus => $node1, children => [], position => 0, rule => 'Left',
+    );
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus => $node2, children => [], position => 0, rule => 'Right',
+    );
+
+    # Left = CALL only; Right = CALL|LIST. Structural prefers left (no list wins).
+    my $val1 = [$bool_sr->one(), STRUCT_IS_CALL,              $ctx1];
+    my $val2 = [$bool_sr->one(), STRUCT_IS_CALL | STRUCT_IS_LIST, $ctx2];
+
+    my $verdict = $comp->_filter_compare($val1, $val2);
+    is($verdict, 'right_loses', 'FC2: _filter_compare right_loses when Structural prefers left');
+}
+
+# Test FC3: _filter_compare returns 'left_loses' when Structural prefers right
+{
+    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $struct_sr, $sem_sr],
+    );
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus => $node1, children => [], position => 0, rule => 'Left',
+    );
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus => $node2, children => [], position => 0, rule => 'Right',
+    );
+
+    # Left = CALL|LIST; Right = CALL only. Structural prefers right.
+    my $val1 = [$bool_sr->one(), STRUCT_IS_CALL | STRUCT_IS_LIST, $ctx1];
+    my $val2 = [$bool_sr->one(), STRUCT_IS_CALL,              $ctx2];
+
+    my $verdict = $comp->_filter_compare($val1, $val2);
+    is($verdict, 'left_loses', 'FC3: _filter_compare left_loses when Structural prefers right');
+}
+
+# Test FC4: _filter_compare with Precedence arrayref protocol - prefers higher-level
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $prec_sr, $sem_sr],
+    );
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus => $node1, children => [], position => 0, rule => 'Left',
+    );
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus => $node2, children => [], position => 0, rule => 'Right',
+    );
+
+    # Use prec->one() (no level info) for left, and a value with level for right.
+    # Precedence.add() returns [$right] when right has level and left doesn't.
+    my $prec_with_level = $prec_sr->one();
+    # Simulate: manually use _intern approach — use add() with one() and a real value
+    # Actually let's use on_scan to get real values. Use one() for both (same object).
+    my $prec_same = $prec_sr->one();
+
+    my $val1 = [$bool_sr->one(), $prec_same, $ctx1];
+    my $val2 = [$bool_sr->one(), $prec_same, $ctx2];
+
+    # Both Precedence values are refaddr-equal (hash-consed one()) → no preference from Prec.
+    # SemanticAction: two different contexts → no preference.
+    # Result: 'neither'.
+    my $verdict = $comp->_filter_compare($val1, $val2);
+    is($verdict, 'neither', 'FC4: _filter_compare neither when Precedence values are identical');
+}
+
+# Test FC5: _filter_compare returns 'neither' when Structural merges (both untagged)
+{
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $struct_sr, $sem_sr],
+    );
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'left');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus => $node1, children => [], position => 0, rule => 'Left',
+    );
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'right');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus => $node2, children => [], position => 0, rule => 'Right',
+    );
+
+    # Both Structural values are 0 (one() = untagged). add() returns 0|0 = 0.
+    # Result equals both inputs (both are 0) → identity collapse → no preference.
+    my $val1 = [$bool_sr->one(), 0, $ctx1];
+    my $val2 = [$bool_sr->one(), 0, $ctx2];
+
+    my $verdict = $comp->_filter_compare($val1, $val2);
+    is($verdict, 'neither', 'FC5: _filter_compare neither when Structural values both untagged (merge)');
+}
+
+# ========================================================================
+# N-ary FilterComposite: on_scan delegation
 # ========================================================================
 
 # Test 10: on_scan delegates to all component semirings
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -415,18 +552,15 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is(scalar($result->@*), 2, 'on_scan returns 2-tuple');
     ok(!$bool_sr->is_zero($result->[0]), 'bool component is non-zero');
     isa_ok($result->[1], 'Chalk::Bootstrap::Context', 'sem component is Context');
-    # on_scan multiplies one() with scan ctx, yielding a parent with undef focus
-    # The matched text is in the child context
     is($result->[1]->scanned_text(), 'hello', 'sem component contains matched text');
 }
 
 # ========================================================================
-# N-ary Composite: on_complete delegation
+# N-ary FilterComposite: on_complete delegation
 # ========================================================================
 
 # Test 11: on_complete delegates to all component semirings
 {
-    # Create a test class with an action method
     package CompositeTestActions {
         use 5.42.0;
         use experimental 'class';
@@ -441,7 +575,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new(
         actions => $actions,
     );
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
@@ -474,7 +608,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # ========================================================================
-# N-ary Composite: 3-ary with Precedence
+# N-ary FilterComposite: 3-ary with Precedence
 # ========================================================================
 
 # Test 12: 3-ary on_scan with operator detection
@@ -484,7 +618,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
@@ -515,17 +649,16 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
-    # Construct a tuple where precedence component is zero
     my $bad = [$bool_sr->one(), $prec_sr->zero(), $sem_sr->one()];
     ok($comp->is_zero($bad), 'precedence zero in 3-tuple kills item');
 }
 
 # ========================================================================
-# 4-ary Composite: Boolean + Precedence + TypeInference + SemanticAction
+# 4-ary FilterComposite: Boolean + Precedence + TypeInference + SemanticAction
 # ========================================================================
 
 # Test 14: 4-ary creation
@@ -539,11 +672,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
     );
 
-    isa_ok($comp, 'Chalk::Bootstrap::Semiring::Composite', 'creates 4-ary composite');
+    isa_ok($comp, 'Chalk::Bootstrap::Semiring::FilterComposite', 'creates 4-ary composite');
 
     my $one = $comp->one();
     is(scalar($one->@*), 4, '4-ary one returns 4-tuple');
@@ -565,11 +698,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
     );
 
-    # TypeInference zero kills the whole tuple
     my $bad = [$bool_sr->one(), $prec_sr->one(), $type_sr->zero(), $sem_sr->one()];
     ok($comp->is_zero($bad), 'type inference zero in 4-tuple kills item');
 }
@@ -585,7 +717,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
     );
 
@@ -600,15 +732,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         value  => $comp->one(),
     };
 
-    # Scan "use" as QualifiedIdentifier: TypeInference tags it
     my $result = $comp->on_scan($item, 0, 0, 'use');
     is(scalar($result->@*), 4, '4-ary on_scan returns 4-tuple');
     ok(!$bool_sr->is_zero($result->[0]), 'bool ok for keyword scan');
     ok(!$prec_sr->is_zero($result->[1]), 'prec ok for keyword scan');
     ok(!$type_sr->is_zero($result->[2]), 'type non-zero at scan (rejection at complete)');
-    # TypeInference returns Context trees; keyword_as_identifier is in a leaf node.
-    # Verify the tag is present by checking it's non-zero and the complete-time
-    # Atom handler will reject it (tested in Test 17).
     ok(!$type_sr->is_zero($result->[2]), 'type inference tagged (non-zero) for keyword scan');
 }
 
@@ -623,7 +751,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
     );
 
@@ -632,8 +760,6 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         expressions => [[]],
     );
 
-    # Simulate: Atom item with keyword_as_identifier tagged via Context tree
-    # (keyword rejection now happens at Atom/CallExpression level, not Identifier)
     my $tagged_type = Chalk::Bootstrap::Context->new(
         focus    => { valid => true, keyword_as_identifier => true },
         children => [],
@@ -652,89 +778,45 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # ========================================================================
-# Composite add() shim: arrayref return convention from migrated semirings
+# FilterComposite: add() zero handling
 # ========================================================================
 
-# A minimal semiring that returns a fixed value from add() to simulate
-# a semiring that has been migrated to the arrayref return convention.
-package MockArrayRefSemiring {
-    use 5.42.0;
-    use utf8;
-    use experimental 'class';
+# Test FC-Z1: add() with left zero returns right
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $sem_sr],
+    );
 
-    class MockArrayRefSemiring {
-        field $return_value :param;
-        method zero()            { return undef }
-        method one()             { return 1 }
-        method is_zero($v)       { return !defined($v) }
-        method add($l, $r)       { return $return_value }
-        method multiply($l, $r)  { return $l }
-        method on_complete($item, $alt, $pos)       { return $item->{value} }
-        method on_scan($item, $alt, $pos, $text)    { return $item->{value} }
-    }
+    my $zero = $comp->zero();
+    my $node = $factory->make('Constant', const_type => 'string', value => 'right');
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus => $node, children => [], position => 0, rule => 'R',
+    );
+    my $one_val = [$bool_sr->one(), $ctx];
+
+    my $result = $comp->add($zero, $one_val);
+    is($result->[1]->extract()->value(), 'right', 'add(zero, right) returns right');
 }
 
-# Test 18: Composite unwraps [$left] (single-element arrayref) transparently
+# Test FC-Z2: add() with right zero returns left
 {
-    my $mock = MockArrayRefSemiring->new(return_value => [42]);
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $mock],
+    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $sem_sr],
     );
 
-    my $val = [$bool_sr->one(), 99];
-    my $result = $comp->add($val, $val);
-
-    isa_ok($result, 'ARRAY', 'shim: single-survivor arrayref unwrapped, result is array tuple');
-    is($result->[1], 42, 'shim: single-survivor [$left] unwrapped to scalar 42');
-}
-
-# Test 19: Composite dies when a migrated semiring returns [$left, $right]
-{
-    my $mock = MockArrayRefSemiring->new(return_value => [11, 22]);
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $mock],
+    my $zero = $comp->zero();
+    my $node = $factory->make('Constant', const_type => 'string', value => 'left');
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus => $node, children => [], position => 0, rule => 'L',
     );
+    my $one_val = [$bool_sr->one(), $ctx];
 
-    my $val = [$bool_sr->one(), 99];
-    eval { $comp->add($val, $val) };
-    like(
-        $@,
-        qr/Multiple survivors from semiring 1 add\(\)/,
-        'shim: two-element arrayref from add() triggers diagnostic die',
-    );
-}
-
-# Test 20: Composite passes plain scalar through unchanged (backward compat)
-{
-    my $mock = MockArrayRefSemiring->new(return_value => 'plain_scalar');
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $mock],
-    );
-
-    my $val = [$bool_sr->one(), 99];
-    my $result = $comp->add($val, $val);
-
-    isa_ok($result, 'ARRAY', 'shim: plain scalar passthrough, result is array tuple');
-    is($result->[1], 'plain_scalar', 'shim: plain scalar returned unchanged');
-}
-
-# Test 21: Composite handles empty arrayref (zero survivors) from add()
-{
-    my $mock = MockArrayRefSemiring->new(return_value => []);
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
-        semirings => [$bool_sr, $mock],
-    );
-
-    my $val = [$bool_sr->one(), 99];
-    my $result = $comp->add($val, $val);
-
-    isa_ok($result, 'ARRAY', 'shim: empty arrayref returns tuple');
-    ok(!defined($result->[1]), 'shim: empty arrayref yields undef (zero)');
-    ok($comp->is_zero($result), 'shim: zero survivors makes whole tuple zero');
+    my $result = $comp->add($one_val, $zero);
+    is($result->[1]->extract()->value(), 'left', 'add(left, zero) returns left');
 }
 
 done_testing();

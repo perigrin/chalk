@@ -377,9 +377,9 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 }
 
 # Note: selects_alternative() was removed. Disambiguation is now handled
-# via the identity-detection protocol in Composite.add(): add() returns
-# [$winner] and Composite detects preference by comparing refaddr of the
-# result with the inputs.
+# via the identity-detection protocol in FilterComposite._filter_compare():
+# add() returns [$winner] and FilterComposite detects preference by comparing
+# refaddr of the result with the inputs.
 
 # ========================================================================
 # Precedence semiring: AssignOp on_scan sets is_operator for disambiguation

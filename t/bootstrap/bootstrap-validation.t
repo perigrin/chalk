@@ -61,7 +61,7 @@ use lib 'lib';
 
 # Phase 2b: Semantic actions produce correct IR
 {
-    use_ok('Chalk::Bootstrap::Semiring::Composite');
+    use_ok('Chalk::Bootstrap::Semiring::FilterComposite');
     use_ok('Chalk::Bootstrap::Semiring::SemanticAction');
     use_ok('Chalk::Grammar::BNF::Actions');
     use_ok('Chalk::Bootstrap::Context');
@@ -91,7 +91,7 @@ use lib 'lib';
 
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp_sr = Chalk::Bootstrap::Semiring::Composite->new(
+    my $comp_sr = Chalk::Bootstrap::Semiring::FilterComposite->new(
         semirings => [$bool_sr, $sem_sr],
     );
 
