@@ -7,6 +7,21 @@ use experimental 'class';
 class Chalk::Bootstrap::Semiring::Composite {
     field $semirings :param :reader;  # arrayref of semirings
 
+    # Shim: unwrap arrayref returns from semirings migrated to the
+    # FilterComposite convention. A single-element arrayref [$value] unwraps to
+    # $value. A multi-element arrayref signals that the semiring produced
+    # multiple survivors, which requires FilterComposite (Phase 3) and is not
+    # supported here. Plain scalar returns (not yet migrated semirings) pass
+    # through unchanged.
+    sub _unwrap_add_result($result, $semiring_idx) {
+        return $result unless ref($result) eq 'ARRAY';
+        if ($result->@* == 1) {
+            return $result->[0];
+        }
+        die "Multiple survivors from semiring $semiring_idx add() — "
+            . "requires FilterComposite (Phase 3)";
+    }
+
     method zero() {
         return [ map { $_->zero() } $semirings->@* ];
     }
@@ -40,14 +55,16 @@ class Chalk::Bootstrap::Semiring::Composite {
                 if (defined $pref) {
                     my $chosen = $pref eq 'left' ? $left : $right;
                     return [ map {
-                        $semirings->[$_]->add($chosen->[$_], $chosen->[$_])
+                        _unwrap_add_result($semirings->[$_]->add($chosen->[$_], $chosen->[$_]), $_)
                     } 0 .. $semirings->$#* ];
                 }
             }
         }
 
         # No preference: merge each component independently
-        return [ map { $semirings->[$_]->add($left->[$_], $right->[$_]) } 0 .. $semirings->$#* ];
+        return [ map {
+            _unwrap_add_result($semirings->[$_]->add($left->[$_], $right->[$_]), $_)
+        } 0 .. $semirings->$#* ];
     }
 
     # Delegate on_scan to each component with its own slice of the value

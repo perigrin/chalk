@@ -506,4 +506,74 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     ok($comp->is_zero($result), 'whole 4-tuple is zero when type inference rejects');
 }
 
+# ========================================================================
+# Composite add() shim: arrayref return convention from migrated semirings
+# ========================================================================
+
+# A minimal semiring that returns a fixed value from add() to simulate
+# a semiring that has been migrated to the arrayref return convention.
+package MockArrayRefSemiring {
+    use 5.42.0;
+    use utf8;
+    use experimental 'class';
+
+    class MockArrayRefSemiring {
+        field $return_value :param;
+        method zero()            { return undef }
+        method one()             { return 1 }
+        method is_zero($v)       { return !defined($v) }
+        method add($l, $r)       { return $return_value }
+        method multiply($l, $r)  { return $l }
+        method on_complete($item, $alt, $pos)       { return $item->{value} }
+        method on_scan($item, $alt, $pos, $text)    { return $item->{value} }
+    }
+}
+
+# Test 18: Composite unwraps [$left] (single-element arrayref) transparently
+{
+    my $mock = MockArrayRefSemiring->new(return_value => [42]);
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $mock],
+    );
+
+    my $val = [$bool_sr->one(), 99];
+    my $result = $comp->add($val, $val);
+
+    isa_ok($result, 'ARRAY', 'shim: single-survivor arrayref unwrapped, result is array tuple');
+    is($result->[1], 42, 'shim: single-survivor [$left] unwrapped to scalar 42');
+}
+
+# Test 19: Composite dies when a migrated semiring returns [$left, $right]
+{
+    my $mock = MockArrayRefSemiring->new(return_value => [11, 22]);
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $mock],
+    );
+
+    my $val = [$bool_sr->one(), 99];
+    eval { $comp->add($val, $val) };
+    like(
+        $@,
+        qr/Multiple survivors from semiring 1 add\(\)/,
+        'shim: two-element arrayref from add() triggers diagnostic die',
+    );
+}
+
+# Test 20: Composite passes plain scalar through unchanged (backward compat)
+{
+    my $mock = MockArrayRefSemiring->new(return_value => 'plain_scalar');
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $mock],
+    );
+
+    my $val = [$bool_sr->one(), 99];
+    my $result = $comp->add($val, $val);
+
+    isa_ok($result, 'ARRAY', 'shim: plain scalar passthrough, result is array tuple');
+    is($result->[1], 'plain_scalar', 'shim: plain scalar returned unchanged');
+}
+
 done_testing();
