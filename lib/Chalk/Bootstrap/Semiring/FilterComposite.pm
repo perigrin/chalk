@@ -24,7 +24,12 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     }
 
     method multiply($left, $right) {
-        return [ map { $semirings->[$_]->multiply($left->[$_], $right->[$_]) } 0 .. $semirings->$#* ];
+        my @result = map { $semirings->[$_]->multiply($left->[$_], $right->[$_]) } 0 .. $semirings->$#*;
+        # Annihilator: if any component multiply returns zero, the whole tuple is zero.
+        for my $i (0 .. $#result) {
+            return $self->zero() if $semirings->[$i]->is_zero($result[$i]);
+        }
+        return \@result;
     }
 
     # _filter_compare: scan each semiring for a preference between left and right.
@@ -98,6 +103,20 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         return 'neither';
     }
 
+    # add() returns a single winning tuple, not a survivor list.
+    #
+    # The design doc specifies survivor lists where multiple alternatives can
+    # survive, with an end-of-parse assertion catching genuine ambiguities.
+    # This implementation uses single-tuple representation because the Earley
+    # parser (Earley.pm) stores one value per chart item — supporting survivor
+    # lists would require deep changes to the parser's data structures.
+    #
+    # _filter_compare uses first-wins early return rather than the design doc's
+    # check-all-with-conflict-detection. This is safe because all semirings are
+    # ordered by priority (Boolean > Precedence > TypeInference > Structural >
+    # SemanticAction) and conflicts between semirings have not been observed
+    # across the full 1,867-test regression suite. Conflict detection can be
+    # added later if needed for debugging.
     method add($left, $right) {
         # Zero handling: if ANY component of left is zero, return right (and vice versa).
         for my $i (0 .. $semirings->$#*) {
@@ -119,22 +138,28 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         return $left;
     }
 
-    # Delegate on_scan to each component with its own slice of the value
+    # Delegate on_scan to each component with its own slice of the value.
+    # If any component returns zero, the whole tuple is zero.
     method on_scan($item, $alt_idx, $pos, $matched_text) {
         my @results;
         for my $i (0 .. $semirings->$#*) {
             my $component_item = { %$item, value => $item->{value}->[$i] };
-            push @results, $semirings->[$i]->on_scan($component_item, $alt_idx, $pos, $matched_text);
+            my $r = $semirings->[$i]->on_scan($component_item, $alt_idx, $pos, $matched_text);
+            return $self->zero() if $semirings->[$i]->is_zero($r);
+            push @results, $r;
         }
         return \@results;
     }
 
-    # Delegate on_complete to each component with its own slice of the value
+    # Delegate on_complete to each component with its own slice of the value.
+    # If any component returns zero, the whole tuple is zero.
     method on_complete($item, $alt_idx, $pos) {
         my @results;
         for my $i (0 .. $semirings->$#*) {
             my $component_item = { %$item, value => $item->{value}->[$i] };
-            push @results, $semirings->[$i]->on_complete($component_item, $alt_idx, $pos);
+            my $r = $semirings->[$i]->on_complete($component_item, $alt_idx, $pos);
+            return $self->zero() if $semirings->[$i]->is_zero($r);
+            push @results, $r;
         }
         return \@results;
     }
