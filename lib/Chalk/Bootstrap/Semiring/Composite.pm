@@ -48,8 +48,10 @@ class Chalk::Bootstrap::Semiring::Composite {
     }
 
     # Determine if two semiring values are "the same" for preference detection.
-    # For references (Context objects, hashrefs): use object identity.
-    # For scalars (integers, strings): use numeric/string equality.
+    # For references (Context objects, hashrefs): use object identity via
+    # refaddr (auto-exported by `use 5.42.0` as a builtin).
+    # For scalars (integers — Structural bitfield, Boolean, Precedence):
+    # use numeric equality.
     # Two values that are "the same" mean the semiring has no preference.
     sub _same_value($a, $b) {
         return false unless defined $a && defined $b;
