@@ -8,6 +8,39 @@ class Chalk::Bootstrap::Semiring::Precedence {
     # Callback: op_string => { level => N, assoc => str } or undef
     field $lookup :param;
 
+    # Hash-cons cache: canonical objects keyed by (valid, level, assoc, is_operator).
+    # The `op` field is excluded from the key: it carries debug text only and does
+    # not affect the identity of a Precedence value for disambiguation purposes.
+    my %_cache;
+
+    # Return (or create and cache) the canonical object for the given 4-tuple.
+    # The key scheme is:
+    #   "0"          for valid=false (zero)
+    #   "1:::"       for valid=true, no level/assoc/is_operator (one)
+    #   "1:N:A:1"    for valid=true, level=N, assoc=A, is_operator=true
+    #   "1:N:A:"     for valid=true, level=N, assoc=A, is_operator=false
+    sub _intern($valid, $level, $assoc, $is_operator, $op = undef) {
+        my $key;
+        if (!$valid) {
+            $key = '0';
+        } else {
+            my $l  = $level       // '';
+            my $a  = $assoc       // '';
+            my $io = $is_operator ? '1' : '';
+            $key = "1:$l:$a:$io";
+        }
+        unless (exists $_cache{$key}) {
+            $_cache{$key} = {
+                valid       => $valid  ? true : false,
+                level       => $level,
+                assoc       => $assoc,
+                is_operator => $is_operator ? true : false,
+                op          => $op,
+            };
+        }
+        return $_cache{$key};
+    }
+
     # Expression-type precedence levels (relative to binary operators).
     # PostfixExpression is highest, AssignmentExpression is lowest.
     # These are conceptual levels above/below the binary operator table.
@@ -23,11 +56,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
     my %RESETS = map { $_ => true } qw(ParenExpr ArrayConstructor HashConstructor);
 
     method zero() {
-        return { valid => false };
+        return _intern(false, undef, undef, false);
     }
 
     method one() {
-        return { valid => true };
+        return _intern(true, undef, undef, false);
     }
 
     method is_zero($value) {

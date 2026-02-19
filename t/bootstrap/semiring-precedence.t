@@ -476,4 +476,29 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
         'assignment as right operand of same-level right-assoc = is valid');
 }
 
+# ========================================================================
+# Hash-consing: zero and one are singletons
+# ========================================================================
+
+# Test 34: zero() always returns the same object
+{
+    my $z1 = $prec->zero();
+    my $z2 = $prec->zero();
+    is(refaddr($z1), refaddr($z2), 'zero() returns the same object each time');
+}
+
+# Test 35: one() always returns the same object
+{
+    my $o1 = $prec->one();
+    my $o2 = $prec->one();
+    is(refaddr($o1), refaddr($o2), 'one() returns the same object each time');
+}
+
+# Test 36: zero and one are different objects
+{
+    my $z = $prec->zero();
+    my $o = $prec->one();
+    isnt(refaddr($z), refaddr($o), 'zero() and one() are distinct objects');
+}
+
 done_testing();
