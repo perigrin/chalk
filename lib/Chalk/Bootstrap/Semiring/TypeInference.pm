@@ -66,7 +66,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     my sub _complete_ctx($focus, $children, $position, $rule) {
         my $focus_key = _tag_key($focus);
         my $children_key = join(":", map { refaddr($_) } @$children);
-        my $key = "complete:$rule:$focus_key:$children_key";
+        my $key = "complete:$rule:$position:$focus_key:$children_key";
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $focus,
             children => $children,
