@@ -47,26 +47,94 @@ class Chalk::Bootstrap::Semiring::Composite {
         return [ map { $semirings->[$_]->multiply($left->[$_], $right->[$_]) } 0 .. $semirings->$#* ];
     }
 
+    # Determine if two semiring values are "the same" for preference detection.
+    # For references (Context objects, hashrefs): use object identity.
+    # For scalars (integers, strings): use numeric/string equality.
+    # Two values that are "the same" mean the semiring has no preference.
+    sub _same_value($a, $b) {
+        return false unless defined $a && defined $b;
+        if (ref($a) && ref($b)) {
+            return refaddr($a) == refaddr($b);
+        }
+        if (!ref($a) && !ref($b)) {
+            return $a == $b;
+        }
+        return false;
+    }
+
     method add($left, $right) {
-        # Check if any component selects a preferred alternative.
-        # When a preference is expressed, each component's add() receives
-        # the preferred side as BOTH arguments, ensuring component-specific
-        # merge logic still runs (e.g., SemanticAction's Context handling).
+        # For each semiring, detect whether it expresses a preference between
+        # the two alternatives. A preference is expressed either via the legacy
+        # selects_alternative() protocol or (for migrated semirings) by add()
+        # returning a value that matches exactly one of its inputs but not the other.
+        #
+        # When a preference is detected, the whole tuple for the winning side
+        # is returned: every semiring sees add(winner[i], winner[i]), ensuring
+        # SemanticAction never receives two different alternatives.
         for my $i (0 .. $semirings->$#*) {
+            my $li = $left->[$i];
+            my $ri = $right->[$i];
+
+            # Legacy protocol: semiring implements selects_alternative()
             if ($semirings->[$i]->can('selects_alternative')) {
-                my $pref = $semirings->[$i]->selects_alternative(
-                    $left->[$i], $right->[$i],
-                );
+                my $pref = $semirings->[$i]->selects_alternative($li, $ri);
                 if (defined $pref) {
                     my $chosen = $pref eq 'left' ? $left : $right;
                     return [ map {
                         _unwrap_add_result($semirings->[$_]->add($chosen->[$_], $chosen->[$_]), $_)
                     } 0 .. $semirings->$#* ];
                 }
+                # No preference from this semiring — try next
+                next;
             }
+
+            # Migrated protocol: call add() and check result identity.
+            #
+            # Two cases where a semiring expresses a preference:
+            #
+            # Case A: Asymmetric inputs (li != ri).
+            #   The semiring picks one side: result equals exactly one of {li, ri}.
+            #
+            # Case B: Identical inputs (li == ri) that are NOT the semiring's
+            #   identity element (one()). This handles Structural's identical-tag
+            #   tie-breakers (both is_list, both is_call+deref, both is_binop, etc.):
+            #   when two alternatives have the same structural tags but differ in
+            #   other semirings (Precedence, SemanticAction), Structural picks left
+            #   to break the tie deterministically.
+            #   We exclude the identity element to avoid false-positives from
+            #   semirings like Boolean that always return true (= their one()).
+            if (_same_value($li, $ri)) {
+                my $one = $semirings->[$i]->one();
+                if (!_same_value($li, $one)) {
+                    # Non-trivial identical inputs: pick left tuple to break tie.
+                    return [ map {
+                        _unwrap_add_result($semirings->[$_]->add($left->[$_], $left->[$_]), $_)
+                    } 0 .. $semirings->$#* ];
+                }
+                # Trivial identical inputs (both equal one()): no preference, skip.
+                next;
+            }
+
+            my $result = _unwrap_add_result($semirings->[$i]->add($li, $ri), $i);
+
+            if (_same_value($result, $li) && !_same_value($result, $ri)) {
+                # Semiring prefers left
+                return [ map {
+                    _unwrap_add_result($semirings->[$_]->add($left->[$_], $left->[$_]), $_)
+                } 0 .. $semirings->$#* ];
+            }
+            if (_same_value($result, $ri) && !_same_value($result, $li)) {
+                # Semiring prefers right
+                return [ map {
+                    _unwrap_add_result($semirings->[$_]->add($right->[$_], $right->[$_]), $_)
+                } 0 .. $semirings->$#* ];
+            }
+
+            # Result equals neither (synthesized merge) or equals both (no distinction).
+            # No preference detected — continue to next semiring.
         }
 
-        # No preference: merge each component independently
+        # No semiring expressed a preference — independent merge of all components.
         return [ map {
             _unwrap_add_result($semirings->[$_]->add($left->[$_], $right->[$_]), $_)
         } 0 .. $semirings->$#* ];

@@ -154,7 +154,9 @@ class Chalk::Bootstrap::Semiring::Structural {
             }
         }
 
-        # Both valid: prefer is_block over is_hash
+        # Both valid: prefer is_block over is_hash.
+        # Returns the actual winning object ($left or $right) so that Composite
+        # can detect the preference via numeric identity comparison.
         my $left_block  = $left  & STRUCT_IS_BLOCK;
         my $right_block = $right & STRUCT_IS_BLOCK;
         my $left_hash   = $left  & STRUCT_IS_HASH;
@@ -166,18 +168,29 @@ class Chalk::Bootstrap::Semiring::Structural {
             # (is_block + is_hash).
             if ($left_block && $right_block) {
                 if ($right_hash && !$left_hash) {
-                    return STRUCT_IS_BLOCK;
+                    return $left;
                 }
                 if ($left_hash && !$right_hash) {
-                    return STRUCT_IS_BLOCK;
+                    return $right;
                 }
+                # Both have is_block and same hash status — pick left
+                return $left;
             }
-            return STRUCT_IS_BLOCK;
+            # One-sided: the block side wins
+            return $left_block ? $left : $right;
         }
 
-        # Both valid, neither is block: prefer is_hash if present
+        # Both valid, neither is block: prefer is_hash if present.
+        # Returns the actual winning object for Composite identity detection.
         if ($left_hash || $right_hash) {
-            return STRUCT_IS_HASH;
+            if ($left_hash && !$right_hash) {
+                return $left;
+            }
+            if ($right_hash && !$left_hash) {
+                return $right;
+            }
+            # Both have is_hash — pick left
+            return $left;
         }
 
         # Both valid: prefer is_vardecl over non-is_vardecl.
@@ -194,172 +207,6 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         # Both valid, untagged: merge all bits
         return $left | $right;
-    }
-
-    # Signal to Composite which alternative to select for ALL components.
-    # Returns 'left', 'right', or undef (no preference).
-    #
-    # Phase 1c validation results (2026-02-19):
-    # Case 2 (both is_list, pick left): UNSAFE - removing it causes SemanticAction::add()
-    #   to receive two non-zero alternatives in grammar-ambiguity-fixes.t (test 3, rule
-    #   SimpleStatement/ExpressionStatement) and crashes concise-actions.t and
-    #   concise-validation.t. The two ExpressionList paths have equal Composite values
-    #   but differ in components other than Structural — hash-consing alone cannot collapse
-    #   them. This tie-breaker is load-bearing.
-    # Case 7 (both is_call, identical Structural tags, pick left): UNSAFE - removing it
-    #   causes semiring-structural.t tests 69 and 72 to fail (call+deref identical and
-    #   call+method identical cases). The Structural integer values are equal but the
-    #   Composite values differ in other semiring components, so the pick-left here is
-    #   the only disambiguation. This tie-breaker is load-bearing.
-    # Case 14 (both is_binop, identical Structural tags, pick left): UNSAFE - removing it
-    #   causes semiring-structural.t tests 78-80 to fail and crashes grammar-ambiguity-fixes.t
-    #   at test 37 ('$x->[$i + 1] =~ /foo/ subscript + regex match', rule BinaryExpression/
-    #   Expression). Same reasoning: equal Structural integers but Composite values differ.
-    #   This tie-breaker is load-bearing.
-    # Conclusion: all three pick-left cases resolve live ambiguities where the Composite-level
-    # values differ in non-Structural components. None can be removed via hash-consing.
-    method selects_alternative($left, $right) {
-        return undef if $left == -1;
-        return undef if $right == -1;
-
-        # Prefer non-list over list (Expression vs ExpressionList)
-        my $left_list  = $left  & STRUCT_IS_LIST;
-        my $right_list = $right & STRUCT_IS_LIST;
-        if ($left_list && !$right_list) {
-            return 'right';
-        }
-        if ($right_list && !$left_list) {
-            return 'left';
-        }
-        # Both is_list: duplicate ExpressionList paths — pick left arbitrarily
-        if ($left_list && $right_list) {
-            return 'left';
-        }
-
-        # Prefer CallExpression over non-call
-        my $left_call  = $left  & STRUCT_IS_CALL;
-        my $right_call = $right & STRUCT_IS_CALL;
-        if ($left_call && !$right_call) {
-            return 'left';
-        }
-        if ($right_call && !$left_call) {
-            return 'right';
-        }
-
-        # Both is_call: prefer non-deref over deref
-        my $left_deref  = $left  & STRUCT_IS_DEREF;
-        my $right_deref = $right & STRUCT_IS_DEREF;
-        if ($left_call && $right_call) {
-            if ($right_deref && !$left_deref) {
-                return 'left';
-            }
-            if ($left_deref && !$right_deref) {
-                return 'right';
-            }
-        }
-
-        # Both is_call: prefer non-method over method
-        my $left_method  = $left  & STRUCT_IS_METHOD;
-        my $right_method = $right & STRUCT_IS_METHOD;
-        if ($left_call && $right_call) {
-            if ($right_method && !$left_method) {
-                return 'left';
-            }
-            if ($left_method && !$right_method) {
-                return 'right';
-            }
-        }
-
-        # Both is_call: prefer non-binop over binop
-        my $left_binop  = $left  & STRUCT_IS_BINOP;
-        my $right_binop = $right & STRUCT_IS_BINOP;
-        if ($left_call && $right_call) {
-            if ($right_binop && !$left_binop) {
-                return 'left';
-            }
-            if ($left_binop && !$right_binop) {
-                return 'right';
-            }
-        }
-
-        # Both is_call with identical tag sets: duplicate CallExpression
-        # paths — pick left arbitrarily. This arises when an if/else block
-        # precedes a CallExpression: the is_block tag from the completed
-        # control structure propagates into both alternatives identically,
-        # so none of the differentiating rules above fire.
-        if ($left_call && $right_call) {
-            if ($left == $right) {
-                return 'left';
-            }
-        }
-
-        # Prefer non-binop over binop (without is_call guard).
-        # When a chained BinaryExpression produces two Expression alternatives
-        # that differ only in grouping (e.g., `$a->{k} && !$b->{k}` as one
-        # BinaryExpression vs nested), the non-binop alternative is the simpler
-        # parse where the subscript completes before the binary operator.
-        if (!$left_call && !$right_call) {
-            if ($right_binop && !$left_binop) {
-                return 'left';
-            }
-            if ($left_binop && !$right_binop) {
-                return 'right';
-            }
-        }
-
-        # Both valid, no is_call: prefer non-deref over deref.
-        # Simpler parse without PostfixDeref wrapping wins.
-        if (!$left_call && !$right_call) {
-            if ($right_deref && !$left_deref) {
-                return 'left';
-            }
-            if ($left_deref && !$right_deref) {
-                return 'right';
-            }
-        }
-
-        # Prefer block over hash
-        my $left_block  = $left  & STRUCT_IS_BLOCK;
-        my $right_block = $right & STRUCT_IS_BLOCK;
-        if ($left_block && !$right_block) {
-            return 'left';
-        }
-        if ($right_block && !$left_block) {
-            return 'right';
-        }
-
-        # Both is_block: prefer the one without is_hash (pure Block over
-        # Block-containing-HashConstructor).
-        my $left_hash  = $left  & STRUCT_IS_HASH;
-        my $right_hash = $right & STRUCT_IS_HASH;
-        if ($left_block && $right_block) {
-            if ($right_hash && !$left_hash) {
-                return 'left';
-            }
-            if ($left_hash && !$right_hash) {
-                return 'right';
-            }
-        }
-
-        # Prefer is_vardecl over non-is_vardecl
-        my $left_vardecl  = $left  & STRUCT_IS_VARDECL;
-        my $right_vardecl = $right & STRUCT_IS_VARDECL;
-        if ($left_vardecl && !$right_vardecl) {
-            return 'left';
-        }
-        if ($right_vardecl && !$left_vardecl) {
-            return 'right';
-        }
-
-        # Both is_binop with identical tag sets: duplicate BinaryExpression
-        # paths from chained operators. Pick left (left-associative grouping).
-        if ($left_binop && $right_binop) {
-            if ($left == $right) {
-                return 'left';
-            }
-        }
-
-        return undef;
     }
 
     method on_scan($item, $alt_idx, $pos, $matched_text) {

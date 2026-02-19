@@ -273,77 +273,73 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
     is($r, 0, 'add(one, one) is valid (integer 0)');
 }
 
-# --- selects_alternative: is_deref disambiguation ---
+# --- add: identical is_call+is_deref tags — pick left (case 7 tie-breaker) ---
+# When both alternatives have identical Structural tags (same bitfield integer),
+# add() picks left to break the tie deterministically. This is load-bearing:
+# the two alternatives may differ in other semiring components (Precedence,
+# SemanticAction) and Composite uses the result to return the whole left tuple.
 {
-    my $call_only  = STRUCT_IS_CALL;
     my $call_deref = STRUCT_IS_CALL | STRUCT_IS_DEREF;
-
-    is($sr->selects_alternative($call_only, $call_deref), 'left',
-        'selects_alternative(call, call+deref) returns left');
-    is($sr->selects_alternative($call_deref, $call_only), 'right',
-        'selects_alternative(call+deref, call) returns right');
-
-    # Both have is_deref — identical tags, pick left to break tie
-    is($sr->selects_alternative($call_deref, $call_deref), 'left',
-        'selects_alternative(call+deref, call+deref) returns left (identical tags)');
+    my $r = $sr->add($call_deref, $call_deref);
+    is($r, $call_deref, 'add(call+deref, call+deref): identical tags returns left');
 }
 
-# --- selects_alternative: is_method disambiguation ---
+# --- add: identical is_call+is_method tags — pick left (case 7 tie-breaker) ---
 {
-    my $call_only   = STRUCT_IS_CALL;
     my $call_method = STRUCT_IS_CALL | STRUCT_IS_METHOD;
-
-    is($sr->selects_alternative($call_only, $call_method), 'left',
-        'selects_alternative(call, call+method) returns left');
-    is($sr->selects_alternative($call_method, $call_only), 'right',
-        'selects_alternative(call+method, call) returns right');
-
-    # Both have is_method — identical tags, pick left to break tie
-    is($sr->selects_alternative($call_method, $call_method), 'left',
-        'selects_alternative(call+method, call+method) returns left (identical tags)');
+    my $r = $sr->add($call_method, $call_method);
+    is($r, $call_method, 'add(call+method, call+method): identical tags returns left');
 }
 
-# --- selects_alternative: is_binop disambiguation ---
+# --- add: identical is_call+is_binop tags — pick left (case 7 tie-breaker) ---
 {
-    my $call_only  = STRUCT_IS_CALL;
     my $call_binop = STRUCT_IS_CALL | STRUCT_IS_BINOP;
-
-    is($sr->selects_alternative($call_only, $call_binop), 'left',
-        'selects_alternative(call, call+binop) returns left');
-    is($sr->selects_alternative($call_binop, $call_only), 'right',
-        'selects_alternative(call+binop, call) returns right');
-
-    # Both have is_binop — identical tags, pick left to break tie
-    is($sr->selects_alternative($call_binop, $call_binop), 'left',
-        'selects_alternative(call+binop, call+binop) returns left (identical tags)');
+    my $r = $sr->add($call_binop, $call_binop);
+    is($r, $call_binop, 'add(call+binop, call+binop): identical tags returns left');
 }
 
-# --- selects_alternative: is_vardecl disambiguation ---
+# --- add: identical is_list tags — pick left (case 2 tie-breaker) ---
+# Two ExpressionList alternatives with identical Structural tags: pick left.
 {
-    my $binop_only    = STRUCT_IS_BINOP;
-    my $binop_vardecl = STRUCT_IS_BINOP | STRUCT_IS_VARDECL;
-
-    is($sr->selects_alternative($binop_only, $binop_vardecl), 'right',
-        'selects_alternative(binop, binop+vardecl) returns right');
-    is($sr->selects_alternative($binop_vardecl, $binop_only), 'left',
-        'selects_alternative(binop+vardecl, binop) returns left');
-
-    # Both have is_vardecl — identical tags, fall through to binop tie-breaker
-    is($sr->selects_alternative($binop_vardecl, $binop_vardecl), 'left',
-        'selects_alternative(binop+vardecl, binop+vardecl) returns left (identical binop tags)');
+    my $list_only = STRUCT_IS_LIST;
+    my $r = $sr->add($list_only, $list_only);
+    is($r, $list_only, 'add(list, list): identical tags returns left');
 }
 
-# --- selects_alternative: is_binop identical-tag tie-breaking ---
-# Chained BinaryExpressions (e.g. $a && $b && $c) produce two alternatives
-# with identical structural tags. Pick left for left-associative grouping.
+# --- add: identical is_binop tags — pick left (case 14 tie-breaker) ---
 {
-    my $binop_only  = STRUCT_IS_BINOP;
+    my $binop_only = STRUCT_IS_BINOP;
+    my $r = $sr->add($binop_only, $binop_only);
+    is($r, $binop_only, 'add(binop, binop): identical tags returns left');
+}
+
+# --- add: identical is_binop+is_deref tags — pick left (case 14 tie-breaker) ---
+{
     my $binop_deref = STRUCT_IS_BINOP | STRUCT_IS_DEREF;
+    my $r = $sr->add($binop_deref, $binop_deref);
+    is($r, $binop_deref, 'add(binop+deref, binop+deref): identical tags returns left');
+}
 
-    is($sr->selects_alternative($binop_only, $binop_only), 'left',
-        'selects_alternative(binop, binop) identical tags returns left');
-    is($sr->selects_alternative($binop_deref, $binop_deref), 'left',
-        'selects_alternative(binop+deref, binop+deref) identical tags returns left');
+# --- add: returns actual winner object (not synthesized constants) ---
+# When block wins over hash (or vice versa), add() must return the actual
+# $left or $right object, not a new synthesized constant. Composite relies
+# on numeric identity ($result == $li vs $result == $ri) to determine
+# which whole tuple to select for all semirings.
+{
+    # add(block, hash): block wins; should return $left = STRUCT_IS_BLOCK = 1
+    my $block = STRUCT_IS_BLOCK;   # 1
+    my $hash  = STRUCT_IS_HASH;    # 2
+    my $r = $sr->add($block, $hash);
+    is($r, $block, 'add(block, hash): returns left value (block winner)');
+    is($r, 1,      'add(block, hash): returns exact block integer');
+}
+
+{
+    # add(hash, block): block wins; should return $right = STRUCT_IS_BLOCK = 1
+    my $block = STRUCT_IS_BLOCK;   # 1
+    my $hash  = STRUCT_IS_HASH;    # 2
+    my $r = $sr->add($hash, $block);
+    is($r, $block, 'add(hash, block): returns right value (block winner)');
 }
 
 # ========================================================================

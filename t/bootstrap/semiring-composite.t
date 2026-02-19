@@ -242,6 +242,148 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 }
 
 # ========================================================================
+# N-ary Composite: integer-semiring preference detection in add()
+# ========================================================================
+
+# When an integer-valued semiring's add() returns a value that equals exactly
+# one of its inputs (but not the other), Composite interprets this as a
+# preference and returns the whole tuple for the winning side. This avoids
+# calling SemanticAction.add() with two different alternatives (which would die).
+#
+# This is the migration path from selects_alternative: integer semirings like
+# Structural express preferences through add() return values, and Composite
+# detects them via numeric equality.
+
+# Test 9c: Composite picks whole left tuple when Structural integer add() returns left value
+{
+    use Chalk::Bootstrap::Semiring::Structural;
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $struct_sr, $sem_sr],
+    );
+
+    # Two alternatives where Structural can disambiguate:
+    # Left has CALL only, Right has CALL+LIST.
+    # Structural prefers non-list, so it picks Left.
+    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+    my $struct_left  = STRUCT_IS_CALL;
+    my $struct_right = STRUCT_IS_CALL | STRUCT_IS_LIST;
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'winner');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus    => $node1,
+        children => [],
+        position => 0,
+        rule     => 'Left',
+    );
+
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'loser');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus    => $node2,
+        children => [],
+        position => 0,
+        rule     => 'Right',
+    );
+
+    my $val1 = [$bool_sr->one(), $struct_left,  $ctx1];
+    my $val2 = [$bool_sr->one(), $struct_right, $ctx2];
+
+    # Structural prefers non-list (left), so Composite should return the left tuple.
+    # SemanticAction should NOT die because it only sees the winning context.
+    my $result = $comp->add($val1, $val2);
+
+    isa_ok($result, 'ARRAY', '9c: Composite returns array tuple when Structural disambiguates');
+    is(scalar($result->@*), 3, '9c: returns 3-tuple');
+    is($result->[1], STRUCT_IS_CALL, '9c: Structural component is the winner value (CALL only)');
+    is($result->[2]->extract()->value(), 'winner', '9c: SemanticAction component is from left tuple');
+}
+
+# Test 9d: Composite picks whole right tuple when Structural prefers right
+{
+    use Chalk::Bootstrap::Semiring::Structural;
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $struct_sr, $sem_sr],
+    );
+
+    # Left has CALL+LIST (is_list), Right has CALL only (no list).
+    # Structural prefers non-list, so it picks Right.
+    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+    my $struct_left  = STRUCT_IS_CALL | STRUCT_IS_LIST;
+    my $struct_right = STRUCT_IS_CALL;
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'loser');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus    => $node1,
+        children => [],
+        position => 0,
+        rule     => 'Left',
+    );
+
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'winner');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus    => $node2,
+        children => [],
+        position => 0,
+        rule     => 'Right',
+    );
+
+    my $val1 = [$bool_sr->one(), $struct_left,  $ctx1];
+    my $val2 = [$bool_sr->one(), $struct_right, $ctx2];
+
+    my $result = $comp->add($val1, $val2);
+
+    isa_ok($result, 'ARRAY', '9d: Composite returns array tuple when Structural disambiguates');
+    is($result->[1], STRUCT_IS_CALL, '9d: Structural component is the winner value (CALL only)');
+    is($result->[2]->extract()->value(), 'winner', '9d: SemanticAction component is from right tuple');
+}
+
+# Test 9e: Composite picks left tuple when Structural tags are identical (tie-break)
+# When both alternatives have identical Structural integer values, Composite
+# picks the left tuple deterministically. This handles duplicate parse paths.
+{
+    use Chalk::Bootstrap::Semiring::Structural;
+    my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+    my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $struct_sr, $sem_sr],
+    );
+
+    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+    my $struct_identical = STRUCT_IS_CALL | STRUCT_IS_LIST;
+
+    my $node1 = $factory->make('Constant', const_type => 'string', value => 'left-winner');
+    my $ctx1 = Chalk::Bootstrap::Context->new(
+        focus    => $node1,
+        children => [],
+        position => 0,
+        rule     => 'Left',
+    );
+
+    my $node2 = $factory->make('Constant', const_type => 'string', value => 'right-loser');
+    my $ctx2 = Chalk::Bootstrap::Context->new(
+        focus    => $node2,
+        children => [],
+        position => 0,
+        rule     => 'Right',
+    );
+
+    my $val1 = [$bool_sr->one(), $struct_identical, $ctx1];
+    my $val2 = [$bool_sr->one(), $struct_identical, $ctx2];
+
+    my $result = $comp->add($val1, $val2);
+
+    isa_ok($result, 'ARRAY', '9e: Composite returns array tuple for identical Structural tie-break');
+    is($result->[1], $struct_identical, '9e: Structural component is the identical tag value');
+    is($result->[2]->extract()->value(), 'left-winner', '9e: SemanticAction picks left on tie-break');
+}
+
+# ========================================================================
 # N-ary Composite: on_scan delegation
 # ========================================================================
 
