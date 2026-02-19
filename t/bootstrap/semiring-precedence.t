@@ -569,4 +569,51 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
         'on_scan in non-operator context returns same interned object for same input value');
 }
 
+# ========================================================================
+# Hash-consing: on_complete returns interned objects
+# ========================================================================
+
+# Test 44: on_complete for ParenExpr always returns same (one) object
+{
+    my $op_value = { valid => true, op => '+', level => 3, assoc => 'left' };
+    my $item1 = make_item('ParenExpr', $op_value);
+    my $item2 = make_item('ParenExpr', { valid => true, op => '-', level => 5, assoc => 'left' });
+    my $r1 = $prec->on_complete($item1, 0, 0);
+    my $r2 = $prec->on_complete($item2, 0, 0);
+    is(refaddr($r1), refaddr($r2),
+        'on_complete for ParenExpr always returns same reset (one) object');
+    is(refaddr($r1), refaddr($prec->one()),
+        'on_complete for ParenExpr returns the one() singleton');
+}
+
+# Test 45: on_complete for PostfixExpression returns same interned object
+{
+    my $item1 = make_item('PostfixExpression', $prec->one());
+    my $item2 = make_item('PostfixExpression', $prec->one());
+    my $r1 = $prec->on_complete($item1, 0, 0);
+    my $r2 = $prec->on_complete($item2, 0, 0);
+    is(refaddr($r1), refaddr($r2),
+        'on_complete for PostfixExpression returns same interned object');
+}
+
+# Test 46: on_complete for Subscript (no high level) returns one singleton
+{
+    my $item = make_item('Subscript', $prec->one());
+    my $r = $prec->on_complete($item, 0, 0);
+    is(refaddr($r), refaddr($prec->one()),
+        'on_complete for Subscript with no high level returns one() singleton');
+}
+
+# Test 47: on_complete for generic rule returns one singleton
+{
+    my $item1 = make_item('SomeOtherRule', $prec->one());
+    my $item2 = make_item('AnotherRule', $prec->one());
+    my $r1 = $prec->on_complete($item1, 0, 0);
+    my $r2 = $prec->on_complete($item2, 0, 0);
+    is(refaddr($r1), refaddr($r2),
+        'on_complete for unrecognised rules returns same one() singleton');
+    is(refaddr($r1), refaddr($prec->one()),
+        'on_complete for unrecognised rules returns the one() singleton');
+}
+
 done_testing();

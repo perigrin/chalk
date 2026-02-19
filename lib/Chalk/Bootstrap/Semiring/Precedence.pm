@@ -338,7 +338,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
         # Parenthesized expressions reset precedence context
         if ($RESETS{$rule_name}) {
-            return { valid => true };
+            return $self->one();
         }
 
         # Expression-type rules get their conceptual precedence level.
@@ -352,12 +352,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
             if ($expr_level < 0 && defined $value->{level} && $value->{level} >= 0) {
                 return $self->zero();
             }
-            return {
-                valid => true,
-                op    => undef,
-                level => $expr_level,
-                assoc => undef,
-            };
+            return _intern(true, $expr_level, undef, false);
         }
 
         # BinaryOp/AssignOp completion: the value already carries operator info
@@ -373,12 +368,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
         # AssignmentExpression: low precedence
         if ($rule_name eq 'AssignmentExpression') {
-            return {
-                valid => true,
-                op    => $value->{op},
-                level => $EXPR_LEVELS->{AssignmentExpression},
-                assoc => 'right',
-            };
+            return _intern(true, $EXPR_LEVELS->{AssignmentExpression}, 'right', false, $value->{op});
         }
 
         # Expression: pass through precedence info from child so that
@@ -397,9 +387,9 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # `($x = $h){$k}` is invalid without parens.
         if ($rule_name eq 'Subscript') {
             if (defined $value->{level} && $value->{level} >= 100) {
-                return { valid => true, level => $value->{level}, assoc => $value->{assoc} };
+                return _intern(true, $value->{level}, $value->{assoc}, false);
             }
-            return { valid => true };
+            return $self->one();
         }
 
         # MethodCall/CallExpression/PostfixDeref/PostfixIncDec: pass through
@@ -413,7 +403,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
 
         # Other rules: pass through value, clear operator info
-        return { valid => true };
+        return $self->one();
     }
 
 }
