@@ -188,6 +188,11 @@ my sub make_item($rule_name, $value) {
     my $result = $ti->on_scan($item, 0, 0, 'use');
     ok(!$ti->is_zero($result), 'scanning keyword as QualifiedIdentifier is non-zero at scan time');
     ok(get_tags($result)->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
+
+    # Hash-consing: same scan inputs → same refaddr
+    my $item2 = make_item('QualifiedIdentifier', $ti->one());
+    my $result2 = $ti->on_scan($item2, 0, 0, 'use');
+    is(refaddr($result), refaddr($result2), 'on_scan with same inputs returns same object (hash-consed)');
 }
 
 # Scanning a non-keyword as QualifiedIdentifier → no tag
