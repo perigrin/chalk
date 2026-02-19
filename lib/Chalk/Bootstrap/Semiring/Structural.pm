@@ -348,8 +348,8 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Propagate zero
         return -1 if $existing == -1;
 
-        # Transparent: just multiply with one()
-        return $existing | 0;
+        # Transparent pass-through
+        return $existing;
     }
 
     method on_complete($item, $alt_idx, $pos) {
