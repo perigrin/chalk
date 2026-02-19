@@ -100,6 +100,10 @@ my sub get_tags($val) {
     ok(!defined $z, 'zero is undef');
     my $o_tags = get_tags($o);
     ok($o_tags->{valid}, 'one has valid=true');
+
+    # Hash-consing: one() returns singleton (same refaddr each call)
+    my $o2 = $ti->one();
+    is(refaddr($o), refaddr($o2), 'one() returns singleton (same refaddr)');
 }
 
 # multiply

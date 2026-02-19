@@ -14,6 +14,13 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Positions where BinaryOp scanned + or - (for unary disambiguation)
     field %binary_op_positions;
 
+    # Hash-cons cache: maps stringified key to Context object.
+    # Ensures identical parse derivations share the same refaddr.
+    my %_ctx_cache;
+
+    # Singleton for one(): a Context with { valid => true } focus and no children.
+    my $_one_singleton;
+
     # Extract tag hash from a TypeInference value (Context with tag hash focus).
     # For intermediate multiply nodes (undef focus), collects tags from leaves.
     my sub _tags($val) {
@@ -32,14 +39,25 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return \%merged;
     }
 
+    # Serialize a tag hash to a stable string key for hash-consing.
+    # Handles arrayref values (e.g. item_types) by joining with semicolons.
+    my sub _tag_key($tags) {
+        return join(",", map {
+            my $v = $tags->{$_};
+            "$_=" . (ref($v) eq 'ARRAY' ? join(';', map { $_ // '' } @$v) : ($v // ''))
+        } sort keys %$tags);
+    }
+
     # Create a leaf Context with the given tag hash as focus.
+    # Hash-consed: same tag content → same object.
     my sub _ctx($tags) {
-        return Chalk::Bootstrap::Context->new(
+        my $key = "scan:" . _tag_key($tags);
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $tags,
             children => [],
             position => 0,
             rule     => undef,
-        );
+        ));
     }
 
     # Walk right spine of multiply tree to find the rightmost type tag.
@@ -105,7 +123,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     }
 
     method one() {
-        return _ctx({ valid => true });
+        return ($_one_singleton //= _ctx({ valid => true }));
     }
 
     method is_zero($value) {
