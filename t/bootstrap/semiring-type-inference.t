@@ -238,6 +238,11 @@ for my $kw (@keywords) {
     my $result = $ti->on_complete($item, 0, 3);
     ok(!$ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier propagates (valid)');
     ok(get_tags($result)->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
+
+    # Hash-consing: same on_complete inputs → same refaddr
+    my $item2 = make_item('QualifiedIdentifier', $tagged);
+    my $result2 = $ti->on_complete($item2, 0, 3);
+    is(refaddr($result), refaddr($result2), 'on_complete with same inputs returns same object (hash-consed)');
 }
 
 # QualifiedIdentifier complete without tag → valid

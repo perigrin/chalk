@@ -60,6 +60,21 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         ));
     }
 
+    # Create an on_complete result Context, hash-consed by focus content and
+    # children refaddrs. All on_complete branches must use this helper to
+    # ensure identical completions produce the same object (same refaddr).
+    my sub _complete_ctx($focus, $children, $position, $rule) {
+        my $focus_key = _tag_key($focus);
+        my $children_key = join(":", map { refaddr($_) } @$children);
+        my $key = "complete:$rule:$focus_key:$children_key";
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus    => $focus,
+            children => $children,
+            position => $position,
+            rule     => $rule,
+        ));
+    }
+
     # Walk right spine of multiply tree to find the rightmost type tag.
     # In a multiply tree (left * right), the rightmost child typically
     # holds the most recent expression's type.
@@ -353,15 +368,15 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 # Trailing comma: preserve item_types
                 $item_types = $tags->{item_types} // $_get_prev_item_types->($value);
             }
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($arity ? (list_arity => $arity) : ()),
                     ($item_types ? (item_types => $item_types) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
@@ -411,14 +426,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 }
             }
             # Clear builtin tag, set return type
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($return_type ? (type => $return_type) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
@@ -444,15 +459,15 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 # No op_text: preserve child type (intermediate completion)
                 $result_type = $tags->{type};
             }
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
@@ -464,28 +479,28 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op($op);
                 $result_type = $sig->{result} if $sig;
             }
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # PostfixIncDec (++/--): result is Num
         if ($rule_name eq 'PostfixIncDec') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true, type => 'Num',
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
@@ -498,53 +513,53 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 $sub_type = 'Scalar';
             }
             # alt 2+ = ->() deref-call: type unknown (undef)
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($sub_type ? (type => $sub_type) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # TernaryExpression: type unknown (could be either branch)
         if ($rule_name eq 'TernaryExpression') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # AssignmentExpression: type unknown
         if ($rule_name eq 'AssignmentExpression') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # MethodCall: type unknown (return type of method not knowable at parse time)
         if ($rule_name eq 'MethodCall') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
                     ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
@@ -560,57 +575,51 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             } else {
                 $type_tag = { valid => true, type => 'Scalar' };
             }
-            return Chalk::Bootstrap::Context->new(
-                focus    => $type_tag,
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+            return _complete_ctx(
+                $type_tag,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # AnonymousSub → type => 'Code'
         if ($rule_name eq 'AnonymousSub') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => { valid => true, type => 'Code' },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+            return _complete_ctx(
+                { valid => true, type => 'Code' },
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # QwLiteral → type => 'List'
         if ($rule_name eq 'QwLiteral') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => { valid => true, type => 'List' },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+            return _complete_ctx(
+                { valid => true, type => 'List' },
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # ArrayConstructor: type => 'ArrayRef', also acts as boundary rule
         if ($rule_name eq 'ArrayConstructor') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
-                    valid => true,
-                    type => 'ArrayRef',
-                },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+            return _complete_ctx(
+                { valid => true, type => 'ArrayRef' },
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # HashConstructor: type => 'HashRef', also acts as boundary rule
         if ($rule_name eq 'HashConstructor') {
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
-                    valid => true,
-                    type => 'HashRef',
-                },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+            return _complete_ctx(
+                { valid => true, type => 'HashRef' },
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
@@ -625,32 +634,32 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             || $rule_name eq 'Signature'
             || $rule_name eq 'Attribute')
         {
-            return Chalk::Bootstrap::Context->new(
-                focus    => {
+            return _complete_ctx(
+                {
                     valid => true,
-                    ($tags->{type}            ? (type            => $tags->{type}) : ()),
+                    ($tags->{type} ? (type => $tags->{type}) : ()),
                 },
-                children => $value->children(),
-                position => $value->position(),
-                rule     => $rule_name,
+                $value->children(),
+                $value->position(),
+                $rule_name,
             );
         }
 
         # Preserve all tags through intermediate rules
-        return Chalk::Bootstrap::Context->new(
-            focus    => {
+        return _complete_ctx(
+            {
                 valid => true,
-                ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true)     : ()),
-                ($tags->{ambiguous_unary}       ? (ambiguous_unary       => true)     : ()),
-                ($tags->{type}                  ? (type            => $tags->{type})   : ()),
-                ($tags->{op_text}               ? (op_text         => $tags->{op_text}) : ()),
+                ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true)       : ()),
+                ($tags->{ambiguous_unary}       ? (ambiguous_unary       => true)       : ()),
+                ($tags->{type}                  ? (type       => $tags->{type})         : ()),
+                ($tags->{op_text}               ? (op_text    => $tags->{op_text})      : ()),
                 ($tags->{call_symbol}           ? (call_symbol => $tags->{call_symbol}) : ()),
-                ($tags->{item_types}            ? (item_types  => $tags->{item_types}) : ()),
-                ($tags->{list_arity}            ? (list_arity  => $tags->{list_arity}) : ()),
+                ($tags->{item_types}            ? (item_types  => $tags->{item_types})  : ()),
+                ($tags->{list_arity}            ? (list_arity  => $tags->{list_arity})  : ()),
             },
-            children => $value->children(),
-            position => $value->position(),
-            rule     => $rule_name,
+            $value->children(),
+            $value->position(),
+            $rule_name,
         );
     }
 }
