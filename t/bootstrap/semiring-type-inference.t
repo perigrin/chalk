@@ -143,22 +143,26 @@ my sub get_tags($val) {
     ok(get_tags($r5)->{keyword_as_identifier}, 'keyword_as_identifier propagates from right');
 }
 
-# add
+# add (returns arrayref of survivors)
 {
     my $o = $ti->one();
     my $z = $ti->zero();
 
-    # add(zero, one) = one
+    # add(zero, one) = [one]
     my $r1 = $ti->add($z, $o);
-    ok(!$ti->is_zero($r1), 'add(zero, one) is non-zero');
+    ok(ref($r1) eq 'ARRAY', 'add(zero, one) returns arrayref');
+    ok(!$ti->is_zero($r1->[0]), 'add(zero, one) survivor is non-zero');
 
-    # add(one, zero) = one
+    # add(one, zero) = [one]
     my $r2 = $ti->add($o, $z);
-    ok(!$ti->is_zero($r2), 'add(one, zero) is non-zero');
+    ok(ref($r2) eq 'ARRAY', 'add(one, zero) returns arrayref');
+    ok(!$ti->is_zero($r2->[0]), 'add(one, zero) survivor is non-zero');
 
-    # add(one, one) = first (one)
+    # add(one, one) = [one] (identity collapse: same refaddr → single survivor)
     my $r3 = $ti->add($o, $o);
-    ok(!$ti->is_zero($r3), 'add(one, one) is non-zero');
+    ok(ref($r3) eq 'ARRAY', 'add(one, one) returns arrayref');
+    is(scalar($r3->@*), 1, 'add(one, one) collapses to single survivor (identity)');
+    ok(!$ti->is_zero($r3->[0]), 'add(one, one) survivor is non-zero');
 }
 
 # ========================================================================
@@ -754,28 +758,32 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 }
 
 # ========================================================================
-# add: prefer non-ambiguous-unary over ambiguous-unary
+# add: prefer non-ambiguous-unary over ambiguous-unary (returns arrayref)
 # ========================================================================
 
 {
     my $unary_tagged = make_ctx(ambiguous_unary => true);
     my $binary_clean = make_ctx();
 
-    # Left tagged, right clean → returns right (binary)
+    # Left tagged, right clean → returns [right] (binary wins)
     my $r1 = $ti->add($unary_tagged, $binary_clean);
-    ok(!get_tags($r1)->{ambiguous_unary}, 'add: left=unary, right=binary → returns binary (no tag)');
+    ok(ref($r1) eq 'ARRAY', 'add: left=unary, right=binary → returns arrayref');
+    ok(!get_tags($r1->[0])->{ambiguous_unary}, 'add: left=unary, right=binary → binary survives (no tag)');
 
-    # Left clean, right tagged → returns left (binary)
+    # Left clean, right tagged → returns [left] (binary wins)
     my $r2 = $ti->add($binary_clean, $unary_tagged);
-    ok(!get_tags($r2)->{ambiguous_unary}, 'add: left=binary, right=unary → returns binary (no tag)');
+    ok(ref($r2) eq 'ARRAY', 'add: left=binary, right=unary → returns arrayref');
+    ok(!get_tags($r2->[0])->{ambiguous_unary}, 'add: left=binary, right=unary → binary survives (no tag)');
 
-    # Both tagged → returns left (no preference)
+    # Both tagged → returns [left] (no preference, left wins by default)
     my $r3 = $ti->add($unary_tagged, $unary_tagged);
-    ok(get_tags($r3)->{ambiguous_unary}, 'add: both tagged → returns left (still tagged)');
+    ok(ref($r3) eq 'ARRAY', 'add: both tagged → returns arrayref');
+    ok(get_tags($r3->[0])->{ambiguous_unary}, 'add: both tagged → left survives (still tagged)');
 
-    # Both clean → returns left (no preference)
+    # Both clean → returns [left] (no preference, left wins by default)
     my $r4 = $ti->add($binary_clean, $binary_clean);
-    ok(!get_tags($r4)->{ambiguous_unary}, 'add: both clean → returns left (no tag)');
+    ok(ref($r4) eq 'ARRAY', 'add: both clean → returns arrayref');
+    ok(!get_tags($r4->[0])->{ambiguous_unary}, 'add: both clean → left survives (no tag)');
 }
 
 # ========================================================================

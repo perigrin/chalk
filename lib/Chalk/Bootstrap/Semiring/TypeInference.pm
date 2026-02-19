@@ -161,9 +161,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     }
 
     method add($left, $right) {
-        # Return first non-zero alternative
-        return $right if !defined $left;
-        return $left if !defined $right;
+        # Return arrayref of survivors (FilterComposite convention).
+        # Single-element [$winner] means one alternative preferred.
+        # Two-element [$left, $right] means no preference (both survive).
+        return [$right] if !defined $left;
+        return [$left]  if !defined $right;
+
+        # Identity collapse: same refaddr → single survivor (no preference needed)
+        return [$left] if refaddr($left) == refaddr($right);
 
         # Prefer non-ambiguous-unary (binary) over ambiguous-unary
         my $left_tags  = _tags($left);
@@ -171,13 +176,13 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $left_unary  = $left_tags->{ambiguous_unary};
         my $right_unary = $right_tags->{ambiguous_unary};
         if ($left_unary && !$right_unary) {
-            return $right;
+            return [$right];
         }
         if ($right_unary && !$left_unary) {
-            return $left;
+            return [$left];
         }
 
-        return $left;
+        return [$left];
     }
 
     # Signal to Composite which alternative to select for ALL components.
