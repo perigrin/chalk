@@ -226,48 +226,6 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return [$left];
     }
 
-    # Signal to Composite which alternative to select for ALL components.
-    # Returns 'left', 'right', or undef (no preference).
-    # Mirrors add() logic: prefer the value with a defined level (more
-    # constraining), and when both have levels, prefer the higher level
-    # number (lower precedence = more constraining context).
-    method selects_alternative($left, $right) {
-        return undef if $self->is_zero($left);
-        return undef if $self->is_zero($right);
-
-        my $ll = $left->{level};
-        my $rl = $right->{level};
-
-        # One has level info, the other doesn't
-        if (defined $ll && !defined $rl) {
-            return 'left';
-        }
-        if (defined $rl && !defined $ll) {
-            return 'right';
-        }
-
-        # Both have levels: prefer higher level number, except when
-        # PostfixExpression (level<0) merges with AssignmentExpression
-        # (level>=100) — prefer PostfixExpression to preserve method-call
-        # parse paths.
-        if (defined $ll && defined $rl) {
-            if ($ll < 0 && $rl >= 100) {
-                return 'left';
-            }
-            if ($rl < 0 && $ll >= 100) {
-                return 'right';
-            }
-            if ($rl > $ll) {
-                return 'right';
-            }
-            if ($ll > $rl) {
-                return 'left';
-            }
-        }
-
-        return undef;
-    }
-
     method on_scan($item, $alt_idx, $pos, $matched_text) {
         my $existing = $item->{value};
 

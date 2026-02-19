@@ -376,60 +376,10 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
     ok(!$prec->is_zero($result), 'non-operator scan in non-BinaryOp is transparent');
 }
 
-# ========================================================================
-# selects_alternative: cross-semiring disambiguation
-# ========================================================================
-
-# Test 25: selects_alternative prefers value with defined level
-{
-    my $with_level = { valid => true, level => 5, op => '.', assoc => 'left' };
-    my $no_level   = { valid => true };
-
-    is($prec->selects_alternative($with_level, $no_level), 'left',
-        'selects_alternative prefers left when it has level');
-    is($prec->selects_alternative($no_level, $with_level), 'right',
-        'selects_alternative prefers right when it has level');
-}
-
-# Test 26: selects_alternative prefers higher level (lower precedence = more constraining)
-{
-    my $binexpr_dot  = { valid => true, level => 5, op => '.', assoc => 'left' };
-    my $postfix_expr = { valid => true, level => -2, op => undef, assoc => undef };
-
-    is($prec->selects_alternative($binexpr_dot, $postfix_expr), 'left',
-        'selects_alternative prefers BinaryExpr(.) over PostfixExpr');
-    is($prec->selects_alternative($postfix_expr, $binexpr_dot), 'right',
-        'selects_alternative prefers BinaryExpr(.) over PostfixExpr (reversed)');
-}
-
-# Test 27: selects_alternative returns undef when neither has level
-{
-    my $a = { valid => true };
-    my $b = { valid => true };
-
-    is($prec->selects_alternative($a, $b), undef,
-        'selects_alternative returns undef when both lack levels');
-}
-
-# Test 28: selects_alternative returns undef when same level
-{
-    my $a = { valid => true, level => 5, op => '.', assoc => 'left' };
-    my $b = { valid => true, level => 5, op => '.', assoc => 'left' };
-
-    is($prec->selects_alternative($a, $b), undef,
-        'selects_alternative returns undef when same level');
-}
-
-# Test 29: selects_alternative returns undef when either is zero
-{
-    my $z = $prec->zero();
-    my $v = { valid => true, level => 5 };
-
-    is($prec->selects_alternative($z, $v), undef,
-        'selects_alternative returns undef when left is zero');
-    is($prec->selects_alternative($v, $z), undef,
-        'selects_alternative returns undef when right is zero');
-}
+# Note: selects_alternative() was removed. Disambiguation is now handled
+# via the identity-detection protocol in Composite.add(): add() returns
+# [$winner] and Composite detects preference by comparing refaddr of the
+# result with the inputs.
 
 # ========================================================================
 # Precedence semiring: AssignOp on_scan sets is_operator for disambiguation
