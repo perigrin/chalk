@@ -73,7 +73,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return $self->zero() if $self->is_zero($right);
 
         # If neither has operator info, no precedence constraint
-        return { valid => true }
+        return $self->one()
             if !defined($left->{level}) && !defined($right->{level});
 
         # Operator check: when a BinaryOp/AssignOp completion (is_operator)
@@ -102,22 +102,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
             }
             # Left operand is compatible. Adopt operator's level as context
             # for the right operand.
-            return {
-                valid => true,
-                op    => $right->{op},
-                level => $op_level,
-                assoc => $right->{assoc},
-            };
+            return _intern(true, $op_level, $right->{assoc}, false, $right->{op});
         }
 
         # If only one has operator info, carry it through
         # (strip is_operator to prevent leaking into BinaryExpression context)
         if (!defined($left->{level})) {
-            return { valid => true, op => $right->{op}, level => $right->{level}, assoc => $right->{assoc} };
+            return _intern(true, $right->{level}, $right->{assoc}, false, $right->{op});
         }
         # Note: is_operator from $right is intentionally NOT propagated above
         if (!defined($right->{level})) {
-            return { valid => true, op => $left->{op}, level => $left->{level}, assoc => $left->{assoc} };
+            return _intern(true, $left->{level}, $left->{assoc}, false, $left->{op});
         }
 
         # Both have operator info — validate precedence nesting
@@ -131,13 +126,13 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # levels. Skip precedence nesting checks for negative-level pairs —
         # they carry no operator semantics.
         if ($parent_level < 0 && $child_level < 0) {
-            return { valid => true, op => $left->{op}, level => $parent_level, assoc => $parent_assoc };
+            return _intern(true, $parent_level, $parent_assoc, false, $left->{op});
         }
 
         # Child with higher precedence (lower level number) inside parent is always valid
         if ($child_level < $parent_level) {
             # Child binds tighter — valid. Carry parent's operator info.
-            return { valid => true, op => $left->{op}, level => $parent_level, assoc => $parent_assoc };
+            return _intern(true, $parent_level, $parent_assoc, false, $left->{op});
         }
 
         # Child with lower precedence (higher level number) inside parent is invalid
@@ -174,7 +169,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
 
         # Chained/other: same level is allowed
-        return { valid => true, op => $left->{op}, level => $parent_level, assoc => $parent_assoc };
+        return _intern(true, $parent_level, $parent_assoc, false, $left->{op});
     }
 
     method add($left, $right) {

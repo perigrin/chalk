@@ -501,4 +501,40 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
     isnt(refaddr($z), refaddr($o), 'zero() and one() are distinct objects');
 }
 
+# ========================================================================
+# Hash-consing: multiply returns interned objects
+# ========================================================================
+
+# Test 37: multiply(one, one) returns same object on repeat calls
+{
+    my $r1 = $prec->multiply($prec->one(), $prec->one());
+    my $r2 = $prec->multiply($prec->one(), $prec->one());
+    is(refaddr($r1), refaddr($r2), 'multiply(one,one) returns the same object each time');
+}
+
+# Test 38: multiply(zero, one) returns zero singleton
+{
+    my $result = $prec->multiply($prec->zero(), $prec->one());
+    is(refaddr($result), refaddr($prec->zero()), 'multiply(zero,one) returns zero singleton');
+}
+
+# Test 39: multiply with same operator inputs yields same object
+{
+    my $left  = { valid => true, op => '+', level => 3, assoc => 'left' };
+    my $right = { valid => true, op => '+', level => 3, assoc => 'left' };
+    my $r1    = $prec->multiply($prec->one(), $left);
+    my $r2    = $prec->multiply($prec->one(), $right);
+    is(refaddr($r1), refaddr($r2),
+        'multiply with same (level,assoc) inputs yields same interned object');
+}
+
+# Test 40: multiply zero-path returns zero singleton
+{
+    my $parent = { valid => true, op => '*', level => 2, assoc => 'left' };
+    my $child  = { valid => true, op => '+', level => 3, assoc => 'left' };
+    my $result = $prec->multiply($parent, $child);
+    ok($prec->is_zero($result), 'rejected multiply still returns zero');
+    is(refaddr($result), refaddr($prec->zero()), 'rejected multiply returns zero singleton');
+}
+
 done_testing();
