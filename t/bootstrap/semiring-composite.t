@@ -576,4 +576,20 @@ package MockArrayRefSemiring {
     is($result->[1], 'plain_scalar', 'shim: plain scalar returned unchanged');
 }
 
+# Test 21: Composite handles empty arrayref (zero survivors) from add()
+{
+    my $mock = MockArrayRefSemiring->new(return_value => []);
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $comp = Chalk::Bootstrap::Semiring::Composite->new(
+        semirings => [$bool_sr, $mock],
+    );
+
+    my $val = [$bool_sr->one(), 99];
+    my $result = $comp->add($val, $val);
+
+    isa_ok($result, 'ARRAY', 'shim: empty arrayref returns tuple');
+    ok(!defined($result->[1]), 'shim: empty arrayref yields undef (zero)');
+    ok($comp->is_zero($result), 'shim: zero survivors makes whole tuple zero');
+}
+
 done_testing();

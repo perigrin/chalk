@@ -18,6 +18,11 @@ class Chalk::Bootstrap::Semiring::Composite {
         if ($result->@* == 1) {
             return $result->[0];
         }
+        if ($result->@* == 0) {
+            # Zero survivors: semiring rejected both alternatives.
+            # Return undef so is_zero catches it downstream.
+            return;
+        }
         die "Multiple survivors from semiring $semiring_idx add() — "
             . "requires FilterComposite (Phase 3)";
     }
