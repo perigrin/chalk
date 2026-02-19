@@ -173,9 +173,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
     }
 
     method add($left, $right) {
-        # Return first non-zero alternative
-        return $right if $self->is_zero($left);
-        return $left if $self->is_zero($right);
+        # Return first non-zero alternative, wrapped in a single-element arrayref.
+        # This enables Composite's identity-detection protocol: when the result
+        # is the same object as one of the inputs, Composite knows which side won.
+        return [$right] if $self->is_zero($left);
+        return [$left]  if $self->is_zero($right);
+
+        # Identical inputs: return [$left] as a deterministic tie-break.
+        # refaddr comparison works because all values are hash-consed.
+        if (refaddr($left) == refaddr($right)) {
+            return [$left];
+        }
 
         # Both valid: prefer the value with level info (more constraining).
         # When both have levels, prefer the higher level number (lower
@@ -193,10 +201,10 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 if $lls ne 'undef' || $rls ne 'undef';
         }
         if (defined $ll && !defined $rl) {
-            return $left;
+            return [$left];
         }
         if (defined $rl && !defined $ll) {
-            return $right;
+            return [$right];
         }
         if (defined $ll && defined $rl) {
             # When a PostfixExpression (level<0) merges with an
@@ -205,17 +213,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
             # method-call/subscript parse paths downstream (PostfixExpression
             # on_complete rejects values with level>=0).
             if ($ll < 0 && $rl >= 100) {
-                return $left;
+                return [$left];
             }
             if ($rl < 0 && $ll >= 100) {
-                return $right;
+                return [$right];
             }
             if ($rl > $ll) {
-                return $right;
+                return [$right];
             }
         }
 
-        return $left;
+        return [$left];
     }
 
     # Signal to Composite which alternative to select for ALL components.

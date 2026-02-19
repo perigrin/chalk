@@ -108,16 +108,16 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
     ok($prec->is_zero($result2), 'multiply(one, zero) is zero');
 }
 
-# Test 10: add returns first non-zero
+# Test 10: add returns single-element arrayref; unwrap to check value
 {
     my $result = $prec->add($prec->one(), $prec->one());
-    ok(!$prec->is_zero($result), 'add(one, one) is not zero');
+    ok(!$prec->is_zero($result->[0]), 'add(one, one) winner is not zero');
 
     my $result2 = $prec->add($prec->zero(), $prec->one());
-    ok(!$prec->is_zero($result2), 'add(zero, one) is not zero');
+    ok(!$prec->is_zero($result2->[0]), 'add(zero, one) winner is not zero');
 
     my $result3 = $prec->add($prec->zero(), $prec->zero());
-    ok($prec->is_zero($result3), 'add(zero, zero) is zero');
+    ok($prec->is_zero($result3->[0]), 'add(zero, zero) winner is zero');
 }
 
 # ========================================================================
@@ -614,6 +614,64 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
         'on_complete for unrecognised rules returns same one() singleton');
     is(refaddr($r1), refaddr($prec->one()),
         'on_complete for unrecognised rules returns the one() singleton');
+}
+
+# ========================================================================
+# add() returns arrayref (migrated identity-detection protocol)
+# ========================================================================
+
+# Test 48: add(one, one) returns single-element arrayref containing one
+{
+    my $result = $prec->add($prec->one(), $prec->one());
+    ok(ref($result) eq 'ARRAY', 'add() returns an arrayref');
+    is(scalar @$result, 1, 'add() returns single-element arrayref');
+    is(refaddr($result->[0]), refaddr($prec->one()),
+        'add(one, one) returns [one()]');
+}
+
+# Test 49: add(zero, one) returns [one]
+{
+    my $result = $prec->add($prec->zero(), $prec->one());
+    ok(ref($result) eq 'ARRAY', 'add(zero, one) returns arrayref');
+    ok(!$prec->is_zero($result->[0]), 'add(zero, one) winner is not zero');
+    is(refaddr($result->[0]), refaddr($prec->one()),
+        'add(zero, one) returns [one()]');
+}
+
+# Test 50: add(one, zero) returns [one]
+{
+    my $result = $prec->add($prec->one(), $prec->zero());
+    ok(ref($result) eq 'ARRAY', 'add(one, zero) returns arrayref');
+    is(refaddr($result->[0]), refaddr($prec->one()),
+        'add(one, zero) returns [one()]');
+}
+
+# Test 51: add(zero, zero) returns [zero]
+{
+    my $result = $prec->add($prec->zero(), $prec->zero());
+    ok(ref($result) eq 'ARRAY', 'add(zero, zero) returns arrayref');
+    ok($prec->is_zero($result->[0]), 'add(zero, zero) yields zero');
+    is(refaddr($result->[0]), refaddr($prec->zero()),
+        'add(zero, zero) returns [zero()]');
+}
+
+# Test 52: add(level, no-level) prefers level — returns arrayref with winner
+{
+    my $with_level = { valid => true, level => 5, op => '.', assoc => 'left' };
+    my $no_level   = $prec->one();
+    my $result = $prec->add($with_level, $no_level);
+    ok(ref($result) eq 'ARRAY', 'add(level, no-level) returns arrayref');
+    is(refaddr($result->[0]), refaddr($with_level),
+        'add(level, no-level) returns the value with level');
+}
+
+# Test 53: add with identical interned objects returns [$left] (identity collapse)
+{
+    my $v = $prec->one();
+    my $result = $prec->add($v, $v);
+    ok(ref($result) eq 'ARRAY', 'add(same,same) returns arrayref');
+    is(refaddr($result->[0]), refaddr($v),
+        'add with identical objects returns [$left] (identity collapse)');
 }
 
 done_testing();
