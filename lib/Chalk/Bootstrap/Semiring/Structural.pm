@@ -198,6 +198,26 @@ class Chalk::Bootstrap::Semiring::Structural {
 
     # Signal to Composite which alternative to select for ALL components.
     # Returns 'left', 'right', or undef (no preference).
+    #
+    # Phase 1c validation results (2026-02-19):
+    # Case 2 (both is_list, pick left): UNSAFE - removing it causes SemanticAction::add()
+    #   to receive two non-zero alternatives in grammar-ambiguity-fixes.t (test 3, rule
+    #   SimpleStatement/ExpressionStatement) and crashes concise-actions.t and
+    #   concise-validation.t. The two ExpressionList paths have equal Composite values
+    #   but differ in components other than Structural — hash-consing alone cannot collapse
+    #   them. This tie-breaker is load-bearing.
+    # Case 7 (both is_call, identical Structural tags, pick left): UNSAFE - removing it
+    #   causes semiring-structural.t tests 69 and 72 to fail (call+deref identical and
+    #   call+method identical cases). The Structural integer values are equal but the
+    #   Composite values differ in other semiring components, so the pick-left here is
+    #   the only disambiguation. This tie-breaker is load-bearing.
+    # Case 14 (both is_binop, identical Structural tags, pick left): UNSAFE - removing it
+    #   causes semiring-structural.t tests 78-80 to fail and crashes grammar-ambiguity-fixes.t
+    #   at test 37 ('$x->[$i + 1] =~ /foo/ subscript + regex match', rule BinaryExpression/
+    #   Expression). Same reasoning: equal Structural integers but Composite values differ.
+    #   This tie-breaker is load-bearing.
+    # Conclusion: all three pick-left cases resolve live ambiguities where the Composite-level
+    # values differ in non-Structural components. None can be removed via hash-consing.
     method selects_alternative($left, $right) {
         return undef if $left == -1;
         return undef if $right == -1;
