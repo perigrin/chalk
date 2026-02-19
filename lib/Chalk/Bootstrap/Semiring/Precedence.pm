@@ -294,13 +294,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 # Mark as is_operator so multiply can validate the left
                 # operand's precedence when this BinaryOp completes back
                 # into the parent BinaryExpression context.
-                return {
-                    valid       => true,
-                    op          => $matched_text,
-                    level       => $op_level,
-                    assoc       => $op_info->{assoc},
-                    is_operator => true,
-                };
+                return _intern(true, $op_level, $op_info->{assoc}, true, $matched_text);
             }
             # AssignOp operators are not in the binary precedence table.
             # Give them level 101 (assignment precedence) with right-associativity
@@ -328,13 +322,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
                     }
                 }
 
-                return {
-                    valid       => true,
-                    op          => $matched_text,
-                    level       => $assign_level,
-                    assoc       => 'right',
-                    is_operator => true,
-                };
+                return _intern(true, $assign_level, 'right', true, $matched_text);
             }
         }
 

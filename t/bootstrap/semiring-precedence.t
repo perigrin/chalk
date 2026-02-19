@@ -537,4 +537,36 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
     is(refaddr($result), refaddr($prec->zero()), 'rejected multiply returns zero singleton');
 }
 
+# ========================================================================
+# Hash-consing: on_scan returns interned objects
+# ========================================================================
+
+# Test 41: on_scan with same operator in BinaryOp yields same interned object
+{
+    my $item1 = make_item('BinaryOp', $prec->one());
+    my $item2 = make_item('BinaryOp', $prec->one());
+    my $r1 = $prec->on_scan($item1, 0, 0, '+');
+    my $r2 = $prec->on_scan($item2, 0, 0, '+');
+    is(refaddr($r1), refaddr($r2),
+        'on_scan with same operator returns same interned object');
+}
+
+# Test 42: on_scan zero propagation returns zero singleton
+{
+    my $item = make_item('BinaryOp', $prec->zero());
+    my $result = $prec->on_scan($item, 0, 0, '+');
+    is(refaddr($result), refaddr($prec->zero()),
+        'on_scan with zero value returns zero singleton');
+}
+
+# Test 43: on_scan non-operator context returns interned one
+{
+    my $item1 = make_item('Identifier', $prec->one());
+    my $item2 = make_item('Identifier', $prec->one());
+    my $r1 = $prec->on_scan($item1, 0, 0, 'foo');
+    my $r2 = $prec->on_scan($item2, 0, 0, 'bar');
+    is(refaddr($r1), refaddr($r2),
+        'on_scan in non-operator context returns same interned object for same input value');
+}
+
 done_testing();
