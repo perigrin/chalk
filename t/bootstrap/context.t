@@ -255,4 +255,50 @@ use Chalk::Bootstrap::Context;
     is($ctx->scanned_text(), "", "empty children returns empty string");
 }
 
+# Test 21: scanned_text() handles deep linear chains without stack overflow
+# Regression test: parsing large files creates deep Context trees that caused
+# deep recursion warnings in the original recursive implementation.
+{
+    # Build a linear chain of 1000 single-child nodes — each level recurses once.
+    # Perl warns at depth 100, so this triggers the bug with the recursive version.
+    my $current = Chalk::Bootstrap::Context->new(focus => "leaf");
+    for my $i (1 .. 999) {
+        $current = Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [$current],
+        );
+    }
+
+    # Capture any deep-recursion warnings
+    my @warnings;
+    local $SIG{__WARN__} = sub { push @warnings, @_ };
+
+    my $text = $current->scanned_text();
+
+    is($text, "leaf", "deep linear chain returns correct text");
+    my @deep_warnings = grep { /Deep recursion/ } @warnings;
+    is(scalar @deep_warnings, 0, "no deep recursion warnings for 1000-deep chain");
+}
+
+# Test 22: leaves() handles deep linear chains without stack overflow
+{
+    my $current = Chalk::Bootstrap::Context->new(focus => "deep_leaf");
+    for my $i (1 .. 999) {
+        $current = Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [$current],
+        );
+    }
+
+    my @warnings;
+    local $SIG{__WARN__} = sub { push @warnings, @_ };
+
+    my @leaves = $current->leaves();
+
+    is(scalar @leaves, 1, "deep linear chain returns one leaf");
+    is($leaves[0]->extract(), "deep_leaf", "leaf has correct value");
+    my @deep_warnings = grep { /Deep recursion/ } @warnings;
+    is(scalar @deep_warnings, 0, "no deep recursion warnings for 1000-deep chain");
+}
+
 done_testing();
