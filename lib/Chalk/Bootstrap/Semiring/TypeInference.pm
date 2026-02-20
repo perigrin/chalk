@@ -617,4 +617,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             $rule_name,
         );
     }
+
+    # should_scan: gate for scan operation, called after regex match succeeds
+    # Returns true to proceed with scan, false to skip it.
+    # Phase 1a default: always return true (Phase 1b adds keyword rejection).
+    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+        return true;
+    }
 }

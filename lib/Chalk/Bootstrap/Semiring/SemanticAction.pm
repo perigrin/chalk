@@ -129,4 +129,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # as a deterministic tie-break when no semiring expresses a preference.
         return [$left, $right];
     }
+
+    # should_scan: gate for scan operation, called after regex match succeeds
+    # Returns true to proceed with scan, false to skip it.
+    # Default: always return true (no filtering).
+    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+        return true;
+    }
 }

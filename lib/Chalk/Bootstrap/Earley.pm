@@ -201,8 +201,18 @@ class Chalk::Bootstrap::Earley {
 
         return unless defined $end_pos;
 
-        # Capture matched text, use on_scan to combine existing value with scan
+        # Capture matched text
         my $matched = substr($input, $pos, $end_pos - $pos);
+
+        # Build $is_predicted callback for this position
+        my $is_predicted = sub($rule_name) {
+            return exists $waiting_for{$rule_name}{$pos};
+        };
+
+        # Ask semiring if scan should proceed
+        return unless $semiring->should_scan($item, $alt_idx, $pos, $matched, $is_predicted);
+
+        # Use on_scan to combine existing value with scan
         my $new_value = $semiring->on_scan($item, $alt_idx, $pos, $matched);
 
         # on_scan returns the combined result; check for zero (semiring rejected)

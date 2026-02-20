@@ -163,4 +163,17 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         }
         return \@results;
     }
+
+    # should_scan: gate for scan operation, called after regex match succeeds.
+    # First-false short-circuit: if ANY component returns false, return false.
+    # This allows any semiring to veto a scan before on_scan is called.
+    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+        for my $i (0 .. $semirings->$#*) {
+            my $component_item = { %$item, value => $item->{value}->[$i] };
+            return false unless $semirings->[$i]->should_scan(
+                $component_item, $alt_idx, $pos, $matched_text, $is_predicted
+            );
+        }
+        return true;
+    }
 }
