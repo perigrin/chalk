@@ -72,9 +72,17 @@ class Chalk::Grammar::Perl::KeywordTable {
         'false'     => [qw(Literal)],
         'qw'        => [qw(QuotedWords)],
         '__SUB__'   => [qw(Atom)],
+        # Quoting/regex prefix keywords: these are consumed by terminal regex
+        # patterns inside StringLiteral/RegexLiteral, not by named grammar rules.
+        # Mapping them here lets should_scan reject them as QualifiedIdentifier
+        # when the containing rule is predicted (which is the normal case).
+        's'         => [qw(RegexLiteral)],
+        'm'         => [qw(RegexLiteral)],
+        'qr'        => [qw(RegexLiteral)],
+        'q'         => [qw(StringLiteral)],
+        'qq'        => [qw(StringLiteral)],
         # Operators (and, or, xor, eq, ne, etc.) appear inside BinaryOp patterns,
         # not as rule-starting keywords, so they don't need keyword_rules entries.
-        # Same for quoting operators q, qq, m, s, qr — they match dedicated terminals.
     );
 
     # Returns arrayref of grammar rule names that consume the given keyword,
