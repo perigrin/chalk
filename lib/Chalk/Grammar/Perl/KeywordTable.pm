@@ -35,4 +35,51 @@ class Chalk::Grammar::Perl::KeywordTable {
     sub is_keyword($word) {
         return $KEYWORDS{$word} // false;
     }
+
+    # Maps keywords to the grammar rule names that consume them.
+    # Used by TypeInference.should_scan to check if a keyword-consuming
+    # rule is predicted before rejecting the keyword as QualifiedIdentifier.
+    # Returns arrayref of rule names or undef if keyword has no dedicated rules.
+    my %KEYWORD_RULES = (
+        'class'     => [qw(ClassDeclaration ClassBlock)],
+        'sub'       => [qw(SubroutineDefinition SubroutineDeclaration AnonymousSub)],
+        'method'    => [qw(MethodDefinition MethodDeclaration AnonymousSub)],
+        'use'       => [qw(UseDeclaration)],
+        'no'        => [qw(UseDeclaration)],
+        'package'   => [qw(PackageDeclaration PackageBlock)],
+        'if'        => [qw(ConditionalStatement)],
+        'unless'    => [qw(ConditionalStatement)],
+        'elsif'     => [qw(ElseChain)],
+        'else'      => [qw(ElseChain)],
+        'while'     => [qw(WhileLoop)],
+        'until'     => [qw(WhileLoop)],
+        'for'       => [qw(CStyleForLoop ForeachLoop)],
+        'foreach'   => [qw(ForeachLoop)],
+        'my'        => [qw(VariableDeclaration ForeachLoop)],
+        'our'       => [qw(VariableDeclaration)],
+        'state'     => [qw(VariableDeclaration)],
+        'local'     => [qw(VariableDeclaration)],
+        'field'     => [qw(FieldDeclaration)],
+        'ADJUST'    => [qw(PhaserBlock)],
+        'BEGIN'     => [qw(PhaserBlock)],
+        'CHECK'     => [qw(PhaserBlock)],
+        'UNITCHECK' => [qw(PhaserBlock)],
+        'INIT'      => [qw(PhaserBlock)],
+        'END'       => [qw(PhaserBlock)],
+        'not'       => [qw(UnaryExpression)],
+        'undef'     => [qw(Literal)],
+        'true'      => [qw(Literal)],
+        'false'     => [qw(Literal)],
+        'qw'        => [qw(QuotedWords)],
+        '__SUB__'   => [qw(Atom)],
+        # Operators (and, or, xor, eq, ne, etc.) appear inside BinaryOp patterns,
+        # not as rule-starting keywords, so they don't need keyword_rules entries.
+        # Same for quoting operators q, qq, m, s, qr — they match dedicated terminals.
+    );
+
+    # Returns arrayref of grammar rule names that consume the given keyword,
+    # or undef if the word is not a keyword or has no dedicated rules.
+    sub keyword_rules($word) {
+        return $KEYWORD_RULES{$word};
+    }
 }

@@ -5,6 +5,7 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Context;
+use Chalk::Grammar::Perl::KeywordTable;
 
 class Chalk::Bootstrap::Semiring::TypeInference {
     # Callback: word => true if keyword, false otherwise
@@ -620,8 +621,33 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     # should_scan: gate for scan operation, called after regex match succeeds
     # Returns true to proceed with scan, false to skip it.
-    # Phase 1a default: always return true (Phase 1b adds keyword rejection).
+    # Rejects keywords as QualifiedIdentifier when a keyword-consuming rule is predicted.
     method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+        my $rule_name = $item->{rule}->name();
+
+        # Only filter QualifiedIdentifier scans
+        return true unless $rule_name eq 'QualifiedIdentifier';
+
+        # Qualified identifiers with :: are never keywords (Foo::class is OK)
+        return true if $matched_text =~ /::/;
+
+        # Check if matched text is a keyword
+        return true unless $keyword_check->($matched_text);
+
+        # Check if any keyword-consuming rule is predicted at this position
+        my $keyword_rules = Chalk::Grammar::Perl::KeywordTable::keyword_rules($matched_text);
+        return true unless $keyword_rules;
+
+        for my $kr ($keyword_rules->@*) {
+            if ($is_predicted->($kr)) {
+                # A rule that consumes this keyword is predicted here.
+                # Reject this keyword-as-identifier scan.
+                return false;
+            }
+        }
+
+        # No keyword-consuming rule predicted — admit as identifier
+        # (e.g., fat-arrow: class => "Foo" inside an expression list)
         return true;
     }
 }

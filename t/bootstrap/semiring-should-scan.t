@@ -290,4 +290,157 @@ use Chalk::Grammar::Rule;
     ok(!$tracking_sr->called(), 'FilterComposite short-circuits - second semiring not called');
 }
 
+# ========================================================================
+# Test 9-16: TypeInference keyword rejection via should_scan
+# ========================================================================
+
+# Helper to make an Earley item for testing
+sub make_item($rule_name, $value) {
+    my $rule = Chalk::Grammar::Rule->new(
+        name => $rule_name,
+        expressions => [[]],
+    );
+    return {
+        rule => $rule,
+        dot => 0,
+        origin => 0,
+        value => $value,
+    };
+}
+
+# Test 9: should_scan rejects 'class' when ClassDeclaration is predicted
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) {
+        $rule_name eq 'ClassDeclaration' || $rule_name eq 'ClassBlock'
+    };
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    ok(!$type_sr->should_scan($item, 0, 0, 'class', $is_predicted),
+        'should_scan rejects class when ClassDeclaration is predicted');
+}
+
+# Test 10: should_scan admits 'class' when ClassDeclaration is NOT predicted (fat-arrow context)
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) { false };  # nothing predicted
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    ok($type_sr->should_scan($item, 0, 0, 'class', $is_predicted),
+        'should_scan admits class when ClassDeclaration NOT predicted (fat-arrow)');
+}
+
+# Test 11: should_scan admits non-keyword as QualifiedIdentifier
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) { true };  # everything predicted
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    ok($type_sr->should_scan($item, 0, 0, 'foo', $is_predicted),
+        'should_scan admits non-keyword foo');
+}
+
+# Test 12: should_scan admits keyword for non-QualifiedIdentifier rules
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) { true };
+    my $item = make_item('BinaryOp', $type_sr->one());
+
+    ok($type_sr->should_scan($item, 0, 0, 'class', $is_predicted),
+        'should_scan admits class for BinaryOp rule');
+}
+
+# Test 13: should_scan rejects 'if' when ConditionalStatement is predicted
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) { $rule_name eq 'ConditionalStatement' };
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    ok(!$type_sr->should_scan($item, 0, 0, 'if', $is_predicted),
+        'should_scan rejects if when ConditionalStatement is predicted');
+}
+
+# Test 14: should_scan admits 'if' when ConditionalStatement is NOT predicted
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) { false };
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    ok($type_sr->should_scan($item, 0, 0, 'if', $is_predicted),
+        'should_scan admits if when ConditionalStatement NOT predicted');
+}
+
+# Test 15: should_scan rejects 'sub' when SubroutineDefinition is predicted
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) {
+        $rule_name eq 'SubroutineDefinition' || $rule_name eq 'SubroutineDeclaration'
+    };
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    ok(!$type_sr->should_scan($item, 0, 0, 'sub', $is_predicted),
+        'should_scan rejects sub when SubroutineDefinition is predicted');
+}
+
+# Test 16: should_scan rejects 'my' when VariableDeclaration is predicted
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) {
+        $rule_name eq 'VariableDeclaration' || $rule_name eq 'ForeachLoop'
+    };
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    ok(!$type_sr->should_scan($item, 0, 0, 'my', $is_predicted),
+        'should_scan rejects my when VariableDeclaration is predicted');
+}
+
+# Test 17: should_scan admits namespace-qualified keyword (Foo::class)
+{
+    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+    );
+
+    my $is_predicted = sub($rule_name) {
+        $rule_name eq 'ClassDeclaration' || $rule_name eq 'ClassBlock'
+    };
+    my $item = make_item('QualifiedIdentifier', $type_sr->one());
+
+    # Qualified identifiers with :: should always be admitted
+    ok($type_sr->should_scan($item, 0, 0, 'Foo::class', $is_predicted),
+        'should_scan admits Foo::class even when ClassDeclaration is predicted');
+}
+
 done_testing();
