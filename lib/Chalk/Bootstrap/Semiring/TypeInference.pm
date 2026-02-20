@@ -393,15 +393,19 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             );
         }
 
-        # Catch-all: preserve all tags through intermediate rules
+        # Catch-all: rules without Actions methods propagate all relevant tags.
+        # _tags() returns the focus of the current node if present, so the
+        # catch-all must copy tags upward to keep them visible to _tags()
+        # at parent rule boundaries. This is the flat-merge behavior that
+        # will be replaced by tree-walking in a future phase.
         return _complete_ctx(
             {
                 valid => true,
-                ($tags->{type}                  ? (type       => $tags->{type})         : ()),
-                ($tags->{op_text}               ? (op_text    => $tags->{op_text})      : ()),
-                ($tags->{call_symbol}           ? (call_symbol => $tags->{call_symbol}) : ()),
-                ($tags->{item_types}            ? (item_types  => $tags->{item_types})  : ()),
-                ($tags->{list_arity}            ? (list_arity  => $tags->{list_arity})  : ()),
+                ($tags->{type}       ? (type       => $tags->{type})       : ()),
+                ($tags->{op_text}    ? (op_text    => $tags->{op_text})    : ()),
+                ($tags->{call_symbol} ? (call_symbol => $tags->{call_symbol}) : ()),
+                ($tags->{item_types} ? (item_types  => $tags->{item_types}) : ()),
+                ($tags->{list_arity} ? (list_arity  => $tags->{list_arity}) : ()),
             },
             $value->children(),
             $value->position(),
