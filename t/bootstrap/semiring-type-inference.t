@@ -133,14 +133,6 @@ my sub get_tags($val) {
     my $m4 = $ti->multiply($c, $o);
     is(refaddr($m3), refaddr($m4), 'multiply(ctx,one) returns same object (hash-consed)');
 
-    # keyword_as_identifier propagation
-    my $tagged = make_ctx(keyword_as_identifier => true);
-
-    my $r4 = $ti->multiply($tagged, $o);
-    ok(get_tags($r4)->{keyword_as_identifier}, 'keyword_as_identifier propagates from left');
-
-    my $r5 = $ti->multiply($o, $tagged);
-    ok(get_tags($r5)->{keyword_as_identifier}, 'keyword_as_identifier propagates from right');
 }
 
 # add (returns arrayref of survivors)
@@ -184,245 +176,6 @@ my sub make_item($rule_name, $value) {
         origin => 0,
         value  => $value,
     };
-}
-
-# Scanning a keyword as QualifiedIdentifier (bare) → tag keyword_as_identifier
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'use');
-    ok(!$ti->is_zero($result), 'scanning keyword as QualifiedIdentifier is non-zero at scan time');
-    ok(get_tags($result)->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
-
-    # Hash-consing: same scan inputs → same refaddr
-    my $item2 = make_item('QualifiedIdentifier', $ti->one());
-    my $result2 = $ti->on_scan($item2, 0, 0, 'use');
-    is(refaddr($result), refaddr($result2), 'on_scan with same inputs returns same object (hash-consed)');
-}
-
-# Scanning a non-keyword as QualifiedIdentifier → no tag
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'foo');
-    ok(!$ti->is_zero($result), 'scanning non-keyword as QualifiedIdentifier is non-zero');
-    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning "foo" as QualifiedIdentifier does not tag');
-}
-
-# Scanning a keyword in a non-QualifiedIdentifier rule → no tag
-{
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'and');
-    ok(!$ti->is_zero($result), 'scanning keyword in BinaryOp is non-zero');
-    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning keyword in BinaryOp does not tag');
-}
-
-# Scanning with zero value propagates zero
-{
-    my $item = make_item('QualifiedIdentifier', $ti->zero());
-    my $result = $ti->on_scan($item, 0, 0, 'foo');
-    ok($ti->is_zero($result), 'scanning with zero propagates zero');
-}
-
-# All keywords scanned as QualifiedIdentifier (bare) get tagged
-for my $kw (@keywords) {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, $kw);
-    ok(get_tags($result)->{keyword_as_identifier}, "on_scan tags '$kw' as keyword_as_identifier");
-}
-
-# ========================================================================
-# on_complete: rejection of keyword-as-identifier
-# Rejection happens at Atom/CallExpression level, not QualifiedIdentifier.
-# QualifiedIdentifier propagates the keyword_as_identifier tag upward.
-# ========================================================================
-
-# QualifiedIdentifier complete with keyword_as_identifier → valid (tag propagates)
-{
-    my $tagged = make_ctx(keyword_as_identifier => true);
-    my $item = make_item('QualifiedIdentifier', $tagged);
-    my $result = $ti->on_complete($item, 0, 3);
-    ok(!$ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier propagates (valid)');
-    ok(get_tags($result)->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
-
-    # Hash-consing: same on_complete inputs → same refaddr
-    my $item2 = make_item('QualifiedIdentifier', $tagged);
-    my $result2 = $ti->on_complete($item2, 0, 3);
-    is(refaddr($result), refaddr($result2), 'on_complete with same inputs returns same object (hash-consed)');
-}
-
-# QualifiedIdentifier complete without tag → valid
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_complete($item, 0, 3);
-    ok(!$ti->is_zero($result), 'QualifiedIdentifier completion without tag returns valid');
-}
-
-# Non-QualifiedIdentifier complete with tag → valid (preserves tag for propagation)
-{
-    my $tagged = make_ctx(keyword_as_identifier => true);
-    my $item = make_item('BinaryExpression', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'non-QualifiedIdentifier completion ignores keyword flag');
-    ok(get_tags($result)->{keyword_as_identifier}, 'non-QualifiedIdentifier completion preserves keyword_as_identifier tag');
-}
-
-# Atom complete with keyword_as_identifier → zero (expression-level rejection)
-{
-    my $tagged = make_ctx(keyword_as_identifier => true);
-    my $item = make_item('Atom', $tagged);
-    my $result = $ti->on_complete($item, 0, 3);
-    ok($ti->is_zero($result), 'Atom completion with keyword_as_identifier returns zero');
-}
-
-# CallExpression complete with keyword_as_identifier → zero
-{
-    my $tagged = make_ctx(keyword_as_identifier => true);
-    my $item = make_item('CallExpression', $tagged);
-    my $result = $ti->on_complete($item, 0, 3);
-    ok($ti->is_zero($result), 'CallExpression completion with keyword_as_identifier returns zero');
-}
-
-# Attribute complete with keyword_as_identifier → valid (boundary, clears tag)
-{
-    my $tagged = make_ctx(keyword_as_identifier => true);
-    my $item = make_item('Attribute', $tagged);
-    my $result = $ti->on_complete($item, 0, 3);
-    ok(!$ti->is_zero($result), 'Attribute completion allows keyword identifiers');
-    ok(!get_tags($result)->{keyword_as_identifier}, 'Attribute clears keyword_as_identifier tag');
-}
-
-# ========================================================================
-# Full chain: scan "use" as QualifiedIdentifier → complete → tag propagates → Atom rejects
-# ========================================================================
-
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $scanned = $ti->on_scan($item, 0, 0, 'use');
-    ok(!$ti->is_zero($scanned), 'chain step 1: scan "use" as QualifiedIdentifier is non-zero');
-    ok(get_tags($scanned)->{keyword_as_identifier}, 'chain step 1: tagged');
-
-    my $completed_item = make_item('QualifiedIdentifier', $scanned);
-    my $completed = $ti->on_complete($completed_item, 0, 3);
-    ok(!$ti->is_zero($completed), 'chain step 2: QualifiedIdentifier completion propagates tag');
-    ok(get_tags($completed)->{keyword_as_identifier}, 'chain step 2: tag preserved');
-
-    # Atom would reject it
-    my $atom_item = make_item('Atom', $completed);
-    my $atom_result = $ti->on_complete($atom_item, 0, 3);
-    ok($ti->is_zero($atom_result), 'chain step 3: Atom completion rejects keyword');
-}
-
-# Full chain for non-keyword: scan "foo" as QualifiedIdentifier → complete → valid
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $scanned = $ti->on_scan($item, 0, 0, 'foo');
-    ok(!$ti->is_zero($scanned), 'non-keyword chain step 1: scan is non-zero');
-
-    my $completed_item = make_item('QualifiedIdentifier', $scanned);
-    my $completed = $ti->on_complete($completed_item, 0, 3);
-    ok(!$ti->is_zero($completed), 'non-keyword chain step 2: completion is valid');
-}
-
-# Keyword scanned in proper context (e.g., UseDeclaration's /use\b/) → no rejection
-# because the rule is not QualifiedIdentifier, the terminal matches differently
-{
-    my $item = make_item('UseDeclaration', $ti->one());
-    my $scanned = $ti->on_scan($item, 0, 0, 'use');
-    ok(!$ti->is_zero($scanned), 'keyword in proper context: scan is non-zero');
-    ok(!get_tags($scanned)->{keyword_as_identifier}, 'keyword in proper context: not tagged');
-
-    my $completed_item = make_item('UseDeclaration', $scanned);
-    my $completed = $ti->on_complete($completed_item, 0, 10);
-    ok(!$ti->is_zero($completed), 'keyword in proper context: completion is valid');
-}
-
-# ========================================================================
-# on_scan: QualifiedIdentifier keyword detection
-# ========================================================================
-
-# Scanning a bare keyword as QualifiedIdentifier → tag keyword_as_identifier
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'use');
-    ok(!$ti->is_zero($result), 'scanning bare keyword as QualifiedIdentifier is non-zero at scan time');
-    ok(get_tags($result)->{keyword_as_identifier}, 'scanning "use" as QualifiedIdentifier tags keyword_as_identifier');
-}
-
-# Scanning a qualified name containing a keyword → NOT tagged
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'Foo::class');
-    ok(!$ti->is_zero($result), 'scanning qualified name as QualifiedIdentifier is non-zero');
-    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning "Foo::class" as QualifiedIdentifier does NOT tag');
-}
-
-# Scanning a non-keyword as QualifiedIdentifier → NOT tagged
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'foo');
-    ok(!$ti->is_zero($result), 'scanning non-keyword as QualifiedIdentifier is non-zero');
-    ok(!get_tags($result)->{keyword_as_identifier}, 'scanning "foo" as QualifiedIdentifier does NOT tag');
-}
-
-# All 33 keywords scanned as QualifiedIdentifier (bare) get tagged
-for my $kw (@keywords) {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, $kw);
-    ok(get_tags($result)->{keyword_as_identifier}, "on_scan QualifiedIdentifier tags bare '$kw' as keyword_as_identifier");
-}
-
-# Qualified forms of keywords are NOT tagged
-for my $kw (qw(use class sub method)) {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, "Foo::$kw");
-    ok(!get_tags($result)->{keyword_as_identifier}, "on_scan QualifiedIdentifier does NOT tag 'Foo::$kw'");
-}
-
-# ========================================================================
-# on_complete: QualifiedIdentifier keyword rejection
-# ========================================================================
-
-# QualifiedIdentifier complete with keyword_as_identifier → valid (tag propagates)
-{
-    my $tagged = make_ctx(keyword_as_identifier => true);
-    my $item = make_item('QualifiedIdentifier', $tagged);
-    my $result = $ti->on_complete($item, 0, 3);
-    ok(!$ti->is_zero($result), 'QualifiedIdentifier completion with keyword_as_identifier propagates');
-    ok(get_tags($result)->{keyword_as_identifier}, 'QualifiedIdentifier preserves keyword_as_identifier tag');
-}
-
-# QualifiedIdentifier complete without tag → valid
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_complete($item, 0, 3);
-    ok(!$ti->is_zero($result), 'QualifiedIdentifier completion without tag returns valid');
-}
-
-# ========================================================================
-# Full chain: scan "class" as QualifiedIdentifier → complete → is_zero
-# ========================================================================
-
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $scanned = $ti->on_scan($item, 0, 0, 'class');
-    ok(!$ti->is_zero($scanned), 'QualifiedIdentifier chain: scan "class" is non-zero');
-    ok(get_tags($scanned)->{keyword_as_identifier}, 'QualifiedIdentifier chain: tagged');
-
-    my $completed_item = make_item('QualifiedIdentifier', $scanned);
-    my $completed = $ti->on_complete($completed_item, 0, 5);
-    ok(!$ti->is_zero($completed), 'QualifiedIdentifier chain: completion propagates tag');
-    ok(get_tags($completed)->{keyword_as_identifier}, 'QualifiedIdentifier chain: tag preserved');
-}
-
-# Full chain for qualified name: scan "Foo::class" → complete → valid
-{
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $scanned = $ti->on_scan($item, 0, 0, 'Foo::class');
-    ok(!$ti->is_zero($scanned), 'QualifiedIdentifier qualified chain: scan is non-zero');
-    ok(!get_tags($scanned)->{keyword_as_identifier}, 'QualifiedIdentifier qualified chain: not tagged');
-
-    my $completed_item = make_item('QualifiedIdentifier', $scanned);
-    my $completed = $ti->on_complete($completed_item, 0, 10);
-    ok(!$ti->is_zero($completed), 'QualifiedIdentifier qualified chain: completion is valid');
 }
 
 # ========================================================================
@@ -535,15 +288,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'UnaryExpression completion without tag is valid');
-}
-
-# QualifiedIdentifier completion propagates keyword_as_identifier (rejection at Atom/CallExpression)
-{
-    my $tagged = make_ctx(keyword_as_identifier => true);
-    my $item = make_item('QualifiedIdentifier', $tagged);
-    my $result = $ti->on_complete($item, 0, 3);
-    ok(!$ti->is_zero($result), 'QualifiedIdentifier propagates keyword_as_identifier');
-    ok(get_tags($result)->{keyword_as_identifier}, 'keyword_as_identifier tag preserved through QualifiedIdentifier');
 }
 
 # add: identity collapse and no-preference behavior
@@ -726,7 +470,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 }
 
 # --- on_complete: boundary rules preserve type tags ---
-# Type tags pass through boundary rules (unlike keyword_as_identifier)
 
 {
     my $typed = make_ctx(type => 'Array');
@@ -734,16 +477,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'ParenExpr with type => Array is valid');
     is(get_tags($result)->{type}, 'Array', 'ParenExpr preserves type => Array');
-    ok(!get_tags($result)->{keyword_as_identifier}, 'ParenExpr still clears keyword_as_identifier');
 }
 
 {
-    my $typed = make_ctx(type => 'Scalar', keyword_as_identifier => true);
+    my $typed = make_ctx(type => 'Scalar');
     my $item = make_item('Block', $typed);
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'Block with type => Scalar is valid');
     is(get_tags($result)->{type}, 'Scalar', 'Block preserves type => Scalar');
-    ok(!get_tags($result)->{keyword_as_identifier}, 'Block still clears keyword_as_identifier');
 }
 
 # ========================================================================
@@ -759,9 +500,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     ok(!$ti->is_zero($result), 'scanning "push" as QualifiedIdentifier is non-zero');
     is(get_tags($result)->{call_symbol}, 'push',
         'scanning "push" as QualifiedIdentifier tags call_symbol => push');
-    # push is NOT a keyword so it should NOT be keyword_as_identifier
-    ok(!get_tags($result)->{keyword_as_identifier},
-        'scanning "push" as QualifiedIdentifier does NOT tag keyword_as_identifier');
 }
 
 # Scanning 'unshift' as QualifiedIdentifier → call_symbol = 'unshift'

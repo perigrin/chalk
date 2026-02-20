@@ -208,14 +208,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 _ctx({ valid => true, call_symbol => $matched_text }));
         }
 
-        # In QualifiedIdentifier context, reject bare keywords (no :: separator)
-        if ($rule_name eq 'QualifiedIdentifier'
-            && $matched_text !~ /::/
-            && $keyword_check->($matched_text))
-        {
-            return $self->multiply($existing,
-                _ctx({ valid => true, keyword_as_identifier => true }));
-        }
 
         # Tag variable scans with their type
         if ($rule_name eq 'ScalarVariable') {
@@ -302,13 +294,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Reject keyword-as-identifier at expression-level rules where a
         # keyword should not be treated as a bare identifier.
         # Atom (last alt = bare QualifiedIdentifier) and CallExpression
-        # (QualifiedIdentifier as function name) are the contexts where
-        # keyword misuse occurs. Other rules that contain QualifiedIdentifier
-        # (Attribute, MethodCall, SubroutineDefinition, MethodDefinition)
-        # legitimately use keywords as identifiers (e.g., :isa(...), ->isa(...), sub eq {}).
-        if ($rule_name eq 'Atom' && $tags->{keyword_as_identifier}) {
-            return undef;
-        }
+        # Atom-level keyword rejection is now handled by should_scan, which
+        # prevents keywords from being scanned as QualifiedIdentifier in the first place.
+        # This block is kept as a comment for historical context.
 
         # ExpressionList: track list arity and per-item types
         # alt 0 = single Expression (arity 1)
@@ -345,11 +333,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             );
         }
 
-        # CallExpression: validate builtin signatures, then check keyword rejection
+        # CallExpression: validate builtin signatures
         if ($rule_name eq 'CallExpression') {
-            if ($tags->{keyword_as_identifier}) {
-                return undef;
-            }
             my $return_type;
             # Builtin signature validation via per-position item_types.
             # Extract call_symbol from the tree (QualifiedIdentifier leaf)
@@ -420,7 +405,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
-                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
                 $value->children(),
                 $value->position(),
@@ -440,7 +424,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 {
                     valid => true,
                     ($result_type ? (type => $result_type) : ()),
-                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
                 $value->children(),
                 $value->position(),
@@ -453,7 +436,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return _complete_ctx(
                 {
                     valid => true, type => 'Num',
-                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
                 $value->children(),
                 $value->position(),
@@ -486,7 +468,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return _complete_ctx(
                 {
                     valid => true,
-                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
                 $value->children(),
                 $value->position(),
@@ -499,7 +480,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return _complete_ctx(
                 {
                     valid => true,
-                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
                 $value->children(),
                 $value->position(),
@@ -512,7 +492,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             return _complete_ctx(
                 {
                     valid => true,
-                    ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true) : ()),
                 },
                 $value->children(),
                 $value->position(),
@@ -580,10 +559,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             );
         }
 
-        # Boundary rules: clear keyword_as_identifier, call_symbol, and
-        # op_text tags. The type tag is PRESERVED through
-        # boundaries because a parenthesized array is still array-typed
-        # (e.g., ($ops->@*) is still array).
+        # Boundary rules: clear call_symbol and op_text tags. The type tag is
+        # PRESERVED through boundaries because a parenthesized array is still
+        # array-typed (e.g., ($ops->@*) is still array).
         # Attribute allows keywords as identifiers (e.g., :isa).
         # Subscript is handled separately above (sets type for subscript access).
         if ($rule_name eq 'ParenExpr'
@@ -606,7 +584,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return _complete_ctx(
             {
                 valid => true,
-                ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true)       : ()),
                 ($tags->{type}                  ? (type       => $tags->{type})         : ()),
                 ($tags->{op_text}               ? (op_text    => $tags->{op_text})      : ()),
                 ($tags->{call_symbol}           ? (call_symbol => $tags->{call_symbol}) : ()),

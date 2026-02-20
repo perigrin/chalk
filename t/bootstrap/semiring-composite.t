@@ -740,43 +740,6 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     ok(!$type_sr->is_zero($result->[2]), 'type inference tagged (non-zero) for keyword scan');
 }
 
-# Test 17: 4-ary on_complete rejects keyword as QualifiedIdentifier in Atom
-{
-    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
-        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
-    );
-    my $type_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
-        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
-    );
-    my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
-        semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
-    );
-
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => 'Atom',
-        expressions => [[]],
-    );
-
-    my $tagged_type = Chalk::Bootstrap::Context->new(
-        focus    => { valid => true, keyword_as_identifier => true },
-        children => [],
-    );
-    my $item = {
-        rule   => $rule,
-        dot    => 0,
-        origin => 0,
-        value  => [$bool_sr->one(), $prec_sr->one(), $tagged_type, $sem_sr->one()],
-    };
-
-    my $result = $comp->on_complete($item, 0, 3);
-    is(scalar($result->@*), 4, '4-ary on_complete returns 4-tuple');
-    ok($type_sr->is_zero($result->[2]), 'type inference rejects Atom completion with keyword');
-    ok($comp->is_zero($result), 'whole 4-tuple is zero when type inference rejects');
-}
-
 # ========================================================================
 # FilterComposite: add() zero handling
 # ========================================================================
