@@ -12,7 +12,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Callback: name => signature hash or undef (from TypeLibrary)
     field $builtin_lookup :param;
     # Positions where BinaryOp scanned + or - (for unary disambiguation)
-    field %binary_op_positions;
 
     # Hash-cons cache: maps stringified key to Context object.
     # Ensures identical parse derivations share the same refaddr.
@@ -172,18 +171,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Identity collapse: same refaddr → single survivor (no preference needed)
         return [$left] if refaddr($left) == refaddr($right);
 
-        # Prefer non-ambiguous-unary (binary) over ambiguous-unary
-        my $left_tags  = _tags($left);
-        my $right_tags = _tags($right);
-        my $left_unary  = $left_tags->{ambiguous_unary};
-        my $right_unary = $right_tags->{ambiguous_unary};
-        if ($left_unary && !$right_unary) {
-            return [$right];
-        }
-        if ($right_unary && !$left_unary) {
-            return [$left];
-        }
-
         # No preference: return a merged Context (not equal to either input).
         # FilterComposite sees "result equals neither" and defers to the next semiring.
         return [$self->multiply($left, $right)];
@@ -286,28 +273,18 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
 
         # BinaryOp: capture operator text for later consumption at
-        # BinaryExpression on_complete, and track +/- positions for
-        # cross-item disambiguation.
+        # BinaryExpression on_complete.
         if ($rule_name eq 'BinaryOp') {
-            if ($matched_text =~ /^[+-]$/) {
-                $binary_op_positions{$pos} = true;
-            }
             return $self->multiply($existing,
                 _ctx({ valid => true, op_text => $matched_text }));
         }
 
-        # UnaryExpression operator scan: capture op_text and handle
-        # ambiguous +/- disambiguation.
+        # UnaryExpression operator scan: capture op_text.
         if ($rule_name eq 'UnaryExpression'
             && $matched_text =~ /^(?:[!~\\]|not|[+-])$/)
         {
-            my %tags = (valid => true, op_text => $matched_text);
-            # Tag ambiguous +/- only when BinaryOp also scanned at
-            # the same position — the binary interpretation should win.
-            if ($matched_text =~ /^[+-]$/ && $binary_op_positions{$pos}) {
-                $tags{ambiguous_unary} = true;
-            }
-            return $self->multiply($existing, _ctx(\%tags));
+            return $self->multiply($existing,
+                _ctx({ valid => true, op_text => $matched_text }));
         }
 
         # Non-QualifiedIdentifier or non-keyword: transparent
@@ -422,14 +399,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                 $value->position(),
                 $rule_name,
             );
-        }
-
-        # UnaryExpression completion with ambiguous_unary tag → reject.
-        # The binary interpretation (BinaryExpression) at the same position
-        # is the correct parse; zero-propagation prevents this unary path
-        # from poisoning parent items.
-        if ($rule_name eq 'UnaryExpression' && $tags->{ambiguous_unary}) {
-            return undef;
         }
 
         # BinaryExpression: consume op_text, set result type from TypeLibrary
@@ -610,8 +579,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             );
         }
 
-        # Boundary rules: clear keyword_as_identifier, ambiguous_unary,
-        # call_symbol, and op_text tags. The type tag is PRESERVED through
+        # Boundary rules: clear keyword_as_identifier, call_symbol, and
+        # op_text tags. The type tag is PRESERVED through
         # boundaries because a parenthesized array is still array-typed
         # (e.g., ($ops->@*) is still array).
         # Attribute allows keywords as identifiers (e.g., :isa).
@@ -637,7 +606,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             {
                 valid => true,
                 ($tags->{keyword_as_identifier} ? (keyword_as_identifier => true)       : ()),
-                ($tags->{ambiguous_unary}       ? (ambiguous_unary       => true)       : ()),
                 ($tags->{type}                  ? (type       => $tags->{type})         : ()),
                 ($tags->{op_text}               ? (op_text    => $tags->{op_text})      : ()),
                 ($tags->{call_symbol}           ? (call_symbol => $tags->{call_symbol}) : ()),

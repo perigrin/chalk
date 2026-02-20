@@ -527,183 +527,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 }
 
 # ========================================================================
-# on_scan: ambiguous unary +/- tagging
+# on_scan: unary operators (no ambiguous_unary — Precedence handles disambiguation)
 # ========================================================================
-
-# UnaryExpression scanning '+' with BinaryOp at same position → tagged ambiguous_unary
-{
-    # Simulate BinaryOp scanning at position 0 first (as happens in real parsing)
-    my $bin_item = make_item('BinaryOp', $ti->one());
-    $ti->on_scan($bin_item, 0, 0, '+');
-
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '+');
-    ok(!$ti->is_zero($result), 'scanning "+" as UnaryExpression (with BinaryOp) is non-zero');
-    ok(get_tags($result)->{ambiguous_unary}, 'scanning "+" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
-}
-
-# UnaryExpression scanning '-' with BinaryOp at same position → tagged ambiguous_unary
-{
-    my $bin_item = make_item('BinaryOp', $ti->one());
-    $ti->on_scan($bin_item, 0, 1, '-');
-
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 1, '-');
-    ok(!$ti->is_zero($result), 'scanning "-" as UnaryExpression (with BinaryOp) is non-zero');
-    ok(get_tags($result)->{ambiguous_unary}, 'scanning "-" as UnaryExpression (with BinaryOp) tags ambiguous_unary');
-}
-
-# UnaryExpression scanning '+' WITHOUT BinaryOp at same position → NOT tagged (standalone unary)
-{
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 99, '+');
-    ok(!$ti->is_zero($result), 'scanning "+" as standalone UnaryExpression is non-zero');
-    ok(!get_tags($result)->{ambiguous_unary}, 'standalone "+" UnaryExpression NOT tagged');
-}
-
-# UnaryExpression scanning '-' WITHOUT BinaryOp → NOT tagged (standalone unary)
-{
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 100, '-');
-    ok(!$ti->is_zero($result), 'scanning "-" as standalone UnaryExpression is non-zero');
-    ok(!get_tags($result)->{ambiguous_unary}, 'standalone "-" UnaryExpression NOT tagged');
-}
-
-# UnaryExpression scanning '!' → NOT tagged (unambiguous unary)
-{
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '!');
-    ok(!$ti->is_zero($result), 'scanning "!" as UnaryExpression is non-zero');
-    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "!" as UnaryExpression does NOT tag ambiguous_unary');
-}
-
-# UnaryExpression scanning '~' → NOT tagged
-{
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '~');
-    ok(!$ti->is_zero($result), 'scanning "~" as UnaryExpression is non-zero');
-    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "~" as UnaryExpression does NOT tag ambiguous_unary');
-}
-
-# UnaryExpression scanning 'not' → NOT tagged
-{
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'not');
-    ok(!$ti->is_zero($result), 'scanning "not" as UnaryExpression is non-zero');
-    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "not" as UnaryExpression does NOT tag ambiguous_unary');
-}
-
-# BinaryOp scanning '+' → NOT tagged (not a UnaryExpression)
-{
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '+');
-    ok(!$ti->is_zero($result), 'scanning "+" as BinaryOp is non-zero');
-    ok(!get_tags($result)->{ambiguous_unary}, 'scanning "+" as BinaryOp does NOT tag ambiguous_unary');
-}
-
-# ========================================================================
-# multiply: ambiguous_unary propagation
-# ========================================================================
-
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $o = $ti->one();
-
-    my $r1 = $ti->multiply($tagged, $o);
-    ok(get_tags($r1)->{ambiguous_unary}, 'ambiguous_unary propagates from left in multiply');
-
-    my $r2 = $ti->multiply($o, $tagged);
-    ok(get_tags($r2)->{ambiguous_unary}, 'ambiguous_unary propagates from right in multiply');
-
-    # Both tagged
-    my $r3 = $ti->multiply($tagged, $tagged);
-    ok(get_tags($r3)->{ambiguous_unary}, 'ambiguous_unary propagates when both sides tagged');
-
-    # Neither tagged
-    my $r4 = $ti->multiply($o, $o);
-    ok(!get_tags($r4)->{ambiguous_unary}, 'ambiguous_unary not set when neither side tagged');
-}
-
-# ========================================================================
-# on_complete: ambiguous_unary preservation and boundary clearing
-# ========================================================================
-
-# UnaryExpression completion with ambiguous_unary tag → rejected (binary path wins)
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('UnaryExpression', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok($ti->is_zero($result), 'UnaryExpression completion with ambiguous_unary returns zero');
-}
 
 # UnaryExpression completion WITHOUT tag → valid (standalone unary)
 {
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_complete($item, 0, 10);
     ok(!$ti->is_zero($result), 'UnaryExpression completion without tag is valid');
-}
-
-# Intermediate rule (Expression) preserves ambiguous_unary
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('Expression', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'Expression completion with ambiguous_unary is valid');
-    ok(get_tags($result)->{ambiguous_unary}, 'Expression preserves ambiguous_unary');
-}
-
-# StatementItem preserves ambiguous_unary
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('StatementItem', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'StatementItem completion with ambiguous_unary is valid');
-    ok(get_tags($result)->{ambiguous_unary}, 'StatementItem preserves ambiguous_unary');
-}
-
-# Boundary rule ParenExpr clears ambiguous_unary
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('ParenExpr', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'ParenExpr completion is valid');
-    ok(!get_tags($result)->{ambiguous_unary}, 'ParenExpr clears ambiguous_unary');
-}
-
-# Boundary rule Block clears ambiguous_unary
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('Block', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'Block completion is valid');
-    ok(!get_tags($result)->{ambiguous_unary}, 'Block clears ambiguous_unary');
-}
-
-# Boundary rule ArrayConstructor clears ambiguous_unary
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('ArrayConstructor', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'ArrayConstructor completion is valid');
-    ok(!get_tags($result)->{ambiguous_unary}, 'ArrayConstructor clears ambiguous_unary');
-}
-
-# Boundary rule HashConstructor clears ambiguous_unary
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('HashConstructor', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'HashConstructor completion is valid');
-    ok(!get_tags($result)->{ambiguous_unary}, 'HashConstructor clears ambiguous_unary');
-}
-
-# Boundary rule Signature clears ambiguous_unary
-{
-    my $tagged = make_ctx(ambiguous_unary => true);
-    my $item = make_item('Signature', $tagged);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'Signature completion is valid');
-    ok(!get_tags($result)->{ambiguous_unary}, 'Signature clears ambiguous_unary');
 }
 
 # QualifiedIdentifier completion propagates keyword_as_identifier (rejection at Atom/CallExpression)
@@ -715,52 +546,29 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     ok(get_tags($result)->{keyword_as_identifier}, 'keyword_as_identifier tag preserved through QualifiedIdentifier');
 }
 
-# Non-boundary rule without tag → no ambiguous_unary
+# add: identity collapse and no-preference behavior
 {
-    my $item = make_item('BinaryExpression', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
-    ok(!$ti->is_zero($result), 'BinaryExpression completion is valid');
-    ok(!get_tags($result)->{ambiguous_unary}, 'BinaryExpression without tag has no ambiguous_unary');
-}
+    my $ctx_a = make_ctx();
+    my $ctx_b = make_ctx();
 
-# ========================================================================
-# add: prefer non-ambiguous-unary over ambiguous-unary (returns arrayref)
-# ========================================================================
-
-{
-    my $unary_tagged = make_ctx(ambiguous_unary => true);
-    my $binary_clean = make_ctx();
-
-    # Left tagged, right clean → returns [right] (binary wins)
-    my $r1 = $ti->add($unary_tagged, $binary_clean);
-    ok(ref($r1) eq 'ARRAY', 'add: left=unary, right=binary → returns arrayref');
-    ok(!get_tags($r1->[0])->{ambiguous_unary}, 'add: left=unary, right=binary → binary survives (no tag)');
-
-    # Left clean, right tagged → returns [left] (binary wins)
-    my $r2 = $ti->add($binary_clean, $unary_tagged);
-    ok(ref($r2) eq 'ARRAY', 'add: left=binary, right=unary → returns arrayref');
-    ok(!get_tags($r2->[0])->{ambiguous_unary}, 'add: left=binary, right=unary → binary survives (no tag)');
-
-    # Both tagged → returns [merged] (no preference, merged != either input)
-    # (Both ambiguous_unary: no disambiguation possible, defer to next semiring)
-    my $unary_tagged2 = make_ctx(ambiguous_unary => true);
-    my $r3 = $ti->add($unary_tagged, $unary_tagged2);
-    ok(ref($r3) eq 'ARRAY', 'add: both tagged → returns arrayref');
-    ok(refaddr($r3->[0]) != refaddr($unary_tagged),  'add: both tagged → merged != left');
-    ok(refaddr($r3->[0]) != refaddr($unary_tagged2), 'add: both tagged → merged != right');
+    # Both non-zero different objects → returns [merged] (no preference)
+    my $r1 = $ti->add($ctx_a, $ctx_b);
+    ok(ref($r1) eq 'ARRAY', 'add: both valid → returns arrayref');
+    ok(refaddr($r1->[0]) != refaddr($ctx_a),  'add: both valid → merged != left');
+    ok(refaddr($r1->[0]) != refaddr($ctx_b), 'add: both valid → merged != right');
 
     # Identity collapse: same object → [$left]
-    my $r3b = $ti->add($unary_tagged, $unary_tagged);
-    ok(ref($r3b) eq 'ARRAY', 'add: same object → returns arrayref');
-    is(scalar($r3b->@*), 1, 'add: same object → single survivor');
-    is(refaddr($r3b->[0]), refaddr($unary_tagged), 'add: same object → left survives');
+    my $r2 = $ti->add($ctx_a, $ctx_a);
+    ok(ref($r2) eq 'ARRAY', 'add: same object → returns arrayref');
+    is(scalar($r2->@*), 1, 'add: same object → single survivor');
+    is(refaddr($r2->[0]), refaddr($ctx_a), 'add: same object → left survives');
 
     # Both clean (different objects) → returns [merged] (no preference)
-    my $binary_clean2 = make_ctx();
-    my $r4 = $ti->add($binary_clean, $binary_clean2);
-    ok(ref($r4) eq 'ARRAY', 'add: both clean → returns arrayref');
-    ok(refaddr($r4->[0]) != refaddr($binary_clean),  'add: both clean → merged != left');
-    ok(refaddr($r4->[0]) != refaddr($binary_clean2), 'add: both clean → merged != right');
+    my $ctx_c = make_ctx();
+    my $r3 = $ti->add($ctx_a, $ctx_c);
+    ok(ref($r3) eq 'ARRAY', 'add: both clean → returns arrayref');
+    ok(refaddr($r3->[0]) != refaddr($ctx_a),  'add: both clean → merged != left');
+    ok(refaddr($r3->[0]) != refaddr($ctx_c), 'add: both clean → merged != right');
 }
 
 # ========================================================================
@@ -1680,14 +1488,12 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'UnaryExpression "\\" tags op_text => \\');
 }
 
-# Standalone unary - (no binary at same pos) still gets op_text but no ambiguous_unary
+# Standalone unary - gets op_text
 {
     my $item = make_item('UnaryExpression', $ti->one());
     my $result = $ti->on_scan($item, 0, 204, '-');
     is(get_tags($result)->{op_text}, '-',
         'standalone UnaryExpression "-" tags op_text => -');
-    ok(!get_tags($result)->{ambiguous_unary},
-        'standalone UnaryExpression "-" NOT tagged ambiguous_unary');
 }
 
 # op_text propagation through multiply
@@ -1874,14 +1680,6 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $result = $ti->on_complete($item, 0, 10);
     is(get_tags($result)->{type}, 'Ref',
         'UnaryExpression "\\" tags type => Ref');
-}
-
-# UnaryExpression with ambiguous_unary still rejected
-{
-    my $val = make_ctx(op_text => '+', ambiguous_unary => true);
-    my $item = make_item('UnaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
-    ok($ti->is_zero($result), 'UnaryExpression with ambiguous_unary still rejected');
 }
 
 # PostfixIncDec → type => 'Num'

@@ -893,15 +893,13 @@ SKIP: {
             'yada range (...) has range op');
     }
 
-    # --- Previously ambiguous operators (resolved by TypeInference) ---
-    # Binary +: TypeInference rejects ambiguous unary + when BinaryOp scanned at same position
+    # --- Binary +/- (Precedence semiring disambiguates unary vs binary) ---
     {
         my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a + $b;');
         ok(defined $tree && (grep { $_->name() eq 'add' } $tree->ops()->@*),
             'binary addition has add op');
     }
 
-    # Binary -: TypeInference rejects ambiguous unary - when BinaryOp scanned at same position
     {
         my $tree = parse_concise('my $a = 1; my $b = 2; my $c = $a - $b;');
         ok(defined $tree && (grep { $_->name() eq 'subtract' } $tree->ops()->@*),
