@@ -45,24 +45,24 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Wrapper rules: passthrough child's type
 
-    method Atom($ctx, $tags) {
+    method Atom($ctx, $tags, $alt_idx = 0) {
         my $child_type = $tags->{type};
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
-    method Expression($ctx, $tags) {
+    method Expression($ctx, $tags, $alt_idx = 0) {
         my $child_type = $tags->{type};
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
-    method PostfixExpression($ctx, $tags) {
+    method PostfixExpression($ctx, $tags, $alt_idx = 0) {
         my $child_type = $tags->{type};
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
     # Rich rules: compute type from operator/signature
 
-    method BinaryExpression($ctx, $tags) {
+    method BinaryExpression($ctx, $tags, $alt_idx = 0) {
         my $op = $tags->{op_text};
         my $result_type;
         if (defined $op) {
@@ -78,7 +78,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         return { valid => true, ($result_type ? (type => $result_type) : ()) };
     }
 
-    method UnaryExpression($ctx, $tags) {
+    method UnaryExpression($ctx, $tags, $alt_idx = 0) {
         my $op = $tags->{op_text};
         my $result_type;
         if (defined $op) {
@@ -90,7 +90,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # ExpressionList: preserve arity and item_types from tags
 
-    method ExpressionList($ctx, $tags) {
+    method ExpressionList($ctx, $tags, $alt_idx = 0) {
         my $arity = $tags->{list_arity};
         my $item_types = $tags->{item_types};
         return {
@@ -140,28 +140,28 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Boundary rules: preserve type, clear call_symbol/op_text
 
-    method ParenExpr($ctx, $tags) {
+    method ParenExpr($ctx, $tags, $alt_idx = 0) {
         return {
             valid => true,
             ($tags->{type} ? (type => $tags->{type}) : ()),
         };
     }
 
-    method Block($ctx, $tags) {
+    method Block($ctx, $tags, $alt_idx = 0) {
         return {
             valid => true,
             ($tags->{type} ? (type => $tags->{type}) : ()),
         };
     }
 
-    method Signature($ctx, $tags) {
+    method Signature($ctx, $tags, $alt_idx = 0) {
         return {
             valid => true,
             ($tags->{type} ? (type => $tags->{type}) : ()),
         };
     }
 
-    method Attribute($ctx, $tags) {
+    method Attribute($ctx, $tags, $alt_idx = 0) {
         return {
             valid => true,
             ($tags->{type} ? (type => $tags->{type}) : ()),
@@ -199,37 +199,37 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Fixed return types
 
-    method PostfixIncDec($ctx, $tags) {
+    method PostfixIncDec($ctx, $tags, $alt_idx = 0) {
         return { valid => true, type => 'Num' };
     }
 
-    method AnonymousSub($ctx, $tags) {
+    method AnonymousSub($ctx, $tags, $alt_idx = 0) {
         return { valid => true, type => 'Code' };
     }
 
-    method QwLiteral($ctx, $tags) {
+    method QwLiteral($ctx, $tags, $alt_idx = 0) {
         return { valid => true, type => 'List' };
     }
 
-    method ArrayConstructor($ctx, $tags) {
+    method ArrayConstructor($ctx, $tags, $alt_idx = 0) {
         return { valid => true, type => 'ArrayRef' };
     }
 
-    method HashConstructor($ctx, $tags) {
+    method HashConstructor($ctx, $tags, $alt_idx = 0) {
         return { valid => true, type => 'HashRef' };
     }
 
     # Unknown types (no static type information)
 
-    method TernaryExpression($ctx, $tags) {
+    method TernaryExpression($ctx, $tags, $alt_idx = 0) {
         return { valid => true };
     }
 
-    method AssignmentExpression($ctx, $tags) {
+    method AssignmentExpression($ctx, $tags, $alt_idx = 0) {
         return { valid => true };
     }
 
-    method MethodCall($ctx, $tags) {
+    method MethodCall($ctx, $tags, $alt_idx = 0) {
         return { valid => true };
     }
 }

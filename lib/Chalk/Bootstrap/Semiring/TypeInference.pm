@@ -6,13 +6,16 @@ use experimental 'class';
 
 use Chalk::Bootstrap::Context;
 use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Bootstrap::Semiring::TypeInferenceActions;
 
 class Chalk::Bootstrap::Semiring::TypeInference {
     # Callback: word => true if keyword, false otherwise
     field $keyword_check :param;
     # Callback: name => signature hash or undef (from TypeLibrary)
     field $builtin_lookup :param;
-    # Positions where BinaryOp scanned + or - (for unary disambiguation)
+
+    # Actions dispatch: methods named after grammar rules for type computation
+    my $actions = Chalk::Bootstrap::Semiring::TypeInferenceActions->new();
 
     # Hash-cons cache: maps stringified key to Context object.
     # Ensures identical parse derivations share the same refaddr.
@@ -291,14 +294,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $tags = _tags($value);
         my $rule_name = $item->{rule}->name();
 
-        # Reject keyword-as-identifier at expression-level rules where a
-        # keyword should not be treated as a bare identifier.
-        # Atom (last alt = bare QualifiedIdentifier) and CallExpression
-        # Atom-level keyword rejection is now handled by should_scan, which
-        # prevents keywords from being scanned as QualifiedIdentifier in the first place.
-        # This block is kept as a comment for historical context.
-
-        # ExpressionList: track list arity and per-item types
+        # ExpressionList: complex tree-walk logic for arity/item_types tracking.
+        # Kept here (not in Actions) because it requires $_get_prev_item_types
+        # and $_get_rightmost_type tree walks on the Context value.
         # alt 0 = single Expression (arity 1)
         # alt 1 = ExpressionList , Expression (arity = child + 1)
         # alt 2 = ExpressionList => Expression (arity = child + 1)
@@ -333,12 +331,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             );
         }
 
-        # CallExpression: validate builtin signatures
+        # CallExpression: complex tree-walk logic for builtin signature validation.
+        # Kept here because it uses $_get_call_symbol tree walk and $builtin_lookup.
         if ($rule_name eq 'CallExpression') {
             my $return_type;
-            # Builtin signature validation via per-position item_types.
-            # Extract call_symbol from the tree (QualifiedIdentifier leaf)
-            # instead of relying on propagated tags.
             my $call_sym = $_get_call_symbol->($value);
             if ($call_sym) {
                 my $builtin_name = $call_sym;
@@ -355,27 +351,21 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                         for my $i (0 .. $#$item_types) {
                             my $actual = $item_types->[$i];
                             my $sig_idx = $i + $sig_offset;
-                            # Variadic: last arg_type applies to remaining positions
                             my $expected = $arg_types->[$sig_idx] // $arg_types->[-1];
                             if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
                                 return undef;
                             }
                         }
                     }
-                    # Validate min arity.
-                    # For block-first alts (2/3), the Block is an implicit first arg
-                    # not counted in ExpressionList's list_arity.
                     my $arity = $tags->{list_arity} // 1;
                     $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
                     if ($arity < $sig->{min_arity}) {
                         return undef;
                     }
-                    # Set return type from signature
                     $return_type = $sig->{return_type};
                     $return_type = undef if defined $return_type && $return_type eq 'Any';
                 }
             }
-            # Clear builtin tag, set return type
             return _complete_ctx(
                 {
                     valid => true,
@@ -387,200 +377,23 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             );
         }
 
-        # BinaryExpression: consume op_text, set result type from TypeLibrary
-        if ($rule_name eq 'BinaryExpression') {
-            my $op = $tags->{op_text};
-            my $result_type;
-            if (defined $op) {
-                my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op($op);
-                if ($sig && $sig->{result} ne 'Any') {
-                    $result_type = $sig->{result};
-                }
-                # result 'Any' → leave type undef (unknown)
-            } else {
-                # No op_text: preserve child type (intermediate completion)
-                $result_type = $tags->{type};
-            }
+        # Dispatch to TypeInferenceActions for rules with registered methods.
+        # Actions receive ($ctx, $tags) and optionally $alt_idx, returning a
+        # focus hash or undef to reject. This replaces the per-rule if/elsif
+        # blocks that were previously inline here.
+        my $method = $actions->can($rule_name);
+        if ($method) {
+            my $focus = $actions->$method($value, $tags, $alt_idx);
+            return undef unless defined $focus;
             return _complete_ctx(
-                {
-                    valid => true,
-                    ($result_type ? (type => $result_type) : ()),
-                },
+                $focus,
                 $value->children(),
                 $value->position(),
                 $rule_name,
             );
         }
 
-        # UnaryExpression: consume op_text, set result type from TypeLibrary
-        if ($rule_name eq 'UnaryExpression') {
-            my $op = $tags->{op_text};
-            my $result_type;
-            if (defined $op) {
-                my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op($op);
-                $result_type = $sig->{result} if $sig;
-            }
-            return _complete_ctx(
-                {
-                    valid => true,
-                    ($result_type ? (type => $result_type) : ()),
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # PostfixIncDec (++/--): result is Num
-        if ($rule_name eq 'PostfixIncDec') {
-            return _complete_ctx(
-                {
-                    valid => true, type => 'Num',
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # Subscript: array/hash subscript → Scalar, deref-call → undef
-        # Also acts as boundary rule (clears keyword/unary/call tags)
-        if ($rule_name eq 'Subscript') {
-            my $sub_type;
-            if ($alt_idx <= 1) {
-                # alt 0 = [...] (array), alt 1 = {...} (hash) → element is Scalar
-                $sub_type = 'Scalar';
-            }
-            # alt 2+ = ->() deref-call: type unknown (undef)
-            return _complete_ctx(
-                {
-                    valid => true,
-                    ($sub_type ? (type => $sub_type) : ()),
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # TernaryExpression: type unknown (could be either branch)
-        if ($rule_name eq 'TernaryExpression') {
-            return _complete_ctx(
-                {
-                    valid => true,
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # AssignmentExpression: type unknown
-        if ($rule_name eq 'AssignmentExpression') {
-            return _complete_ctx(
-                {
-                    valid => true,
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # MethodCall: type unknown (return type of method not knowable at parse time)
-        if ($rule_name eq 'MethodCall') {
-            return _complete_ctx(
-                {
-                    valid => true,
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # PostfixDeref: tag with the type of the dereference result.
-        # alt 0 = ->@* (array), alt 1 = ->%* (hash),
-        # alt 2 = ->$* (scalar), alt 3 = ->$#* (scalar count)
-        if ($rule_name eq 'PostfixDeref') {
-            my $type_tag;
-            if ($alt_idx == 0) {
-                $type_tag = { valid => true, type => 'Array' };
-            } elsif ($alt_idx == 1) {
-                $type_tag = { valid => true, type => 'Hash' };
-            } else {
-                $type_tag = { valid => true, type => 'Scalar' };
-            }
-            return _complete_ctx(
-                $type_tag,
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # AnonymousSub → type => 'Code'
-        if ($rule_name eq 'AnonymousSub') {
-            return _complete_ctx(
-                { valid => true, type => 'Code' },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # QwLiteral → type => 'List'
-        if ($rule_name eq 'QwLiteral') {
-            return _complete_ctx(
-                { valid => true, type => 'List' },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # ArrayConstructor: type => 'ArrayRef', also acts as boundary rule
-        if ($rule_name eq 'ArrayConstructor') {
-            return _complete_ctx(
-                { valid => true, type => 'ArrayRef' },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # HashConstructor: type => 'HashRef', also acts as boundary rule
-        if ($rule_name eq 'HashConstructor') {
-            return _complete_ctx(
-                { valid => true, type => 'HashRef' },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # Boundary rules: clear call_symbol and op_text tags. The type tag is
-        # PRESERVED through boundaries because a parenthesized array is still
-        # array-typed (e.g., ($ops->@*) is still array).
-        # Attribute allows keywords as identifiers (e.g., :isa).
-        # Subscript is handled separately above (sets type for subscript access).
-        if ($rule_name eq 'ParenExpr'
-            || $rule_name eq 'Block'
-            || $rule_name eq 'Signature'
-            || $rule_name eq 'Attribute')
-        {
-            return _complete_ctx(
-                {
-                    valid => true,
-                    ($tags->{type} ? (type => $tags->{type}) : ()),
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
-
-        # Preserve all tags through intermediate rules
+        # Catch-all: preserve all tags through intermediate rules
         return _complete_ctx(
             {
                 valid => true,
