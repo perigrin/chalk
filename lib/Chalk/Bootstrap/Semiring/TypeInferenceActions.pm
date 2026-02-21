@@ -45,18 +45,18 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Wrapper rules: passthrough child's type
 
-    method Atom($ctx, $tags, $alt_idx = 0) {
-        my $child_type = $tags->{type};
+    method Atom($ctx) {
+        my $child_type = $_get_rightmost_type->($ctx);
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
-    method Expression($ctx, $tags, $alt_idx = 0) {
-        my $child_type = $tags->{type};
+    method Expression($ctx) {
+        my $child_type = $_get_rightmost_type->($ctx);
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
-    method PostfixExpression($ctx, $tags, $alt_idx = 0) {
-        my $child_type = $tags->{type};
+    method PostfixExpression($ctx) {
+        my $child_type = $_get_rightmost_type->($ctx);
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
