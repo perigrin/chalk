@@ -82,42 +82,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return ($_ctx_cache{$key} //= $extended);
     }
 
-    # Walk right spine of multiply tree to find the rightmost type tag.
-    # In a multiply tree (left * right), the rightmost child typically
-    # holds the most recent expression's type.
-    # Uses coderef for recursive calls within class scope.
-    my $_get_rightmost_type;
-    $_get_rightmost_type = sub($ctx) {
-        return undef unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus && exists $focus->{type}) {
-            return $focus->{type};
-        }
-        # Walk children right-to-left
-        my @children = $ctx->children()->@*;
-        for my $child (reverse @children) {
-            my $t = $_get_rightmost_type->($child);
-            return $t if defined $t;
-        }
-        return undef;
-    };
-
-    # Search the multiply tree for a child with item_types in focus.
-    # Returns the item_types arrayref or undef.
-    my $_get_prev_item_types;
-    $_get_prev_item_types = sub($ctx) {
-        return undef unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus && exists $focus->{item_types}) {
-            return $focus->{item_types};
-        }
-        for my $child ($ctx->children()->@*) {
-            my $found = $_get_prev_item_types->($child);
-            return $found if defined $found;
-        }
-        return undef;
-    };
-
     # Search the multiply tree leaves for one with call_symbol in its focus.
     # Returns the call_symbol string or undef. Used by CallExpression
     # on_complete to extract the function name directly from the tree
@@ -295,7 +259,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $value = $item->{value};
         return undef if !defined $value;
 
-        my $tags = _tags($value);
         my $rule_name = $item->{rule}->name();
 
         # CallExpression: builtin signature validation.
@@ -309,6 +272,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             if ($call_sym) {
                 my $sig = $builtin_lookup->($call_sym);
                 if ($sig) {
+                    my $tags = _tags($value);
                     my $item_types = $tags->{item_types};
                     if ($item_types) {
                         my $arg_types = $sig->{arg_types};

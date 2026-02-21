@@ -1,5 +1,5 @@
 # ABOUTME: Type inference action methods dispatched by TypeInference on_complete.
-# ABOUTME: Each method receives a Context and tags hash, returns focus tags or undef to reject.
+# ABOUTME: Each method receives a Context via extend(), returns a focus hash for the completed rule.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -178,42 +178,11 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         };
     }
 
-    # CallExpression: validate builtin signatures, determine return type
-
-    method CallExpression($ctx, $tags, $alt_idx = 0) {
-        my $return_type = 'Unknown';
-        my $call_sym = $_get_call_symbol->($ctx);
-        if ($call_sym) {
-            my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin($call_sym);
-            if ($sig) {
-                # Validate per-position argument types if available
-                my $item_types = $tags->{item_types};
-                if ($item_types) {
-                    my $arg_types = $sig->{arg_types};
-                    my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
-                    for my $i (0 .. $#$item_types) {
-                        my $actual = $item_types->[$i];
-                        my $sig_idx = $i + $sig_offset;
-                        # Variadic: last arg_type applies to remaining positions
-                        my $expected = $arg_types->[$sig_idx] // $arg_types->[-1];
-                        if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
-                            return undef;  # Reject: type mismatch
-                        }
-                    }
-                }
-                # Validate min arity
-                my $arity = $tags->{list_arity} // 1;
-                $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
-                if ($arity < $sig->{min_arity}) {
-                    return undef;  # Reject: too few arguments
-                }
-                # Set return type from signature
-                $return_type = $sig->{return_type};
-                $return_type = undef if defined $return_type && $return_type eq 'Any';
-            }
-        }
-        return { valid => true, ($return_type ? (type => $return_type) : ()) };
-    }
+    # CallExpression is handled inline in TypeInference.pm (not dispatched here)
+    # because tree-walkers cannot find call_symbol through _extend_ctx focused
+    # wrapper nodes (Atom/Expression/PostfixExpression create focused nodes
+    # without call_symbol). The inline handler uses _tags() flat-merge for
+    # item_types/list_arity until _tags() is fully removed.
 
     # Boundary rules: preserve type, clear call_symbol/op_text
 
