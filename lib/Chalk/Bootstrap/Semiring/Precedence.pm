@@ -41,6 +41,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return $_cache{$key};
     }
 
+    # Clear hash-cons cache between parses to prevent unbounded growth.
+    method reset_cache() {
+        %_cache = ();
+    }
+
     # Expression-type precedence levels (relative to binary operators).
     # PostfixExpression is highest, AssignmentExpression is lowest.
     # These are conceptual levels above/below the binary operator table.

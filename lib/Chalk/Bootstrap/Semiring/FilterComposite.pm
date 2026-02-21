@@ -7,6 +7,14 @@ use experimental 'class';
 class Chalk::Bootstrap::Semiring::FilterComposite {
     field $semirings :param :reader;  # arrayref of semirings
 
+    # Clear hash-cons caches in all component semirings that support it.
+    # Called between file parses to prevent unbounded memory growth.
+    method reset_cache() {
+        for my $sr ($semirings->@*) {
+            $sr->reset_cache() if $sr->can('reset_cache');
+        }
+    }
+
     method zero() {
         return [ map { $_->zero() } $semirings->@* ];
     }

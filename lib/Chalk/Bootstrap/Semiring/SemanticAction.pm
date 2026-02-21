@@ -61,6 +61,14 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return _one_ctx();
     }
 
+    # Clear hash-cons cache between parses to prevent unbounded growth.
+    # Cache entries from one file are not useful for subsequent files
+    # because they reference different Context refaddrs.
+    method reset_cache() {
+        %_ctx_cache = ();
+        $_one_singleton = undef;
+    }
+
     # Check if value is zero (undef)
     method is_zero($value) {
         return !defined $value;

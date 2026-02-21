@@ -1776,4 +1776,97 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     ok($ti->is_zero($result), 'per-position: grep(Block, Scalar) alt 2 → rejected (Scalar is not List)');
 }
 
+# ========================================================================
+# Phase 10: _extend_ctx hash-consing and tree-walker boundary tests
+# ========================================================================
+
+# on_complete hash-consing: same rule + same value → same refaddr
+{
+    my $val = make_ctx(type => 'Str');
+    my $item1 = make_item('Atom', $val);
+    my $item2 = make_item('Atom', $val);
+    my $r1 = $ti->on_complete($item1, 0, 5);
+    my $r2 = $ti->on_complete($item2, 0, 5);
+    ok(!$ti->is_zero($r1), 'on_complete Atom with Str is valid');
+    ok(!$ti->is_zero($r2), 'on_complete Atom with Str (second call) is valid');
+    is(refaddr($r1), refaddr($r2),
+        '_extend_ctx hash-consing: same rule + same value → same refaddr');
+}
+
+# Different alt_idx for PostfixDeref → different refaddrs
+{
+    my $val = make_ctx();
+    my $item = make_item('PostfixDeref', $val);
+    my $r_array = $ti->on_complete($item, 0, 5);  # alt 0 = ->@* → Array
+    my $r_hash  = $ti->on_complete($item, 1, 5);  # alt 1 = ->%* → Hash
+    my $r_scalar = $ti->on_complete($item, 2, 5); # alt 2 = ->$* → Scalar
+    ok(!$ti->is_zero($r_array), 'PostfixDeref alt 0 is valid');
+    ok(!$ti->is_zero($r_hash), 'PostfixDeref alt 1 is valid');
+    ok(!$ti->is_zero($r_scalar), 'PostfixDeref alt 2 is valid');
+    is(get_tags($r_array)->{type}, 'Array', 'PostfixDeref alt 0 → Array');
+    is(get_tags($r_hash)->{type}, 'Hash', 'PostfixDeref alt 1 → Hash');
+    is(get_tags($r_scalar)->{type}, 'Scalar', 'PostfixDeref alt 2 → Scalar');
+    isnt(refaddr($r_array), refaddr($r_hash),
+        'Different alt_idx → different refaddrs (Array vs Hash)');
+    isnt(refaddr($r_array), refaddr($r_scalar),
+        'Different alt_idx → different refaddrs (Array vs Scalar)');
+}
+
+# Different alt_idx for Subscript → different refaddrs
+{
+    my $val = make_ctx();
+    my $item = make_item('Subscript', $val);
+    my $r_arr = $ti->on_complete($item, 0, 5);  # alt 0 = [...] → Scalar
+    my $r_call = $ti->on_complete($item, 2, 5); # alt 2 = ->() → no type
+    ok(!$ti->is_zero($r_arr), 'Subscript alt 0 is valid');
+    ok(!$ti->is_zero($r_call), 'Subscript alt 2 is valid');
+    is(get_tags($r_arr)->{type}, 'Scalar', 'Subscript alt 0 → Scalar');
+    ok(!get_tags($r_call)->{type}, 'Subscript alt 2 → no type');
+    isnt(refaddr($r_arr), refaddr($r_call),
+        'Different alt_idx for Subscript → different refaddrs');
+}
+
+# Tree-walker boundary semantics: focused node stops $_get_call_symbol walk.
+# If call_symbol is inside a child that has been wrapped by a boundary rule
+# (e.g., ParenExpr), it should NOT be visible through the boundary.
+{
+    # Inner context has call_symbol (simulates QualifiedIdentifier scan)
+    my $inner = make_ctx(call_symbol => 'push');
+    # Wrap through ParenExpr on_complete (boundary rule clears call_symbol)
+    my $paren_item = make_item('ParenExpr', $inner);
+    my $boundary_result = $ti->on_complete($paren_item, 0, 5);
+    ok(!$ti->is_zero($boundary_result), 'ParenExpr wrapping call_symbol is valid');
+    # The focused result from ParenExpr should NOT have call_symbol
+    my $focus = $boundary_result->extract();
+    ok(!$focus->{call_symbol},
+        'Boundary rule (ParenExpr) clears call_symbol from focused result');
+
+    # Now use this as a CallExpression value — should NOT find call_symbol
+    my $call_item = make_item('CallExpression', $boundary_result);
+    my $call_result = $ti->on_complete($call_item, 0, 5);
+    ok(!$ti->is_zero($call_result), 'CallExpression with boundary-wrapped value is valid');
+    # No call_symbol means no builtin validation → just returns valid
+    my $call_focus = $call_result->extract();
+    ok(!$call_focus->{type},
+        'CallExpression without call_symbol returns no type (no builtin matched)');
+}
+
+# reset_cache() clears hash-cons and one() singleton
+{
+    my $o1 = $ti->one();
+    my $val = make_ctx(type => 'Int');
+    my $item = make_item('Expression', $val);
+    my $r1 = $ti->on_complete($item, 0, 5);
+
+    $ti->reset_cache();
+
+    my $o2 = $ti->one();
+    isnt(refaddr($o1), refaddr($o2),
+        'reset_cache() clears one() singleton (different refaddr after reset)');
+
+    my $r2 = $ti->on_complete($item, 0, 5);
+    isnt(refaddr($r1), refaddr($r2),
+        'reset_cache() clears _extend_ctx cache (different refaddr after reset)');
+}
+
 done_testing;

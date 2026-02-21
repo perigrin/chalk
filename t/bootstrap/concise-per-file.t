@@ -102,6 +102,11 @@ SKIP: {
 
     # Parse a .pm file and return our ConciseTree
     my sub our_tree_for_file($file) {
+        # Clear semiring caches between files to prevent unbounded memory growth.
+        # Cache entries from one file reference different Context refaddrs and
+        # are not useful for subsequent files.
+        $parser->semiring->reset_cache();
+
         my $source = do {
             open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
             local $/;
