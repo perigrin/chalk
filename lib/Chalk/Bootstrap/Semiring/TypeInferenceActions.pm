@@ -104,11 +104,72 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         return { valid => true, ($result_type ? (type => $result_type) : ()) };
     }
 
-    # ExpressionList: preserve arity and item_types from tags
+    # Helper: Get list_arity from Context tree
+    my $_get_list_arity;
+    $_get_list_arity = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus) {
+            return $focus->{list_arity};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_list_arity->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
 
-    method ExpressionList($ctx, $tags, $alt_idx = 0) {
-        my $arity = $tags->{list_arity};
-        my $item_types = $tags->{item_types};
+    # Helper: Get item_types from Context tree
+    my $_get_item_types;
+    $_get_item_types = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus) {
+            return $focus->{item_types};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_item_types->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
+    # Helper: Search for item_types in previous ExpressionList children
+    my $_get_prev_item_types;
+    $_get_prev_item_types = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus && exists $focus->{item_types}) {
+            return $focus->{item_types};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_prev_item_types->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
+    # ExpressionList: arity/item_types tracking
+    # alt 0 = single Expression (arity 1)
+    # alt 1 = ExpressionList , Expression (arity = child + 1)
+    # alt 2 = ExpressionList => Expression (arity = child + 1)
+    # alt 3 = trailing comma (arity preserved)
+
+    method ExpressionList($ctx, $alt_idx = 0) {
+        my ($arity, $item_types);
+        if ($alt_idx == 0) {
+            $arity = 1;
+            my $type = $_get_rightmost_type->($ctx);
+            $item_types = [$type];
+        } elsif ($alt_idx == 1 || $alt_idx == 2) {
+            $arity = ($_get_list_arity->($ctx) // 1) + 1;
+            my $prev = $_get_prev_item_types->($ctx) // [];
+            my $new_type = $_get_rightmost_type->($ctx);
+            $item_types = [$prev->@*, $new_type];
+        } else {
+            $arity = $_get_list_arity->($ctx);
+            $item_types = $_get_item_types->($ctx) // $_get_prev_item_types->($ctx);
+        }
         return {
             valid => true,
             ($arity ? (list_arity => $arity) : ()),

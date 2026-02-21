@@ -30,11 +30,12 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         BinaryExpression UnaryExpression
         ParenExpr Block Signature Attribute
         PostfixDeref Subscript TernaryExpression AssignmentExpression MethodCall
+        ExpressionList
     );
 
     # Subset of migrated rules that need $alt_idx passed to the Actions method.
     my %_needs_alt_idx = map { $_ => true } qw(
-        PostfixDeref Subscript
+        PostfixDeref Subscript ExpressionList
     );
 
     # Singleton for one(): a Context with { valid => true } focus and no children.
@@ -323,43 +324,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         my $tags = _tags($value);
         my $rule_name = $item->{rule}->name();
-
-        # ExpressionList: complex tree-walk logic for arity/item_types tracking.
-        # Kept here (not in Actions) because it requires $_get_prev_item_types
-        # and $_get_rightmost_type tree walks on the Context value.
-        # alt 0 = single Expression (arity 1)
-        # alt 1 = ExpressionList , Expression (arity = child + 1)
-        # alt 2 = ExpressionList => Expression (arity = child + 1)
-        # alt 3 = trailing comma (arity preserved)
-        if ($rule_name eq 'ExpressionList') {
-            my ($arity, $item_types);
-            if ($alt_idx == 0) {
-                $arity = 1;
-                # Single expression: its type is the only item
-                my $type = $tags->{type};
-                $item_types = [$type];
-            } elsif ($alt_idx == 1 || $alt_idx == 2) {
-                $arity = ($tags->{list_arity} // 1) + 1;
-                # Comma/fat-arrow: previous item_types + new item's type
-                my $prev = $_get_prev_item_types->($value) // [];
-                my $new_type = $_get_rightmost_type->($value);
-                $item_types = [$prev->@*, $new_type];
-            } else {
-                $arity = $tags->{list_arity};
-                # Trailing comma: preserve item_types
-                $item_types = $tags->{item_types} // $_get_prev_item_types->($value);
-            }
-            return _complete_ctx(
-                {
-                    valid => true,
-                    ($arity ? (list_arity => $arity) : ()),
-                    ($item_types ? (item_types => $item_types) : ()),
-                },
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
-        }
 
         # CallExpression: complex tree-walk logic for builtin signature validation.
         # Kept here because it uses $_get_call_symbol tree walk and $builtin_lookup.
