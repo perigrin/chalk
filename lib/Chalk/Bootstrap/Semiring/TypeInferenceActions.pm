@@ -199,23 +199,23 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Fixed return types
 
-    method PostfixIncDec($ctx, $tags, $alt_idx = 0) {
+    method PostfixIncDec($ctx) {
         return { valid => true, type => 'Num' };
     }
 
-    method AnonymousSub($ctx, $tags, $alt_idx = 0) {
+    method AnonymousSub($ctx) {
         return { valid => true, type => 'Code' };
     }
 
-    method QwLiteral($ctx, $tags, $alt_idx = 0) {
+    method QwLiteral($ctx) {
         return { valid => true, type => 'List' };
     }
 
-    method ArrayConstructor($ctx, $tags, $alt_idx = 0) {
+    method ArrayConstructor($ctx) {
         return { valid => true, type => 'ArrayRef' };
     }
 
-    method HashConstructor($ctx, $tags, $alt_idx = 0) {
+    method HashConstructor($ctx) {
         return { valid => true, type => 'HashRef' };
     }
 

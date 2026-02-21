@@ -21,6 +21,13 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Ensures identical parse derivations share the same refaddr.
     my %_ctx_cache;
 
+    # Rules migrated from _complete_ctx to _extend_ctx dispatch.
+    # Methods for these rules receive ($ctx) only via extend().
+    # Other Actions methods still receive ($value, $tags, $alt_idx) via legacy path.
+    my %_migrated_to_extend = map { $_ => true } qw(
+        PostfixIncDec AnonymousSub QwLiteral ArrayConstructor HashConstructor
+    );
+
     # Singleton for one(): a Context with { valid => true } focus and no children.
     my $_one_singleton;
 
@@ -392,11 +399,22 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
 
         # Dispatch to TypeInferenceActions for rules with registered methods.
-        # Actions receive ($ctx, $tags) and optionally $alt_idx, returning a
-        # focus hash or undef to reject. This replaces the per-rule if/elsif
-        # blocks that were previously inline here.
+        # Migrated methods receive ($ctx) via extend() and are hash-consed
+        # by _extend_ctx. Legacy methods still receive ($value, $tags, $alt_idx)
+        # and use _complete_ctx.
         my $method = $actions->can($rule_name);
         if ($method) {
+            if ($_migrated_to_extend{$rule_name}) {
+                # Migrated: use comonad extend() — method receives full Context tree
+                my $result = _extend_ctx(
+                    $value,
+                    sub($ctx) { $actions->$method($ctx) },
+                    $rule_name,
+                );
+                return undef unless defined $result && defined $result->extract();
+                return $result;
+            }
+            # Legacy: method receives ($value, $tags, $alt_idx)
             my $focus = $actions->$method($value, $tags, $alt_idx);
             return undef unless defined $focus;
             return _complete_ctx(
