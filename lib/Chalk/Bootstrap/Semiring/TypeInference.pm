@@ -28,6 +28,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         PostfixIncDec AnonymousSub QwLiteral ArrayConstructor HashConstructor
         Atom Expression PostfixExpression
         BinaryExpression UnaryExpression
+        ParenExpr Block Signature Attribute
     );
 
     # Singleton for one(): a Context with { valid => true } focus and no children.

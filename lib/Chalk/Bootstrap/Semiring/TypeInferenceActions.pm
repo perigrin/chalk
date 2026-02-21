@@ -156,31 +156,35 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Boundary rules: preserve type, clear call_symbol/op_text
 
-    method ParenExpr($ctx, $tags, $alt_idx = 0) {
+    method ParenExpr($ctx) {
+        my $child_type = $_get_rightmost_type->($ctx);
         return {
             valid => true,
-            ($tags->{type} ? (type => $tags->{type}) : ()),
+            ($child_type ? (type => $child_type) : ()),
         };
     }
 
-    method Block($ctx, $tags, $alt_idx = 0) {
+    method Block($ctx) {
+        my $child_type = $_get_rightmost_type->($ctx);
         return {
             valid => true,
-            ($tags->{type} ? (type => $tags->{type}) : ()),
+            ($child_type ? (type => $child_type) : ()),
         };
     }
 
-    method Signature($ctx, $tags, $alt_idx = 0) {
+    method Signature($ctx) {
+        my $child_type = $_get_rightmost_type->($ctx);
         return {
             valid => true,
-            ($tags->{type} ? (type => $tags->{type}) : ()),
+            ($child_type ? (type => $child_type) : ()),
         };
     }
 
-    method Attribute($ctx, $tags, $alt_idx = 0) {
+    method Attribute($ctx) {
+        my $child_type = $_get_rightmost_type->($ctx);
         return {
             valid => true,
-            ($tags->{type} ? (type => $tags->{type}) : ()),
+            ($child_type ? (type => $child_type) : ()),
         };
     }
 
