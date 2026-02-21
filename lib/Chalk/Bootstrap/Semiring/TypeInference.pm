@@ -21,19 +21,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Ensures identical parse derivations share the same refaddr.
     my %_ctx_cache;
 
-    # Rules migrated from _complete_ctx to _extend_ctx dispatch.
-    # Methods for these rules receive ($ctx) only via extend().
-    # Other Actions methods still receive ($value, $tags, $alt_idx) via legacy path.
-    my %_migrated_to_extend = map { $_ => true } qw(
-        PostfixIncDec AnonymousSub QwLiteral ArrayConstructor HashConstructor
-        Atom Expression PostfixExpression
-        BinaryExpression UnaryExpression
-        ParenExpr Block Signature Attribute
-        PostfixDeref Subscript TernaryExpression AssignmentExpression MethodCall
-        ExpressionList
-    );
-
-    # Subset of migrated rules that need $alt_idx passed to the Actions method.
+    # Rules that need $alt_idx passed to the Actions method via closure.
     my %_needs_alt_idx = map { $_ => true } qw(
         PostfixDeref Subscript ExpressionList
     );
@@ -77,21 +65,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             children => [],
             position => 0,
             rule     => undef,
-        ));
-    }
-
-    # Create an on_complete result Context, hash-consed by focus content and
-    # children refaddrs. All on_complete branches must use this helper to
-    # ensure identical completions produce the same object (same refaddr).
-    my sub _complete_ctx($focus, $children, $position, $rule) {
-        my $focus_key = _tag_key($focus);
-        my $children_key = join(":", map { refaddr($_) } @$children);
-        my $key = "complete:$rule:$position:$focus_key:$children_key";
-        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
-            focus    => $focus,
-            children => $children,
-            position => $position,
-            rule     => $rule,
         ));
     }
 
@@ -325,13 +298,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $tags = _tags($value);
         my $rule_name = $item->{rule}->name();
 
-        # CallExpression: builtin signature validation via tree-walk.
-        # Uses $_get_call_symbol to find the function name in the Context tree,
-        # then validates argument types and arity against TypeLibrary signatures.
-        # Kept inline (not in Actions) because _extend_ctx changes the
-        # identity of intermediate nodes, affecting _tags() flat-merge behavior
-        # for ExpressionList item_types. Uses _complete_ctx to preserve
-        # identity semantics until _tags() is fully removed.
+        # CallExpression: builtin signature validation.
+        # Uses $_get_call_symbol to find the function name, _tags() for
+        # item_types/list_arity. Kept inline because tree-walkers cannot
+        # find call_symbol through _extend_ctx wrapper nodes (Atom/Expression/
+        # PostfixExpression create focused nodes without call_symbol).
         if ($rule_name eq 'CallExpression') {
             my $return_type;
             my $call_sym = $_get_call_symbol->($value);
@@ -370,30 +341,16 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
 
         # Dispatch to TypeInferenceActions for rules with registered methods.
-        # Migrated methods receive ($ctx) via extend() and are hash-consed
-        # by _extend_ctx. Legacy methods still receive ($value, $tags, $alt_idx)
-        # and use _complete_ctx.
+        # All methods receive ($ctx) via extend() and are hash-consed by
+        # _extend_ctx. Alt-dependent rules capture $alt_idx via closure.
         my $method = $actions->can($rule_name);
         if ($method) {
-            if ($_migrated_to_extend{$rule_name}) {
-                # Migrated: use comonad extend() — method receives full Context tree
-                # Alt-dependent rules capture $alt_idx via closure
-                my $f = $_needs_alt_idx{$rule_name}
-                    ? sub($ctx) { $actions->$method($ctx, $alt_idx) }
-                    : sub($ctx) { $actions->$method($ctx) };
-                my $result = _extend_ctx($value, $f, $rule_name);
-                return undef unless defined $result && defined $result->extract();
-                return $result;
-            }
-            # Legacy: method receives ($value, $tags, $alt_idx)
-            my $focus = $actions->$method($value, $tags, $alt_idx);
-            return undef unless defined $focus;
-            return _complete_ctx(
-                $focus,
-                $value->children(),
-                $value->position(),
-                $rule_name,
-            );
+            my $f = $_needs_alt_idx{$rule_name}
+                ? sub($ctx) { $actions->$method($ctx, $alt_idx) }
+                : sub($ctx) { $actions->$method($ctx) };
+            my $result = _extend_ctx($value, $f, $rule_name);
+            return undef unless defined $result && defined $result->extract();
+            return $result;
         }
 
         # Catch-all: transparent passthrough for rules without Actions methods.
