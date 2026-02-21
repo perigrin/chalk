@@ -29,6 +29,12 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         Atom Expression PostfixExpression
         BinaryExpression UnaryExpression
         ParenExpr Block Signature Attribute
+        PostfixDeref Subscript TernaryExpression AssignmentExpression MethodCall
+    );
+
+    # Subset of migrated rules that need $alt_idx passed to the Actions method.
+    my %_needs_alt_idx = map { $_ => true } qw(
+        PostfixDeref Subscript
     );
 
     # Singleton for one(): a Context with { valid => true } focus and no children.
@@ -409,11 +415,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         if ($method) {
             if ($_migrated_to_extend{$rule_name}) {
                 # Migrated: use comonad extend() — method receives full Context tree
-                my $result = _extend_ctx(
-                    $value,
-                    sub($ctx) { $actions->$method($ctx) },
-                    $rule_name,
-                );
+                # Alt-dependent rules capture $alt_idx via closure
+                my $f = $_needs_alt_idx{$rule_name}
+                    ? sub($ctx) { $actions->$method($ctx, $alt_idx) }
+                    : sub($ctx) { $actions->$method($ctx) };
+                my $result = _extend_ctx($value, $f, $rule_name);
                 return undef unless defined $result && defined $result->extract();
                 return $result;
             }

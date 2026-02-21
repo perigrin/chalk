@@ -190,7 +190,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Subscript: type depends on alt_idx
 
-    method Subscript($ctx, $tags, $alt_idx = 0) {
+    method Subscript($ctx, $alt_idx = 0) {
         my $sub_type;
         if ($alt_idx <= 1) {
             # alt 0 = [...] (array), alt 1 = {...} (hash) → element is Scalar
@@ -205,7 +205,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # PostfixDeref: type depends on alt_idx
 
-    method PostfixDeref($ctx, $tags, $alt_idx = 0) {
+    method PostfixDeref($ctx, $alt_idx = 0) {
         my $type_tag;
         if ($alt_idx == 0) {
             $type_tag = 'Array';
@@ -241,15 +241,15 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Unknown types (no static type information)
 
-    method TernaryExpression($ctx, $tags, $alt_idx = 0) {
+    method TernaryExpression($ctx) {
         return { valid => true };
     }
 
-    method AssignmentExpression($ctx, $tags, $alt_idx = 0) {
+    method AssignmentExpression($ctx) {
         return { valid => true };
     }
 
-    method MethodCall($ctx, $tags, $alt_idx = 0) {
+    method MethodCall($ctx) {
         return { valid => true };
     }
 }
