@@ -76,6 +76,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     my sub _extend_ctx($value, $f, $rule_name) {
         my $extended = $value->extend($f);
         my $focus = $extended->extract();
+        return undef unless defined $focus;
         my $focus_key = _tag_key($focus);
         my $children_key = join(":", map { refaddr($_) } $extended->children()->@*);
         my $key = "ext:$rule_name:" . $extended->position() . ":$focus_key:$children_key";
@@ -114,6 +115,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     method is_zero($value) {
         return !defined $value;
+    }
+
+    # Clear hash-cons cache between parses to prevent unbounded growth.
+    # Cache entries from one file are not useful for subsequent files
+    # because they reference different Context refaddrs.
+    method reset_cache() {
+        %_ctx_cache = ();
+        $_one_singleton = undef;
     }
 
     method multiply($left, $right) {

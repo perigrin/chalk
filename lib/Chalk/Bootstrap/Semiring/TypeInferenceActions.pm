@@ -5,8 +5,6 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Grammar::Perl::TypeLibrary;
-use Chalk::Grammar::Perl::KeywordTable;
-
 class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Helper: Get rightmost type from Context tree (for wrapper rules)
@@ -22,23 +20,6 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         for my $child (reverse @children) {
             my $t = $_get_rightmost_type->($child);
             return $t if defined $t;
-        }
-        return undef;
-    };
-
-    # Helper: Get call_symbol from Context tree (for CallExpression)
-    my $_get_call_symbol;
-    $_get_call_symbol = sub($ctx) {
-        return undef unless defined $ctx;
-        my $focus = $ctx->extract();
-        if (defined $focus) {
-            # Focused node (leaf): check for call_symbol and stop
-            return $focus->{call_symbol};
-        }
-        # Unfocused multiply node: recurse into children
-        for my $child ($ctx->children()->@*) {
-            my $found = $_get_call_symbol->($child);
-            return $found if defined $found;
         }
         return undef;
     };

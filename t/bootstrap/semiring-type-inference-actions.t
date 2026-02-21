@@ -7,7 +7,7 @@ use Test2::V0;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Semiring::TypeInferenceActions;
 use Chalk::Grammar::Perl::TypeLibrary;
-use Chalk::Grammar::Perl::KeywordTable;
+
 
 # Helper to create a Context with given focus and children.
 # Simulates the Context tree that extend() receives.
