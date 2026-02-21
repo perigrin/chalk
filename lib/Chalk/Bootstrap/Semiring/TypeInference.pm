@@ -27,6 +27,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     my %_migrated_to_extend = map { $_ => true } qw(
         PostfixIncDec AnonymousSub QwLiteral ArrayConstructor HashConstructor
         Atom Expression PostfixExpression
+        BinaryExpression UnaryExpression
     );
 
     # Singleton for one(): a Context with { valid => true } focus and no children.

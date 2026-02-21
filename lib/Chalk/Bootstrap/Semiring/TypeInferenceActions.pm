@@ -43,6 +43,22 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         return undef;
     };
 
+    # Helper: Get op_text from Context tree (for operator rules)
+    # Follows leaf-finding semantics: stops at focused nodes.
+    my $_get_op_text;
+    $_get_op_text = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus) {
+            return $focus->{op_text};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_op_text->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
     # Wrapper rules: passthrough child's type
 
     method Atom($ctx) {
@@ -62,8 +78,8 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Rich rules: compute type from operator/signature
 
-    method BinaryExpression($ctx, $tags, $alt_idx = 0) {
-        my $op = $tags->{op_text};
+    method BinaryExpression($ctx) {
+        my $op = $_get_op_text->($ctx);
         my $result_type;
         if (defined $op) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op($op);
@@ -73,13 +89,13 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
             # result 'Any' → leave type undef (unknown)
         } else {
             # No op_text: preserve child type (intermediate completion)
-            $result_type = $tags->{type};
+            $result_type = $_get_rightmost_type->($ctx);
         }
         return { valid => true, ($result_type ? (type => $result_type) : ()) };
     }
 
-    method UnaryExpression($ctx, $tags, $alt_idx = 0) {
-        my $op = $tags->{op_text};
+    method UnaryExpression($ctx) {
+        my $op = $_get_op_text->($ctx);
         my $result_type;
         if (defined $op) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op($op);
