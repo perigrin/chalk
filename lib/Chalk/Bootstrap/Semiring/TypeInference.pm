@@ -360,13 +360,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     $return_type = undef if defined $return_type && $return_type eq 'Any';
                 }
             }
-            return _complete_ctx(
-                {
-                    valid => true,
-                    ($return_type ? (type => $return_type) : ()),
+            return _extend_ctx(
+                $value,
+                sub($ctx) {
+                    return { valid => true, ($return_type ? (type => $return_type) : ()) };
                 },
-                $value->children(),
-                $value->position(),
                 $rule_name,
             );
         }
