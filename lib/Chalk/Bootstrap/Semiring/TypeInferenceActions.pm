@@ -160,6 +160,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         if ($alt_idx == 0) {
             $arity = 1;
             my $type = $_get_rightmost_type->($ctx);
+            # type can be undef for non-typed expressions (e.g. function calls)
             $item_types = [$type];
         } elsif ($alt_idx == 1 || $alt_idx == 2) {
             $arity = ($_get_list_arity->($ctx) // 1) + 1;
@@ -181,8 +182,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     method CallExpression($ctx, $tags, $alt_idx = 0) {
         my $return_type = 'Unknown';
-        # Extract call_symbol from tags (already computed by TypeInference)
-        my $call_sym = $tags->{call_symbol};
+        my $call_sym = $_get_call_symbol->($ctx);
         if ($call_sym) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin($call_sym);
             if ($sig) {

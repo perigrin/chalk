@@ -325,21 +325,21 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $tags = _tags($value);
         my $rule_name = $item->{rule}->name();
 
-        # CallExpression: complex tree-walk logic for builtin signature validation.
-        # Kept here because it uses $_get_call_symbol tree walk and $builtin_lookup.
+        # CallExpression: builtin signature validation via tree-walk.
+        # Uses $_get_call_symbol to find the function name in the Context tree,
+        # then validates argument types and arity against TypeLibrary signatures.
+        # Kept inline (not in Actions) because _extend_ctx changes the
+        # identity of intermediate nodes, affecting _tags() flat-merge behavior
+        # for ExpressionList item_types. Uses _complete_ctx to preserve
+        # identity semantics until _tags() is fully removed.
         if ($rule_name eq 'CallExpression') {
             my $return_type;
             my $call_sym = $_get_call_symbol->($value);
             if ($call_sym) {
-                my $builtin_name = $call_sym;
-                my $item_types = $tags->{item_types};
-                my $sig = $builtin_lookup->($builtin_name);
+                my $sig = $builtin_lookup->($call_sym);
                 if ($sig) {
+                    my $item_types = $tags->{item_types};
                     if ($item_types) {
-                        # Per-position validation using item_types.
-                        # For block-first alts (2/3), the Block is arg[0] (Code type)
-                        # and ExpressionList's item_types covers remaining args starting
-                        # at signature position 1.
                         my $arg_types = $sig->{arg_types};
                         my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
                         for my $i (0 .. $#$item_types) {
