@@ -160,10 +160,8 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     }
 
     # CallExpression is handled inline in TypeInference.pm (not dispatched here)
-    # because tree-walkers cannot find call_symbol through _extend_ctx focused
-    # wrapper nodes (Atom/Expression/PostfixExpression create focused nodes
-    # without call_symbol). The inline handler uses _tags() flat-merge for
-    # item_types/list_arity until _tags() is fully removed.
+    # because it requires complex multi-walker logic with builtin_lookup and
+    # type_satisfies for per-position argument validation.
 
     # Boundary rules: preserve type, clear call_symbol/op_text
 

@@ -29,24 +29,6 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Singleton for one(): a Context with { valid => true } focus and no children.
     my $_one_singleton;
 
-    # Extract tag hash from a TypeInference value (Context with tag hash focus).
-    # For intermediate multiply nodes (undef focus), collects tags from leaves.
-    my sub _tags($val) {
-        return undef unless defined $val;
-        my $focus = $val->extract();
-        return $focus if defined $focus;
-        # Intermediate multiply node with undef focus: collect from leaves
-        my %merged;
-        for my $leaf ($val->leaves()) {
-            my $f = $leaf->extract();
-            next unless defined $f;
-            for my $k (keys %$f) {
-                $merged{$k} = $f->{$k} if $f->{$k};
-            }
-        }
-        return \%merged;
-    }
-
     # Serialize a tag hash to a stable string key for hash-consing.
     # Handles arrayref values (e.g. item_types) by joining with semicolons.
     my sub _tag_key($tags) {
@@ -83,12 +65,12 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return ($_ctx_cache{$key} //= $extended);
     }
 
+    # Tree-walkers for CallExpression on_complete.
+    # Follow leaf-finding semantics: stop at focused nodes (on_complete
+    # results) and only recurse through unfocused multiply nodes.
+
     # Search the multiply tree leaves for one with call_symbol in its focus.
-    # Returns the call_symbol string or undef. Used by CallExpression
-    # on_complete to extract the function name directly from the tree
-    # instead of relying on propagated tags.
-    # Follows leaf-finding semantics: stops at focused nodes (on_complete
-    # results) and only recurses through unfocused multiply nodes.
+    # Returns the call_symbol string or undef.
     my $_get_call_symbol;
     $_get_call_symbol = sub($ctx) {
         return undef unless defined $ctx;
@@ -100,6 +82,38 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Unfocused multiply node: recurse into children
         for my $child ($ctx->children()->@*) {
             my $found = $_get_call_symbol->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
+    # Search the multiply tree leaves for one with item_types in its focus.
+    # Returns the item_types arrayref or undef.
+    my $_get_item_types;
+    $_get_item_types = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus) {
+            return $focus->{item_types};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_item_types->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
+    # Search the multiply tree leaves for one with list_arity in its focus.
+    # Returns the list_arity integer or undef.
+    my $_get_list_arity;
+    $_get_list_arity = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus) {
+            return $focus->{list_arity};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_list_arity->($child);
             return $found if defined $found;
         }
         return undef;
@@ -271,18 +285,17 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $rule_name = $item->{rule}->name();
 
         # CallExpression: builtin signature validation.
-        # Uses $_get_call_symbol to find the function name, _tags() for
-        # item_types/list_arity. Kept inline because tree-walkers cannot
-        # find call_symbol through _extend_ctx wrapper nodes (Atom/Expression/
-        # PostfixExpression create focused nodes without call_symbol).
+        # Kept inline (not in TypeInferenceActions) because it needs
+        # complex multi-walker logic: $_get_call_symbol for function name,
+        # $_get_item_types/$_get_list_arity for argument info, plus
+        # builtin_lookup and type_satisfies for per-position validation.
         if ($rule_name eq 'CallExpression') {
             my $return_type;
             my $call_sym = $_get_call_symbol->($value);
             if ($call_sym) {
                 my $sig = $builtin_lookup->($call_sym);
                 if ($sig) {
-                    my $tags = _tags($value);
-                    my $item_types = $tags->{item_types};
+                    my $item_types = $_get_item_types->($value);
                     if ($item_types) {
                         my $arg_types = $sig->{arg_types};
                         my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
@@ -295,7 +308,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                             }
                         }
                     }
-                    my $arity = $tags->{list_arity} // 1;
+                    my $arity = $_get_list_arity->($value) // 1;
                     $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
                     if ($arity < $sig->{min_arity}) {
                         return undef;

@@ -72,7 +72,7 @@ my sub make_ctx(%tags) {
 }
 
 # Helper: extract tag hash from a TypeInference value (Context tree).
-# Mirrors the _tags() helper inside TypeInference.
+# Uses flat leaf-merge for test assertions (production code uses tree-walkers).
 my sub get_tags($val) {
     return undef unless defined $val;
     my $focus = $val->extract();
@@ -1867,6 +1867,60 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $r2 = $ti->on_complete($item, 0, 5);
     isnt(refaddr($r1), refaddr($r2),
         'reset_cache() clears _extend_ctx cache (different refaddr after reset)');
+}
+
+# ========================================================================
+# Split-tree CallExpression: call_symbol and item_types in separate
+# focused subtrees separated by unfocused multiply nodes.
+# Simulates real parse: QI(call_symbol) * one() * ExpressionList(item_types)
+# where ExpressionList? desugaring creates unfocused intermediate nodes.
+# ========================================================================
+
+# Split tree with multiple unfocused layers between call_symbol and item_types
+{
+    my $qi_leaf = make_ctx(call_symbol => 'push');
+    my $el_leaf = make_ctx(item_types => ['Array', 'Scalar'], list_arity => 2);
+
+    # Build a deeper tree: qi * one * one * el (simulating grammar intermediates)
+    my $left  = $ti->multiply($qi_leaf, $ti->one());
+    my $mid   = $ti->multiply($left, $ti->one());
+    my $val   = $ti->multiply($mid, $el_leaf);
+
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result),
+        'split-tree CallExpression: finds call_symbol and item_types through unfocused nodes');
+    is(get_tags($result)->{type}, 'Int',
+        'split-tree CallExpression: push return type => Int');
+}
+
+# Split tree: call_symbol deep left, item_types deep right — arity validation
+{
+    my $qi_leaf = make_ctx(call_symbol => 'push');
+    my $el_leaf = make_ctx(item_types => ['Array'], list_arity => 1);
+
+    my $left = $ti->multiply($ti->one(), $qi_leaf);
+    my $right = $ti->multiply($el_leaf, $ti->one());
+    my $val = $ti->multiply($left, $right);
+
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result),
+        'split-tree CallExpression: push with arity 1 → rejected (min_arity 2)');
+}
+
+# Split tree: call_symbol and item_types in separate subtrees — type rejection
+{
+    my $qi_leaf = make_ctx(call_symbol => 'keys');
+    my $el_leaf = make_ctx(item_types => ['Scalar'], list_arity => 1);
+
+    my $left = $ti->multiply($qi_leaf, $ti->one());
+    my $val = $ti->multiply($left, $el_leaf);
+
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok($ti->is_zero($result),
+        'split-tree CallExpression: keys(Scalar) → rejected through split tree');
 }
 
 done_testing;
