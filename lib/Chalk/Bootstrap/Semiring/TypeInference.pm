@@ -78,6 +78,20 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         ));
     }
 
+    # Create an on_complete result Context using comonad extend().
+    # Calls $f on the full Context tree, producing a new Context with
+    # the result as focus and children preserved. Hash-consed by focus
+    # content and children refaddrs to ensure identical derivations share
+    # the same refaddr (required by FilterComposite identity comparison).
+    my sub _extend_ctx($value, $f, $rule_name) {
+        my $extended = $value->extend($f);
+        my $focus = $extended->extract();
+        my $focus_key = _tag_key($focus);
+        my $children_key = join(":", map { refaddr($_) } $extended->children()->@*);
+        my $key = "ext:$rule_name:" . $extended->position() . ":$focus_key:$children_key";
+        return ($_ctx_cache{$key} //= $extended);
+    }
+
     # Walk right spine of multiply tree to find the rightmost type tag.
     # In a multiply tree (left * right), the rightmost child typically
     # holds the most recent expression's type.
