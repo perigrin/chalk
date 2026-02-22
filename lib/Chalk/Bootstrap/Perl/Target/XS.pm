@@ -54,6 +54,88 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return undef;
     }
 
+    # Build field index map from ClassDecl IR.
+    # Returns hashref mapping field name (without sigil) to integer index.
+    # Fields are numbered in declaration order starting from 0.
+    method _build_field_index_map($class_decl) {
+        my $body = $class_decl->inputs()->[2];
+        my %field_map;
+        my $index = 0;
+
+        for my $item ($body->@*) {
+            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'FieldDecl') {
+                my $name_node = $item->inputs()->[0];
+                my $field_name = $name_node->value();
+                $field_name =~ s/^\$//;  # Strip sigil
+                $field_map{$field_name} = $index++;
+            }
+        }
+
+        return \%field_map;
+    }
+
+    # Emit BOOT block for feature class setup.
+    # Generates class_setup_stash, field registration, class_seal_stash,
+    # and new() re-installation sequence using Perl 5.42.0 C API.
+    # Note: new() re-installation is commented out for now - will be implemented
+    # in a later component when shadow constructor XSUB is added.
+    method _emit_xs_boot_block($class_decl, $field_map) {
+        my @lines;
+        push @lines, 'BOOT:';
+        push @lines, '{';
+
+        # Get stash and save PL_curstash
+        my $escaped_module = $self->_escape_c_string($module_name);
+        push @lines, "    HV *stash = gv_stashpv(\"$escaped_module\", GV_ADD);";
+        push @lines, '    HV *old_stash = PL_curstash;';
+        push @lines, '    PL_curstash = stash;';
+        push @lines, '';
+
+        # 1. Create class
+        push @lines, '    Perl_class_setup_stash(aTHX_ stash);';
+        push @lines, '';
+
+        # 2. Add fields in order
+        my $body = $class_decl->inputs()->[2];
+        for my $item ($body->@*) {
+            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'FieldDecl') {
+                my $name_node = $item->inputs()->[0];
+                my $field_name = $name_node->value();  # Includes sigil
+                my $escaped = $self->_escape_c_string($field_name);
+                push @lines, '    Perl_class_prepare_initfield_parse(aTHX);';
+                push @lines, "    pad_add_name_pvs(\"$escaped\", padadd_FIELD, NULL, NULL);";
+            }
+        }
+        push @lines, '';
+
+        # 3. Seal class (generates auto new())
+        push @lines, '    Perl_class_seal_stash(aTHX_ stash);';
+        push @lines, '';
+
+        # 4. Grab auto new(), clear GV, install shadow
+        # TODO: Implement shadow constructor XSUB in Component B
+        # For now, we rely on the auto-generated new() from class_seal_stash
+        my $sanitized = $module_name;
+        $sanitized =~ s/::/_/g;
+        my $xs_func_name = $module_name;
+        $xs_func_name =~ s/::/double_underscore_temp/g;
+        $xs_func_name =~ s/double_underscore_temp/__/g;
+        push @lines, '    GV *gv = gv_fetchmethod(stash, "new");';
+        push @lines, "    ${sanitized}_original_new = GvCV(gv);";
+        push @lines, "    SvREFCNT_inc((SV*)${sanitized}_original_new);";
+        push @lines, '    GvCV_set(gv, NULL);';
+        push @lines, "    newXS(\"${module_name}::new\", XS_${xs_func_name}_new, __FILE__);";
+        push @lines, '';
+
+        # Restore PL_curstash
+        push @lines, '    PL_curstash = old_stash;';
+        push @lines, '}';
+
+        return \@lines;
+    }
+
     # Escape a string for C double-quoted literal
     method _escape_c_string($str) {
         $str =~ s/\\/\\\\/g;
@@ -76,10 +158,52 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '#include "perl.h"';
         push @lines, '#include "XSUB.h"';
         push @lines, '';
+
+        # Forward declarations for feature class C API
+        push @lines, 'extern void Perl_class_setup_stash(pTHX_ HV *stash);';
+        push @lines, 'extern void Perl_class_seal_stash(pTHX_ HV *stash);';
+        push @lines, 'extern void Perl_class_prepare_initfield_parse(pTHX);';
+        push @lines, 'extern void Perl_class_apply_attributes(pTHX_ HV *stash, OP *attrlist);';
+        push @lines, '';
+
+        # Static variable for original new() CV
+        if (defined $class_decl) {
+            my $sanitized = $module_name;
+            $sanitized =~ s/::/_/g;
+            push @lines, "static CV *${sanitized}_original_new = NULL;";
+            push @lines, '';
+        }
+
         push @lines, "MODULE = $module_name  PACKAGE = $module_name";
         push @lines, '';
 
         if (defined $class_decl) {
+            # Emit stub new() XSUB that delegates to auto-generated constructor
+            # TODO: Component B will replace this with full shadow constructor
+            my $sanitized = $module_name;
+            $sanitized =~ s/::/_/g;
+            push @lines, 'SV *';
+            push @lines, 'new(class, ...)';
+            push @lines, '    SV *class';
+            push @lines, '  CODE:';
+            push @lines, '    {';
+            push @lines, "        if (!${sanitized}_original_new) {";
+            push @lines, '            croak("BOOT block has not run yet");';
+            push @lines, '        }';
+            push @lines, '        dSP;';
+            push @lines, '        ENTER; SAVETMPS;';
+            push @lines, '        PUSHMARK(SP);';
+            push @lines, '        XPUSHs(class);';
+            push @lines, '        PUTBACK;';
+            push @lines, "        call_sv((SV*)${sanitized}_original_new, G_SCALAR);";
+            push @lines, '        SPAGAIN;';
+            push @lines, '        RETVAL = SvREFCNT_inc(POPs);';
+            push @lines, '        PUTBACK; FREETMPS; LEAVE;';
+            push @lines, '    }';
+            push @lines, '  OUTPUT:';
+            push @lines, '    RETVAL';
+            push @lines, '';
+
             my $body = $class_decl->inputs()->[2];
             for my $item ($body->@*) {
                 if ($item isa Chalk::Bootstrap::IR::Node::Constructor
@@ -95,6 +219,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     push @lines, '';
                 }
             }
+
+            # Emit BOOT block after XSUBs
+            my $field_map = $self->_build_field_index_map($class_decl);
+            push @lines, $self->_emit_xs_boot_block($class_decl, $field_map)->@*;
         }
 
         return join("\n", @lines) . "\n";
@@ -1057,49 +1185,43 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit the .pm stub (bless-based OO with XSLoader)
     method _emit_pm_stub($ir) {
-        my $class_decl = $self->_find_class_decl($ir);
-        my $parent;
-        if (defined $class_decl) {
-            my $parent_node = $class_decl->inputs()->[1];
-            $parent = $parent_node->value() if defined $parent_node;
-        }
-
         my @lines;
         push @lines, "# Generated by Chalk::Bootstrap compiler";
         push @lines, "package $module_name;";
         push @lines, 'use strict;';
         push @lines, 'use warnings;';
-        push @lines, 'use XSLoader;';
-
-        if (defined $parent) {
-            push @lines, "our \@ISA = ('$parent');";
-        }
-
-        push @lines, "our \$VERSION = '0.01';";
+        push @lines, 'require DynaLoader;';
         push @lines, '';
-        push @lines, 'sub new {';
-        push @lines, '    my ($class, %args) = @_;';
 
-        # Emit field defaults for fields with default values
-        if (defined $class_decl) {
-            my $body = $class_decl->inputs()->[2];
-            for my $item ($body->@*) {
-                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'FieldDecl';
-                my $default_node = $item->inputs()->[2];
-                next unless defined $default_node;
-                my $perl_default = $self->_ir_default_to_perl($default_node);
-                next unless defined $perl_default;
-                my $field_name = $item->inputs()->[0]->value();
-                $field_name =~ s/^\$//;
-                push @lines, "    \$args{$field_name} //= $perl_default;";
-            }
-        }
+        # Use raw dl_* API to bypass XSLoader's @ISA pollution
+        # which conflicts with feature class sealed stashes
 
-        push @lines, '    return bless \%args, $class;';
+        # Compute .so path: auto/Foo/Bar/Baz/Baz.so for Foo::Bar::Baz
+        my $dir_path = $module_name;
+        $dir_path =~ s/::/\//g;
+        my $filename = $module_name;
+        $filename =~ s/^.*:://;  # Get last component
+        my $so_rel_path = "auto/$dir_path/$filename.so";
+
+        my $boot_name = $module_name;
+        $boot_name =~ s/::/double_underscore_temp/g;
+        $boot_name =~ s/double_underscore_temp/__/g;
+
+        push @lines, '# Search @INC for the .so file';
+        push @lines, 'my $so;';
+        push @lines, 'for my $dir (@INC) {';
+        push @lines, '    next if ref $dir;';
+        push @lines, "    my \$path = \"\$dir/$so_rel_path\";";
+        push @lines, '    if (-f $path) { $so = $path; last; }';
         push @lines, '}';
+        push @lines, 'die "Cannot locate .so file" unless defined $so;';
         push @lines, '';
-        push @lines, "XSLoader::load(__PACKAGE__, \$VERSION);";
+        push @lines, 'my $libref = DynaLoader::dl_load_file($so, 0)';
+        push @lines, '    or die "dl_load_file: " . DynaLoader::dl_error();';
+        push @lines, "my \$boot = DynaLoader::dl_find_symbol(\$libref, 'boot_${boot_name}')";
+        push @lines, '    or die "dl_find_symbol: " . DynaLoader::dl_error();';
+        push @lines, "DynaLoader::dl_install_xsub('${module_name}::_bootstrap', \$boot, \$so);";
+        push @lines, "${module_name}->_bootstrap();";
         push @lines, '';
         push @lines, '1;';
 
