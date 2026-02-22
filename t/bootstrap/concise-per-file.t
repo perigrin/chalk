@@ -167,7 +167,6 @@ SKIP: {
         'lib/Chalk/Bootstrap/Optimizer.pm'              => 'push $passes->@* op sequence mismatch with native push opcode',
         # Parse failures — remaining ambiguities
         'lib/Chalk/Bootstrap/Earley.pm'             => 'Pre-existing phase5 Earley parse failure',
-        'lib/Chalk/Bootstrap/IR/Node.pm'            => 'PostfixDeref @* assignment ambiguity (#559)',
         'lib/Chalk/Bootstrap/Target/XS.pm'          => 'Pre-existing parse failure',
     );
 
