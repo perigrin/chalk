@@ -1,5 +1,5 @@
-# ABOUTME: Walks Perl IR and emits XS/C code with bless-based OO wrapper.
-# ABOUTME: Generates .xs, .pm stub, and Build.PL for Tier A-C classes via Perl API.
+# ABOUTME: Walks Perl IR and emits XS/C code using Perl 5.42 feature class API.
+# ABOUTME: Generates .xs with BOOT block, .pm dl_* loader stub, and Build.PL.
 use 5.42.0;
 use utf8;
 use experimental 'class';
