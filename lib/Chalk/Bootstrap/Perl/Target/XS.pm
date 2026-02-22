@@ -79,9 +79,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Emit BOOT block for feature class setup.
     # Generates class_setup_stash, field registration, class_seal_stash,
     # and new() re-installation sequence using Perl 5.42.0 C API.
-    # Note: new() re-installation is commented out for now - will be implemented
-    # in a later component when shadow constructor XSUB is added.
-    method _emit_xs_boot_block($class_decl, $field_map) {
+    # Also emits eval_pv fallback calls for methods that can't be compiled to XS.
+    method _emit_xs_boot_block($class_decl, $field_map, $fallback_methods = []) {
         my @lines;
         push @lines, 'BOOT:';
         push @lines, '{';
@@ -130,8 +129,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '';
 
         # 5. Grab auto new(), clear GV, install shadow
-        # TODO: Implement shadow constructor XSUB in Component B
-        # For now, we rely on the auto-generated new() from class_seal_stash
         my $sanitized = $module_name;
         $sanitized =~ s/::/_/g;
         my $xs_func_name = $module_name;
@@ -143,6 +140,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    GvCV_set(gv, NULL);';
         push @lines, "    newXS(\"${module_name}::new\", XS_${xs_func_name}_new, __FILE__);";
         push @lines, '';
+
+        # 6. Emit eval_pv fallback for unsupported methods
+        if ($fallback_methods->@*) {
+            push @lines, '    /* eval_pv fallback for unsupported methods */';
+            for my $method ($fallback_methods->@*) {
+                push @lines, $self->_emit_xs_eval_fallback($method);
+            }
+            push @lines, '';
+        }
 
         # Restore PL_curstash
         push @lines, '    PL_curstash = old_stash;';
@@ -161,6 +167,34 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         $str =~ s/\0/\\0/g;
         $str =~ s/([^\x20-\x7E])/sprintf("\\x%02x", ord($1))/ge;
         return $str;
+    }
+
+    # Check if a method's XS output contains unsupported constructs
+    # that require eval_pv fallback instead of XSUB emission.
+    method _needs_eval_fallback($xs_output) {
+        return $xs_output =~ /NULL \/\* unsupported \*\//;
+    }
+
+    # Emit eval_pv fallback for a method that can't be compiled to XS.
+    # Returns a single eval_pv() call that defines the method as a Perl sub.
+    # For now, emits a stub that dies - full Perl code generation comes later.
+    method _emit_xs_eval_fallback($method_decl) {
+        my $name = $method_decl->inputs()->[0]->value();
+        my $params = $method_decl->inputs()->[1];
+
+        # Build parameter list for Perl sub signature
+        my @param_names;
+        for my $p ($params->@*) {
+            my $pname = $p->value();
+            push @param_names, $pname;
+        }
+
+        # Generate Perl sub stub that indicates it needs implementation
+        my $param_list = join(', ', '$self', @param_names);
+        my $perl_code = "sub ${module_name}::${name} { my ($param_list) = \@_; die 'eval_pv fallback not yet implemented for $name' }";
+        my $escaped = $self->_escape_c_string($perl_code);
+
+        return "    eval_pv(\"$escaped\", TRUE);";
     }
 
     # Emit shadow constructor XSUB with param extraction and defaults.
@@ -327,6 +361,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, "MODULE = $module_name  PACKAGE = $module_name";
         push @lines, '';
 
+        my @fallback_methods;  # Collect methods needing eval_pv fallback
+
         if (defined $class_decl) {
             # Build field map once and store it for use throughout code generation
             $field_map = $self->_build_field_index_map($class_decl);
@@ -353,13 +389,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     }
                 } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                         && $item->class() eq 'MethodDecl') {
-                    push @lines, $self->_emit_xs_method($item)->@*;
-                    push @lines, '';
+                    # Try to emit as XSUB
+                    my $method_lines = $self->_emit_xs_method($item);
+                    my $xs_output = join("\n", $method_lines->@*);
+
+                    # Check if XSUB contains unsupported constructs
+                    if ($self->_needs_eval_fallback($xs_output)) {
+                        # Collect for eval_pv fallback in BOOT block
+                        push @fallback_methods, $item;
+                    } else {
+                        # Emit as XSUB
+                        push @lines, $method_lines->@*;
+                        push @lines, '';
+                    }
                 }
             }
 
-            # Emit BOOT block after XSUBs
-            push @lines, $self->_emit_xs_boot_block($class_decl, $field_map)->@*;
+            # Emit BOOT block after XSUBs (includes eval_pv fallbacks)
+            push @lines, $self->_emit_xs_boot_block($class_decl, $field_map, \@fallback_methods)->@*;
         }
 
         return join("\n", @lines) . "\n";

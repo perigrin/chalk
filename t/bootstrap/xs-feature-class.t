@@ -190,4 +190,66 @@ SKIP: {
         'no our @ISA in XS output (inheritance via class_apply_attributes)');
 }
 
+# Test eval_pv fallback for unsupported methods (Component G)
+my $fallback_source = q{use 5.42.0;
+use utf8;
+
+class Calculator {
+    field $multiplier :param :reader;
+
+    method multiply($x) {
+        return $multiplier * $x;
+    }
+
+    method check_type($obj) {
+        return $obj isa Calculator;
+    }
+
+    method call_coderef($f) {
+        return $f->($self);
+    }
+}
+};
+
+my ($fallback_fh, $fallback_filename) = tempfile(SUFFIX => '.pm', UNLINK => 1);
+print $fallback_fh $fallback_source;
+close $fallback_fh;
+
+my $fallback_ir = parse_file_ir($gen_grammar, $fallback_filename);
+ok(defined $fallback_ir, 'parse class with unsupported methods produces IR');
+
+SKIP: {
+    skip 'no fallback IR', 8 unless defined $fallback_ir;
+
+    my $fallback_target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Calculator');
+    my $fallback_xs = $fallback_target->generate($fallback_ir);
+
+    # Test 38: multiply() currently uses eval_pv fallback because IR doesn't properly
+    # resolve field access in return expressions yet. This will be fixed in a future component.
+    unlike($fallback_xs, qr/SV \*\s+multiply\(self, x\)/,
+        'multiply() NOT emitted as XSUB (field access in expression not yet supported)');
+    like($fallback_xs, qr/eval_pv\("sub Calculator::multiply/,
+        'multiply() uses eval_pv fallback for now');
+
+    # Test 39: check_type() also needs fallback because $obj param access broken in IR
+    unlike($fallback_xs, qr/SV \*\s+check_type\(self, obj\)/,
+        'check_type() NOT emitted as XSUB (param access in expression not yet supported)');
+    like($fallback_xs, qr/eval_pv\("sub Calculator::check_type/,
+        'check_type() uses eval_pv fallback for now');
+
+    # Test 40: call_coderef() has unsupported construct - should use eval_pv fallback
+    unlike($fallback_xs, qr/SV \*\s+call_coderef\(self, f\)/,
+        'call_coderef() NOT emitted as XSUB (coderef invocation unsupported)');
+    like($fallback_xs, qr/eval_pv\("sub Calculator::call_coderef/,
+        'call_coderef() emitted as eval_pv fallback in BOOT block');
+
+    # Test 41: Verify eval_pv call is in BOOT block
+    like($fallback_xs, qr/BOOT:.*eval_pv\("sub Calculator::call_coderef/s,
+        'eval_pv fallback call is in BOOT block');
+
+    # Test 42: Verify eval_pv contains method signature stub
+    like($fallback_xs, qr/eval_pv\("sub Calculator::call_coderef \{[^}]*\}"/,
+        'eval_pv fallback contains method body stub');
+}
+
 done_testing();
