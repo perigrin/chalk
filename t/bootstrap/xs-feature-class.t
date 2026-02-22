@@ -147,4 +147,47 @@ SKIP: {
         'set_age writer uses sv_setsv with ObjectFIELDS[1]');
 }
 
+# Test inheritance support (Component E)
+my $inherit_source = q{use 5.42.0;
+use utf8;
+
+class Dog :isa(Animal) {
+    field $breed :param :reader;
+}
+};
+
+my ($inherit_fh, $inherit_filename) = tempfile(SUFFIX => '.pm', UNLINK => 1);
+print $inherit_fh $inherit_source;
+close $inherit_fh;
+
+my $inherit_ir = parse_file_ir($gen_grammar, $inherit_filename);
+ok(defined $inherit_ir, 'parse inheritance class produces IR');
+
+SKIP: {
+    skip 'no inheritance IR', 5 unless defined $inherit_ir;
+
+    my $inherit_target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Dog');
+    my $inherit_xs = $inherit_target->generate($inherit_ir);
+
+    # Test 33: BOOT block contains class_apply_attributes with isa(Animal)
+    like($inherit_xs, qr/class_apply_attributes.*isa\(Animal\)/s,
+        'BOOT block contains class_apply_attributes with isa(Animal)');
+
+    # Test 34: isa step comes after class_setup_stash
+    like($inherit_xs, qr/class_setup_stash.*class_apply_attributes/s,
+        'class_apply_attributes comes after class_setup_stash');
+
+    # Test 35: isa step comes before class_seal_stash
+    like($inherit_xs, qr/class_apply_attributes.*class_seal_stash/s,
+        'class_apply_attributes comes before class_seal_stash');
+
+    # Test 36: Verify exact optree construction (OP_CONST with "isa(Animal)")
+    like($inherit_xs, qr/newSVpvs\("isa\(Animal\)"\)/,
+        'isa attribute uses newSVpvs with literal "isa(Animal)"');
+
+    # Test 37: No our @ISA in output
+    unlike($inherit_xs, qr/our\s+\@ISA/,
+        'no our @ISA in XS output (inheritance via class_apply_attributes)');
+}
+
 done_testing();

@@ -97,7 +97,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    Perl_class_setup_stash(aTHX_ stash);';
         push @lines, '';
 
-        # 2. Add fields in order
+        # 2. Apply :isa inheritance if parent class exists
+        my $parent = $class_decl->inputs()->[1];
+        if (defined $parent) {
+            my $parent_name = $parent->value();
+            my $isa_attr = "isa($parent_name)";
+            my $escaped_attr = $self->_escape_c_string($isa_attr);
+            push @lines, '    {';
+            push @lines, "        OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";
+            push @lines, '        OP *list = newLISTOP(OP_LIST, 0, attr, NULL);';
+            push @lines, '        Perl_class_apply_attributes(aTHX_ stash, list);';
+            push @lines, '    }';
+            push @lines, '';
+        }
+
+        # 3. Add fields in order
         my $body = $class_decl->inputs()->[2];
         for my $item ($body->@*) {
             if ($item isa Chalk::Bootstrap::IR::Node::Constructor
@@ -111,11 +125,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
         push @lines, '';
 
-        # 3. Seal class (generates auto new())
+        # 4. Seal class (generates auto new())
         push @lines, '    Perl_class_seal_stash(aTHX_ stash);';
         push @lines, '';
 
-        # 4. Grab auto new(), clear GV, install shadow
+        # 5. Grab auto new(), clear GV, install shadow
         # TODO: Implement shadow constructor XSUB in Component B
         # For now, we rely on the auto-generated new() from class_seal_stash
         my $sanitized = $module_name;
