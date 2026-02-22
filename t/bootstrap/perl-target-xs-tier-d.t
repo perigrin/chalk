@@ -171,6 +171,12 @@ test_file(
     structural => [
         { pattern => qr/name\(self/, label => 'has name method' },
     ],
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            my $dce = $m->new();
+            die "name != DCE" unless $dce->name() eq 'DCE';
+        }, 'name method');
+    },
 );
 
 test_file(
@@ -323,6 +329,18 @@ test_file(
     structural => [
         { pattern => qr/emit\(self/, label => 'has emit method' },
     ],
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            my $xsub = $m->new(
+                name => 'test_func',
+                params => ['SV *self'],
+                return_type => 'SV *',
+                body => [],
+            );
+            die "name != test_func" unless $xsub->name() eq 'test_func';
+            die "return_type != SV *" unless $xsub->return_type() eq 'SV *';
+        }, 'field readers');
+    },
 );
 
 # ============================================================

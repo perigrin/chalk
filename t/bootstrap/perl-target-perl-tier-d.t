@@ -168,6 +168,13 @@ test_perl_file(
         { pattern => qr/method name/, label => 'has method name' },
         { pattern => qr/method run/, label => 'has method run' },
     ],
+    original_ns => 'Chalk::Bootstrap::Optimizer::DCE',
+    test_ns     => 'Chalk::Bootstrap::Optimizer::DCEGenD',
+    todo_eval   => 'DCE.pm depends on parent class Optimizer::Pass which may not be available',
+    behavioral  => sub ($mod) {
+        my $dce = $mod->new();
+        is($dce->name(), 'DCE', 'name returns DCE');
+    },
 );
 
 test_perl_file(
@@ -348,13 +355,25 @@ test_perl_file(
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',
-    label      => 'XS::AST::XSUB.pm',
-    structural => [
+    file        => 'lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',
+    label       => 'XS::AST::XSUB.pm',
+    structural  => [
         { pattern => qr/field \$name/, label => 'has field $name' },
         { pattern => qr/field \$params/, label => 'has field $params' },
         { pattern => qr/method emit/, label => 'has method emit' },
     ],
+    original_ns => 'Chalk::Bootstrap::Target::XS::AST::XSUB',
+    test_ns     => 'Chalk::Bootstrap::Target::XS::AST::XSUBGenD',
+    todo_eval   => 'XSUB.pm depends on parent class Node and VarDecl isa check',
+    behavioral  => sub ($mod) {
+        my $xsub = $mod->new(
+            name => 'test_func',
+            params => ['SV *self'],
+            body => [],
+        );
+        is($xsub->name(), 'test_func', 'name reader');
+        is($xsub->return_type(), 'SV *', 'return_type default');
+    },
 );
 
 # ============================================================
