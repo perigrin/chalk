@@ -93,34 +93,75 @@ sub build_and_load($ir, $module_name) {
 }
 
 # Runs a behavioral test in a forked child process to catch segfaults.
-# Failures are wrapped in TODO blocks since XS behavioral tests are still maturing.
-sub fork_test($module, $test_code, $label) {
+# Signal deaths (segfault, timeout) are always TODO-wrapped since they indicate XS issues.
+# Runtime failures (die, bad exit) are real FAILs unless todo => 'reason' is passed.
+# Accepts optional named parameters:
+#   timeout => $seconds (default 10)
+#   todo => $reason (wrap runtime failures in TODO block)
+sub fork_test($module, $test_code, $label, %opts) {
+    my $timeout = $opts{timeout} // 10;
+    my $todo_reason = $opts{todo};
+    my $outfile = File::Temp::tmpnam();
+
     my $pid = fork();
     if (!defined $pid) {
         fail("$label: fork failed: $!");
         return;
     }
     if ($pid == 0) {
-        # Redirect child output to avoid corrupting parent TAP stream
-        open STDOUT, '>', '/dev/null';
-        open STDERR, '>', '/dev/null';
-        alarm(10);
+        # Capture child output to tempfile for parent diagnostics
+        open STDOUT, '>', $outfile;
+        open STDERR, '>&', \*STDOUT;
+        # Handle SIGALRM explicitly so timeout is exit(124), not signal death
+        $SIG{ALRM} = sub { print STDERR "TIMEOUT after ${timeout}s\n"; exit(124); };
+        alarm($timeout);
         my $result = eval { $test_code->($module); 'ok' };
-        exit($@ || !defined $result ? 1 : 0);
+        if ($@ || !defined $result) {
+            print STDERR "Child died: $@\n" if $@;
+            exit(1);
+        }
+        exit(0);
     }
     waitpid($pid, 0);
     my $signal = $? & 127;
     my $exit = $? >> 8;
+
+    # Read child output for diagnostics
+    my $child_output = '';
+    if (-f $outfile) {
+        if (open my $fh, '<', $outfile) {
+            local $/;
+            $child_output = <$fh>;
+            close $fh;
+        }
+        unlink $outfile;
+    }
+
     if ($signal) {
+        # Signal death (segfault, etc.) — TODO since it's an XS/system issue
         TODO: {
             local $TODO = "$label: child died with signal $signal (segfault)";
             ok(false, "$label: behavioral test passes");
         }
-    } elsif ($exit != 0) {
+        diag "Child output:\n$child_output" if $child_output;
+    } elsif ($exit == 124) {
+        # Timeout — TODO since it indicates an XS hang or slow operation
         TODO: {
-            local $TODO = "$label: XS behavioral test fails at runtime";
+            local $TODO = "$label: child timed out after ${timeout}s";
             ok(false, "$label: behavioral test passes");
         }
+        diag "Child output:\n$child_output" if $child_output;
+    } elsif ($exit != 0) {
+        # Runtime failure — real FAIL unless caller marked as expected
+        if ($todo_reason) {
+            TODO: {
+                local $TODO = "$label: $todo_reason";
+                ok(false, "$label: behavioral test passes");
+            }
+        } else {
+            ok(false, "$label: behavioral test passes");
+        }
+        diag "Child exited $exit. Output:\n$child_output" if $child_output;
     } else {
         pass("$label: behavioral test passes in fork");
     }
