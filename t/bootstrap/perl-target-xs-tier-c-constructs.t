@@ -3,9 +3,6 @@
 use 5.42.0;
 use utf8;
 use Test::More;
-use File::Temp qw(tempdir);
-use File::Path qw(make_path);
-use File::Basename qw(dirname);
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
@@ -25,7 +22,7 @@ eval { require Module::Build; 1 }
     or plan skip_all => 'Module::Build not installed';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use TestXSHelpers qw(setup_xs_grammar build_and_load);
+use TestXSHelpers qw(setup_xs_grammar build_and_load fork_test);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::XS;
@@ -45,44 +42,6 @@ my sub parse_source_ir($source) {
     my $sem_ctx = $result->[4];
     return unless defined $sem_ctx;
     return $sem_ctx->extract();
-}
-
-# === Helper: run behavioral test in a fork (catches segfaults) ===
-
-my sub fork_test($module, $test_code, $label) {
-    my $pid = fork();
-    if (!defined $pid) {
-        fail("$label: fork failed: $!");
-        return;
-    }
-    if ($pid == 0) {
-        # Child process
-        alarm(10); # prevent hangs
-        my $result = eval { $test_code->($module); 'ok' };
-        if ($@ || !defined $result) {
-            # Print to stderr so parent can detect
-            print STDERR "CHILD_FAIL: $@\n" if $@;
-            exit(1);
-        }
-        exit(0);
-    }
-    # Parent waits
-    waitpid($pid, 0);
-    my $exit = $? >> 8;
-    my $signal = $? & 127;
-    if ($signal) {
-        TODO: {
-            local $TODO = "$label: child died with signal $signal (segfault)";
-            ok(false, "$label: behavioral test runs without segfault");
-        }
-    } elsif ($exit != 0) {
-        TODO: {
-            local $TODO = "$label: child exited with error";
-            ok(false, "$label: behavioral test passes");
-        }
-    } else {
-        pass("$label: behavioral test passes in fork");
-    }
 }
 
 # ============================================================

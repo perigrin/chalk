@@ -16,23 +16,11 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
 
 # Sets up the grammar pipeline for Perl target tests.
-# Accepts a namespace string used to rename the generated grammar module.
-# Returns ($gen_grammar) or dies on failure.
+# Delegates to the same logic as setup_xs_grammar — they are identical.
 sub setup_perl_grammar($namespace) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $raw_ir = perl_pipeline();
-    die "perl_pipeline returned undef" unless defined $raw_ir;
-
-    my $bnf_target = Chalk::Bootstrap::Target::Perl->new();
-    my $generated = $bnf_target->generate($raw_ir);
-    $generated =~ s/Chalk::Grammar::BNF::Generated/$namespace/g;
-    eval $generated;
-    die "Grammar eval failed: $@" if $@;
-
-    no strict 'refs';
-    my $grammar = "${namespace}::grammar"->();
-    die "Grammar not defined after eval" unless defined $grammar;
-    return $grammar;
+    # Reuse the XS helper's setup since the grammar setup is the same
+    require TestXSHelpers;
+    return TestXSHelpers::setup_xs_grammar($namespace);
 }
 
 # Parses a .pm file and generates Perl code from the IR.
@@ -42,6 +30,7 @@ sub parse_and_generate($gen_grammar, $file) {
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
     my $source = <$fh>;
+    close $fh;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
     my $result = $parser->parse_value($source);
@@ -63,8 +52,8 @@ sub parse_and_generate($gen_grammar, $file) {
 sub eval_module($code, $original_ns, $test_ns) {
     my $renamed = $code;
     $renamed =~ s/\Q$original_ns\E\b/$test_ns/g;
-    eval $renamed;
-    if ($@) {
+    my $ok = eval "$renamed; 1";
+    if (!$ok) {
         return (false, $@);
     }
     return (true, undef);

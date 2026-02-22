@@ -7,53 +7,18 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 
-use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
-use Chalk::Bootstrap::Perl::Target::Perl;
+use TestPerlHelpers qw(setup_perl_grammar parse_and_generate eval_module);
 
 # Build Perl grammar pipeline
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $raw_ir = perl_pipeline();
-ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
-
-my $bnf_target = Chalk::Bootstrap::Target::Perl->new();
-my $generated = $bnf_target->generate($raw_ir);
-$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TargetPerlTierCTest/g;
-eval $generated;
-is($@, '', 'generated grammar code evals cleanly') or BAIL_OUT("Cannot continue: $@");
-
-my $gen_grammar = Chalk::Grammar::Perl::TargetPerlTierCTest::grammar();
-ok(defined $gen_grammar, 'grammar objects loaded');
-
-# === Helper ===
-
-my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-
-my sub parse_and_generate($file) {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
-    local $/;
-    my $source = <$fh>;
-
-    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
-    my $result = $parser->parse_value($source);
-    return undef unless defined $result;
-
-    my $sem_ctx = $result->[4];
-    return undef unless defined $sem_ctx;
-    my $ir = $sem_ctx->extract();
-    return undef unless defined $ir;
-
-    return $perl_target->generate($ir);
-}
+my $gen_grammar = eval { setup_perl_grammar('Chalk::Grammar::Perl::TargetPerlTierCTest') };
+ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 
 # ============================================================
 # 1. ConciseOp.pm — 5 fields, 2 methods (to_string, structural_key)
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/ConciseOp.pm');
+    my $code = parse_and_generate($gen_grammar, 'lib/Chalk/Bootstrap/ConciseOp.pm');
     ok(defined $code, 'ConciseOp.pm: generated Perl code');
 
     SKIP: {
@@ -69,16 +34,18 @@ my sub parse_and_generate($file) {
         # bodies (same issue as ConciseTree et al), so compound assigns like
         # $str .= "[$type_info]" become standalone statements without their
         # surrounding if() conditional.
-        my $renamed = $code;
-        $renamed =~ s/Chalk::Bootstrap::ConciseOp\b/Chalk::Bootstrap::ConciseOpGenerated/g;
         TODO: {
             local $TODO = 'Grammar fragmentation splits if-conditions from compound assign bodies';
-            eval $renamed;
-            is($@, '', 'ConciseOp.pm: evals cleanly') or diag "Code:\n$renamed\nError: $@";
+            my ($ok, $err) = eval_module($code,
+                'Chalk::Bootstrap::ConciseOp',
+                'Chalk::Bootstrap::ConciseOpGenerated');
+            ok($ok, 'ConciseOp.pm: evals cleanly') or diag "Error: $err";
         }
 
         SKIP: {
-            skip 'ConciseOp.pm: eval not yet supported', 5 if $@;
+            # Check if eval succeeded by trying to use the class
+            my $eval_ok = eval { Chalk::Bootstrap::ConciseOpGenerated->can('new') };
+            skip 'ConciseOp.pm: eval not yet supported', 5 unless $eval_ok;
 
             my $op = Chalk::Bootstrap::ConciseOpGenerated->new(
                 name => 'const', arity => '0',
@@ -104,7 +71,7 @@ my sub parse_and_generate($file) {
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/ConciseTree.pm');
+    my $code = parse_and_generate($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree.pm');
     ok(defined $code, 'ConciseTree.pm: generated Perl code');
 
     SKIP: {
@@ -121,18 +88,20 @@ my sub parse_and_generate($file) {
         # Behavioral equivalence deferred until PostfixDeref chaining is fixed.
         TODO: {
             local $TODO = 'Method bodies use PostfixDeref and builtins that fragment in ambiguous grammar';
-            my $renamed = $code;
-            $renamed =~ s/Chalk::Bootstrap::ConciseTree\b/Chalk::Bootstrap::ConciseTreeGenerated/g;
-            eval $renamed;
-            is($@, '', 'ConciseTree.pm: evals cleanly');
+            my ($ok, $err) = eval_module($code,
+                'Chalk::Bootstrap::ConciseTree',
+                'Chalk::Bootstrap::ConciseTreeGenerated');
+            ok($ok, 'ConciseTree.pm: evals cleanly') or diag "Error: $err";
         }
 
         SKIP: {
-            skip 'ConciseTree.pm: eval not yet supported', 3;
+            my $eval_ok = eval { Chalk::Bootstrap::ConciseTreeGenerated->can('new') };
+            skip 'ConciseTree.pm: eval not yet supported', 3 unless $eval_ok;
 
             my $tree = Chalk::Bootstrap::ConciseTreeGenerated->new();
             is($tree->op_count(), 0, 'ConciseTree.pm: empty tree has 0 ops');
 
+            use Chalk::Bootstrap::ConciseOp;
             my $op = Chalk::Bootstrap::ConciseOp->new(
                 name => 'const', arity => '0',
             );
@@ -150,7 +119,7 @@ my sub parse_and_generate($file) {
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/ConciseTree/Comparator.pm');
+    my $code = parse_and_generate($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree/Comparator.pm');
     ok(defined $code, 'Comparator.pm: generated Perl code');
 
     SKIP: {
@@ -163,19 +132,22 @@ my sub parse_and_generate($file) {
         # method chains that fragment in the ambiguous grammar.
         TODO: {
             local $TODO = 'Method bodies use complex constructs that fragment in ambiguous grammar';
-            my $renamed = $code;
-            $renamed =~ s/Chalk::Bootstrap::ConciseTree::Comparator\b/Chalk::Bootstrap::ConciseTree::ComparatorGenerated/g;
-            eval $renamed;
-            is($@, '', 'Comparator.pm: evals cleanly');
+            my ($ok, $err) = eval_module($code,
+                'Chalk::Bootstrap::ConciseTree::Comparator',
+                'Chalk::Bootstrap::ConciseTree::ComparatorGenerated');
+            ok($ok, 'Comparator.pm: evals cleanly') or diag "Error: $err";
         }
 
         SKIP: {
-            skip 'Comparator.pm: eval not yet supported', 4;
+            my $eval_ok = eval { Chalk::Bootstrap::ConciseTree::ComparatorGenerated->can('new') };
+            skip 'Comparator.pm: eval not yet supported', 4 unless $eval_ok;
 
             my $cmp = Chalk::Bootstrap::ConciseTree::ComparatorGenerated->new();
+            use Chalk::Bootstrap::ConciseOp;
             my $op1 = Chalk::Bootstrap::ConciseOp->new(
                 name => 'const', arity => '0', type_info => 'IV 42',
             );
+            use Chalk::Bootstrap::ConciseTree;
             my $tree1 = Chalk::Bootstrap::ConciseTree->new(ops => [$op1]);
             my $tree2 = Chalk::Bootstrap::ConciseTree->new(ops => [$op1]);
             my $result = $cmp->compare($tree1, $tree2);
@@ -200,7 +172,7 @@ my sub parse_and_generate($file) {
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/ConciseTree/Oracle.pm');
+    my $code = parse_and_generate($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm');
     ok(defined $code, 'Oracle.pm: generated Perl code');
 
     SKIP: {
@@ -213,14 +185,15 @@ my sub parse_and_generate($file) {
         # next unless, captures that fragment in the ambiguous grammar.
         TODO: {
             local $TODO = 'Method bodies use backticks, regex, split that fragment in ambiguous grammar';
-            my $renamed = $code;
-            $renamed =~ s/Chalk::Bootstrap::ConciseTree::Oracle\b/Chalk::Bootstrap::ConciseTree::OracleGenerated/g;
-            eval $renamed;
-            is($@, '', 'Oracle.pm: evals cleanly');
+            my ($ok, $err) = eval_module($code,
+                'Chalk::Bootstrap::ConciseTree::Oracle',
+                'Chalk::Bootstrap::ConciseTree::OracleGenerated');
+            ok($ok, 'Oracle.pm: evals cleanly') or diag "Error: $err";
         }
 
         SKIP: {
-            skip 'Oracle.pm: eval not yet supported', 2;
+            my $eval_ok = eval { Chalk::Bootstrap::ConciseTree::OracleGenerated->can('new') };
+            skip 'Oracle.pm: eval not yet supported', 2 unless $eval_ok;
 
             my $oracle = Chalk::Bootstrap::ConciseTree::OracleGenerated->new();
             my $sample = <<'CONCISE';
@@ -241,7 +214,7 @@ CONCISE
 # ============================================================
 
 {
-    my $code = parse_and_generate('lib/Chalk/Bootstrap/Context.pm');
+    my $code = parse_and_generate($gen_grammar, 'lib/Chalk/Bootstrap/Context.pm');
     ok(defined $code, 'Context.pm: generated Perl code');
 
     SKIP: {
@@ -257,14 +230,15 @@ CONCISE
         # ref(), PostfixDeref that fragment in the ambiguous grammar.
         TODO: {
             local $TODO = 'Method bodies use anon sub, isa, recursion, PostfixDeref that fragment';
-            my $renamed = $code;
-            $renamed =~ s/Chalk::Bootstrap::Context\b/Chalk::Bootstrap::ContextGenerated/g;
-            eval $renamed;
-            is($@, '', 'Context.pm: evals cleanly');
+            my ($ok, $err) = eval_module($code,
+                'Chalk::Bootstrap::Context',
+                'Chalk::Bootstrap::ContextGenerated');
+            ok($ok, 'Context.pm: evals cleanly') or diag "Error: $err";
         }
 
         SKIP: {
-            skip 'Context.pm: eval not yet supported', 3;
+            my $eval_ok = eval { Chalk::Bootstrap::ContextGenerated->can('new') };
+            skip 'Context.pm: eval not yet supported', 3 unless $eval_ok;
 
             my $ctx = Chalk::Bootstrap::ContextGenerated->new(focus => 'hello');
             is($ctx->extract(), 'hello', 'Context.pm: extract returns focus');

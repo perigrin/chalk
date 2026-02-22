@@ -21,44 +21,11 @@ unless ($have_compiler) {
 eval { require Module::Build; 1 }
     or plan skip_all => 'Module::Build not installed';
 
-use TestXSHelpers qw(setup_xs_grammar parse_file_ir build_and_load);
+use TestXSHelpers qw(setup_xs_grammar parse_file_ir build_and_load fork_test);
 
 # Build Perl grammar pipeline
 my $gen_grammar = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSTierDTest') };
 ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
-
-# ============================================================
-# Helper: fork-safe behavioral test (prevents segfaults from crashing harness)
-# ============================================================
-
-my sub fork_test($module, $test_code, $label) {
-    my $pid = fork();
-    if (!defined $pid) {
-        fail("$label: fork failed: $!");
-        return;
-    }
-    if ($pid == 0) {
-        alarm(10);
-        my $result = eval { $test_code->($module); 'ok' };
-        exit($@ || !defined $result ? 1 : 0);
-    }
-    waitpid($pid, 0);
-    my $signal = $? & 127;
-    my $exit = $? >> 8;
-    if ($signal) {
-        TODO: {
-            local $TODO = "$label: child died with signal $signal (segfault)";
-            ok(false, "$label: behavioral test passes");
-        }
-    } elsif ($exit != 0) {
-        TODO: {
-            local $TODO = "$label: XS behavioral test fails at runtime";
-            ok(false, "$label: behavioral test passes");
-        }
-    } else {
-        pass("$label: behavioral test passes in fork");
-    }
-}
 
 # ============================================================
 # Helper: structural + behavioral test for a file
