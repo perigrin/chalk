@@ -17,6 +17,8 @@ use utf8;
 class TestClass {
     field $name :param :reader;
     field $age :param;
+    field $count :param = 0;
+    field $active :param = 1;
 
     method greet() {
         return "Hello";
@@ -37,7 +39,7 @@ my $ir = parse_file_ir($gen_grammar, $filename);
 ok(defined $ir, 'parse produces IR');
 
 SKIP: {
-    skip 'no IR', 11 unless defined $ir;
+    skip 'no IR', 19 unless defined $ir;
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'TestClass');
     my $xs_output = $target->generate($ir);
@@ -81,6 +83,30 @@ SKIP: {
     # Test 9: BOOT block contains new() re-installation sequence
     like($xs_output, qr/gv_fetchmethod.*TestClass_original_new.*GvCV_set.*newXS/s,
         'BOOT block contains new() re-installation sequence');
+
+    # Test 10-16: Shadow constructor with param extraction
+    like($xs_output, qr/call_sv\(\(SV\*\)TestClass_original_new, G_SCALAR\)/,
+        'shadow new() calls original_new via call_sv');
+    like($xs_output, qr/ObjectFIELDS\(obj\)/,
+        'shadow new() uses ObjectFIELDS for indexed access');
+    like($xs_output, qr/bool got_name = FALSE/,
+        'shadow new() tracks required param name');
+    like($xs_output, qr/bool got_age = FALSE/,
+        'shadow new() tracks required param age');
+    like($xs_output, qr/strEQ\(key, "name"\)/,
+        'shadow new() matches name param with strEQ');
+    like($xs_output, qr/strEQ\(key, "age"\)/,
+        'shadow new() matches age param with strEQ');
+    like($xs_output, qr/if \(!got_name\) croak/,
+        'shadow new() validates required name param');
+
+    # Test 17-19: Default value application for optional params
+    like($xs_output, qr/strEQ\(key, "count"\)/,
+        'shadow new() matches optional count param with strEQ');
+    like($xs_output, qr/if \(!got_count\).*sv_setiv\(fields\[2\], 0\)/s,
+        'shadow new() applies default 0 for count');
+    like($xs_output, qr/if \(!got_active\).*sv_setiv\(fields\[3\], 1\)/s,
+        'shadow new() applies default 1 for active');
 }
 
 done_testing();

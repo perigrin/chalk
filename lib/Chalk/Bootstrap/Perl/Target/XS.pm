@@ -148,6 +148,138 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return $str;
     }
 
+    # Emit shadow constructor XSUB with param extraction and defaults.
+    # This XSUB calls the auto-generated new() to allocate the PVOBJ,
+    # then extracts named params from @_, validates required params,
+    # and applies defaults for optional params.
+    method _emit_xs_shadow_constructor($class_decl, $sanitized, $field_map) {
+        my @lines;
+        my $body = $class_decl->inputs()->[2];
+
+        # Collect param fields with their metadata
+        my @param_fields;
+        for my $item ($body->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
+                     && $item->class() eq 'FieldDecl';
+
+            my $name_node = $item->inputs()->[0];
+            my $attrs = $item->inputs()->[1];
+            my $default = $item->inputs()->[2];
+
+            # Check for :param attribute
+            my $has_param = false;
+            if (ref($attrs) eq 'ARRAY') {
+                for my $attr ($attrs->@*) {
+                    if ($attr->inputs()->[0]->value() eq 'param') {
+                        $has_param = true;
+                        last;
+                    }
+                }
+            }
+            next unless $has_param;
+
+            my $field_name = $name_node->value();
+            $field_name =~ s/^\$//;  # Strip sigil
+            my $index = $field_map->{$field_name};
+            my $is_required = !defined $default;
+
+            push @param_fields, {
+                name => $field_name,
+                index => $index,
+                required => $is_required,
+                default => $default,
+            };
+        }
+
+        # Emit XSUB signature
+        push @lines, 'SV *';
+        push @lines, 'new(class, ...)';
+        push @lines, '    SV *class';
+        push @lines, '  CODE:';
+
+        # Call auto-generated new() to allocate PVOBJ
+        push @lines, '    {';
+        push @lines, "        if (!${sanitized}_original_new) {";
+        push @lines, '            croak("BOOT block has not run yet");';
+        push @lines, '        }';
+        push @lines, '        dSP;';
+        push @lines, '        ENTER; SAVETMPS;';
+        push @lines, '        PUSHMARK(SP);';
+        push @lines, '        XPUSHs(class);';
+        push @lines, '        PUTBACK;';
+        push @lines, "        call_sv((SV*)${sanitized}_original_new, G_SCALAR);";
+        push @lines, '        SPAGAIN;';
+        push @lines, '        RETVAL = SvREFCNT_inc(POPs);';
+        push @lines, '        PUTBACK; FREETMPS; LEAVE;';
+        push @lines, '    }';
+
+        # Extract named params and apply defaults
+        if (@param_fields) {
+            push @lines, '    {';
+            push @lines, '        SV *obj = SvRV(RETVAL);';
+            push @lines, '        SV **fields = ObjectFIELDS(obj);';
+            push @lines, '        int i;';
+
+            # Declare got_* flags for each param
+            for my $field (@param_fields) {
+                push @lines, "        bool got_$field->{name} = FALSE;";
+            }
+
+            # Check for odd number of arguments
+            push @lines, '        if ((items - 1) % 2 != 0) croak("Odd number of arguments");';
+
+            # Iterate @_ and match params
+            push @lines, '        for (i = 1; i < items; i += 2) {';
+            push @lines, '            const char *key = SvPV_nolen(ST(i));';
+
+            for my $field (@param_fields) {
+                my $name = $field->{name};
+                my $idx = $field->{index};
+                push @lines, "            if (strEQ(key, \"$name\")) { sv_setsv(fields[$idx], ST(i+1)); got_$name = TRUE; }";
+            }
+
+            push @lines, '            else { croak("Unknown parameter \'%s\'", key); }';
+            push @lines, '        }';
+
+            # Validate required params
+            for my $field (@param_fields) {
+                next unless $field->{required};
+                my $name = $field->{name};
+                push @lines, "        if (!got_$name) croak(\"Required parameter '$name' is missing\");";
+            }
+
+            # Apply defaults for optional params
+            for my $field (@param_fields) {
+                next if $field->{required};
+                my $name = $field->{name};
+                my $idx = $field->{index};
+                my $default = $field->{default};
+
+                if (defined $default && $default isa Chalk::Bootstrap::IR::Node::Constant) {
+                    my $val = $default->value();
+                    if ($val =~ /^-?\d+$/) {
+                        # Integer default
+                        push @lines, "        if (!got_$name) { sv_setiv(fields[$idx], $val); }";
+                    } elsif ($val =~ /^-?\d+\.\d+$/) {
+                        # Float default
+                        push @lines, "        if (!got_$name) { sv_setnv(fields[$idx], $val); }";
+                    } else {
+                        # String default
+                        my $escaped = $self->_escape_c_string($val);
+                        push @lines, "        if (!got_$name) { sv_setpv(fields[$idx], \"$escaped\"); }";
+                    }
+                }
+            }
+
+            push @lines, '    }';
+        }
+
+        push @lines, '  OUTPUT:';
+        push @lines, '    RETVAL';
+
+        return \@lines;
+    }
+
     # Emit the .xs file
     method _emit_xs($ir) {
         my $class_decl = $self->_find_class_decl($ir);
@@ -178,30 +310,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '';
 
         if (defined $class_decl) {
-            # Emit stub new() XSUB that delegates to auto-generated constructor
-            # TODO: Component B will replace this with full shadow constructor
+            # Build field map once for use in constructor and BOOT block
+            my $field_map = $self->_build_field_index_map($class_decl);
+
+            # Emit shadow new() XSUB with param extraction and defaults
             my $sanitized = $module_name;
             $sanitized =~ s/::/_/g;
-            push @lines, 'SV *';
-            push @lines, 'new(class, ...)';
-            push @lines, '    SV *class';
-            push @lines, '  CODE:';
-            push @lines, '    {';
-            push @lines, "        if (!${sanitized}_original_new) {";
-            push @lines, '            croak("BOOT block has not run yet");';
-            push @lines, '        }';
-            push @lines, '        dSP;';
-            push @lines, '        ENTER; SAVETMPS;';
-            push @lines, '        PUSHMARK(SP);';
-            push @lines, '        XPUSHs(class);';
-            push @lines, '        PUTBACK;';
-            push @lines, "        call_sv((SV*)${sanitized}_original_new, G_SCALAR);";
-            push @lines, '        SPAGAIN;';
-            push @lines, '        RETVAL = SvREFCNT_inc(POPs);';
-            push @lines, '        PUTBACK; FREETMPS; LEAVE;';
-            push @lines, '    }';
-            push @lines, '  OUTPUT:';
-            push @lines, '    RETVAL';
+            push @lines, $self->_emit_xs_shadow_constructor($class_decl, $sanitized, $field_map)->@*;
             push @lines, '';
 
             my $body = $class_decl->inputs()->[2];
@@ -221,7 +336,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
 
             # Emit BOOT block after XSUBs
-            my $field_map = $self->_build_field_index_map($class_decl);
             push @lines, $self->_emit_xs_boot_block($class_decl, $field_map)->@*;
         }
 
