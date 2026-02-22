@@ -56,9 +56,9 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/to_string\(/, 'ConciseOp: XS has to_string method');
         like($xs_code, qr/structural_key\(/, 'ConciseOp: XS has structural_key method');
-        # Methods should have real bodies (not just /* empty */)
-        like($xs_code, qr/hv_fetch.*name/, 'ConciseOp: to_string accesses name field');
-        like($xs_code, qr/hv_fetch.*arity/, 'ConciseOp: methods access arity field');
+        # Methods should use ObjectFIELDS for field access (not hv_fetch)
+        like($xs_code, qr/ObjectFIELDS\(SvRV\(self\)\)\[0\]/, 'ConciseOp: methods use ObjectFIELDS for name field');
+        like($xs_code, qr/ObjectFIELDS\(SvRV\(self\)\)\[1\]/, 'ConciseOp: methods use ObjectFIELDS for arity field');
 
         # Behavioral: 5 field readers
         my $op = eval { $module->new(

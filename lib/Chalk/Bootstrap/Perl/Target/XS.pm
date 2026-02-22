@@ -9,6 +9,7 @@ use Chalk::Bootstrap::Target;
 
 class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;
+    field $field_map;  # hashref: field name => index (set during _emit_xs)
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -232,10 +233,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, '        for (i = 1; i < items; i += 2) {';
             push @lines, '            const char *key = SvPV_nolen(ST(i));';
 
+            my $first = true;
             for my $field (@param_fields) {
                 my $name = $field->{name};
                 my $idx = $field->{index};
-                push @lines, "            if (strEQ(key, \"$name\")) { sv_setsv(fields[$idx], ST(i+1)); got_$name = TRUE; }";
+                my $prefix = $first ? 'if' : 'else if';
+                push @lines, "            $prefix (strEQ(key, \"$name\")) { sv_setsv(fields[$idx], ST(i+1)); got_$name = TRUE; }";
+                $first = false;
             }
 
             push @lines, '            else { croak("Unknown parameter \'%s\'", key); }';
@@ -310,8 +314,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '';
 
         if (defined $class_decl) {
-            # Build field map once for use in constructor and BOOT block
-            my $field_map = $self->_build_field_index_map($class_decl);
+            # Build field map once and store it for use throughout code generation
+            $field_map = $self->_build_field_index_map($class_decl);
 
             # Emit shadow new() XSUB with param extraction and defaults
             my $sanitized = $module_name;
@@ -661,7 +665,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($declared_vars && $declared_vars->{"param:$var"}) {
                 return $var;
             }
-            # Field access: fetch from self hash
+            # Field access: use ObjectFIELDS indexed access if this is a field
+            if ($field_map && exists $field_map->{$var}) {
+                my $idx = $field_map->{$var};
+                return "ObjectFIELDS(SvRV(self))[$idx]";
+            }
+            # Package global or unknown variable — use old hv_fetch pattern
             my $escaped = $self->_escape_c_string($var);
             return "((svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0)) ? *svp : &PL_sv_undef)";
         }
@@ -686,7 +695,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit an InterpolatedString as a C expression building an SV via
     # sv_catpvs/sv_catsv. Variables are resolved from the declared_vars
-    # (local C vars) or the blessed hash (field access).
+    # (local C vars) or ObjectFIELDS (field access).
     method _emit_xs_interp_expr($node, $declared_vars) {
         my $parts = $node->inputs()->[0];
         return '&PL_sv_undef' unless $parts->@*;
@@ -708,6 +717,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $src = "get_sv(\"::_c$var\", GV_ADD)";
                 } elsif ($declared_vars && $declared_vars->{$var}) {
                     $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
+                } elsif ($field_map && exists $field_map->{$var}) {
+                    my $idx = $field_map->{$var};
+                    $src = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
                     my $escaped = $self->_escape_c_string($var);
                     $src = "(svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0)) ? *svp : &PL_sv_undef";
@@ -1195,18 +1207,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         my $var_name = $name_node->value();
         $var_name =~ s/^\$//;  # Strip sigil for hash key and method name
-        my $escaped_key = $self->_escape_c_string($var_name);
+
+        # Get field index from field_map
+        my $idx = $field_map->{$var_name} // 0;
 
         my @lines;
         push @lines, 'SV *';
         push @lines, "${var_name}(self)";
         push @lines, '    SV *self';
         push @lines, '  CODE:';
-        push @lines, '    {';
-        push @lines, '        HV *hash = (HV*)SvRV(self);';
-        push @lines, "        SV **svp = hv_fetch(hash, \"$escaped_key\", " . bytes::length($var_name) . ", 0);";
-        push @lines, '        RETVAL = (svp && *svp) ? SvREFCNT_inc(*svp) : &PL_sv_undef;';
-        push @lines, '    }';
+        push @lines, "    RETVAL = newSVsv(ObjectFIELDS(SvRV(self))[$idx]);";
         push @lines, '  OUTPUT:';
         push @lines, '    RETVAL';
 
@@ -1214,7 +1224,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     }
 
     # Emit an XSUB that returns an InterpolatedString via C string concatenation.
-    # Variables are read from the blessed hash via hv_fetch.
+    # Variables are read from ObjectFIELDS for field access.
     method _emit_xs_interp_return($method_name, $interp_node) {
         my $parts = $interp_node->inputs()->[0];
         my @lines;
@@ -1223,20 +1233,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, "${method_name}(self)";
         push @lines, '    SV *self';
         push @lines, '  CODE:';
-        push @lines, '    {';
-        push @lines, '        HV *hash = (HV*)SvRV(self);';
-
-        # Declare SV* variables for each field reference
-        my %seen_vars;
-        for my $part ($parts->@*) {
-            if ($part->const_type() eq 'variable') {
-                my $var = $part->value();
-                $var =~ s/^\$//;
-                next if $seen_vars{$var}++;
-                my $escaped = $self->_escape_c_string($var);
-                push @lines, "        SV **${var}_svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0);";
-            }
-        }
 
         # Build the result SV by concatenation
         my $first = true;
@@ -1244,24 +1240,32 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($part->const_type() eq 'variable') {
                 my $var = $part->value();
                 $var =~ s/^\$//;
+                my $src;
+                if ($field_map && exists $field_map->{$var}) {
+                    my $idx = $field_map->{$var};
+                    $src = "ObjectFIELDS(SvRV(self))[$idx]";
+                } else {
+                    # Fallback for non-field variables (shouldn't happen in simple cases)
+                    my $escaped = $self->_escape_c_string($var);
+                    $src = "get_sv(\"${module_name}::$escaped\", GV_ADD)";
+                }
                 if ($first) {
-                    push @lines, "        RETVAL = newSVsv(${var}_svp ? *${var}_svp : &PL_sv_undef);";
+                    push @lines, "    RETVAL = newSVsv($src);";
                     $first = false;
                 } else {
-                    push @lines, "        sv_catsv(RETVAL, ${var}_svp ? *${var}_svp : &PL_sv_undef);";
+                    push @lines, "    sv_catsv(RETVAL, $src);";
                 }
             } else {
                 my $lit = $self->_escape_c_string($part->value());
                 if ($first) {
-                    push @lines, "        RETVAL = newSVpvs(\"$lit\");";
+                    push @lines, "    RETVAL = newSVpvs(\"$lit\");";
                     $first = false;
                 } else {
-                    push @lines, "        sv_catpvs(RETVAL, \"$lit\");";
+                    push @lines, "    sv_catpvs(RETVAL, \"$lit\");";
                 }
             }
         }
 
-        push @lines, '    }';
         push @lines, '  OUTPUT:';
         push @lines, '    RETVAL';
 

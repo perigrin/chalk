@@ -23,6 +23,10 @@ class TestClass {
     method greet() {
         return "Hello";
     }
+
+    method greet_name() {
+        return "Hello, $name";
+    }
 }
 };
 
@@ -39,7 +43,7 @@ my $ir = parse_file_ir($gen_grammar, $filename);
 ok(defined $ir, 'parse produces IR');
 
 SKIP: {
-    skip 'no IR', 19 unless defined $ir;
+    skip 'no IR', 28 unless defined $ir;
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'TestClass');
     my $xs_output = $target->generate($ir);
@@ -107,6 +111,30 @@ SKIP: {
         'shadow new() applies default 0 for count');
     like($xs_output, qr/if \(!got_active\).*sv_setiv\(fields\[3\], 1\)/s,
         'shadow new() applies default 1 for active');
+
+    # Test 20-23: Field access using ObjectFIELDS (Component C)
+    unlike($xs_output, qr/hv_fetch\(hash, "name"/,
+        'field access does NOT use hv_fetch for name field');
+    like($xs_output, qr/ObjectFIELDS\(SvRV\(self\)\)\[0\]/,
+        'field access uses ObjectFIELDS[0] for name field');
+
+    # Test 24-25: Field reader accessor uses ObjectFIELDS
+    unlike($xs_output, qr/name\(self\).*hv_fetch\(hash, "name"/s,
+        'name() reader does NOT use hv_fetch');
+    like($xs_output, qr/name\(self\).*newSVsv\(ObjectFIELDS\(SvRV\(self\)\)\[0\]\)/s,
+        'name() reader uses ObjectFIELDS[0]');
+
+    # Test 26: Method body no longer requires hash = (HV*)SvRV(self) for field-only methods
+    # Note: greet() is field-free so it won't have hash var; we'll test with a field-using method
+    # For now, check that name() reader doesn't need hash var
+    unlike($xs_output, qr/name\(self\).*HV \*hash = \(HV\*\)SvRV\(self\)/s,
+        'name() reader does NOT need hash variable');
+
+    # Test 27-28: Interpolated string with field uses ObjectFIELDS
+    unlike($xs_output, qr/greet_name.*hv_fetch\(hash, "name"/s,
+        'greet_name() interpolation does NOT use hv_fetch for name field');
+    like($xs_output, qr/greet_name.*ObjectFIELDS\(SvRV\(self\)\)\[0\]/s,
+        'greet_name() interpolation uses ObjectFIELDS[0] for name field');
 }
 
 done_testing();
