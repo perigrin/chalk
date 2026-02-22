@@ -16,7 +16,7 @@ use utf8;
 
 class TestClass {
     field $name :param :reader;
-    field $age :param;
+    field $age :param :writer;
     field $count :param = 0;
     field $active :param = 1;
 
@@ -43,7 +43,7 @@ my $ir = parse_file_ir($gen_grammar, $filename);
 ok(defined $ir, 'parse produces IR');
 
 SKIP: {
-    skip 'no IR', 28 unless defined $ir;
+    skip 'no IR', 32 unless defined $ir;
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'TestClass');
     my $xs_output = $target->generate($ir);
@@ -135,6 +135,16 @@ SKIP: {
         'greet_name() interpolation does NOT use hv_fetch for name field');
     like($xs_output, qr/greet_name.*ObjectFIELDS\(SvRV\(self\)\)\[0\]/s,
         'greet_name() interpolation uses ObjectFIELDS[0] for name field');
+
+    # Test 29-32: Writer accessor generation for :writer fields
+    like($xs_output, qr/set_age\(self, value\)/,
+        'XS contains set_age writer method signature');
+    like($xs_output, qr/void\s+set_age\(self, value\)/,
+        'set_age writer returns void');
+    like($xs_output, qr/SV \*self.*SV \*value/s,
+        'set_age writer has self and value parameters');
+    like($xs_output, qr/sv_setsv\(ObjectFIELDS\(SvRV\(self\)\)\[1\], value\)/,
+        'set_age writer uses sv_setsv with ObjectFIELDS[1]');
 }
 
 done_testing();

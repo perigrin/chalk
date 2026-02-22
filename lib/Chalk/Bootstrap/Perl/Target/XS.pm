@@ -332,6 +332,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         push @lines, @reader_lines;
                         push @lines, '';
                     }
+                    my @writer_lines = $self->_emit_xs_field_writer($item)->@*;
+                    if (@writer_lines) {
+                        push @lines, @writer_lines;
+                        push @lines, '';
+                    }
                 } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                         && $item->class() eq 'MethodDecl') {
                     push @lines, $self->_emit_xs_method($item)->@*;
@@ -1219,6 +1224,40 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, "    RETVAL = newSVsv(ObjectFIELDS(SvRV(self))[$idx]);";
         push @lines, '  OUTPUT:';
         push @lines, '    RETVAL';
+
+        return \@lines;
+    }
+
+    # Emit an XSUB field writer for a FieldDecl with :writer attribute
+    method _emit_xs_field_writer($field_decl) {
+        my $name_node = $field_decl->inputs()->[0];
+        my $attrs     = $field_decl->inputs()->[1];
+
+        # Only emit writer if :writer attribute present
+        my $has_writer = false;
+        if (ref($attrs) eq 'ARRAY') {
+            for my $attr ($attrs->@*) {
+                if ($attr->inputs()->[0]->value() eq 'writer') {
+                    $has_writer = true;
+                    last;
+                }
+            }
+        }
+        return [] unless $has_writer;
+
+        my $var_name = $name_node->value();
+        $var_name =~ s/^\$//;  # Strip sigil for method name
+
+        # Get field index from field_map
+        my $idx = $field_map->{$var_name} // 0;
+
+        my @lines;
+        push @lines, 'void';
+        push @lines, "set_${var_name}(self, value)";
+        push @lines, '    SV *self';
+        push @lines, '    SV *value';
+        push @lines, '  CODE:';
+        push @lines, "    sv_setsv(ObjectFIELDS(SvRV(self))[$idx], value);";
 
         return \@lines;
     }
