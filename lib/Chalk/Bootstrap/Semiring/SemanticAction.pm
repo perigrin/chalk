@@ -124,7 +124,9 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # Get the inherited CFG state for a context.
     # Returns the direct cfg_state if available, falls back to one() defaults.
     method inherited_cfg_state($ctx) {
-        return $_cfg_state{refaddr($ctx)} // $_cfg_state{refaddr(_one_ctx())};
+        my $state = $_cfg_state{refaddr($ctx)};
+        return $state if defined $state;
+        return $_cfg_state{refaddr(_one_ctx())};
     }
 
     # Build scope by walking the Context tree post-parse.
@@ -246,12 +248,37 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # Multiply combines two contexts in sequence.
     # Creates a parent context with both as children, hash-consed by child identity.
+    # Propagates cfg_state from children: prefer right (later in sequence), fall back to left.
     method multiply($left, $right) {
         # Propagate zero
         return undef if !defined $left;
         return undef if !defined $right;
 
-        return _mul_ctx($left, $right);
+        my $result = _mul_ctx($left, $right);
+
+        # Propagate cfg_state through multiply chains so that parent rules
+        # see the most recent control/scope state from their children.
+        if (!exists $_cfg_state{refaddr($result)}) {
+            my $right_state = $_cfg_state{refaddr($right)};
+            my $left_state = $_cfg_state{refaddr($left)};
+            # Prefer the more advanced CFG state (non-Start over Start).
+            # Right is later in sequence, but whitespace/punctuation rules
+            # carry Start state which should not overwrite a Region/If from left.
+            my $inherited;
+            if (defined $right_state && defined $left_state) {
+                if ($left_state->{control}->operation() ne 'Start'
+                    && $right_state->{control}->operation() eq 'Start') {
+                    $inherited = $left_state;
+                } else {
+                    $inherited = $right_state;
+                }
+            } else {
+                $inherited = $right_state // $left_state;
+            }
+            $_cfg_state{refaddr($result)} = $inherited if defined $inherited;
+        }
+
+        return $result;
     }
 
     # on_scan: create a hash-consed Context for the matched text and multiply
@@ -323,6 +350,31 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # should disambiguate before reaching here. FilterComposite picks left
         # as a deterministic tie-break when no semiring expresses a preference.
         return [$left, $right];
+    }
+
+    # Post-merge hook: transfer cfg_state from loser to winner when the winner
+    # lacks state that the loser has. This fixes the Earley stale-value merge
+    # problem where add() picks an older value that predates a cfg_state update.
+    method on_merge($winner, $loser) {
+        return unless defined $winner && defined $loser;
+        my $winner_state = $_cfg_state{refaddr($winner)};
+        my $loser_state = $_cfg_state{refaddr($loser)};
+
+        # If the loser has cfg_state but the winner doesn't, transfer it
+        if (defined $loser_state && !defined $winner_state) {
+            $_cfg_state{refaddr($winner)} = $loser_state;
+            return;
+        }
+
+        # If both have cfg_state, prefer the one with a non-Start control
+        # (the one that has been updated by an action method)
+        if (defined $loser_state && defined $winner_state) {
+            if ($winner_state->{control}->operation() eq 'Start'
+                && $loser_state->{control}->operation() ne 'Start') {
+                $_cfg_state{refaddr($winner)} = $loser_state;
+            }
+        }
+        return;
     }
 
     # should_scan: gate for scan operation, called after regex match succeeds

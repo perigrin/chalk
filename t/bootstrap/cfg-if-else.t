@@ -126,7 +126,22 @@ SKIP: {
         ok($found_if_stmt, 'IfStmt Constructor found in tree (backward compat)');
     }
 
-    # --- Test 4: build_cfg also accumulates VarDecl scope ---
+    # --- Test 4: cfg_state propagates through parse via on_merge ---
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $result = $parser->parse_value('if (1) { 2 } else { 3 }');
+        ok(defined $result, 'if/else parses for cfg_state check');
+
+        my $sem_ctx = $result->[4];
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state propagated to outermost context');
+        is($state->{control}->operation(), 'Region',
+            'cfg_state control is Region (propagated through Earley merges)');
+    }
+
+    # --- Test 5: build_cfg also accumulates VarDecl scope ---
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();

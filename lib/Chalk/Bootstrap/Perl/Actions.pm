@@ -1730,12 +1730,35 @@ class Chalk::Bootstrap::Perl::Actions {
             );
         }
 
-        return $factory->make('Constructor',
+        my $if_stmt = $factory->make('Constructor',
             'class'     => 'IfStmt',
             condition => $condition,
             then_body => $then_body,
             else_body => $else_body,
         );
+
+        # Build CFG nodes: If/Proj/Region for control flow
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my $if_node = $factory->make('If',
+                    control   => $state->{control},
+                    condition => $condition,
+                );
+                my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+                my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+                my $region = $factory->make('Region',
+                    controls => [$true_proj, $false_proj],
+                );
+                $sa->update_cfg({
+                    control => $region,
+                    scope   => $state->{scope},
+                });
+            }
+        }
+
+        return $if_stmt;
     }
 
     # §5 ElsifChain ::= /elsif\b/ _ ParenExpr _ Block

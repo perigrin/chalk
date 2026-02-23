@@ -135,15 +135,26 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         # Determine which tuple wins by scanning for semiring preferences.
         my $verdict = $self->_filter_compare($left, $right);
 
+        my ($winner, $loser);
         if ($verdict eq 'right_loses') {
-            return $left;
-        }
-        if ($verdict eq 'left_loses') {
-            return $right;
+            ($winner, $loser) = ($left, $right);
+        } elsif ($verdict eq 'left_loses') {
+            ($winner, $loser) = ($right, $left);
+        } else {
+            # No semiring expressed a preference: deterministic tie-break picks left.
+            ($winner, $loser) = ($left, $right);
         }
 
-        # No semiring expressed a preference: deterministic tie-break picks left.
-        return $left;
+        # Post-merge hook: allow semirings to transfer side-table state from
+        # loser to winner. This fixes the Earley stale-value merge problem
+        # where cfg_state updates are lost when add() picks the older value.
+        for my $i (0 .. $semirings->$#*) {
+            if ($semirings->[$i]->can('on_merge')) {
+                $semirings->[$i]->on_merge($winner->[$i], $loser->[$i]);
+            }
+        }
+
+        return $winner;
     }
 
     # Delegate on_scan to each component with its own slice of the value.
