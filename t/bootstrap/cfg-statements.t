@@ -235,7 +235,7 @@ SKIP: {
     }
 }
 
-# --- Test 5: Full pipeline: generate() uses cfg_state for if/else ---
+# --- Test 5: Full pipeline round-trip: generate_with_cfg produces valid Perl ---
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
@@ -252,7 +252,7 @@ SKIP: {
     my $semiring2 = $parser2->semiring();
     my $sa2 = $semiring2->semirings()->[4];
 
-    # Parse if/else and get both IR and SemanticAction context
+    # Parse if/else and verify generate_with_cfg produces valid Perl with if/else
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring2->reset_cache();
@@ -264,12 +264,32 @@ SKIP: {
         my $ir_node = $sem_ctx->extract();
         ok(defined $ir_node, 'IR node extracted');
 
-        # generate_with_cfg should use cfg_state for control flow
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my $code = $perl_target->generate_with_cfg($ir_node, $sa2, $sem_ctx);
         ok(defined $code, 'generate_with_cfg produces code');
         like($code, qr/if\s*\(/, 'generated code contains if statement');
         like($code, qr/else/, 'generated code contains else');
+        like($code, qr/'42'/, 'generated code contains then body');
+        like($code, qr/'99'/, 'generated code contains else body');
+    }
+
+    # Parse if-without-else and verify no spurious else block
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring2->reset_cache();
+
+        my $result = $parser2->parse_value('if (1) { 42 }');
+        ok(defined $result, 'if-no-else parses for generate test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        ok(defined $ir_node, 'IR node extracted for if-no-else');
+
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $code = $perl_target->generate_with_cfg($ir_node, $sa2, $sem_ctx);
+        ok(defined $code, 'generate_with_cfg produces code for if-no-else');
+        like($code, qr/if\s*\(/, 'generated code contains if');
+        like($code, qr/'42'/, 'generated code contains then body');
     }
 
     # Parse foreach and verify cfg_state dispatch
