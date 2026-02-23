@@ -5,6 +5,8 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Context;
+use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::IR::NodeFactory;
 
 class Chalk::Bootstrap::Semiring::SemanticAction {
     field $actions :param = undef;
@@ -14,17 +16,31 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # can detect identity collapse via refaddr equality.
     my %_ctx_cache;
 
+    # Side-table mapping Context refaddr to {control, scope} state.
+    # Keeps the Context tree clean (focus remains bare IR node or undef)
+    # while threading CFG state for Sea of Nodes construction.
+    my %_cfg_state;
+
     # Singleton for one(): a Context with undef focus and no children.
     my $_one_singleton;
 
     # Return a singleton one() Context, creating it on first call.
+    # Also initializes the cfg_state side-table entry for this context.
     my sub _one_ctx() {
-        return ($_one_singleton //= Chalk::Bootstrap::Context->new(
-            focus    => undef,
-            children => [],
-            position => 0,
-            rule     => undef,
-        ));
+        if (!defined $_one_singleton) {
+            $_one_singleton = Chalk::Bootstrap::Context->new(
+                focus    => undef,
+                children => [],
+                position => 0,
+                rule     => undef,
+            );
+            my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+            $_cfg_state{refaddr($_one_singleton)} = {
+                control => $factory->make('Start'),
+                scope   => Chalk::Bootstrap::Scope->new(),
+            };
+        }
+        return $_one_singleton;
     }
 
     # Return a hash-consed scan leaf Context for the given text and position.
@@ -66,7 +82,21 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # because they reference different Context refaddrs.
     method reset_cache() {
         %_ctx_cache = ();
+        %_cfg_state = ();
         $_one_singleton = undef;
+    }
+
+    # Retrieve CFG state (control token + scope) for a Context.
+    # Returns hashref {control => $node, scope => $scope} or undef if no state.
+    method cfg_state($ctx) {
+        return $_cfg_state{refaddr($ctx)};
+    }
+
+    # Set CFG state for a Context. Used by action methods to update
+    # control flow and scope as they build Sea of Nodes IR.
+    method set_cfg_state($ctx, $state) {
+        $_cfg_state{refaddr($ctx)} = $state;
+        return;
     }
 
     # Check if value is zero (undef)
@@ -111,12 +141,27 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         }
 
         # Set the rule name on the result context
-        return Chalk::Bootstrap::Context->new(
+        my $result_ctx = Chalk::Bootstrap::Context->new(
             focus    => $result->extract(),
             children => $result->children(),
             position => $result->position(),
             rule     => $rule_name,
         );
+
+        # Propagate CFG state: inherit from the rightmost child that has state,
+        # unless an action explicitly set state on the result context.
+        if (!exists $_cfg_state{refaddr($result_ctx)}) {
+            my $parent_state;
+            for my $child ($value->children()->@*) {
+                my $child_state = $_cfg_state{refaddr($child)};
+                $parent_state = $child_state if defined $child_state;
+            }
+            # Fall back to one() state if no child has state
+            $parent_state //= $_cfg_state{refaddr(_one_ctx())};
+            $_cfg_state{refaddr($result_ctx)} = $parent_state if defined $parent_state;
+        }
+
+        return $result_ctx;
     }
 
     # Add combines alternative derivations, returning an arrayref of survivors.
