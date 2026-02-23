@@ -186,6 +186,52 @@ SKIP: {
         is(ref($state->{then_stmts}), 'ARRAY', 'then_stmts is array');
         ok(defined $state->{if_node}, 'if_node present for if-without-else');
     }
+
+    # --- ElsifChain stores body statements and has its own if_node ---
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $result = $parser->parse_value('if (1) { 42 } elsif (2) { 99 } else { 0 }');
+        ok(defined $result, 'if/elsif/else parses');
+
+        my $sem_ctx = $result->[4];
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state exists after if/elsif/else');
+
+        # The outer if should have then_stmts and if_node
+        ok(defined $state->{then_stmts}, 'outer if has then_stmts');
+        ok(defined $state->{if_node}, 'outer if has if_node');
+        is($state->{if_node}->operation(), 'If', 'outer if_node is If');
+    }
+
+    # --- ForeachStatement stores body_stmts and loop structure ---
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $result = $parser->parse_value('for my $x (1, 2, 3) { $x }');
+        ok(defined $result, 'foreach parses');
+
+        my $sem_ctx = $result->[4];
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state exists after foreach');
+
+        my $control = $state->{control};
+        is($control->operation(), 'Region', 'control is Region after foreach');
+
+        # Verify loop structure stored
+        ok(defined $state->{body_stmts}, 'body_stmts present in cfg_state');
+        is(ref($state->{body_stmts}), 'ARRAY', 'body_stmts is array');
+        ok(defined $state->{loop}, 'loop present in cfg_state');
+        is($state->{loop}->operation(), 'Loop', 'loop is Loop');
+        ok(defined $state->{loop_if}, 'loop_if present');
+        is($state->{loop_if}->operation(), 'If', 'loop_if is If');
+        ok(defined $state->{body_proj}, 'body_proj present');
+        ok(defined $state->{exit_proj}, 'exit_proj present');
+        ok(defined $state->{iterator}, 'iterator present');
+        ok(exists $state->{list}, 'list key exists in cfg_state');
+    }
 }
 
 done_testing();

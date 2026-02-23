@@ -1802,8 +1802,13 @@ class Chalk::Bootstrap::Perl::Actions {
                     controls => [$true_proj, $false_proj],
                 );
                 $sa->update_cfg({
-                    control => $region,
-                    scope   => $state->{scope},
+                    control    => $region,
+                    scope      => $state->{scope},
+                    then_stmts => $then_body,
+                    else_stmts => $else_body,
+                    if_node    => $if_node,
+                    true_proj  => $true_proj,
+                    false_proj => $false_proj,
                 });
             }
         }
@@ -1916,8 +1921,15 @@ class Chalk::Bootstrap::Perl::Actions {
                     controls => [$exit_proj],
                 );
                 $sa->update_cfg({
-                    control => $region,
-                    scope   => $state->{scope},
+                    control    => $region,
+                    scope      => $state->{scope},
+                    body_stmts => $body,
+                    loop       => $loop,
+                    loop_if    => $if_node,
+                    body_proj  => $body_proj,
+                    exit_proj  => $exit_proj,
+                    iterator   => $iterator,
+                    list       => $list,
                 });
             }
         }
