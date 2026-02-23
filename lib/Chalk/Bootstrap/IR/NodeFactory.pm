@@ -11,6 +11,11 @@ class Chalk::Bootstrap::IR::NodeFactory {
     use Chalk::Bootstrap::IR::Node::Return;
     use Chalk::Bootstrap::IR::Node::Constant;
     use Chalk::Bootstrap::IR::Node::Constructor;
+    use Chalk::Bootstrap::IR::Node::If;
+    use Chalk::Bootstrap::IR::Node::Proj;
+    use Chalk::Bootstrap::IR::Node::Region;
+    use Chalk::Bootstrap::IR::Node::Phi;
+    use Chalk::Bootstrap::IR::Node::Loop;
 
     # Singleton instance
     my $instance;
@@ -24,6 +29,11 @@ class Chalk::Bootstrap::IR::NodeFactory {
         Start => [],
         Return => ['value'],
         Constant => [],  # Constant has attributes, not inputs
+        If => ['control', 'condition'],
+        Proj => ['source'],
+        Region => ['controls'],
+        Phi => ['region', 'values'],
+        Loop => ['entry_ctrl', 'backedge_ctrl'],
         'Constructor:Symbol'     => ['type', 'value', 'quantifier'],
         'Constructor:Expression' => ['elements'],
         'Constructor:Rule'       => ['name', 'expressions'],
