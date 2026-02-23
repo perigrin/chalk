@@ -116,4 +116,76 @@ use Chalk::Bootstrap::Scope;
     is($state->{list}, $list_node, 'list stored');
 }
 
+# --- Test 4: IfStatement populates cfg_state with body statements (integration) ---
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use Chalk::Bootstrap::Target::Perl;
+
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $ir = perl_pipeline();
+
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgStmtTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::CfgStmtTest::grammar();
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser;
+
+    my $semiring = $parser->semiring();
+    my $sa = $semiring->semirings()->[4];
+    ok($sa isa Chalk::Bootstrap::Semiring::SemanticAction, 'got SemanticAction from parser');
+
+    # --- IfStatement stores then_stmts and else_stmts ---
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $result = $parser->parse_value('if (1) { 42 } else { 99 }');
+        ok(defined $result, 'if/else parses');
+
+        my $sem_ctx = $result->[4];
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state exists after if/else');
+
+        my $control = $state->{control};
+        is($control->operation(), 'Region', 'control is Region after if/else');
+
+        # Verify IfStatement stored body statements
+        ok(defined $state->{then_stmts}, 'then_stmts present in cfg_state');
+        ok(defined $state->{else_stmts}, 'else_stmts present in cfg_state');
+        is(ref($state->{then_stmts}), 'ARRAY', 'then_stmts is array');
+        is(ref($state->{else_stmts}), 'ARRAY', 'else_stmts is array');
+
+        # Verify CFG node references stored
+        ok(defined $state->{if_node}, 'if_node present in cfg_state');
+        is($state->{if_node}->operation(), 'If', 'if_node is If');
+        ok(defined $state->{true_proj}, 'true_proj present');
+        ok(defined $state->{false_proj}, 'false_proj present');
+        is($state->{true_proj}->operation(), 'Proj', 'true_proj is Proj');
+        is($state->{false_proj}->operation(), 'Proj', 'false_proj is Proj');
+    }
+
+    # --- IfStatement without else stores then_stmts only ---
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $result = $parser->parse_value('if (1) { 42 }');
+        ok(defined $result, 'if without else parses');
+
+        my $sem_ctx = $result->[4];
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state exists after if');
+
+        ok(defined $state->{then_stmts}, 'then_stmts present for if-without-else');
+        is(ref($state->{then_stmts}), 'ARRAY', 'then_stmts is array');
+        ok(defined $state->{if_node}, 'if_node present for if-without-else');
+    }
+}
+
 done_testing();

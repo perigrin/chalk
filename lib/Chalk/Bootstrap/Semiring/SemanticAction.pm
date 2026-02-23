@@ -158,16 +158,18 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             if (defined $right_state && defined $left_state) {
                 my $l_ctrl = $left_state->{control}->operation();
                 my $r_ctrl = $right_state->{control}->operation();
-                # Pick the more advanced control token
-                my $control;
+                # Pick the more advanced control token and preserve
+                # all extra fields (then_stmts, if_node, etc.) from
+                # the side with the more advanced control.
+                my $base;
                 if ($l_ctrl ne 'Start' && $r_ctrl eq 'Start') {
-                    $control = $left_state->{control};
+                    $base = $left_state;
                 } else {
-                    $control = $right_state->{control};
+                    $base = $right_state;
                 }
                 # Merge scopes: left's bindings + right's bindings
                 my $merged_scope = $left_state->{scope}->merge($right_state->{scope});
-                $inherited = { control => $control, scope => $merged_scope };
+                $inherited = { $base->%*, scope => $merged_scope };
             } else {
                 $inherited = $right_state // $left_state;
             }
@@ -268,16 +270,18 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         if (defined $loser_state && defined $winner_state) {
             my $w_ctrl = $winner_state->{control}->operation();
             my $l_ctrl = $loser_state->{control}->operation();
-            my $control;
+            # Pick the side with the more advanced control and preserve
+            # all extra fields (then_stmts, if_node, etc.)
+            my $base;
             if ($w_ctrl eq 'Start' && $l_ctrl ne 'Start') {
-                $control = $loser_state->{control};
+                $base = $loser_state;
             } else {
-                $control = $winner_state->{control};
+                $base = $winner_state;
             }
             my $merged_scope = $winner_state->{scope}->merge($loser_state->{scope});
             $_cfg_state{refaddr($winner)} = {
-                control => $control,
-                scope   => $merged_scope,
+                $base->%*,
+                scope => $merged_scope,
             };
         }
         return;
