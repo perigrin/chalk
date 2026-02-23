@@ -1539,4 +1539,39 @@ Module::Build->new(
 )->create_build_script;
 ];
     }
+
+    # Emit C code from a cfg_state entry.
+    # Dispatches to emit_cfg_if or emit_cfg_loop based on which CFG node
+    # references are present in the state.
+    # Returns undef if the state has no control flow structure to emit.
+    method emit_from_cfg_state($sa, $ctx, $declared_vars) {
+        my $state = $sa->cfg_state($ctx);
+        return unless defined $state;
+
+        # If/else: cfg_state has if_node
+        if (defined $state->{if_node}) {
+            return $self->emit_cfg_if(
+                $state->{if_node},
+                $state->{true_proj},
+                $state->{false_proj},
+                $declared_vars,
+                $state->{then_stmts} // [],
+                $state->{else_stmts} // [],
+            );
+        }
+
+        # Loop: cfg_state has loop
+        if (defined $state->{loop}) {
+            return $self->emit_cfg_loop(
+                $state->{loop},
+                $state->{loop_if},
+                $state->{body_proj},
+                $state->{exit_proj},
+                $declared_vars,
+                $state->{body_stmts} // [],
+            );
+        }
+
+        return;
+    }
 }
