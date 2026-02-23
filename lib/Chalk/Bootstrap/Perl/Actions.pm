@@ -5,6 +5,7 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -1175,11 +1176,26 @@ class Chalk::Bootstrap::Perl::Actions {
             );
         }
 
-        return $factory->make('Constructor',
+        my $var_decl = $factory->make('Constructor',
             'class'       => 'VarDecl',
             variable    => $var_name,
             initializer => undef,
         );
+
+        # Update CFG scope with the new variable binding
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my $new_scope = $state->{scope}->define($var_name->value(), $var_decl);
+                $sa->update_cfg({
+                    control => $state->{control},
+                    scope   => $new_scope,
+                });
+            }
+        }
+
+        return $var_decl;
     }
 
     # §13 ParenExpr — transparent

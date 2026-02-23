@@ -21,6 +21,15 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # while threading CFG state for Sea of Nodes construction.
     my %_cfg_state;
 
+    # Pending CFG state update from action methods. Action methods call
+    # update_cfg() to request a state change; on_complete applies it to the
+    # result context after the action returns.
+    my $_pending_cfg_update;
+
+    # The active SemanticAction instance during on_complete. Action methods
+    # access this via current_instance() to call cfg_state/update_cfg.
+    my $_current_instance;
+
     # Singleton for one(): a Context with undef focus and no children.
     my $_one_singleton;
 
@@ -99,6 +108,51 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return;
     }
 
+    # Request a CFG state update from within an action method.
+    # Called by Actions.pm during extend(); on_complete applies the update
+    # to the result context after the action returns.
+    method update_cfg($state) {
+        $_pending_cfg_update = $state;
+        return;
+    }
+
+    # Class method: return the SemanticAction instance currently executing
+    # an on_complete action. Allows action methods in Actions.pm to access
+    # cfg_state/update_cfg without needing a reference to the semiring.
+    sub current_instance { return $_current_instance }
+
+    # Get the inherited CFG state for a context.
+    # Returns the direct cfg_state if available, falls back to one() defaults.
+    method inherited_cfg_state($ctx) {
+        return $_cfg_state{refaddr($ctx)} // $_cfg_state{refaddr(_one_ctx())};
+    }
+
+    # Build scope by walking the Context tree post-parse.
+    # Finds all VarDecl IR nodes in tree order and accumulates them into a Scope.
+    # This avoids the Earley chart merge problem where side-table state is lost
+    # during add() operations that pick older values without scope updates.
+    method build_scope($ctx) {
+        my $scope = Chalk::Bootstrap::Scope->new();
+        my @stack = ($ctx);
+        while (@stack) {
+            my $node = pop @stack;
+            my $focus = $node->extract();
+            # Check if focus is a VarDecl Constructor IR node
+            if (defined $focus && ref($focus) && $focus isa Chalk::Bootstrap::IR::Node
+                && $focus->operation() eq 'Constructor' && $focus->class() eq 'VarDecl') {
+                my $var_node = $focus->inputs()->[0];  # variable input
+                if (defined $var_node && $var_node isa Chalk::Bootstrap::IR::Node
+                    && $var_node->operation() eq 'Constant') {
+                    my $var_name = $var_node->value();
+                    $scope = $scope->define($var_name, $focus);
+                }
+            }
+            # Walk children in reverse so leftmost is processed first
+            push @stack, reverse $node->children()->@*;
+        }
+        return $scope;
+    }
+
     # Check if value is zero (undef)
     method is_zero($value) {
         return !defined $value;
@@ -132,6 +186,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         my $rule_name = $item->{rule}->name();
         my $method = $actions ? $actions->can($rule_name) : undef;
         my $result;
+        $_pending_cfg_update = undef;  # Clear before action call
+        $_current_instance = $self;     # Make accessible to action methods
         if ($method) {
             # Call the method via the actions object instance
             $result = $value->extend(sub { $actions->$method(@_) });
@@ -148,17 +204,17 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             rule     => $rule_name,
         );
 
-        # Propagate CFG state: inherit from the rightmost child that has state,
-        # unless an action explicitly set state on the result context.
+        # Apply pending CFG state update from action method, if any
+        if (defined $_pending_cfg_update) {
+            $_cfg_state{refaddr($result_ctx)} = $_pending_cfg_update;
+            $_pending_cfg_update = undef;
+        }
+
+        # Propagate CFG state: inherit from the value context,
+        # unless an action explicitly set state via update_cfg.
         if (!exists $_cfg_state{refaddr($result_ctx)}) {
-            my $parent_state;
-            for my $child ($value->children()->@*) {
-                my $child_state = $_cfg_state{refaddr($child)};
-                $parent_state = $child_state if defined $child_state;
-            }
-            # Fall back to one() state if no child has state
-            $parent_state //= $_cfg_state{refaddr(_one_ctx())};
-            $_cfg_state{refaddr($result_ctx)} = $parent_state if defined $parent_state;
+            my $inherited = $self->inherited_cfg_state($value);
+            $_cfg_state{refaddr($result_ctx)} = $inherited if defined $inherited;
         }
 
         return $result_ctx;
