@@ -582,7 +582,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # including those in nested scopes (if/foreach/etc.)
         $self->_collect_var_decls($body, \%declared_vars);
 
-        # Detect early returns (ReturnStmt inside IfStmt or non-final position)
+        # Detect early returns (ReturnStmt inside If CFG node or non-final position)
         my $has_early_return = $self->_has_early_return($body);
 
         # Emit each body item as C code, marking the last statement
@@ -650,15 +650,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         && $self->_body_contains_return($else);
                 }
             }
-            # Legacy Constructor check
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($item->class() eq 'IfStmt') {
-                my $then_body = $item->inputs()->[1];
-                return true if $self->_body_contains_return($then_body);
-                my $else_body = $item->inputs()->[2];
-                return true if defined($else_body) && ref($else_body) eq 'ARRAY'
-                    && $self->_body_contains_return($else_body);
-            }
         }
         return false;
     }
@@ -680,12 +671,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             return true if $item->class() eq 'ReturnStmt';
-            if ($item->class() eq 'IfStmt') {
-                my $then = $item->inputs()->[1];
-                return true if $self->_body_contains_return($then);
-                my $else = $item->inputs()->[2];
-                return true if defined($else) && $self->_body_contains_return($else);
-            }
         }
         return false;
     }
@@ -732,24 +717,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $var =~ s/^[\$\@\%]//;
                 $declared_vars->{$var} = true;
             }
-            if ($class eq 'ForeachLoop') {
-                # Legacy: Iterator variable
-                my $iter = $item->inputs()->[0]->value();
-                $iter =~ s/^[\$\@\%]//;
-                $declared_vars->{$iter} = true;
-                my $body = $item->inputs()->[2];
-                $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
-            }
-            if ($class eq 'IfStmt') {
-                my $then_body = $item->inputs()->[1];
-                $self->_collect_var_decls($then_body, $declared_vars) if ref($then_body) eq 'ARRAY';
-                my $else_body = $item->inputs()->[2];
-                $self->_collect_var_decls($else_body, $declared_vars) if defined($else_body) && ref($else_body) eq 'ARRAY';
-            }
-            if ($class eq 'PostfixLoop') {
-                my $body = $item->inputs()->[1];
-                $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
-            }
         }
     }
 
@@ -791,10 +758,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'VarDecl')         { return $self->_emit_xs_var_decl($node, $declared_vars); }
             if ($class eq 'ReturnStmt')      { return $self->_emit_xs_return_stmt($node, $declared_vars, $is_last); }
             if ($class eq 'DieCall')         { return $self->_emit_xs_die_call($node); }
-            if ($class eq 'IfStmt')          { return $self->_emit_xs_if_stmt($node, $declared_vars); }
-            if ($class eq 'ForeachLoop')     { return $self->_emit_xs_foreach_loop($node, $declared_vars); }
             if ($class eq 'CompoundAssign')  { return $self->_emit_xs_compound_assign_stmt($node, $declared_vars); }
-            if ($class eq 'PostfixLoop')     { return $self->_emit_xs_postfix_loop($node, $declared_vars); }
             if ($class eq 'NextUnless')      { return $self->_emit_xs_next_unless($node, $declared_vars); }
 
             # Expression types used as statements (side effects)
@@ -1285,104 +1249,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "croak(\"%s\", \"$msg\");";
     }
 
-    # Emit IfStmt as C if/else
-    method _emit_xs_if_stmt($node, $declared_vars) {
-        my $cond      = $node->inputs()->[0];
-        my $then_body = $node->inputs()->[1];
-        my $else_body = $node->inputs()->[2];
-
-        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
-        my @lines;
-        push @lines, "if (SvTRUE($cond_expr)) {";
-        for my $stmt ($then_body->@*) {
-            # Returns inside if blocks are always early (non-final)
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
-            push @lines, "    $code" if defined $code;
-        }
-
-        if (defined $else_body) {
-            if (scalar $else_body->@* == 1
-                    && $else_body->[0] isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $else_body->[0]->class() eq 'IfStmt') {
-                my $elsif = $self->_emit_xs_if_stmt($else_body->[0], $declared_vars);
-                $elsif =~ s/^if/} else if/;
-                push @lines, $elsif;
-                return join("\n", @lines);
-            }
-
-            push @lines, "} else {";
-            for my $stmt ($else_body->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
-                push @lines, "    $code" if defined $code;
-            }
-        }
-
-        push @lines, "}";
-        return join("\n", @lines);
-    }
-
-    # Emit ForeachLoop as C for loop over AV, or integer for loop for ranges
-    method _emit_xs_foreach_loop($node, $declared_vars) {
-        my $iter = $node->inputs()->[0]->value();
-        $iter =~ s/^[\$\@\%]//;
-        my $list = $node->inputs()->[1];
-        my $body = $node->inputs()->[2];
-
-        # Detect range operator (..) and emit optimized integer for loop
-        if ($list isa Chalk::Bootstrap::IR::Node::Constructor
-                && $list->class() eq 'BinaryExpr'
-                && $list->inputs()->[0]->value() eq '..') {
-            my $range_left  = $self->_emit_xs_expr($list->inputs()->[1], $declared_vars);
-            my $range_right = $self->_emit_xs_expr($list->inputs()->[2], $declared_vars);
-
-            my @lines;
-            push @lines, "{";
-            push @lines, "    SSize_t _start = SvIV($range_left);";
-            push @lines, "    SSize_t _end = SvIV($range_right);";
-            push @lines, "    SSize_t _i;";
-            push @lines, "    for (_i = _start; _i <= _end; _i++) {";
-            push @lines, "        ${iter}_sv = sv_2mortal(newSViv(_i));";
-            for my $stmt ($body->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
-                push @lines, "        $code" if defined $code;
-            }
-            push @lines, "    }";
-            push @lines, "}";
-            return join("\n", @lines);
-        }
-
-        my $list_expr = $self->_emit_xs_expr($list, $declared_vars);
-
-        my @lines;
-        push @lines, "{";
-        push @lines, "    AV *av = (AV*)SvRV($list_expr);";
-        push @lines, "    SSize_t len = av_len(av) + 1;";
-        push @lines, "    SSize_t i;";
-        push @lines, "    for (i = 0; i < len; i++) {";
-        push @lines, "        SV **elem = av_fetch(av, i, 0);";
-        push @lines, "        ${iter}_sv = (elem && *elem) ? *elem : &PL_sv_undef;";
-        for my $stmt ($body->@*) {
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
-            push @lines, "        $code" if defined $code;
-        }
-        push @lines, "    }";
-        push @lines, "}";
-        return join("\n", @lines);
-    }
-
     # Emit CompoundAssign as statement
     method _emit_xs_compound_assign_stmt($node, $declared_vars) {
         return $self->_emit_xs_compound_assign_expr($node, $declared_vars) . ";";
     }
 
-    # Emit PostfixLoop (e.g., "expr for ...") — TODO: implement as C
-    # for loop. Currently a placeholder since postfix loops in Tier C
-    # come from fragmented method bodies.
-    method _emit_xs_postfix_loop($node, $declared_vars) {
-        return "/* TODO: postfix loop not yet implemented */";
-    }
-
-    # Emit NextUnless (next unless cond)
+    # Emit NextUnless (next unless cond) as C continue statement
     method _emit_xs_next_unless($node, $declared_vars) {
         my $cond = $self->_emit_xs_expr($node->inputs()->[0], $declared_vars);
         return "if (!SvTRUE($cond)) continue;";

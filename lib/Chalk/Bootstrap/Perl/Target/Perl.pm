@@ -90,7 +90,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Statement-level types that handle their own formatting (no auto-semicolon)
     my %STATEMENT_TYPES = map { $_ => 1 } qw(
         Program UseDecl ClassDecl MethodDecl ReturnStmt DieCall FieldDecl
-        VarDecl IfStmt ForeachLoop CompoundAssign PostfixLoop NextUnless
+        VarDecl CompoundAssign NextUnless
     );
 
     # Expression types that need semicolons when used as statements
@@ -148,10 +148,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'DieCall')    { return $self->_emit_die_call($node); }
             if ($class eq 'FieldDecl')  { return $self->_emit_field_decl($node); }
             if ($class eq 'VarDecl')         { return $self->_emit_var_decl($node); }
-            if ($class eq 'IfStmt')          { return $self->_emit_if_stmt($node); }
-            if ($class eq 'ForeachLoop')     { return $self->_emit_foreach_loop($node); }
             if ($class eq 'CompoundAssign')  { return $self->_emit_compound_assign($node); }
-            if ($class eq 'PostfixLoop')     { return $self->_emit_postfix_loop($node); }
             if ($class eq 'NextUnless')      { return $self->_emit_next_unless($node); }
             die "Unknown Constructor class: $class";
         }
@@ -358,69 +355,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return "my $var";
     }
 
-    method _emit_if_stmt($node) {
-        my $cond      = $node->inputs()->[0];
-        my $then_body = $node->inputs()->[1];
-        my $else_body = $node->inputs()->[2];
-
-        my @lines;
-        push @lines, "if (" . $self->_emit_expr($cond) . ") {";
-        for my $stmt ($then_body->@*) {
-            my $code = $self->_emit_node($stmt);
-            if (defined $code) {
-                for my $line (split /\n/, $code) {
-                    push @lines, "    $line";
-                }
-            }
-        }
-
-        if (defined $else_body) {
-            # Check if else_body is a single IfStmt (elsif chain)
-            if (scalar $else_body->@* == 1
-                    && $else_body->[0] isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $else_body->[0]->class() eq 'IfStmt') {
-                # Emit as elsif
-                my $elsif_code = $self->_emit_if_stmt($else_body->[0]);
-                # Replace leading "if" with "} elsif"
-                $elsif_code =~ s/^if/} elsif/;
-                push @lines, $elsif_code;
-                return join("\n", @lines);
-            }
-
-            push @lines, "} else {";
-            for my $stmt ($else_body->@*) {
-                my $code = $self->_emit_node($stmt);
-                if (defined $code) {
-                    for my $line (split /\n/, $code) {
-                        push @lines, "    $line";
-                    }
-                }
-            }
-        }
-
-        push @lines, "}";
-        return join("\n", @lines);
-    }
-
-    method _emit_foreach_loop($node) {
-        my $iter = $node->inputs()->[0]->value();
-        my $list = $node->inputs()->[1];
-        my $body = $node->inputs()->[2];
-
-        my @lines;
-        push @lines, "for my $iter (" . $self->_emit_expr($list) . ") {";
-        for my $stmt ($body->@*) {
-            my $code = $self->_emit_node($stmt);
-            if (defined $code) {
-                for my $line (split /\n/, $code) {
-                    push @lines, "    $line";
-                }
-            }
-        }
-        push @lines, "}";
-        return join("\n", @lines);
-    }
-
     method _emit_binary_expr($node) {
         my $op    = $node->inputs()->[0]->value();
         my $left  = $node->inputs()->[1];
@@ -563,15 +497,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
 
         return "$name(" . join(', ', @arg_strs) . ")";
-    }
-
-    method _emit_postfix_loop($node) {
-        my $body      = $node->inputs()->[0];
-        my $modifier  = $node->inputs()->[1]->value();
-        my $condition = $node->inputs()->[2];
-
-        my $body_code = defined $body ? $self->_emit_expr($body) : '';
-        return "$body_code $modifier " . $self->_emit_expr($condition) . ";";
     }
 
     method _emit_next_unless($node) {
