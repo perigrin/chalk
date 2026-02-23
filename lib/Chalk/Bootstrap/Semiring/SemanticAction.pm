@@ -153,6 +153,66 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $scope;
     }
 
+    # Build CFG graph by walking the Context tree post-parse.
+    # Finds IfStmt Constructor nodes and builds If/Proj/Region CFG nodes.
+    # Returns {control => $node, scope => $scope} representing the final CFG state.
+    # This avoids the Earley chart merge problem: parse-time action methods
+    # can't propagate cfg_state through the chart's add() merge, so we build
+    # the CFG graph from the completed AST-shaped IR in a post-parse pass.
+    method build_cfg($ctx, $state = undef) {
+        my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+        $state //= {
+            control => $factory->make('Start'),
+            scope   => Chalk::Bootstrap::Scope->new(),
+        };
+
+        my @stack = ($ctx);
+        while (@stack) {
+            my $node = pop @stack;
+            my $focus = $node->extract();
+
+            if (defined $focus && ref($focus) && $focus isa Chalk::Bootstrap::IR::Node
+                && $focus->operation() eq 'Constructor') {
+
+                if ($focus->class() eq 'IfStmt') {
+                    my $condition = $focus->inputs()->[0];
+                    my $if_node = $factory->make('If',
+                        control   => $state->{control},
+                        condition => $condition,
+                    );
+                    my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+                    my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+                    my $region = $factory->make('Region',
+                        controls => [$true_proj, $false_proj],
+                    );
+                    $state = {
+                        control => $region,
+                        scope   => $state->{scope},
+                    };
+                    # Don't recurse into IfStmt children — they're already processed
+                    next;
+                }
+
+                if ($focus->class() eq 'VarDecl') {
+                    my $var_node = $focus->inputs()->[0];
+                    if (defined $var_node && $var_node isa Chalk::Bootstrap::IR::Node
+                        && $var_node->operation() eq 'Constant') {
+                        my $var_name = $var_node->value();
+                        $state = {
+                            control => $state->{control},
+                            scope   => $state->{scope}->define($var_name, $focus),
+                        };
+                    }
+                }
+            }
+
+            # Walk children in reverse so leftmost is processed first
+            push @stack, reverse $node->children()->@*;
+        }
+
+        return $state;
+    }
+
     # Check if value is zero (undef)
     method is_zero($value) {
         return !defined $value;
