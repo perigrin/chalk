@@ -269,4 +269,48 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     is($@, '', 'remove_node() succeeds when node has no consumers');
 }
 
+# Test 14: CFG nodes (If, Proj, Region, Loop, Phi) are NOT hash-consed
+# CFG nodes represent control flow positions, not data values.
+# Two different if-statements at different program points must be distinct
+# even if they have the same control region and condition.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+    # Create shared inputs
+    my $start = $factory->make('Start');
+    my $region = $factory->make('Region', controls => [$start]);
+    my $cond = $factory->make('Constant', const_type => 'string', value => 'test_cond');
+
+    # Two If nodes with identical inputs should be DIFFERENT objects
+    my $if1 = $factory->make('If', control => $region, condition => $cond);
+    my $if2 = $factory->make('If', control => $region, condition => $cond);
+    isnt(refaddr($if1), refaddr($if2),
+        'CFG If nodes with same inputs are distinct objects');
+
+    # Two Proj nodes with identical inputs should be DIFFERENT objects
+    my $proj1 = $factory->make('Proj', source => $if1, index => 0);
+    my $proj2 = $factory->make('Proj', source => $if1, index => 0);
+    isnt(refaddr($proj1), refaddr($proj2),
+        'CFG Proj nodes with same inputs are distinct objects');
+
+    # Two Region nodes with identical inputs should be DIFFERENT objects
+    my $region1 = $factory->make('Region', controls => [$proj1]);
+    my $region2 = $factory->make('Region', controls => [$proj1]);
+    isnt(refaddr($region1), refaddr($region2),
+        'CFG Region nodes with same inputs are distinct objects');
+
+    # Two Loop nodes with identical inputs should be DIFFERENT objects
+    my $loop1 = $factory->make('Loop', entry_ctrl => $region, backedge_ctrl => undef);
+    my $loop2 = $factory->make('Loop', entry_ctrl => $region, backedge_ctrl => undef);
+    isnt(refaddr($loop1), refaddr($loop2),
+        'CFG Loop nodes with same inputs are distinct objects');
+
+    # Data nodes should still be hash-consed
+    my $const1 = $factory->make('Constant', const_type => 'string', value => 'same');
+    my $const2 = $factory->make('Constant', const_type => 'string', value => 'same');
+    is(refaddr($const1), refaddr($const2),
+        'data Constant nodes are still hash-consed');
+}
+
 done_testing;

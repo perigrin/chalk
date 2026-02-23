@@ -311,4 +311,79 @@ SKIP: {
     }
 }
 
+# --- Test 6: IR statement list contains CFG nodes, not legacy Constructors ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgNodeTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::CfgNodeTest::grammar();
+    my $parser3 = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser3;
+
+    my $semiring3 = $parser3->semiring();
+    my $sa3 = $semiring3->semirings()->[4];
+
+    # Parse if/else and verify the IR node doesn't contain IfStmt Constructor
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring3->reset_cache();
+
+        my $result = $parser3->parse_value('if (1) { 42 } else { 99 }');
+        ok(defined $result, 'if/else parses for CFG node test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        ok(defined $ir_node, 'IR node extracted for if/else');
+
+        # The Program's statement list should contain a CFG If node, not IfStmt Constructor
+        my $stmts = $ir_node->inputs()->[0];
+        ok(ref($stmts) eq 'ARRAY', 'Program inputs[0] is array');
+
+        my @if_stmts = grep {
+            $_ isa Chalk::Bootstrap::IR::Node::Constructor
+            && $_->class() eq 'IfStmt'
+        } $stmts->@*;
+        is(scalar @if_stmts, 0, 'no IfStmt Constructor in statement list');
+
+        my @cfg_nodes = grep {
+            $_ isa Chalk::Bootstrap::IR::Node
+            && $_->operation() eq 'If'
+        } $stmts->@*;
+        ok(scalar @cfg_nodes > 0, 'If CFG node present in statement list');
+    }
+
+    # Parse foreach and verify no ForeachLoop Constructor
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring3->reset_cache();
+
+        my $result = $parser3->parse_value('for my $x (1, 2, 3) { $x }');
+        ok(defined $result, 'foreach parses for CFG node test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        ok(defined $ir_node, 'IR node extracted for foreach');
+
+        my $stmts = $ir_node->inputs()->[0];
+        ok(ref($stmts) eq 'ARRAY', 'Program inputs[0] is array for foreach');
+
+        my @foreach_stmts = grep {
+            $_ isa Chalk::Bootstrap::IR::Node::Constructor
+            && $_->class() eq 'ForeachLoop'
+        } $stmts->@*;
+        is(scalar @foreach_stmts, 0, 'no ForeachLoop Constructor in statement list');
+
+        my @cfg_loops = grep {
+            $_ isa Chalk::Bootstrap::IR::Node
+            && $_->operation() eq 'Loop'
+        } $stmts->@*;
+        ok(scalar @cfg_loops > 0, 'Loop CFG node present in statement list');
+    }
+}
+
 done_testing();

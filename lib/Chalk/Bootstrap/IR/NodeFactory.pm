@@ -23,6 +23,14 @@ class Chalk::Bootstrap::IR::NodeFactory {
     # Cache mapping hash keys to nodes for deduplication
     field $node_cache = {};
 
+    # Counter for unique CFG node IDs (CFG nodes are not hash-consed)
+    field $cfg_counter = 0;
+
+    # CFG operations represent control flow positions, not data values.
+    # Two if-statements at different program points must be distinct objects
+    # even with identical inputs, because cfg_state maps by node identity.
+    my %CFG_OPS = map { $_ => 1 } qw(If Proj Region Phi Loop);
+
     # Define input parameter names for each operation type (in order)
     # Constructor uses compound keys: "Constructor:Class" format
     my %INPUT_SPECS = (
@@ -106,8 +114,15 @@ class Chalk::Bootstrap::IR::NodeFactory {
         # Generate hash key for deduplication
         my $key = $self->_make_key($operation, \@inputs, \%attributes);
 
-        # Return cached node if exists
-        return $node_cache->{$key} if exists $node_cache->{$key};
+        # CFG nodes get unique IDs and skip the cache entirely
+        my $is_cfg = $CFG_OPS{$operation};
+        if ($is_cfg) {
+            $cfg_counter++;
+            $key = "${key}#${cfg_counter}";
+        } else {
+            # Return cached node if exists (data nodes only)
+            return $node_cache->{$key} if exists $node_cache->{$key};
+        }
 
         # Create new node (node classes loaded statically at compile time)
         # Constructor is a special case - class is always Constructor, not derived from operation
@@ -135,7 +150,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
             }
         }
 
-        # Cache and return
+        # Cache and return (CFG nodes cached under unique key, so never deduplicated)
         $node_cache->{$key} = $node;
         return $node;
     }

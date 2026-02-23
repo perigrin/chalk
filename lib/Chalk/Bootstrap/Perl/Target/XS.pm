@@ -635,21 +635,29 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@lines;
     }
 
-    # Check if a body contains early returns (ReturnStmt inside IfStmt)
+    # Check if a body contains early returns (ReturnStmt inside if body)
     method _has_early_return($nodes) {
         for my $item ($nodes->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node;
+            # Check CFG If nodes via cfg_lookup
+            if (%_cfg_lookup && ref($item)) {
+                my $state = $_cfg_lookup{refaddr($item)};
+                if (defined $state && defined $state->{if_node}) {
+                    my $then = $state->{then_stmts};
+                    return true if $self->_body_contains_return($then);
+                    my $else = $state->{else_stmts};
+                    return true if defined($else) && ref($else) eq 'ARRAY'
+                        && $self->_body_contains_return($else);
+                }
+            }
+            # Legacy Constructor check
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            my $class = $item->class();
-            if ($class eq 'IfStmt') {
+            if ($item->class() eq 'IfStmt') {
                 my $then_body = $item->inputs()->[1];
-                if ($self->_body_contains_return($then_body)) {
-                    return true;
-                }
+                return true if $self->_body_contains_return($then_body);
                 my $else_body = $item->inputs()->[2];
-                if (defined($else_body) && ref($else_body) eq 'ARRAY'
-                        && $self->_body_contains_return($else_body)) {
-                    return true;
-                }
+                return true if defined($else_body) && ref($else_body) eq 'ARRAY'
+                    && $self->_body_contains_return($else_body);
             }
         }
         return false;
@@ -659,6 +667,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     method _body_contains_return($body) {
         return false unless ref($body) eq 'ARRAY';
         for my $item ($body->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node;
+            # Check CFG If nodes via cfg_lookup
+            if (%_cfg_lookup && ref($item)) {
+                my $state = $_cfg_lookup{refaddr($item)};
+                if (defined $state && defined $state->{if_node}) {
+                    my $then = $state->{then_stmts};
+                    return true if $self->_body_contains_return($then);
+                    my $else = $state->{else_stmts};
+                    return true if defined($else) && $self->_body_contains_return($else);
+                }
+            }
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             return true if $item->class() eq 'ReturnStmt';
             if ($item->class() eq 'IfStmt') {
@@ -671,10 +690,40 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return false;
     }
 
-    # Recursively collect VarDecl and ForeachLoop iterator names from IR
-    # nodes at any nesting depth, so PREINIT has all needed declarations.
+    # Recursively collect VarDecl and iterator names from IR nodes at any
+    # nesting depth, so PREINIT has all needed declarations. Handles both
+    # legacy Constructor types and CFG nodes via cfg_lookup.
     method _collect_var_decls($nodes, $declared_vars) {
         for my $item ($nodes->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node;
+
+            # Check if this is a CFG node with associated cfg_state
+            if (%_cfg_lookup && ref($item)) {
+                my $state = $_cfg_lookup{refaddr($item)};
+                if (defined $state) {
+                    if (defined $state->{if_node}) {
+                        # Recurse into if/else bodies
+                        my $then = $state->{then_stmts};
+                        $self->_collect_var_decls($then, $declared_vars) if ref($then) eq 'ARRAY';
+                        my $else = $state->{else_stmts};
+                        $self->_collect_var_decls($else, $declared_vars) if defined($else) && ref($else) eq 'ARRAY';
+                    }
+                    if (defined $state->{loop}) {
+                        # Iterator variable
+                        my $iter = $state->{iterator};
+                        if (defined $iter && $iter isa Chalk::Bootstrap::IR::Node::Constant) {
+                            my $iter_name = $iter->value();
+                            $iter_name =~ s/^[\$\@\%]//;
+                            $declared_vars->{$iter_name} = true;
+                        }
+                        # Recurse into loop body
+                        my $body = $state->{body_stmts};
+                        $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
+                    }
+                    next;
+                }
+            }
+
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             my $class = $item->class();
 
@@ -684,11 +733,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $declared_vars->{$var} = true;
             }
             if ($class eq 'ForeachLoop') {
-                # Iterator variable
+                # Legacy: Iterator variable
                 my $iter = $item->inputs()->[0]->value();
                 $iter =~ s/^[\$\@\%]//;
                 $declared_vars->{$iter} = true;
-                # Recurse into loop body
                 my $body = $item->inputs()->[2];
                 $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
             }

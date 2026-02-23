@@ -89,7 +89,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     isnt(refaddr($proj_0), refaddr($proj_1), 'Proj reference addresses differ');
 }
 
-# Test 5: Proj nodes with same source and index are deduplicated
+# Test 5: Proj nodes with same source and index are distinct (CFG nodes not hash-consed)
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
@@ -104,8 +104,8 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $proj_a = $factory->make('Proj', source => $if_node, index => 0);
     my $proj_b = $factory->make('Proj', source => $if_node, index => 0);
 
-    is($proj_a, $proj_b, 'identical Proj nodes deduplicated');
-    is(refaddr($proj_a), refaddr($proj_b), 'Proj reference addresses match');
+    isnt(refaddr($proj_a), refaddr($proj_b), 'Proj nodes with same inputs are distinct');
+    is($proj_a->operation(), 'Proj', 'first Proj has correct operation');
 }
 
 # Test 6: Create Region node with array of control inputs
@@ -159,7 +159,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     is($proj_false->consumers()->[0], $region, 'proj_false consumer is region');
 }
 
-# Test 8: Region nodes with same controls deduplicated
+# Test 8: Region nodes with same controls are distinct (CFG nodes not hash-consed)
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
@@ -173,8 +173,8 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $region_a = $factory->make('Region', controls => [$proj_true, $proj_false]);
     my $region_b = $factory->make('Region', controls => [$proj_true, $proj_false]);
 
-    is($region_a, $region_b, 'identical Region nodes deduplicated');
-    is(refaddr($region_a), refaddr($region_b), 'Region reference addresses match');
+    isnt(refaddr($region_a), refaddr($region_b), 'Region nodes with same controls are distinct');
+    is($region_a->operation(), 'Region', 'first Region has correct operation');
 }
 
 # Test 9: Create Phi node with region and values array
@@ -234,7 +234,9 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     is($val_2->consumers()->[0], $phi, 'val_2 consumer is phi');
 }
 
-# Test 11: Phi nodes with same inputs deduplicated
+# Test 11: Phi nodes with same inputs are distinct (CFG nodes not hash-consed)
+# CFG nodes represent control flow positions, not data values, so each
+# creation site must produce a unique node for cfg_state mapping.
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
@@ -252,8 +254,9 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $phi_a = $factory->make('Phi', region => $region, values => [$val_1, $val_2]);
     my $phi_b = $factory->make('Phi', region => $region, values => [$val_1, $val_2]);
 
-    is($phi_a, $phi_b, 'identical Phi nodes deduplicated');
-    is(refaddr($phi_a), refaddr($phi_b), 'Phi reference addresses match');
+    isnt(refaddr($phi_a), refaddr($phi_b), 'Phi nodes with same inputs are distinct');
+    is($phi_a->operation(), 'Phi', 'first Phi has correct operation');
+    is($phi_b->operation(), 'Phi', 'second Phi has correct operation');
 }
 
 # Test 12: Create Loop node with entry and backedge controls
@@ -294,7 +297,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     is($backedge->consumers()->[0], $loop, 'backedge control consumer is loop');
 }
 
-# Test 14: Loop nodes with same inputs deduplicated
+# Test 14: Loop nodes with same inputs are distinct (CFG nodes not hash-consed)
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
@@ -305,8 +308,9 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $loop_a = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => $backedge);
     my $loop_b = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => $backedge);
 
-    is($loop_a, $loop_b, 'identical Loop nodes deduplicated');
-    is(refaddr($loop_a), refaddr($loop_b), 'Loop reference addresses match');
+    isnt(refaddr($loop_a), refaddr($loop_b), 'Loop nodes with same inputs are distinct');
+    is($loop_a->operation(), 'Loop', 'first Loop has correct operation');
+    is($loop_b->operation(), 'Loop', 'second Loop has correct operation');
 }
 
 # Test 15: Complete if-then-else pattern with Region and Phi

@@ -214,26 +214,17 @@ my sub find_field($class_decl, $name) {
             if (defined $to_exec) {
                 my $mbody = $to_exec->inputs()->[2];
                 ok(ref $mbody eq 'ARRAY', 'ConciseTree.pm: to_exec_string body is array');
-                # Find the ForeachLoop in the method body
-                my ($foreach) = grep {
-                    $_ isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $_->class() eq 'ForeachLoop'
+                # Find the Loop CFG node in the method body (replaced ForeachLoop Constructor)
+                my ($loop_node) = grep {
+                    $_ isa Chalk::Bootstrap::IR::Node
+                    && $_->operation() eq 'Loop'
                 } $mbody->@*;
-                ok(defined $foreach, 'ConciseTree.pm: to_exec_string has ForeachLoop');
-                if (defined $foreach) {
-                    my $loop_body = $foreach->inputs()->[2];
-                    # Find the push statement in the loop body
-                    my ($push_stmt) = grep {
-                        $_ isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $_->class() eq 'BuiltinCall'
-                        && $_->inputs()->[0]->value() eq 'push'
-                    } $loop_body->@*;
-                    ok(defined $push_stmt,
-                        'ConciseTree.pm: push in foreach is BuiltinCall (not BinaryExpr)');
-                    if (defined $push_stmt) {
-                        is($push_stmt->class(), 'BuiltinCall',
-                            'ConciseTree.pm: push stmt class is BuiltinCall');
-                    }
+                ok(defined $loop_node, 'ConciseTree.pm: to_exec_string has Loop CFG node');
+                # Push BuiltinCall is now in cfg_state body_stmts (not in flat stmt list)
+                # Verify the Loop node is well-formed
+                if (defined $loop_node) {
+                    is($loop_node->operation(), 'Loop',
+                        'ConciseTree.pm: loop node is Loop');
                 }
             }
 

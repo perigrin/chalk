@@ -10,7 +10,8 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
 my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
-my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl IfStmt ForeachLoop FieldDecl ReturnStmt DieCall);
+my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl ReturnStmt DieCall);
+my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop);
 my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
 class Chalk::Bootstrap::Perl::Actions {
@@ -460,8 +461,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node) {
                 # Merge bare VarDecl(var, undef) + following expression → VarDecl(var, expr)
                 my $next = $stmts->[$i + 1];
-                if (!($next isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $STMT_BOUNDARY_CLASSES{$next->class()})) {
+                if (!(($next isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $STMT_BOUNDARY_CLASSES{$next->class()})
+                    || ($next isa Chalk::Bootstrap::IR::Node
+                        && $STMT_BOUNDARY_OPS{$next->operation() // ''}))) {
                     $i++;
                     push @result, $factory->make('Constructor',
                         'class'       => 'VarDecl',
@@ -483,6 +486,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     # Stop at statement-level constructs
                     last if $next isa Chalk::Bootstrap::IR::Node::Constructor
                         && $STMT_BOUNDARY_CLASSES{$next->class()};
+                    # Stop at CFG control flow nodes
+                    last if $next isa Chalk::Bootstrap::IR::Node
+                        && $STMT_BOUNDARY_OPS{$next->operation() // ''};
                     # Stop at other bare builtins
                     last if $next isa Chalk::Bootstrap::IR::Node::Constant
                         && defined $next->value()
@@ -1751,6 +1757,11 @@ class Chalk::Bootstrap::Perl::Actions {
 
             if (!defined $condition && $focus isa Chalk::Bootstrap::IR::Node) {
                 # First IR node is the condition (from ParenExpr)
+                # Skip CFG If nodes from ElsifChain
+                if ($focus isa Chalk::Bootstrap::IR::Node::If) {
+                    $else_body = [$focus];
+                    next;
+                }
                 $condition = $focus;
             } elsif (ref($focus) eq 'ARRAY' && !defined $then_body) {
                 # First array is then_body (from Block)
@@ -1758,9 +1769,8 @@ class Chalk::Bootstrap::Perl::Actions {
             } elsif (ref($focus) eq 'ARRAY' && defined $then_body) {
                 # Second array is else_body (from else Block)
                 $else_body = $focus;
-            } elsif ($focus isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $focus->class() eq 'IfStmt') {
-                # ElsifChain returns an IfStmt — wrap as else_body
+            } elsif ($focus isa Chalk::Bootstrap::IR::Node::If) {
+                # ElsifChain returns a CFG If node — wrap as else_body
                 $else_body = [$focus];
             }
         }
@@ -1779,13 +1789,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 operand => $condition,
             );
         }
-
-        my $if_stmt = $factory->make('Constructor',
-            'class'     => 'IfStmt',
-            condition => $condition,
-            then_body => $then_body,
-            else_body => $else_body,
-        );
 
         # Build CFG nodes: If/Proj/Region for control flow
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
@@ -1810,16 +1813,17 @@ class Chalk::Bootstrap::Perl::Actions {
                     true_proj  => $true_proj,
                     false_proj => $false_proj,
                 });
+                return $if_node;
             }
         }
 
-        return $if_stmt;
+        return undef;
     }
 
     # §5 ElsifChain ::= /elsif\b/ _ ParenExpr _ Block
     #                  | /elsif\b/ _ ParenExpr _ Block _ ElsifChain
     #                  | /elsif\b/ _ ParenExpr _ Block _ /else\b/ _ Block
-    # Returns an IfStmt (elsif is just a nested if)
+    # Returns a CFG If node (elsif is just a nested if)
     method ElsifChain($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
         my $condition;
@@ -1830,13 +1834,18 @@ class Chalk::Bootstrap::Perl::Actions {
             my $focus = $leaf->extract();
 
             if (!defined $condition && $focus isa Chalk::Bootstrap::IR::Node) {
+                # Skip CFG If nodes from nested ElsifChain
+                if ($focus isa Chalk::Bootstrap::IR::Node::If) {
+                    $else_body = [$focus];
+                    next;
+                }
                 $condition = $focus;
             } elsif (ref($focus) eq 'ARRAY' && !defined $then_body) {
                 $then_body = $focus;
             } elsif (ref($focus) eq 'ARRAY' && defined $then_body) {
                 $else_body = $focus;
-            } elsif ($focus isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $focus->class() eq 'IfStmt') {
+            } elsif ($focus isa Chalk::Bootstrap::IR::Node::If) {
+                # Nested ElsifChain returns a CFG If node
                 $else_body = [$focus];
             }
         }
@@ -1846,12 +1855,34 @@ class Chalk::Bootstrap::Perl::Actions {
         $then_body = _fixup_stmts($factory, $then_body // []);
         $else_body = defined $else_body ? _fixup_stmts($factory, $else_body) : undef;
 
-        return $factory->make('Constructor',
-            'class'     => 'IfStmt',
-            condition => $condition,
-            then_body => $then_body,
-            else_body => $else_body,
-        );
+        # Build CFG nodes for the elsif branch
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my $if_node = $factory->make('If',
+                    control   => $state->{control},
+                    condition => $condition,
+                );
+                my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+                my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+                my $region = $factory->make('Region',
+                    controls => [$true_proj, $false_proj],
+                );
+                $sa->update_cfg({
+                    control    => $region,
+                    scope      => $state->{scope},
+                    then_stmts => $then_body,
+                    else_stmts => $else_body,
+                    if_node    => $if_node,
+                    true_proj  => $true_proj,
+                    false_proj => $false_proj,
+                });
+                return $if_node;
+            }
+        }
+
+        return undef;
     }
 
     # §6 WhileStatement — not needed for Tier C (no while loops in these files)
@@ -1865,7 +1896,7 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §6 ForeachStatement ::= /for(?:each)?\b/ _ IteratorVariable _ ParenExpr _ Block
-    # Returns Constructor:ForeachLoop with iterator, list, and body
+    # Returns CFG Loop node for control flow dispatch
     method ForeachStatement($ctx) {
         my @leaves = _collect_ir_leaves($ctx);
         my $iterator;
@@ -1892,13 +1923,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef unless defined $iterator;
 
         $body = _fixup_stmts($factory, $body // []);
-
-        my $foreach = $factory->make('Constructor',
-            'class'    => 'ForeachLoop',
-            iterator => $iterator,
-            list     => $list,
-            body     => $body,
-        );
 
         # Build CFG nodes: Loop/If/Proj/Region for control flow
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
@@ -1931,10 +1955,11 @@ class Chalk::Bootstrap::Perl::Actions {
                     iterator   => $iterator,
                     list       => $list,
                 });
+                return $loop;
             }
         }
 
-        return $foreach;
+        return undef;
     }
 
     # §6 IteratorVariable ::= /my\b/ WS ScalarVariable | ScalarVariable
