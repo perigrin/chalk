@@ -1656,7 +1656,7 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §4 PostfixModifier ::= /(?:if|unless|while|until|for|foreach)\b/ _ Expression
-    # Returns the modifier type and condition for the parent statement to handle
+    # Returns CFG If or Loop node for control flow dispatch.
     method PostfixModifier($ctx) {
         my $text = $ctx->scanned_text();
         my $keyword;
@@ -1674,13 +1674,6 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return undef unless defined $keyword;
-
-        my $postfix = $factory->make('Constructor',
-            'class'     => 'PostfixLoop',
-            body      => undef,  # set by parent
-            modifier  => _make_const($factory, $keyword),
-            condition => $condition,
-        );
 
         # Build CFG nodes for loop-type modifiers (for/foreach/while/until)
         if ($keyword =~ /^(?:for|foreach|while|until)$/) {
@@ -1707,6 +1700,7 @@ class Chalk::Bootstrap::Perl::Actions {
                         control => $region,
                         scope   => $state->{scope},
                     });
+                    return $loop;
                 }
             }
         } elsif ($keyword =~ /^(?:if|unless)$/) {
@@ -1725,14 +1719,20 @@ class Chalk::Bootstrap::Perl::Actions {
                         controls => [$true_proj, $false_proj],
                     );
                     $sa->update_cfg({
-                        control => $region,
-                        scope   => $state->{scope},
+                        control    => $region,
+                        scope      => $state->{scope},
+                        then_stmts => [],
+                        else_stmts => undef,
+                        if_node    => $if_node,
+                        true_proj  => $true_proj,
+                        false_proj => $false_proj,
                     });
+                    return $if_node;
                 }
             }
         }
 
-        return $postfix;
+        return undef;
     }
 
     # §5 IfStatement ::= /(?:if|unless)\b/ _ ParenExpr _ Block

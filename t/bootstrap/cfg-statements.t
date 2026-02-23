@@ -386,4 +386,61 @@ SKIP: {
     }
 }
 
+# --- Test 7: PostfixModifier returns CFG nodes, not PostfixLoop Constructors ---
+# Uses real file parsing to verify PostfixModifier returns CFG nodes for
+# postfix if/unless. PostfixLoop body is undef (dead constructor).
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixCfgTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::PostfixCfgTest::grammar();
+
+    # Parse ConciseOp.pm which uses postfix if in method bodies
+    use TestXSHelpers qw(parse_file_ir);
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my ($file_ir, $file_sa, $file_ctx) = parse_file_ir($gen_grammar,
+        'lib/Chalk/Bootstrap/ConciseOp.pm');
+    ok(defined $file_ir, 'ConciseOp.pm parses for postfix CFG test');
+
+    SKIP: {
+        skip 'ConciseOp.pm: no IR', 2 unless defined $file_ir;
+
+        # Walk all IR nodes looking for PostfixLoop Constructors
+        my @stack = ($file_ir);
+        my $found_postfix_loop = false;
+        while (@stack) {
+            my $node = pop @stack;
+            if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+                $found_postfix_loop = true if $node->class() eq 'PostfixLoop';
+                for my $input ($node->inputs()->@*) {
+                    if (ref($input) eq 'ARRAY') {
+                        push @stack, grep { defined && ref } $input->@*;
+                    } elsif (defined $input && ref($input)) {
+                        push @stack, $input;
+                    }
+                }
+            }
+        }
+        ok(!$found_postfix_loop, 'no PostfixLoop Constructor in ConciseOp IR');
+
+        # Verify cfg_state has if_node entries (from postfix if in method bodies)
+        my @ctx_stack = ($file_ctx);
+        my $cfg_if_count = 0;
+        while (@ctx_stack) {
+            my $ctx = pop @ctx_stack;
+            my $state = $file_sa->cfg_state($ctx);
+            if (defined $state && defined $state->{if_node}) {
+                $cfg_if_count++;
+            }
+            push @ctx_stack, reverse $ctx->children()->@*;
+        }
+        ok($cfg_if_count > 0, "ConciseOp has cfg_state If entries ($cfg_if_count)");
+    }
+}
+
 done_testing();
