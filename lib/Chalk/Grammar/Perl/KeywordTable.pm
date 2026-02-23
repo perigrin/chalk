@@ -36,6 +36,21 @@ class Chalk::Grammar::Perl::KeywordTable {
         return $KEYWORDS{$word} // false;
     }
 
+    # Hard keywords: ALWAYS rejected as QualifiedIdentifier, regardless of
+    # whether a keyword-consuming rule is predicted. These words are never
+    # valid as function names in Perl and must not be admitted as identifiers
+    # even when the Earley parser hasn't yet predicted their consuming rule
+    # (e.g., due to nullable ElsifChain? completing IfStatement first).
+    my %HARD_KEYWORDS = map { $_ => true } qw(
+        else elsif
+    );
+
+    # Returns true if the word is a hard keyword that must always be rejected
+    # as QualifiedIdentifier.
+    sub is_hard_keyword($word) {
+        return $HARD_KEYWORDS{$word} // false;
+    }
+
     # Maps keywords to the grammar rule names that consume them.
     # Used by TypeInference.should_scan to check if a keyword-consuming
     # rule is predicted before rejecting the keyword as QualifiedIdentifier.

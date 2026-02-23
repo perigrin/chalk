@@ -362,6 +362,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Check if matched text is a keyword
         return true unless $keyword_check->($matched_text);
 
+        # Hard keywords are always rejected as identifiers, regardless of
+        # prediction state. Prevents non-deterministic parsing when nullable
+        # rules (ElsifChain?) cause prediction order to vary.
+        return false if Chalk::Grammar::Perl::KeywordTable::is_hard_keyword($matched_text);
+
         # Check if any keyword-consuming rule is predicted at this position
         my $keyword_rules = Chalk::Grammar::Perl::KeywordTable::keyword_rules($matched_text);
         return true unless $keyword_rules;
