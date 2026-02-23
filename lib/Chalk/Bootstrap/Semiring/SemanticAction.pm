@@ -193,6 +193,32 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                     next;
                 }
 
+                if ($focus->class() eq 'ForeachLoop') {
+                    my $list = $focus->inputs()->[1];  # list input
+                    # Synthetic loop-bound condition (placeholder for "has more items")
+                    my $loop_cond = $factory->make('Constant',
+                        const_type => 'string', value => '__loop_bound__');
+                    my $loop = $factory->make('Loop',
+                        entry_ctrl    => $state->{control},
+                        backedge_ctrl => undef,
+                    );
+                    my $if_node = $factory->make('If',
+                        control   => $loop,
+                        condition => $loop_cond,
+                    );
+                    my $body_proj = $factory->make('Proj', source => $if_node, index => 0);
+                    my $exit_proj = $factory->make('Proj', source => $if_node, index => 1);
+                    my $region = $factory->make('Region',
+                        controls => [$exit_proj],
+                    );
+                    $state = {
+                        control => $region,
+                        scope   => $state->{scope},
+                    };
+                    # Don't recurse into ForeachLoop children
+                    next;
+                }
+
                 if ($focus->class() eq 'VarDecl') {
                     my $var_node = $focus->inputs()->[0];
                     if (defined $var_node && $var_node isa Chalk::Bootstrap::IR::Node
