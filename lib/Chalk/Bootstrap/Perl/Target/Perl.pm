@@ -8,6 +8,9 @@ use Chalk::Bootstrap::Target;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
+    # Lookup from IR node refaddr → cfg_state entry, built by generate_with_cfg
+    field %_cfg_lookup;
+
     method generate($ir) {
         die "generate() requires a Constructor:Program IR node"
             unless defined($ir)
@@ -15,6 +18,39 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             && $ir->class() eq 'Program';
 
         return $self->_emit_program($ir);
+    }
+
+    # Generate code with cfg_state-aware dispatch for control flow.
+    # Walks the Context tree to build IR node → cfg_state lookup,
+    # then generates code using cfg_state for if/loop dispatch.
+    method generate_with_cfg($ir, $sa, $ctx) {
+        die "generate_with_cfg() requires a Constructor:Program IR node"
+            unless defined($ir)
+            && $ir isa Chalk::Bootstrap::IR::Node::Constructor
+            && $ir->class() eq 'Program';
+
+        %_cfg_lookup = ();
+        $self->_build_cfg_lookup($sa, $ctx);
+        my $code = $self->_emit_program($ir);
+        %_cfg_lookup = ();
+        return $code;
+    }
+
+    # Walk Context tree, mapping IR node refaddr → cfg_state for control flow nodes
+    method _build_cfg_lookup($sa, $ctx) {
+        my @stack = ($ctx);
+        while (@stack) {
+            my $node = pop @stack;
+            my $state = $sa->cfg_state($node);
+            if (defined $state && (defined $state->{if_node} || defined $state->{loop})) {
+                my $ir_node = $node->extract();
+                if (defined $ir_node && ref($ir_node)) {
+                    $_cfg_lookup{refaddr($ir_node)} = $state;
+                }
+            }
+            push @stack, reverse $node->children()->@*;
+        }
+        return;
     }
 
     method generate_distribution($ir) {
@@ -66,6 +102,31 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     method _emit_node($node) {
         return undef unless defined $node;
+
+        # Check cfg_state lookup for control flow dispatch
+        if (%_cfg_lookup && ref($node)) {
+            my $state = $_cfg_lookup{refaddr($node)};
+            if (defined $state) {
+                if (defined $state->{if_node}) {
+                    return $self->emit_cfg_if(
+                        $state->{if_node},
+                        $state->{true_proj},
+                        $state->{false_proj},
+                        $state->{then_stmts} // [],
+                        $state->{else_stmts} // [],
+                    );
+                }
+                if (defined $state->{loop}) {
+                    return $self->emit_cfg_loop(
+                        $state->{loop},
+                        $state->{loop_if},
+                        $state->{body_proj},
+                        $state->{exit_proj},
+                        $state->{body_stmts} // [],
+                    );
+                }
+            }
+        }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
             return $self->_emit_constant($node);

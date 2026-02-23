@@ -119,6 +119,7 @@ use Chalk::Bootstrap::Scope;
 # --- Test 4: IfStatement populates cfg_state with body statements (integration) ---
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::Perl::Target::Perl;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
@@ -231,6 +232,62 @@ SKIP: {
         ok(defined $state->{exit_proj}, 'exit_proj present');
         ok(defined $state->{iterator}, 'iterator present');
         ok(exists $state->{list}, 'list key exists in cfg_state');
+    }
+}
+
+# --- Test 5: Full pipeline: generate() uses cfg_state for if/else ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgGenTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::CfgGenTest::grammar();
+    my $parser2 = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser2;
+
+    my $semiring2 = $parser2->semiring();
+    my $sa2 = $semiring2->semirings()->[4];
+
+    # Parse if/else and get both IR and SemanticAction context
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring2->reset_cache();
+
+        my $result = $parser2->parse_value('if (1) { 42 } else { 99 }');
+        ok(defined $result, 'if/else parses for generate test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        ok(defined $ir_node, 'IR node extracted');
+
+        # generate_with_cfg should use cfg_state for control flow
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $code = $perl_target->generate_with_cfg($ir_node, $sa2, $sem_ctx);
+        ok(defined $code, 'generate_with_cfg produces code');
+        like($code, qr/if\s*\(/, 'generated code contains if statement');
+        like($code, qr/else/, 'generated code contains else');
+    }
+
+    # Parse foreach and verify cfg_state dispatch
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring2->reset_cache();
+
+        my $result = $parser2->parse_value('for my $x (1, 2, 3) { $x }');
+        ok(defined $result, 'foreach parses for generate test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        ok(defined $ir_node, 'IR node extracted for foreach');
+
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $code = $perl_target->generate_with_cfg($ir_node, $sa2, $sem_ctx);
+        ok(defined $code, 'generate_with_cfg produces code for foreach');
+        like($code, qr/(?:while|for)/, 'generated code contains loop');
     }
 }
 
