@@ -1669,14 +1669,64 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $keyword;
 
-        # Return a hash-like structure the parent statement can use
-        # For now, store as a special marker using Constant
-        return $factory->make('Constructor',
+        my $postfix = $factory->make('Constructor',
             'class'     => 'PostfixLoop',
             body      => undef,  # set by parent
             modifier  => _make_const($factory, $keyword),
             condition => $condition,
         );
+
+        # Build CFG nodes for loop-type modifiers (for/foreach/while/until)
+        if ($keyword =~ /^(?:for|foreach|while|until)$/) {
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            if (defined $sa) {
+                my $state = $sa->inherited_cfg_state($ctx);
+                if (defined $state) {
+                    my $loop_cond = $condition // $factory->make('Constant',
+                        const_type => 'string', value => '__loop_bound__');
+                    my $loop = $factory->make('Loop',
+                        entry_ctrl    => $state->{control},
+                        backedge_ctrl => undef,
+                    );
+                    my $if_node = $factory->make('If',
+                        control   => $loop,
+                        condition => $loop_cond,
+                    );
+                    my $body_proj = $factory->make('Proj', source => $if_node, index => 0);
+                    my $exit_proj = $factory->make('Proj', source => $if_node, index => 1);
+                    my $region = $factory->make('Region',
+                        controls => [$exit_proj],
+                    );
+                    $sa->update_cfg({
+                        control => $region,
+                        scope   => $state->{scope},
+                    });
+                }
+            }
+        } elsif ($keyword =~ /^(?:if|unless)$/) {
+            # Postfix if/unless: builds If/Proj/Region like IfStatement
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            if (defined $sa) {
+                my $state = $sa->inherited_cfg_state($ctx);
+                if (defined $state) {
+                    my $if_node = $factory->make('If',
+                        control   => $state->{control},
+                        condition => $condition,
+                    );
+                    my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+                    my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+                    my $region = $factory->make('Region',
+                        controls => [$true_proj, $false_proj],
+                    );
+                    $sa->update_cfg({
+                        control => $region,
+                        scope   => $state->{scope},
+                    });
+                }
+            }
+        }
+
+        return $postfix;
     }
 
     # §5 IfStatement ::= /(?:if|unless)\b/ _ ParenExpr _ Block
@@ -1838,12 +1888,41 @@ class Chalk::Bootstrap::Perl::Actions {
 
         $body = _fixup_stmts($factory, $body // []);
 
-        return $factory->make('Constructor',
+        my $foreach = $factory->make('Constructor',
             'class'    => 'ForeachLoop',
             iterator => $iterator,
             list     => $list,
             body     => $body,
         );
+
+        # Build CFG nodes: Loop/If/Proj/Region for control flow
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my $loop_cond = $factory->make('Constant',
+                    const_type => 'string', value => '__loop_bound__');
+                my $loop = $factory->make('Loop',
+                    entry_ctrl    => $state->{control},
+                    backedge_ctrl => undef,
+                );
+                my $if_node = $factory->make('If',
+                    control   => $loop,
+                    condition => $loop_cond,
+                );
+                my $body_proj = $factory->make('Proj', source => $if_node, index => 0);
+                my $exit_proj = $factory->make('Proj', source => $if_node, index => 1);
+                my $region = $factory->make('Region',
+                    controls => [$exit_proj],
+                );
+                $sa->update_cfg({
+                    control => $region,
+                    scope   => $state->{scope},
+                });
+            }
+        }
+
+        return $foreach;
     }
 
     # §6 IteratorVariable ::= /my\b/ WS ScalarVariable | ScalarVariable
