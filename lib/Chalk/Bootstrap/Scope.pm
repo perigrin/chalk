@@ -60,6 +60,21 @@ class Chalk::Bootstrap::Scope {
         return \%changes;
     }
 
+    # Return count of bound variable names
+    method size() {
+        return scalar keys $bindings->%*;
+    }
+
+    # Merge another scope's bindings into this one, returning a new Scope.
+    # The other scope's bindings take precedence for duplicate names.
+    method merge($other) {
+        my %new_bindings = $bindings->%*;
+        for my $name ($other->variable_names()) {
+            $new_bindings{$name} = $other->lookup($name);
+        }
+        return Chalk::Bootstrap::Scope->new(bindings => \%new_bindings);
+    }
+
     # Return list of all bound variable names
     method variable_names() {
         return keys $bindings->%*;

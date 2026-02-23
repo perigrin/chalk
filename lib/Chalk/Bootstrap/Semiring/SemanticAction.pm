@@ -261,17 +261,25 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         if (!exists $_cfg_state{refaddr($result)}) {
             my $right_state = $_cfg_state{refaddr($right)};
             my $left_state = $_cfg_state{refaddr($left)};
-            # Prefer the more advanced CFG state (non-Start over Start).
+            # Combine CFG state from both sides of the multiply:
+            # 1. Control: prefer non-Start over Start (structural change wins)
+            # 2. Scope: merge both sides (left accumulated, right may add new vars)
             # Right is later in sequence, but whitespace/punctuation rules
             # carry Start state which should not overwrite a Region/If from left.
             my $inherited;
             if (defined $right_state && defined $left_state) {
-                if ($left_state->{control}->operation() ne 'Start'
-                    && $right_state->{control}->operation() eq 'Start') {
-                    $inherited = $left_state;
+                my $l_ctrl = $left_state->{control}->operation();
+                my $r_ctrl = $right_state->{control}->operation();
+                # Pick the more advanced control token
+                my $control;
+                if ($l_ctrl ne 'Start' && $r_ctrl eq 'Start') {
+                    $control = $left_state->{control};
                 } else {
-                    $inherited = $right_state;
+                    $control = $right_state->{control};
                 }
+                # Merge scopes: left's bindings + right's bindings
+                my $merged_scope = $left_state->{scope}->merge($right_state->{scope});
+                $inherited = { control => $control, scope => $merged_scope };
             } else {
                 $inherited = $right_state // $left_state;
             }
@@ -366,13 +374,23 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             return;
         }
 
-        # If both have cfg_state, prefer the one with a non-Start control
-        # (the one that has been updated by an action method)
+        # If both have cfg_state, merge them:
+        # Control: prefer non-Start over Start
+        # Scope: merge both sides (loser may have bindings winner lacks)
         if (defined $loser_state && defined $winner_state) {
-            if ($winner_state->{control}->operation() eq 'Start'
-                && $loser_state->{control}->operation() ne 'Start') {
-                $_cfg_state{refaddr($winner)} = $loser_state;
+            my $w_ctrl = $winner_state->{control}->operation();
+            my $l_ctrl = $loser_state->{control}->operation();
+            my $control;
+            if ($w_ctrl eq 'Start' && $l_ctrl ne 'Start') {
+                $control = $loser_state->{control};
+            } else {
+                $control = $winner_state->{control};
             }
+            my $merged_scope = $winner_state->{scope}->merge($loser_state->{scope});
+            $_cfg_state{refaddr($winner)} = {
+                control => $control,
+                scope   => $merged_scope,
+            };
         }
         return;
     }

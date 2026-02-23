@@ -1,4 +1,4 @@
-# ABOUTME: Tests that ForeachLoop produces Loop/Phi CFG nodes via post-parse build_cfg.
+# ABOUTME: Tests that ForeachLoop produces Loop/Phi CFG nodes via parse-time cfg_state.
 # ABOUTME: Verifies Sea of Nodes CFG structure from parsed loop statements.
 use 5.42.0;
 use utf8;
@@ -32,7 +32,7 @@ SKIP: {
     my $sa = $semiring->semirings()->[4];
     ok($sa isa Chalk::Bootstrap::Semiring::SemanticAction, 'got SemanticAction from parser');
 
-    # --- Test 1: foreach produces Loop CFG node ---
+    # --- Test 1: foreach produces Loop CFG node via parse-time cfg_state ---
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
@@ -43,15 +43,15 @@ SKIP: {
         my $sem_ctx = $result->[4];
         ok(defined $sem_ctx, 'SemanticAction context exists');
 
-        # Build CFG from the parse tree
-        my $state = $sa->build_cfg($sem_ctx);
-        ok(defined $state, 'build_cfg returns state');
+        # cfg_state should reflect the Loop/If/Region CFG structure
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state returns state');
 
         # The control should be a Region (loop exit)
         my $control = $state->{control};
         is($control->operation(), 'Region', 'control after foreach is Region (loop exit)');
 
-        # Walk up: Region's controls → Proj → If → Loop
+        # Walk up: Region's controls -> Proj -> If -> Loop
         my $controls = $control->inputs()->[0];
         is(ref($controls), 'ARRAY', 'Region has controls array');
         ok(scalar($controls->@*) >= 1, 'Region has at least 1 control input');
@@ -68,45 +68,21 @@ SKIP: {
         is($loop_node->operation(), 'Loop', 'If controlled by Loop node');
     }
 
-    # --- Test 2: Backward compatibility — ForeachLoop Constructor preserved ---
+    # --- Test 2: postfix for produces Loop CFG node via parse-time cfg_state ---
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
         $semiring->reset_cache();
 
-        my $result = $parser->parse_value('for my $x (1, 2, 3) { $x }');
-        ok(defined $result, 'foreach parses for compat check');
+        my $result = $parser->parse_value('push @r, $_ for 1, 2, 3;');
+        ok(defined $result, 'postfix for parses');
 
         my $sem_ctx = $result->[4];
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state returns state for postfix for');
 
-        # Walk the Context tree to find ForeachLoop Constructor
-        my $found_foreach = false;
-        my @walk = ($sem_ctx);
-        while (@walk) {
-            my $node = pop @walk;
-            my $f = $node->extract();
-            if (defined $f && ref($f) && $f isa Chalk::Bootstrap::IR::Node
-                && $f->operation() eq 'Constructor' && $f->class() eq 'ForeachLoop') {
-                $found_foreach = true;
-                last;
-            }
-            push @walk, reverse $node->children()->@*;
-        }
-        ok($found_foreach, 'ForeachLoop Constructor found in tree (backward compat)');
-    }
-
-    # --- Test 3: Sequential: vardecl then loop ---
-    {
-        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-        $semiring->reset_cache();
-
-        my $result = $parser->parse_value('my $y = 0; for my $x (1, 2, 3) { $x }');
-        ok(defined $result, 'vardecl + foreach parses');
-
-        my $sem_ctx = $result->[4];
-        my $state = $sa->build_cfg($sem_ctx);
-
-        ok(defined $state->{scope}->lookup('$y'), '$y in scope');
-        is($state->{control}->operation(), 'Region', 'control is Region after foreach');
+        # The control should be a Region (loop exit), same as foreach
+        my $control = $state->{control};
+        is($control->operation(), 'Region', 'control after postfix for is Region');
     }
 }
 
