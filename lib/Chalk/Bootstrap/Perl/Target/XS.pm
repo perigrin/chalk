@@ -1264,6 +1264,71 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "if (!SvTRUE($cond)) continue;";
     }
 
+    # Emit C if/else from an If CFG node with true/false Proj branches.
+    # The If node's condition is emitted as a SvTRUE test. Body statements
+    # for each branch are provided by the caller as arrayrefs.
+    method emit_cfg_if($if_node, $true_proj, $false_proj, $declared_vars,
+                       $true_stmts = [], $false_stmts = []) {
+        my $cond = $if_node->inputs()->[1];  # condition input
+        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+
+        my @lines;
+        push @lines, "if (SvTRUE($cond_expr)) {";
+        for my $stmt ($true_stmts->@*) {
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+            push @lines, "    $code" if defined $code;
+        }
+        push @lines, "} else {";
+        for my $stmt ($false_stmts->@*) {
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+            push @lines, "    $code" if defined $code;
+        }
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
+    # Emit C if/else with Phi variable declaration.
+    # Phi(Region, val_a, val_b) becomes a C variable declared before the if,
+    # assigned in each branch.
+    method emit_cfg_phi_if($if_node, $phi, $declared_vars) {
+        my $cond = $if_node->inputs()->[1];
+        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+
+        my $region = $phi->inputs()->[0];
+        my $values = $phi->inputs()->[1];  # arrayref of [val_a, val_b]
+        my $val_a_expr = $self->_emit_xs_expr($values->[0], $declared_vars);
+        my $val_b_expr = $self->_emit_xs_expr($values->[1], $declared_vars);
+
+        # Generate a unique variable name from the Phi node ID
+        my $phi_var = '_phi_' . $phi->id();
+
+        my @lines;
+        push @lines, "SV *$phi_var;";
+        push @lines, "if (SvTRUE($cond_expr)) {";
+        push @lines, "    $phi_var = sv_2mortal($val_a_expr);";
+        push @lines, "} else {";
+        push @lines, "    $phi_var = sv_2mortal($val_b_expr);";
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
+    # Emit C loop from a Loop CFG node.
+    # Loop → If → Proj(body) / Proj(exit) structure becomes a while loop.
+    method emit_cfg_loop($loop, $loop_if, $body_proj, $exit_proj, $declared_vars,
+                         $body_stmts = []) {
+        my $cond = $loop_if->inputs()->[1];
+        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+
+        my @lines;
+        push @lines, "while (SvTRUE($cond_expr)) {";
+        for my $stmt ($body_stmts->@*) {
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+            push @lines, "    $code" if defined $code;
+        }
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
     # Emit an XSUB field reader for a FieldDecl with :reader attribute
     method _emit_xs_field_reader($field_decl) {
         my $name_node = $field_decl->inputs()->[0];
