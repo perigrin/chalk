@@ -10,6 +10,7 @@ use Chalk::Bootstrap::Target;
 class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;
     field $field_map;  # hashref: field name => index (set during _emit_xs)
+    field %_cfg_lookup;  # IR node refaddr → cfg_state entry, built by generate_with_cfg
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -34,6 +35,54 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             $pm_path   => $self->_emit_pm_stub($ir),
             'Build.PL' => $self->_emit_build_pl(),
         };
+    }
+
+    # Generate XS code with cfg_state-aware dispatch for control flow.
+    method generate_with_cfg($ir, $sa, $ctx) {
+        die "generate_with_cfg() requires a Constructor:Program IR node"
+            unless defined($ir)
+            && $ir isa Chalk::Bootstrap::IR::Node::Constructor
+            && $ir->class() eq 'Program';
+
+        %_cfg_lookup = ();
+        $self->_build_cfg_lookup($sa, $ctx);
+        my $code = $self->_emit_xs($ir);
+        %_cfg_lookup = ();
+        return $code;
+    }
+
+    # Generate distribution with cfg_state-aware dispatch.
+    method generate_distribution_with_cfg($ir, $sa, $ctx) {
+        %_cfg_lookup = ();
+        $self->_build_cfg_lookup($sa, $ctx);
+
+        my $xs_path = $self->_module_path_prefix() . '.xs';
+        my $pm_path = $self->_module_path_prefix() . '.pm';
+        my $result = {
+            $xs_path   => $self->_emit_xs($ir),
+            $pm_path   => $self->_emit_pm_stub($ir),
+            'Build.PL' => $self->_emit_build_pl(),
+        };
+
+        %_cfg_lookup = ();
+        return $result;
+    }
+
+    # Walk Context tree, mapping IR node refaddr → cfg_state for control flow nodes
+    method _build_cfg_lookup($sa, $ctx) {
+        my @stack = ($ctx);
+        while (@stack) {
+            my $node = pop @stack;
+            my $state = $sa->cfg_state($node);
+            if (defined $state && (defined $state->{if_node} || defined $state->{loop})) {
+                my $ir_node = $node->extract();
+                if (defined $ir_node && ref($ir_node)) {
+                    $_cfg_lookup{refaddr($ir_node)} = $state;
+                }
+            }
+            push @stack, reverse $node->children()->@*;
+        }
+        return;
     }
 
     # Convert module name to file path prefix
@@ -660,6 +709,33 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # $is_last indicates whether this is the final statement in the method body.
     method _emit_xs_stmt($node, $declared_vars, $is_last = true) {
         return undef unless defined $node;
+
+        # Check cfg_state lookup for control flow dispatch
+        if (%_cfg_lookup && ref($node)) {
+            my $state = $_cfg_lookup{refaddr($node)};
+            if (defined $state) {
+                if (defined $state->{if_node}) {
+                    return $self->emit_cfg_if(
+                        $state->{if_node},
+                        $state->{true_proj},
+                        $state->{false_proj},
+                        $declared_vars,
+                        $state->{then_stmts} // [],
+                        $state->{else_stmts} // [],
+                    );
+                }
+                if (defined $state->{loop}) {
+                    return $self->emit_cfg_loop(
+                        $state->{loop},
+                        $state->{loop_if},
+                        $state->{body_proj},
+                        $state->{exit_proj},
+                        $declared_vars,
+                        $state->{body_stmts} // [],
+                    );
+                }
+            }
+        }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();

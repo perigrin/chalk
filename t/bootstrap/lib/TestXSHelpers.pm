@@ -39,7 +39,8 @@ sub setup_xs_grammar($namespace) {
 }
 
 # Parses a .pm file to IR using the given grammar.
-# Returns the IR extract or undef on failure.
+# In list context: returns ($ir, $sa, $sem_ctx) for cfg-aware generation, or () on failure.
+# In scalar context: returns $ir for backward compatibility.
 sub parse_file_ir($gen_grammar, $file) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
@@ -48,27 +49,34 @@ sub parse_file_ir($gen_grammar, $file) {
     close $fh;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
     my $result = $parser->parse_value($source);
     return unless defined $result;
 
+    my $sa = $semiring->semirings()->[4];
     my $sem_ctx = $result->[4];
     return unless defined $sem_ctx;
-    return $sem_ctx->extract();
+    my $ir = $sem_ctx->extract();
+    return unless defined $ir;
+
+    return wantarray ? ($ir, $sa, $sem_ctx) : $ir;
 }
 
-# Builds, compiles, and loads an XS module from IR.
+# Builds, compiles, and loads an XS module from IR with cfg_state dispatch.
 # Returns ($dist_hashref, $error_string). On success, $error_string is undef.
-sub build_and_load($ir, $module_name) {
+sub build_and_load($ir, $sa, $sem_ctx, $module_name) {
     my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
         module_name => $module_name,
     );
     my $dist;
     try {
-        $dist = $xs_target->generate_distribution($ir);
+        $dist = $xs_target->generate_distribution_with_cfg($ir, $sa, $sem_ctx);
     } catch ($e) {
-        return (undef, "generate_distribution died: $e");
+        return (undef, "generate_distribution_with_cfg died: $e");
     }
-    return (undef, "generate_distribution failed") unless ref($dist) eq 'HASH';
+    return (undef, "generate_distribution_with_cfg failed") unless ref($dist) eq 'HASH';
 
     my $tmpdir = tempdir(CLEANUP => 1);
     for my $path (sort keys $dist->%*) {

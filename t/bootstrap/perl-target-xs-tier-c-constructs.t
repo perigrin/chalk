@@ -41,7 +41,9 @@ my sub parse_source_ir($source) {
 
     my $sem_ctx = $result->[4];
     return unless defined $sem_ctx;
-    return $sem_ctx->extract();
+    my $ir = $sem_ctx->extract();
+    my $sa = $result->[3];
+    return ($ir, $sa, $sem_ctx);
 }
 
 # ============================================================
@@ -67,11 +69,11 @@ class ForLoopDeref {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::ForLoopDeref';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: PostfixDeref iteration in for-loop' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -110,11 +112,11 @@ class PushDeref {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::PushDeref';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: push with PostfixDeref' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -151,11 +153,11 @@ class SprintfUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::SprintfUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: sprintf' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -192,11 +194,11 @@ class SplitUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::SplitUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: split with regex' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -236,11 +238,11 @@ class NextUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::NextUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: next unless in for-loop' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -275,11 +277,11 @@ class CoderefUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::CoderefUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: coderef invocation $f->($arg)' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -315,11 +317,11 @@ class IsaChecker {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::IsaChecker';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: isa operator' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -359,11 +361,11 @@ class ConcatUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::ConcatUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: .= concat in for-loop' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -398,11 +400,11 @@ class TernaryUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::TernaryUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: ternary operator' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -442,11 +444,11 @@ class ChainTarget {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::ChainTarget';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: chained method calls via $self' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -481,11 +483,11 @@ class HashUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::HashUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: hash deref with ->{}' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -521,11 +523,11 @@ class ArrayUser {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::ArrayUser';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: array deref with ->[]' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -564,11 +566,11 @@ class StringCompare {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::StringCompare';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: string eq comparison' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -604,11 +606,11 @@ class DefaultValue {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::DefaultValue';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: defined-or operator' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {
@@ -649,11 +651,11 @@ class Classifier {
 }
 PERL
 
-    my $ir = parse_source_ir($source);
+    my ($ir, $sa, $sem_ctx) = parse_source_ir($source);
     ok(defined $ir, 'parse produces IR') or return;
 
     my $module = 'Chalk::XS::Construct::Classifier';
-    my ($dist, $err) = build_and_load($ir, $module);
+    my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
     TODO: {
         local $TODO = 'XS emitter: if/elsif/else chain' unless defined $dist;
         ok(defined $dist, 'XS builds') or do {

@@ -72,14 +72,14 @@ my @test_cases = (
 
 for my $tc (@test_cases) {
     my $label = $tc->{label};
-    my $ir = parse_file_ir($gen_grammar, $tc->{file});
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, $tc->{file});
     ok(defined $ir, "$label: parse produces IR");
 
     SKIP: {
         skip "$label: no IR", 10 unless defined $ir;
 
         my $module = $tc->{module};
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, "$label: XS builds") or do {
             diag $err;
             skip "$label: build failed", 5;

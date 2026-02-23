@@ -36,12 +36,18 @@ my sub parse_file_ir($file) {
     my $source = <$fh>;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
     my $result = $parser->parse_value($source);
-    return undef unless defined $result;
+    return unless defined $result;
 
+    my $sa = $semiring->semirings()->[4];
     my $sem_ctx = $result->[4];
-    return undef unless defined $sem_ctx;
-    return $sem_ctx->extract();
+    return unless defined $sem_ctx;
+    my $ir = $sem_ctx->extract();
+    return unless defined $ir;
+
+    return ($ir, $sa, $sem_ctx);
 }
 
 # === Test files and their XS module names ===
@@ -72,7 +78,7 @@ for my $tc (@test_files) {
         local $ENV{PERL_HASH_SEED} = $seed;
         local $ENV{PERL_PERTURB_KEYS} = 'NO';
 
-        my $ir = parse_file_ir($tc->{file});
+        my ($ir, $sa, $sem_ctx) = parse_file_ir($tc->{file});
         unless (defined $ir) {
             fail("$label: seed $seed failed to parse");
             push @perl_outputs, undef;
@@ -82,13 +88,13 @@ for my $tc (@test_files) {
 
         # Perl target
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        push @perl_outputs, $perl_target->generate($ir);
+        push @perl_outputs, $perl_target->generate_with_cfg($ir, $sa, $sem_ctx);
 
         # XS target
         my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
             module_name => $tc->{module},
         );
-        my $dist = $xs_target->generate_distribution($ir);
+        my $dist = $xs_target->generate_distribution_with_cfg($ir, $sa, $sem_ctx);
         # Concatenate all files in sorted key order for comparison
         my $xs_concat = join("\n---\n",
             map { "$_\n" . $dist->{$_} } sort keys $dist->%*

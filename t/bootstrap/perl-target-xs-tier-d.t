@@ -41,16 +41,16 @@ my sub test_file(%args) {
     my $todo_parse = $args{todo_parse};
 
     subtest "$label" => sub {
-        my $ir;
+        my ($ir, $sa, $sem_ctx);
         if ($todo_parse) {
-            $ir = eval { parse_file_ir($gen_grammar, $file) };
+            ($ir, $sa, $sem_ctx) = eval { parse_file_ir($gen_grammar, $file) };
             TODO: {
                 local $TODO = $todo_parse;
                 ok(defined $ir, 'parse produces IR');
             }
             return unless defined $ir;
         } else {
-            $ir = eval { parse_file_ir($gen_grammar, $file) };
+            ($ir, $sa, $sem_ctx) = eval { parse_file_ir($gen_grammar, $file) };
             if ($@) {
                 diag "parse_file_ir died: $@";
                 ok(false, 'parse produces IR');
@@ -59,7 +59,7 @@ my sub test_file(%args) {
             ok(defined $ir, 'parse produces IR') or return;
         }
 
-        my ($dist, $err) = eval { build_and_load($ir, $module) };
+        my ($dist, $err) = eval { build_and_load($ir, $sa, $sem_ctx, $module) };
         if ($@) {
             $err //= "build_and_load died: $@";
             $dist = undef;

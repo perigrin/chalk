@@ -6,7 +6,7 @@ use utf8;
 package TestPerlHelpers;
 
 use Exporter 'import';
-our @EXPORT_OK = qw(setup_perl_grammar parse_and_generate eval_module);
+our @EXPORT_OK = qw(setup_perl_grammar parse_and_generate parse_file_with_cfg eval_module);
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -23,9 +23,9 @@ sub setup_perl_grammar($namespace) {
     return TestXSHelpers::setup_xs_grammar($namespace);
 }
 
-# Parses a .pm file and generates Perl code from the IR.
-# Returns the generated Perl code string or undef on failure.
-sub parse_and_generate($gen_grammar, $file) {
+# Parses a .pm file and returns ($ir, $sa, $sem_ctx) for cfg-aware generation.
+# Returns () on failure.
+sub parse_file_with_cfg($gen_grammar, $file) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
@@ -33,15 +33,28 @@ sub parse_and_generate($gen_grammar, $file) {
     close $fh;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
     my $result = $parser->parse_value($source);
     return unless defined $result;
 
+    my $sa = $semiring->semirings()->[4];
     my $sem_ctx = $result->[4];
     return unless defined $sem_ctx;
     my $ir = $sem_ctx->extract();
     return unless defined $ir;
 
-    return $perl_target->generate($ir);
+    return ($ir, $sa, $sem_ctx);
+}
+
+# Parses a .pm file and generates Perl code from the IR using cfg_state dispatch.
+# Returns the generated Perl code string or undef on failure.
+sub parse_and_generate($gen_grammar, $file) {
+    my ($ir, $sa, $sem_ctx) = parse_file_with_cfg($gen_grammar, $file);
+    return unless defined $ir;
+
+    return $perl_target->generate_with_cfg($ir, $sa, $sem_ctx);
 }
 
 # Evals generated Perl code with namespace rewriting.

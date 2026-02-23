@@ -39,14 +39,14 @@ close $fh;
 my $gen_grammar = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSFeatureClassTest') };
 ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 
-my $ir = parse_file_ir($gen_grammar, $filename);
+my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, $filename);
 ok(defined $ir, 'parse produces IR');
 
 SKIP: {
     skip 'no IR', 32 unless defined $ir;
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'TestClass');
-    my $xs_output = $target->generate($ir);
+    my $xs_output = $target->generate_with_cfg($ir, $sa, $sem_ctx);
 
     # Test 2: Forward declarations present
     like($xs_output, qr/extern void Perl_class_setup_stash/,
@@ -160,14 +160,14 @@ my ($inherit_fh, $inherit_filename) = tempfile(SUFFIX => '.pm', UNLINK => 1);
 print $inherit_fh $inherit_source;
 close $inherit_fh;
 
-my $inherit_ir = parse_file_ir($gen_grammar, $inherit_filename);
+my ($inherit_ir, $inherit_sa, $inherit_sem_ctx) = parse_file_ir($gen_grammar, $inherit_filename);
 ok(defined $inherit_ir, 'parse inheritance class produces IR');
 
 SKIP: {
     skip 'no inheritance IR', 5 unless defined $inherit_ir;
 
     my $inherit_target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Dog');
-    my $inherit_xs = $inherit_target->generate($inherit_ir);
+    my $inherit_xs = $inherit_target->generate_with_cfg($inherit_ir, $inherit_sa, $inherit_sem_ctx);
 
     # Test 33: BOOT block contains class_apply_attributes with isa(Animal)
     like($inherit_xs, qr/class_apply_attributes.*isa\(Animal\)/s,
@@ -215,14 +215,14 @@ my ($fallback_fh, $fallback_filename) = tempfile(SUFFIX => '.pm', UNLINK => 1);
 print $fallback_fh $fallback_source;
 close $fallback_fh;
 
-my $fallback_ir = parse_file_ir($gen_grammar, $fallback_filename);
+my ($fallback_ir, $fallback_sa, $fallback_sem_ctx) = parse_file_ir($gen_grammar, $fallback_filename);
 ok(defined $fallback_ir, 'parse class with unsupported methods produces IR');
 
 SKIP: {
     skip 'no fallback IR', 8 unless defined $fallback_ir;
 
     my $fallback_target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Calculator');
-    my $fallback_xs = $fallback_target->generate($fallback_ir);
+    my $fallback_xs = $fallback_target->generate_with_cfg($fallback_ir, $fallback_sa, $fallback_sem_ctx);
 
     # Test 38: multiply() currently uses eval_pv fallback because IR doesn't properly
     # resolve field access in return expressions yet. This will be fixed in a future component.

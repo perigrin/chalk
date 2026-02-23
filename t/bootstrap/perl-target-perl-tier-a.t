@@ -37,15 +37,18 @@ my sub parse_and_generate($file) {
     my $source = <$fh>;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
     my $result = $parser->parse_value($source);
     return undef unless defined $result;
 
+    my $sa = $semiring->semirings()->[4];
     my $sem_ctx = $result->[4];
     return undef unless defined $sem_ctx;
     my $ir = $sem_ctx->extract();
     return undef unless defined $ir;
 
-    return $perl_target->generate($ir);
+    return $perl_target->generate_with_cfg($ir, $sa, $sem_ctx);
 }
 
 # ============================================================

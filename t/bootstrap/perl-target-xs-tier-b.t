@@ -32,14 +32,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/IR/Node/Constant.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/IR/Node/Constant.pm');
     ok(defined $ir, 'Constant: parse produces IR');
 
     SKIP: {
         skip 'Constant: no IR', 8 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierB::Constant';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Constant: XS builds') or do {
             diag $err;
             skip 'Constant: build failed', 6;
@@ -54,14 +54,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Node.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Node.pm');
     ok(defined $ir, 'XS::AST::Node: parse produces IR');
 
     SKIP: {
         skip 'XS::AST::Node: no IR', 3 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierB::Node';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Node: XS builds') or do {
             diag $err;
             skip 'Node: build failed', 1;
@@ -81,14 +81,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Statement.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Statement.pm');
     ok(defined $ir, 'Statement: parse produces IR');
 
     SKIP: {
         skip 'Statement: no IR', 5 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierB::Statement';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Statement: XS builds') or do {
             diag $err;
             skip 'Statement: build failed', 3;
@@ -107,14 +107,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Module.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Module.pm');
     ok(defined $ir, 'Module: parse produces IR');
 
     SKIP: {
         skip 'Module: no IR', 6 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierB::Module';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Module: XS builds') or do {
             diag $err;
             skip 'Module: build failed', 4;
@@ -135,14 +135,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/IR/Node/Constructor.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/IR/Node/Constructor.pm');
     ok(defined $ir, 'Constructor: parse produces IR');
 
     SKIP: {
         skip 'Constructor: no IR', 4 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierB::Constructor';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Constructor: XS builds') or do {
             diag $err;
             skip 'Constructor: build failed', 2;

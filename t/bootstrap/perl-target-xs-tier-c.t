@@ -32,14 +32,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseOp.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseOp.pm');
     ok(defined $ir, 'ConciseOp: parse produces IR');
 
     SKIP: {
         skip 'ConciseOp: no IR', 18 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::ConciseOp';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'ConciseOp: XS builds') or do {
             diag $err;
             # Dump XS for debugging
@@ -115,14 +115,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree.pm');
     ok(defined $ir, 'ConciseTree: parse produces IR');
 
     SKIP: {
         skip 'ConciseTree: no IR', 13 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::ConciseTree';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'ConciseTree: XS builds') or do {
             diag $err;
             skip 'ConciseTree: build failed', 11;
@@ -205,14 +205,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree/Comparator.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree/Comparator.pm');
     ok(defined $ir, 'Comparator: parse produces IR');
 
     SKIP: {
         skip 'Comparator: no IR', 11 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Comparator';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Comparator: XS builds') or do {
             diag $err;
             skip 'Comparator: build failed', 9;
@@ -299,14 +299,14 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/ConciseTree/Oracle.pm');
     ok(defined $ir, 'Oracle: parse produces IR');
 
     SKIP: {
         skip 'Oracle: no IR', 10 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Oracle';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Oracle: XS builds') or do {
             diag $err;
             skip 'Oracle: build failed', 8;
@@ -358,14 +358,14 @@ CONCISE
 # ============================================================
 
 {
-    my $ir = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Context.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Context.pm');
     ok(defined $ir, 'Context: parse produces IR');
 
     SKIP: {
         skip 'Context: no IR', 16 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierC::Context';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         ok(defined $dist, 'Context: XS builds') or do {
             diag $err;
             skip 'Context: build failed', 14;
