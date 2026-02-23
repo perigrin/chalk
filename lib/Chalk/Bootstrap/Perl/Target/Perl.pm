@@ -518,6 +518,79 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return "next unless " . $self->_emit_expr($condition) . ";";
     }
 
+    # Emit Perl if/else from an If CFG node with true/false Proj branches.
+    method emit_cfg_if($if_node, $true_proj, $false_proj,
+                       $true_stmts = [], $false_stmts = []) {
+        my $cond = $if_node->inputs()->[1];  # condition input
+        my $cond_expr = $self->_emit_expr($cond);
+
+        my @lines;
+        push @lines, "if ($cond_expr) {";
+        for my $stmt ($true_stmts->@*) {
+            my $code = $self->_emit_node($stmt);
+            if (defined $code) {
+                for my $line (split /\n/, $code) {
+                    push @lines, "    $line";
+                }
+            }
+        }
+        push @lines, "} else {";
+        for my $stmt ($false_stmts->@*) {
+            my $code = $self->_emit_node($stmt);
+            if (defined $code) {
+                for my $line (split /\n/, $code) {
+                    push @lines, "    $line";
+                }
+            }
+        }
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
+    # Emit Perl if/else with Phi variable declaration.
+    # Phi(Region, val_a, val_b) becomes a my variable declared before the if,
+    # assigned in each branch.
+    method emit_cfg_phi_if($if_node, $phi) {
+        my $cond = $if_node->inputs()->[1];
+        my $cond_expr = $self->_emit_expr($cond);
+
+        my $region = $phi->inputs()->[0];
+        my $values = $phi->inputs()->[1];  # arrayref of [val_a, val_b]
+        my $val_a_expr = $self->_emit_expr($values->[0]);
+        my $val_b_expr = $self->_emit_expr($values->[1]);
+
+        my $phi_var = '$_phi_' . $phi->id();
+
+        my @lines;
+        push @lines, "my $phi_var;";
+        push @lines, "if ($cond_expr) {";
+        push @lines, "    $phi_var = $val_a_expr;";
+        push @lines, "} else {";
+        push @lines, "    $phi_var = $val_b_expr;";
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
+    # Emit Perl while loop from a Loop CFG node.
+    method emit_cfg_loop($loop, $loop_if, $body_proj, $exit_proj,
+                         $body_stmts = []) {
+        my $cond = $loop_if->inputs()->[1];
+        my $cond_expr = $self->_emit_expr($cond);
+
+        my @lines;
+        push @lines, "while ($cond_expr) {";
+        for my $stmt ($body_stmts->@*) {
+            my $code = $self->_emit_node($stmt);
+            if (defined $code) {
+                for my $line (split /\n/, $code) {
+                    push @lines, "    $line";
+                }
+            }
+        }
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
     method _emit_backtick_expr($node) {
         my $command = $node->inputs()->[0];
         return '`' . $self->_emit_expr($command) . '`';
