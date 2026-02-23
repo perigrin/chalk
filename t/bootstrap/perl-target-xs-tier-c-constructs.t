@@ -379,4 +379,296 @@ PERL
     }, 'join_parts');
 };
 
+# ============================================================
+# 9. Ternary operator
+# ============================================================
+
+subtest 'ternary operator' => sub {
+    my $source = <<'PERL';
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class TernaryUser {
+    field $value :param :reader;
+
+    method classify() {
+        return $value > 0 ? "positive" : "non-positive";
+    }
+}
+PERL
+
+    my $ir = parse_source_ir($source);
+    ok(defined $ir, 'parse produces IR') or return;
+
+    my $module = 'Chalk::XS::Construct::TernaryUser';
+    my ($dist, $err) = build_and_load($ir, $module);
+    TODO: {
+        local $TODO = 'XS emitter: ternary operator' unless defined $dist;
+        ok(defined $dist, 'XS builds') or do {
+            diag $err if $err;
+            return;
+        };
+    }
+    return unless defined $dist;
+
+    fork_test($module, sub ($mod) {
+        my $pos = $mod->new(value => 5);
+        die "classify(5) != positive" unless $pos->classify() eq 'positive';
+        my $neg = $mod->new(value => -1);
+        die "classify(-1) != non-positive" unless $neg->classify() eq 'non-positive';
+    }, 'ternary classify', todo => 'XS emitter: eval_pv fallback for ternary operator');
+};
+
+# ============================================================
+# 10. Chained method calls
+# ============================================================
+
+subtest 'chained method calls' => sub {
+    my $source = <<'PERL';
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class ChainTarget {
+    field $name :param :reader;
+    field $count :param :reader;
+
+    method describe() {
+        my $n = $self->name();
+        my $c = $self->count();
+        return "$n:$c";
+    }
+}
+PERL
+
+    my $ir = parse_source_ir($source);
+    ok(defined $ir, 'parse produces IR') or return;
+
+    my $module = 'Chalk::XS::Construct::ChainTarget';
+    my ($dist, $err) = build_and_load($ir, $module);
+    TODO: {
+        local $TODO = 'XS emitter: chained method calls via $self' unless defined $dist;
+        ok(defined $dist, 'XS builds') or do {
+            diag $err if $err;
+            return;
+        };
+    }
+    return unless defined $dist;
+
+    fork_test($module, sub ($mod) {
+        my $obj = $mod->new(name => 'foo', count => 3);
+        die "describe != foo:3" unless $obj->describe() eq 'foo:3';
+    }, 'chained method calls');
+};
+
+# ============================================================
+# 11. Hash field access with ->{}
+# ============================================================
+
+subtest 'hash field access' => sub {
+    my $source = <<'PERL';
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class HashUser {
+    field $data :param :reader;
+
+    method get_key($key) {
+        return $data->{$key};
+    }
+}
+PERL
+
+    my $ir = parse_source_ir($source);
+    ok(defined $ir, 'parse produces IR') or return;
+
+    my $module = 'Chalk::XS::Construct::HashUser';
+    my ($dist, $err) = build_and_load($ir, $module);
+    TODO: {
+        local $TODO = 'XS emitter: hash deref with ->{}' unless defined $dist;
+        ok(defined $dist, 'XS builds') or do {
+            diag $err if $err;
+            return;
+        };
+    }
+    return unless defined $dist;
+
+    fork_test($module, sub ($mod) {
+        my $obj = $mod->new(data => { x => 1, y => 2 });
+        die "get_key(x) != 1" unless $obj->get_key('x') == 1;
+        die "get_key(y) != 2" unless $obj->get_key('y') == 2;
+    }, 'hash field access', todo => 'XS emitter: eval_pv fallback for hash subscript');
+};
+
+# ============================================================
+# 12. Array field access with ->[]
+# ============================================================
+
+subtest 'array field access' => sub {
+    my $source = <<'PERL';
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class ArrayUser {
+    field $items :param :reader;
+
+    method get_at($idx) {
+        return $items->[$idx];
+    }
+}
+PERL
+
+    my $ir = parse_source_ir($source);
+    ok(defined $ir, 'parse produces IR') or return;
+
+    my $module = 'Chalk::XS::Construct::ArrayUser';
+    my ($dist, $err) = build_and_load($ir, $module);
+    TODO: {
+        local $TODO = 'XS emitter: array deref with ->[]' unless defined $dist;
+        ok(defined $dist, 'XS builds') or do {
+            diag $err if $err;
+            return;
+        };
+    }
+    return unless defined $dist;
+
+    fork_test($module, sub ($mod) {
+        my $obj = $mod->new(items => ['a', 'b', 'c']);
+        die "get_at(0) != a" unless $obj->get_at(0) eq 'a';
+        die "get_at(2) != c" unless $obj->get_at(2) eq 'c';
+    }, 'array field access', todo => 'XS emitter: eval_pv fallback for array subscript');
+};
+
+# ============================================================
+# 13. String equality comparison (eq)
+# ============================================================
+
+subtest 'string equality comparison' => sub {
+    my $source = <<'PERL';
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class StringCompare {
+    field $target :param :reader;
+
+    method matches($other) {
+        if ($target eq $other) {
+            return true;
+        }
+        return false;
+    }
+}
+PERL
+
+    my $ir = parse_source_ir($source);
+    ok(defined $ir, 'parse produces IR') or return;
+
+    my $module = 'Chalk::XS::Construct::StringCompare';
+    my ($dist, $err) = build_and_load($ir, $module);
+    TODO: {
+        local $TODO = 'XS emitter: string eq comparison' unless defined $dist;
+        ok(defined $dist, 'XS builds') or do {
+            diag $err if $err;
+            return;
+        };
+    }
+    return unless defined $dist;
+
+    fork_test($module, sub ($mod) {
+        my $obj = $mod->new(target => 'hello');
+        die "matches(hello) != true" unless $obj->matches('hello');
+        die "matches(world) != false" if $obj->matches('world');
+    }, 'string eq comparison');
+};
+
+# ============================================================
+# 14. Defined-or operator (//)
+# ============================================================
+
+subtest 'defined-or operator' => sub {
+    my $source = <<'PERL';
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class DefaultValue {
+    field $value :param;
+
+    method value_or_default() {
+        return $value // "default";
+    }
+}
+PERL
+
+    my $ir = parse_source_ir($source);
+    ok(defined $ir, 'parse produces IR') or return;
+
+    my $module = 'Chalk::XS::Construct::DefaultValue';
+    my ($dist, $err) = build_and_load($ir, $module);
+    TODO: {
+        local $TODO = 'XS emitter: defined-or operator' unless defined $dist;
+        ok(defined $dist, 'XS builds') or do {
+            diag $err if $err;
+            return;
+        };
+    }
+    return unless defined $dist;
+
+    fork_test($module, sub ($mod) {
+        my $obj1 = $mod->new(value => 'hello');
+        die "defined value != hello" unless $obj1->value_or_default() eq 'hello';
+        my $obj2 = $mod->new(value => undef);
+        die "undef value != default" unless $obj2->value_or_default() eq 'default';
+    }, 'defined-or operator', todo => 'XS emitter: eval_pv fallback for defined-or');
+};
+
+# ============================================================
+# 15. Nested if/elsif/else
+# ============================================================
+
+subtest 'nested if/elsif/else' => sub {
+    my $source = <<'PERL';
+use 5.42.0;
+use utf8;
+use experimental 'class';
+
+class Classifier {
+    method classify($n) {
+        if ($n > 0) {
+            return "positive";
+        } elsif ($n == 0) {
+            return "zero";
+        } else {
+            return "negative";
+        }
+    }
+}
+PERL
+
+    my $ir = parse_source_ir($source);
+    ok(defined $ir, 'parse produces IR') or return;
+
+    my $module = 'Chalk::XS::Construct::Classifier';
+    my ($dist, $err) = build_and_load($ir, $module);
+    TODO: {
+        local $TODO = 'XS emitter: if/elsif/else chain' unless defined $dist;
+        ok(defined $dist, 'XS builds') or do {
+            diag $err if $err;
+            return;
+        };
+    }
+    return unless defined $dist;
+
+    fork_test($module, sub ($mod) {
+        my $obj = $mod->new();
+        die "classify(5) != positive" unless $obj->classify(5) eq 'positive';
+        die "classify(0) != zero" unless $obj->classify(0) eq 'zero';
+        die "classify(-1) != negative" unless $obj->classify(-1) eq 'negative';
+    }, 'if/elsif/else chain');
+};
+
 done_testing();

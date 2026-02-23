@@ -159,6 +159,13 @@ test_perl_file(
         { pattern => qr/NodeFactory/, label => 'contains NodeFactory class' },
         { pattern => qr/method make/, label => 'has method make' },
     ],
+    original_ns => 'Chalk::Bootstrap::IR::NodeFactory',
+    test_ns     => 'Chalk::Bootstrap::IR::NodeFactoryGenD',
+    todo_eval   => 'NodeFactory.pm depends on IR::Node classes',
+    behavioral  => sub ($mod) {
+        my $factory = $mod->new();
+        ok(defined $factory, 'NodeFactory can be constructed');
+    },
 );
 
 test_perl_file(
@@ -225,7 +232,22 @@ test_perl_file(
     structural => [
         { pattern => qr/method zero/, label => 'has method zero' },
         { pattern => qr/method one/, label => 'has method one' },
+        { pattern => qr/method multiply/, label => 'has method multiply' },
+        { pattern => qr/method add/, label => 'has method add' },
+        { pattern => qr/method on_scan/, label => 'has method on_scan' },
+        { pattern => qr/method on_complete/, label => 'has method on_complete' },
     ],
+    original_ns => 'Chalk::Bootstrap::Semiring::Structural',
+    test_ns     => 'Chalk::Bootstrap::Semiring::StructuralGenD',
+    todo_eval   => 'Grammar fragmentation: complex bitfield operations',
+    behavioral  => sub ($mod) {
+        my $s = $mod->new();
+        is($s->zero(), 0, 'zero is 0');
+        is($s->one(), 1, 'one is 1');
+        ok($s->is_zero(0), '0 is zero');
+        ok(!$s->is_zero(1), '1 is not zero');
+        is($s->multiply(3, 5), 3 | 5, 'multiply is bitwise OR');
+    },
 );
 
 test_perl_file(
@@ -234,7 +256,19 @@ test_perl_file(
     structural => [
         { pattern => qr/method zero/, label => 'has method zero' },
         { pattern => qr/method one/, label => 'has method one' },
+        { pattern => qr/method multiply/, label => 'has method multiply' },
+        { pattern => qr/method add/, label => 'has method add' },
     ],
+    original_ns => 'Chalk::Bootstrap::Semiring::Precedence',
+    test_ns     => 'Chalk::Bootstrap::Semiring::PrecedenceGenD',
+    todo_eval   => 'Grammar fragmentation: complex hash operations',
+    behavioral  => sub ($mod) {
+        my $p = $mod->new();
+        ok(!defined $p->zero(), 'zero is undef');
+        ok(defined $p->one(), 'one is defined');
+        ok($p->is_zero(undef), 'undef is zero');
+        ok(!$p->is_zero($p->one()), 'one is not zero');
+    },
 );
 
 test_perl_file(
@@ -243,7 +277,18 @@ test_perl_file(
     structural => [
         { pattern => qr/method zero/, label => 'has method zero' },
         { pattern => qr/method one/, label => 'has method one' },
+        { pattern => qr/method multiply/, label => 'has method multiply' },
+        { pattern => qr/method add/, label => 'has method add' },
     ],
+    original_ns => 'Chalk::Bootstrap::Semiring::SemanticAction',
+    test_ns     => 'Chalk::Bootstrap::Semiring::SemanticActionGenD',
+    todo_eval   => 'Grammar fragmentation: complex sub/coderef patterns',
+    behavioral  => sub ($mod) {
+        my $sa = $mod->new(actions => {}, ir_factory => undef);
+        ok(!defined $sa->zero(), 'zero is undef');
+        ok(defined $sa->one(), 'one is defined');
+        ok($sa->is_zero(undef), 'undef is zero');
+    },
 );
 
 test_perl_file(
@@ -252,7 +297,22 @@ test_perl_file(
     structural => [
         { pattern => qr/method zero/, label => 'has method zero' },
         { pattern => qr/method one/, label => 'has method one' },
+        { pattern => qr/method multiply/, label => 'has method multiply' },
+        { pattern => qr/method add/, label => 'has method add' },
+        { pattern => qr/method should_scan/, label => 'has method should_scan' },
     ],
+    original_ns => 'Chalk::Bootstrap::Semiring::TypeInference',
+    test_ns     => 'Chalk::Bootstrap::Semiring::TypeInferenceGenD',
+    todo_eval   => 'Grammar fragmentation: complex coderef/tree-walker patterns',
+    behavioral  => sub ($mod) {
+        my $ti = $mod->new(
+            keyword_check  => sub ($w) { false },
+            builtin_lookup => sub ($n) { undef },
+        );
+        ok(!defined $ti->zero(), 'zero is undef');
+        ok(defined $ti->one(), 'one is defined');
+        ok($ti->is_zero(undef), 'undef is zero');
+    },
 );
 
 test_perl_file(
@@ -261,6 +321,13 @@ test_perl_file(
     structural => [
         { pattern => qr/TypeInferenceActions/, label => 'contains TypeInferenceActions class' },
     ],
+    original_ns => 'Chalk::Bootstrap::Semiring::TypeInferenceActions',
+    test_ns     => 'Chalk::Bootstrap::Semiring::TypeInferenceActionsGenD',
+    todo_eval   => 'Grammar fragmentation: complex method dispatch patterns',
+    behavioral  => sub ($mod) {
+        my $actions = $mod->new();
+        ok(defined $actions, 'TypeInferenceActions can be constructed');
+    },
 );
 
 test_perl_file(
@@ -270,7 +337,17 @@ test_perl_file(
         { pattern => qr/method zero/, label => 'has method zero' },
         { pattern => qr/method one/, label => 'has method one' },
         { pattern => qr/method add/, label => 'has method add' },
+        { pattern => qr/method multiply/, label => 'has method multiply' },
     ],
+    original_ns => 'Chalk::Bootstrap::Semiring::FilterComposite',
+    test_ns     => 'Chalk::Bootstrap::Semiring::FilterCompositeGenD',
+    todo_eval   => 'Grammar fragmentation: complex semiring delegation',
+    behavioral  => sub ($mod) {
+        use Chalk::Bootstrap::Semiring::Boolean;
+        my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
+        my $fc = $mod->new(semirings => [$bool]);
+        ok(defined $fc, 'FilterComposite can be constructed');
+    },
 );
 
 # ============================================================
@@ -304,7 +381,12 @@ test_perl_file(
     label      => 'TypeLibrary.pm',
     structural => [
         { pattern => qr/TypeLibrary/, label => 'contains TypeLibrary' },
+        { pattern => qr/type_satisfies/, label => 'has type_satisfies function' },
+        { pattern => qr/get_builtin/, label => 'has get_builtin function' },
     ],
+    original_ns => 'Chalk::Grammar::Perl::TypeLibrary',
+    test_ns     => 'Chalk::Grammar::Perl::TypeLibraryGenD',
+    todo_eval   => 'sub inside class emits as string literal',
 );
 
 # ============================================================
@@ -312,12 +394,20 @@ test_perl_file(
 # ============================================================
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Target/XS/AST/CompositeNode.pm',
-    label      => 'XS::AST::CompositeNode.pm',
-    structural => [
+    file        => 'lib/Chalk/Bootstrap/Target/XS/AST/CompositeNode.pm',
+    label       => 'XS::AST::CompositeNode.pm',
+    structural  => [
         { pattern => qr/field \$children/, label => 'has field $children' },
         { pattern => qr/method emit/, label => 'has method emit' },
     ],
+    original_ns => 'Chalk::Bootstrap::Target::XS::AST::CompositeNode',
+    test_ns     => 'Chalk::Bootstrap::Target::XS::AST::CompositeNodeGenD',
+    todo_eval   => 'CompositeNode.pm depends on AST::Node parent class',
+    behavioral  => sub ($mod) {
+        my $node = $mod->new(children => []);
+        ok(defined $node, 'CompositeNode can be constructed');
+        is(ref($node->children()), 'ARRAY', 'children returns arrayref');
+    },
 );
 
 test_perl_file(
@@ -381,27 +471,49 @@ test_perl_file(
 # ============================================================
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Target/Perl.pm',
-    label      => 'Target::Perl.pm',
-    structural => [
+    file        => 'lib/Chalk/Bootstrap/Target/Perl.pm',
+    label       => 'Target::Perl.pm',
+    structural  => [
         { pattern => qr/method generate/, label => 'has method generate' },
     ],
+    original_ns => 'Chalk::Bootstrap::Target::Perl',
+    test_ns     => 'Chalk::Bootstrap::Target::PerlGenD',
+    todo_eval   => 'Target::Perl depends on IR node types',
+    behavioral  => sub ($mod) {
+        my $target = $mod->new();
+        ok(defined $target, 'Target::Perl can be constructed');
+    },
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Perl/Target/Perl.pm',
-    label      => 'Perl::Target::Perl.pm',
-    structural => [
+    file        => 'lib/Chalk/Bootstrap/Perl/Target/Perl.pm',
+    label       => 'Perl::Target::Perl.pm',
+    structural  => [
         { pattern => qr/method generate/, label => 'has method generate' },
     ],
+    original_ns => 'Chalk::Bootstrap::Perl::Target::Perl',
+    test_ns     => 'Chalk::Bootstrap::Perl::Target::PerlGenD',
+    todo_eval   => 'Grammar fragmentation: complex string interpolation patterns',
+    behavioral  => sub ($mod) {
+        my $target = $mod->new();
+        ok(defined $target, 'Perl::Target::Perl can be constructed');
+    },
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Perl/Target/XS.pm',
-    label      => 'Perl::Target::XS.pm',
-    structural => [
+    file        => 'lib/Chalk/Bootstrap/Perl/Target/XS.pm',
+    label       => 'Perl::Target::XS.pm',
+    structural  => [
         { pattern => qr/method generate/, label => 'has method generate' },
+        { pattern => qr/method generate_distribution/, label => 'has method generate_distribution' },
     ],
+    original_ns => 'Chalk::Bootstrap::Perl::Target::XS',
+    test_ns     => 'Chalk::Bootstrap::Perl::Target::XSGenD',
+    todo_eval   => 'Grammar fragmentation: complex code generation patterns',
+    behavioral  => sub ($mod) {
+        my $target = $mod->new(module_name => 'Test::XS');
+        ok(defined $target, 'Perl::Target::XS can be constructed');
+    },
 );
 
 # ============================================================
@@ -418,20 +530,34 @@ test_perl_file(
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/ConciseTree/Actions.pm',
-    label      => 'ConciseTree::Actions.pm',
-    structural => [
+    file        => 'lib/Chalk/Bootstrap/ConciseTree/Actions.pm',
+    label       => 'ConciseTree::Actions.pm',
+    structural  => [
         { pattern => qr/Actions/, label => 'contains Actions class' },
+        { pattern => qr/method/, label => 'has method definitions' },
     ],
+    original_ns => 'Chalk::Bootstrap::ConciseTree::Actions',
+    test_ns     => 'Chalk::Bootstrap::ConciseTree::ActionsGenD',
+    todo_eval   => 'Actions depends on ConciseOp/ConciseTree and uses complex patterns',
+    behavioral  => sub ($mod) {
+        my $actions = $mod->new();
+        ok(defined $actions, 'ConciseTree::Actions can be constructed');
+    },
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Desugar.pm',
-    label      => 'Desugar.pm',
-    structural => [
+    file        => 'lib/Chalk/Bootstrap/Desugar.pm',
+    label       => 'Desugar.pm',
+    structural  => [
         { pattern => qr/Desugar/, label => 'contains Desugar' },
         { pattern => qr/desugar_grammar/, label => 'has desugar_grammar' },
     ],
+    original_ns => 'Chalk::Bootstrap::Desugar',
+    test_ns     => 'Chalk::Bootstrap::DesugarGenD',
+    todo_eval   => 'Desugar depends on Grammar::Rule/Symbol classes',
+    behavioral  => sub ($mod) {
+        ok(defined $mod->can('desugar_grammar'), 'desugar_grammar is available');
+    },
 );
 
 # ============================================================
@@ -439,35 +565,56 @@ test_perl_file(
 # ============================================================
 
 test_perl_file(
-    file       => 'lib/Chalk/Grammar/BNF.pm',
-    label      => 'Grammar::BNF.pm',
-    structural => [
+    file        => 'lib/Chalk/Grammar/BNF.pm',
+    label       => 'Grammar::BNF.pm',
+    structural  => [
         { pattern => qr/BNF/, label => 'contains BNF' },
     ],
+    original_ns => 'Chalk::Grammar::BNF',
+    test_ns     => 'Chalk::Grammar::BNFGenD',
+    todo_eval   => 'BNF depends on Rule/Symbol classes',
+    behavioral  => sub ($mod) {
+        my $bnf = $mod->new();
+        ok(defined $bnf, 'BNF can be constructed');
+    },
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Grammar/BNF/Generated.pm',
-    label      => 'Grammar::BNF::Generated.pm',
-    structural => [
+    file        => 'lib/Chalk/Grammar/BNF/Generated.pm',
+    label       => 'Grammar::BNF::Generated.pm',
+    structural  => [
         { pattern => qr/Generated/, label => 'contains Generated' },
+        { pattern => qr/grammar/, label => 'has grammar function' },
     ],
+    original_ns => 'Chalk::Grammar::BNF::Generated',
+    test_ns     => 'Chalk::Grammar::BNF::GeneratedGenD',
+    todo_eval   => 'Generated.pm depends on Symbol/Rule/BNF classes',
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Grammar/BNF/Actions.pm',
-    label      => 'Grammar::BNF::Actions.pm',
-    structural => [
+    file        => 'lib/Chalk/Grammar/BNF/Actions.pm',
+    label       => 'Grammar::BNF::Actions.pm',
+    structural  => [
         { pattern => qr/Actions/, label => 'contains Actions' },
     ],
+    original_ns => 'Chalk::Grammar::BNF::Actions',
+    test_ns     => 'Chalk::Grammar::BNF::ActionsGenD',
+    todo_eval   => 'BNF::Actions depends on Symbol/Rule constructors',
+    behavioral  => sub ($mod) {
+        my $actions = $mod->new();
+        ok(defined $actions, 'BNF::Actions can be constructed');
+    },
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Grammar/Chalk/Rule/ExpressionList.pm',
-    label      => 'Grammar::Chalk::Rule::ExpressionList.pm',
-    structural => [
+    file        => 'lib/Chalk/Grammar/Chalk/Rule/ExpressionList.pm',
+    label       => 'Grammar::Chalk::Rule::ExpressionList.pm',
+    structural  => [
         { pattern => qr/ExpressionList/, label => 'contains ExpressionList' },
     ],
+    original_ns => 'Chalk::Grammar::Chalk::Rule::ExpressionList',
+    test_ns     => 'Chalk::Grammar::Chalk::Rule::ExpressionListGenD',
+    todo_eval   => 'ExpressionList depends on Rule parent class',
 );
 
 # ============================================================

@@ -221,6 +221,17 @@ test_file(
     label      => 'Semiring::Structural.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::Structural',
     skip_build => 'XS emitter: RETVAL/xsreturn label issues in early-return codegen',
+    structural => [
+        { pattern => qr/zero\(self/, label => 'has zero method' },
+        { pattern => qr/one\(self/, label => 'has one method' },
+    ],
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            my $s = $m->new();
+            die "zero != 0" unless $s->zero() == 0;
+            die "one != 1" unless $s->one() == 1;
+        }, 'zero/one');
+    },
 );
 
 test_file(
@@ -228,6 +239,10 @@ test_file(
     label      => 'Semiring::Precedence.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::Precedence',
     skip_build => 'XS emitter: RETVAL/xsreturn label issues in early-return codegen',
+    structural => [
+        { pattern => qr/zero\(self/, label => 'has zero method' },
+        { pattern => qr/one\(self/, label => 'has one method' },
+    ],
 );
 
 test_file(
@@ -235,6 +250,10 @@ test_file(
     label      => 'Semiring::SemanticAction.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::SemanticAction',
     skip_build => 'XS emitter: RETVAL/xsreturn label issues in early-return codegen',
+    structural => [
+        { pattern => qr/zero\(self/, label => 'has zero method' },
+        { pattern => qr/one\(self/, label => 'has one method' },
+    ],
 );
 
 test_file(
@@ -242,18 +261,29 @@ test_file(
     label      => 'Semiring::TypeInference.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::TypeInference',
     skip_build => 'XS emitter: RETVAL/xsreturn label issues in early-return codegen',
+    structural => [
+        { pattern => qr/zero\(self/, label => 'has zero method' },
+        { pattern => qr/one\(self/, label => 'has one method' },
+    ],
 );
 
 test_file(
-    file   => 'lib/Chalk/Bootstrap/Semiring/TypeInferenceActions.pm',
-    label  => 'Semiring::TypeInferenceActions.pm',
-    module => 'Chalk::Bootstrap::XS::TierD::TypeInferenceActions',
+    file       => 'lib/Chalk/Bootstrap/Semiring/TypeInferenceActions.pm',
+    label      => 'Semiring::TypeInferenceActions.pm',
+    module     => 'Chalk::Bootstrap::XS::TierD::TypeInferenceActions',
+    structural => [
+        { pattern => qr/TypeInferenceActions/, label => 'has TypeInferenceActions class' },
+    ],
 );
 
 test_file(
-    file   => 'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',
-    label  => 'Semiring::FilterComposite.pm',
-    module => 'Chalk::Bootstrap::XS::TierD::FilterComposite',
+    file       => 'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',
+    label      => 'Semiring::FilterComposite.pm',
+    module     => 'Chalk::Bootstrap::XS::TierD::FilterComposite',
+    structural => [
+        { pattern => qr/zero\(self/, label => 'has zero method' },
+        { pattern => qr/one\(self/, label => 'has one method' },
+    ],
 );
 
 # ============================================================
@@ -264,18 +294,36 @@ test_file(
     file   => 'lib/Chalk/Grammar/Perl/KeywordTable.pm',
     label  => 'KeywordTable.pm',
     module => 'Chalk::Grammar::XS::TierD::KeywordTable',
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            my $obj = $m->new();
+            die "module not loaded" unless defined $obj;
+        }, 'construction');
+    },
 );
 
 test_file(
     file   => 'lib/Chalk/Grammar/Perl/PrecedenceTable.pm',
     label  => 'PrecedenceTable.pm',
     module => 'Chalk::Grammar::XS::TierD::PrecedenceTable',
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            my $obj = $m->new();
+            die "module not loaded" unless defined $obj;
+        }, 'construction');
+    },
 );
 
 test_file(
     file   => 'lib/Chalk/Grammar/Perl/TypeLibrary.pm',
     label  => 'TypeLibrary.pm',
     module => 'Chalk::Grammar::XS::TierD::TypeLibrary',
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            my $obj = $m->new();
+            die "module not loaded" unless defined $obj;
+        }, 'construction');
+    },
 );
 
 # ============================================================
@@ -358,6 +406,9 @@ test_file(
     label      => 'Perl::Target::Perl.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::PerlTargetPerl',
     skip_build => 'XS target generator dies: Constructor node missing value method',
+    structural => [
+        { pattern => qr/generate\(self/, label => 'has generate method' },
+    ],
 );
 
 test_file(
@@ -365,6 +416,9 @@ test_file(
     label      => 'Perl::Target::XS.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::PerlTargetXS',
     skip_build => 'XS emitter: av_push void value, type mismatch, early-return codegen issues',
+    structural => [
+        { pattern => qr/generate\(self/, label => 'has generate method' },
+    ],
 );
 
 # ============================================================
@@ -383,12 +437,20 @@ test_file(
     label      => 'ConciseTree::Actions.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::ConciseTreeActions',
     skip_build => 'XS emitter: AV*/SV* type mismatch, RETVAL/xsreturn issues',
+    structural => [
+        { pattern => qr/ConciseTreeActions|Actions/, label => 'has Actions class' },
+    ],
 );
 
 test_file(
     file   => 'lib/Chalk/Bootstrap/Desugar.pm',
     label  => 'Desugar.pm',
     module => 'Chalk::Bootstrap::XS::TierD::Desugar',
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            die "module not loaded" unless defined $m;
+        }, 'module loads');
+    },
 );
 
 # ============================================================
@@ -399,6 +461,12 @@ test_file(
     file   => 'lib/Chalk/Grammar/BNF.pm',
     label  => 'Grammar::BNF.pm',
     module => 'Chalk::Grammar::XS::TierD::BNF',
+    behavioral => sub ($mod) {
+        fork_test($mod, sub ($m) {
+            my $bnf = $m->new();
+            die "not constructed" unless defined $bnf;
+        }, 'construction');
+    },
 );
 
 test_file(
@@ -412,6 +480,9 @@ test_file(
     label      => 'Grammar::BNF::Actions.pm',
     module     => 'Chalk::Grammar::XS::TierD::BNFActions',
     skip_build => 'XS emitter: xsreturn label issues in early-return codegen',
+    structural => [
+        { pattern => qr/Actions/, label => 'has Actions class' },
+    ],
 );
 
 test_file(
@@ -419,6 +490,9 @@ test_file(
     label      => 'Grammar::Chalk::Rule::ExpressionList.pm',
     module     => 'Chalk::Grammar::XS::TierD::ExpressionList',
     skip_build => 'XS emitter: av_push void value, NULL unsupported op',
+    structural => [
+        { pattern => qr/ExpressionList/, label => 'has ExpressionList class' },
+    ],
 );
 
 # ============================================================
