@@ -309,7 +309,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
                 if (defined $default && $default isa Chalk::Bootstrap::IR::Node::Constant) {
                     my $val = $default->value();
-                    if ($val =~ /^-?\d+$/) {
+                    if ($val eq 'undef') {
+                        # undef default — PVOBJ fields are already &PL_sv_undef, no action needed
+                    } elsif ($val =~ /^-?\d+$/) {
                         # Integer default
                         push @lines, "        if (!got_$name) { sv_setiv(fields[$idx], $val); }";
                     } elsif ($val =~ /^-?\d+\.\d+$/) {
@@ -320,6 +322,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         my $escaped = $self->_escape_c_string($val);
                         push @lines, "        if (!got_$name) { sv_setpv(fields[$idx], \"$escaped\"); }";
                     }
+                } elsif (defined $default && $default isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $default->class() eq 'ArrayRefExpr') {
+                    # Empty array default: field $ops = []
+                    push @lines, "        if (!got_$name) { sv_setsv(fields[$idx], newRV_noinc((SV*)newAV())); }";
+                } elsif (defined $default && $default isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $default->class() eq 'HashRefExpr') {
+                    # Empty hash default: field $cache = {}
+                    push @lines, "        if (!got_$name) { sv_setsv(fields[$idx], newRV_noinc((SV*)newHV())); }";
                 }
             }
 
