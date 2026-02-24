@@ -745,6 +745,31 @@ class Chalk::Bootstrap::Perl::Actions {
                     my $updated = { $state->%* };
                     if (defined $updated->{loop}) {
                         $updated->{body_stmts} = [$body_expr];
+
+                        # Collect variable refs from the body expression so Program
+                        # can create Phi nodes for loop-carried dependencies.
+                        # Mirrors the same pattern as ForeachStatement.
+                        my $loop      = $updated->{loop};
+                        my $body_refs = $collect_body_var_refs->($body_expr);
+
+                        # Collect post-body scope bindings for backedge wiring.
+                        # Walk leaves of this context to find any scope updates
+                        # that occurred while parsing the body expression.
+                        my %body_final_bindings;
+                        for my $leaf (_collect_ir_leaves($ctx)) {
+                            my $leaf_state = $sa->cfg_state($leaf);
+                            if (defined $leaf_state && defined $leaf_state->{scope}) {
+                                for my $name ($leaf_state->{scope}->variable_names()) {
+                                    my $binding = $leaf_state->{scope}->lookup($name);
+                                    $body_final_bindings{$name} = $binding if defined $binding;
+                                }
+                            }
+                        }
+
+                        $_loop_body_var_refs{refaddr($loop)} = {
+                            phi_vars            => $body_refs,
+                            body_final_bindings => \%body_final_bindings,
+                        };
                     } elsif (defined $updated->{if_node}) {
                         # Detect loop jump keywords (next/last) as body:
                         # set loop_jump marker instead of then_stmts so
