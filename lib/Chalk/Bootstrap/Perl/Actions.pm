@@ -9,15 +9,15 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
+my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
+my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl ReturnStmt DieCall);
+my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop);
+my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
 # Side table: maps refaddr(loop_ir_node) => hashref of variable names read in loop body.
 # Populated by ForeachStatement; consumed by Program for Phi insertion.
 # Keyed by the Loop IR node's refaddr so Program can look up body refs per-loop.
 my %_loop_body_var_refs;
-my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
-my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl ReturnStmt DieCall);
-my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop);
-my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
 class Chalk::Bootstrap::Perl::Actions {
     field $factory;
@@ -136,6 +136,22 @@ class Chalk::Bootstrap::Perl::Actions {
     # Helper: make a Constant IR node
     my sub _make_const($factory, $value) {
         return $factory->make('Constant', const_type => 'string', value => $value);
+    }
+
+    # Helper: resolve a variable name from scope, creating a Phi if needed.
+    # Returns the resolved IR node if the variable is in scope (regular or sentinel),
+    # or undef if no scope is active or the variable is not bound.
+    # When a sentinel is resolved to a Phi, updates the cfg_state in SemanticAction.
+    my sub _resolve_from_scope($ctx, $sa, $var_name, $factory) {
+        return undef unless defined $sa;
+        my $state = $sa->inherited_cfg_state($ctx);
+        return undef unless defined $state;
+        my ($value, $new_scope) = $state->{scope}->resolve_sentinel($var_name, $factory);
+        return undef unless defined $value;
+        if ($new_scope) {
+            $sa->update_cfg({ $state->%*, scope => $new_scope });
+        }
+        return $value;
     }
 
     # Helper: check if a BuiltinCall node should be unwrapped during push-inward
@@ -1272,88 +1288,36 @@ class Chalk::Bootstrap::Perl::Actions {
     method Variable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-        if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
-                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
-                if (defined $value) {
-                    if ($new_scope) {
-                        $sa->update_cfg({ $state->%*, scope => $new_scope });
-                    }
-                    return $value;
-                }
-            }
-        }
-
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
     # §18 ScalarVariable — resolve from scope if available, else Constant
     method ScalarVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-        if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
-                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
-                if (defined $value) {
-                    if ($new_scope) {
-                        $sa->update_cfg({ $state->%*, scope => $new_scope });
-                    }
-                    return $value;
-                }
-            }
-        }
-
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
     # §18 ArrayVariable — resolve from scope if available, else Constant
     method ArrayVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-        if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
-                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
-                if (defined $value) {
-                    if ($new_scope) {
-                        $sa->update_cfg({ $state->%*, scope => $new_scope });
-                    }
-                    return $value;
-                }
-            }
-        }
-
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
     # §18 HashVariable — resolve from scope if available, else Constant
     method HashVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-        if (defined $sa) {
-            my $state = $sa->inherited_cfg_state($ctx);
-            if (defined $state) {
-                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
-                if (defined $value) {
-                    if ($new_scope) {
-                        $sa->update_cfg({ $state->%*, scope => $new_scope });
-                    }
-                    return $value;
-                }
-            }
-        }
-
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
     # §13 QwLiteral — return array of Constants
