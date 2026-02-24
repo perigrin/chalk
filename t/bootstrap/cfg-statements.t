@@ -116,7 +116,70 @@ use Chalk::Bootstrap::Scope;
     is($state->{list}, $list_node, 'list stored');
 }
 
-# --- Test 4: IfStatement populates cfg_state with body statements (integration) ---
+# --- Test 4: _build_cfg_lookup first-found-wins invariant ---
+# When parent and child contexts both have cfg_state for the same IR node,
+# the parent's state (with body wired in) must take priority.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $start   = $factory->make('Start');
+    my $cond    = $factory->make('Constant', const_type => 'integer', value => 1);
+    my $if_node = $factory->make('If', control => $start, condition => $cond);
+    my $body_stmt = $factory->make('Constant', const_type => 'integer', value => 42);
+
+    # Build a Context tree: parent with children
+    use Chalk::Bootstrap::Context;
+    my $child_ctx = Chalk::Bootstrap::Context->new(
+        focus    => $if_node,
+        children => [],
+        position => 0,
+        rule     => 'PostfixModifier',
+    );
+    my $parent_ctx = Chalk::Bootstrap::Context->new(
+        focus    => $if_node,      # Same IR node as child
+        children => [$child_ctx],
+        position => 0,
+        rule     => 'ExpressionStatement',
+    );
+
+    # Child has cfg_state with empty then_stmts (PostfixModifier's original)
+    my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+    my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+    $sa->set_cfg_state($child_ctx, {
+        control    => $factory->make('Region', controls => [$true_proj, $false_proj]),
+        scope      => Chalk::Bootstrap::Scope->new(),
+        then_stmts => [],
+        else_stmts => undef,
+        if_node    => $if_node,
+        true_proj  => $true_proj,
+        false_proj => $false_proj,
+    });
+
+    # Parent has cfg_state with body wired in (ExpressionStatement's update)
+    $sa->set_cfg_state($parent_ctx, {
+        control    => $factory->make('Region', controls => [$true_proj, $false_proj]),
+        scope      => Chalk::Bootstrap::Scope->new(),
+        then_stmts => [$body_stmt],
+        else_stmts => undef,
+        if_node    => $if_node,
+        true_proj  => $true_proj,
+        false_proj => $false_proj,
+    });
+
+    # Run _build_cfg_lookup via generate_with_cfg on a wrapper Program
+    my $program = $factory->make('Constructor', 'class' => 'Program',
+        statements => [$if_node]);
+    my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
+    my $code = $target->generate_with_cfg($program, $sa, $parent_ctx);
+    ok(defined $code, '_build_cfg_lookup first-found-wins generates code');
+    # The parent's body (42) must appear in the output, not empty braces
+    like($code, qr/42/, 'first-found-wins: parent body (42) present in output');
+    unlike($code, qr/if\s*\([^)]*\)\s*\{\s*\}/, 'first-found-wins: no empty if body');
+}
+
+# --- Test 5: IfStatement populates cfg_state with body statements (integration) ---
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;

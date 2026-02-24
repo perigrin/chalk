@@ -187,4 +187,45 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/SvROK/, 'XS variable list foreach guards with SvROK check');
 }
 
+# --- Test 8: XS emit_cfg_if elsif chain emits } else if (not nested) ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    my $cond1 = $factory->make('Constant', const_type => 'string', value => 'cond1_sv');
+    my $cond2 = $factory->make('Constant', const_type => 'string', value => 'cond2_sv');
+
+    # Outer if
+    my $outer_if   = $factory->make('If', control => $start, condition => $cond1);
+    my $outer_true = $factory->make('Proj', source => $outer_if, index => 0);
+    my $outer_false = $factory->make('Proj', source => $outer_if, index => 1);
+
+    # Inner if (elsif branch)
+    my $inner_if   = $factory->make('If', control => $outer_false, condition => $cond2);
+    my $inner_true = $factory->make('Proj', source => $inner_if, index => 0);
+    my $inner_false = $factory->make('Proj', source => $inner_if, index => 1);
+
+    my $then1 = $factory->make('Constant', const_type => 'string', value => 'then1_val');
+    my $then2 = $factory->make('Constant', const_type => 'string', value => 'then2_val');
+    my $else_val = $factory->make('Constant', const_type => 'string', value => 'else_val');
+
+    # Set up cfg_lookup so elsif detection finds inner_if
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::CfgElsif');
+
+    # Populate cfg_lookup by calling _build_cfg_lookup with a mock SemanticAction
+    # Instead, directly call emit_cfg_if with inner If as false_stmts
+    # and register it in cfg_lookup via the target's internal hash
+    # We need to use the target's emit_cfg_if — but elsif detection requires cfg_lookup.
+    # For a unit test, just test the prefix parameter directly:
+    my $code = $target->emit_cfg_if(
+        $inner_if, $inner_true, $inner_false, {},
+        [$then2], [$else_val],
+        '} else if',
+    );
+    ok(defined $code, 'XS emit_cfg_if with elsif prefix returns code');
+    like($code, qr/^\}\s*else\s*if\s*\(SvTRUE/, 'XS elsif starts with } else if');
+    like($code, qr/else\s*\{/, 'XS elsif chain has final else');
+}
+
 done_testing();

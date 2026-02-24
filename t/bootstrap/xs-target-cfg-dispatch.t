@@ -98,4 +98,45 @@ use Chalk::Bootstrap::Perl::Target::XS;
     ok(!defined $code, 'returns undef for plain state');
 }
 
+# --- Test 4: emit_from_cfg_state forwards iterator/list for foreach ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $start = $factory->make('Start');
+    my $loop_cond = $factory->make('Constant', const_type => 'string', value => '__loop_bound__');
+    my $loop      = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
+    my $loop_if   = $factory->make('If', control => $loop, condition => $loop_cond);
+    my $body_proj = $factory->make('Proj', source => $loop_if, index => 0);
+    my $exit_proj = $factory->make('Proj', source => $loop_if, index => 1);
+    my $region    = $factory->make('Region', controls => [$exit_proj]);
+
+    my $iterator = $factory->make('Constant', const_type => 'string', value => '$x');
+    my $list_items = [
+        $factory->make('Constant', const_type => 'integer', value => 1),
+        $factory->make('Constant', const_type => 'integer', value => 2),
+    ];
+
+    my $ctx = $sa->one();
+    $sa->set_cfg_state($ctx, {
+        control    => $region,
+        scope      => Chalk::Bootstrap::Scope->new(),
+        body_stmts => [],
+        loop       => $loop,
+        loop_if    => $loop_if,
+        body_proj  => $body_proj,
+        exit_proj  => $exit_proj,
+        iterator   => $iterator,
+        list       => $list_items,
+    });
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'TestModule');
+    my $code = $target->emit_from_cfg_state($sa, $ctx, {});
+    ok(defined $code, 'XS emit_from_cfg_state with iterator/list returns code');
+    # Should emit C-style AV iteration, not while loop
+    unlike($code, qr/while/, 'XS foreach via dispatch does NOT emit while');
+    like($code, qr/av_fetch/, 'XS foreach via dispatch uses av_fetch');
+}
+
 done_testing();
