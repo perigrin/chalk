@@ -208,6 +208,20 @@ SKIP: {
     my $sa = $semiring->semirings()->[4];
     ok($sa isa Chalk::Bootstrap::Semiring::SemanticAction, 'got SemanticAction from parser');
 
+    # --- current_instance() lifecycle: undef outside parse, set during parse ---
+    {
+        ok(!defined Chalk::Bootstrap::Semiring::SemanticAction->current_instance(),
+            'current_instance is undef before parse');
+
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+        my $result = $parser->parse_value('42;');
+        ok(defined $result, 'simple parse succeeds for lifecycle test');
+
+        ok(!defined Chalk::Bootstrap::Semiring::SemanticAction->current_instance(),
+            'current_instance is undef after parse completes');
+    }
+
     # --- IfStatement stores then_stmts and else_stmts ---
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -883,6 +897,80 @@ SKIP: {
             my $code = $perl_target->generate_with_cfg($ir_node, $sa_fa, $sem_ctx);
             ok(defined $code, 'foreach with @array generates code');
             like($code, qr/for\s+my\s+\$x/, 'foreach with @array uses for my syntax');
+        }
+    }
+}
+
+# --- Test 18: Postfix unless with binary condition parenthesizes correctly ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UnlessBinTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::UnlessBinTest::grammar();
+    my $parser_ub = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_ub;
+
+    my $semiring_ub = $parser_ub->semiring();
+    my $sa_ub = $semiring_ub->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_ub->reset_cache();
+
+        my $result = $parser_ub->parse_value('42 unless $a && $b;');
+        ok(defined $result, 'postfix unless with && parses');
+
+        SKIP: {
+            skip 'postfix unless with && did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_ub, $sem_ctx);
+            ok(defined $code, 'postfix unless with && generates code');
+            # Must parenthesize: if (!($a && $b)), not if (!$a && $b)
+            like($code, qr/!\s*\(/, 'postfix unless with && parenthesizes binary condition');
+        }
+    }
+}
+
+# --- Test 19: Postfix until with comparison parenthesizes correctly ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UntilCmpTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::UntilCmpTest::grammar();
+    my $parser_uc = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_uc;
+
+    my $semiring_uc = $parser_uc->semiring();
+    my $sa_uc = $semiring_uc->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_uc->reset_cache();
+
+        my $result = $parser_uc->parse_value('$x++ until $x > 10;');
+        ok(defined $result, 'postfix until with > parses');
+
+        SKIP: {
+            skip 'postfix until with > did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_uc, $sem_ctx);
+            ok(defined $code, 'postfix until with > generates code');
+            # Must parenthesize: while (!($x > 10)), not while (!$x > 10)
+            like($code, qr/!\s*\(/, 'postfix until with > parenthesizes binary condition');
         }
     }
 }

@@ -518,7 +518,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     && defined $item->value()
                     && $item->value() eq 'next'
                     && $i + 1 <= $#$stmts) {
-                # Merge next + condition → NextUnless or PostfixLoop
+                # Merge next + condition → NextUnless
                 $i++;
                 my $cond = $stmts->[$i];
                 push @result, $factory->make('Constructor',

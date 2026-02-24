@@ -510,6 +510,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     # Emit Perl if/else from an If CFG node with true/false Proj branches.
+    # $true_proj/$false_proj: retained for future GCM/peephole passes
+    # that schedule data-flow nodes relative to Proj control anchors.
     method emit_cfg_if($if_node, $true_proj, $false_proj,
                        $true_stmts = [], $false_stmts = [],
                        $prefix = 'if') {
@@ -585,6 +587,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     # Emit Perl loop from a Loop CFG node.
     # When iterator/list are present, emits foreach syntax.
+    # $loop/$body_proj/$exit_proj: retained for future GCM/peephole passes.
     method emit_cfg_loop($loop, $loop_if, $body_proj, $exit_proj,
                          $body_stmts = [], $iterator = undef, $list = undef) {
         my @lines;

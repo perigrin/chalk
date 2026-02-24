@@ -1265,6 +1265,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Emit C if/else from an If CFG node with true/false Proj branches.
     # The If node's condition is emitted as a SvTRUE test. Body statements
     # for each branch are provided by the caller as arrayrefs.
+    # $true_proj/$false_proj: retained for future GCM/peephole passes
+    # that schedule data-flow nodes relative to Proj control anchors.
     method emit_cfg_if($if_node, $true_proj, $false_proj, $declared_vars,
                        $true_stmts = [], $false_stmts = [],
                        $prefix = 'if') {
@@ -1334,6 +1336,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit C loop from a Loop CFG node.
     # Loop → If → Proj(body) / Proj(exit) structure becomes a while loop.
+    # $loop/$body_proj/$exit_proj: retained for future GCM/peephole passes.
     method emit_cfg_loop($loop, $loop_if, $body_proj, $exit_proj, $declared_vars,
                          $body_stmts = [], $iterator = undef, $list = undef) {
         my @lines;
