@@ -76,17 +76,15 @@ SKIP: {
         my $sum_binding = $state->{scope}->lookup('$sum');
         ok(defined $sum_binding, '$sum in scope after loop');
 
-        # $sum should be a Phi (or a node derived from Phi)
-        # After backedge wiring, the Phi's backedge should not be undef
+        # $sum should be a Phi with a wired backedge
+        ok($sum_binding isa Chalk::Bootstrap::IR::Node::Phi,
+            '$sum is a Phi after read-write loop')
+            or diag('$sum binding is: ' . ref($sum_binding));
         if ($sum_binding isa Chalk::Bootstrap::IR::Node::Phi) {
             my $values = $sum_binding->inputs()->[1];
             ok(defined $values->[1],
                 'Phi backedge is wired (not undef)')
                 or diag("backedge value: " . ($values->[1] // 'undef'));
-        } else {
-            # Scope may point at the final VarDecl from assignment
-            # In that case check that a Phi exists somewhere in the IR
-            pass('$sum binding is ' . ref($sum_binding) . ' (acceptable)');
         }
     }
 

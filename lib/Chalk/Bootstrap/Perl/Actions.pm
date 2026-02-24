@@ -602,7 +602,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     next unless defined $stmt;
                     next unless $stmt->operation() eq 'Loop';
 
-                    my $loop_info = $_loop_body_var_refs{refaddr($stmt)};
+                    my $loop_key = refaddr($stmt);
+                    my $loop_info = $_loop_body_var_refs{$loop_key};
                     next unless defined $loop_info;
 
                     my $phi_vars            = $loop_info->{phi_vars};
@@ -632,6 +633,9 @@ class Chalk::Bootstrap::Perl::Actions {
                         $running_scope = $running_scope->define($name, $phi);
                         $scope_changed = true;
                     }
+
+                    # Clean up side table entry (consumed, prevents refaddr reuse bugs)
+                    delete $_loop_body_var_refs{$loop_key};
                 }
 
                 if ($scope_changed) {
