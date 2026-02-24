@@ -55,8 +55,6 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:FieldDecl' => ['name', 'attributes', 'default_value'],
         'Constructor:InterpolatedString' => ['parts'],
         'Constructor:VarDecl'         => ['variable', 'initializer'],
-        'Constructor:IfStmt'          => ['condition', 'then_body', 'else_body'],
-        'Constructor:ForeachLoop'     => ['iterator', 'list', 'body'],
         'Constructor:BinaryExpr'      => ['op', 'left', 'right'],
         'Constructor:UnaryExpr'       => ['op', 'operand'],
         'Constructor:CompoundAssign'  => ['op', 'target', 'value'],
@@ -70,7 +68,6 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:RegexMatch'      => ['target', 'pattern', 'flags'],
         'Constructor:RegexSubst'      => ['target', 'pattern', 'replacement', 'flags'],
         'Constructor:BuiltinCall'     => ['name', 'args'],
-        'Constructor:PostfixLoop'     => ['body', 'modifier', 'condition'],
         'Constructor:NextUnless'      => ['condition'],
         'Constructor:BacktickExpr'    => ['command'],
     );

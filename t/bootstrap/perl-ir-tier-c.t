@@ -1,5 +1,5 @@
 # ABOUTME: Tests for Tier C IR node types used by runtime method logic.
-# ABOUTME: Validates VarDecl, IfStmt, BinaryExpr, MethodCallExpr, etc. via NodeFactory.
+# ABOUTME: Validates VarDecl, BinaryExpr, MethodCallExpr, NextUnless, etc. via NodeFactory.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -43,54 +43,7 @@ my sub c($val) {
 }
 
 # ============================================================
-# 2. IfStmt — if (cond) { then } else { else }
-# ============================================================
-
-{
-    my $cond = c('1');
-    my $then_body = [c('yes')];
-    my $node = $factory->make('Constructor',
-        class     => 'IfStmt',
-        condition => $cond,
-        then_body => $then_body,
-        else_body => undef,
-    );
-    ok(defined $node, 'IfStmt: created');
-    is($node->class(), 'IfStmt', 'IfStmt: class');
-    is($node->inputs()->[0]->value(), '1', 'IfStmt: condition');
-    is(ref $node->inputs()->[1], 'ARRAY', 'IfStmt: then_body is array');
-    is($node->inputs()->[2], undef, 'IfStmt: no else_body');
-
-    # With else
-    my $with_else = $factory->make('Constructor',
-        class     => 'IfStmt',
-        condition => c('0'),
-        then_body => [c('yes')],
-        else_body => [c('no')],
-    );
-    is(ref $with_else->inputs()->[2], 'ARRAY', 'IfStmt: else_body is array');
-}
-
-# ============================================================
-# 3. ForeachLoop — for my $x (list) { body }
-# ============================================================
-
-{
-    my $node = $factory->make('Constructor',
-        class    => 'ForeachLoop',
-        iterator => c('$item'),
-        list     => c('@items'),
-        body     => [c('process')],
-    );
-    ok(defined $node, 'ForeachLoop: created');
-    is($node->class(), 'ForeachLoop', 'ForeachLoop: class');
-    is($node->inputs()->[0]->value(), '$item', 'ForeachLoop: iterator');
-    is($node->inputs()->[1]->value(), '@items', 'ForeachLoop: list');
-    is(ref $node->inputs()->[2], 'ARRAY', 'ForeachLoop: body is array');
-}
-
-# ============================================================
-# 4. BinaryExpr — $a op $b
+# 2. BinaryExpr — $a op $b
 # ============================================================
 
 {
@@ -310,22 +263,7 @@ my sub c($val) {
 }
 
 # ============================================================
-# 17. PostfixLoop — push @r, $x for @list
-# ============================================================
-
-{
-    my $node = $factory->make('Constructor',
-        class     => 'PostfixLoop',
-        body      => c('push'),
-        modifier  => c('for'),
-        condition => c('@list'),
-    );
-    ok(defined $node, 'PostfixLoop: created');
-    is($node->class(), 'PostfixLoop', 'PostfixLoop: class');
-}
-
-# ============================================================
-# 18. NextUnless — next unless $cond
+# 17. NextUnless — next unless $cond
 # ============================================================
 
 {
