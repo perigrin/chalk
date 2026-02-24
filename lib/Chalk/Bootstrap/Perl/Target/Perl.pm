@@ -36,7 +36,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return $code;
     }
 
-    # Walk Context tree, mapping IR node refaddr → cfg_state for control flow nodes
+    # Walk Context tree, mapping IR node refaddr → cfg_state for control flow nodes.
+    # First-found wins: parent rules (e.g. ExpressionStatement) that wire body
+    # expressions into cfg_state take priority over child rules (e.g. PostfixModifier)
+    # that have empty stmts.
     method _build_cfg_lookup($sa, $ctx) {
         my @stack = ($ctx);
         while (@stack) {
@@ -44,7 +47,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             my $state = $sa->cfg_state($node);
             if (defined $state && (defined $state->{if_node} || defined $state->{loop})) {
                 my $ir_node = $node->extract();
-                if (defined $ir_node && ref($ir_node)) {
+                if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}) {
                     $_cfg_lookup{refaddr($ir_node)} = $state;
                 }
             }

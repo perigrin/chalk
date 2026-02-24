@@ -597,4 +597,40 @@ SKIP: {
     }
 }
 
+# --- Test 12: Postfix if wires body expression into then_stmts ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixBodyTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::PostfixBodyTest::grammar();
+    my $parser_f = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_f;
+
+    my $semiring_f = $parser_f->semiring();
+    my $sa_f = $semiring_f->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_f->reset_cache();
+
+        my $result = $parser_f->parse_value('42 if 1;');
+        ok(defined $result, 'postfix if parses for body wiring test');
+
+        SKIP: {
+            skip 'postfix if did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_f, $sem_ctx);
+            ok(defined $code, 'postfix if generates code');
+            like($code, qr/if.*\{.*42/s, 'postfix if body (42) appears inside if block');
+        }
+    }
+}
+
 done_testing();

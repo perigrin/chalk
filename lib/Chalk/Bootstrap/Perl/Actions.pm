@@ -610,14 +610,61 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §4 ExpressionStatement — transparent pass-through
+    # For postfix modifier alt (Expression WS PostfixModifier), wires the
+    # expression into the PostfixModifier's cfg_state body_stmts so codegen
+    # emits the body inside the control flow construct.
     method ExpressionStatement($ctx) {
-        my @values = _collect_ir_values($ctx);
+        my @leaves = _collect_ir_leaves($ctx);
         my @ir_nodes;
-        for my $val (@values) {
-            if ($val isa Chalk::Bootstrap::IR::Node) {
-                push @ir_nodes, $val;
+        my $postfix_leaf;
+        my $body_expr;
+
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            my $rule = $leaf->rule() // '';
+            if ($focus isa Chalk::Bootstrap::IR::Node) {
+                push @ir_nodes, $focus;
+                if ($rule eq 'PostfixModifier') {
+                    $postfix_leaf = $leaf;
+                } elsif (!defined $postfix_leaf) {
+                    # Expression before PostfixModifier is the body
+                    $body_expr = $focus;
+                }
             }
         }
+
+        # Wire body expression into PostfixModifier's cfg_state
+        if (defined $postfix_leaf && defined $body_expr) {
+            my $postfix_node = $postfix_leaf->extract();
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            if (defined $sa) {
+                # Find PostfixModifier's cfg_state by walking context tree
+                my $state;
+                my @walk = ($ctx);
+                while (@walk) {
+                    my $n = pop @walk;
+                    my $s = $sa->cfg_state($n);
+                    if (defined $s && (defined $s->{loop} || defined $s->{if_node})) {
+                        $state = $s;
+                        last;
+                    }
+                    push @walk, reverse $n->children()->@*;
+                }
+
+                if (defined $state) {
+                    my $updated = { $state->%* };
+                    if (defined $updated->{loop}) {
+                        $updated->{body_stmts} = [$body_expr];
+                    } elsif (defined $updated->{if_node}) {
+                        $updated->{then_stmts} = [$body_expr];
+                    }
+                    # Pending update applied to ExpressionStatement's result context
+                    $sa->update_cfg($updated);
+                }
+            }
+            return $postfix_node;
+        }
+
         return $ir_nodes[0] if @ir_nodes == 1;
         return \@ir_nodes if @ir_nodes > 1;
         return undef;
