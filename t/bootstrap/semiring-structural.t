@@ -10,7 +10,19 @@ use lib 't/bootstrap/lib';
 # ========================================================================
 # Phase 1: Basic semiring operations (zero, one, is_zero, multiply, add)
 # ========================================================================
-use_ok('Chalk::Bootstrap::Semiring::Structural');
+use Chalk::Bootstrap::Semiring::Structural;
+
+# Local aliases for fully-qualified structural constants
+use constant {
+    STRUCT_IS_BLOCK   => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_BLOCK,
+    STRUCT_IS_HASH    => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_HASH,
+    STRUCT_IS_CALL    => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_CALL,
+    STRUCT_IS_LIST    => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_LIST,
+    STRUCT_IS_DEREF   => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_DEREF,
+    STRUCT_IS_METHOD  => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_METHOD,
+    STRUCT_IS_BINOP   => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_BINOP,
+    STRUCT_IS_VARDECL => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_VARDECL,
+};
 
 my $sr = Chalk::Bootstrap::Semiring::Structural->new();
 
@@ -30,11 +42,6 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
 
 # Verify the bit position constants are correct
 {
-    use Chalk::Bootstrap::Semiring::Structural qw(
-        STRUCT_IS_BLOCK  STRUCT_IS_HASH    STRUCT_IS_CALL
-        STRUCT_IS_LIST   STRUCT_IS_DEREF   STRUCT_IS_METHOD
-        STRUCT_IS_BINOP  STRUCT_IS_VARDECL
-    );
 
     is(STRUCT_IS_BLOCK,   1,   'STRUCT_IS_BLOCK   = bit 0 (1)');
     is(STRUCT_IS_HASH,    2,   'STRUCT_IS_HASH    = bit 1 (2)');
@@ -92,11 +99,6 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
 
 # --- multiply: tag propagation ---
 {
-    use Chalk::Bootstrap::Semiring::Structural qw(
-        STRUCT_IS_BLOCK STRUCT_IS_HASH STRUCT_IS_CALL STRUCT_IS_DEREF
-        STRUCT_IS_METHOD STRUCT_IS_BINOP STRUCT_IS_VARDECL STRUCT_IS_LIST
-    );
-
     my $block_val = STRUCT_IS_BLOCK;
     my $hash_val  = STRUCT_IS_HASH;
     my $plain     = $sr->one();

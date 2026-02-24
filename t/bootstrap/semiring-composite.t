@@ -17,6 +17,13 @@ use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
+use Chalk::Bootstrap::Semiring::Structural;
+
+# Local aliases for fully-qualified structural constants
+use constant {
+    STRUCT_IS_CALL => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_CALL,
+    STRUCT_IS_LIST => Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_LIST,
+};
 
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -261,7 +268,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     # Two alternatives where Structural can disambiguate:
     # Left has CALL only, Right has CALL+LIST.
     # Structural prefers non-list, so it picks Left.
-    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+
     my $struct_left  = STRUCT_IS_CALL;
     my $struct_right = STRUCT_IS_CALL | STRUCT_IS_LIST;
 
@@ -305,7 +312,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
     # Left has CALL+LIST (is_list), Right has CALL only (no list).
     # Structural prefers non-list, so it picks Right.
-    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+
     my $struct_left  = STRUCT_IS_CALL | STRUCT_IS_LIST;
     my $struct_right = STRUCT_IS_CALL;
 
@@ -345,7 +352,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $struct_sr, $sem_sr],
     );
 
-    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+
     my $struct_identical = STRUCT_IS_CALL | STRUCT_IS_LIST;
 
     my $node1 = $factory->make('Constant', const_type => 'string', value => 'left-winner');
@@ -407,7 +414,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
 # Test FC2: _filter_compare returns 'right_loses' when Structural prefers left
 {
-    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();
@@ -434,7 +441,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
 # Test FC3: _filter_compare returns 'left_loses' when Structural prefers right
 {
-    use Chalk::Bootstrap::Semiring::Structural qw(STRUCT_IS_CALL STRUCT_IS_LIST);
+
     my $bool_sr   = Chalk::Bootstrap::Semiring::Boolean->new();
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
     my $sem_sr    = Chalk::Bootstrap::Semiring::SemanticAction->new();

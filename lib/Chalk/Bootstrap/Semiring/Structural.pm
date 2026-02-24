@@ -27,12 +27,9 @@ class Chalk::Bootstrap::Semiring::Structural {
         STRUCT_IS_VARDECL => 128,
     };
 
-    use Exporter 'import';
-    our @EXPORT_OK = qw(
-        STRUCT_IS_BLOCK  STRUCT_IS_HASH    STRUCT_IS_CALL
-        STRUCT_IS_LIST   STRUCT_IS_DEREF   STRUCT_IS_METHOD
-        STRUCT_IS_BINOP  STRUCT_IS_VARDECL
-    );
+    # Constants are accessed via fully-qualified names
+    # (e.g. Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_CALL)
+    # to avoid depending on Exporter, which Chalk cannot compile.
 
     # zero() returns -1: the sentinel value outside the 0-255 valid bitfield range.
     # This marks a dead parse path.
