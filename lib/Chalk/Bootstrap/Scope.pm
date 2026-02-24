@@ -1,10 +1,11 @@
 # ABOUTME: Immutable lexical scope mapping variable names to IR node bindings
-# ABOUTME: Provides lookup, define (copy-on-write), snapshot, and diff operations for scope threading
+# ABOUTME: Provides lookup, define (copy-on-write), snapshot, diff, and lazy Phi sentinel operations
 use 5.42.0;
 use utf8;
 use experimental 'class';
 
 use Scalar::Util 'refaddr';
+use Chalk::Bootstrap::IR::Node::Phi;
 
 class Chalk::Bootstrap::Scope {
     # Hash mapping variable names (strings like '$x', '@arr', '%hash') to IR nodes
@@ -78,6 +79,54 @@ class Chalk::Bootstrap::Scope {
     # Return list of all bound variable names
     method variable_names() {
         return keys $bindings->%*;
+    }
+
+    # Create a new Scope with all bindings replaced by sentinels.
+    # Each sentinel records the Loop node and the pre-loop binding value.
+    # Called at loop entry to enable lazy Phi creation.
+    # Sentinels are blessed into Chalk::Bootstrap::Scope::Sentinel for
+    # unambiguous type detection (plain hashrefs could be confused with IR nodes).
+    method fork_for_loop($loop_node) {
+        my %sentinel_bindings;
+        for my $name (keys $bindings->%*) {
+            $sentinel_bindings{$name} = bless {
+                sentinel  => true,
+                loop      => $loop_node,
+                pre_value => $bindings->{$name},
+            }, 'Chalk::Bootstrap::Scope::Sentinel';
+        }
+        return Chalk::Bootstrap::Scope->new(bindings => \%sentinel_bindings);
+    }
+
+    # Resolve a sentinel for a variable, creating a Phi on demand.
+    # Returns ($value, $new_scope):
+    #   - If sentinel: creates Phi, returns (Phi, new Scope with Phi replacing sentinel)
+    #   - If non-sentinel binding: returns (binding, undef)
+    #   - If unbound: returns (undef, undef)
+    method resolve_sentinel($name, $factory) {
+        my $binding = $bindings->{$name};
+        return (undef, undef) unless defined $binding;
+
+        # Non-sentinel: return the binding directly
+        unless (ref $binding eq 'Chalk::Bootstrap::Scope::Sentinel') {
+            return ($binding, undef);
+        }
+
+        # Sentinel: create a Phi node with backedge placeholder
+        my $phi = $factory->make('Phi',
+            region => $binding->{loop},
+            values => [$binding->{pre_value}, undef],
+        );
+
+        # Replace sentinel with Phi in a new scope
+        my $new_scope = $self->define($name, $phi);
+        return ($phi, $new_scope);
+    }
+
+    # Return the raw binding without resolving sentinels.
+    # Used during backedge wiring to distinguish sentinels from Phis.
+    method raw_lookup($name) {
+        return $bindings->{$name};
     }
 }
 

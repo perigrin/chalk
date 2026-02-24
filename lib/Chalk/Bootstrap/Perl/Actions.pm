@@ -17,6 +17,12 @@ my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless 
 class Chalk::Bootstrap::Perl::Actions {
     field $factory;
 
+    # Side table: maps refaddr(loop_ir_node) => hashref of variable names read in loop body.
+    # Populated by ForeachStatement and ExpressionStatement (postfix loops);
+    # consumed by Program for Phi insertion.
+    # Instance-scoped so it is GC'd with the Actions object between parses.
+    field %_loop_body_var_refs;
+
     ADJUST {
         $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     }
@@ -86,9 +92,69 @@ class Chalk::Bootstrap::Perl::Actions {
         return @results;
     }
 
+    # Helper: recursively collect all variable names referenced in a body stmts array.
+    # Walks the IR tree to find Constant nodes with const_type='variable'.
+    # Returns a hashref of variable name => 1 for each variable found.
+    my $collect_body_var_refs;
+    $collect_body_var_refs = sub ($stmts_or_node) {
+        my %found;
+        my %visited;
+        my @queue;
+
+        # Accept either an arrayref of statements or a single node
+        if (ref $stmts_or_node eq 'ARRAY') {
+            @queue = $stmts_or_node->@*;
+        } elsif (defined $stmts_or_node) {
+            @queue = ($stmts_or_node);
+        }
+
+        while (@queue) {
+            my $node = shift @queue;
+            next unless defined $node;
+            next unless ref $node;
+            next if $visited{refaddr($node)}++;
+
+            if ($node isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $node->value()
+                    && $node->const_type() eq 'variable') {
+                $found{$node->value()} = 1;
+            }
+
+            # Recurse into inputs
+            if ($node->can('inputs') && defined $node->inputs()) {
+                for my $input ($node->inputs()->@*) {
+                    next unless defined $input;
+                    if (ref $input eq 'ARRAY') {
+                        push @queue, $input->@*;
+                    } else {
+                        push @queue, $input;
+                    }
+                }
+            }
+        }
+
+        return \%found;
+    };
+
     # Helper: make a Constant IR node
     my sub _make_const($factory, $value) {
         return $factory->make('Constant', const_type => 'string', value => $value);
+    }
+
+    # Helper: resolve a variable name from scope, creating a Phi if needed.
+    # Returns the resolved IR node if the variable is in scope (regular or sentinel),
+    # or undef if no scope is active or the variable is not bound.
+    # When a sentinel is resolved to a Phi, updates the cfg_state in SemanticAction.
+    my sub _resolve_from_scope($ctx, $sa, $var_name, $factory) {
+        return undef unless defined $sa;
+        my $state = $sa->inherited_cfg_state($ctx);
+        return undef unless defined $state && defined $state->{scope};
+        my ($value, $new_scope) = $state->{scope}->resolve_sentinel($var_name, $factory);
+        return undef unless defined $value;
+        if ($new_scope) {
+            $sa->update_cfg({ $state->%*, scope => $new_scope });
+        }
+        return $value;
     }
 
     # Helper: check if a BuiltinCall node should be unwrapped during push-inward
@@ -523,7 +589,10 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §2 Program ::= _ StatementList? _
-    # Collects all statement-level IR nodes into Constructor:Program
+    # Collects all statement-level IR nodes into Constructor:Program.
+    # Also performs Phi insertion for loop-carried variables: ForeachStatement
+    # fires with a narrow scope and cannot see variables defined in sibling
+    # statements. Program has the full merged scope and creates Phis here.
     method Program($ctx) {
         my @stmts;
         for my $val (_collect_ir_values($ctx)) {
@@ -536,6 +605,67 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         # Fix misparented postfix chains from Earley stale-value merge
         @stmts = map { _fix_postfix_chain($factory, $_) } @stmts;
+
+        # Phi insertion for loop-carried variables.
+        # Walk statements in order, tracking scope. When a Loop statement is
+        # encountered, check if any variables in its body_var_refs were defined
+        # before the loop. For those variables, create Phi nodes and update scope.
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state && defined $state->{scope}) {
+                my $running_scope = $state->{scope};
+                my $scope_changed = false;
+
+                for my $stmt (@stmts) {
+                    next unless defined $stmt;
+                    next unless $stmt->operation() eq 'Loop';
+
+                    my $loop_key = refaddr($stmt);
+                    my $loop_info = $_loop_body_var_refs{$loop_key};
+                    next unless defined $loop_info;
+
+                    my $phi_vars            = $loop_info->{phi_vars};
+                    my $body_final_bindings = $loop_info->{body_final_bindings};
+
+                    for my $name (sort keys %$phi_vars) {
+                        my $pre_value = $running_scope->lookup($name);
+                        next unless defined $pre_value;
+
+                        # Create Phi: pre_value at loop entry, backedge TBD
+                        my $phi = $factory->make('Phi',
+                            region => $stmt,
+                            values => [$pre_value, undef],
+                        );
+
+                        # Wire backedge: if the variable was assigned in the body,
+                        # use the post-body value; otherwise use the Phi itself
+                        # (degenerate loop-carried dep for read-only variables).
+                        my $backedge_val = $phi;
+                        my $body_binding = $body_final_bindings->{$name};
+                        if (defined $body_binding
+                                && refaddr($body_binding) != refaddr($pre_value)) {
+                            $backedge_val = $body_binding;
+                        }
+                        $phi->set_backedge($backedge_val);
+
+                        $running_scope = $running_scope->define($name, $phi);
+                        $scope_changed = true;
+                    }
+
+                    # Clean up side table entry (consumed, prevents refaddr reuse bugs)
+                    delete $_loop_body_var_refs{$loop_key};
+                }
+
+                if ($scope_changed) {
+                    $sa->update_cfg({
+                        $state->%*,
+                        scope => $running_scope,
+                    });
+                }
+            }
+        }
+
         return $factory->make('Constructor',
             'class'      => 'Program',
             statements => \@stmts,
@@ -634,6 +764,31 @@ class Chalk::Bootstrap::Perl::Actions {
                     my $updated = { $state->%* };
                     if (defined $updated->{loop}) {
                         $updated->{body_stmts} = [$body_expr];
+
+                        # Collect variable refs from the body expression so Program
+                        # can create Phi nodes for loop-carried dependencies.
+                        # Mirrors the same pattern as ForeachStatement.
+                        my $loop      = $updated->{loop};
+                        my $body_refs = $collect_body_var_refs->($body_expr);
+
+                        # Collect post-body scope bindings for backedge wiring.
+                        # Walk leaves of this context to find any scope updates
+                        # that occurred while parsing the body expression.
+                        my %body_final_bindings;
+                        for my $leaf (_collect_ir_leaves($ctx)) {
+                            my $leaf_state = $sa->cfg_state($leaf);
+                            if (defined $leaf_state && defined $leaf_state->{scope}) {
+                                for my $name ($leaf_state->{scope}->variable_names()) {
+                                    my $binding = $leaf_state->{scope}->lookup($name);
+                                    $body_final_bindings{$name} = $binding if defined $binding;
+                                }
+                            }
+                        }
+
+                        $_loop_body_var_refs{refaddr($loop)} = {
+                            phi_vars            => $body_refs,
+                            body_final_bindings => \%body_final_bindings,
+                        };
                     } elsif (defined $updated->{if_node}) {
                         # Detect loop jump keywords (next/last) as body:
                         # set loop_jump marker instead of then_stmts so
@@ -1132,32 +1287,40 @@ class Chalk::Bootstrap::Perl::Actions {
         return _fixup_stmts($factory, \@stmts);
     }
 
-    # §18 Variable — return variable name as Constant
+    # §18 Variable — resolve from scope if available, else Constant
     method Variable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 ScalarVariable — return as Constant with variable type
+    # §18 ScalarVariable — resolve from scope if available, else Constant
     method ScalarVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 ArrayVariable — return as Constant with variable type
+    # §18 ArrayVariable — resolve from scope if available, else Constant
     method ArrayVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 HashVariable — return as Constant with variable type
+    # §18 HashVariable — resolve from scope if available, else Constant
     method HashVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return $factory->make('Constant', const_type => 'variable', value => $text);
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        return _resolve_from_scope($ctx, $sa, $text, $factory)
+            // $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
     # §13 QwLiteral — return array of Constants
@@ -1639,6 +1802,17 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $target && defined $op;
 
+        # Helper: update scope when assigning to a variable.
+        # Called with the variable name (string with sigil) and the resulting IR node.
+        my $update_scope = sub ($var_name, $ir_node) {
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            return unless defined $sa;
+            my $state = $sa->inherited_cfg_state($ctx);
+            return unless defined $state;
+            my $new_scope = $state->{scope}->define($var_name, $ir_node);
+            $sa->update_cfg({ $state->%*, scope => $new_scope });
+        };
+
         my $op_val = $op->value();
         if ($op_val eq '=') {
             # FieldDecl target: set its default_value and return it
@@ -1654,21 +1828,30 @@ class Chalk::Bootstrap::Perl::Actions {
             # VarDecl target: set its initializer and return it
             if ($target isa Chalk::Bootstrap::IR::Node::Constructor
                     && $target->class() eq 'VarDecl') {
-                return $factory->make('Constructor',
+                my $result = $factory->make('Constructor',
                     'class'       => 'VarDecl',
                     variable    => $target->inputs()->[0],
                     initializer => $value,
                 );
+                my $var_name_node = $target->inputs()->[0];
+                if ($var_name_node isa Chalk::Bootstrap::IR::Node::Constant
+                        && defined $var_name_node->value()
+                        && $var_name_node->value() =~ /^[\$\@\%]/) {
+                    $update_scope->($var_name_node->value(), $result);
+                }
+                return $result;
             }
             # Plain assignment: Return as VarDecl if target is variable.
             if ($target isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $target->value()
                     && $target->value() =~ /^[\$\@\%]/) {
-                return $factory->make('Constructor',
+                my $result = $factory->make('Constructor',
                     'class'       => 'VarDecl',
                     variable    => $target,
                     initializer => $value,
                 );
+                $update_scope->($target->value(), $result);
+                return $result;
             }
             # Otherwise binary expression for assignment
             return $factory->make('Constructor',
@@ -1680,12 +1863,18 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # Compound assignment (.=, //=, +=, etc.)
-        return $factory->make('Constructor',
+        my $compound_result = $factory->make('Constructor',
             'class'  => 'CompoundAssign',
             op     => $op,
             target => $target,
             value  => $value,
         );
+        if ($target isa Chalk::Bootstrap::IR::Node::Constant
+                && defined $target->value()
+                && $target->value() =~ /^[\$\@\%]/) {
+            $update_scope->($target->value(), $compound_result);
+        }
+        return $compound_result;
     }
 
     # §17 AssignOp — returns operator as Constant
@@ -1995,6 +2184,8 @@ class Chalk::Bootstrap::Perl::Actions {
         if (defined $sa) {
             my $state = $sa->inherited_cfg_state($ctx);
             if (defined $state) {
+                my $pre_loop_scope = $state->{scope};
+
                 my $loop_cond = $factory->make('Constant',
                     const_type => 'string', value => '__loop_bound__');
                 my $loop = $factory->make('Loop',
@@ -2007,12 +2198,52 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
                 my $body_proj = $factory->make('Proj', source => $if_node, index => 0);
                 my $exit_proj = $factory->make('Proj', source => $if_node, index => 1);
+
+                # Find which variables from the loop body were referenced.
+                # The Earley parser is bottom-up: the body was already parsed before
+                # ForeachStatement fires, so we cannot retroactively inject sentinels.
+                # Instead, scan the body IR for Constant(variable, '$name') nodes
+                # to find referenced variable names.
+                my $body_var_refs = $collect_body_var_refs->($body);
+
+                # Store body_var_refs keyed by loop refaddr so Program can create Phis.
+                # ForeachStatement fires with a narrow scope (only the for-construct
+                # subtree), but Program has the full merged scope from all sibling
+                # statements and can create Phis with the correct pre-loop values.
+                # Remove the iterator variable from body refs — it's defined by the loop.
+                my %phi_vars = %$body_var_refs;
+                delete $phi_vars{$iterator->value()} if defined $iterator;
+
+                # Also collect post-body scope bindings for backedge wiring.
+                # If a variable was assigned inside the loop body (e.g., $sum = $sum + $x),
+                # the body leaf cfg_state will have a scope binding for it that differs
+                # from the pre-loop value. Store these for Program to use as backedge values.
+                my %body_final_bindings;
+                for my $leaf (_collect_ir_leaves($ctx)) {
+                    my $leaf_state = $sa->cfg_state($leaf);
+                    if (defined $leaf_state && defined $leaf_state->{scope}) {
+                        for my $name ($leaf_state->{scope}->variable_names()) {
+                            my $binding = $leaf_state->{scope}->lookup($name);
+                            $body_final_bindings{$name} = $binding if defined $binding;
+                        }
+                    }
+                }
+
+                $_loop_body_var_refs{refaddr($loop)} = {
+                    phi_vars           => \%phi_vars,
+                    body_final_bindings => \%body_final_bindings,
+                };
+
+                # The post-loop scope starts as the pre-loop scope (potentially empty
+                # at this point). Program will augment this with Phi nodes.
+                my $post_loop_scope = $pre_loop_scope;
+
                 my $region = $factory->make('Region',
                     controls => [$exit_proj],
                 );
                 $sa->update_cfg({
                     control    => $region,
-                    scope      => $state->{scope},
+                    scope      => $post_loop_scope,
                     body_stmts => $body,
                     loop       => $loop,
                     loop_if    => $if_node,

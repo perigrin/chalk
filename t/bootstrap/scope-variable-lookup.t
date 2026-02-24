@@ -1,0 +1,222 @@
+# ABOUTME: Tests that variable references resolve from scope when available
+# ABOUTME: Verifies ScalarVariable/ArrayVariable/HashVariable consult cfg_state scope
+use 5.42.0;
+use utf8;
+use Test::More;
+
+use lib 'lib';
+use lib 't/bootstrap/lib';
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::IR::Node::Phi;
+use Chalk::Bootstrap::Scope;
+use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::Bootstrap::Perl::Actions;
+use Chalk::Bootstrap::Context;
+use Chalk::Grammar::Rule;
+use Chalk::Grammar::Symbol;
+
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+# Helper: build a fake Earley-style item with a given value and rule name
+my sub make_item($value, $rule_name) {
+    my $rule = Chalk::Grammar::Rule->new(
+        name        => $rule_name,
+        expressions => [[]],
+    );
+    return {
+        rule  => $rule,
+        dot   => 1,
+        value => $value,
+    };
+}
+
+# Helper: build a scan context for a variable name at position 0
+my sub make_scan_ctx($text) {
+    return Chalk::Bootstrap::Context->new(
+        focus    => $text,
+        children => [],
+        position => 0,
+        rule     => undef,
+    );
+}
+
+# --- Case 1: Backward compat — variable not in scope returns Constant ---
+# We test this by calling on_complete for ScalarVariable with a context that
+# has no cfg_state (or empty scope), and verify a Constant is returned.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    # Scan context for $unbound — no cfg_state set
+    my $ctx = make_scan_ctx('$unbound');
+    my $item = make_item($ctx, 'ScalarVariable');
+
+    my $result = $sa->on_complete($item, 0, 0);
+    ok(defined $result, 'on_complete returns a result');
+
+    my $node = $result->extract();
+    ok(defined $node, 'result has a focus node');
+    is($node->operation(), 'Constant', 'unbound variable returns Constant node');
+    is($node->value(), '$unbound', 'Constant has the variable name as value');
+}
+
+# --- Case 2: Variable in scope — action returns the bound node ---
+# Set up cfg_state on the input context with a scope containing $x = some_node.
+# Verify on_complete for ScalarVariable returns that node.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    # Create a node representing the binding for $x
+    my $x_node = $factory->make('Constant', const_type => 'integer', value => '42');
+
+    # Create scope with $x bound
+    my $scope = Chalk::Bootstrap::Scope->new();
+    $scope = $scope->define('$x', $x_node);
+
+    # Create a Context and manually set its cfg_state in the SemanticAction
+    my $ctx = make_scan_ctx('$x');
+    $sa->set_cfg_state($ctx, {
+        control => $factory->make('Start'),
+        scope   => $scope,
+    });
+
+    my $item = make_item($ctx, 'ScalarVariable');
+
+    my $result = $sa->on_complete($item, 0, 0);
+    ok(defined $result, 'on_complete returns a result for in-scope variable');
+
+    my $node = $result->extract();
+    ok(defined $node, 'result has a focus node');
+    is($node->operation(), 'Constant', 'in-scope $x returns its bound node');
+    is($node->value(), '42', 'bound node has correct value (the integer 42)');
+    is($node, $x_node, 'returned node is exactly the bound node from scope');
+}
+
+# --- Case 3: Sentinel in scope — action creates a Phi node ---
+# Set up cfg_state with a scope containing a sentinel for $x.
+# Verify on_complete for ScalarVariable creates and returns a Phi node.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    # Create pre-loop binding and a loop node
+    my $pre_value = $factory->make('Constant', const_type => 'integer', value => '0');
+    my $loop = $factory->make('Loop',
+        entry_ctrl   => $factory->make('Start'),
+        backedge_ctrl => undef,
+    );
+
+    # Fork scope to create sentinels
+    my $scope = Chalk::Bootstrap::Scope->new();
+    $scope = $scope->define('$x', $pre_value);
+    my $loop_scope = $scope->fork_for_loop($loop);
+
+    # Verify sentinel is in place before calling action
+    my $raw = $loop_scope->raw_lookup('$x');
+    ok(ref $raw eq 'Chalk::Bootstrap::Scope::Sentinel', 'scope has sentinel before action runs');
+
+    # Create a Context with the sentinel scope in cfg_state
+    my $ctx = make_scan_ctx('$x');
+    $sa->set_cfg_state($ctx, {
+        control => $factory->make('Start'),
+        scope   => $loop_scope,
+    });
+
+    my $item = make_item($ctx, 'ScalarVariable');
+
+    my $result = $sa->on_complete($item, 0, 0);
+    ok(defined $result, 'on_complete returns a result for sentinel variable');
+
+    my $node = $result->extract();
+    ok(defined $node, 'result has a focus node');
+    ok($node isa Chalk::Bootstrap::IR::Node::Phi, 'sentinel variable resolves to a Phi node');
+
+    # Phi inputs: [loop, [pre_value, undef]]
+    my $inputs = $node->inputs();
+    is($inputs->[0], $loop, 'Phi region is the loop node');
+    ok(ref $inputs->[1] eq 'ARRAY', 'Phi values is an arrayref');
+    is($inputs->[1][0], $pre_value, 'Phi pre-value is the pre-loop binding');
+    ok(!defined $inputs->[1][1], 'Phi backedge is undef (not yet wired)');
+
+    # The cfg_state on the result should have the updated scope (Phi, not sentinel)
+    my $state = $sa->cfg_state($result);
+    ok(defined $state, 'result context has cfg_state');
+    if (defined $state) {
+        my $x_after = $state->{scope}->lookup('$x');
+        ok(defined $x_after, '$x is still in scope after resolution');
+        ok($x_after isa Chalk::Bootstrap::IR::Node::Phi,
+            '$x binding was updated to the Phi node');
+    }
+}
+
+# --- Case 4: ArrayVariable also resolves from scope ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    my $arr_node = $factory->make('Constant', const_type => 'variable', value => '@arr');
+
+    my $scope = Chalk::Bootstrap::Scope->new();
+    $scope = $scope->define('@arr', $arr_node);
+
+    my $ctx = make_scan_ctx('@arr');
+    $sa->set_cfg_state($ctx, {
+        control => $factory->make('Start'),
+        scope   => $scope,
+    });
+
+    my $item = make_item($ctx, 'ArrayVariable');
+
+    my $result = $sa->on_complete($item, 0, 0);
+    ok(defined $result, 'ArrayVariable on_complete returns result');
+    my $node = $result->extract();
+    is($node, $arr_node, 'ArrayVariable returns bound node from scope');
+}
+
+# --- Case 5: HashVariable also resolves from scope ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $actions = Chalk::Bootstrap::Perl::Actions->new();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(
+        actions => $actions,
+    );
+
+    my $hash_node = $factory->make('Constant', const_type => 'variable', value => '%h');
+
+    my $scope = Chalk::Bootstrap::Scope->new();
+    $scope = $scope->define('%h', $hash_node);
+
+    my $ctx = make_scan_ctx('%h');
+    $sa->set_cfg_state($ctx, {
+        control => $factory->make('Start'),
+        scope   => $scope,
+    });
+
+    my $item = make_item($ctx, 'HashVariable');
+
+    my $result = $sa->on_complete($item, 0, 0);
+    ok(defined $result, 'HashVariable on_complete returns result');
+    my $node = $result->extract();
+    is($node, $hash_node, 'HashVariable returns bound node from scope');
+}
+
+done_testing();
