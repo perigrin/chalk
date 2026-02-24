@@ -1372,7 +1372,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
 
             for my $stmt ($body_stmts->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "        $code" if defined $code;
             }
             push @lines, "    }";
@@ -1385,7 +1385,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, "while (SvTRUE($cond_expr)) {";
 
             for my $stmt ($body_stmts->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
             }
             push @lines, "}";

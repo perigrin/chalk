@@ -228,4 +228,32 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/else\s*\{/, 'XS elsif chain has final else');
 }
 
+# --- Test 9: emit_cfg_loop body stmts pass is_last=false for return ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start     = $factory->make('Start');
+    my $loop_cond = $factory->make('Constant', const_type => 'string', value => 'cond_sv');
+    my $loop      = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
+    my $loop_if   = $factory->make('If', control => $loop, condition => $loop_cond);
+    my $body_proj = $factory->make('Proj', source => $loop_if, index => 0);
+    my $exit_proj = $factory->make('Proj', source => $loop_if, index => 1);
+
+    # Body contains a ReturnStmt — must emit 'goto xsreturn' (is_last=false)
+    my $ret_val  = $factory->make('Constant', const_type => 'integer', value => 42);
+    my $ret_stmt = $factory->make('Constructor',
+        'class' => 'ReturnStmt',
+        value   => $ret_val,
+    );
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::LoopReturn');
+    my $code = $target->emit_cfg_loop(
+        $loop, $loop_if, $body_proj, $exit_proj, {},
+        [$ret_stmt],
+    );
+    ok(defined $code, 'emit_cfg_loop with return in body produces code');
+    like($code, qr/goto xsreturn/, 'return inside loop body emits goto xsreturn');
+}
+
 done_testing();

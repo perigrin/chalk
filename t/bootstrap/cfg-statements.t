@@ -188,8 +188,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
 if (!defined $ir) {
-    diag "WARNING: perl_pipeline() returned undef - all integration tests will be skipped";
-    diag "This means ~100 tests provide no coverage. Check grammar/pipeline setup.";
+    BAIL_OUT("perl_pipeline() returned undef - integration tests cannot run. Check grammar/pipeline setup.");
 }
 
 SKIP: {
