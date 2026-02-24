@@ -673,4 +673,77 @@ SKIP: {
     }
 }
 
+# --- Test 14: unless with else generates correct code ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UnlessElseTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::UnlessElseTest::grammar();
+    my $parser_ue = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_ue;
+
+    my $semiring_ue = $parser_ue->semiring();
+    my $sa_ue = $semiring_ue->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_ue->reset_cache();
+
+        my $result = $parser_ue->parse_value('unless (0) { 42 } else { 99 }');
+        ok(defined $result, 'unless+else parses');
+
+        SKIP: {
+            skip 'unless+else did not parse', 3 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_ue, $sem_ctx);
+            ok(defined $code, 'unless+else generates code');
+            like($code, qr/if\s*\(\s*!/, 'unless+else emits negated condition');
+            like($code, qr/else/, 'unless+else has else block');
+        }
+    }
+}
+
+# --- Test 15: foreach with array variable ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ForArrayTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::ForArrayTest::grammar();
+    my $parser_fa = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_fa;
+
+    my $semiring_fa = $parser_fa->semiring();
+    my $sa_fa = $semiring_fa->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_fa->reset_cache();
+
+        my $result = $parser_fa->parse_value('for my $x (@arr) { $x }');
+        ok(defined $result, 'foreach with @array parses');
+
+        SKIP: {
+            skip 'foreach with @array did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_fa, $sem_ctx);
+            ok(defined $code, 'foreach with @array generates code');
+            like($code, qr/for\s+my\s+\$x/, 'foreach with @array uses for my syntax');
+        }
+    }
+}
+
 done_testing();
