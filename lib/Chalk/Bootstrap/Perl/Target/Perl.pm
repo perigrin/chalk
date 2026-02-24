@@ -141,6 +141,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+            # Loop control keywords must be emitted as bare keywords, not quoted
+            my $val = $node->value() // '';
+            if ($val eq 'next' || $val eq 'last' || $val eq 'redo') {
+                return "$val;";
+            }
             return $self->_emit_constant($node);
         }
 
@@ -514,6 +519,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # PostfixModifier negated the condition for 'unless', so the If node's
     # condition is !($original). We detect the negation wrapper and strip it
     # to emit 'next unless $original' for readability.
+    # The If node is found via _build_cfg_lookup (cfg_state side-table keyed
+    # by IR node refaddr). GCM/DCE passes that need to see this conditional
+    # branch must walk cfg_state, not just the IR statement list.
     method _emit_loop_jump($jump_keyword, $if_node) {
         my $cond = $if_node->inputs()->[1];
         # Detect negation wrapper: UnaryExpr('!', expr) → emit 'unless expr'

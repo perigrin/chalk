@@ -637,7 +637,12 @@ class Chalk::Bootstrap::Perl::Actions {
                     } elsif (defined $updated->{if_node}) {
                         # Detect loop jump keywords (next/last) as body:
                         # set loop_jump marker instead of then_stmts so
-                        # targets emit 'next if/unless' instead of 'if { next }'
+                        # targets emit 'next if/unless' instead of 'if { next }'.
+                        # NOTE: The If CFG node lives in cfg_state metadata
+                        # (keyed by the IR node's refaddr), not directly in
+                        # body_stmts. _build_cfg_lookup resolves this at codegen
+                        # time. Future GCM/DCE passes that walk only the IR tree
+                        # (not cfg_state) will need to be extended to see it.
                         if ($body_expr isa Chalk::Bootstrap::IR::Node::Constant
                                 && defined $body_expr->value()
                                 && ($body_expr->value() eq 'next'

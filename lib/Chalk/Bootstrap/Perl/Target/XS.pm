@@ -775,6 +775,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+            # Loop control keywords: next→continue, last→break in C
+            my $val = $node->value() // '';
+            if ($val eq 'next') { return "continue;"; }
+            if ($val eq 'last') { return "break;"; }
             return $self->_emit_xs_expr($node, $declared_vars) . ";";
         }
 

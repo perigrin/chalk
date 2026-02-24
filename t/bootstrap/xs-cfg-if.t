@@ -287,9 +287,15 @@ use Chalk::Bootstrap::Perl::Target::XS;
 
     # Simulate cfg_state with loop_jump by calling _emit_xs_loop_jump
     my $code = $target->_emit_xs_loop_jump('next', $if_node, {});
-    ok(defined $code, 'XS loop_jump produces code');
-    like($code, qr/continue/, 'XS loop_jump emits continue');
-    like($code, qr/SvTRUE/, 'XS loop_jump tests condition with SvTRUE');
+    ok(defined $code, 'XS loop_jump next produces code');
+    like($code, qr/continue/, 'XS loop_jump next emits continue');
+    like($code, qr/SvTRUE/, 'XS loop_jump next tests condition with SvTRUE');
+
+    # Verify 'last' maps to C 'break'
+    my $code_last = $target->_emit_xs_loop_jump('last', $if_node, {});
+    ok(defined $code_last, 'XS loop_jump last produces code');
+    like($code_last, qr/break/, 'XS loop_jump last emits break');
+    unlike($code_last, qr/continue/, 'XS loop_jump last does NOT emit continue');
 }
 
 done_testing();

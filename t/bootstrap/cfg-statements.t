@@ -1081,4 +1081,132 @@ SKIP: {
     }
 }
 
+# --- Test 22: last unless $cond produces If CFG with loop_jump => 'last' ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::LastUnlessCfgTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::LastUnlessCfgTest::grammar();
+    my $parser_lu = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_lu;
+
+    my $semiring_lu = $parser_lu->semiring();
+    my $sa_lu = $semiring_lu->semirings()->[4];
+
+    # Parse last unless inside a for loop
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_lu->reset_cache();
+
+        my $result = $parser_lu->parse_value('for my $x (@arr) { last unless $x > 0; $x }');
+        ok(defined $result, 'last unless inside for loop parses');
+
+        SKIP: {
+            skip 'last unless did not parse', 4 unless defined $result;
+            my $sem_ctx = $result->[4];
+
+            # Walk Context tree looking for cfg_state with loop_jump
+            my @ctx_stack = ($sem_ctx);
+            my $found_loop_jump = false;
+            my $loop_jump_value;
+            while (@ctx_stack) {
+                my $ctx = pop @ctx_stack;
+                my $state = $sa_lu->cfg_state($ctx);
+                if (defined $state && defined $state->{loop_jump}) {
+                    $found_loop_jump = true;
+                    $loop_jump_value = $state->{loop_jump};
+                }
+                push @ctx_stack, reverse $ctx->children()->@*;
+            }
+            ok($found_loop_jump, 'cfg_state has loop_jump for last unless');
+            is($loop_jump_value, 'last', 'loop_jump value is last');
+
+            # Verify codegen emits last if/unless
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_lu, $sem_ctx);
+            ok(defined $code, 'last unless generates code');
+            like($code, qr/last\s+(if|unless)\s/, 'codegen emits last if/unless');
+        }
+    }
+}
+
+# --- Test 23: last if $cond (no negation stripping) ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::LastIfCfgTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::LastIfCfgTest::grammar();
+    my $parser_li = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_li;
+
+    my $semiring_li = $parser_li->semiring();
+    my $sa_li = $semiring_li->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_li->reset_cache();
+
+        my $result = $parser_li->parse_value('for my $x (@arr) { last if $x > 10; $x }');
+        ok(defined $result, 'last if inside for loop parses');
+
+        SKIP: {
+            skip 'last if did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_li, $sem_ctx);
+            ok(defined $code, 'last if generates code');
+            like($code, qr/last\s+if\s/, 'codegen emits last if (no negation)');
+        }
+    }
+}
+
+# --- Test 24: bare next; inside loop body emits keyword, not string literal ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::BareNextTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::BareNextTest::grammar();
+    my $parser_bn = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_bn;
+
+    my $semiring_bn = $parser_bn->semiring();
+    my $sa_bn = $semiring_bn->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_bn->reset_cache();
+
+        my $result = $parser_bn->parse_value('for my $x (@arr) { next; $x }');
+        ok(defined $result, 'bare next inside for loop parses');
+
+        SKIP: {
+            skip 'bare next did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_bn, $sem_ctx);
+            ok(defined $code, 'bare next generates code');
+            # Bare next must emit as keyword next; not as string literal 'next'
+            like($code, qr/(?<!')next(?!')/, 'bare next emitted as keyword, not quoted string');
+        }
+    }
+}
+
 done_testing();
