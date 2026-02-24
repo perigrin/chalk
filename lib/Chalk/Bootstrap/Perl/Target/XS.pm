@@ -1345,8 +1345,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             if (ref($list) eq 'ARRAY') {
                 # Literal list: build temp AV, iterate with av_fetch
+                # Mortalize AV so it is cleaned up on croak/exception
                 push @lines, "{";
-                push @lines, "    AV *_tmp_av = newAV();";
+                push @lines, "    AV *_tmp_av = (AV*)sv_2mortal((SV*)newAV());";
                 for my $item ($list->@*) {
                     my $val = $self->_emit_xs_expr($item, $declared_vars);
                     push @lines, "    av_push(_tmp_av, SvREFCNT_inc($val));";
@@ -1360,7 +1361,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # Variable list: iterate existing AV
                 my $list_expr = $self->_emit_xs_expr($list, $declared_vars);
                 push @lines, "{";
-                push @lines, "    AV *_av = (AV*)SvRV($list_expr);";
+                push @lines, "    SV *_list_sv = $list_expr;";
+                push @lines, "    if (!SvROK(_list_sv)) croak(\"Not an ARRAY reference\");";
+                push @lines, "    AV *_av = (AV*)SvRV(_list_sv);";
                 push @lines, "    SSize_t _len = av_len(_av) + 1;";
                 push @lines, "    SSize_t _i;";
                 push @lines, "    for (_i = 0; _i < _len; _i++) {";
@@ -1373,9 +1376,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @lines, "        $code" if defined $code;
             }
             push @lines, "    }";
-            if (ref($list) eq 'ARRAY') {
-                push @lines, "    SvREFCNT_dec((SV*)_tmp_av);";
-            }
+            # No explicit SvREFCNT_dec needed — sv_2mortal handles cleanup
             push @lines, "}";
         } else {
             # While loop: while (cond) { ... }

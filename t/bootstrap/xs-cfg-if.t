@@ -138,4 +138,53 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/av_fetch|av_len/, 'XS foreach with variable uses AV API');
 }
 
+# --- Test 6: XS foreach literal list uses sv_2mortal for exception safety ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    my $loop  = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
+    my $loop_cond = $factory->make('Constant', const_type => 'string', value => '__loop_bound__');
+    my $loop_if   = $factory->make('If', control => $loop, condition => $loop_cond);
+    my $body_proj = $factory->make('Proj', source => $loop_if, index => 0);
+    my $exit_proj = $factory->make('Proj', source => $loop_if, index => 1);
+
+    my $iterator = $factory->make('Constant', const_type => 'string', value => '$x');
+    my $list_items = [
+        $factory->make('Constant', const_type => 'integer', value => 1),
+    ];
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::CfgMortal');
+    my $code = $target->emit_cfg_loop(
+        $loop, $loop_if, $body_proj, $exit_proj, {},
+        [], $iterator, $list_items,
+    );
+    # The temp AV itself must be mortalized for exception safety
+    like($code, qr/sv_2mortal\(\(SV\*\)newAV\(\)\)/, 'XS literal list foreach mortalizes temp AV');
+}
+
+# --- Test 7: XS foreach variable list guards with SvROK ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    my $loop  = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
+    my $loop_cond = $factory->make('Constant', const_type => 'string', value => '__loop_bound__');
+    my $loop_if   = $factory->make('If', control => $loop, condition => $loop_cond);
+    my $body_proj = $factory->make('Proj', source => $loop_if, index => 0);
+    my $exit_proj = $factory->make('Proj', source => $loop_if, index => 1);
+
+    my $iterator = $factory->make('Constant', const_type => 'string', value => '$item');
+    my $list_node = $factory->make('Constant', const_type => 'string', value => '@array');
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::CfgROK');
+    my $code = $target->emit_cfg_loop(
+        $loop, $loop_if, $body_proj, $exit_proj, {},
+        [], $iterator, $list_node,
+    );
+    like($code, qr/SvROK/, 'XS variable list foreach guards with SvROK check');
+}
+
 done_testing();
