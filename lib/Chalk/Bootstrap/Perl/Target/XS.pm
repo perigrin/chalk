@@ -747,6 +747,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         $state->{exit_proj},
                         $declared_vars,
                         $state->{body_stmts} // [],
+                        $state->{iterator},
+                        $state->{list},
                     );
                 }
             }
@@ -1274,10 +1276,31 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
             push @lines, "    $code" if defined $code;
         }
-        push @lines, "} else {";
-        for my $stmt ($false_stmts->@*) {
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
-            push @lines, "    $code" if defined $code;
+        if ($false_stmts->@*) {
+            # Detect elsif: single If CFG node in else branch
+            if (scalar $false_stmts->@* == 1
+                    && ref($false_stmts->[0])
+                    && %_cfg_lookup) {
+                my $elsif_state = $_cfg_lookup{refaddr($false_stmts->[0])};
+                if (defined $elsif_state && defined $elsif_state->{if_node}) {
+                    my $elsif_code = $self->emit_cfg_if(
+                        $elsif_state->{if_node},
+                        $elsif_state->{true_proj},
+                        $elsif_state->{false_proj},
+                        $declared_vars,
+                        $elsif_state->{then_stmts} // [],
+                        $elsif_state->{else_stmts} // [],
+                    );
+                    $elsif_code =~ s/^if/} else if/;
+                    push @lines, $elsif_code;
+                    return join("\n", @lines);
+                }
+            }
+            push @lines, "} else {";
+            for my $stmt ($false_stmts->@*) {
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+                push @lines, "    $code" if defined $code;
+            }
         }
         push @lines, "}";
         return join("\n", @lines);
@@ -1311,12 +1334,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Emit C loop from a Loop CFG node.
     # Loop → If → Proj(body) / Proj(exit) structure becomes a while loop.
     method emit_cfg_loop($loop, $loop_if, $body_proj, $exit_proj, $declared_vars,
-                         $body_stmts = []) {
-        my $cond = $loop_if->inputs()->[1];
-        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
-
+                         $body_stmts = [], $iterator = undef, $list = undef) {
         my @lines;
-        push @lines, "while (SvTRUE($cond_expr)) {";
+
+        if (defined $iterator && defined $list) {
+            # Foreach loop: for my $var (list) { ... }
+            my $iter_expr = $self->_emit_xs_expr($iterator, $declared_vars);
+            my $list_expr;
+            if (ref($list) eq 'ARRAY') {
+                $list_expr = join(', ', map { $self->_emit_xs_expr($_, $declared_vars) } $list->@*);
+            } else {
+                $list_expr = $self->_emit_xs_expr($list, $declared_vars);
+            }
+            push @lines, "for my $iter_expr ($list_expr) {";
+        } else {
+            my $cond = $loop_if->inputs()->[1];
+            my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+            push @lines, "while (SvTRUE($cond_expr)) {";
+        }
+
         for my $stmt ($body_stmts->@*) {
             my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
             push @lines, "    $code" if defined $code;

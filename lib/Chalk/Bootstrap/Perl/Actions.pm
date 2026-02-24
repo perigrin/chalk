@@ -1905,18 +1905,22 @@ class Chalk::Bootstrap::Perl::Actions {
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
-            my $rule = $leaf->rule();
+            my $rule = $leaf->rule() // '';
 
             if ($focus isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $focus->value()
                     && $focus->value() =~ /^[\$\@\%]/
                     && !defined $iterator) {
                 $iterator = $focus;
+            } elsif (ref($focus) eq 'ARRAY' && defined $iterator && !defined $list) {
+                # First array after iterator is the list (from ParenExpr)
+                $list = $focus;
+            } elsif (ref($focus) eq 'ARRAY' && defined $list) {
+                # Second array is the body (from Block)
+                $body //= $focus;
             } elsif ($focus isa Chalk::Bootstrap::IR::Node && !defined $list
                     && defined $iterator) {
                 $list = $focus;
-            } elsif (ref($focus) eq 'ARRAY') {
-                $body //= $focus;
             }
         }
 

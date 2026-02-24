@@ -443,4 +443,158 @@ SKIP: {
     }
 }
 
+# --- Test 8: unless negates condition in IfStatement CFG nodes ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UnlessTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::UnlessTest::grammar();
+    my $parser_u = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_u;
+
+    my $semiring_u = $parser_u->semiring();
+    my $sa_u = $semiring_u->semirings()->[4];
+
+    # unless generates negated condition in If CFG node
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_u->reset_cache();
+
+        my $result = $parser_u->parse_value('unless (1) { 42 }');
+        ok(defined $result, 'unless parses');
+
+        my $sem_ctx = $result->[4];
+        my $state = $sa_u->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state exists after unless');
+        ok(defined $state->{if_node}, 'if_node present for unless');
+
+        # The If node's condition should be a negated expression (UnaryExpr '!')
+        my $if_cond = $state->{if_node}->inputs()->[1];
+        ok(defined $if_cond, 'If condition exists');
+        ok($if_cond isa Chalk::Bootstrap::IR::Node::Constructor
+            && $if_cond->class() eq 'UnaryExpr',
+            'unless condition is UnaryExpr (negation)');
+    }
+
+    # Codegen: unless produces if (!...) in output
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_u->reset_cache();
+
+        my $result = $parser_u->parse_value('unless (1) { 42 }');
+        ok(defined $result, 'unless parses for codegen test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $code = $perl_target->generate_with_cfg($ir_node, $sa_u, $sem_ctx);
+        ok(defined $code, 'unless generates code');
+        like($code, qr/if\s*\(\s*!/, 'unless generates if (! ...) in output');
+    }
+}
+
+# --- Test 9: if-without-else does not emit empty else block ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::NoElseTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::NoElseTest::grammar();
+    my $parser_ne = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_ne;
+
+    my $semiring_ne = $parser_ne->semiring();
+    my $sa_ne = $semiring_ne->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_ne->reset_cache();
+
+        my $result = $parser_ne->parse_value('if (1) { 42 }');
+        ok(defined $result, 'if-no-else parses for empty-else test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $code = $perl_target->generate_with_cfg($ir_node, $sa_ne, $sem_ctx);
+        ok(defined $code, 'if-no-else generates code');
+        unlike($code, qr/\}\s*else\s*\{/, 'no empty else block in output');
+    }
+}
+
+# --- Test 10: elsif chain emits elsif, not nested if/else ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ElsifTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::ElsifTest::grammar();
+    my $parser_el = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_el;
+
+    my $semiring_el = $parser_el->semiring();
+    my $sa_el = $semiring_el->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_el->reset_cache();
+
+        my $result = $parser_el->parse_value('if (1) { 42 } elsif (2) { 99 } else { 0 }');
+        ok(defined $result, 'if/elsif/else parses for elsif test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $code = $perl_target->generate_with_cfg($ir_node, $sa_el, $sem_ctx);
+        ok(defined $code, 'if/elsif/else generates code');
+        like($code, qr/\}\s*elsif\s*\(/, 'output contains elsif (not nested if)');
+    }
+}
+
+# --- Test 11: foreach emits for syntax, not while ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ForTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::ForTest::grammar();
+    my $parser_f = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_f;
+
+    my $semiring_f = $parser_f->semiring();
+    my $sa_f = $semiring_f->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_f->reset_cache();
+
+        my $result = $parser_f->parse_value('for my $x (1, 2, 3) { $x }');
+        ok(defined $result, 'foreach parses for syntax test');
+
+        my $sem_ctx = $result->[4];
+        my $ir_node = $sem_ctx->extract();
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $code = $perl_target->generate_with_cfg($ir_node, $sa_f, $sem_ctx);
+        ok(defined $code, 'foreach generates code');
+        like($code, qr/for\s+my\s+\$/, 'output contains for my $... (not while)');
+    }
+}
+
 done_testing();
