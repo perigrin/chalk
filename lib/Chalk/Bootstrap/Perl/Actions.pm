@@ -1730,6 +1730,14 @@ class Chalk::Bootstrap::Perl::Actions {
                 if (defined $state) {
                     my $loop_cond = $condition // $factory->make('Constant',
                         const_type => 'string', value => '__loop_bound__');
+                    # For 'until', negate the condition (until X = while !X)
+                    if ($keyword eq 'until') {
+                        $loop_cond = $factory->make('Constructor',
+                            'class'   => 'UnaryExpr',
+                            op      => _make_const($factory, '!'),
+                            operand => $loop_cond,
+                        );
+                    }
                     my $loop = $factory->make('Loop',
                         entry_ctrl    => $state->{control},
                         backedge_ctrl => undef,
@@ -1761,9 +1769,18 @@ class Chalk::Bootstrap::Perl::Actions {
             if (defined $sa) {
                 my $state = $sa->inherited_cfg_state($ctx);
                 if (defined $state) {
+                    # For 'unless', negate the condition (unless X = if !X)
+                    my $cond = $condition;
+                    if ($keyword eq 'unless') {
+                        $cond = $factory->make('Constructor',
+                            'class'   => 'UnaryExpr',
+                            op      => _make_const($factory, '!'),
+                            operand => $condition,
+                        );
+                    }
                     my $if_node = $factory->make('If',
                         control   => $state->{control},
-                        condition => $condition,
+                        condition => $cond,
                     );
                     my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
                     my $false_proj = $factory->make('Proj', source => $if_node, index => 1);

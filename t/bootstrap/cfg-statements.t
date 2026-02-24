@@ -673,7 +673,81 @@ SKIP: {
     }
 }
 
-# --- Test 14: unless with else generates correct code ---
+# --- Test 14: Postfix unless negates condition ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixUnlessTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::PostfixUnlessTest::grammar();
+    my $parser_pu = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_pu;
+
+    my $semiring_pu = $parser_pu->semiring();
+    my $sa_pu = $semiring_pu->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_pu->reset_cache();
+
+        my $result = $parser_pu->parse_value('42 unless 0;');
+        ok(defined $result, 'postfix unless parses');
+
+        SKIP: {
+            skip 'postfix unless did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_pu, $sem_ctx);
+            ok(defined $code, 'postfix unless generates code');
+            # Postfix unless must negate the condition (like block unless does)
+            like($code, qr/if\s*\(\s*!/, 'postfix unless emits negated condition if (!)');
+        }
+    }
+}
+
+# --- Test 15: Postfix until negates loop condition ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixUntilTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::PostfixUntilTest::grammar();
+    my $parser_pt = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_pt;
+
+    my $semiring_pt = $parser_pt->semiring();
+    my $sa_pt = $semiring_pt->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_pt->reset_cache();
+
+        my $result = $parser_pt->parse_value('$x++ until $done;');
+        ok(defined $result, 'postfix until parses');
+
+        SKIP: {
+            skip 'postfix until did not parse', 2 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_pt, $sem_ctx);
+            ok(defined $code, 'postfix until generates code');
+            # Until negates condition: while (!$done)
+            like($code, qr/!\s*\$done|!\(.*\$done/, 'postfix until emits negated condition');
+        }
+    }
+}
+
+# --- Test 16: unless with else generates correct code ---
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
