@@ -1,5 +1,5 @@
 # ABOUTME: Tests for Tier C IR node types used by runtime method logic.
-# ABOUTME: Validates VarDecl, BinaryExpr, MethodCallExpr, NextUnless, etc. via NodeFactory.
+# ABOUTME: Validates VarDecl, BinaryExpr, MethodCallExpr, etc. via NodeFactory.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -260,20 +260,6 @@ my sub c($val) {
     is($node->class(), 'BuiltinCall', 'BuiltinCall: class');
     is($node->inputs()->[0]->value(), 'push', 'BuiltinCall: name');
     is(ref $node->inputs()->[1], 'ARRAY', 'BuiltinCall: args is array');
-}
-
-# ============================================================
-# 17. NextUnless — next unless $cond
-# ============================================================
-
-{
-    my $node = $factory->make('Constructor',
-        class     => 'NextUnless',
-        condition => c('$x'),
-    );
-    ok(defined $node, 'NextUnless: created');
-    is($node->class(), 'NextUnless', 'NextUnless: class');
-    is($node->inputs()->[0]->value(), '$x', 'NextUnless: condition');
 }
 
 # ============================================================

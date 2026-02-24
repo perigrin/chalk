@@ -68,7 +68,6 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:RegexMatch'      => ['target', 'pattern', 'flags'],
         'Constructor:RegexSubst'      => ['target', 'pattern', 'replacement', 'flags'],
         'Constructor:BuiltinCall'     => ['name', 'args'],
-        'Constructor:NextUnless'      => ['condition'],
         'Constructor:BacktickExpr'    => ['command'],
     );
 

@@ -514,17 +514,6 @@ class Chalk::Bootstrap::Perl::Actions {
                     name  => _make_const($factory, $builtin),
                     args  => [$arg],
                 );
-            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
-                    && defined $item->value()
-                    && $item->value() eq 'next'
-                    && $i + 1 <= $#$stmts) {
-                # Merge next + condition → NextUnless
-                $i++;
-                my $cond = $stmts->[$i];
-                push @result, $factory->make('Constructor',
-                    'class'     => 'NextUnless',
-                    condition => $cond,
-                );
             } else {
                 push @result, $item;
             }

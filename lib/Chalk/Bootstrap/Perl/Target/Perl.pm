@@ -93,7 +93,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Statement-level types that handle their own formatting (no auto-semicolon)
     my %STATEMENT_TYPES = map { $_ => 1 } qw(
         Program UseDecl ClassDecl MethodDecl ReturnStmt DieCall FieldDecl
-        VarDecl CompoundAssign NextUnless
+        VarDecl CompoundAssign
     );
 
     # Expression types that need semicolons when used as statements
@@ -161,7 +161,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'FieldDecl')  { return $self->_emit_field_decl($node); }
             if ($class eq 'VarDecl')         { return $self->_emit_var_decl($node); }
             if ($class eq 'CompoundAssign')  { return $self->_emit_compound_assign($node); }
-            if ($class eq 'NextUnless')      { return $self->_emit_next_unless($node); }
             die "Unknown Constructor class: $class";
         }
 
@@ -509,11 +508,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
 
         return "$name(" . join(', ', @arg_strs) . ")";
-    }
-
-    method _emit_next_unless($node) {
-        my $condition = $node->inputs()->[0];
-        return "next unless " . $self->_emit_expr($condition) . ";";
     }
 
     # Emit 'next if/unless $cond' from an If CFG node with loop_jump marker.

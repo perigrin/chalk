@@ -769,7 +769,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'ReturnStmt')      { return $self->_emit_xs_return_stmt($node, $declared_vars, $is_last); }
             if ($class eq 'DieCall')         { return $self->_emit_xs_die_call($node); }
             if ($class eq 'CompoundAssign')  { return $self->_emit_xs_compound_assign_stmt($node, $declared_vars); }
-            if ($class eq 'NextUnless')      { return $self->_emit_xs_next_unless($node, $declared_vars); }
 
             # Expression types used as statements (side effects)
             return $self->_emit_xs_expr($node, $declared_vars) . ";";
@@ -1262,12 +1261,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Emit CompoundAssign as statement
     method _emit_xs_compound_assign_stmt($node, $declared_vars) {
         return $self->_emit_xs_compound_assign_expr($node, $declared_vars) . ";";
-    }
-
-    # Emit NextUnless (next unless cond) as C continue statement
-    method _emit_xs_next_unless($node, $declared_vars) {
-        my $cond = $self->_emit_xs_expr($node->inputs()->[0], $declared_vars);
-        return "if (!SvTRUE($cond)) continue;";
     }
 
     # Emit C continue/break from an If CFG node with loop_jump marker.
