@@ -256,4 +256,40 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/goto xsreturn/, 'return inside loop body emits goto xsreturn');
 }
 
+# --- Test: loop_jump emits C continue statement ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    # Condition: !($x > 0) — PostfixModifier negated for 'unless'
+    my $x_var = $factory->make('Constant', const_type => 'string', value => '$x');
+    my $zero  = $factory->make('Constant', const_type => 'integer', value => 0);
+    my $gt_op = $factory->make('Constant', const_type => 'string', value => '>');
+    my $gt_expr = $factory->make('Constructor',
+        'class' => 'BinaryExpr',
+        op    => $gt_op,
+        left  => $x_var,
+        right => $zero,
+    );
+    my $not_op = $factory->make('Constant', const_type => 'string', value => '!');
+    my $negated = $factory->make('Constructor',
+        'class'  => 'UnaryExpr',
+        op       => $not_op,
+        operand  => $gt_expr,
+    );
+
+    my $if_node    = $factory->make('If', control => $start, condition => $negated);
+    my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+    my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::LoopJump');
+
+    # Simulate cfg_state with loop_jump by calling _emit_xs_loop_jump
+    my $code = $target->_emit_xs_loop_jump('next', $if_node, {});
+    ok(defined $code, 'XS loop_jump produces code');
+    like($code, qr/continue/, 'XS loop_jump emits continue');
+    like($code, qr/SvTRUE/, 'XS loop_jump tests condition with SvTRUE');
+}
+
 done_testing();

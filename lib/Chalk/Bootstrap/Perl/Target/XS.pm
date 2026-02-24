@@ -730,6 +730,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $state = $_cfg_lookup{refaddr($node)};
             if (defined $state) {
                 if (defined $state->{if_node}) {
+                    # loop_jump: emit 'if (!cond) continue;' instead of block
+                    if (defined $state->{loop_jump}) {
+                        return $self->_emit_xs_loop_jump(
+                            $state->{loop_jump},
+                            $state->{if_node},
+                            $declared_vars,
+                        );
+                    }
                     return $self->emit_cfg_if(
                         $state->{if_node},
                         $state->{true_proj},
@@ -1260,6 +1268,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     method _emit_xs_next_unless($node, $declared_vars) {
         my $cond = $self->_emit_xs_expr($node->inputs()->[0], $declared_vars);
         return "if (!SvTRUE($cond)) continue;";
+    }
+
+    # Emit C continue/break from an If CFG node with loop_jump marker.
+    # The If node's condition is already the correct test (negated for unless).
+    # 'next' maps to C 'continue', 'last' maps to C 'break'.
+    method _emit_xs_loop_jump($jump_keyword, $if_node, $declared_vars) {
+        my $cond = $if_node->inputs()->[1];
+        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+        my $c_keyword = $jump_keyword eq 'last' ? 'break' : 'continue';
+        return "if (SvTRUE($cond_expr)) $c_keyword;";
     }
 
     # Emit C if/else from an If CFG node with true/false Proj branches.
