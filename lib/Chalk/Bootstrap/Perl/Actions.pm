@@ -646,7 +646,17 @@ class Chalk::Bootstrap::Perl::Actions {
                     if (defined $updated->{loop}) {
                         $updated->{body_stmts} = [$body_expr];
                     } elsif (defined $updated->{if_node}) {
-                        $updated->{then_stmts} = [$body_expr];
+                        # Detect loop jump keywords (next/last) as body:
+                        # set loop_jump marker instead of then_stmts so
+                        # targets emit 'next if/unless' instead of 'if { next }'
+                        if ($body_expr isa Chalk::Bootstrap::IR::Node::Constant
+                                && defined $body_expr->value()
+                                && ($body_expr->value() eq 'next'
+                                    || $body_expr->value() eq 'last')) {
+                            $updated->{loop_jump} = $body_expr->value();
+                        } else {
+                            $updated->{then_stmts} = [$body_expr];
+                        }
                     }
                     $sa->update_cfg($updated);
                 }

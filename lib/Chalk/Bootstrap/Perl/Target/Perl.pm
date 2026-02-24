@@ -111,6 +111,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             my $state = $_cfg_lookup{refaddr($node)};
             if (defined $state) {
                 if (defined $state->{if_node}) {
+                    # loop_jump: emit 'next if/unless $cond' instead of block
+                    if (defined $state->{loop_jump}) {
+                        return $self->_emit_loop_jump(
+                            $state->{loop_jump},
+                            $state->{if_node},
+                        );
+                    }
                     return $self->emit_cfg_if(
                         $state->{if_node},
                         $state->{true_proj},
@@ -507,6 +514,23 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     method _emit_next_unless($node) {
         my $condition = $node->inputs()->[0];
         return "next unless " . $self->_emit_expr($condition) . ";";
+    }
+
+    # Emit 'next if/unless $cond' from an If CFG node with loop_jump marker.
+    # PostfixModifier negated the condition for 'unless', so the If node's
+    # condition is !($original). We detect the negation wrapper and strip it
+    # to emit 'next unless $original' for readability.
+    method _emit_loop_jump($jump_keyword, $if_node) {
+        my $cond = $if_node->inputs()->[1];
+        # Detect negation wrapper: UnaryExpr('!', expr) → emit 'unless expr'
+        if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
+                && $cond->class() eq 'UnaryExpr'
+                && $cond->inputs()->[0] isa Chalk::Bootstrap::IR::Node::Constant
+                && $cond->inputs()->[0]->value() eq '!') {
+            my $inner = $cond->inputs()->[1];
+            return "$jump_keyword unless " . $self->_emit_expr($inner) . ";";
+        }
+        return "$jump_keyword if " . $self->_emit_expr($cond) . ";";
     }
 
     # Emit Perl if/else from an If CFG node with true/false Proj branches.

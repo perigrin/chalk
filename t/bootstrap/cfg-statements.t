@@ -975,4 +975,110 @@ SKIP: {
     }
 }
 
+# --- Test 20: next unless $cond produces If CFG with loop_jump in cfg_state ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::NextUnlessCfgTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::NextUnlessCfgTest::grammar();
+    my $parser_nu = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_nu;
+
+    my $semiring_nu = $parser_nu->semiring();
+    my $sa_nu = $semiring_nu->semirings()->[4];
+
+    # Parse next unless inside a for loop
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_nu->reset_cache();
+
+        my $result = $parser_nu->parse_value('for my $x (@arr) { next unless $x > 0; $x }');
+        ok(defined $result, 'next unless inside for loop parses');
+
+        SKIP: {
+            skip 'next unless did not parse', 5 unless defined $result;
+            my $sem_ctx = $result->[4];
+
+            # Walk Context tree looking for cfg_state with loop_jump
+            my @ctx_stack = ($sem_ctx);
+            my $found_loop_jump = false;
+            my $loop_jump_value;
+            while (@ctx_stack) {
+                my $ctx = pop @ctx_stack;
+                my $state = $sa_nu->cfg_state($ctx);
+                if (defined $state && defined $state->{loop_jump}) {
+                    $found_loop_jump = true;
+                    $loop_jump_value = $state->{loop_jump};
+                }
+                push @ctx_stack, reverse $ctx->children()->@*;
+            }
+            ok($found_loop_jump, 'cfg_state has loop_jump for next unless');
+            is($loop_jump_value, 'next', 'loop_jump value is next');
+
+            # Verify codegen emits next if/unless instead of if { next }
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_nu, $sem_ctx);
+            ok(defined $code, 'next unless generates code');
+            like($code, qr/next\s+(if|unless)\s/, 'codegen emits next if/unless');
+            unlike($code, qr/\{\s*next\s*;?\s*\}/, 'codegen does NOT emit { next } block');
+        }
+    }
+}
+
+# --- Test 21: next unless does not create NextUnless Constructor ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::NoNextUnlessTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::NoNextUnlessTest::grammar();
+    my $parser_nn = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_nn;
+
+    my $semiring_nn = $parser_nn->semiring();
+    my $sa_nn = $semiring_nn->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_nn->reset_cache();
+
+        my $result = $parser_nn->parse_value('for my $x (@arr) { next unless $x > 0; $x }');
+        ok(defined $result, 'next unless parses for NextUnless check');
+
+        SKIP: {
+            skip 'next unless did not parse', 1 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+
+            # Walk IR tree looking for NextUnless Constructors
+            my @stack = ($ir_node);
+            my $found_next_unless = false;
+            while (@stack) {
+                my $node = pop @stack;
+                if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+                    $found_next_unless = true if $node->class() eq 'NextUnless';
+                    for my $input ($node->inputs()->@*) {
+                        if (ref($input) eq 'ARRAY') {
+                            push @stack, grep { defined && ref } $input->@*;
+                        } elsif (defined $input && ref($input)) {
+                            push @stack, $input;
+                        }
+                    }
+                }
+            }
+            ok(!$found_next_unless, 'no NextUnless Constructor in IR');
+        }
+    }
+}
+
 done_testing();
