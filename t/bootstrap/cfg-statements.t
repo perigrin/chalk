@@ -187,6 +187,11 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
 
+if (!defined $ir) {
+    diag "WARNING: perl_pipeline() returned undef - all integration tests will be skipped";
+    diag "This means ~100 tests provide no coverage. Check grammar/pipeline setup.";
+}
+
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 

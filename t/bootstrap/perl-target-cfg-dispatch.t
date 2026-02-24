@@ -171,4 +171,34 @@ use Chalk::Bootstrap::Perl::Target::Perl;
     ok(!defined $code, 'emit_from_cfg_state returns undef for plain state (no control flow)');
 }
 
+# --- Test 6: emit_from_cfg_state returns undef when no cfg_state exists ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    my $ctx = $sa->one();
+    # No cfg_state set at all
+    my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
+    my $code = $target->emit_from_cfg_state($sa, $ctx);
+    ok(!defined $code, 'emit_from_cfg_state returns undef when no cfg_state exists');
+}
+
+# --- Test 7: emit_cfg_if with empty stmts produces no body content ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    my $cond  = $factory->make('Constant', const_type => 'integer', value => 1);
+    my $if_node    = $factory->make('If', control => $start, condition => $cond);
+    my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+    my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+
+    my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
+    my $code = $target->emit_cfg_if($if_node, $true_proj, $false_proj, [], []);
+    ok(defined $code, 'emit_cfg_if with empty stmts returns code');
+    like($code, qr/if\s*\(/, 'empty-stmts if has condition');
+    unlike($code, qr/else/, 'empty-stmts if has no else');
+}
+
 done_testing();
