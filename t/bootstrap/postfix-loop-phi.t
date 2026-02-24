@@ -77,6 +77,9 @@ SKIP: {
 
         my $n_binding = $state->{scope}->lookup('$n');
         ok(defined $n_binding, '$n in scope after postfix while loop');
+        ok($n_binding isa Chalk::Bootstrap::IR::Node::Phi,
+            '$n is a Phi after postfix while loop')
+            or diag('$n binding is: ' . ref($n_binding));
     }
 }
 

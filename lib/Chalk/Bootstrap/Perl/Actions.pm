@@ -14,13 +14,14 @@ my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl Re
 my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop);
 my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
-# Side table: maps refaddr(loop_ir_node) => hashref of variable names read in loop body.
-# Populated by ForeachStatement; consumed by Program for Phi insertion.
-# Keyed by the Loop IR node's refaddr so Program can look up body refs per-loop.
-my %_loop_body_var_refs;
-
 class Chalk::Bootstrap::Perl::Actions {
     field $factory;
+
+    # Side table: maps refaddr(loop_ir_node) => hashref of variable names read in loop body.
+    # Populated by ForeachStatement and ExpressionStatement (postfix loops);
+    # consumed by Program for Phi insertion.
+    # Instance-scoped so it is GC'd with the Actions object between parses.
+    field %_loop_body_var_refs;
 
     ADJUST {
         $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -97,6 +98,7 @@ class Chalk::Bootstrap::Perl::Actions {
     my $collect_body_var_refs;
     $collect_body_var_refs = sub ($stmts_or_node) {
         my %found;
+        my %visited;
         my @queue;
 
         # Accept either an arrayref of statements or a single node
@@ -110,6 +112,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $node = shift @queue;
             next unless defined $node;
             next unless ref $node;
+            next if $visited{refaddr($node)}++;
 
             if ($node isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $node->value()
@@ -145,7 +148,7 @@ class Chalk::Bootstrap::Perl::Actions {
     my sub _resolve_from_scope($ctx, $sa, $var_name, $factory) {
         return undef unless defined $sa;
         my $state = $sa->inherited_cfg_state($ctx);
-        return undef unless defined $state;
+        return undef unless defined $state && defined $state->{scope};
         my ($value, $new_scope) = $state->{scope}->resolve_sentinel($var_name, $factory);
         return undef unless defined $value;
         if ($new_scope) {

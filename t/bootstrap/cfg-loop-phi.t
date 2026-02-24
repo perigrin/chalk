@@ -111,6 +111,61 @@ SKIP: {
             '$y is not a Phi (never read in loop)')
             or diag("Got Phi for unread variable");
     }
+    # --- Test 4: Nested loops produce Phi for outer variable ---
+    # The two-phase approach (ForeachStatement collects refs, Program wires Phis)
+    # does not yet propagate inner loop variable refs to the outer loop.
+    # The inner loop's $x usage is inside the inner ForeachStatement Constructor,
+    # so the outer $collect_body_var_refs does not see it.
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $src = 'my $x = 0; for my $i (1, 2) { for my $j (3, 4) { $x = $x + $j; } }';
+        my $result = $parser->parse_value($src);
+        ok(defined $result, 'nested loop parses');
+
+        my $sem_ctx = $result->[4];
+        skip 'no semantic context', 2 unless defined $sem_ctx;
+
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state available for nested loop');
+
+        my $x_binding = $state->{scope}->lookup('$x');
+        ok(defined $x_binding, '$x in scope after nested loops');
+        TODO: {
+            local $TODO = 'nested loop Phi requires propagating inner body refs to outer loop';
+            ok($x_binding isa Chalk::Bootstrap::IR::Node::Phi,
+                '$x is a Phi after nested loops')
+                or diag('$x binding is: ' . ref($x_binding));
+        }
+    }
+
+    # --- Test 5: Multiple variables, only referenced ones get Phi ---
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $src = 'my $a = 0; my $b = 1; for my $i (1, 2, 3) { $a = $a + $i; }';
+        my $result = $parser->parse_value($src);
+        ok(defined $result, 'multi-var loop parses');
+
+        my $sem_ctx = $result->[4];
+        skip 'no semantic context', 4 unless defined $sem_ctx;
+
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'cfg_state available for multi-var loop');
+
+        my $a_binding = $state->{scope}->lookup('$a');
+        ok($a_binding isa Chalk::Bootstrap::IR::Node::Phi,
+            '$a is a Phi (referenced in loop)')
+            or diag('$a binding is: ' . ref($a_binding));
+
+        my $b_binding = $state->{scope}->lookup('$b');
+        ok(defined $b_binding, '$b is still in scope');
+        ok(!($b_binding isa Chalk::Bootstrap::IR::Node::Phi),
+            '$b is NOT a Phi (never referenced in loop)')
+            or diag('$b binding is: ' . ref($b_binding));
+    }
 }
 
 done_testing();
