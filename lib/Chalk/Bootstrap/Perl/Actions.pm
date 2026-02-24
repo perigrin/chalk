@@ -1699,6 +1699,17 @@ class Chalk::Bootstrap::Perl::Actions {
 
         return undef unless defined $target && defined $op;
 
+        # Helper: update scope when assigning to a variable.
+        # Called with the variable name (string with sigil) and the resulting IR node.
+        my $update_scope = sub ($var_name, $ir_node) {
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            return unless defined $sa;
+            my $state = $sa->inherited_cfg_state($ctx);
+            return unless defined $state;
+            my $new_scope = $state->{scope}->define($var_name, $ir_node);
+            $sa->update_cfg({ $state->%*, scope => $new_scope });
+        };
+
         my $op_val = $op->value();
         if ($op_val eq '=') {
             # FieldDecl target: set its default_value and return it
@@ -1714,21 +1725,30 @@ class Chalk::Bootstrap::Perl::Actions {
             # VarDecl target: set its initializer and return it
             if ($target isa Chalk::Bootstrap::IR::Node::Constructor
                     && $target->class() eq 'VarDecl') {
-                return $factory->make('Constructor',
+                my $result = $factory->make('Constructor',
                     'class'       => 'VarDecl',
                     variable    => $target->inputs()->[0],
                     initializer => $value,
                 );
+                my $var_name_node = $target->inputs()->[0];
+                if ($var_name_node isa Chalk::Bootstrap::IR::Node::Constant
+                        && defined $var_name_node->value()
+                        && $var_name_node->value() =~ /^[\$\@\%]/) {
+                    $update_scope->($var_name_node->value(), $result);
+                }
+                return $result;
             }
             # Plain assignment: Return as VarDecl if target is variable.
             if ($target isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $target->value()
                     && $target->value() =~ /^[\$\@\%]/) {
-                return $factory->make('Constructor',
+                my $result = $factory->make('Constructor',
                     'class'       => 'VarDecl',
                     variable    => $target,
                     initializer => $value,
                 );
+                $update_scope->($target->value(), $result);
+                return $result;
             }
             # Otherwise binary expression for assignment
             return $factory->make('Constructor',
@@ -1740,12 +1760,18 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         # Compound assignment (.=, //=, +=, etc.)
-        return $factory->make('Constructor',
+        my $compound_result = $factory->make('Constructor',
             'class'  => 'CompoundAssign',
             op     => $op,
             target => $target,
             value  => $value,
         );
+        if ($target isa Chalk::Bootstrap::IR::Node::Constant
+                && defined $target->value()
+                && $target->value() =~ /^[\$\@\%]/) {
+            $update_scope->($target->value(), $compound_result);
+        }
+        return $compound_result;
     }
 
     # §17 AssignOp — returns operator as Constant
