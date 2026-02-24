@@ -1132,31 +1132,91 @@ class Chalk::Bootstrap::Perl::Actions {
         return _fixup_stmts($factory, \@stmts);
     }
 
-    # §18 Variable — return variable name as Constant
+    # §18 Variable — resolve from scope if available, else Constant
     method Variable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
+
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
+                if (defined $value) {
+                    if ($new_scope) {
+                        $sa->update_cfg({ $state->%*, scope => $new_scope });
+                    }
+                    return $value;
+                }
+            }
+        }
+
         return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 ScalarVariable — return as Constant with variable type
+    # §18 ScalarVariable — resolve from scope if available, else Constant
     method ScalarVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
+
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
+                if (defined $value) {
+                    if ($new_scope) {
+                        $sa->update_cfg({ $state->%*, scope => $new_scope });
+                    }
+                    return $value;
+                }
+            }
+        }
+
         return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 ArrayVariable — return as Constant with variable type
+    # §18 ArrayVariable — resolve from scope if available, else Constant
     method ArrayVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
+
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
+                if (defined $value) {
+                    if ($new_scope) {
+                        $sa->update_cfg({ $state->%*, scope => $new_scope });
+                    }
+                    return $value;
+                }
+            }
+        }
+
         return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
-    # §18 HashVariable — return as Constant with variable type
+    # §18 HashVariable — resolve from scope if available, else Constant
     method HashVariable($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
+
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my ($value, $new_scope) = $state->{scope}->resolve_sentinel($text, $factory);
+                if (defined $value) {
+                    if ($new_scope) {
+                        $sa->update_cfg({ $state->%*, scope => $new_scope });
+                    }
+                    return $value;
+                }
+            }
+        }
+
         return $factory->make('Constant', const_type => 'variable', value => $text);
     }
 
