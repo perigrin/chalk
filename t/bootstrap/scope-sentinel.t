@@ -27,7 +27,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
 
     # raw_lookup returns sentinel hashref, not original node
     my $sentinel_a = $forked->raw_lookup('$a');
-    ok(ref $sentinel_a eq 'HASH', '$a binding is a sentinel hashref');
+    ok(ref $sentinel_a eq 'Chalk::Bootstrap::Scope::Sentinel', '$a binding is a blessed sentinel');
     ok($sentinel_a->{sentinel}, 'sentinel flag is set');
     is($sentinel_a->{pre_value}, $node_a, 'sentinel pre_value is original node');
     is($sentinel_a->{loop}, $loop, 'sentinel loop is the Loop node');
@@ -91,11 +91,11 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->new();
 
     # raw_lookup returns the sentinel, not a Phi
     my $raw = $forked->raw_lookup('$x');
-    ok(ref $raw eq 'HASH' && $raw->{sentinel}, 'raw_lookup returns sentinel');
+    ok(ref $raw eq 'Chalk::Bootstrap::Scope::Sentinel', 'raw_lookup returns sentinel');
 
     # regular lookup also returns sentinel (no auto-resolve)
     my $regular = $forked->lookup('$x');
-    ok(ref $regular eq 'HASH' && $regular->{sentinel}, 'lookup returns sentinel too');
+    ok(ref $regular eq 'Chalk::Bootstrap::Scope::Sentinel', 'lookup returns sentinel too');
 }
 
 done_testing();

@@ -84,14 +84,16 @@ class Chalk::Bootstrap::Scope {
     # Create a new Scope with all bindings replaced by sentinels.
     # Each sentinel records the Loop node and the pre-loop binding value.
     # Called at loop entry to enable lazy Phi creation.
+    # Sentinels are blessed into Chalk::Bootstrap::Scope::Sentinel for
+    # unambiguous type detection (plain hashrefs could be confused with IR nodes).
     method fork_for_loop($loop_node) {
         my %sentinel_bindings;
         for my $name (keys $bindings->%*) {
-            $sentinel_bindings{$name} = {
+            $sentinel_bindings{$name} = bless {
                 sentinel  => true,
                 loop      => $loop_node,
                 pre_value => $bindings->{$name},
-            };
+            }, 'Chalk::Bootstrap::Scope::Sentinel';
         }
         return Chalk::Bootstrap::Scope->new(bindings => \%sentinel_bindings);
     }
@@ -106,7 +108,7 @@ class Chalk::Bootstrap::Scope {
         return (undef, undef) unless defined $binding;
 
         # Non-sentinel: return the binding directly
-        unless (ref $binding eq 'HASH' && $binding->{sentinel}) {
+        unless (ref $binding eq 'Chalk::Bootstrap::Scope::Sentinel') {
             return ($binding, undef);
         }
 
