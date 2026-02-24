@@ -228,6 +228,9 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $_cfg_state{refaddr($result_ctx)} = $inherited if defined $inherited;
         }
 
+        # Clear current_instance after on_complete to prevent stale access
+        $_current_instance = undef;
+
         return $result_ctx;
     }
 

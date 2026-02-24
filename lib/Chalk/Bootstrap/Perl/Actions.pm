@@ -633,32 +633,21 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Wire body expression into PostfixModifier's cfg_state
+        # Wire body expression into PostfixModifier's cfg_state.
+        # The cfg_state is propagated to $ctx via multiply() during Earley processing,
+        # so cfg_state($ctx) returns the PostfixModifier's state directly.
         if (defined $postfix_leaf && defined $body_expr) {
             my $postfix_node = $postfix_leaf->extract();
             my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
             if (defined $sa) {
-                # Find PostfixModifier's cfg_state by walking context tree
-                my $state;
-                my @walk = ($ctx);
-                while (@walk) {
-                    my $n = pop @walk;
-                    my $s = $sa->cfg_state($n);
-                    if (defined $s && (defined $s->{loop} || defined $s->{if_node})) {
-                        $state = $s;
-                        last;
-                    }
-                    push @walk, reverse $n->children()->@*;
-                }
-
-                if (defined $state) {
+                my $state = $sa->cfg_state($ctx);
+                if (defined $state && (defined $state->{loop} || defined $state->{if_node})) {
                     my $updated = { $state->%* };
                     if (defined $updated->{loop}) {
                         $updated->{body_stmts} = [$body_expr];
                     } elsif (defined $updated->{if_node}) {
                         $updated->{then_stmts} = [$body_expr];
                     }
-                    # Pending update applied to ExpressionStatement's result context
                     $sa->update_cfg($updated);
                 }
             }
