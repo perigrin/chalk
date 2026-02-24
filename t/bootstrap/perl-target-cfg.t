@@ -23,8 +23,10 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 
     my $target = Chalk::Bootstrap::Perl::Target::Perl->new();
 
+    my $then_node = $factory->make('Constant', const_type => 'integer', value => 42);
+    my $else_node = $factory->make('Constant', const_type => 'integer', value => 99);
     my $code = $target->emit_cfg_if($if_node, $true_proj, $false_proj,
-                                     [], []);
+                                     [$then_node], [$else_node]);
     ok(defined $code, 'emit_cfg_if returns code');
     like($code, qr/if\s*\(/, 'emitted code contains if');
     like($code, qr/\}\s*else\s*\{/, 'emitted code contains else branch');
