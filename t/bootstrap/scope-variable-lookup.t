@@ -6,10 +6,8 @@ use Test::More;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
-use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::IR::Node::Phi;
-use Chalk::Bootstrap::Target::Perl;
 use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
@@ -160,7 +158,7 @@ my sub make_scan_ctx($text) {
     if (defined $state) {
         my $x_after = $state->{scope}->lookup('$x');
         ok(defined $x_after, '$x is still in scope after resolution');
-        ok(!defined $x_after || $x_after isa Chalk::Bootstrap::IR::Node::Phi,
+        ok($x_after isa Chalk::Bootstrap::IR::Node::Phi,
             '$x binding was updated to the Phi node');
     }
 }
