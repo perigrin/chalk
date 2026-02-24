@@ -26,7 +26,11 @@ use Chalk::Bootstrap::Perl::Target::XS;
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::CfgIf');
 
     # Test that the target can emit code for an If node
-    my $code = $target->emit_cfg_if($if_node, $true_proj, $false_proj, {});
+    # With true_stmts and false_stmts both populated, else block should appear
+    my $then_node = $factory->make('Constant', const_type => 'string', value => 'then_val');
+    my $else_node = $factory->make('Constant', const_type => 'string', value => 'else_val');
+    my $code = $target->emit_cfg_if($if_node, $true_proj, $false_proj, {},
+        [$then_node], [$else_node]);
     ok(defined $code, 'emit_cfg_if returns code');
     like($code, qr/if\s*\(SvTRUE/, 'emitted code contains SvTRUE condition');
     like($code, qr/\}\s*else\s*\{/, 'emitted code contains else branch');
@@ -78,6 +82,60 @@ use Chalk::Bootstrap::Perl::Target::XS;
     my $code = $target->emit_cfg_loop($loop, $loop_if, $body_proj, $exit_proj, {});
     ok(defined $code, 'emit_cfg_loop returns code');
     like($code, qr/while|for/, 'emitted code contains loop construct');
+}
+
+# --- Test 4: XS foreach loop emits C-style AV iteration, not Perl syntax ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    my $loop  = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
+    my $loop_cond = $factory->make('Constant', const_type => 'string', value => '__loop_bound__');
+    my $loop_if   = $factory->make('If', control => $loop, condition => $loop_cond);
+    my $body_proj = $factory->make('Proj', source => $loop_if, index => 0);
+    my $exit_proj = $factory->make('Proj', source => $loop_if, index => 1);
+
+    my $iterator = $factory->make('Constant', const_type => 'string', value => '$x');
+    my $list_items = [
+        $factory->make('Constant', const_type => 'integer', value => 1),
+        $factory->make('Constant', const_type => 'integer', value => 2),
+        $factory->make('Constant', const_type => 'integer', value => 3),
+    ];
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::CfgForeach');
+    my $code = $target->emit_cfg_loop(
+        $loop, $loop_if, $body_proj, $exit_proj, {},
+        [], $iterator, $list_items,
+    );
+    ok(defined $code, 'XS emit_cfg_loop with iterator/list returns code');
+    unlike($code, qr/for my/, 'XS foreach does NOT emit Perl syntax');
+    like($code, qr/av_fetch|av_len|for\s*\(/, 'XS foreach emits C-style iteration');
+}
+
+# --- Test 5: XS foreach with single node (variable) emits AV iteration ---
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    my $loop  = $factory->make('Loop', entry_ctrl => $start, backedge_ctrl => undef);
+    my $loop_cond = $factory->make('Constant', const_type => 'string', value => '__loop_bound__');
+    my $loop_if   = $factory->make('If', control => $loop, condition => $loop_cond);
+    my $body_proj = $factory->make('Proj', source => $loop_if, index => 0);
+    my $exit_proj = $factory->make('Proj', source => $loop_if, index => 1);
+
+    my $iterator = $factory->make('Constant', const_type => 'string', value => '$item');
+    my $list_node = $factory->make('Constant', const_type => 'string', value => '@array');
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::CfgForeachVar');
+    my $code = $target->emit_cfg_loop(
+        $loop, $loop_if, $body_proj, $exit_proj, {},
+        [], $iterator, $list_node,
+    );
+    ok(defined $code, 'XS emit_cfg_loop with variable list returns code');
+    unlike($code, qr/for my/, 'XS foreach with variable does NOT emit Perl syntax');
+    like($code, qr/av_fetch|av_len/, 'XS foreach with variable uses AV API');
 }
 
 done_testing();

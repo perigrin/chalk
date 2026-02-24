@@ -652,6 +652,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 $state->{body_proj},
                 $state->{exit_proj},
                 $state->{body_stmts} // [],
+                $state->{iterator},
+                $state->{list},
             );
         }
 

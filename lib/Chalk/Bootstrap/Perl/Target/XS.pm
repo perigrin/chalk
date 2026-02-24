@@ -1338,26 +1338,57 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines;
 
         if (defined $iterator && defined $list) {
-            # Foreach loop: for my $var (list) { ... }
-            my $iter_expr = $self->_emit_xs_expr($iterator, $declared_vars);
-            my $list_expr;
+            # Foreach: emit C-style AV iteration
+            my $iter_name = $iterator->value();
+            $iter_name =~ s/^[\$\@\%]//;
+
             if (ref($list) eq 'ARRAY') {
-                $list_expr = join(', ', map { $self->_emit_xs_expr($_, $declared_vars) } $list->@*);
+                # Literal list: build temp AV, iterate with av_fetch
+                push @lines, "{";
+                push @lines, "    AV *_tmp_av = newAV();";
+                for my $item ($list->@*) {
+                    my $val = $self->_emit_xs_expr($item, $declared_vars);
+                    push @lines, "    av_push(_tmp_av, SvREFCNT_inc($val));";
+                }
+                push @lines, "    SSize_t _len = av_len(_tmp_av) + 1;";
+                push @lines, "    SSize_t _i;";
+                push @lines, "    for (_i = 0; _i < _len; _i++) {";
+                push @lines, "        SV **_elem = av_fetch(_tmp_av, _i, 0);";
+                push @lines, "        SV *${iter_name}_sv = (_elem && *_elem) ? *_elem : &PL_sv_undef;";
             } else {
-                $list_expr = $self->_emit_xs_expr($list, $declared_vars);
+                # Variable list: iterate existing AV
+                my $list_expr = $self->_emit_xs_expr($list, $declared_vars);
+                push @lines, "{";
+                push @lines, "    AV *_av = (AV*)SvRV($list_expr);";
+                push @lines, "    SSize_t _len = av_len(_av) + 1;";
+                push @lines, "    SSize_t _i;";
+                push @lines, "    for (_i = 0; _i < _len; _i++) {";
+                push @lines, "        SV **_elem = av_fetch(_av, _i, 0);";
+                push @lines, "        SV *${iter_name}_sv = (_elem && *_elem) ? *_elem : &PL_sv_undef;";
             }
-            push @lines, "for my $iter_expr ($list_expr) {";
+
+            for my $stmt ($body_stmts->@*) {
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+                push @lines, "        $code" if defined $code;
+            }
+            push @lines, "    }";
+            if (ref($list) eq 'ARRAY') {
+                push @lines, "    SvREFCNT_dec((SV*)_tmp_av);";
+            }
+            push @lines, "}";
         } else {
+            # While loop: while (cond) { ... }
             my $cond = $loop_if->inputs()->[1];
             my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
             push @lines, "while (SvTRUE($cond_expr)) {";
+
+            for my $stmt ($body_stmts->@*) {
+                my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
+                push @lines, "    $code" if defined $code;
+            }
+            push @lines, "}";
         }
 
-        for my $stmt ($body_stmts->@*) {
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars);
-            push @lines, "    $code" if defined $code;
-        }
-        push @lines, "}";
         return join("\n", @lines);
     }
 
@@ -1601,6 +1632,8 @@ Module::Build->new(
                 $state->{exit_proj},
                 $declared_vars,
                 $state->{body_stmts} // [],
+                $state->{iterator},
+                $state->{list},
             );
         }
 
