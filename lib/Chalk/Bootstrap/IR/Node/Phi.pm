@@ -8,4 +8,10 @@ class Chalk::Bootstrap::IR::Node::Phi :isa(Chalk::Bootstrap::IR::Node) {
     method operation() {
         return 'Phi';
     }
+
+    # Set the backedge value (second element of the values array).
+    # This is the only mutation point — backedges don't exist at construction time.
+    method set_backedge($value) {
+        $self->inputs()->[1][1] = $value;
+    }
 }

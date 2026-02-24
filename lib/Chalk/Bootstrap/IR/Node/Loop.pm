@@ -8,4 +8,10 @@ class Chalk::Bootstrap::IR::Node::Loop :isa(Chalk::Bootstrap::IR::Node) {
     method operation() {
         return 'Loop';
     }
+
+    # Set the backedge control input (second element of inputs).
+    # This is the only mutation point — backedges don't exist at construction time.
+    method set_backedge_ctrl($ctrl) {
+        $self->inputs()->[1] = $ctrl;
+    }
 }
