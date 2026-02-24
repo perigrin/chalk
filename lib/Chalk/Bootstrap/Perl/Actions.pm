@@ -1697,8 +1697,13 @@ class Chalk::Bootstrap::Perl::Actions {
                         controls => [$exit_proj],
                     );
                     $sa->update_cfg({
-                        control => $region,
-                        scope   => $state->{scope},
+                        control    => $region,
+                        scope      => $state->{scope},
+                        loop       => $loop,
+                        loop_if    => $if_node,
+                        body_proj  => $body_proj,
+                        exit_proj  => $exit_proj,
+                        body_stmts => [],
                     });
                     return $loop;
                 }
