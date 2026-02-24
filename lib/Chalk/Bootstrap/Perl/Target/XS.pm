@@ -1266,12 +1266,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # The If node's condition is emitted as a SvTRUE test. Body statements
     # for each branch are provided by the caller as arrayrefs.
     method emit_cfg_if($if_node, $true_proj, $false_proj, $declared_vars,
-                       $true_stmts = [], $false_stmts = []) {
+                       $true_stmts = [], $false_stmts = [],
+                       $prefix = 'if') {
         my $cond = $if_node->inputs()->[1];  # condition input
         my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
 
         my @lines;
-        push @lines, "if (SvTRUE($cond_expr)) {";
+        push @lines, "$prefix (SvTRUE($cond_expr)) {";
         for my $stmt ($true_stmts->@*) {
             my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
             push @lines, "    $code" if defined $code;
@@ -1290,8 +1291,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         $declared_vars,
                         $elsif_state->{then_stmts} // [],
                         $elsif_state->{else_stmts} // [],
+                        '} else if',
                     );
-                    $elsif_code =~ s/^if/} else if/;
                     push @lines, $elsif_code;
                     return join("\n", @lines);
                 }

@@ -597,7 +597,47 @@ SKIP: {
     }
 }
 
-# --- Test 12: Postfix if wires body expression into then_stmts ---
+# --- Test 12: Deep elsif chain (3+ branches) ---
+SKIP: {
+    skip 'Perl grammar failed to parse', 1 unless defined $ir;
+
+    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $generated = $target->generate($ir);
+    $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::DeepElsifTest/g;
+    eval $generated;
+    skip "Generated code failed to compile: $@", 1 if $@;
+
+    my $gen_grammar = Chalk::Grammar::Perl::DeepElsifTest::grammar();
+    my $parser_de = build_perl_ir_parser($gen_grammar, start => 'Program');
+    skip 'IR parser not built', 1 unless defined $parser_de;
+
+    my $semiring_de = $parser_de->semiring();
+    my $sa_de = $semiring_de->semirings()->[4];
+
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_de->reset_cache();
+
+        my $result = $parser_de->parse_value('if (1) { 10 } elsif (2) { 20 } elsif (3) { 30 } else { 40 }');
+        ok(defined $result, 'deep elsif chain parses');
+
+        SKIP: {
+            skip 'deep elsif chain did not parse', 4 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $ir_node = $sem_ctx->extract();
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my $code = $perl_target->generate_with_cfg($ir_node, $sa_de, $sem_ctx);
+            ok(defined $code, 'deep elsif chain generates code');
+            # Count elsif occurrences — should have 2 elsif keywords
+            my @elsifs = ($code =~ /elsif/g);
+            is(scalar @elsifs, 2, 'deep elsif chain has exactly 2 elsif keywords');
+            like($code, qr/20/, 'deep elsif chain contains second branch body');
+            like($code, qr/30/, 'deep elsif chain contains third branch body');
+        }
+    }
+}
+
+# --- Test 13: Postfix if wires body expression into then_stmts ---
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 

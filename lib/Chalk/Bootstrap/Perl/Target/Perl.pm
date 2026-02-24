@@ -511,12 +511,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     # Emit Perl if/else from an If CFG node with true/false Proj branches.
     method emit_cfg_if($if_node, $true_proj, $false_proj,
-                       $true_stmts = [], $false_stmts = []) {
+                       $true_stmts = [], $false_stmts = [],
+                       $prefix = 'if') {
         my $cond = $if_node->inputs()->[1];  # condition input
         my $cond_expr = $self->_emit_expr($cond);
 
         my @lines;
-        push @lines, "if ($cond_expr) {";
+        push @lines, "$prefix ($cond_expr) {";
         for my $stmt ($true_stmts->@*) {
             my $code = $self->_emit_node($stmt);
             if (defined $code) {
@@ -538,8 +539,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                         $elsif_state->{false_proj},
                         $elsif_state->{then_stmts} // [],
                         $elsif_state->{else_stmts} // [],
+                        '} elsif',
                     );
-                    $elsif_code =~ s/^if/} elsif/;
                     push @lines, $elsif_code;
                     return join("\n", @lines);
                 }
