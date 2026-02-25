@@ -47,7 +47,19 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             my $state = $sa->cfg_state($node);
             if (defined $state && (defined $state->{if_node} || defined $state->{loop})) {
                 my $ir_node = $node->extract();
-                if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}) {
+                # Only register IR nodes that are directly associated with
+                # control flow — not parent nodes (ClassDecl, MethodDecl,
+                # Program) that inherit cfg_state from child If/Loop nodes.
+                # cfg_state propagates upward through the Context comonad,
+                # so without this guard, ClassDecl gets mapped to an If and
+                # _emit_node emits a bare if-block instead of the class.
+                if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}
+                        && !($ir_node isa Chalk::Bootstrap::IR::Node::Constructor
+                             && ($ir_node->class() eq 'Program'
+                                 || $ir_node->class() eq 'ClassDecl'
+                                 || $ir_node->class() eq 'MethodDecl'
+                                 || $ir_node->class() eq 'UseDecl'
+                                 || $ir_node->class() eq 'FieldDecl'))) {
                     $_cfg_lookup{refaddr($ir_node)} = $state;
                 }
             }
