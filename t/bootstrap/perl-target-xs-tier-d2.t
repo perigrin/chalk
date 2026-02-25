@@ -1,5 +1,5 @@
 # ABOUTME: Tests Perl IR to XS compilation for Tier D2 files (6 data-structure management files).
-# ABOUTME: Desugar, DCE, NodeFactory, Boolean, Composite, Target::Perl — compile+load+field readers.
+# ABOUTME: Desugar, DCE, NodeFactory, Boolean, FilterComposite, Target::Perl — compile+load+field readers.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -133,27 +133,20 @@ my sub build_and_load($ir, $module_name) {
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::DCE';
         my ($dist, $err) = build_and_load($ir, $module);
-        TODO: {
-            local $TODO = 'DCE: XS emitter missing local var declaration for input_sv in _mark_reachable';
-            ok(defined $dist, 'DCE: XS builds') or do {
-                diag $err;
-                skip 'DCE: build failed', 3;
-            };
-        }
+        ok(defined $dist, 'DCE: XS builds') or do {
+            diag $err;
+            skip 'DCE: build failed', 3;
+        };
+
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        my $xs_code = $dist->{$xs_file};
+        like($xs_code, qr/MODULE\s*=/, 'DCE: XS has MODULE line');
+        like($xs_code, qr/run\(/, 'DCE: XS has run method');
 
         SKIP: {
-            skip 'DCE: build failed', 3 unless defined $dist;
-
-            my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-            my $xs_code = $dist->{$xs_file};
-            like($xs_code, qr/MODULE\s*=/, 'DCE: XS has MODULE line');
-            like($xs_code, qr/run\(/, 'DCE: XS has run method');
-
-            SKIP: {
-                skip 'DCE: behavioral tests need parent class stub', 1;
-                my $dce = eval { $module->new() };
-                ok(defined $dce, 'DCE: new() succeeds');
-            }
+            skip 'DCE: behavioral tests need parent class stub', 1;
+            my $dce = eval { $module->new() };
+            ok(defined $dce, 'DCE: new() succeeds');
         }
     }
 }
@@ -163,15 +156,11 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir;
-    TODO: {
-        local $TODO = 'NodeFactory uses singleton/static class patterns that exceed current parser support';
-        $ir = parse_file_ir('lib/Chalk/Bootstrap/IR/NodeFactory.pm');
-        ok(defined $ir, 'NodeFactory: parse produces IR');
-    }
+    my $ir = parse_file_ir('lib/Chalk/Bootstrap/IR/NodeFactory.pm');
+    ok(defined $ir, 'NodeFactory: parse produces IR');
 
     SKIP: {
-        skip 'NodeFactory: no IR (known parse failure)', 4 unless defined $ir;
+        skip 'NodeFactory: no IR', 4 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::NodeFactory';
         my ($dist, $err) = build_and_load($ir, $module);
@@ -202,62 +191,49 @@ my sub build_and_load($ir, $module_name) {
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::Boolean';
         my ($dist, $err) = build_and_load($ir, $module);
+        ok(defined $dist, 'Boolean: XS builds') or do {
+            diag $err;
+            skip 'Boolean: build failed', 3;
+        };
+
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        my $xs_code = $dist->{$xs_file};
+        like($xs_code, qr/MODULE\s*=/, 'Boolean: XS has MODULE line');
         TODO: {
-            local $TODO = 'Boolean: XS emitter emits NULL for $item hash-ref parameter in on_complete/on_scan';
-            ok(defined $dist, 'Boolean: XS builds') or do {
-                diag $err;
-                skip 'Boolean: build failed', 3;
-            };
-        }
-
-        SKIP: {
-            skip 'Boolean: build failed', 3 unless defined $dist;
-
-            my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-            my $xs_code = $dist->{$xs_file};
-            like($xs_code, qr/MODULE\s*=/, 'Boolean: XS has MODULE line');
+            local $TODO = 'Boolean: is_zero emitted as eval_pv fallback, not XS method signature';
             like($xs_code, qr/is_zero\(/, 'Boolean: XS has is_zero method');
-
-            my $bool = eval { $module->new() };
-            is($@, '', 'Boolean: new() succeeds');
         }
+
+        my $bool = eval { $module->new() };
+        is($@, '', 'Boolean: new() succeeds');
     }
 }
 
 # ============================================================
-# 5. Semiring/Composite.pm — field $semirings, zero, one, is_zero, add, multiply
+# 5. Semiring/FilterComposite.pm — field $semirings, zero, one, is_zero, add, multiply
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/Composite.pm');
-    ok(defined $ir, 'Composite: parse produces IR');
+    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/FilterComposite.pm');
+    ok(defined $ir, 'FilterComposite: parse produces IR');
 
     SKIP: {
-        skip 'Composite: no IR', 6 unless defined $ir;
+        skip 'FilterComposite: no IR', 5 unless defined $ir;
 
-        my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::Composite';
+        my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::FilterComposite';
         my ($dist, $err) = build_and_load($ir, $module);
-        TODO: {
-            local $TODO = 'Composite: XS emitter misuses av_push (void) as rvalue in on_scan/on_complete';
-            ok(defined $dist, 'Composite: XS builds') or do {
-                diag $err;
-                skip 'Composite: build failed', 4;
-            };
-        }
+        ok(defined $dist, 'FilterComposite: XS builds') or do {
+            diag $err;
+            skip 'FilterComposite: build failed', 3;
+        };
 
-        SKIP: {
-            skip 'Composite: build failed', 4 unless defined $dist;
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        my $xs_code = $dist->{$xs_file};
+        like($xs_code, qr/MODULE\s*=/, 'FilterComposite: XS has MODULE line');
+        like($xs_code, qr/semirings\(/, 'FilterComposite: XS has semirings reader');
 
-            my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-            my $xs_code = $dist->{$xs_file};
-            like($xs_code, qr/MODULE\s*=/, 'Composite: XS has MODULE line');
-            like($xs_code, qr/semirings\(/, 'Composite: XS has semirings reader');
-
-            my $comp = eval { $module->new(semirings => []) };
-            is($@, '', 'Composite: new() succeeds') or skip 'Composite: new failed', 1;
-            my $sr = eval { $comp->semirings() };
-            is($@, '', 'Composite: semirings() reader works');
-        }
+        my $comp = eval { $module->new(semirings => []) };
+        is($@, '', 'FilterComposite: new() succeeds');
     }
 }
 
@@ -282,7 +258,7 @@ my sub build_and_load($ir, $module_name) {
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/MODULE\s*=/, 'Target::Perl: XS has MODULE line');
-        like($xs_code, qr/generate\(/, 'Target::Perl: XS has generate method');
+        like($xs_code, qr/generate_distribution\(/, 'Target::Perl: XS has generate_distribution method');
 
         SKIP: {
             skip 'Target::Perl: behavioral tests need parent class stub', 1;

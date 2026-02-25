@@ -1,5 +1,5 @@
-# ABOUTME: Tests that XS emitter closes eval_pv gaps for AnonSubExpr, BacktickExpr,
-# ABOUTME: sprintf, join, split, non-empty HashRefExpr, and non-empty ArrayRefExpr.
+# ABOUTME: Tests that XS emitter closes eval_pv gaps and handles compound operators.
+# ABOUTME: Covers AnonSubExpr, BacktickExpr, sprintf, join, split, HashRefExpr, ArrayRefExpr, //=.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -154,6 +154,40 @@ my sub ctor($class, %args) {
     my $arr = ctor('ArrayRefExpr', elements => []);
     my $code = $xs->_emit_xs_expr($arr, {});
     like($code, qr/newRV_noinc.*newAV/, 'ArrayRefExpr: empty still uses newAV');
+}
+
+# === 2a. //= compound assign — defined-or-assign ===
+
+{
+    my $assign = ctor('CompoundAssign',
+        op     => const_node('//='),
+        target => const_node('$cache'),
+        value  => const_node('"default"'),
+    );
+
+    my $code = $xs->_emit_xs_expr($assign, {});
+    unlike($code, qr{not supported}, '//=: not "not supported"');
+    like($code, qr/SvOK/, '//=: checks definedness with SvOK');
+}
+
+# === 2b. push as expression — av_push wrapped so it returns a value ===
+
+{
+    my $push_call = ctor('BuiltinCall',
+        name => const_node('push'),
+        args => [const_node('@lines'), const_node('"hello"')],
+    );
+
+    # When emitted as an expression, push must return a value (not void av_push)
+    my $code = $xs->_emit_xs_expr($push_call, {});
+    like($code, qr/av_push/, 'push expr: uses av_push');
+    # Must be wrapped in statement expression so it has a value
+    like($code, qr/\(\{.*av_push.*\}\)/, 'push expr: wrapped in statement expression');
+    unlike($code, qr/^\s*av_push\(/, 'push expr: not bare av_push (void)');
+
+    # When emitted as a statement, push should work as a simple void call
+    my $stmt = $xs->_emit_xs_stmt($push_call, {});
+    like($stmt, qr/av_push/, 'push stmt: uses av_push');
 }
 
 done_testing();

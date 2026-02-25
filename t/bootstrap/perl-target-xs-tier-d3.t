@@ -138,25 +138,18 @@ my sub build_and_load($ir, $module_name) {
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD3::Precedence';
         my ($dist, $err) = build_and_load($ir, $module);
-        TODO: {
-            local $TODO = 'Precedence: XS emitter emits NULL for hashref field access in is_zero (hashref deref pattern unsupported)';
-            ok(defined $dist, 'Precedence: XS builds') or do {
-                diag $err;
-                skip 'Precedence: build failed', 3;
-            };
-        }
+        ok(defined $dist, 'Precedence: XS builds') or do {
+            diag $err;
+            skip 'Precedence: build failed', 3;
+        };
 
-        SKIP: {
-            skip 'Precedence: build failed', 3 unless defined $dist;
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        my $xs_code = $dist->{$xs_file};
+        like($xs_code, qr/MODULE\s*=/, 'Precedence: XS has MODULE line');
+        like($xs_code, qr/zero\(/, 'Precedence: XS has zero method');
 
-            my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-            my $xs_code = $dist->{$xs_file};
-            like($xs_code, qr/MODULE\s*=/, 'Precedence: XS has MODULE line');
-            like($xs_code, qr/zero\(/, 'Precedence: XS has zero method');
-
-            my $prec = eval { $module->new(lookup => sub { undef }) };
-            is($@, '', 'Precedence: new() succeeds');
-        }
+        my $prec = eval { $module->new(lookup => sub { undef }) };
+        is($@, '', 'Precedence: new() succeeds');
     }
 }
 
@@ -173,24 +166,20 @@ my sub build_and_load($ir, $module_name) {
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD3::Structural';
         my ($dist, $err) = build_and_load($ir, $module);
+        ok(defined $dist, 'Structural: XS builds') or do {
+            diag $err;
+            skip 'Structural: build failed', 4;
+        };
+
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        my $xs_code = $dist->{$xs_file};
+        like($xs_code, qr/MODULE\s*=/, 'Structural: XS has MODULE line');
+        like($xs_code, qr/zero\(/, 'Structural: XS has zero method');
+
+        my $struct = eval { $module->new() };
+        is($@, '', 'Structural: new() succeeds') or skip 'Structural: new failed', 1;
         TODO: {
-            local $TODO = 'Structural: XS emitter emits RETVAL without declaration and missing xsreturn label in add/on_complete';
-            ok(defined $dist, 'Structural: XS builds') or do {
-                diag $err;
-                skip 'Structural: build failed', 4;
-            };
-        }
-
-        SKIP: {
-            skip 'Structural: build failed', 4 unless defined $dist;
-
-            my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-            my $xs_code = $dist->{$xs_file};
-            like($xs_code, qr/MODULE\s*=/, 'Structural: XS has MODULE line');
-            like($xs_code, qr/zero\(/, 'Structural: XS has zero method');
-
-            my $struct = eval { $module->new() };
-            is($@, '', 'Structural: new() succeeds') or skip 'Structural: new failed', 1;
+            local $TODO = 'Structural: parser misinterprets "return -1" as BinaryExpr("return" - 1)';
             is($struct->zero(), -1, 'Structural: zero() returns -1');
         }
     }

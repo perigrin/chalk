@@ -1173,17 +1173,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "sv_2mortal(newSViv(av_len((AV*)$arg) + 1))";
         }
 
-        # push — av_push
+        # push — av_push wrapped in statement expression (av_push returns void)
         if ($name eq 'push' && $args->@* >= 2) {
             my $arr_node = $args->[0];
             my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
             my $val = $self->_emit_xs_expr($args->[1], $declared_vars);
             # PostfixDerefExpr ->@* already returns (AV*)SvRV(...), no need to double-deref
+            my $av_expr;
             if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $arr_node->class() eq 'PostfixDerefExpr') {
-                return "av_push($arr, SvREFCNT_inc($val))";
+                $av_expr = $arr;
+            } else {
+                $av_expr = "(AV*)SvRV($arr)";
             }
-            return "av_push((AV*)SvRV($arr), SvREFCNT_inc($val))";
+            return "({ av_push($av_expr, SvREFCNT_inc($val)); $arr; })";
         }
 
         # sprintf — native C via Perl_sv_setpvf
@@ -1249,6 +1252,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
         if ($op eq '-=') {
             return "sv_setiv($tgt, SvIV($tgt) - SvIV($val))";
+        }
+        if ($op eq '//=') {
+            return "({ if (!SvOK($tgt)) sv_setsv($tgt, $val); $tgt; })";
         }
 
         return "/* $op not supported */";

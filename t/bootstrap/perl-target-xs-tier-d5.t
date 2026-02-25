@@ -98,19 +98,15 @@ my sub build_and_load($ir, $module_name) {
 }
 
 # ============================================================
-# 1. Target/XS.pm — known parse failure (TODO)
+# 1. Target/XS.pm
 # ============================================================
 
 {
-    my $ir;
-    TODO: {
-        local $TODO = 'Target/XS.pm has a known parse failure';
-        $ir = parse_file_ir('lib/Chalk/Bootstrap/Target/XS.pm');
-        ok(defined $ir, 'Target/XS: parse produces IR');
-    }
+    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Target/XS.pm');
+    ok(defined $ir, 'Target/XS: parse produces IR');
 
     SKIP: {
-        skip 'Target/XS: no IR (expected)', 5 unless defined $ir;
+        skip 'Target/XS: no IR', 5 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD5::TargetXS';
         my ($dist, $err) = build_and_load($ir, $module);
@@ -145,26 +141,20 @@ my sub build_and_load($ir, $module_name) {
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD5::PerlTargetPerl';
         my ($dist, $err) = build_and_load($ir, $module);
+        ok(defined $dist, 'Perl/Target/Perl: XS builds') or do {
+            diag $err;
+            skip 'Perl/Target/Perl: build failed', 3;
+        };
 
-        TODO: {
-            local $TODO = 'Perl/Target/Perl: XS emitter crashes on die with non-constant message';
-            ok(defined $dist, 'Perl/Target/Perl: XS builds');
-        }
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
+        my $xs_code = $dist->{$xs_file};
+        like($xs_code, qr/MODULE\s*=/, 'Perl/Target/Perl: XS has MODULE line');
 
         SKIP: {
-            skip 'Perl/Target/Perl: build failed', 3 unless defined $dist;
-            diag $err if defined $err;
-
-            my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-            my $xs_code = $dist->{$xs_file};
-            like($xs_code, qr/MODULE\s*=/, 'Perl/Target/Perl: XS has MODULE line');
-
-            SKIP: {
-                skip 'Perl/Target/Perl: behavioral tests need parent class stub', 2;
-                my $t = eval { $module->new() };
-                ok(defined $t, 'Perl/Target/Perl: new() succeeds');
-                is($@, '', 'Perl/Target/Perl: new() no error');
-            }
+            skip 'Perl/Target/Perl: behavioral tests need parent class stub', 2;
+            my $t = eval { $module->new() };
+            ok(defined $t, 'Perl/Target/Perl: new() succeeds');
+            is($@, '', 'Perl/Target/Perl: new() no error');
         }
     }
 }
