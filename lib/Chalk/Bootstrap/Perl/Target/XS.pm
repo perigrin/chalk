@@ -222,7 +222,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Check if a method's XS output contains unsupported constructs
     # that require eval_pv fallback instead of XSUB emission.
     method _needs_eval_fallback($xs_output) {
-        return $xs_output =~ /NULL \/\* unsupported \*\//;
+        return $xs_output =~ /NULL \/\* unsupported \*\// || $xs_output =~ /\/\* unknown node \*\//;
     }
 
     # Emit eval_pv fallback for a method that can't be compiled to XS.
@@ -255,8 +255,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines;
         my $body = $class_decl->inputs()->[2];
 
-        # Collect param fields with their metadata
+        # Collect param fields and non-param fields with defaults
         my @param_fields;
+        my @default_fields;
         for my $item ($body->@*) {
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
                      && $item->class() eq 'FieldDecl';
@@ -264,6 +265,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $name_node = $item->inputs()->[0];
             my $attrs = $item->inputs()->[1];
             my $default = $item->inputs()->[2];
+
+            my $field_name = $name_node->value();
+            $field_name =~ s/^\$//;  # Strip sigil
+            my $index = $field_map->{$field_name};
 
             # Check for :param attribute
             my $has_param = false;
@@ -275,19 +280,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     }
                 }
             }
-            next unless $has_param;
 
-            my $field_name = $name_node->value();
-            $field_name =~ s/^\$//;  # Strip sigil
-            my $index = $field_map->{$field_name};
-            my $is_required = !defined $default;
-
-            push @param_fields, {
-                name => $field_name,
-                index => $index,
-                required => $is_required,
-                default => $default,
-            };
+            if ($has_param) {
+                push @param_fields, {
+                    name => $field_name,
+                    index => $index,
+                    required => !defined $default,
+                    default => $default,
+                };
+            } elsif (defined $default) {
+                push @default_fields, {
+                    name => $field_name,
+                    index => $index,
+                    default => $default,
+                };
+            }
         }
 
         # Emit XSUB signature
@@ -312,74 +319,58 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '        PUTBACK; FREETMPS; LEAVE;';
         push @lines, '    }';
 
-        # Extract named params and apply defaults
-        if (@param_fields) {
+        # Apply field defaults and extract named params
+        if (@param_fields || @default_fields) {
             push @lines, '    {';
             push @lines, '        SV *obj = SvRV(RETVAL);';
             push @lines, '        SV **fields = ObjectFIELDS(obj);';
-            push @lines, '        int i;';
 
-            # Declare got_* flags for each param
-            for my $field (@param_fields) {
-                push @lines, "        bool got_$field->{name} = FALSE;";
-            }
-
-            # Check for odd number of arguments
-            push @lines, '        if ((items - 1) % 2 != 0) croak("Odd number of arguments");';
-
-            # Iterate @_ and match params
-            push @lines, '        for (i = 1; i < items; i += 2) {';
-            push @lines, '            const char *key = SvPV_nolen(ST(i));';
-
-            my $first = true;
-            for my $field (@param_fields) {
-                my $name = $field->{name};
+            # Non-param fields with defaults: always apply
+            for my $field (@default_fields) {
                 my $idx = $field->{index};
-                my $prefix = $first ? 'if' : 'else if';
-                push @lines, "            $prefix (strEQ(key, \"$name\")) { sv_setsv(fields[$idx], ST(i+1)); got_$name = TRUE; }";
-                $first = false;
+                push @lines, $self->_emit_field_default_init($field, "fields[$idx]");
             }
 
-            push @lines, '            else { croak("Unknown parameter \'%s\'", key); }';
-            push @lines, '        }';
+            # Param extraction
+            if (@param_fields) {
+                push @lines, '        int i;';
 
-            # Validate required params
-            for my $field (@param_fields) {
-                next unless $field->{required};
-                my $name = $field->{name};
-                push @lines, "        if (!got_$name) croak(\"Required parameter '$name' is missing\");";
-            }
+                for my $field (@param_fields) {
+                    push @lines, "        bool got_$field->{name} = FALSE;";
+                }
 
-            # Apply defaults for optional params
-            for my $field (@param_fields) {
-                next if $field->{required};
-                my $name = $field->{name};
-                my $idx = $field->{index};
-                my $default = $field->{default};
+                push @lines, '        if ((items - 1) % 2 != 0) croak("Odd number of arguments");';
 
-                if (defined $default && $default isa Chalk::Bootstrap::IR::Node::Constant) {
-                    my $val = $default->value();
-                    if ($val eq 'undef') {
-                        # undef default — PVOBJ fields are already &PL_sv_undef, no action needed
-                    } elsif ($val =~ /^-?\d+$/) {
-                        # Integer default
-                        push @lines, "        if (!got_$name) { sv_setiv(fields[$idx], $val); }";
-                    } elsif ($val =~ /^-?\d+\.\d+$/) {
-                        # Float default
-                        push @lines, "        if (!got_$name) { sv_setnv(fields[$idx], $val); }";
-                    } else {
-                        # String default
-                        my $escaped = $self->_escape_c_string($val);
-                        push @lines, "        if (!got_$name) { sv_setpv(fields[$idx], \"$escaped\"); }";
-                    }
-                } elsif (defined $default && $default isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $default->class() eq 'ArrayRefExpr') {
-                    # Empty array default: field $ops = []
-                    push @lines, "        if (!got_$name) { sv_setsv(fields[$idx], newRV_noinc((SV*)newAV())); }";
-                } elsif (defined $default && $default isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $default->class() eq 'HashRefExpr') {
-                    # Empty hash default: field $cache = {}
-                    push @lines, "        if (!got_$name) { sv_setsv(fields[$idx], newRV_noinc((SV*)newHV())); }";
+                push @lines, '        for (i = 1; i < items; i += 2) {';
+                push @lines, '            const char *key = SvPV_nolen(ST(i));';
+
+                my $first = true;
+                for my $field (@param_fields) {
+                    my $name = $field->{name};
+                    my $idx = $field->{index};
+                    my $prefix = $first ? 'if' : 'else if';
+                    push @lines, "            $prefix (strEQ(key, \"$name\")) { sv_setsv(fields[$idx], ST(i+1)); got_$name = TRUE; }";
+                    $first = false;
+                }
+
+                push @lines, '            else { croak("Unknown parameter \'%s\'", key); }';
+                push @lines, '        }';
+
+                for my $field (@param_fields) {
+                    next unless $field->{required};
+                    my $name = $field->{name};
+                    push @lines, "        if (!got_$name) croak(\"Required parameter '$name' is missing\");";
+                }
+
+                # Apply defaults for optional params not provided
+                for my $field (@param_fields) {
+                    next if $field->{required};
+                    next unless defined $field->{default};
+                    my $name = $field->{name};
+                    my $idx = $field->{index};
+                    push @lines, "        if (!got_$name) {";
+                    push @lines, '    ' . $self->_emit_field_default_init($field, "fields[$idx]");
+                    push @lines, '        }';
                 }
             }
 
@@ -390,6 +381,33 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    RETVAL';
 
         return \@lines;
+    }
+
+    # Emit C code to initialize a field with its default value.
+    # Returns a single C statement string (with leading spaces).
+    method _emit_field_default_init($field, $target) {
+        my $default = $field->{default};
+
+        if ($default isa Chalk::Bootstrap::IR::Node::Constant) {
+            my $val = $default->value();
+            if ($val eq 'undef') {
+                return;  # PVOBJ fields start as bare SV, no action needed
+            } elsif ($val =~ /^-?\d+$/) {
+                return "        sv_setiv($target, $val);";
+            } elsif ($val =~ /^-?\d+\.\d+$/) {
+                return "        sv_setnv($target, $val);";
+            } else {
+                my $escaped = $self->_escape_c_string($val);
+                return "        sv_setpv($target, \"$escaped\");";
+            }
+        } elsif ($default isa Chalk::Bootstrap::IR::Node::Constructor
+                && $default->class() eq 'ArrayRefExpr') {
+            return "        sv_setsv($target, newRV_noinc((SV*)newAV()));";
+        } elsif ($default isa Chalk::Bootstrap::IR::Node::Constructor
+                && $default->class() eq 'HashRefExpr') {
+            return "        sv_setsv($target, newRV_noinc((SV*)newHV()));";
+        }
+        return;
     }
 
     # Emit the .xs file
@@ -1287,9 +1305,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit ReturnStmt as RETVAL assignment.
     # Non-final returns jump to xsreturn: label before OUTPUT section.
+    # Strips sv_2mortal() from the value expression since XS's OUTPUT
+    # section applies sv_2mortal to ST(0) automatically. Double-mortal
+    # causes "attempt to copy freed scalar" panics.
     method _emit_xs_return_stmt($node, $declared_vars, $is_last = true) {
         my $value = $node->inputs()->[0];
         my $val_expr = $self->_emit_xs_expr($value, $declared_vars);
+        $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
         if ($is_last) {
             return "RETVAL = $val_expr;";
         }

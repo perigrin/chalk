@@ -141,7 +141,7 @@ my sub build_and_load($ir, $module_name) {
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/MODULE\s*=/, 'DCE: XS has MODULE line');
-        like($xs_code, qr/run\(/, 'DCE: XS has run method');
+        like($xs_code, qr/run/, 'DCE: XS has run method (XSUB or eval_pv)');
 
         SKIP: {
             skip 'DCE: behavioral tests need parent class stub', 1;
