@@ -6,6 +6,7 @@ use experimental 'class';
 
 use bytes ();
 use Chalk::Bootstrap::Target;
+use Chalk::Bootstrap::Perl::Target::Perl;
 
 class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;
@@ -1083,10 +1084,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (!$pairs->@*) {
             return "newRV_noinc((SV*)newHV())";
         }
-        # TODO: populate hash with pairs via hv_store. Currently only
-        # empty hashes are generated correctly — non-empty hashes from
-        # fragmented method bodies are structurally incomplete anyway.
-        return "newRV_noinc((SV*)newHV()) /* non-empty hash: elements dropped */";
+        # Populate hash with key/value pairs via hv_store
+        my @stores;
+        for (my $i = 0; $i < $pairs->@*; $i += 2) {
+            my $key = $self->_emit_xs_expr($pairs->[$i], $declared_vars);
+            my $val = $self->_emit_xs_expr($pairs->[$i + 1], $declared_vars);
+            push @stores, "hv_store(_hv, SvPV_nolen($key), SvCUR($key), SvREFCNT_inc($val), 0)";
+        }
+        return "({ HV *_hv = newHV(); " . join("; ", @stores) . "; newRV_noinc((SV*)_hv); })";
     }
 
     # Emit array ref constructor
@@ -1095,17 +1100,22 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (!$elements->@*) {
             return "newRV_noinc((SV*)newAV())";
         }
-        # TODO: populate array with elements via av_push. Currently only
-        # empty arrays are generated correctly — non-empty arrays from
-        # fragmented method bodies are structurally incomplete anyway.
-        return "newRV_noinc((SV*)newAV()) /* non-empty array: elements dropped */";
+        # Populate array with elements via av_push
+        my @pushes;
+        for my $elem ($elements->@*) {
+            my $val = $self->_emit_xs_expr($elem, $declared_vars);
+            push @pushes, "av_push(_av, SvREFCNT_inc($val))";
+        }
+        return "({ AV *_av = newAV(); " . join("; ", @pushes) . "; newRV_noinc((SV*)_av); })";
     }
 
-    # Emit anonymous sub — TODO: capture params and body for full codegen.
-    # Currently emits empty sub placeholder since anon subs in Tier C
-    # come from fragmented method bodies and lack complete IR.
+    # Emit anonymous sub via eval_pv with real params and body.
+    # Uses the Perl target to generate the source, then wraps in eval_pv.
     method _emit_xs_anon_sub_expr($node, $declared_vars) {
-        return "eval_pv(\"sub { }\", TRUE)";
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $perl_src = $perl_target->_emit_anon_sub_expr($node);
+        my $escaped = $self->_escape_c_string($perl_src);
+        return "eval_pv(\"$escaped\", TRUE)";
     }
 
     # Emit regex match via eval_pv, setting $_ to target first.
@@ -1176,9 +1186,36 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "av_push((AV*)SvRV($arr), SvREFCNT_inc($val))";
         }
 
-        # sprintf, split, join — delegate to eval_pv
-        if ($name eq 'sprintf' || $name eq 'split' || $name eq 'join') {
-            my $escaped = $self->_escape_c_string("$name()");
+        # sprintf — native C via Perl_sv_setpvf
+        if ($name eq 'sprintf' && $args->@* >= 1) {
+            my $fmt = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my @c_args = map { $self->_emit_xs_expr($_, $declared_vars) } $args->@[1 .. $#$args];
+            my $args_str = join(', ', $fmt, map { "SvPV_nolen($_)" } @c_args);
+            return "({ SV *_sv = sv_2mortal(newSVpvs(\"\")); Perl_sv_setpvf(aTHX_ _sv, SvPV_nolen($fmt)" .
+                (@c_args ? ", " . join(", ", map { "SvPV_nolen($_)" } @c_args) : "") .
+                "); _sv; })";
+        }
+
+        # join — native C via sv_catsv loop
+        if ($name eq 'join' && $args->@* >= 2) {
+            my $sep = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arr = $self->_emit_xs_expr($args->[1], $declared_vars);
+            return "({ SV *_result = sv_2mortal(newSVpvs(\"\")); " .
+                "AV *_items = (AV*)SvRV($arr); " .
+                "I32 _len = av_len(_items); " .
+                "I32 _i; " .
+                "for (_i = 0; _i <= _len; _i++) { " .
+                "if (_i > 0) sv_catsv(_result, $sep); " .
+                "sv_catsv(_result, *av_fetch(_items, _i, 0)); " .
+                "} _result; })";
+        }
+
+        # split — eval_pv with actual args from IR
+        if ($name eq 'split' && $args->@* >= 2) {
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my @arg_strs = map { $perl_target->_emit_expr($_) } $args->@*;
+            my $perl_call = "split(" . join(', ', @arg_strs) . ")";
+            my $escaped = $self->_escape_c_string($perl_call);
             return "eval_pv(\"$escaped\", TRUE)";
         }
 
@@ -1187,11 +1224,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
-    # Emit backtick expression — TODO: extract actual command from IR for
-    # full codegen. Currently a placeholder since backtick expressions in
-    # Tier C come from Oracle.pm's fragmented method bodies.
+    # Emit backtick expression via eval_pv with actual command from IR
     method _emit_xs_backtick_expr($node, $declared_vars) {
-        return "eval_pv(\"`cmd`\", TRUE) /* TODO: extract command from IR */";
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $cmd = $perl_target->_emit_expr($node->inputs()->[0]);
+        my $escaped = $self->_escape_c_string("`$cmd`");
+        return "eval_pv(\"$escaped\", TRUE)";
     }
 
     # CompoundAssign as expression (e.g., $str .= "foo")
