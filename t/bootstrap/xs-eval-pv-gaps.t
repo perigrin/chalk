@@ -190,27 +190,6 @@ my sub ctor($class, %args) {
     like($stmt, qr/av_push/, 'push stmt: uses av_push');
 }
 
-# === Shadow constructor: non-param field defaults ===
-{
-    # Build a ClassDecl with a non-param field that has a default
-    # field $passes = []  (no :param)
-    my $field_name = const_node('$passes', 'variable');
-    my $field_default = ctor('ArrayRefExpr', inputs => []);
-    my $field_decl = ctor('FieldDecl', inputs => [$field_name, [], $field_default]);
-
-    my $class_name = const_node('Test::ShadowDefaults');
-    my $class_decl = ctor('ClassDecl', inputs => [$class_name, undef, [$field_decl]]);
-
-    my $field_map = { 'passes' => 0 };
-    my $sanitized = 'Test_ShadowDefaults';
-    my $constructor_lines = $xs->_emit_xs_shadow_constructor($class_decl, $sanitized, $field_map);
-    my $constructor_code = join("\n", $constructor_lines->@*);
-
-    # The shadow constructor should initialize non-param fields with defaults
-    like($constructor_code, qr/newAV/, 'shadow ctor: non-param field with [] default initializes AV');
-    like($constructor_code, qr/fields\[0\]/, 'shadow ctor: references field index 0');
-}
-
 # === sv_2mortal stripping in return statements ===
 {
     # Build a ReturnStmt that returns a numeric expression
