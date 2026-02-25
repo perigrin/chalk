@@ -118,7 +118,7 @@ my sub build_and_load($ir, $module_name) {
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/MODULE\s*=/, 'Target/XS: XS has MODULE line');
-        like($xs_code, qr/module_name\(self\)/, 'Target/XS: XS has module_name reader');
+        like($xs_code, qr/"reader"/, 'Target/XS: XS applies :reader attribute via C API');
 
         SKIP: {
             skip 'Target/XS: behavioral tests need parent class stub', 1;
@@ -180,7 +180,7 @@ my sub build_and_load($ir, $module_name) {
         my ($dist, $err) = build_and_load($ir, $module);
         ok(defined $dist, 'Perl/Target/XS: XS builds');
         like($dist->{'placeholder'}, qr/MODULE\s*=/, 'Perl/Target/XS: XS has MODULE line');
-        like($dist->{'placeholder'}, qr/module_name\(self\)/, 'Perl/Target/XS: XS has module_name reader');
+        like($dist->{'placeholder'}, qr/"reader"/, 'Perl/Target/XS: XS applies :reader attribute via C API');
         SKIP: {
             skip 'Perl/Target/XS: behavioral tests need parent class stub', 1;
             ok(0, 'Perl/Target/XS: new() succeeds');
@@ -209,8 +209,8 @@ my sub build_and_load($ir, $module_name) {
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/MODULE\s*=/, 'XSUB: XS has MODULE line');
-        like($xs_code, qr/name\(self\)/, 'XSUB: XS has name reader');
-        like($xs_code, qr/return_type\(self\)/, 'XSUB: XS has return_type reader');
+        like($xs_code, qr/"reader"/, 'XSUB: XS applies :reader attribute via C API');
+        like($xs_code, qr/"param"/, 'XSUB: XS applies :param attribute via C API');
 
         SKIP: {
             skip 'XSUB: behavioral tests need parent class stub', 2;

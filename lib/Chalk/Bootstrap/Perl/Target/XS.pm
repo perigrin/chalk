@@ -126,9 +126,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \%field_map;
     }
 
-    # Emit BOOT block for feature class setup.
-    # Generates class_setup_stash, field registration, class_seal_stash,
-    # and new() re-installation sequence using Perl 5.42.0 C API.
+    # Emit BOOT block for feature class setup using defop-based field initialization.
+    # Uses ENTER/LEAVE scoping so SAVEDESTRUCTOR_X handles class sealing automatically.
+    # Field attributes (:param, :reader, :writer) are applied via class_apply_field_attributes.
+    # Field defaults are set via class_set_field_defop with op_next cleared.
     # Also emits eval_pv fallback calls for methods that can't be compiled to XS.
     method _emit_xs_boot_block($class_decl, $field_map, $fallback_methods = []) {
         my @lines;
@@ -142,7 +143,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    PL_curstash = stash;';
         push @lines, '';
 
-        # 1. Create class
+        # Outer ENTER — SAVEDESTRUCTOR_X registered by class_setup_stash
+        # will call class_seal_stash when this scope exits via LEAVE
+        push @lines, '    ENTER;';
+        push @lines, '';
+
+        # 1. Create class (registers SAVEDESTRUCTOR_X for seal)
         push @lines, '    Perl_class_setup_stash(aTHX_ stash);';
         push @lines, '';
 
@@ -160,38 +166,51 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, '';
         }
 
-        # 3. Add fields in order
+        # 3. Register fields with attributes and defaults via C API
         my $body = $class_decl->inputs()->[2];
         for my $item ($body->@*) {
-            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'FieldDecl') {
-                my $name_node = $item->inputs()->[0];
-                my $field_name = $name_node->value();  # Includes sigil
-                my $escaped = $self->_escape_c_string($field_name);
-                push @lines, '    Perl_class_prepare_initfield_parse(aTHX);';
-                push @lines, "    pad_add_name_pvs(\"$escaped\", padadd_FIELD, NULL, NULL);";
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
+                     && $item->class() eq 'FieldDecl';
+
+            my $name_node = $item->inputs()->[0];
+            my $attrs = $item->inputs()->[1];
+            my $default = $item->inputs()->[2];
+            my $field_name = $name_node->value();  # Includes sigil
+            my $escaped = $self->_escape_c_string($field_name);
+
+            push @lines, '    {';
+            push @lines, '        ENTER;';
+            push @lines, '        Perl_class_prepare_initfield_parse(aTHX);';
+            push @lines, "        PADOFFSET padix = pad_add_name_pvs(\"$escaped\", padadd_FIELD, NULL, NULL);";
+            push @lines, '        PADNAME *pn = PadnamelistARRAY(PadlistNAMES(CvPADLIST(PL_compcv)))[padix];';
+
+            # Apply field attributes (:param, :reader, :writer)
+            if (ref($attrs) eq 'ARRAY') {
+                for my $attr ($attrs->@*) {
+                    my $attr_name = $attr->inputs()->[0]->value();
+                    my $escaped_attr = $self->_escape_c_string($attr_name);
+                    push @lines, '        {';
+                    push @lines, "            OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";
+                    push @lines, '            Perl_class_apply_field_attributes(aTHX_ pn, attr);';
+                    push @lines, '        }';
+                }
             }
+
+            # Set default value via defop
+            if (defined $default) {
+                push @lines, $self->_emit_defop($default);
+            }
+
+            push @lines, '        LEAVE;';
+            push @lines, '    }';
         }
         push @lines, '';
 
-        # 4. Seal class (generates auto new())
-        push @lines, '    Perl_class_seal_stash(aTHX_ stash);';
+        # Outer LEAVE triggers SAVEDESTRUCTOR_X which calls class_seal_stash
+        push @lines, '    LEAVE;';
         push @lines, '';
 
-        # 5. Grab auto new(), clear GV, install shadow
-        my $sanitized = $module_name;
-        $sanitized =~ s/::/_/g;
-        my $xs_func_name = $module_name;
-        $xs_func_name =~ s/::/double_underscore_temp/g;
-        $xs_func_name =~ s/double_underscore_temp/__/g;
-        push @lines, '    GV *gv = gv_fetchmethod(stash, "new");';
-        push @lines, "    ${sanitized}_original_new = GvCV(gv);";
-        push @lines, "    SvREFCNT_inc((SV*)${sanitized}_original_new);";
-        push @lines, '    GvCV_set(gv, NULL);';
-        push @lines, "    newXS(\"${module_name}::new\", XS_${xs_func_name}_new, __FILE__);";
-        push @lines, '';
-
-        # 6. Emit eval_pv fallback for unsupported methods
+        # Emit eval_pv fallback for unsupported methods
         if ($fallback_methods->@*) {
             push @lines, '    /* eval_pv fallback for unsupported methods */';
             for my $method ($fallback_methods->@*) {
@@ -205,6 +224,43 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '}';
 
         return \@lines;
+    }
+
+    # Emit C code for a field default op (defop) to be set via class_set_field_defop.
+    # Returns array of C lines with proper indentation for the BOOT block context.
+    method _emit_defop($default) {
+        my @lines;
+        push @lines, '        {';
+
+        if ($default isa Chalk::Bootstrap::IR::Node::Constant) {
+            my $val = $default->value();
+            if ($val eq 'undef') {
+                # Explicit undef default — still need defop for :param to mark as optional
+                push @lines, '            OP *defop = newSVOP(OP_CONST, 0, &PL_sv_undef);';
+            } elsif ($val =~ /^-?\d+$/) {
+                push @lines, "            OP *defop = newSVOP(OP_CONST, 0, newSViv($val));";
+            } elsif ($val =~ /^-?\d+\.\d+$/) {
+                push @lines, "            OP *defop = newSVOP(OP_CONST, 0, newSVnv($val));";
+            } else {
+                my $escaped = $self->_escape_c_string($val);
+                push @lines, "            OP *defop = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped\"));";
+            }
+        } elsif ($default isa Chalk::Bootstrap::IR::Node::Constructor
+                && $default->class() eq 'ArrayRefExpr') {
+            push @lines, '            OP *defop = newANONLIST(NULL);';
+        } elsif ($default isa Chalk::Bootstrap::IR::Node::Constructor
+                && $default->class() eq 'HashRefExpr') {
+            push @lines, '            OP *defop = newANONHASH(NULL);';
+        } else {
+            # Unknown default type — skip defop
+            return;
+        }
+
+        push @lines, '            defop->op_next = NULL;';
+        push @lines, '            Perl_class_set_field_defop(aTHX_ pn, 0, defop);';
+        push @lines, '        }';
+
+        return @lines;
     }
 
     # Escape a string for C double-quoted literal
@@ -423,18 +479,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # Forward declarations for feature class C API
         push @lines, 'extern void Perl_class_setup_stash(pTHX_ HV *stash);';
-        push @lines, 'extern void Perl_class_seal_stash(pTHX_ HV *stash);';
         push @lines, 'extern void Perl_class_prepare_initfield_parse(pTHX);';
+        push @lines, 'extern void Perl_class_set_field_defop(pTHX_ PADNAME *pn, int defmode, OP *defop);';
         push @lines, 'extern void Perl_class_apply_attributes(pTHX_ HV *stash, OP *attrlist);';
+        push @lines, 'extern void Perl_class_apply_field_attributes(pTHX_ PADNAME *pn, OP *attrlist);';
         push @lines, '';
-
-        # Static variable for original new() CV
-        if (defined $class_decl) {
-            my $sanitized = $module_name;
-            $sanitized =~ s/::/_/g;
-            push @lines, "static CV *${sanitized}_original_new = NULL;";
-            push @lines, '';
-        }
 
         push @lines, "MODULE = $module_name  PACKAGE = $module_name";
         push @lines, '';
@@ -445,27 +494,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Build field map once and store it for use throughout code generation
             $field_map = $self->_build_field_index_map($class_decl);
 
-            # Emit shadow new() XSUB with param extraction and defaults
-            my $sanitized = $module_name;
-            $sanitized =~ s/::/_/g;
-            push @lines, $self->_emit_xs_shadow_constructor($class_decl, $sanitized, $field_map)->@*;
-            push @lines, '';
+            # Field readers/writers are auto-generated by seal_stash via :reader/:writer
+            # attributes applied in the BOOT block — no need for XSUB readers/writers.
 
             my $body = $class_decl->inputs()->[2];
             for my $item ($body->@*) {
                 if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'FieldDecl') {
-                    my @reader_lines = $self->_emit_xs_field_reader($item)->@*;
-                    if (@reader_lines) {
-                        push @lines, @reader_lines;
-                        push @lines, '';
-                    }
-                    my @writer_lines = $self->_emit_xs_field_writer($item)->@*;
-                    if (@writer_lines) {
-                        push @lines, @writer_lines;
-                        push @lines, '';
-                    }
-                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                         && $item->class() eq 'MethodDecl') {
                     # Try to emit as XSUB
                     my $method_lines = $self->_emit_xs_method($item);

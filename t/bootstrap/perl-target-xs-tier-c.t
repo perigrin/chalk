@@ -132,7 +132,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/MODULE\s*=/, 'ConciseTree: XS has MODULE line');
-        like($xs_code, qr/ops\(self\)/, 'ConciseTree: XS has ops reader');
+        like($xs_code, qr/"reader"/, 'ConciseTree: XS applies :reader attribute via C API');
 
         # Behavioral: new() with default empty ops
         my $tree = eval { $module->new() };

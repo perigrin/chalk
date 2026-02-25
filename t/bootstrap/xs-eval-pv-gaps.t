@@ -230,4 +230,70 @@ my sub ctor($class, %args) {
     ok(!$xs->_needs_eval_fallback('sv_setiv(fields[0], 42);'), 'needs_eval_fallback: clean code is false');
 }
 
+# === BOOT block: defop-based field initialization (no shadow constructor) ===
+{
+    # Build a ClassDecl with:
+    # - field $name :param :reader = "unnamed"
+    # - field $count :param :reader (required, no default)
+    # - field $tags :reader = [] (no :param)
+    my $param_attr = ctor('_Attribute', name => const_node('param'));
+    my $reader_attr = ctor('_Attribute', name => const_node('reader'));
+
+    my $name_field = ctor('FieldDecl', inputs => [
+        const_node('$name', 'variable'),
+        [$param_attr, $reader_attr],
+        const_node('unnamed'),
+    ]);
+    my $count_field = ctor('FieldDecl', inputs => [
+        const_node('$count', 'variable'),
+        [$param_attr, $reader_attr],
+        undef,  # no default — required
+    ]);
+    my $tags_field = ctor('FieldDecl', inputs => [
+        const_node('$tags', 'variable'),
+        [$reader_attr],
+        ctor('ArrayRefExpr', inputs => []),
+    ]);
+
+    my $class_name = const_node('Test::DefopBoot');
+    my $class_decl = ctor('ClassDecl', inputs => [$class_name, undef, [
+        $name_field, $count_field, $tags_field,
+    ]]);
+    my $field_map = { 'name' => 0, 'count' => 1, 'tags' => 2 };
+
+    my $boot_lines = $xs->_emit_xs_boot_block($class_decl, $field_map);
+    my $boot_code = join("\n", $boot_lines->@*);
+
+    # BOOT block structure: uses ENTER/LEAVE, no explicit seal_stash
+    like($boot_code, qr/ENTER/, 'defop boot: has outer ENTER');
+    like($boot_code, qr/class_setup_stash/, 'defop boot: calls setup_stash');
+    unlike($boot_code, qr/class_seal_stash/, 'defop boot: no explicit seal_stash');
+    like($boot_code, qr/LEAVE/, 'defop boot: has outer LEAVE (triggers seal via destructor)');
+
+    # Per-field ENTER/LEAVE with prepare_initfield_parse
+    like($boot_code, qr/class_prepare_initfield_parse/, 'defop boot: calls prepare_initfield_parse');
+
+    # Field attributes: :param and :reader applied via class_apply_field_attributes
+    like($boot_code, qr/class_apply_field_attributes/, 'defop boot: applies field attributes');
+    like($boot_code, qr/"param"/, 'defop boot: has param attribute string');
+    like($boot_code, qr/"reader"/, 'defop boot: has reader attribute string');
+
+    # Field defaults via set_field_defop
+    like($boot_code, qr/class_set_field_defop/, 'defop boot: sets field defaults via defop');
+    like($boot_code, qr/op_next\s*=\s*NULL/, 'defop boot: clears op_next on defop');
+
+    # No shadow constructor artifacts
+    unlike($boot_code, qr/original_new/, 'defop boot: no original_new capture');
+    unlike($boot_code, qr/gv_fetchmethod.*"new"/, 'defop boot: no gv_fetchmethod for new');
+
+    # Field names present
+    like($boot_code, qr/\$name/, 'defop boot: registers $name field');
+    like($boot_code, qr/\$count/, 'defop boot: registers $count field');
+    like($boot_code, qr/\$tags/, 'defop boot: registers $tags field');
+
+    # Default values: "unnamed" string and [] array
+    like($boot_code, qr/unnamed/, 'defop boot: has "unnamed" default for $name');
+    like($boot_code, qr/newANONLIST/, 'defop boot: has [] default for $tags via newANONLIST');
+}
+
 done_testing();

@@ -143,7 +143,7 @@ my sub build_and_load($ir, $module_name) {
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/MODULE\s*=/, 'IR/Node: XS has MODULE line');
-        like($xs_code, qr/id\(self\)/, 'IR/Node: XS has id reader');
+        like($xs_code, qr/"reader"/, 'IR/Node: XS applies :reader attribute via C API');
 
         my $node = eval { $module->new(id => 'test-1') };
         is($@, '', 'IR/Node: new() succeeds') or skip 'IR/Node: new failed', 1;

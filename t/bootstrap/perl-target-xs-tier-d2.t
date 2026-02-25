@@ -230,7 +230,7 @@ my sub build_and_load($ir, $module_name) {
         my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
         my $xs_code = $dist->{$xs_file};
         like($xs_code, qr/MODULE\s*=/, 'FilterComposite: XS has MODULE line');
-        like($xs_code, qr/semirings\(/, 'FilterComposite: XS has semirings reader');
+        like($xs_code, qr/"reader"/, 'FilterComposite: XS applies :reader attribute via C API');
 
         my $comp = eval { $module->new(semirings => []) };
         is($@, '', 'FilterComposite: new() succeeds');
