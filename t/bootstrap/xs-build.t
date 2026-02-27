@@ -28,8 +28,8 @@ eval { require Module::Build; 1 }
 # === Generate distribution ===
 
 use TestPipeline qw(optimized_pipeline full_pipeline grammars_match bnf_text);
-use Chalk::Bootstrap::Target::XS;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::XS;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Desugar;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
@@ -38,7 +38,7 @@ use Chalk::Grammar::BNF;
 my $ir = optimized_pipeline();
 ok(defined $ir, 'optimized pipeline produces IR');
 
-my $target = Chalk::Bootstrap::Target::XS->new();
+my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 my $dist = $target->generate_distribution($ir);
 is(ref($dist), 'HASH', 'generate_distribution returns hashref');
 is(scalar keys $dist->%*, 3, 'distribution has 3 files');
@@ -116,7 +116,7 @@ ok(defined $m0_grammar, 'M0: hand-written grammar loaded');
 is(scalar $m0_grammar->@*, 10, 'M0: 10 rules');
 
 # M4: Generated Perl grammar
-my $perl_target = Chalk::Bootstrap::Target::Perl->new();
+my $perl_target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $perl_code = $perl_target->generate($ir);
 # Use a distinct class name to avoid collision with bootstrap-validation.t
 $perl_code =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::BNF::XSTestGenerated/g;

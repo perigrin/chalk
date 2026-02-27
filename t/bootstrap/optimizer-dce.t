@@ -209,7 +209,7 @@ sub build_mini_rule {
 {
     use lib 't/bootstrap/lib';
     use TestPipeline qw(full_pipeline bnf_text grammars_match);
-    use Chalk::Bootstrap::Target::Perl;
+    use Chalk::Bootstrap::BNF::Target::Perl;
 
     # Run full pipeline to get IR from the real 10-rule BNF
     my $ir = full_pipeline();
@@ -230,7 +230,7 @@ sub build_mini_rule {
     is(scalar($optimized_ir->@*), 10, 'optimized IR still has 10 rules');
 
     # Generate Perl code from optimized IR
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($optimized_ir);
     ok(defined($generated), 'code generation from optimized IR produces output');
 

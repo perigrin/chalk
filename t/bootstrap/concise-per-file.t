@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_concise_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::ConciseTree;
 use Chalk::Bootstrap::ConciseTree::Oracle;
 use Chalk::Bootstrap::ConciseTree::Comparator;
@@ -31,9 +31,9 @@ my @FILES = (
     # Same as Tier A but with field declarations, which cause B::Concise to
     # emit nextstate instead of stub inside the class body.
     ['lib/Chalk/Bootstrap/IR/Node/Constant.pm',           'Tier B: IR::Node::Constant'],
-    ['lib/Chalk/Bootstrap/Target/XS/AST/Node.pm',        'Tier B: XS::AST::Node'],
-    ['lib/Chalk/Bootstrap/Target/XS/AST/Statement.pm',   'Tier B: XS::AST::Statement'],
-    ['lib/Chalk/Bootstrap/Target/XS/AST/Module.pm',      'Tier B: XS::AST::Module'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS/AST/Node.pm',        'Tier B: XS::AST::Node'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS/AST/Statement.pm',   'Tier B: XS::AST::Statement'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS/AST/Module.pm',      'Tier B: XS::AST::Module'],
     ['lib/Chalk/Bootstrap/IR/Node/Constructor.pm',        'Tier B: IR::Node::Constructor'],
 
     # Tier C: Classes with methods containing runtime logic (25-45 lines)
@@ -48,10 +48,10 @@ my @FILES = (
     # Tier D: All remaining oracle-matching files
     # Includes classes with diverse method bodies, standalone modules with
     # subs, and large files. B::Concise main-program optree matches ours.
-    ['lib/Chalk/Bootstrap/Target/XS/AST/CompositeNode.pm','Tier D: XS::AST::CompositeNode'],
-    ['lib/Chalk/Bootstrap/Target/XS/AST/VarDecl.pm',     'Tier D: XS::AST::VarDecl'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS/AST/CompositeNode.pm','Tier D: XS::AST::CompositeNode'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS/AST/VarDecl.pm',     'Tier D: XS::AST::VarDecl'],
     ['lib/Chalk/Grammar/Symbol.pm',                       'Tier D: Symbol'],
-    ['lib/Chalk/Bootstrap/Target/XS/AST/Preamble.pm',    'Tier D: XS::AST::Preamble'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS/AST/Preamble.pm',    'Tier D: XS::AST::Preamble'],
     ['lib/Chalk/Bootstrap/Terminal.pm',                   'Tier D: Terminal'],
     ['lib/Chalk/Grammar/Rule.pm',                         'Tier D: Rule'],
     ['lib/Chalk/Bootstrap/IR/Node.pm',                    'Tier D: IR::Node'],
@@ -59,16 +59,16 @@ my @FILES = (
     ['lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',   'Tier D: Semiring::FilterComposite'],
     ['lib/Chalk/Bootstrap/Semiring/SemanticAction.pm',    'Tier D: Semiring::SemanticAction'],
     ['lib/Chalk/Grammar/Perl/KeywordTable.pm',            'Tier D: KeywordTable'],
-    ['lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',        'Tier D: XS::AST::XSUB'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm',        'Tier D: XS::AST::XSUB'],
     ['lib/Chalk/Bootstrap/Optimizer/DCE.pm',              'Tier D: Optimizer::DCE'],
-    ['lib/Chalk/Bootstrap/Target/Perl.pm',                'Tier D: Target::Perl'],
+    ['lib/Chalk/Bootstrap/BNF/Target/Perl.pm',                'Tier D: Target::Perl'],
     ['lib/Chalk/Grammar/BNF/Generated.pm',                'Tier D: BNF::Generated'],
     ['lib/Chalk/Bootstrap/Desugar.pm',                    'Tier D: Desugar'],
     ['lib/Chalk/Grammar/BNF.pm',                          'Tier D: Grammar::BNF'],
     ['lib/Chalk/Bootstrap/Semiring/Structural.pm',        'Tier D: Semiring::Structural'],
     ['lib/Chalk/Bootstrap/Semiring/TypeInference.pm',     'Tier D: Semiring::TypeInference'],
     ['lib/Chalk/Bootstrap/Earley.pm',                     'Tier D: Earley'],
-    ['lib/Chalk/Bootstrap/Target/XS.pm',                  'Tier D: Target::XS'],
+    ['lib/Chalk/Bootstrap/BNF/Target/XS.pm',                  'Tier D: Target::XS'],
     ['lib/Chalk/Grammar/Perl/PrecedenceTable.pm',         'Tier D: PrecedenceTable'],
     ['lib/Chalk/Bootstrap/Semiring/Boolean.pm',           'Tier D: Semiring::Boolean'],
     ['lib/Chalk/Bootstrap/Perl/Actions.pm',              'Tier D: Perl::Actions'],
@@ -87,7 +87,7 @@ my $ir = perl_pipeline();
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PerFileValidation/g;
     eval $generated;
@@ -166,7 +166,7 @@ SKIP: {
         'lib/Chalk/Bootstrap/Optimizer.pm'              => 'push $passes->@* op sequence mismatch with native push opcode',
         # Parse failures — remaining ambiguities
         'lib/Chalk/Bootstrap/Earley.pm'             => 'Pre-existing phase5 Earley parse failure',
-        'lib/Chalk/Bootstrap/Target/XS.pm'          => 'Pre-existing parse failure',
+        'lib/Chalk/Bootstrap/BNF/Target/XS.pm'          => 'Pre-existing parse failure',
     );
 
     # Emit TAP for a single file result

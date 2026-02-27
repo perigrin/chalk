@@ -15,7 +15,7 @@ use Test::More;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::XS;
 
 # Sets up the grammar pipeline for tests.
@@ -26,7 +26,7 @@ sub setup_xs_grammar($namespace) {
     my $raw_ir = perl_pipeline();
     die "perl_pipeline returned undef" unless defined $raw_ir;
 
-    my $bnf_target = Chalk::Bootstrap::Target::Perl->new();
+    my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $bnf_target->generate($raw_ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/$namespace/g;
     my $ok = eval "$generated; 1";

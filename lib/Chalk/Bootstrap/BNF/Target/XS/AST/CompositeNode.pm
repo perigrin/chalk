@@ -4,9 +4,9 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::Bootstrap::Target::XS::AST::Node;
+use Chalk::Bootstrap::BNF::Target::XS::AST::Node;
 
-class Chalk::Bootstrap::Target::XS::AST::CompositeNode :isa(Chalk::Bootstrap::Target::XS::AST::Node) {
+class Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode :isa(Chalk::Bootstrap::BNF::Target::XS::AST::Node) {
     field $children :param :reader;
 
     method emit() {

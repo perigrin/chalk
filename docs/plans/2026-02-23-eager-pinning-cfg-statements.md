@@ -140,7 +140,7 @@ Add to `cfg-statements.t`: parse `if (1) { 42 } else { 99 }` via the full pipeli
 
 ```perl
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $ir = perl_pipeline();
@@ -148,7 +148,7 @@ my $ir = perl_pipeline();
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgStmtTest/g;
     eval $generated;
@@ -371,7 +371,7 @@ $sa->set_cfg_state($ctx, {
 
 # Generate code via Perl target using cfg_state
 # (This is the part that needs a new API on the target)
-my $target = Chalk::Bootstrap::Target::Perl->new();
+my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $code = $target->emit_from_cfg_state($sa, $ctx);
 like($code, qr/if.*\{/, 'emitted code contains if');
 like($code, qr/42/, 'emitted code contains then body');

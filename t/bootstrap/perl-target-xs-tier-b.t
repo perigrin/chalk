@@ -54,7 +54,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Node.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/Node.pm');
     ok(defined $ir, 'XS::AST::Node: parse produces IR');
 
     SKIP: {
@@ -81,7 +81,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Statement.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/Statement.pm');
     ok(defined $ir, 'Statement: parse produces IR');
 
     SKIP: {
@@ -107,7 +107,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/Target/XS/AST/Module.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/Module.pm');
     ok(defined $ir, 'Module: parse produces IR');
 
     SKIP: {

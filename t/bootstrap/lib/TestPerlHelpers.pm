@@ -10,7 +10,7 @@ our @EXPORT_OK = qw(setup_perl_grammar parse_and_generate parse_file_with_cfg ev
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
 my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();

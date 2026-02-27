@@ -6,13 +6,13 @@
 |---|---|
 | **Predecessor** | `docs/xs-target.md` (XS Target PRD v0.1) |
 | **Language** | Perl 5.42 (feature class) + C (via XS) |
-| **Scope** | Implementation spec for `Chalk::Bootstrap::Target::XS` |
+| **Scope** | Implementation spec for `Chalk::Bootstrap::BNF::Target::XS` |
 
 ---
 
 ## 1. Overview
 
-This spec describes how to implement `Chalk::Bootstrap::Target::XS`, a second code generation target for the bootstrap compiler. It takes the same optimized Sea of Nodes IR that `Target::Perl` consumes and emits a buildable XS distribution: `.xs`, `.pm`, and `Build.PL` files.
+This spec describes how to implement `Chalk::Bootstrap::BNF::Target::XS`, a second code generation target for the bootstrap compiler. It takes the same optimized Sea of Nodes IR that `Target::Perl` consumes and emits a buildable XS distribution: `.xs`, `.pm`, and `Build.PL` files.
 
 The pipeline is unchanged through optimization:
 
@@ -36,7 +36,7 @@ Both targets consume the same optimized IR independently. They are peers — nei
 
 The main Chalk codebase has XS AST infrastructure (`Chalk::Target::XS::AST::*`), but those nodes are tightly coupled to main Chalk's richer IR (type system, class defs, field loads, etc.). The bootstrap has a deliberately simpler IR with 4 node types (Start, Return, Constant, Constructor).
 
-**Decision**: Write fresh XS AST nodes in the `Chalk::Bootstrap::Target::XS::AST::*` namespace, purpose-built for the bootstrap's data-centric code generation. The IR will grow richer over time, and the AST can grow with it.
+**Decision**: Write fresh XS AST nodes in the `Chalk::Bootstrap::BNF::Target::XS::AST::*` namespace, purpose-built for the bootstrap's data-centric code generation. The IR will grow richer over time, and the AST can grow with it.
 
 ### 2.2 AST Reflects XS Structure; Walker Handles Semantics
 
@@ -89,7 +89,7 @@ Sea of Nodes defines the graph traversal order. Everything feeding into the XS t
 
 ## 3. XS AST Node Set
 
-Six AST nodes, all in `Chalk::Bootstrap::Target::XS::AST::*`:
+Six AST nodes, all in `Chalk::Bootstrap::BNF::Target::XS::AST::*`:
 
 | Node | Purpose | `emit()` output |
 |---|---|---|
@@ -330,14 +330,14 @@ Module::Build->new(
 ### 7.1 New Files
 
 ```
-lib/Chalk/Bootstrap/Target/XS.pm                      # XS emitter (graph visitor)
-lib/Chalk/Bootstrap/Target/XS/AST/Node.pm             # Abstract base AST node
-lib/Chalk/Bootstrap/Target/XS/AST/Module.pm            # MODULE/PACKAGE declaration
-lib/Chalk/Bootstrap/Target/XS/AST/Preamble.pm          # C preamble (#define, #include)
-lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm              # Complete XSUB with sections
-lib/Chalk/Bootstrap/Target/XS/AST/VarDecl.pm           # C variable declaration
-lib/Chalk/Bootstrap/Target/XS/AST/Statement.pm         # Raw C statement
-lib/Chalk/Bootstrap/Target/XS/AST/CompositeNode.pm     # Groups children
+lib/Chalk/Bootstrap/BNF/Target/XS.pm                      # XS emitter (graph visitor)
+lib/Chalk/Bootstrap/BNF/Target/XS/AST/Node.pm             # Abstract base AST node
+lib/Chalk/Bootstrap/BNF/Target/XS/AST/Module.pm            # MODULE/PACKAGE declaration
+lib/Chalk/Bootstrap/BNF/Target/XS/AST/Preamble.pm          # C preamble (#define, #include)
+lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm              # Complete XSUB with sections
+lib/Chalk/Bootstrap/BNF/Target/XS/AST/VarDecl.pm           # C variable declaration
+lib/Chalk/Bootstrap/BNF/Target/XS/AST/Statement.pm         # Raw C statement
+lib/Chalk/Bootstrap/BNF/Target/XS/AST/CompositeNode.pm     # Groups children
 t/bootstrap/xs-ast.t                                    # AST node unit tests
 t/bootstrap/xs-target.t                                 # Target::XS unit tests
 t/bootstrap/xs-build.t                                  # Full build + equivalence test
@@ -347,7 +347,7 @@ t/bootstrap/xs-build.t                                  # Full build + equivalen
 
 ```
 lib/Chalk/Bootstrap/Target.pm                          # Add generate_distribution()
-lib/Chalk/Bootstrap/Target/Perl.pm                     # Implement generate_distribution()
+lib/Chalk/Bootstrap/BNF/Target/Perl.pm                     # Implement generate_distribution()
 ```
 
 ## 8. Testing Strategy
@@ -402,7 +402,7 @@ Extend `bootstrap-validation.t` Phase 4 to note XS readiness, but keep XS build 
 
 ### Milestone 5.1: Target::XS Graph Visitor
 
-- Implement `Chalk::Bootstrap::Target::XS` with proper graph walking
+- Implement `Chalk::Bootstrap::BNF::Target::XS` with proper graph walking
 - IR node visitors: Start, Return, Constant, Constructor(Symbol/Expression/Rule)
 - Single-pass accumulator for PREINIT/CODE partitioning
 - Symbol/Rule construction via `call_method("new")` blocks

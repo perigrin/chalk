@@ -24,7 +24,7 @@ eval { require Module::Build; 1 }
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use TestXSHelpers qw(setup_xs_grammar build_and_load fork_test);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::XS;
 
 # Build Perl grammar pipeline

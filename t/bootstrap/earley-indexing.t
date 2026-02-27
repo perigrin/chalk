@@ -11,7 +11,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer);
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 
@@ -123,7 +123,7 @@ SKIP: {
     my $ir = perl_pipeline();
     skip 'Perl grammar failed to parse', 4 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::IndexTest/g;
     eval $generated;

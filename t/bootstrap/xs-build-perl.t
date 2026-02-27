@@ -27,8 +27,8 @@ eval { require Module::Build; 1 }
 # === Generate distribution from 63-rule Perl grammar ===
 
 use TestPipeline qw(perl_pipeline build_perl_recognizer grammars_match);
-use Chalk::Bootstrap::Target::XS;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::XS;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Optimizer;
 use Chalk::Bootstrap::Optimizer::DCE;
 
@@ -43,7 +43,7 @@ ok(defined $ir, 'DCE optimization produces IR');
 is(ref($ir), 'ARRAY', 'optimized IR is an arrayref');
 is(scalar $ir->@*, 63, 'optimized IR has 63 rules');
 
-my $target = Chalk::Bootstrap::Target::XS->new(
+my $target = Chalk::Bootstrap::BNF::Target::XS->new(
     module_name => 'Chalk::Grammar::Perl::Rules',
 );
 my $dist = $target->generate_distribution($ir);
@@ -96,7 +96,7 @@ unshift @INC, "$tmpdir/blib/lib", "$tmpdir/blib/arch";
 # === Verify all 63 rule methods ===
 
 # M4: Generate Perl-target grammar for rule name extraction and equivalence
-my $perl_target = Chalk::Bootstrap::Target::Perl->new();
+my $perl_target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $perl_code = $perl_target->generate($ir);
 # Use a distinct class name to avoid collision with other tests
 $perl_code =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSBuildGenerated/g;

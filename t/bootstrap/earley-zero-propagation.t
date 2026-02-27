@@ -15,7 +15,7 @@ use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
 use TestPipeline qw(perl_pipeline);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Desugar;
 
 # Build the Perl grammar recognizer
@@ -25,7 +25,7 @@ my $ir = perl_pipeline();
 SKIP: {
     skip 'Perl grammar failed to parse', 10 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ZeroPropTest/g;
     eval $generated;

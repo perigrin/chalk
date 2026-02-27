@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
 # Build the Perl grammar recognizer pipeline
@@ -18,7 +18,7 @@ my $ir = perl_pipeline();
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgLoopTest/g;
     eval $generated;

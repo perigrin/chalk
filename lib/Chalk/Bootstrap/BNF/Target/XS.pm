@@ -5,14 +5,14 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Target;
-use Chalk::Bootstrap::Target::XS::AST::Preamble;
-use Chalk::Bootstrap::Target::XS::AST::Module;
-use Chalk::Bootstrap::Target::XS::AST::CompositeNode;
-use Chalk::Bootstrap::Target::XS::AST::VarDecl;
-use Chalk::Bootstrap::Target::XS::AST::Statement;
-use Chalk::Bootstrap::Target::XS::AST::XSUB;
+use Chalk::Bootstrap::BNF::Target::XS::AST::Preamble;
+use Chalk::Bootstrap::BNF::Target::XS::AST::Module;
+use Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode;
+use Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl;
+use Chalk::Bootstrap::BNF::Target::XS::AST::Statement;
+use Chalk::Bootstrap::BNF::Target::XS::AST::XSUB;
 
-class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
+class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader = 'Chalk::Grammar::BNF::Rules';
     # Per-rule scratch counters; reset at the start of each _emit_rule call
     field $sym_counter = 0;
@@ -109,11 +109,11 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         $block .= "    FREETMPS; LEAVE;\n";
         $block .= "}";
 
-        my $var_decl = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+        my $var_decl = Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
             type => 'SV *',
             name => $var_name,
         );
-        my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => $block);
+        my $stmt = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => $block);
 
         return [$var_decl, $stmt];
     }
@@ -124,13 +124,13 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @nodes;
 
         # VarDecl for the expression AV
-        push @nodes, Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+        push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
             type => 'AV *',
             name => $var_name,
         );
 
         # Initialize the AV
-        push @nodes, Chalk::Bootstrap::Target::XS::AST::Statement->new(
+        push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(
             code => "$var_name = newAV();",
         );
 
@@ -143,7 +143,7 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $sym_nodes = $self->_emit_symbol($sym, $sym_name);
             push @nodes, $sym_nodes->@*;
 
-            push @nodes, Chalk::Bootstrap::Target::XS::AST::Statement->new(
+            push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(
                 code => "av_push($var_name, $sym_name);",
             );
         }
@@ -165,15 +165,15 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $rule_name = $name_const->value();
 
         # VarDecls for top-level rule variables
-        push @nodes, Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+        push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
             type => 'AV *', name => 'expressions',
         );
-        push @nodes, Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+        push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
             type => 'SV *', name => 'rule',
         );
 
         # Initialize expressions AV
-        push @nodes, Chalk::Bootstrap::Target::XS::AST::Statement->new(
+        push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(
             code => 'expressions = newAV();',
         );
 
@@ -185,7 +185,7 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $expr_nodes = $self->_emit_expression($expr, $expr_name);
             push @nodes, $expr_nodes->@*;
 
-            push @nodes, Chalk::Bootstrap::Target::XS::AST::Statement->new(
+            push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(
                 code => "av_push(expressions, newRV_noinc((SV *)$expr_name));",
             );
         }
@@ -209,10 +209,10 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         $block .= "    FREETMPS; LEAVE;\n";
         $block .= "}";
 
-        push @nodes, Chalk::Bootstrap::Target::XS::AST::Statement->new(code => $block);
+        push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => $block);
 
         # RETVAL assignment
-        push @nodes, Chalk::Bootstrap::Target::XS::AST::Statement->new(
+        push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(
             code => 'RETVAL = rule;',
         );
 
@@ -226,7 +226,7 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
             unless $rule_name =~ /^[A-Za-z_][A-Za-z_0-9]*$/;
         my $body_nodes = $self->_emit_rule($rule_node);
 
-        return Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+        return Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(
             name   => $rule_name,
             params => ['SV *self'],
             body   => $body_nodes,
@@ -237,8 +237,8 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
         die "generate() requires an arrayref of IR rules"
             unless defined($ir) && ref($ir) eq 'ARRAY';
 
-        my $preamble = Chalk::Bootstrap::Target::XS::AST::Preamble->new();
-        my $module = Chalk::Bootstrap::Target::XS::AST::Module->new(
+        my $preamble = Chalk::Bootstrap::BNF::Target::XS::AST::Preamble->new();
+        my $module = Chalk::Bootstrap::BNF::Target::XS::AST::Module->new(
             module  => $module_name,
             package => $module_name,
         );
@@ -249,7 +249,7 @@ class Chalk::Bootstrap::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @children, $self->_emit_xsub($rule);
         }
 
-        my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(
+        my $composite = Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode->new(
             children => \@children,
         );
 

@@ -395,14 +395,14 @@ test_perl_file(
 # ============================================================
 
 test_perl_file(
-    file        => 'lib/Chalk/Bootstrap/Target/XS/AST/CompositeNode.pm',
+    file        => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/CompositeNode.pm',
     label       => 'XS::AST::CompositeNode.pm',
     structural  => [
         { pattern => qr/field \$children/, label => 'has field $children' },
         { pattern => qr/method emit/, label => 'has method emit' },
     ],
-    original_ns => 'Chalk::Bootstrap::Target::XS::AST::CompositeNode',
-    test_ns     => 'Chalk::Bootstrap::Target::XS::AST::CompositeNodeGenD',
+    original_ns => 'Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode',
+    test_ns     => 'Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNodeGenD',
     todo_eval   => 'CompositeNode.pm depends on AST::Node parent class',
     behavioral  => sub ($mod) {
         my $node = $mod->new(children => []);
@@ -412,15 +412,15 @@ test_perl_file(
 );
 
 test_perl_file(
-    file        => 'lib/Chalk/Bootstrap/Target/XS/AST/VarDecl.pm',
+    file        => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/VarDecl.pm',
     label       => 'XS::AST::VarDecl.pm',
     structural  => [
         { pattern => qr/field \$type/, label => 'has field $type' },
         { pattern => qr/field \$name/, label => 'has field $name' },
         { pattern => qr/method emit/, label => 'has method emit' },
     ],
-    original_ns => 'Chalk::Bootstrap::Target::XS::AST::VarDecl',
-    test_ns     => 'Chalk::Bootstrap::Target::XS::AST::VarDeclGenD',
+    original_ns => 'Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl',
+    test_ns     => 'Chalk::Bootstrap::BNF::Target::XS::AST::VarDeclGenD',
     behavioral  => sub ($mod) {
         my $decl = $mod->new(type => 'SV *', name => 'result');
         is($decl->type(), 'SV *', 'type reader');
@@ -430,13 +430,13 @@ test_perl_file(
 );
 
 test_perl_file(
-    file        => 'lib/Chalk/Bootstrap/Target/XS/AST/Preamble.pm',
+    file        => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/Preamble.pm',
     label       => 'XS::AST::Preamble.pm',
     structural  => [
         { pattern => qr/method emit/, label => 'has method emit' },
     ],
-    original_ns => 'Chalk::Bootstrap::Target::XS::AST::Preamble',
-    test_ns     => 'Chalk::Bootstrap::Target::XS::AST::PreambleGenD',
+    original_ns => 'Chalk::Bootstrap::BNF::Target::XS::AST::Preamble',
+    test_ns     => 'Chalk::Bootstrap::BNF::Target::XS::AST::PreambleGenD',
     behavioral  => sub ($mod) {
         my $preamble = $mod->new();
         my $emitted = $preamble->emit();
@@ -446,15 +446,15 @@ test_perl_file(
 );
 
 test_perl_file(
-    file        => 'lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',
+    file        => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm',
     label       => 'XS::AST::XSUB.pm',
     structural  => [
         { pattern => qr/field \$name/, label => 'has field $name' },
         { pattern => qr/field \$params/, label => 'has field $params' },
         { pattern => qr/method emit/, label => 'has method emit' },
     ],
-    original_ns => 'Chalk::Bootstrap::Target::XS::AST::XSUB',
-    test_ns     => 'Chalk::Bootstrap::Target::XS::AST::XSUBGenD',
+    original_ns => 'Chalk::Bootstrap::BNF::Target::XS::AST::XSUB',
+    test_ns     => 'Chalk::Bootstrap::BNF::Target::XS::AST::XSUBGenD',
     todo_eval   => 'XSUB.pm depends on parent class Node and VarDecl isa check',
     behavioral  => sub ($mod) {
         my $xsub = $mod->new(
@@ -472,13 +472,13 @@ test_perl_file(
 # ============================================================
 
 test_perl_file(
-    file        => 'lib/Chalk/Bootstrap/Target/Perl.pm',
+    file        => 'lib/Chalk/Bootstrap/BNF/Target/Perl.pm',
     label       => 'Target::Perl.pm',
     structural  => [
         { pattern => qr/method generate/, label => 'has method generate' },
     ],
-    original_ns => 'Chalk::Bootstrap::Target::Perl',
-    test_ns     => 'Chalk::Bootstrap::Target::PerlGenD',
+    original_ns => 'Chalk::Bootstrap::BNF::Target::Perl',
+    test_ns     => 'Chalk::Bootstrap::BNF::Target::PerlGenD',
     todo_eval   => 'Target::Perl depends on IR node types',
     behavioral  => sub ($mod) {
         my $target = $mod->new();
@@ -619,7 +619,7 @@ test_perl_file(
 );
 
 test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Target/XS.pm',
+    file       => 'lib/Chalk/Bootstrap/BNF/Target/XS.pm',
     label      => 'Target::XS.pm (expected parse failure)',
     todo_parse => 'Target::XS.pm has pre-existing parse failure',
 );

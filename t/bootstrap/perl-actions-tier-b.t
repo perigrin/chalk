@@ -9,14 +9,14 @@ use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
-my $target = Chalk::Bootstrap::Target::Perl->new();
+my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $generated = $target->generate($raw_ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ActionsTierBTest/g;
 eval $generated;
@@ -109,7 +109,7 @@ my sub is_constant($node, $expected_value, $msg) {
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/Bootstrap/Target/XS/AST/Node.pm');
+    my $ir = parse_file('lib/Chalk/Bootstrap/BNF/Target/XS/AST/Node.pm');
     ok(defined $ir, 'XS::AST::Node.pm: parse produces IR');
 
     SKIP: {
@@ -120,7 +120,7 @@ my sub is_constant($node, $expected_value, $msg) {
         my $cls = $stmts->[-1];
         is_constructor($cls, 'ClassDecl', 'Node.pm ClassDecl');
         is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::Target::XS::AST::Node', 'Node.pm class name');
+            'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Node.pm class name');
         is($cls->inputs()->[1], undef, 'Node.pm: no parent class');
 
         my $body = $cls->inputs()->[2];
@@ -141,7 +141,7 @@ my sub is_constant($node, $expected_value, $msg) {
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/Bootstrap/Target/XS/AST/Statement.pm');
+    my $ir = parse_file('lib/Chalk/Bootstrap/BNF/Target/XS/AST/Statement.pm');
     ok(defined $ir, 'Statement.pm: parse produces IR');
 
     SKIP: {
@@ -152,9 +152,9 @@ my sub is_constant($node, $expected_value, $msg) {
         my $cls = $stmts->[-1];
         is_constructor($cls, 'ClassDecl', 'Statement.pm ClassDecl');
         is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::Target::XS::AST::Statement', 'Statement.pm class name');
+            'Chalk::Bootstrap::BNF::Target::XS::AST::Statement', 'Statement.pm class name');
         is_constant($cls->inputs()->[1],
-            'Chalk::Bootstrap::Target::XS::AST::Node', 'Statement.pm parent class');
+            'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Statement.pm parent class');
 
         my $body = $cls->inputs()->[2];
         is(ref $body, 'ARRAY', 'Statement.pm: class body is arrayref');
@@ -198,7 +198,7 @@ my sub is_constant($node, $expected_value, $msg) {
 # ============================================================
 
 {
-    my $ir = parse_file('lib/Chalk/Bootstrap/Target/XS/AST/Module.pm');
+    my $ir = parse_file('lib/Chalk/Bootstrap/BNF/Target/XS/AST/Module.pm');
     ok(defined $ir, 'Module.pm: parse produces IR');
 
     SKIP: {
@@ -209,9 +209,9 @@ my sub is_constant($node, $expected_value, $msg) {
         my $cls = $stmts->[-1];
         is_constructor($cls, 'ClassDecl', 'Module.pm ClassDecl');
         is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::Target::XS::AST::Module', 'Module.pm class name');
+            'Chalk::Bootstrap::BNF::Target::XS::AST::Module', 'Module.pm class name');
         is_constant($cls->inputs()->[1],
-            'Chalk::Bootstrap::Target::XS::AST::Node', 'Module.pm parent class');
+            'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Module.pm parent class');
 
         my $body = $cls->inputs()->[2];
         is(ref $body, 'ARRAY', 'Module.pm: class body is arrayref');

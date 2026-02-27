@@ -4,10 +4,10 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::Bootstrap::Target::XS::AST::Node;
-use Chalk::Bootstrap::Target::XS::AST::VarDecl;
+use Chalk::Bootstrap::BNF::Target::XS::AST::Node;
+use Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl;
 
-class Chalk::Bootstrap::Target::XS::AST::XSUB :isa(Chalk::Bootstrap::Target::XS::AST::Node) {
+class Chalk::Bootstrap::BNF::Target::XS::AST::XSUB :isa(Chalk::Bootstrap::BNF::Target::XS::AST::Node) {
     field $return_type :param :reader = 'SV *';
     field $name :param :reader;
     field $params :param :reader;
@@ -33,7 +33,7 @@ class Chalk::Bootstrap::Target::XS::AST::XSUB :isa(Chalk::Bootstrap::Target::XS:
         my @preinit;
         my @code;
         for my $node ($body->@*) {
-            if ($node isa Chalk::Bootstrap::Target::XS::AST::VarDecl) {
+            if ($node isa Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl) {
                 push @preinit, $node;
             } else {
                 push @code, $node;

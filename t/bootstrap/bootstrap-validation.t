@@ -116,14 +116,14 @@ use lib 'lib';
     use lib 't/bootstrap/lib';
     use TestPipeline qw(full_pipeline optimized_pipeline bnf_text grammars_match);
     use Chalk::Bootstrap::Desugar;
-    use Chalk::Bootstrap::Target::Perl;
+    use Chalk::Bootstrap::BNF::Target::Perl;
 
     my $ir = full_pipeline();
     ok(defined $ir, 'Phase 3: BNF meta-grammar parses');
     is(scalar($ir->@*), 10, 'Phase 3: IR contains 10 rules');
 
     # Generate Perl code
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     ok(defined $generated, 'Phase 3: code generation produces output');
 
@@ -171,7 +171,7 @@ use lib 'lib';
     is(scalar($ir->@*), 10, 'Phase 4: optimized IR contains 10 rules');
 
     # Generate Perl code from optimized IR
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     ok(defined $generated, 'Phase 4: optimized code generation produces output');
 

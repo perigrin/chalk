@@ -8,11 +8,11 @@ use lib 'lib';
 
 # === Node base class ===
 
-use_ok('Chalk::Bootstrap::Target::XS::AST::Node');
+use_ok('Chalk::Bootstrap::BNF::Target::XS::AST::Node');
 
 {
-    my $node = Chalk::Bootstrap::Target::XS::AST::Node->new();
-    isa_ok($node, 'Chalk::Bootstrap::Target::XS::AST::Node');
+    my $node = Chalk::Bootstrap::BNF::Target::XS::AST::Node->new();
+    isa_ok($node, 'Chalk::Bootstrap::BNF::Target::XS::AST::Node');
 
     eval { $node->emit() };
     like($@, qr/Subclass must implement emit/, 'base Node emit() dies');
@@ -20,12 +20,12 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::Node');
 
 # === Preamble ===
 
-use_ok('Chalk::Bootstrap::Target::XS::AST::Preamble');
+use_ok('Chalk::Bootstrap::BNF::Target::XS::AST::Preamble');
 
 {
-    my $preamble = Chalk::Bootstrap::Target::XS::AST::Preamble->new();
-    isa_ok($preamble, 'Chalk::Bootstrap::Target::XS::AST::Node');
-    isa_ok($preamble, 'Chalk::Bootstrap::Target::XS::AST::Preamble');
+    my $preamble = Chalk::Bootstrap::BNF::Target::XS::AST::Preamble->new();
+    isa_ok($preamble, 'Chalk::Bootstrap::BNF::Target::XS::AST::Node');
+    isa_ok($preamble, 'Chalk::Bootstrap::BNF::Target::XS::AST::Preamble');
 
     my $output = $preamble->emit();
     like($output, qr/#define PERL_NO_GET_CONTEXT/, 'preamble contains PERL_NO_GET_CONTEXT');
@@ -42,15 +42,15 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::Preamble');
 
 # === Module ===
 
-use_ok('Chalk::Bootstrap::Target::XS::AST::Module');
+use_ok('Chalk::Bootstrap::BNF::Target::XS::AST::Module');
 
 {
-    my $module = Chalk::Bootstrap::Target::XS::AST::Module->new(
+    my $module = Chalk::Bootstrap::BNF::Target::XS::AST::Module->new(
         module  => 'Chalk::Grammar::BNF::Rules',
         package => 'Chalk::Grammar::BNF::Rules',
     );
-    isa_ok($module, 'Chalk::Bootstrap::Target::XS::AST::Node');
-    isa_ok($module, 'Chalk::Bootstrap::Target::XS::AST::Module');
+    isa_ok($module, 'Chalk::Bootstrap::BNF::Target::XS::AST::Node');
+    isa_ok($module, 'Chalk::Bootstrap::BNF::Target::XS::AST::Module');
 
     my $output = $module->emit();
     like($output, qr/MODULE = Chalk::Grammar::BNF::Rules/, 'module contains MODULE =');
@@ -66,7 +66,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::Module');
 
 # Module with different module and package names
 {
-    my $module = Chalk::Bootstrap::Target::XS::AST::Module->new(
+    my $module = Chalk::Bootstrap::BNF::Target::XS::AST::Module->new(
         module  => 'Foo::Bar',
         package => 'Foo::Baz',
     );
@@ -77,15 +77,15 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::Module');
 
 # === VarDecl ===
 
-use_ok('Chalk::Bootstrap::Target::XS::AST::VarDecl');
+use_ok('Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl');
 
 {
-    my $var = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+    my $var = Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
         type => 'SV *',
         name => 'symbol',
     );
-    isa_ok($var, 'Chalk::Bootstrap::Target::XS::AST::Node');
-    isa_ok($var, 'Chalk::Bootstrap::Target::XS::AST::VarDecl');
+    isa_ok($var, 'Chalk::Bootstrap::BNF::Target::XS::AST::Node');
+    isa_ok($var, 'Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl');
 
     my $output = $var->emit();
     is($output, "    SV *symbol;\n", 'VarDecl emits correct format');
@@ -96,7 +96,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::VarDecl');
 
 # VarDecl with AV * type
 {
-    my $var = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+    my $var = Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
         type => 'AV *',
         name => 'expressions',
     );
@@ -106,7 +106,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::VarDecl');
 
 # VarDecl with non-pointer type
 {
-    my $var = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(
+    my $var = Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
         type => 'int',
         name => 'count',
     );
@@ -116,14 +116,14 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::VarDecl');
 
 # === Statement ===
 
-use_ok('Chalk::Bootstrap::Target::XS::AST::Statement');
+use_ok('Chalk::Bootstrap::BNF::Target::XS::AST::Statement');
 
 {
-    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(
+    my $stmt = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(
         code => 'expressions = newAV();',
     );
-    isa_ok($stmt, 'Chalk::Bootstrap::Target::XS::AST::Node');
-    isa_ok($stmt, 'Chalk::Bootstrap::Target::XS::AST::Statement');
+    isa_ok($stmt, 'Chalk::Bootstrap::BNF::Target::XS::AST::Node');
+    isa_ok($stmt, 'Chalk::Bootstrap::BNF::Target::XS::AST::Statement');
 
     my $output = $stmt->emit();
     is($output, "    expressions = newAV();\n", 'Statement emits with indent');
@@ -134,7 +134,7 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::Statement');
 # Statement with multi-line call_method block
 {
     my $block = "{\n    dSP;\n    ENTER; SAVETMPS;\n    FREETMPS; LEAVE;\n}";
-    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => $block);
+    my $stmt = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => $block);
     my $output = $stmt->emit();
     like($output, qr/dSP/, 'multi-line Statement contains dSP');
     like($output, qr/FREETMPS/, 'multi-line Statement contains FREETMPS');
@@ -142,21 +142,21 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::Statement');
 
 # === CompositeNode ===
 
-use_ok('Chalk::Bootstrap::Target::XS::AST::CompositeNode');
+use_ok('Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode');
 
 {
-    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(children => []);
-    isa_ok($composite, 'Chalk::Bootstrap::Target::XS::AST::Node');
-    isa_ok($composite, 'Chalk::Bootstrap::Target::XS::AST::CompositeNode');
+    my $composite = Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode->new(children => []);
+    isa_ok($composite, 'Chalk::Bootstrap::BNF::Target::XS::AST::Node');
+    isa_ok($composite, 'Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode');
 
     is($composite->emit(), '', 'CompositeNode with empty children emits empty string');
 }
 
 # CompositeNode emits children in order
 {
-    my $stmt1 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'first();');
-    my $stmt2 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'second();');
-    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(
+    my $stmt1 = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'first();');
+    my $stmt2 = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'second();');
+    my $composite = Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode->new(
         children => [$stmt1, $stmt2],
     );
 
@@ -166,9 +166,9 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::CompositeNode');
 
 # CompositeNode with mixed child types
 {
-    my $var = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'x');
-    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'x = newSViv(42);');
-    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(
+    my $var = Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'x');
+    my $stmt = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'x = newSViv(42);');
+    my $composite = Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode->new(
         children => [$var, $stmt],
     );
 
@@ -178,27 +178,27 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::CompositeNode');
 
 # CompositeNode children reader
 {
-    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'foo();');
-    my $composite = Chalk::Bootstrap::Target::XS::AST::CompositeNode->new(children => [$stmt]);
+    my $stmt = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'foo();');
+    my $composite = Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode->new(children => [$stmt]);
     is(scalar $composite->children()->@*, 1, 'children reader returns arrayref with 1 element');
 }
 
 # === XSUB ===
 
-use_ok('Chalk::Bootstrap::Target::XS::AST::XSUB');
+use_ok('Chalk::Bootstrap::BNF::Target::XS::AST::XSUB');
 
 # XSUB with only statements (no VarDecls) omits PREINIT
 {
-    my $stmt = Chalk::Bootstrap::Target::XS::AST::Statement->new(
+    my $stmt = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(
         code => 'RETVAL = newSViv(42);',
     );
-    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+    my $xsub = Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(
         name        => 'simple',
         params      => ['SV *self'],
         body        => [$stmt],
     );
-    isa_ok($xsub, 'Chalk::Bootstrap::Target::XS::AST::Node');
-    isa_ok($xsub, 'Chalk::Bootstrap::Target::XS::AST::XSUB');
+    isa_ok($xsub, 'Chalk::Bootstrap::BNF::Target::XS::AST::Node');
+    isa_ok($xsub, 'Chalk::Bootstrap::BNF::Target::XS::AST::XSUB');
 
     my $output = $xsub->emit();
     unlike($output, qr/PREINIT/, 'XSUB without VarDecls omits PREINIT');
@@ -208,11 +208,11 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::XSUB');
 
 # XSUB default return type is SV *
 {
-    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+    my $xsub = Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(
         name   => 'test_func',
         params => ['SV *self'],
         body   => [
-            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = self;'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'RETVAL = self;'),
         ],
     );
     my $output = $xsub->emit();
@@ -221,12 +221,12 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::XSUB');
 
 # XSUB with mixed VarDecl + Statement correctly partitions them
 {
-    my $var1 = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'AV *', name => 'expressions');
-    my $var2 = Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'rule');
-    my $stmt1 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'expressions = newAV();');
-    my $stmt2 = Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = rule;');
+    my $var1 = Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(type => 'AV *', name => 'expressions');
+    my $var2 = Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'rule');
+    my $stmt1 = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'expressions = newAV();');
+    my $stmt2 = Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'RETVAL = rule;');
 
-    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+    my $xsub = Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(
         name   => 'Grammar',
         params => ['SV *self'],
         body   => [$var1, $stmt1, $var2, $stmt2],
@@ -248,12 +248,12 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::XSUB');
 
 # XSUB emits correct signature line
 {
-    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+    my $xsub = Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(
         return_type => 'SV *',
         name        => 'Grammar',
         params      => ['SV *self'],
         body        => [
-            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = self;'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'RETVAL = self;'),
         ],
     );
 
@@ -266,17 +266,17 @@ use_ok('Chalk::Bootstrap::Target::XS::AST::XSUB');
 
 # Full realistic XSUB with expected exact structure
 {
-    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+    my $xsub = Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(
         name   => 'Grammar',
         params => ['SV *self'],
         body   => [
-            Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'AV *', name => 'expressions'),
-            Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'sym_0'),
-            Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'rule'),
-            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'expressions = newAV();'),
-            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => "{\n    dSP;\n    ENTER; SAVETMPS;\n    FREETMPS; LEAVE;\n}"),
-            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'av_push(expressions, sym_0);'),
-            Chalk::Bootstrap::Target::XS::AST::Statement->new(code => 'RETVAL = rule;'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(type => 'AV *', name => 'expressions'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'sym_0'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(type => 'SV *', name => 'rule'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'expressions = newAV();'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => "{\n    dSP;\n    ENTER; SAVETMPS;\n    FREETMPS; LEAVE;\n}"),
+            Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'av_push(expressions, sym_0);'),
+            Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new(code => 'RETVAL = rule;'),
         ],
     );
 
@@ -308,7 +308,7 @@ EXPECTED
 
 # XSUB readers work
 {
-    my $xsub = Chalk::Bootstrap::Target::XS::AST::XSUB->new(
+    my $xsub = Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(
         return_type => 'void',
         name        => 'test',
         params      => ['SV *self', 'SV *arg'],
@@ -321,10 +321,10 @@ EXPECTED
 
 # XSUB requires name and params
 {
-    eval { Chalk::Bootstrap::Target::XS::AST::XSUB->new(name => 'test') };
+    eval { Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(name => 'test') };
     ok($@, 'XSUB dies when missing params');
 
-    eval { Chalk::Bootstrap::Target::XS::AST::XSUB->new(params => ['SV *self']) };
+    eval { Chalk::Bootstrap::BNF::Target::XS::AST::XSUB->new(params => ['SV *self']) };
     ok($@, 'XSUB dies when missing name');
 }
 
@@ -332,25 +332,25 @@ EXPECTED
 
 # Module requires both module and package
 {
-    eval { Chalk::Bootstrap::Target::XS::AST::Module->new(module => 'Foo') };
+    eval { Chalk::Bootstrap::BNF::Target::XS::AST::Module->new(module => 'Foo') };
     ok($@, 'Module dies when missing package param');
 
-    eval { Chalk::Bootstrap::Target::XS::AST::Module->new(package => 'Foo') };
+    eval { Chalk::Bootstrap::BNF::Target::XS::AST::Module->new(package => 'Foo') };
     ok($@, 'Module dies when missing module param');
 }
 
 # VarDecl requires both type and name
 {
-    eval { Chalk::Bootstrap::Target::XS::AST::VarDecl->new(type => 'SV *') };
+    eval { Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(type => 'SV *') };
     ok($@, 'VarDecl dies when missing name param');
 
-    eval { Chalk::Bootstrap::Target::XS::AST::VarDecl->new(name => 'foo') };
+    eval { Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(name => 'foo') };
     ok($@, 'VarDecl dies when missing type param');
 }
 
 # Statement requires code
 {
-    eval { Chalk::Bootstrap::Target::XS::AST::Statement->new() };
+    eval { Chalk::Bootstrap::BNF::Target::XS::AST::Statement->new() };
     ok($@, 'Statement dies when missing code param');
 }
 

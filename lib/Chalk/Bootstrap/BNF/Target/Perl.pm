@@ -6,7 +6,7 @@ use experimental 'class';
 
 use Chalk::Bootstrap::Target;
 
-class Chalk::Bootstrap::Target::Perl :isa(Chalk::Bootstrap::Target) {
+class Chalk::Bootstrap::BNF::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     method generate($ir) {
         die "generate() requires an arrayref of IR rules"

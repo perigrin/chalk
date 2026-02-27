@@ -28,7 +28,7 @@ eval { require Module::Build; 1 }
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::XS;
 
 # Build Perl grammar pipeline
@@ -36,7 +36,7 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
-my $bnf_target = Chalk::Bootstrap::Target::Perl->new();
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $generated = $bnf_target->generate($raw_ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSTierD2Test/g;
 eval $generated;
@@ -242,7 +242,7 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Target/Perl.pm');
+    my $ir = parse_file_ir('lib/Chalk/Bootstrap/BNF/Target/Perl.pm');
     ok(defined $ir, 'Target::Perl: parse produces IR');
 
     SKIP: {

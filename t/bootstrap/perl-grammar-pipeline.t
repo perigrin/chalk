@@ -11,7 +11,7 @@ use TestPipeline qw(
     build_parser parse_ir perl_bnf_text perl_pipeline build_perl_recognizer
 );
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Optimizer;
 use Chalk::Bootstrap::Optimizer::DCE;
 
@@ -37,7 +37,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
         diag sprintf("Parse time: %.3f seconds", $elapsed);
 
         # Phase 0 Gate 2: Code generation produces compilable output
-        my $target = Chalk::Bootstrap::Target::Perl->new();
+        my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
         my $generated = $target->generate($ir);
         ok(defined $generated, 'Phase 0: code generation produces output');
 
@@ -100,7 +100,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
         is(scalar($opt_ir->@*), 63, 'Phase 0: optimized IR retains 63 rules');
 
         # Generate and compile optimized version
-        my $target = Chalk::Bootstrap::Target::Perl->new();
+        my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
         my $generated = $target->generate($opt_ir);
         $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::Optimized/g;
         eval $generated;

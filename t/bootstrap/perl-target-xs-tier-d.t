@@ -331,7 +331,7 @@ test_file(
 # ============================================================
 
 test_file(
-    file   => 'lib/Chalk/Bootstrap/Target/XS/AST/CompositeNode.pm',
+    file   => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/CompositeNode.pm',
     label  => 'XS::AST::CompositeNode.pm',
     module => 'Chalk::Bootstrap::XS::TierD::CompositeNode',
     structural => [
@@ -340,7 +340,7 @@ test_file(
 );
 
 test_file(
-    file   => 'lib/Chalk/Bootstrap/Target/XS/AST/VarDecl.pm',
+    file   => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/VarDecl.pm',
     label  => 'XS::AST::VarDecl.pm',
     module => 'Chalk::Bootstrap::XS::TierD::VarDecl',
     structural => [
@@ -356,7 +356,7 @@ test_file(
 );
 
 test_file(
-    file   => 'lib/Chalk/Bootstrap/Target/XS/AST/Preamble.pm',
+    file   => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/Preamble.pm',
     label  => 'XS::AST::Preamble.pm',
     module => 'Chalk::Bootstrap::XS::TierD::Preamble',
     structural => [
@@ -371,7 +371,7 @@ test_file(
 );
 
 test_file(
-    file   => 'lib/Chalk/Bootstrap/Target/XS/AST/XSUB.pm',
+    file   => 'lib/Chalk/Bootstrap/BNF/Target/XS/AST/XSUB.pm',
     label  => 'XS::AST::XSUB.pm',
     module => 'Chalk::Bootstrap::XS::TierD::XSUB',
     structural => [
@@ -396,7 +396,7 @@ test_file(
 # ============================================================
 
 test_file(
-    file   => 'lib/Chalk/Bootstrap/Target/Perl.pm',
+    file   => 'lib/Chalk/Bootstrap/BNF/Target/Perl.pm',
     label  => 'Target::Perl.pm',
     module => 'Chalk::Bootstrap::XS::TierD::TargetPerl',
 );
@@ -507,7 +507,7 @@ test_file(
 );
 
 test_file(
-    file       => 'lib/Chalk/Bootstrap/Target/XS.pm',
+    file       => 'lib/Chalk/Bootstrap/BNF/Target/XS.pm',
     label      => 'Target::XS.pm (expected parse failure)',
     module     => 'Chalk::Bootstrap::XS::TierD::TargetXS',
     todo_parse => 'Target::XS.pm has pre-existing parse failure',

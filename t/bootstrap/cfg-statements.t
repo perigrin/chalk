@@ -181,7 +181,7 @@ use Chalk::Bootstrap::Scope;
 
 # --- Test 5: IfStatement populates cfg_state with body statements (integration) ---
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -194,7 +194,7 @@ if (!defined $ir) {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgStmtTest/g;
     eval $generated;
@@ -320,7 +320,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgGenTest/g;
     eval $generated;
@@ -396,7 +396,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CfgNodeTest/g;
     eval $generated;
@@ -473,7 +473,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixCfgTest/g;
     eval $generated;
@@ -528,7 +528,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UnlessTest/g;
     eval $generated;
@@ -583,7 +583,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::NoElseTest/g;
     eval $generated;
@@ -616,7 +616,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ElsifTest/g;
     eval $generated;
@@ -649,7 +649,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ForTest/g;
     eval $generated;
@@ -682,7 +682,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::DeepElsifTest/g;
     eval $generated;
@@ -722,7 +722,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixBodyTest/g;
     eval $generated;
@@ -758,7 +758,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixUnlessTest/g;
     eval $generated;
@@ -795,7 +795,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PostfixUntilTest/g;
     eval $generated;
@@ -832,7 +832,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UnlessElseTest/g;
     eval $generated;
@@ -869,7 +869,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ForArrayTest/g;
     eval $generated;
@@ -905,7 +905,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UnlessBinTest/g;
     eval $generated;
@@ -942,7 +942,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::UntilCmpTest/g;
     eval $generated;
@@ -979,7 +979,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::NextUnlessCfgTest/g;
     eval $generated;
@@ -1035,7 +1035,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::NoNextUnlessTest/g;
     eval $generated;
@@ -1085,7 +1085,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::LastUnlessCfgTest/g;
     eval $generated;
@@ -1140,7 +1140,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::LastIfCfgTest/g;
     eval $generated;
@@ -1176,7 +1176,7 @@ SKIP: {
 SKIP: {
     skip 'Perl grammar failed to parse', 1 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::BareNextTest/g;
     eval $generated;

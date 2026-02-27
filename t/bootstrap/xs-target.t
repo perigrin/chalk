@@ -9,18 +9,18 @@ use lib 'lib';
 # === Scaffold Tests ===
 
 # Test: Module loads
-use_ok('Chalk::Bootstrap::Target::XS');
+use_ok('Chalk::Bootstrap::BNF::Target::XS');
 
 # Test: isa Target
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     isa_ok($target, 'Chalk::Bootstrap::Target');
-    isa_ok($target, 'Chalk::Bootstrap::Target::XS');
+    isa_ok($target, 'Chalk::Bootstrap::BNF::Target::XS');
 }
 
 # Test: generate([]) returns a string with preamble and module declaration
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $output = $target->generate([]);
     like($output, qr/#define PERL_NO_GET_CONTEXT/, 'scaffold contains PERL_NO_GET_CONTEXT');
     like($output, qr/#include "EXTERN\.h"/, 'scaffold contains EXTERN.h');
@@ -32,7 +32,7 @@ use_ok('Chalk::Bootstrap::Target::XS');
 
 # Test: module_name is configurable
 {
-    my $target = Chalk::Bootstrap::Target::XS->new(module_name => 'Test::Module');
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'Test::Module');
     my $output = $target->generate([]);
     like($output, qr/MODULE = Test::Module/, 'configurable module name in MODULE =');
     like($output, qr/PACKAGE = Test::Module/, 'configurable module name in PACKAGE =');
@@ -41,44 +41,44 @@ use_ok('Chalk::Bootstrap::Target::XS');
 
 # Test: Invalid module names rejected at construction
 {
-    eval { Chalk::Bootstrap::Target::XS->new(module_name => "Foo'; system('bad')") };
+    eval { Chalk::Bootstrap::BNF::Target::XS->new(module_name => "Foo'; system('bad')") };
     like($@, qr/Invalid module name/, 'module name with quotes rejected');
 
-    eval { Chalk::Bootstrap::Target::XS->new(module_name => "../../../etc/passwd") };
+    eval { Chalk::Bootstrap::BNF::Target::XS->new(module_name => "../../../etc/passwd") };
     like($@, qr/Invalid module name/, 'module name with path traversal rejected');
 
-    eval { Chalk::Bootstrap::Target::XS->new(module_name => "Foo\nBar") };
+    eval { Chalk::Bootstrap::BNF::Target::XS->new(module_name => "Foo\nBar") };
     like($@, qr/Invalid module name/, 'module name with newline rejected');
 
-    eval { Chalk::Bootstrap::Target::XS->new(module_name => '') };
+    eval { Chalk::Bootstrap::BNF::Target::XS->new(module_name => '') };
     like($@, qr/Invalid module name/, 'empty module name rejected');
 
-    eval { Chalk::Bootstrap::Target::XS->new(module_name => 'Foo-Bar') };
+    eval { Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'Foo-Bar') };
     like($@, qr/Invalid module name/, 'module name with hyphen rejected');
 }
 
 # Test: Valid module names accepted
 {
-    my $t1 = Chalk::Bootstrap::Target::XS->new(module_name => 'Foo');
+    my $t1 = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'Foo');
     is($t1->module_name(), 'Foo', 'single-segment module name accepted');
 
-    my $t2 = Chalk::Bootstrap::Target::XS->new(module_name => 'Foo::Bar::Baz');
+    my $t2 = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'Foo::Bar::Baz');
     is($t2->module_name(), 'Foo::Bar::Baz', 'multi-segment module name accepted');
 
-    my $t3 = Chalk::Bootstrap::Target::XS->new(module_name => 'Foo_Bar::Baz2');
+    my $t3 = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'Foo_Bar::Baz2');
     is($t3->module_name(), 'Foo_Bar::Baz2', 'module name with underscores and digits accepted');
 }
 
 # Test: generate(undef) dies with useful error
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     eval { $target->generate(undef) };
     like($@, qr/generate\(\) requires an arrayref/, 'generate(undef) dies with useful error');
 }
 
 # Test: generate("not an array") dies with useful error
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     eval { $target->generate("not an array") };
     like($@, qr/generate\(\) requires an arrayref/, 'generate(non-arrayref) dies with useful error');
 }
@@ -86,7 +86,7 @@ use_ok('Chalk::Bootstrap::Target::XS');
 # === C String Escaping Tests ===
 
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 
     # Plain string — no escaping needed
     is($target->_escape_c_string('hello'), 'hello', 'plain string passes through');
@@ -152,7 +152,7 @@ use_ok('Chalk::Bootstrap::Target::XS');
 # === Terminal Delimiter Stripping ===
 
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 
     # Strip / delimiters from terminal value
     is($target->_strip_terminal_delimiters('/[A-Z]+/'), '[A-Z]+',
@@ -179,7 +179,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 
     # String constant → newSVpvs
     my $const = $factory->make('Constant', const_type => 'string', value => 'Grammar');
@@ -232,7 +232,7 @@ sub make_symbol {
 # Test: Reference symbol without quantifier
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
 
     my $nodes = $target->_emit_symbol($sym, 'sym_0');
@@ -240,12 +240,12 @@ sub make_symbol {
     is(scalar $nodes->@*, 2, '_emit_symbol returns 2 nodes (VarDecl + Statement)');
 
     # First node is a VarDecl
-    isa_ok($nodes->[0], 'Chalk::Bootstrap::Target::XS::AST::VarDecl');
+    isa_ok($nodes->[0], 'Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl');
     is($nodes->[0]->type(), 'SV *', 'VarDecl type is SV *');
     is($nodes->[0]->name(), 'sym_0', 'VarDecl name matches var_name arg');
 
     # Second node is a Statement with call_method block
-    isa_ok($nodes->[1], 'Chalk::Bootstrap::Target::XS::AST::Statement');
+    isa_ok($nodes->[1], 'Chalk::Bootstrap::BNF::Target::XS::AST::Statement');
     my $code = $nodes->[1]->code();
     like($code, qr/dSP/, 'call_method block has dSP');
     like($code, qr/ENTER; SAVETMPS/, 'call_method block has ENTER; SAVETMPS');
@@ -263,7 +263,7 @@ sub make_symbol {
 # Test: Terminal symbol — value has delimiters stripped and C-escaped
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
 
     my $nodes = $target->_emit_symbol($sym, 'sym_1');
@@ -276,7 +276,7 @@ sub make_symbol {
 # Test: Symbol with quantifier — block includes quantifier args
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'reference', value => 'Rule', quantifier => '+');
 
     my $nodes = $target->_emit_symbol($sym, 'sym_2');
@@ -288,7 +288,7 @@ sub make_symbol {
 # Test: Complex regex terminal — properly escaped in C string
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/(?:\\s|#[^\\n]*)*/');
 
     my $nodes = $target->_emit_symbol($sym, 'sym_3');
@@ -326,7 +326,7 @@ sub make_rule {
 # Test: Single-symbol expression lowering
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
     my $expr = make_expression($sym);
 
@@ -338,24 +338,24 @@ sub make_rule {
     ok(scalar $nodes->@* >= 4, '_emit_expression returns at least 4 nodes');
 
     # First node: VarDecl for AV *expr_0
-    isa_ok($nodes->[0], 'Chalk::Bootstrap::Target::XS::AST::VarDecl');
+    isa_ok($nodes->[0], 'Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl');
     is($nodes->[0]->type(), 'AV *', 'expression VarDecl type is AV *');
     is($nodes->[0]->name(), 'expr_0', 'expression VarDecl name is expr_0');
 
     # Second node: Statement for newAV()
-    isa_ok($nodes->[1], 'Chalk::Bootstrap::Target::XS::AST::Statement');
+    isa_ok($nodes->[1], 'Chalk::Bootstrap::BNF::Target::XS::AST::Statement');
     like($nodes->[1]->code(), qr/expr_0 = newAV\(\)/, 'expression init with newAV()');
 
     # Last node: av_push statement
     my $last = $nodes->[-1];
-    isa_ok($last, 'Chalk::Bootstrap::Target::XS::AST::Statement');
+    isa_ok($last, 'Chalk::Bootstrap::BNF::Target::XS::AST::Statement');
     like($last->code(), qr/av_push\(expr_0/, 'expression av_push to expr_0');
 }
 
 # Test: Multi-symbol expression
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym1 = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
     my $sym2 = make_symbol(type => 'terminal', value => '/::=/', quantifier => undef);
     my $expr = make_expression($sym1, $sym2);
@@ -364,7 +364,7 @@ sub make_rule {
 
     # Count av_push statements (one per symbol)
     my @pushes = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::Statement
         && $_->code() =~ /av_push/
     } $nodes->@*;
     is(scalar @pushes, 2, 'multi-symbol expression has 2 av_push statements');
@@ -375,7 +375,7 @@ sub make_rule {
 # Test: Single-alternative rule
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Identifier', $expr);
@@ -384,26 +384,26 @@ sub make_rule {
     is(ref($nodes), 'ARRAY', '_emit_rule returns arrayref');
 
     # Check for VarDecls: AV *expressions, SV *rule (at minimum)
-    my @var_decls = grep { $_ isa Chalk::Bootstrap::Target::XS::AST::VarDecl } $nodes->@*;
+    my @var_decls = grep { $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl } $nodes->@*;
     ok(scalar @var_decls >= 2, 'rule has at least 2 VarDecls');
 
     # Check for expressions = newAV()
     my @init_stmts = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::Statement
         && $_->code() =~ /expressions = newAV/
     } $nodes->@*;
     is(scalar @init_stmts, 1, 'rule has expressions = newAV() statement');
 
     # Check for av_push to expressions (one per alternative)
     my @expr_pushes = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::Statement
         && $_->code() =~ /av_push\(expressions/
     } $nodes->@*;
     is(scalar @expr_pushes, 1, 'single-alt rule has 1 av_push to expressions');
 
     # Check for call_method block constructing Rule
     my @rule_blocks = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::Statement
         && $_->code() =~ /Chalk::Grammar::Rule/
     } $nodes->@*;
     is(scalar @rule_blocks, 1, 'rule has call_method block for Rule constructor');
@@ -413,7 +413,7 @@ sub make_rule {
 
     # Check for RETVAL assignment
     my @retval = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::Statement
         && $_->code() =~ /RETVAL = rule/
     } $nodes->@*;
     is(scalar @retval, 1, 'rule has RETVAL = rule statement');
@@ -425,7 +425,7 @@ sub make_rule {
 # Test: Multi-alternative rule
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym1 = make_symbol(type => 'reference', value => 'Identifier', quantifier => undef);
     my $sym2 = make_symbol(type => 'reference', value => 'InlineRegex', quantifier => undef);
     my $expr1 = make_expression($sym1);
@@ -436,7 +436,7 @@ sub make_rule {
 
     # 2 alternatives → 2 av_pushes to expressions
     my @expr_pushes = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::Statement
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::Statement
         && $_->code() =~ /av_push\(expressions/
     } $nodes->@*;
     is(scalar @expr_pushes, 2, 'multi-alt rule has 2 av_pushes to expressions');
@@ -447,7 +447,7 @@ sub make_rule {
 # Test: Symbol/expression counters reset when _emit_rule is called multiple times
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 
     my $sym1 = make_symbol(type => 'reference', value => 'A', quantifier => undef);
     my $expr1 = make_expression($sym1);
@@ -464,13 +464,13 @@ sub make_rule {
     my $nodes2 = $target->_emit_rule($rule2);
 
     my @sym_decls = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::VarDecl
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl
         && $_->name() =~ /^sym_/
     } $nodes2->@*;
     is($sym_decls[0]->name(), 'sym_0', 'symbol counter resets between rules');
 
     my @expr_decls = grep {
-        $_ isa Chalk::Bootstrap::Target::XS::AST::VarDecl
+        $_ isa Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl
         && $_->name() =~ /^expr_/
     } $nodes2->@*;
     is($expr_decls[0]->name(), 'expr_0', 'expression counter resets between rules');
@@ -481,7 +481,7 @@ sub make_rule {
 # Test: Terminal regex values use newSVpvn with explicit length
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
     my $nodes = $target->_emit_symbol($sym, 'sym_0');
     my $code = $nodes->[1]->code();
@@ -498,7 +498,7 @@ sub make_rule {
 # interprets escape sequences (e.g. \\ → \), so the runtime byte count is smaller.
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 
     # /\d+/ strips to \d+ (3 bytes), C-escapes to \\d+ (4 chars in Perl source)
     # newSVpvn length MUST be 3 (pre-escaped), not 4 (post-escaped)
@@ -520,7 +520,7 @@ sub make_rule {
 # Test: Non-terminal values still use newSVpvs
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
     my $nodes = $target->_emit_symbol($sym, 'sym_0');
     my $code = $nodes->[1]->code();
@@ -534,13 +534,13 @@ sub make_rule {
 # Test: _emit_xsub wraps a rule in an XSUB AST node
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Identifier', $expr);
 
     my $xsub = $target->_emit_xsub($rule);
-    isa_ok($xsub, 'Chalk::Bootstrap::Target::XS::AST::XSUB', '_emit_xsub returns XSUB node');
+    isa_ok($xsub, 'Chalk::Bootstrap::BNF::Target::XS::AST::XSUB', '_emit_xsub returns XSUB node');
     is($xsub->name(), 'Identifier', 'XSUB name matches rule name');
     is($xsub->return_type(), 'SV *', 'XSUB return type is SV *');
 
@@ -554,7 +554,7 @@ sub make_rule {
 # Test: _emit_xsub rejects rule names that are not valid C identifiers
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 
     # Rule name with C injection attempt
     my $sym = make_symbol(type => 'reference', value => 'Atom', quantifier => undef);
@@ -592,7 +592,7 @@ sub make_rule {
 # Test: generate() with single rule produces valid XS with 1 XSUB
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Identifier', $expr);
@@ -613,7 +613,7 @@ sub make_rule {
 # Test: generate() with 2 rules produces XS with 2 XSUBs in order
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
 
     my $sym1 = make_symbol(type => 'terminal', value => '/[A-Za-z]+/', quantifier => undef);
     my $expr1 = make_expression($sym1);
@@ -645,7 +645,7 @@ use TestPipeline qw(optimized_pipeline);
     my $ir = optimized_pipeline();
     ok(defined $ir, 'optimized_pipeline returns IR');
 
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $output = $target->generate($ir);
 
     # Preamble and MODULE present
@@ -680,11 +680,11 @@ use TestPipeline qw(optimized_pipeline);
 # Test: Same input produces byte-identical output across regenerations
 {
     my $ir1 = optimized_pipeline();
-    my $target1 = Chalk::Bootstrap::Target::XS->new();
+    my $target1 = Chalk::Bootstrap::BNF::Target::XS->new();
     my $output1 = $target1->generate($ir1);
 
     my $ir2 = optimized_pipeline();
-    my $target2 = Chalk::Bootstrap::Target::XS->new();
+    my $target2 = Chalk::Bootstrap::BNF::Target::XS->new();
     my $output2 = $target2->generate($ir2);
 
     is($output1, $output2, 'XS output is deterministic across regenerations');
@@ -694,7 +694,7 @@ use TestPipeline qw(optimized_pipeline);
 
 # Test: _generate_pm_stub returns PMC stub with default module name
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $pmc = $target->_generate_pm_stub();
 
     like($pmc, qr/^# Generated by Chalk::Bootstrap compiler .* do not edit/, 'PMC has generated comment with do-not-edit');
@@ -708,7 +708,7 @@ use TestPipeline qw(optimized_pipeline);
 
 # Test: _generate_pm_stub uses configurable module name
 {
-    my $target = Chalk::Bootstrap::Target::XS->new(module_name => 'My::Custom::Module');
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'My::Custom::Module');
     my $pmc = $target->_generate_pm_stub();
 
     like($pmc, qr/package My::Custom::Module;/, 'PMC has custom package name');
@@ -718,21 +718,21 @@ use TestPipeline qw(optimized_pipeline);
 
 # Test: _module_path_prefix with default module name
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     is($target->_module_path_prefix(), 'lib/Chalk/Grammar/BNF/Rules',
         '_module_path_prefix returns correct path for default module');
 }
 
 # Test: _module_path_prefix with custom module name
 {
-    my $target = Chalk::Bootstrap::Target::XS->new(module_name => 'My::Custom::Module');
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'My::Custom::Module');
     is($target->_module_path_prefix(), 'lib/My/Custom/Module',
         '_module_path_prefix returns correct path for custom module');
 }
 
 # Test: _module_path_prefix with single-segment module name
 {
-    my $target = Chalk::Bootstrap::Target::XS->new(module_name => 'Foo');
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'Foo');
     is($target->_module_path_prefix(), 'lib/Foo',
         '_module_path_prefix returns correct path for single-segment module');
 }
@@ -741,7 +741,7 @@ use TestPipeline qw(optimized_pipeline);
 
 # Test: _generate_build_pl returns Module::Build script
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $build = $target->_generate_build_pl();
 
     like($build, qr/use Module::Build;/, 'Build.PL uses Module::Build');
@@ -759,7 +759,7 @@ use TestPipeline qw(optimized_pipeline);
 
 # Test: _generate_build_pl uses configurable module name
 {
-    my $target = Chalk::Bootstrap::Target::XS->new(module_name => 'My::Custom::Module');
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'My::Custom::Module');
     my $build = $target->_generate_build_pl();
 
     like($build, qr/module_name\s+=>\s+'My::Custom::Module'/, 'Build.PL has custom module_name');
@@ -775,7 +775,7 @@ use TestPipeline qw(optimized_pipeline);
 # Test: generate_distribution returns hashref with 3 keys
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Test', $expr);
@@ -795,7 +795,7 @@ use TestPipeline qw(optimized_pipeline);
 # Test: .xs content matches generate() output
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Test', $expr);
@@ -810,7 +810,7 @@ use TestPipeline qw(optimized_pipeline);
 # Test: .pm content matches _generate_pm_stub() output
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Test', $expr);
@@ -825,7 +825,7 @@ use TestPipeline qw(optimized_pipeline);
 # Test: Build.PL content matches _generate_build_pl() output
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Test', $expr);
@@ -840,7 +840,7 @@ use TestPipeline qw(optimized_pipeline);
 # Test: File paths derive from custom module name
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $target = Chalk::Bootstrap::Target::XS->new(module_name => 'My::Custom::Module');
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new(module_name => 'My::Custom::Module');
     my $sym = make_symbol(type => 'terminal', value => '/[A-Z]+/', quantifier => undef);
     my $expr = make_expression($sym);
     my $rule = make_rule('Test', $expr);
@@ -854,7 +854,7 @@ use TestPipeline qw(optimized_pipeline);
 
 # Test: generate_distribution with empty IR produces 3-key hashref
 {
-    my $target = Chalk::Bootstrap::Target::XS->new();
+    my $target = Chalk::Bootstrap::BNF::Target::XS->new();
     my $dist = $target->generate_distribution([]);
     is(ref($dist), 'HASH', 'empty IR distribution returns hashref');
     is(scalar keys $dist->%*, 3, 'empty IR distribution has 3 files');
@@ -868,7 +868,7 @@ use TestPipeline qw(optimized_pipeline);
     my @outputs;
     for my $i (1..3) {
         my $ir = optimized_pipeline();
-        my $target = Chalk::Bootstrap::Target::XS->new();
+        my $target = Chalk::Bootstrap::BNF::Target::XS->new();
         push @outputs, $target->generate($ir);
     }
 
@@ -879,11 +879,11 @@ use TestPipeline qw(optimized_pipeline);
 # Test: Full distribution determinism (all 3 files)
 {
     my $ir1 = optimized_pipeline();
-    my $target1 = Chalk::Bootstrap::Target::XS->new();
+    my $target1 = Chalk::Bootstrap::BNF::Target::XS->new();
     my $dist1 = $target1->generate_distribution($ir1);
 
     my $ir2 = optimized_pipeline();
-    my $target2 = Chalk::Bootstrap::Target::XS->new();
+    my $target2 = Chalk::Bootstrap::BNF::Target::XS->new();
     my $dist2 = $target2->generate_distribution($ir2);
 
     for my $key (sort keys $dist1->%*) {

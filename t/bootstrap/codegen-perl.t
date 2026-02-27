@@ -15,12 +15,12 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 # === Step 2: Scaffold ===
 
 # Test 1: Module loads
-use_ok('Chalk::Bootstrap::Target::Perl');
+use_ok('Chalk::Bootstrap::BNF::Target::Perl');
 
 # Test 2: isa Target
-my $target = Chalk::Bootstrap::Target::Perl->new();
+my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
 isa_ok($target, 'Chalk::Bootstrap::Target');
-isa_ok($target, 'Chalk::Bootstrap::Target::Perl');
+isa_ok($target, 'Chalk::Bootstrap::BNF::Target::Perl');
 
 # Test 3: generate([]) returns string with preamble
 {
@@ -202,14 +202,14 @@ sub make_rule {
 
 # Test: generate(undef) dies with useful error
 {
-    my $target_neg = Chalk::Bootstrap::Target::Perl->new();
+    my $target_neg = Chalk::Bootstrap::BNF::Target::Perl->new();
     eval { $target_neg->generate(undef); };
     like($@, qr/generate\(\) requires an arrayref/, 'generate(undef) dies with useful error');
 }
 
 # Test: generate("not an array") dies with useful error
 {
-    my $target_neg = Chalk::Bootstrap::Target::Perl->new();
+    my $target_neg = Chalk::Bootstrap::BNF::Target::Perl->new();
     eval { $target_neg->generate("not an array"); };
     like($@, qr/generate\(\) requires an arrayref/, 'generate(non-arrayref) dies with useful error');
 }
@@ -231,7 +231,7 @@ sub make_rule {
     my $expr2b = make_expression($sym2b);
     my $rule2 = make_rule('Atom', $expr2a, $expr2b);
 
-    my $target2 = Chalk::Bootstrap::Target::Perl->new();
+    my $target2 = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $output = $target2->generate([$rule1, $rule2]);
 
     like($output, qr/push \@rules.*Identifier/s, 'generate() includes Identifier rule');
@@ -272,7 +272,7 @@ sub make_rule {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-    my $target_dist = Chalk::Bootstrap::Target::Perl->new();
+    my $target_dist = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $dist = $target_dist->generate_distribution([]);
     is(ref($dist), 'HASH', 'generate_distribution returns hashref');
 

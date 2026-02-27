@@ -638,7 +638,7 @@ for my $preserve_rule (qw(Program StatementList)) {
 # ========================================================================
 use TestPipeline qw(perl_pipeline);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
@@ -651,7 +651,7 @@ my $ir = perl_pipeline();
 SKIP: {
     skip 'Perl grammar failed to parse', 15 unless defined $ir;
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::StructuralInteg/g;
     eval $generated;

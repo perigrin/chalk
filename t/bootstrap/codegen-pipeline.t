@@ -8,7 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(build_parser parse_ir bnf_text);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Reset factory for clean state
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -70,7 +70,7 @@ SKIP: {
 
     # === Code Generation ===
 
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated_code = $target->generate($ir);
 
     ok(defined $generated_code, 'generate() returns defined output');
@@ -138,7 +138,7 @@ SKIP: {
     SKIP: {
         skip 'IR parse failed, cannot test disk sync', 2 unless defined $ir;
 
-        my $target = Chalk::Bootstrap::Target::Perl->new();
+        my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
         my $generated_code = $target->generate($ir);
 
         ok(defined $generated_code, 'generated code from pipeline');

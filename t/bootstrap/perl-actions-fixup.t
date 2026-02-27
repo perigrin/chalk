@@ -9,14 +9,14 @@ use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $raw_ir = perl_pipeline();
 ok(defined $raw_ir, 'perl_pipeline produces grammar IR');
 
-my $target = Chalk::Bootstrap::Target::Perl->new();
+my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $generated = $target->generate($raw_ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::FixupTest/g;
 eval $generated;

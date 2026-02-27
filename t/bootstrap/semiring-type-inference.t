@@ -250,13 +250,13 @@ my sub make_item($rule_name, $value) {
 # ========================================================================
 
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::Target::Perl;
+use Chalk::Bootstrap::BNF::Target::Perl;
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parser build_perl_ir_parser);
 
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIRegexTest/g;
     eval $generated;
@@ -322,7 +322,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIUnaryTest/g;
     eval $generated;
@@ -813,7 +813,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIBuiltinTest/g;
     eval $generated;
@@ -934,7 +934,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $ir = perl_pipeline();
-    my $target = Chalk::Bootstrap::Target::Perl->new();
+    my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $generated = $target->generate($ir);
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::TIBuiltinIRTest/g;
     eval $generated;
