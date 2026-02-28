@@ -6,6 +6,7 @@ use experimental 'class';
 
 use Chalk::Bootstrap::Terminal;
 use Chalk::Bootstrap::CoreItemIndex;
+use Chalk::Bootstrap::LR0DFA;
 
 class Chalk::Bootstrap::Earley {
     field $grammar  :param :reader;
@@ -16,6 +17,9 @@ class Chalk::Bootstrap::Earley {
 
     # Core item index: maps (rule_name, alt_idx, dot) to small integer IDs
     field $core_index;
+
+    # LR(0) DFA for prediction clustering
+    field $lr0_dfa;
 
     # Secondary indexes for O(1) lookup during complete/advance
     # Reset at the start of each parse.
@@ -49,6 +53,14 @@ class Chalk::Bootstrap::Earley {
         # Build core item index from grammar
         $core_index = Chalk::Bootstrap::CoreItemIndex->new();
         $core_index->build_from_grammar($grammar);
+
+        # Build LR(0) DFA for prediction clustering
+        $lr0_dfa = Chalk::Bootstrap::LR0DFA->new(
+            grammar    => $grammar,
+            core_index => $core_index,
+            rule_table => $rule_table,
+        );
+        $lr0_dfa->build();
     }
 
     # GC statistics accessor
@@ -263,20 +275,20 @@ class Chalk::Bootstrap::Earley {
         return $self->_run_parse($input);
     }
 
-    # Predict: add items for all alternatives of a nonterminal
+    # Predict: add items for all alternatives of a nonterminal using
+    # pre-computed LR(0) DFA epsilon-closure prediction items.
     method _predict($symbol, $pos, $chart, $agenda) {
         my $rule_name = $symbol->value();
-        my $rule = $rule_table->{$rule_name};
+        my $prediction_items = $lr0_dfa->prediction_items_for($rule_name);
+        return unless defined $prediction_items;
 
-        return unless defined $rule;
-
-        for my $alt_idx (0 .. $rule->expressions()->$#*) {
-            my $core_id = $core_index->id_for($rule_name, $alt_idx, 0);
-
+        for my $core_id ($prediction_items->@*) {
             unless ($self->_chart_has($chart, $pos, $core_id, $pos)) {
-                my $item = $self->_make_item($rule, $alt_idx, 0, $pos, $semiring->one());
-                $self->_chart_set($chart, $pos, $core_id, $pos, [$item, $alt_idx]);
-                push $agenda->@*, [$item, $alt_idx];
+                my $info = $core_index->item_for($core_id);
+                my $rule = $rule_table->{$info->{rule_name}};
+                my $item = $self->_make_item($rule, $info->{alt_idx}, 0, $pos, $semiring->one());
+                $self->_chart_set($chart, $pos, $core_id, $pos, [$item, $info->{alt_idx}]);
+                push $agenda->@*, [$item, $info->{alt_idx}];
             }
         }
     }
