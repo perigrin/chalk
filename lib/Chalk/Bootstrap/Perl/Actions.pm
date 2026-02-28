@@ -2136,8 +2136,95 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §6 WhileStatement — not needed for Tier C (no while loops in these files)
+    # §6 WhileStatement ::= /(?:while|until)\b/ _ ParenExpr _ Block
+    # Returns CFG Loop node for control flow dispatch
     method WhileStatement($ctx) {
+        my @leaves = _collect_ir_leaves($ctx);
+        my $keyword;
+        my $condition;
+        my $body;
+
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            my $rule = $leaf->rule() // '';
+
+            # The keyword is a plain string leaf (from regex scan), not a Constant node
+            if (!defined $keyword && defined $focus && !ref($focus)
+                    && $focus =~ /^(?:while|until)$/) {
+                $keyword = $focus;
+            } elsif (defined $keyword && !defined $condition) {
+                # First IR node after keyword is the condition (from ParenExpr/Expression)
+                if ($focus isa Chalk::Bootstrap::IR::Node) {
+                    $condition = $focus;
+                } elsif (ref($focus) eq 'ARRAY' && $focus->@*) {
+                    # ParenExpr may produce an array; take first element as condition
+                    $condition = $focus->[0];
+                }
+            } elsif (defined $condition && !defined $body && ref($focus) eq 'ARRAY') {
+                # Block body
+                $body = $focus;
+            }
+        }
+
+        return undef unless defined $keyword && defined $condition;
+
+        $body = _fixup_stmts($factory, $body // []);
+
+        # Build CFG nodes: Loop/If/Proj/Region for control flow
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my $pre_loop_scope = $state->{scope};
+
+                my $loop = $factory->make('Loop',
+                    entry_ctrl    => $state->{control},
+                    backedge_ctrl => undef,
+                );
+                my $if_node = $factory->make('If',
+                    control   => $loop,
+                    condition => $condition,
+                );
+                my $body_proj = $factory->make('Proj', source => $if_node, index => 0);
+                my $exit_proj = $factory->make('Proj', source => $if_node, index => 1);
+
+                # Collect body variable references for Phi creation
+                my $body_var_refs = $collect_body_var_refs->($body);
+
+                my %body_final_bindings;
+                for my $leaf (_collect_ir_leaves($ctx)) {
+                    my $leaf_state = $sa->cfg_state($leaf);
+                    if (defined $leaf_state && defined $leaf_state->{scope}) {
+                        for my $name ($leaf_state->{scope}->variable_names()) {
+                            my $binding = $leaf_state->{scope}->lookup($name);
+                            $body_final_bindings{$name} = $binding if defined $binding;
+                        }
+                    }
+                }
+
+                $_loop_body_var_refs{refaddr($loop)} = {
+                    phi_vars            => $body_var_refs,
+                    body_final_bindings => \%body_final_bindings,
+                };
+
+                my $post_loop_scope = $pre_loop_scope;
+
+                my $region = $factory->make('Region',
+                    controls => [$exit_proj],
+                );
+                $sa->update_cfg({
+                    control    => $region,
+                    scope      => $post_loop_scope,
+                    body_stmts => $body,
+                    loop       => $loop,
+                    loop_if    => $if_node,
+                    body_proj  => $body_proj,
+                    exit_proj  => $exit_proj,
+                });
+                return $loop;
+            }
+        }
+
         return undef;
     }
 

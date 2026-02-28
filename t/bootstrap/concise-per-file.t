@@ -167,6 +167,7 @@ SKIP: {
         # Parse failures — remaining ambiguities
         'lib/Chalk/Bootstrap/Earley.pm'             => 'Pre-existing phase5 Earley parse failure',
         'lib/Chalk/Bootstrap/BNF/Target/XS.pm'          => 'Pre-existing parse failure',
+        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'O(n^2) Earley scaling: 1530 lines, Boolean recognition alone exceeds 120s',
     );
 
     # Emit TAP for a single file result

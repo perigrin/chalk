@@ -89,6 +89,75 @@ SKIP: {
         is($control ? $control->operation() : 'undef', 'Region',
             'control after postfix for is Region');
     }
+
+    # --- Test 3: while loop produces Loop CFG node via parse-time cfg_state ---
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $result = $parser->parse_value('my $x = 1; while ($x > 0) { $x; }');
+        ok(defined $result, 'while loop parses');
+
+        my $sem_ctx = $result->[4];
+        ok(defined $sem_ctx, 'while: SemanticAction context exists');
+
+        # cfg_state should reflect the Loop/If/Region CFG structure
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'while: cfg_state returns state');
+
+        # The control should be a Region (loop exit)
+        my $control = $state->{control};
+        is($control->operation(), 'Region', 'while: control after while is Region (loop exit)');
+
+        SKIP: {
+            skip 'while: Region structure not available', 5
+                unless $control->operation() eq 'Region';
+
+            # Walk up: Region's controls -> Proj -> If -> Loop
+            my $controls = $control->inputs()->[0];
+            is(ref($controls), 'ARRAY', 'while: Region has controls array');
+            ok(scalar($controls->@*) >= 1, 'while: Region has at least 1 control input');
+
+            my $exit_proj = $controls->[0];
+            is($exit_proj->operation(), 'Proj', 'while: exit control is a Proj');
+
+            my $if_node = $exit_proj->inputs()->[0];
+            is($if_node->operation(), 'If', 'while: Proj source is an If node');
+
+            my $loop_node = $if_node->inputs()->[0];
+            is($loop_node->operation(), 'Loop', 'while: If controlled by Loop node');
+        }
+    }
+
+    # --- Test 4: while loop body has cfg_state with loop key ---
+    # This is critical for XS emission: body stmts need loop in cfg_state
+    # so the emitter knows to wrap them in a C while() loop.
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring->reset_cache();
+
+        my $result = $parser->parse_value('my $x = 1; while ($x > 0) { $x; }');
+        ok(defined $result, 'while body cfg: parses');
+
+        my $sem_ctx = $result->[4];
+        ok(defined $sem_ctx, 'while body cfg: context exists');
+
+        my $state = $sa->cfg_state($sem_ctx);
+        ok(defined $state, 'while body cfg: has cfg_state');
+
+        # The cfg_state should have loop-related keys for the emitter
+        ok(defined $state->{loop}, 'while body cfg: state has loop key');
+        SKIP: {
+            skip 'while body cfg: loop key not present', 6
+                unless defined $state->{loop};
+            is($state->{loop}->operation(), 'Loop', 'while body cfg: loop is a Loop node');
+            ok(defined $state->{loop_if}, 'while body cfg: state has loop_if key');
+            ok(defined $state->{body_proj}, 'while body cfg: state has body_proj key');
+            ok(defined $state->{exit_proj}, 'while body cfg: state has exit_proj key');
+            ok(defined $state->{body_stmts}, 'while body cfg: state has body_stmts key');
+            ok(ref($state->{body_stmts}) eq 'ARRAY', 'while body cfg: body_stmts is arrayref');
+        }
+    }
 }
 
 done_testing();
