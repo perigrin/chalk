@@ -179,6 +179,7 @@ class Chalk::Bootstrap::Earley {
                 push @agenda, values $core_hash->%*;
             }
             my %processed;
+            my %predicted_at;  # Track which rules have been predicted at this pos
 
             while (my $entry = shift @agenda) {
                 my ($item, $alt_idx) = $entry->@*;
@@ -225,7 +226,7 @@ class Chalk::Bootstrap::Earley {
                         $waiting_for{$w_rule}{$pos} //= [];
                         push $waiting_for{$w_rule}{$pos}->@*, [$core_id, $origin];
                         # Predict
-                        $self->_predict($symbol, $pos, \@chart, \@agenda);
+                        $self->_predict($symbol, $pos, \@chart, \@agenda, \%predicted_at);
                         # Advance from already-completed items at this position.
                         # When a nullable nonterminal (e.g. _) appears multiple
                         # times in a rule, the second prediction is suppressed
@@ -296,8 +297,17 @@ class Chalk::Bootstrap::Earley {
 
     # Predict: add items for all alternatives of a nonterminal using
     # pre-computed LR(0) DFA epsilon-closure prediction items.
-    method _predict($symbol, $pos, $chart, $agenda) {
+    # Tracks which rules have been predicted at each position to avoid
+    # re-iterating the prediction set (up to 133 items) on redundant calls.
+    method _predict($symbol, $pos, $chart, $agenda, $predicted_at = undef) {
         my $rule_name = $symbol->value();
+
+        # Skip if this rule was already predicted at this position
+        if (defined $predicted_at) {
+            return if $predicted_at->{$rule_name};
+            $predicted_at->{$rule_name} = true;
+        }
+
         my $prediction_items = $lr0_dfa->prediction_items_for($rule_name);
         return unless defined $prediction_items;
 
