@@ -28,6 +28,19 @@ class Chalk::Bootstrap::Earley {
     field %waiting_for;
     field %completed_at;
 
+    # Leo items: {rule_name}{pos} = $leo_item
+    # A Leo item represents a chain of deterministic completions,
+    # reducing O(n) items per recursive chain to O(1).
+    field %leo_items;
+
+    # Whether the semiring supports Leo optimization (cached at construction)
+    field $_leo_enabled;
+
+    # Minimum position referenced by waiting_for entries and Leo item origins
+    # (tracked incrementally to avoid O(n) scan at every GC step)
+    field $_waiting_for_min;
+    field $_leo_origin_min;
+
     # Compiled regex cache: pattern_string => qr// object
     field %regex_cache;
 
@@ -49,6 +62,9 @@ class Chalk::Bootstrap::Earley {
         for my $rule ($grammar->@*) {
             $rule_table->{$rule->name()} = $rule;
         }
+
+        # Cache whether Leo optimization is supported by this semiring
+        $_leo_enabled = ($semiring->can('supports_leo') && $semiring->supports_leo()) ? true : false;
 
         # Build core item index from grammar
         $core_index = Chalk::Bootstrap::CoreItemIndex->new();
@@ -132,6 +148,9 @@ class Chalk::Bootstrap::Earley {
         # Reset secondary indexes for this parse
         %waiting_for = ();
         %completed_at = ();
+        %leo_items = ();
+        $_waiting_for_min = 0;
+        $_leo_origin_min = undef;
         %_gc_stats = (positions_freed => 0);
         @_gc_min_origin_at = ();
         $_gc_current_pos = undef;
@@ -223,18 +242,18 @@ class Chalk::Bootstrap::Earley {
                 }
             }
 
-            # Safe-set chart GC: determine the safe floor by checking which
-            # positions are still referenced by waiting_for entries.
-            # _complete reads chart[$origin] to find waiting items, so any
-            # position that has waiting items must stay alive.
+            # Safe-set chart GC: determine the safe floor using incrementally
+            # tracked minimum positions. _complete reads chart[$origin] to
+            # find waiting items, so any position that has waiting items must
+            # stay alive. $_waiting_for_min is updated when entries are added
+            # to %waiting_for, avoiding O(n) scan per position.
             {
                 my $safe_floor = $pos;
-                # Find minimum position still referenced by waiting_for
-                for my $rule_waits (values %waiting_for) {
-                    for my $wait_pos (keys $rule_waits->%*) {
-                        $safe_floor = $wait_pos if $wait_pos < $safe_floor;
-                    }
-                }
+                # Use incrementally tracked minimums from waiting_for and Leo items
+                $safe_floor = $_waiting_for_min
+                    if defined $_waiting_for_min && $_waiting_for_min < $safe_floor;
+                $safe_floor = $_leo_origin_min
+                    if defined $_leo_origin_min && $_leo_origin_min < $safe_floor;
                 # Also check future items placed by scanning
                 if (defined $_gc_future_min && $_gc_future_min < $safe_floor) {
                     $safe_floor = $_gc_future_min;
@@ -357,16 +376,81 @@ class Chalk::Bootstrap::Earley {
 
     # Complete: combine completed items with items waiting for them.
     # Uses %waiting_for index for O(1) lookup instead of scanning the full chart.
+    # Leo optimization: when a completion is deterministic (exactly one waiting
+    # item, at penultimate position), create a Leo item that represents the
+    # entire chain of completions in O(1) instead of O(n).
     method _complete($completed_item, $completed_alt_idx, $pos, $chart, $agenda) {
         my $rule_name = $completed_item->{rule}->name();
         my $origin = $completed_item->{origin};
+
+        # Leo resolution: check if a Leo item exists for this rule at origin.
+        # Leo items are keyed by (rule_name, origin) where origin is where the
+        # waiting items live. When a completion has this origin, the Leo item
+        # shortcuts the entire chain to the top.
+        # Leo is only used when the semiring supports it (on_complete must be
+        # trivial / identity for correctness — non-trivial on_complete would
+        # be skipped for intermediate chain steps).
+        my $leo_resolved_core_id;
+        my $leo_resolved_origin;
+        if ($_leo_enabled
+            && (my $leo = $leo_items{$rule_name}{$origin})) {
+            my $combined = $semiring->multiply($leo->{value}, $completed_item->{value});
+            unless ($semiring->is_zero($combined)) {
+                my $top = $leo->{top_item};
+                my $top_alt = $leo->{top_alt};
+                my $new_item = $self->_make_item(
+                    $top->{rule},
+                    $top_alt,
+                    $top->{dot} + 1,
+                    $top->{origin},
+                    $combined,
+                );
+                my $new_core_id = $new_item->{core_id};
+                my $new_origin = $new_item->{origin};
+
+                if ($self->_chart_has($chart, $pos, $new_core_id, $new_origin)) {
+                    my $existing = $self->_chart_get($chart, $pos, $new_core_id, $new_origin)->[0];
+                    my $merged_value;
+                    try {
+                        $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+                    } catch ($e) {
+                        die "Ambiguity resolving Leo item for '$rule_name': $e";
+                    }
+                    my $merged_item = $self->_make_item(
+                        $existing->{rule}, $top_alt,
+                        $existing->{dot}, $existing->{origin}, $merged_value,
+                    );
+                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $top_alt]);
+                } else {
+                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $top_alt]);
+                    push $agenda->@*, [$new_item, $top_alt];
+                }
+            }
+            # Track which waiting item the Leo covered so we skip it below.
+            # Use the immediate waiting item identity (wait_core_id/wait_origin),
+            # not top_item — after chain extension, top_item may be at a distant
+            # origin that doesn't match the actual waiting item at this position.
+            $leo_resolved_core_id = $leo->{wait_core_id};
+            $leo_resolved_origin = $leo->{wait_origin};
+        }
 
         # Look up items at origin that are waiting for this rule name
         my $waiting_refs = $waiting_for{$rule_name}{$origin};
         return unless defined $waiting_refs;
 
+        # Count non-zero waiting items and track the single candidate for Leo
+        my $eligible_count = 0;
+        my $leo_candidate_entry;
+        my $leo_candidate_value;
+
         for my $wref ($waiting_refs->@*) {
             my ($w_core_id, $w_origin) = $wref->@*;
+
+            # Skip the waiting item already handled by Leo resolution above
+            next if defined $leo_resolved_core_id
+                && $w_core_id == $leo_resolved_core_id
+                && $w_origin  == $leo_resolved_origin;
+
             my $entry = $self->_chart_get($chart, $origin, $w_core_id, $w_origin);
             next unless defined $entry;
             my ($waiting_item, $waiting_alt_idx) = $entry->@*;
@@ -415,6 +499,62 @@ class Chalk::Bootstrap::Earley {
             } else {
                 $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $waiting_alt_idx]);
                 push $agenda->@*, [$new_item, $waiting_alt_idx];
+            }
+
+            # Track Leo eligibility: count non-zero waiting items
+            $eligible_count++;
+            $leo_candidate_entry = $entry;
+            $leo_candidate_value = $new_value;
+        }
+
+        # Leo creation: if exactly one waiting item produced a non-zero result
+        # AND no Leo item was already resolved (deterministic = total 1 waiter),
+        # and advancing it would make it complete (penultimate position),
+        # create a Leo item keyed at the origin position.
+        if ($eligible_count == 1 && !defined $leo_resolved_core_id
+            && $_leo_enabled) {
+            my ($waiting_item, $waiting_alt_idx) = $leo_candidate_entry->@*;
+            my $advanced_dot = $waiting_item->{dot} + 1;
+            my $alt = $waiting_item->{rule}->expressions()->[$waiting_alt_idx];
+
+            # Penultimate check: after advancing, the item would be complete
+            if ($advanced_dot >= scalar $alt->@*) {
+                # Check if there's already a Leo item in the chain we can extend
+                my $w_rule_name = $waiting_item->{rule}->name();
+                my $top_item;
+                my $top_alt;
+                my $chain_value;
+
+                if (my $parent_leo = $leo_items{$w_rule_name}{$waiting_item->{origin}}) {
+                    # Extend existing Leo chain: use the top of the parent chain
+                    $top_item = $parent_leo->{top_item};
+                    $top_alt = $parent_leo->{top_alt};
+                    $chain_value = $semiring->multiply($parent_leo->{value}, $completed_item->{value});
+                } else {
+                    # Start new Leo chain
+                    $top_item = $waiting_item;
+                    $top_alt = $waiting_alt_idx;
+                    $chain_value = $leo_candidate_value;
+                }
+
+                # Store Leo item at $origin (where the waiting items live).
+                # Future completions of $rule_name with this origin will resolve
+                # the chain in O(1).
+                # wait_core_id/wait_origin track the immediate waiting item
+                # so _complete can skip it (distinct from top_item after chain extension).
+                $leo_items{$rule_name}{$origin} = {
+                    leo          => true,
+                    rule_name    => $rule_name,
+                    origin       => $top_item->{origin},
+                    value        => $chain_value,
+                    top_item     => $top_item,
+                    top_alt      => $top_alt,
+                    wait_core_id => $waiting_item->{core_id},
+                    wait_origin  => $waiting_item->{origin},
+                };
+                # Track minimum Leo origin for GC
+                $_leo_origin_min = $top_item->{origin}
+                    if !defined $_leo_origin_min || $top_item->{origin} < $_leo_origin_min;
             }
         }
     }

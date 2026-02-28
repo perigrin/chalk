@@ -59,4 +59,10 @@ class Chalk::Bootstrap::Semiring::Boolean {
     method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
         return true;
     }
+
+    # Leo optimization is safe for Boolean: on_complete is identity,
+    # multiply is associative, skipping intermediate completions is correct.
+    method supports_leo() {
+        return true;
+    }
 }
