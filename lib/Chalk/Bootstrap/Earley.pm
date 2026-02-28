@@ -30,8 +30,15 @@ class Chalk::Bootstrap::Earley {
     # GC statistics for the most recent parse
     field %_gc_stats;
 
-    # Per-position minimum origin for safe GC decisions (used by GC in Phase 2)
+    # Per-position minimum origin for safe GC decisions
     field @_gc_min_origin_at;
+
+    # Current position being processed (for GC tracking in _chart_set)
+    field $_gc_current_pos;
+
+    # Minimum origin across items at positions > $_gc_current_pos
+    # Updated by _chart_set when items are placed at future positions
+    field $_gc_future_min;
 
     ADJUST {
         $rule_table = {};
@@ -60,9 +67,14 @@ class Chalk::Bootstrap::Earley {
 
     method _chart_set($chart, $pos, $core_id, $origin, $entry) {
         $chart->[$pos]{$core_id}{$origin} = $entry;
-        # Track minimum origin across all chart positions for safe GC
+        # Track minimum origin per position for GC
         $_gc_min_origin_at[$pos] = $origin
             if !defined $_gc_min_origin_at[$pos] || $origin < $_gc_min_origin_at[$pos];
+        # Track minimum origin across future positions (items placed by scan)
+        if (defined $_gc_current_pos && $pos > $_gc_current_pos) {
+            $_gc_future_min = $origin
+                if !defined $_gc_future_min || $origin < $_gc_future_min;
+        }
     }
 
     # Earley item: {rule, alt_idx, core_id, dot, origin, value}
@@ -110,6 +122,8 @@ class Chalk::Bootstrap::Earley {
         %completed_at = ();
         %_gc_stats = (positions_freed => 0);
         @_gc_min_origin_at = ();
+        $_gc_current_pos = undef;
+        $_gc_future_min = undef;
 
         # Find the start rule (first rule in grammar)
         my $start_rule = $grammar->[0];
@@ -120,8 +134,14 @@ class Chalk::Bootstrap::Earley {
             $self->_chart_set(\@chart, 0, $item->{core_id}, 0, [$item, $alt_idx]);
         }
 
+        # GC tracking
+        my $oldest_live_pos = 0;
+
         # Process each chart position
         for my $pos (0 .. $n) {
+            $_gc_current_pos = $pos;
+            $_gc_future_min = undef;  # Reset for this position
+
             # Build agenda from all entries at this position
             my @agenda;
             for my $core_hash (values $chart[$pos]->%*) {
@@ -191,7 +211,31 @@ class Chalk::Bootstrap::Earley {
                 }
             }
 
-            # Chart GC will be added in Phase 2
+            # Safe-set chart GC: determine the safe floor by checking which
+            # positions are still referenced by waiting_for entries.
+            # _complete reads chart[$origin] to find waiting items, so any
+            # position that has waiting items must stay alive.
+            {
+                my $safe_floor = $pos;
+                # Find minimum position still referenced by waiting_for
+                for my $rule_waits (values %waiting_for) {
+                    for my $wait_pos (keys $rule_waits->%*) {
+                        $safe_floor = $wait_pos if $wait_pos < $safe_floor;
+                    }
+                }
+                # Also check future items placed by scanning
+                if (defined $_gc_future_min && $_gc_future_min < $safe_floor) {
+                    $safe_floor = $_gc_future_min;
+                }
+                for my $gc_pos ($oldest_live_pos .. $safe_floor - 1) {
+                    next if $gc_pos >= $pos;
+                    if (keys $chart[$gc_pos]->%*) {
+                        $chart[$gc_pos] = {};
+                        $_gc_stats{positions_freed}++;
+                    }
+                }
+                $oldest_live_pos = $safe_floor if $safe_floor > $oldest_live_pos;
+            }
         }
 
         # Check if we have a completed start rule spanning entire input
