@@ -152,12 +152,9 @@ for my $target (qw(_chart_has _chart_get _symbol_after_dot _is_complete _run_par
     ok((grep { $_ eq $target } @native_methods), "$target compiles natively");
 }
 
-# Methods still needing work
+# All methods now compile natively (after try/catch cfg_lookup fix)
 for my $target (qw(_complete)) {
-    TODO: {
-        local $TODO = "CFG nodes not dispatching through cfg_lookup";
-        ok((grep { $_ eq $target } @native_methods), "$target compiles natively");
-    }
+    ok((grep { $_ eq $target } @native_methods), "$target compiles natively");
 }
 
 done_testing();

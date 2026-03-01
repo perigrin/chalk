@@ -80,6 +80,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}) {
                     $_cfg_lookup{refaddr($ir_node)} = $state;
                 }
+                # For try/catch, also register by try_node refaddr. The Context
+                # extract() may return undef or ARRAY (stale-value merge), but
+                # the TryCatchStmt Constructor in state->{try_node} is what
+                # appears as VarDecl init in the IR tree.
+                if (defined $state->{try_node} && ref($state->{try_node})
+                        && !exists $_cfg_lookup{refaddr($state->{try_node})}) {
+                    $_cfg_lookup{refaddr($state->{try_node})} = $state;
+                }
             }
             push @stack, reverse $node->children()->@*;
         }
@@ -595,6 +603,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         my $body = $state->{body_stmts};
                         $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
                     }
+                    if (defined $state->{try_node}) {
+                        # Recurse into try and catch bodies
+                        my $try = $state->{try_stmts};
+                        $self->_collect_var_decls($try, $declared_vars) if ref($try) eq 'ARRAY';
+                        my $catch = $state->{catch_stmts};
+                        $self->_collect_var_decls($catch, $declared_vars) if ref($catch) eq 'ARRAY';
+                        # Register catch variable
+                        my $catch_var = $state->{catch_var};
+                        if (defined $catch_var) {
+                            my $cv = $catch_var;
+                            $cv =~ s/^[\$\@\%]//;
+                            $declared_vars->{$cv} = true;
+                        }
+                    }
                     next;
                 }
             }
@@ -606,6 +628,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $var = $item->inputs()->[0]->value();
                 $var =~ s/^[\$\@\%]//;
                 $declared_vars->{$var} = true;
+                # VarDecl with TryCatchStmt init: recurse into try/catch bodies
+                my $init = $item->inputs()->[1];
+                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $init->class() eq 'TryCatchStmt') {
+                    my $state = $_cfg_lookup{refaddr($init)};
+                    if (defined $state) {
+                        my $try = $state->{try_stmts};
+                        $self->_collect_var_decls($try, $declared_vars) if ref($try) eq 'ARRAY';
+                        my $catch = $state->{catch_stmts};
+                        $self->_collect_var_decls($catch, $declared_vars) if ref($catch) eq 'ARRAY';
+                        my $catch_var = $state->{catch_var};
+                        if (defined $catch_var) {
+                            my $cv = $catch_var;
+                            $cv =~ s/^[\$\@\%]//;
+                            $declared_vars->{$cv} = true;
+                        }
+                    }
+                }
             }
         }
     }
@@ -665,7 +705,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             if ($class eq 'VarDecl')         { return $self->_emit_xs_var_decl($node, $declared_vars); }
             if ($class eq 'ReturnStmt')      { return $self->_emit_xs_return_stmt($node, $declared_vars, $is_last); }
-            if ($class eq 'DieCall')         { return $self->_emit_xs_die_call($node); }
+            if ($class eq 'DieCall')         { return $self->_emit_xs_die_call($node, $declared_vars); }
             if ($class eq 'CompoundAssign')  { return $self->_emit_xs_compound_assign_stmt($node, $declared_vars); }
 
             # Expression types used as statements (side effects)
@@ -716,6 +756,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'ReturnStmt') {
                 my $inner = $node->inputs()->[0];
                 return $self->_emit_xs_expr($inner, $declared_vars);
+            }
+
+            # DieCall used as expression: stale-value merge artifact.
+            # Emit croak in a statement expression — croak never returns.
+            if ($class eq 'DieCall') {
+                my $croak = $self->_emit_xs_die_call($node, $declared_vars);
+                return "({ $croak &PL_sv_undef; })";
             }
         }
 
@@ -1183,6 +1230,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $init = $node->inputs()->[1];
 
         if (defined $init) {
+            # TryCatchStmt as VarDecl init is a stale-value merge artifact.
+            # The variable is declared with undef, then assigned inside the
+            # try block. Split into: declare var, then emit try/catch statement.
+            if ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $init->class() eq 'TryCatchStmt') {
+                my $try_stmt = $self->_emit_xs_stmt($init, $declared_vars);
+                return "${var}_sv = &PL_sv_undef;\n$try_stmt";
+            }
             my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
             return "${var}_sv = $init_expr;";
         }
@@ -1205,11 +1260,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     }
 
     # Emit DieCall as croak
-    method _emit_xs_die_call($node) {
+    method _emit_xs_die_call($node, $declared_vars = undef) {
         my $args = $node->inputs()->[0];
         my $msg = '';
         if (ref($args) eq 'ARRAY' && $args->@*) {
-            $msg = $self->_escape_c_string($args->[0]->value());
+            my $first = $args->[0];
+            if ($first isa Chalk::Bootstrap::IR::Node::Constant) {
+                $msg = $self->_escape_c_string($first->value());
+            } elsif (defined $declared_vars) {
+                # Non-constant arg (e.g. string interpolation): emit as expression
+                my $expr = $self->_emit_xs_expr($first, $declared_vars);
+                return "croak(\"%s\", SvPV_nolen($expr));";
+            }
         }
         return "croak(\"%s\", \"$msg\");";
     }
