@@ -135,13 +135,13 @@ SKIP: {
     my $ecode2 = eval { $exs2->generate_with_cfg($eir, $esa, $ectx) };
     ok(defined $ecode2, 'Earley.pm XS generated for ADJUST test');
 
-    # The BOOT block should contain eval_pv with ADJUST
-    like($ecode2, qr/eval_pv.*ADJUST/s,
-        'BOOT block contains eval_pv with ADJUST keyword');
+    # The BOOT block should register ADJUST via class_add_ADJUST
+    like($ecode2, qr/class_add_ADJUST/s,
+        'BOOT block contains class_add_ADJUST call');
 
-    # The ADJUST eval_pv should appear BEFORE the outer LEAVE
+    # The ADJUST registration should appear BEFORE the outer LEAVE
     # (which seals the class)
-    my ($adjust_pos) = ($ecode2 =~ /(.*)eval_pv.*ADJUST/s);
+    my ($adjust_pos) = ($ecode2 =~ /(.*)class_add_ADJUST/s);
     my ($leave_pos)  = ($ecode2 =~ /(.*)LEAVE;/s);
     if (defined $adjust_pos && defined $leave_pos) {
         ok(length($adjust_pos) < length($leave_pos),

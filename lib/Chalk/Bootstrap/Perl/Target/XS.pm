@@ -266,13 +266,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             if (@body_lines) {
                 my $adjust_body = join("\n        ", @body_lines);
+                # Compile ADJUST body as an anonymous sub, then register it
+                # via class_add_ADJUST. eval_pv("sub { ... }") returns a
+                # coderef; SvRV extracts the CV for registration.
                 my $escaped_body = $self->_escape_c_string(
                     "package $module_name; use 5.42.0; use utf8; "
                     . "no warnings 'experimental::class'; "
-                    . "ADJUST {\n        $adjust_body\n    }"
+                    . "sub {\n        $adjust_body\n    }"
                 );
                 push @lines, '    /* Register ADJUST block within class scope */';
-                push @lines, "    eval_pv(\"$escaped_body\", TRUE);";
+                push @lines, '    {';
+                push @lines, "        SV *adjust_ref = eval_pv(\"$escaped_body\", TRUE);";
+                push @lines, '        Perl_class_add_ADJUST(aTHX_ stash, (CV*)SvRV(adjust_ref));';
+                push @lines, '    }';
                 push @lines, '';
             }
         }
@@ -391,6 +397,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, 'extern void Perl_class_set_field_defop(pTHX_ PADNAME *pn, int defmode, OP *defop);';
         push @lines, 'extern void Perl_class_apply_attributes(pTHX_ HV *stash, OP *attrlist);';
         push @lines, 'extern void Perl_class_apply_field_attributes(pTHX_ PADNAME *pn, OP *attrlist);';
+        push @lines, 'extern void Perl_class_add_ADJUST(pTHX_ HV *stash, CV *cv);';
         push @lines, '';
 
         push @lines, "MODULE = $module_name  PACKAGE = $module_name";
