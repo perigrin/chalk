@@ -650,8 +650,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     );
                 }
                 if (defined $state->{try_node}) {
-                    # try/catch has no direct C equivalent; trigger eval_pv fallback
-                    return "NULL /* unsupported */";
+                    return $self->emit_cfg_try_catch(
+                        $state->{try_stmts}   // [],
+                        $state->{catch_var},
+                        $state->{catch_stmts} // [],
+                        $declared_vars,
+                    );
                 }
             }
         }
@@ -1402,6 +1406,37 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@lines;
     }
 
+    # Emit C try/catch using JMPENV_PUSH/POP (setjmp/longjmp).
+    # try body runs when ret == 0, catch body runs when ret != 0.
+    # The catch variable is bound to ERRSV (Perl's $@).
+    method emit_cfg_try_catch($try_stmts, $catch_var, $catch_stmts, $declared_vars) {
+        my @lines;
+        push @lines, "{";
+        push @lines, "    dJMPENV;";
+        push @lines, "    int ret;";
+        push @lines, "    JMPENV_PUSH(ret);";
+        push @lines, "    if (ret == 0) {";
+        for my $stmt ($try_stmts->@*) {
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+            push @lines, "        $code" if defined $code;
+        }
+        push @lines, "        JMPENV_POP;";
+        push @lines, "    }";
+        push @lines, "    if (ret != 0) {";
+        push @lines, "        JMPENV_POP;";
+        # Bind catch variable to ERRSV
+        my $var_name = $catch_var;
+        $var_name =~ s/^\$//;
+        push @lines, "        SV *${var_name} = ERRSV;";
+        for my $stmt ($catch_stmts->@*) {
+            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+            push @lines, "        $code" if defined $code;
+        }
+        push @lines, "    }";
+        push @lines, "}";
+        return join("\n", @lines);
+    }
+
     # Convert an IR default value node to a Perl literal string for PM stub
     method _ir_default_to_perl($node) {
         return undef unless defined $node;
@@ -1529,9 +1564,14 @@ Module::Build->new(
             );
         }
 
-        # Try/catch: no direct C equivalent, trigger eval_pv fallback
+        # Try/catch: emit JMPENV_PUSH/POP C code
         if (defined $state->{try_node}) {
-            return "NULL /* unsupported */";
+            return $self->emit_cfg_try_catch(
+                $state->{try_stmts}   // [],
+                $state->{catch_var},
+                $state->{catch_stmts} // [],
+                $declared_vars,
+            );
         }
 
         return;
