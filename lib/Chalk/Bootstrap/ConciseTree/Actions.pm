@@ -1334,6 +1334,11 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
+    # §9 TryCatchStatement — try/catch error handling; no compile-time ops
+    method TryCatchStatement($ctx) {
+        return Chalk::Bootstrap::ConciseTree->new();
+    }
+
     # §10 AttributeList — no runtime ops
     method AttributeList($ctx) {
         return Chalk::Bootstrap::ConciseTree->new();

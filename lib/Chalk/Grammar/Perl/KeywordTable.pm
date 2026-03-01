@@ -22,6 +22,7 @@ class Chalk::Grammar::Perl::KeywordTable {
         use class sub method ADJUST package
         if unless elsif else
         while until for foreach
+        try catch
         my our state local field
         BEGIN CHECK UNITCHECK INIT END
         not and or xor
@@ -75,6 +76,8 @@ class Chalk::Grammar::Perl::KeywordTable {
         'local'     => [qw(VariableDeclaration)],
         'field'     => [qw(VariableDeclaration)],
         'ADJUST'    => [qw(AdjustBlock)],
+        'try'       => [qw(TryCatchStatement)],
+        'catch'     => [qw(TryCatchStatement)],
         'not'       => [qw(UnaryExpression)],
         'undef'     => [qw(Literal)],
         'true'      => [qw(Literal)],

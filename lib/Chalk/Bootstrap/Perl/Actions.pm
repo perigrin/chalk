@@ -971,6 +971,11 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
+    # §9 TryCatchStatement — try/catch error handling
+    method TryCatchStatement($ctx) {
+        return undef;
+    }
+
     # §10 AttributeList ::= WS Attribute | AttributeList WS Attribute
     # Returns arrayref of _Attribute Constructor nodes
     method AttributeList($ctx) {
