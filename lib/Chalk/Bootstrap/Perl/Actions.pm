@@ -972,7 +972,64 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §9 TryCatchStatement — try/catch error handling
+    # Grammar: /try\b/ _ Block _ /catch\b/ _ /\(/ _ ScalarVariable _ /\)/ _ Block
+    # Children: Block (try body), ScalarVariable (catch var), Block (catch body)
     method TryCatchStatement($ctx) {
+        my @leaves = _collect_ir_leaves($ctx);
+        my $try_body;
+        my $catch_var;
+        my $catch_body;
+
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+
+            if (ref($focus) eq 'ARRAY' && !defined $try_body) {
+                # First arrayref is try_body (from Block)
+                $try_body = $focus;
+            } elsif ($focus isa Chalk::Bootstrap::IR::Node::Constant && !defined $catch_var) {
+                # Constant node is the catch variable name
+                $catch_var = $focus->value();
+            } elsif (ref($focus) eq 'ARRAY' && defined $try_body) {
+                # Second arrayref is catch_body (from Block)
+                $catch_body = $focus;
+            }
+        }
+
+        return undef unless defined $try_body;
+
+        # Apply fixup to bodies
+        $try_body = _fixup_stmts($factory, $try_body);
+        $catch_body = _fixup_stmts($factory, $catch_body // []);
+        $catch_var //= '$_';
+
+        # Build cfg_state with try_node key (same pattern as IfStatement)
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $state = $sa->inherited_cfg_state($ctx);
+            if (defined $state) {
+                my $catch_var_const = $factory->make('Constant',
+                    const_type => 'variable',
+                    value      => $catch_var,
+                );
+                my $try_node = $factory->make('Constructor',
+                    'class'     => 'TryCatchStmt',
+                    try_body    => $try_body,
+                    catch_var   => $catch_var_const,
+                    catch_body  => $catch_body,
+                );
+
+                $sa->update_cfg({
+                    control     => $state->{control},
+                    scope       => $state->{scope},
+                    try_node    => $try_node,
+                    try_stmts   => $try_body,
+                    catch_var   => $catch_var,
+                    catch_stmts => $catch_body,
+                });
+                return $try_node;
+            }
+        }
+
         return undef;
     }
 

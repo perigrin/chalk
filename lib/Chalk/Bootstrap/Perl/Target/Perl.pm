@@ -45,7 +45,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         while (@stack) {
             my $node = pop @stack;
             my $state = $sa->cfg_state($node);
-            if (defined $state && (defined $state->{if_node} || defined $state->{loop})) {
+            if (defined $state && (defined $state->{if_node} || defined $state->{loop} || defined $state->{try_node})) {
                 my $ir_node = $node->extract();
                 # Only register IR nodes that are directly associated with
                 # control flow — not parent nodes (ClassDecl, MethodDecl,
@@ -105,7 +105,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Statement-level types that handle their own formatting (no auto-semicolon)
     my %STATEMENT_TYPES = map { $_ => 1 } qw(
         Program UseDecl ClassDecl MethodDecl ReturnStmt DieCall FieldDecl
-        VarDecl CompoundAssign
+        VarDecl CompoundAssign TryCatchStmt
     );
 
     # Expression types that need semicolons when used as statements
@@ -147,6 +147,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                         $state->{body_stmts} // [],
                         $state->{iterator},
                         $state->{list},
+                    );
+                }
+                if (defined $state->{try_node}) {
+                    return $self->emit_cfg_try_catch(
+                        $state->{try_stmts}   // [],
+                        $state->{catch_var},
+                        $state->{catch_stmts} // [],
                     );
                 }
             }
@@ -702,6 +709,40 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             );
         }
 
+        # Try/catch: cfg_state has try_node
+        if (defined $state->{try_node}) {
+            return $self->emit_cfg_try_catch(
+                $state->{try_stmts}   // [],
+                $state->{catch_var},
+                $state->{catch_stmts} // [],
+            );
+        }
+
         return;
+    }
+
+    # Emit Perl try { ... } catch ($var) { ... } from cfg_state.
+    method emit_cfg_try_catch($try_stmts, $catch_var, $catch_stmts) {
+        my @lines;
+        push @lines, "try {";
+        for my $stmt ($try_stmts->@*) {
+            my $code = $self->_emit_node($stmt);
+            if (defined $code) {
+                for my $line (split /\n/, $code) {
+                    push @lines, "    $line";
+                }
+            }
+        }
+        push @lines, "} catch ($catch_var) {";
+        for my $stmt ($catch_stmts->@*) {
+            my $code = $self->_emit_node($stmt);
+            if (defined $code) {
+                for my $line (split /\n/, $code) {
+                    push @lines, "    $line";
+                }
+            }
+        }
+        push @lines, "}";
+        return join("\n", @lines);
     }
 }

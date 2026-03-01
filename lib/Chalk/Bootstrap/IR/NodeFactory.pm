@@ -69,6 +69,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:RegexSubst'      => ['target', 'pattern', 'replacement', 'flags'],
         'Constructor:BuiltinCall'     => ['name', 'args'],
         'Constructor:BacktickExpr'    => ['command'],
+        'Constructor:TryCatchStmt'    => ['try_body', 'catch_var', 'catch_body'],
     );
 
     # Get singleton instance
