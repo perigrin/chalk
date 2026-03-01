@@ -126,7 +126,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $item->class() eq 'FieldDecl') {
                 my $name_node = $item->inputs()->[0];
                 my $field_name = $name_node->value();
-                $field_name =~ s/^\$//;  # Strip sigil
+                $field_name =~ s/^[\$\@\%]//;  # Strip sigil
                 $field_map{$field_name} = $index++;
             }
         }
@@ -518,8 +518,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # PREINIT section for variable declarations
         push @lines, '  PREINIT:';
-        push @lines, '    HV *hash;';
-        push @lines, '    SV **svp;';
         for my $var (sort keys %declared_vars) {
             next if $var eq 'hash';
             next if $var =~ /^param:/;  # method params are XS parameters, not PREINIT vars
@@ -528,7 +526,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # CODE section
         push @lines, '  CODE:';
-        push @lines, '    hash = (HV*)SvRV(self);';
         for my $stmt (@code) {
             for my $line (split /\n/, $stmt) {
                 push @lines, "    $line";
@@ -813,9 +810,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $idx = $field_map->{$var};
                 return "ObjectFIELDS(SvRV(self))[$idx]";
             }
-            # Package global or unknown variable — use old hv_fetch pattern
+            # Package global or unknown variable — use get_sv for package lookup
             my $escaped = $self->_escape_c_string($var);
-            return "((svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0)) ? *svp : &PL_sv_undef)";
+            return "get_sv(\"${module_name}::$escaped\", GV_ADD)";
         }
 
         # Numeric values — sv_2mortal prevents leaks when used as sub-expressions
@@ -865,7 +862,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $src = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "(svp = hv_fetch(hash, \"$escaped\", " . bytes::length($var) . ", 0)) ? *svp : &PL_sv_undef";
+                    $src = "get_sv(\"${module_name}::$escaped\", GV_ADD)";
                 }
                 if ($first) {
                     push @stmts, "SV *_r = newSVsv($src)";
