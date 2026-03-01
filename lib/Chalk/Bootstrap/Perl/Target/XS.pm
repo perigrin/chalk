@@ -651,7 +651,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 }
                 if (defined $state->{try_node}) {
                     # try/catch has no direct C equivalent; trigger eval_pv fallback
-                    return "NULL /* unsupported: try/catch */";
+                    return "NULL /* unsupported */";
                 }
             }
         }
@@ -1531,7 +1531,7 @@ Module::Build->new(
 
         # Try/catch: no direct C equivalent, trigger eval_pv fallback
         if (defined $state->{try_node}) {
-            return "NULL /* unsupported: try/catch */";
+            return "NULL /* unsupported */";
         }
 
         return;

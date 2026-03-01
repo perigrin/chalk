@@ -503,7 +503,7 @@ test_file(
     file       => 'lib/Chalk/Bootstrap/Earley.pm',
     label      => 'Earley.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::Earley',
-    skip_build => 'TryCatchStatement IR generation not yet implemented',
+    skip_build => 'try/catch methods use eval_pv fallback (no direct C equivalent)',
 );
 
 test_file(
