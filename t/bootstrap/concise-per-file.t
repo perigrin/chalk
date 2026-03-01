@@ -165,7 +165,6 @@ SKIP: {
         'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm' => 'Lexical subs produce introcv/clonecv ops we do not emit',
         'lib/Chalk/Bootstrap/Optimizer.pm'              => 'push $passes->@* op sequence mismatch with native push opcode',
         # Parse failures — remaining ambiguities
-        'lib/Chalk/Bootstrap/Earley.pm'             => 'entertrycatch/catch/poptry/leavetrycatch op order may not match B::Concise exactly',
         'lib/Chalk/Bootstrap/BNF/Target/XS.pm'          => 'Pre-existing parse failure',
         'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'O(n^2) Earley scaling: 1530 lines, Boolean recognition alone exceeds 120s',
     );
