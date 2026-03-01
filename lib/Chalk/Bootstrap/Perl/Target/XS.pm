@@ -526,11 +526,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $last_is_return = (defined $last_item
             && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
             && $last_item->class() eq 'ReturnStmt');
-        my $has_return = $last_is_return || $self->_body_contains_return($body);
+        # Detect tail-position expressions: a bare expression as the final
+        # body item is treated as a return value (IR strips explicit return
+        # in tail position). Statement-like nodes are excluded.
+        my %void_classes = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign);
+        my $tail_expr_return = (!$last_is_return
+            && defined $last_item
+            && scalar $body->@* == 1
+            && !(  $last_item isa Chalk::Bootstrap::IR::Node::Constructor
+                && $void_classes{$last_item->class()})
+            );
+        my $has_return = $last_is_return || $tail_expr_return || $self->_body_contains_return($body);
 
         # Track C variable declarations needed
         my %declared_vars;
-        $declared_vars{hash} = true;  # always need hash for self access
 
         # Track method parameters as declared vars before body emission,
         # so _emit_xs_const_expr can resolve them as C parameters
