@@ -224,32 +224,31 @@ SKIP: {
     my $fallback_target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Calculator');
     my $fallback_xs = $fallback_target->generate_with_cfg($fallback_ir, $fallback_sa, $fallback_sem_ctx);
 
-    # Test 38: multiply() currently uses eval_pv fallback because IR doesn't properly
-    # resolve field access in return expressions yet. This will be fixed in a future component.
-    unlike($fallback_xs, qr/SV \*\s+multiply\(self, x\)/,
-        'multiply() NOT emitted as XSUB (field access in expression not yet supported)');
-    like($fallback_xs, qr/eval_pv\("sub Calculator::multiply/,
-        'multiply() uses eval_pv fallback for now');
+    # multiply() emits as native XSUB using ObjectFIELDS for field access
+    like($fallback_xs, qr/multiply\(self, x\)/,
+        'multiply() emitted as native XSUB');
+    like($fallback_xs, qr/ObjectFIELDS\(SvRV\(self\)\)\[\d+\]/,
+        'multiply() uses ObjectFIELDS for field access');
 
-    # Test 39: check_type() also needs fallback because $obj param access broken in IR
-    unlike($fallback_xs, qr/SV \*\s+check_type\(self, obj\)/,
-        'check_type() NOT emitted as XSUB (param access in expression not yet supported)');
-    like($fallback_xs, qr/eval_pv\("sub Calculator::check_type/,
-        'check_type() uses eval_pv fallback for now');
+    # check_type() emits as native XSUB using sv_derived_from_sv for isa
+    like($fallback_xs, qr/check_type\(self, obj\)/,
+        'check_type() emitted as native XSUB');
+    like($fallback_xs, qr/sv_derived_from_sv/,
+        'check_type() uses sv_derived_from_sv for isa operator');
 
-    # Test 40: call_coderef() has unsupported construct - should use eval_pv fallback
-    unlike($fallback_xs, qr/SV \*\s+call_coderef\(self, f\)/,
-        'call_coderef() NOT emitted as XSUB (coderef invocation unsupported)');
-    like($fallback_xs, qr/eval_pv\("sub Calculator::call_coderef/,
-        'call_coderef() emitted as eval_pv fallback in BOOT block');
+    # call_coderef() emits as native XSUB using call_sv for coderef invocation
+    like($fallback_xs, qr/call_coderef\(self, f\)/,
+        'call_coderef() emitted as native XSUB');
+    like($fallback_xs, qr/call_sv\(f,/,
+        'call_coderef() uses call_sv for coderef invocation');
 
-    # Test 41: Verify eval_pv call is in BOOT block
-    like($fallback_xs, qr/BOOT:.*eval_pv\("sub Calculator::call_coderef/s,
-        'eval_pv fallback call is in BOOT block');
+    # No eval_pv fallbacks needed for these methods
+    unlike($fallback_xs, qr/eval_pv\("sub Calculator::(multiply|check_type|call_coderef)/,
+        'no eval_pv fallback needed for any Calculator methods');
 
-    # Test 42: Verify eval_pv contains method signature stub
-    like($fallback_xs, qr/eval_pv\("sub Calculator::call_coderef \{[^}]*\}"/,
-        'eval_pv fallback contains method body stub');
+    # Verify methods appear as proper XSUB signatures
+    like($fallback_xs, qr/^SV \*\nmultiply\(self, x\)/m,
+        'multiply() has proper XSUB return type and signature');
 }
 
 done_testing();
