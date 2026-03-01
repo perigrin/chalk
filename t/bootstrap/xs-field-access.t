@@ -124,4 +124,31 @@ SKIP: {
         or diag("Earley fields using hv_fetch: " . join(', ', @earley_fallbacks));
 }
 
+# --- Test 8: ADJUST block emission for Earley.pm ---
+# Earley.pm has an ADJUST block that builds rule_table, core_index, lr0_dfa.
+# This must be emitted as eval_pv("ADJUST { ... }") inside the BOOT block
+# BEFORE the LEAVE that seals the class.
+SKIP: {
+    skip 'Earley.pm parse failed', 3 unless defined $eir;
+
+    my $exs2 = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::Earley2');
+    my $ecode2 = eval { $exs2->generate_with_cfg($eir, $esa, $ectx) };
+    ok(defined $ecode2, 'Earley.pm XS generated for ADJUST test');
+
+    # The BOOT block should contain eval_pv with ADJUST
+    like($ecode2, qr/eval_pv.*ADJUST/s,
+        'BOOT block contains eval_pv with ADJUST keyword');
+
+    # The ADJUST eval_pv should appear BEFORE the outer LEAVE
+    # (which seals the class)
+    my ($adjust_pos) = ($ecode2 =~ /(.*)eval_pv.*ADJUST/s);
+    my ($leave_pos)  = ($ecode2 =~ /(.*)LEAVE;/s);
+    if (defined $adjust_pos && defined $leave_pos) {
+        ok(length($adjust_pos) < length($leave_pos),
+            'ADJUST eval_pv appears before final LEAVE');
+    } else {
+        fail('ADJUST eval_pv appears before final LEAVE');
+    }
+}
+
 done_testing();

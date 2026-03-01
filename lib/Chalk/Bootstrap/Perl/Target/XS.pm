@@ -12,6 +12,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;
     field $field_map;  # hashref: field name => index (set during _emit_xs)
     field %_cfg_lookup;  # IR node refaddr → cfg_state entry, built by generate_with_cfg
+    field $_sa;  # SemanticAction instance, set during generate_with_cfg
+    field $_ctx; # Context root, set during generate_with_cfg
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -46,15 +48,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             && $ir->class() eq 'Program';
 
         %_cfg_lookup = ();
+        $_sa = $sa;
+        $_ctx = $ctx;
         $self->_build_cfg_lookup($sa, $ctx);
         my $code = $self->_emit_xs($ir);
         %_cfg_lookup = ();
+        $_sa = undef;
+        $_ctx = undef;
         return $code;
     }
 
     # Generate distribution with cfg_state-aware dispatch.
     method generate_distribution_with_cfg($ir, $sa, $ctx) {
         %_cfg_lookup = ();
+        $_sa = $sa;
+        $_ctx = $ctx;
         $self->_build_cfg_lookup($sa, $ctx);
 
         my $xs_path = $self->_module_path_prefix() . '.xs';
@@ -66,6 +74,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         };
 
         %_cfg_lookup = ();
+        $_sa = undef;
+        $_ctx = undef;
         return $result;
     }
 
@@ -139,7 +149,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Field attributes (:param, :reader, :writer) are applied via class_apply_field_attributes.
     # Field defaults are set via class_set_field_defop with op_next cleared.
     # Also emits eval_pv fallback calls for methods that can't be compiled to XS.
-    method _emit_xs_boot_block($class_decl, $field_map, $fallback_methods = []) {
+    method _emit_xs_boot_block($class_decl, $field_map, $fallback_methods = [], $sa = undef, $ctx = undef) {
         my @lines;
         push @lines, 'BOOT:';
         push @lines, '{';
@@ -213,6 +223,59 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, '    }';
         }
         push @lines, '';
+
+        # 4. Emit ADJUST block for class body statements (non-field, non-method)
+        # These are statements from ADJUST { ... } that leaked into the class body
+        # because AdjustBlock action returns undef. Emit as eval_pv inside class scope.
+        my @adjust_stmts;
+        for my $item ($body->@*) {
+            next if $item isa Chalk::Bootstrap::IR::Node::Constructor
+                 && ($item->class() eq 'FieldDecl' || $item->class() eq 'MethodDecl');
+            push @adjust_stmts, $item;
+        }
+
+        if (@adjust_stmts) {
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            # Build cfg_lookup for the Perl target so it can emit Loop/If nodes
+            if (defined $_sa && defined $_ctx) {
+                $perl_target->_build_cfg_lookup($_sa, $_ctx);
+            }
+
+            # Build set of field variable names for stripping 'my' from
+            # VarDecl nodes that are really field assignments inside ADJUST
+            my %field_vars;
+            for my $item ($body->@*) {
+                if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $item->class() eq 'FieldDecl') {
+                    $field_vars{$item->inputs()->[0]->value()} = true;
+                }
+            }
+
+            my @body_lines;
+            for my $stmt (@adjust_stmts) {
+                my $perl_code = $perl_target->_emit_node($stmt);
+                if (defined $perl_code) {
+                    # Strip 'my' from field variable assignments — inside ADJUST,
+                    # fields are already in scope as pad variables
+                    if ($perl_code =~ /^my (\$\w+) =/ && $field_vars{$1}) {
+                        $perl_code =~ s/^my //;
+                    }
+                    push @body_lines, $perl_code;
+                }
+            }
+
+            if (@body_lines) {
+                my $adjust_body = join("\n        ", @body_lines);
+                my $escaped_body = $self->_escape_c_string(
+                    "package $module_name; use 5.42.0; use utf8; "
+                    . "no warnings 'experimental::class'; "
+                    . "ADJUST {\n        $adjust_body\n    }"
+                );
+                push @lines, '    /* Register ADJUST block within class scope */';
+                push @lines, "    eval_pv(\"$escaped_body\", TRUE);";
+                push @lines, '';
+            }
+        }
 
         # Outer LEAVE triggers SAVEDESTRUCTOR_X which calls class_seal_stash
         push @lines, '    LEAVE;';
