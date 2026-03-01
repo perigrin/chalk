@@ -456,11 +456,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines;
         my @code;
 
-        # Determine if the method returns a value (last item is ReturnStmt)
+        # Determine if the method returns a value.
+        # Check last item directly, but also check for returns anywhere
+        # in the body (e.g., early returns inside if-blocks).
         my $last_item = $body->[-1];
-        my $has_return = (defined $last_item
+        my $last_is_return = (defined $last_item
             && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
             && $last_item->class() eq 'ReturnStmt');
+        my $has_return = $last_is_return || $self->_body_contains_return($body);
 
         # Track C variable declarations needed
         my %declared_vars;
@@ -488,6 +491,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $is_last = ($idx == $body->@* - 1);
             my $stmt = $self->_emit_xs_stmt($body->[$idx], \%declared_vars, $is_last);
             push @code, $stmt if defined $stmt;
+        }
+
+        # When the method has returns (from early return branches) but the
+        # last statement is a bare expression, wrap it as RETVAL assignment
+        # so the XS OUTPUT section can return it.
+        if ($has_return && !$last_is_return && @code) {
+            my $last_code = $code[-1];
+            # Strip trailing semicolon from bare expression statement
+            if ($last_code =~ s/;\s*$//) {
+                $code[-1] = "RETVAL = $last_code;";
+            }
         }
 
         if ($has_return) {
@@ -1015,6 +1029,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             ? $self->_emit_xs_expr($target, $declared_vars)
             : 'self';
 
+        # Check if this deref is used in AV/HV context (push, foreach, etc.)
+        # vs SV context (variable assignment). Callers that need AV*/HV*
+        # explicitly check for the cast prefix and handle it.
         if ($sigil eq '@') { return "(AV*)SvRV($tgt)"; }
         if ($sigil eq '%') { return "(HV*)SvRV($tgt)"; }
         return "SvRV($tgt)";
@@ -1239,6 +1256,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 return "${var}_sv = &PL_sv_undef;\n$try_stmt";
             }
             my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
+            # PostfixDerefExpr ->@* and ->%* return (AV*) / (HV*) casts.
+            # VarDecl targets are SV*, so cast to avoid type mismatch.
+            if ($init_expr =~ /^\((?:AV|HV)\*\)/) {
+                $init_expr = "(SV*)$init_expr";
+            }
             return "${var}_sv = $init_expr;";
         }
         return "${var}_sv = &PL_sv_undef;";
@@ -1393,9 +1415,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # Variable list: iterate existing AV
                 my $list_expr = $self->_emit_xs_expr($list, $declared_vars);
                 push @lines, "{";
-                push @lines, "    SV *_list_sv = $list_expr;";
-                push @lines, "    if (!SvROK(_list_sv)) croak(\"Not an ARRAY reference\");";
-                push @lines, "    AV *_av = (AV*)SvRV(_list_sv);";
+                # PostfixDerefExpr ->@* already returns (AV*)SvRV(...),
+                # so skip the SV* intermediate to avoid type mismatch.
+                if ($list_expr =~ /^\(AV\*\)/) {
+                    push @lines, "    AV *_av = $list_expr;";
+                } else {
+                    push @lines, "    SV *_list_sv = $list_expr;";
+                    push @lines, "    if (!SvROK(_list_sv)) croak(\"Not an ARRAY reference\");";
+                    push @lines, "    AV *_av = (AV*)SvRV(_list_sv);";
+                }
                 push @lines, "    SSize_t _len = av_len(_av) + 1;";
                 push @lines, "    SSize_t _i;";
                 push @lines, "    for (_i = 0; _i < _len; _i++) {";
