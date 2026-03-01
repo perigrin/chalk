@@ -41,6 +41,11 @@ class Chalk::Bootstrap::Earley {
     field $_waiting_for_min;
     field $_leo_origin_min;
 
+    # Scan result cache: {pos}{pattern_string} => $end_pos (or undef)
+    # Avoids redundant regex matching when multiple items scan the same
+    # terminal at the same position (28% of scans are duplicates, 93% fail).
+    field %_scan_cache;
+
     # Compiled regex cache: pattern_string => qr// object
     field %regex_cache;
 
@@ -149,6 +154,7 @@ class Chalk::Bootstrap::Earley {
         %waiting_for = ();
         %completed_at = ();
         %leo_items = ();
+        %_scan_cache = ();
         $_waiting_for_min = 0;
         $_leo_origin_min = undef;
         %_gc_stats = (positions_freed => 0);
@@ -263,6 +269,7 @@ class Chalk::Bootstrap::Earley {
                     next if $gc_pos >= $pos;
                     if (keys $chart[$gc_pos]->%*) {
                         $chart[$gc_pos] = {};
+                        delete $_scan_cache{$gc_pos};
                         $_gc_stats{positions_freed}++;
                     }
                 }
@@ -325,8 +332,16 @@ class Chalk::Bootstrap::Earley {
     # Scan: match terminal and advance to next position
     method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $n, $agenda = undef) {
         my $pattern_str = $symbol->value();
-        my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
-        my $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+
+        # Check scan result cache before attempting regex match
+        my $end_pos;
+        if (exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pattern_str}) {
+            $end_pos = $_scan_cache{$pos}{$pattern_str};
+        } else {
+            my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
+            $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+            $_scan_cache{$pos}{$pattern_str} = $end_pos;
+        }
 
         return unless defined $end_pos;
 
