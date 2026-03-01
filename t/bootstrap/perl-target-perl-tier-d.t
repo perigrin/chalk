@@ -614,8 +614,8 @@ test_perl_file(
 
 test_perl_file(
     file       => 'lib/Chalk/Bootstrap/Earley.pm',
-    label      => 'Earley.pm (expected parse failure)',
-    todo_parse => 'Earley.pm uses try/catch which is not in grammar yet',
+    label      => 'Earley.pm',
+    todo_parse => 'TryCatchStatement bodies silently dropped (action returns undef)',
 );
 
 test_perl_file(

@@ -501,9 +501,9 @@ test_file(
 
 test_file(
     file       => 'lib/Chalk/Bootstrap/Earley.pm',
-    label      => 'Earley.pm (expected parse failure)',
+    label      => 'Earley.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::Earley',
-    todo_parse => 'Earley.pm uses try/catch which is not in grammar yet',
+    skip_build => 'TryCatchStatement IR generation not yet implemented',
 );
 
 test_file(

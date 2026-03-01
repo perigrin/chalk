@@ -165,7 +165,7 @@ SKIP: {
         'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm' => 'Lexical subs produce introcv/clonecv ops we do not emit',
         'lib/Chalk/Bootstrap/Optimizer.pm'              => 'push $passes->@* op sequence mismatch with native push opcode',
         # Parse failures — remaining ambiguities
-        'lib/Chalk/Bootstrap/Earley.pm'             => 'Pre-existing phase5 Earley parse failure',
+        'lib/Chalk/Bootstrap/Earley.pm'             => 'TryCatchStatement ConciseTree action returns empty tree',
         'lib/Chalk/Bootstrap/BNF/Target/XS.pm'          => 'Pre-existing parse failure',
         'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'O(n^2) Earley scaling: 1530 lines, Boolean recognition alone exceeds 120s',
     );
