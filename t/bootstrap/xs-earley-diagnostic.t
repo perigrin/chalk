@@ -138,17 +138,24 @@ if (defined $class_decl) {
 
 # Assertions: track progress toward all-native goal
 ok(scalar(@native_methods) >= 6, 'at least 6 methods compile natively');
-is(scalar(@fallback_methods), 7, '7 methods still need fallback');
+
+# Track fallback count — decreases as we implement more constructs
+ok(scalar(@fallback_methods) <= 7, 'fallback count within expected range');
 
 # Track specific methods we expect to be native
 for my $expected (qw(gc_stats _chart_set _make_item parse_value _predict _scan _advance_from_completed)) {
     ok((grep { $_ eq $expected } @native_methods), "$expected compiles natively");
 }
 
-# Track which methods we're working to make native
-for my $target (qw(_chart_has _chart_get _symbol_after_dot _is_complete _run_parse parse _complete)) {
+# Methods that now compile natively (after ReturnStmt-as-expression fix)
+for my $target (qw(_chart_has _chart_get _symbol_after_dot _is_complete _run_parse parse)) {
+    ok((grep { $_ eq $target } @native_methods), "$target compiles natively");
+}
+
+# Methods still needing work
+for my $target (qw(_complete)) {
     TODO: {
-        local $TODO = "Phase 1-7: implement missing XS constructs";
+        local $TODO = "CFG nodes not dispatching through cfg_lookup";
         ok((grep { $_ eq $target } @native_methods), "$target compiles natively");
     }
 }

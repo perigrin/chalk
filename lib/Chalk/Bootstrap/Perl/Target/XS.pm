@@ -710,6 +710,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'BacktickExpr')       { return $self->_emit_xs_backtick_expr($node, $declared_vars); }
             if ($class eq 'CompoundAssign')     { return $self->_emit_xs_compound_assign_expr($node, $declared_vars); }
             if ($class eq 'VarDecl')            { return $self->_emit_xs_var_decl_expr($node, $declared_vars); }
+
+            # ReturnStmt used as expression: stale-value merge artifact from Earley parser.
+            # Unwrap and emit the inner value as an expression.
+            if ($class eq 'ReturnStmt') {
+                my $inner = $node->inputs()->[0];
+                return $self->_emit_xs_expr($inner, $declared_vars);
+            }
         }
 
         return "NULL /* unsupported */";
