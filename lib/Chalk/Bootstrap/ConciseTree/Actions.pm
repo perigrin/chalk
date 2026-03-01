@@ -1334,9 +1334,29 @@ class Chalk::Bootstrap::ConciseTree::Actions {
         return Chalk::Bootstrap::ConciseTree->new();
     }
 
-    # §9 TryCatchStatement — try/catch error handling; no compile-time ops
+    # §9 TryCatchStatement — try/catch error handling
+    # B::Concise exec order: entertrycatch → catch → [catch body] → [try body] → poptry → leavetrycatch
     method TryCatchStatement($ctx) {
-        return Chalk::Bootstrap::ConciseTree->new();
+        my @trees = _collect_trees($ctx);
+        # trees[0] = try body (from Block), trees[1] = catch var (ScalarVariable),
+        # trees[2] = catch body (from Block)
+        my $try_body   = $trees[0];
+        my $catch_body = $trees[2] // $trees[1];
+
+        my $result = Chalk::Bootstrap::ConciseTree->new();
+        $result->push_op(_make_op('entertrycatch', '|'));
+        $result->push_op(_make_op('catch', '|'));
+        # Catch body comes first in exec order
+        if (defined $catch_body && $catch_body->op_count() > 0) {
+            $result->concat($catch_body);
+        }
+        # Then try body
+        if (defined $try_body && $try_body->op_count() > 0) {
+            $result->concat($try_body);
+        }
+        $result->push_op(_make_op('poptry', '@'));
+        $result->push_op(_make_op('leavetrycatch', '@'));
+        return $result;
     }
 
     # §10 AttributeList — no runtime ops

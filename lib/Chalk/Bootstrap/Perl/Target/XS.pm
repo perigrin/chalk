@@ -75,7 +75,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         while (@stack) {
             my $node = pop @stack;
             my $state = $sa->cfg_state($node);
-            if (defined $state && (defined $state->{if_node} || defined $state->{loop})) {
+            if (defined $state && (defined $state->{if_node} || defined $state->{loop} || defined $state->{try_node})) {
                 my $ir_node = $node->extract();
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}) {
                     $_cfg_lookup{refaddr($ir_node)} = $state;
@@ -648,6 +648,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         $state->{iterator},
                         $state->{list},
                     );
+                }
+                if (defined $state->{try_node}) {
+                    # try/catch has no direct C equivalent; trigger eval_pv fallback
+                    return "NULL /* unsupported: try/catch */";
                 }
             }
         }
@@ -1523,6 +1527,11 @@ Module::Build->new(
                 $state->{iterator},
                 $state->{list},
             );
+        }
+
+        # Try/catch: no direct C equivalent, trigger eval_pv fallback
+        if (defined $state->{try_node}) {
+            return "NULL /* unsupported: try/catch */";
         }
 
         return;
