@@ -1179,24 +1179,31 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         if ($builtin_name eq 'exists') {
             # Build chain: intermediate subscripts use av_fetch/hv_fetch,
-            # last subscript uses av_exists/hv_exists_ent
+            # last subscript uses av_exists/hv_exists_ent.
+            # Typed fields (field %hash, field @array) ARE the HV*/AV* directly
+            # in ObjectFIELDS — skip SvRV for them.
             my $expr = $base;
             for my $i (0 .. $#subscripts) {
                 my ($idx_node, $sty) = $subscripts[$i]->@*;
                 my $idx = $self->_emit_xs_expr($idx_node, $declared_vars);
                 my $is_last = ($i == $#subscripts);
+                my $field_sig = $self->_field_sigil_for_expr($expr);
 
                 if ($sty eq 'array') {
+                    my $av = (defined $field_sig && $field_sig eq '@')
+                        ? "(AV*)$expr" : "(AV*)SvRV($expr)";
                     if ($is_last) {
-                        $expr = "av_exists((AV*)SvRV($expr), SvIV($idx))";
+                        $expr = "av_exists($av, SvIV($idx))";
                     } else {
-                        $expr = "(*av_fetch((AV*)SvRV($expr), SvIV($idx), 0))";
+                        $expr = "(*av_fetch($av, SvIV($idx), 0))";
                     }
                 } else {
+                    my $hv = (defined $field_sig && $field_sig eq '%')
+                        ? "(HV*)$expr" : "(HV*)SvRV($expr)";
                     if ($is_last) {
-                        $expr = "hv_exists_ent((HV*)SvRV($expr), $idx, 0)";
+                        $expr = "hv_exists_ent($hv, $idx, 0)";
                     } else {
-                        $expr = "(*hv_fetch((HV*)SvRV($expr), SvPV_nolen($idx), SvCUR($idx), 0))";
+                        $expr = "(*hv_fetch($hv, SvPV_nolen($idx), SvCUR($idx), 0))";
                     }
                 }
             }
@@ -1206,24 +1213,30 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         if ($builtin_name eq 'delete') {
             # Build chain: intermediate subscripts use av_fetch/hv_fetch,
-            # last subscript uses av_delete/hv_delete_ent
+            # last subscript uses av_delete/hv_delete_ent.
+            # Typed fields skip SvRV — see exists chain above.
             my $expr = $base;
             for my $i (0 .. $#subscripts) {
                 my ($idx_node, $sty) = $subscripts[$i]->@*;
                 my $idx = $self->_emit_xs_expr($idx_node, $declared_vars);
                 my $is_last = ($i == $#subscripts);
+                my $field_sig = $self->_field_sigil_for_expr($expr);
 
                 if ($sty eq 'array') {
+                    my $av = (defined $field_sig && $field_sig eq '@')
+                        ? "(AV*)$expr" : "(AV*)SvRV($expr)";
                     if ($is_last) {
-                        $expr = "av_delete((AV*)SvRV($expr), SvIV($idx), 0)";
+                        $expr = "av_delete($av, SvIV($idx), 0)";
                     } else {
-                        $expr = "(*av_fetch((AV*)SvRV($expr), SvIV($idx), 0))";
+                        $expr = "(*av_fetch($av, SvIV($idx), 0))";
                     }
                 } else {
+                    my $hv = (defined $field_sig && $field_sig eq '%')
+                        ? "(HV*)$expr" : "(HV*)SvRV($expr)";
                     if ($is_last) {
-                        $expr = "hv_delete_ent((HV*)SvRV($expr), $idx, 0, 0)";
+                        $expr = "hv_delete_ent($hv, $idx, 0, 0)";
                     } else {
-                        $expr = "(*hv_fetch((HV*)SvRV($expr), SvPV_nolen($idx), SvCUR($idx), 0))";
+                        $expr = "(*hv_fetch($hv, SvPV_nolen($idx), SvCUR($idx), 0))";
                     }
                 }
             }
@@ -1636,7 +1649,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $sub_node->class() eq 'SubscriptExpr') {
                 my $target = $self->_emit_xs_expr($sub_node->inputs()->[0], $declared_vars);
                 my $key = $self->_emit_xs_expr($sub_node->inputs()->[1], $declared_vars);
-                return "hv_delete_ent((HV*)SvRV($target), $key, G_DISCARD, 0)";
+                my $field_sig = $self->_field_sigil_for_expr($target);
+                my $hv = (defined $field_sig && $field_sig eq '%')
+                    ? "(HV*)$target" : "(HV*)SvRV($target)";
+                return "hv_delete_ent($hv, $key, G_DISCARD, 0)";
             }
         }
 
@@ -1647,7 +1663,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $sub_node->class() eq 'SubscriptExpr') {
                 my $target = $self->_emit_xs_expr($sub_node->inputs()->[0], $declared_vars);
                 my $key = $self->_emit_xs_expr($sub_node->inputs()->[1], $declared_vars);
-                return "(hv_exists_ent((HV*)SvRV($target), $key, 0) ? &PL_sv_yes : &PL_sv_no)";
+                my $field_sig = $self->_field_sigil_for_expr($target);
+                my $hv = (defined $field_sig && $field_sig eq '%')
+                    ? "(HV*)$target" : "(HV*)SvRV($target)";
+                return "(hv_exists_ent($hv, $key, 0) ? &PL_sv_yes : &PL_sv_no)";
             }
         }
 

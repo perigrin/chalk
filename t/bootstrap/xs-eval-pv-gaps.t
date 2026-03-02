@@ -704,6 +704,50 @@ my sub var_node($name) {
     # Hash field subscripts should cast directly: (HV*)ObjectFIELDS(SvRV(self))[N]
     like($run_parse_code, qr/\(HV\*\)ObjectFIELDS\(SvRV\(self\)\)/,
         '_run_parse: hash field subscript uses (HV*)ObjectFIELDS without SvRV');
+
+    # exists/delete chain on typed hash fields must also skip SvRV.
+    # hv_exists_ent, hv_delete_ent, av_exists, av_delete on field slots must
+    # use (HV*)ObjectFIELDS directly, not (HV*)SvRV(ObjectFIELDS[idx]).
+    # Fields 5-7, 11, 13 are hash fields; field 14 is array.
+    my @bad_svrv;
+    while ($run_parse_code =~ /SvRV\(ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]\)/g) {
+        my $idx = $1;
+        push @bad_svrv, "field[$idx]" if $idx =~ /^(5|6|7|11|13|14)$/;
+    }
+    is(scalar @bad_svrv, 0,
+        '_run_parse: no SvRV on ANY typed field — exists/delete/fetch all fixed')
+        or diag("Still has SvRV: " . join(', ', @bad_svrv));
+}
+
+# === Typed field SvRV check across ALL Earley methods ===
+# _complete, _predict, _scan also access typed hash fields via exists/delete.
+# Verify none of them use SvRV(ObjectFIELDS[idx]) on hash/array fields.
+{
+    use lib 't/bootstrap/lib';
+    require TestXSHelpers;
+    TestXSHelpers->import(qw(setup_xs_grammar parse_file_ir));
+
+    my $gen = setup_xs_grammar('Chalk::Grammar::Perl::AllMethods');
+    my ($ir, $sa, $ctx) = parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm');
+    my $xs_gen = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::AllMethods');
+    my $output = $xs_gen->generate_with_cfg($ir, $sa, $ctx);
+
+    my @methods = ('_complete', '_predict', '_scan', '_advance_from_completed');
+    for my $m (@methods) {
+        my ($code) = $output =~ /${m}\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
+        if (defined $code) {
+            my @bad;
+            while ($code =~ /SvRV\(ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]\)/g) {
+                my $idx = $1;
+                push @bad, "field[$idx]" if $idx =~ /^(5|6|7|11|13|14)$/;
+            }
+            is(scalar @bad, 0,
+                "$m: no SvRV on typed hash/array fields")
+                or diag("$m still has SvRV: " . join(', ', @bad));
+        } else {
+            pass("$m: not found or no CODE section (may be eval_pv fallback)");
+        }
+    }
 }
 
 done_testing();
