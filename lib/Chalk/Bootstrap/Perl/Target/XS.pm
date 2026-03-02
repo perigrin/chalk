@@ -1713,8 +1713,32 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         } else {
             # While loop: while (cond) { ... }
             my $cond = $loop_if->inputs()->[1];
-            my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
-            push @lines, "while (SvTRUE($cond_expr)) {";
+
+            # Detect while (my $var = shift @array) pattern:
+            # VarDecl($var, BuiltinCall(shift, @array))
+            # Emit: while ((var_sv = av_shift(...)) != &PL_sv_undef)
+            if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $cond->class() eq 'VarDecl') {
+                my $var_name = $cond->inputs()->[0]->value();
+                $var_name =~ s/^[\$\@\%]//;
+                my $init = $cond->inputs()->[1];
+                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $init->class() eq 'BuiltinCall'
+                        && $init->inputs()->[0]->value() eq 'shift') {
+                    my $shift_args = $init->inputs()->[1];
+                    my $arr_arg = (ref($shift_args) eq 'ARRAY') ? $shift_args->[0] : $shift_args;
+                    my $arr_expr = $self->_emit_xs_expr($arr_arg, $declared_vars);
+                    my $av_expr = ($arr_expr =~ /^\(AV\*\)/) ? $arr_expr : "(AV*)SvRV($arr_expr)";
+                    $declared_vars->{$var_name} = true;
+                    push @lines, "while ((${var_name}_sv = av_shift($av_expr)) != &PL_sv_undef) {";
+                } else {
+                    my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+                    push @lines, "while (SvTRUE($cond_expr)) {";
+                }
+            } else {
+                my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+                push @lines, "while (SvTRUE($cond_expr)) {";
+            }
 
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);

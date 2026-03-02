@@ -511,4 +511,45 @@ my sub var_node($name) {
     like($code, qr/newAV/, 'local array var: creates empty array');
 }
 
+# === Full Earley.pm compilation: check _run_parse patterns ===
+# These tests generate the full XS for Earley.pm and verify specific
+# patterns in the _run_parse method are correct.
+{
+    use lib 't/bootstrap/lib';
+    require TestXSHelpers;
+    TestXSHelpers->import(qw(setup_xs_grammar parse_file_ir));
+
+    my $gen = setup_xs_grammar('Chalk::Grammar::Perl::Remaining');
+    my ($ir, $sa, $ctx) = parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm');
+    my $xs_gen = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::RunParse');
+    my $dist = $xs_gen->generate_distribution_with_cfg($ir, $sa, $ctx);
+    my $xs_code = $dist->{'lib/Test/RunParse.xs'};
+    ok(defined $xs_code, 'generated XS code for Earley.pm');
+
+    # Extract _run_parse method
+    my ($run_parse) = $xs_code =~ /(_run_parse\(self.*?\nSV \*\n|\z)/s;
+    # More flexible: grab from _run_parse to next XSUB header
+    ($run_parse) = $xs_code =~ /(_run_parse.*?)(?=^[A-Z]\w* \*$|^void$|^\z)/ms;
+    ok(defined $run_parse && length($run_parse) > 100, '_run_parse method extracted');
+
+    # While-shift: while (my $entry = shift @agenda) must capture shifted value
+    # Bad:  while (SvTRUE(av_shift(...)))
+    # Good: while ((entry_sv = av_shift(...)) != &PL_sv_undef)
+    unlike($run_parse, qr/while \(SvTRUE\(av_shift/,
+        'while-shift: not SvTRUE(av_shift) — must capture shifted value');
+    like($run_parse, qr/entry_sv\s*=\s*av_shift/,
+        'while-shift: assigns shifted value to entry_sv');
+
+    # Hash spread: { %$item, value => completed_value } must not use get_sv
+    # Bad:  get_sv("Test::RunParse::$item", GV_ADD)
+    # Good: should copy hash entries from item_sv and add value key
+    unlike($run_parse, qr/get_sv\("Test::RunParse::\\\$item"/,
+        'hash spread: no broken get_sv for hash spread');
+
+    # Entry variable: while (my $entry = shift) should use entry_sv from shift
+    # Bad:  get_sv("Test::RunParse::entry", GV_ADD)
+    unlike($run_parse, qr/get_sv\("Test::RunParse::entry"/,
+        'while-shift var: no get_sv for entry variable');
+}
+
 done_testing();
