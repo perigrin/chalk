@@ -919,10 +919,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
-            # Loop control keywords: next→continue, last→break in C
+            # Loop control keywords: next→continue, last→break, return→return in C
             my $val = $node->value() // '';
-            if ($val eq 'next') { return "continue;"; }
-            if ($val eq 'last') { return "break;"; }
+            if ($val eq 'next')   { return "continue;"; }
+            if ($val eq 'last')   { return "break;"; }
+            if ($val eq 'return') { return "return;"; }
             return $self->_emit_xs_expr($node, $declared_vars) . ";";
         }
 
@@ -1532,6 +1533,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my $perl_src = $perl_target->_emit_anon_sub_expr($node);
 
+        # Extract the sub's own parameter names to avoid rewriting them.
+        # Parameters in the signature (sub ($x, $y)) must keep their names.
+        my %sub_params;
+        my $sub_params_node = $node->inputs()->[0];
+        for my $p ($sub_params_node->@*) {
+            my $pname = $p->value();
+            $pname =~ s/^\$//;
+            $sub_params{$pname} = true;
+        }
+
         # Scan the sub body for variable references that are C locals.
         # Bind them as package globals before eval_pv so the closure works.
         my @bindings;
@@ -1541,9 +1552,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             next if $bound{$var}++;
             # Skip the sub's own parameters and special variables
             next if $var =~ /^_$/;
-            # Check if this is a C-local variable
+            next if $sub_params{$var};
+            # Check if this is a C-local variable or method parameter
             my $bare = $var;
-            if (exists $declared_vars->{$bare}) {
+            if (exists $declared_vars->{"param:$bare"}) {
+                # Method parameter: XS declares as bare name, not _sv suffix
+                push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), $bare)";
+            } elsif (exists $declared_vars->{$bare}) {
                 push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), ${bare}_sv)";
             } elsif (defined $field_map && exists $field_map->{$bare}) {
                 my $idx = $field_map->{$bare};
@@ -1551,15 +1566,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        # Rewrite variable references in the sub to use the package globals
+        # Rewrite variable references in the sub BODY to use package globals.
+        # Split at the first '{' to avoid rewriting the signature line.
         my $rewritten = $perl_src;
-        for my $var (keys %bound) {
-            next unless exists $declared_vars->{$var}
-                || (defined $field_map && exists $field_map->{$var});
-            $rewritten =~ s/\$\Q$var\E/\$::_anon_$var/g;
+        if ($perl_src =~ /^(sub\s*\([^)]*\)\s*\{)(.*)$/s) {
+            my ($sig_line, $body) = ($1, $2);
+            for my $var (keys %bound) {
+                next if $sub_params{$var};
+                next unless exists $declared_vars->{$var}
+                    || exists $declared_vars->{"param:$var"}
+                    || (defined $field_map && exists $field_map->{$var});
+                $body =~ s/\$\Q$var\E/\$::_anon_$var/g;
+            }
+            $rewritten = $sig_line . $body;
         }
 
-        my $escaped = $self->_escape_c_string($rewritten);
+        # Prepend 'use feature "signatures"; no warnings "experimental::signatures";'
+        # because eval_pv runs in a bare scope without feature bundles.
+        my $prefix = 'use feature "signatures"; no warnings "experimental::signatures"; ';
+        my $escaped = $self->_escape_c_string($prefix . $rewritten);
         if (@bindings) {
             return '({ ' . join('; ', @bindings) . '; '
                 . "eval_pv(\"$escaped\", TRUE); })";
@@ -1905,10 +1930,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         $var =~ s/^[\$\@\%]//;
         my $init = $node->inputs()->[1];
 
-        if (defined $init) {
-            return $self->_emit_xs_expr($init, $declared_vars);
+        # Field variables use ObjectFIELDS accessor with sv_setsv,
+        # locals use direct C pointer assignment
+        if (defined $field_map && exists $field_map->{$var}) {
+            my $idx = $field_map->{$var};
+            my $accessor = "ObjectFIELDS(SvRV(self))[$idx]";
+            if (defined $init) {
+                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
+                return "({ sv_setsv($accessor, $init_expr); $accessor; })";
+            }
+            return "({ sv_setsv($accessor, &PL_sv_undef); $accessor; })";
         }
-        return '&PL_sv_undef';
+
+        my $c_var = "${var}_sv";
+        if (defined $init) {
+            my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
+            return "({ $c_var = $init_expr; $c_var; })";
+        }
+        return "({ $c_var = &PL_sv_undef; $c_var; })";
     }
 
     # Emit VarDecl as C statement (SV assignment)

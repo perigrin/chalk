@@ -322,4 +322,44 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/av_fetch\([^,]+,[^,]+,\s*1\)/, 'array subscript uses lval=1 for auto-vivification');
 }
 
+# --- Test: bare 'return' constant emits C return statement ---
+# Bare `return;` in Perl source becomes a Constant node with value 'return'.
+# The XS emitter must emit an actual C `return;` statement, not a literal
+# string "return" (which would be a no-op and let execution fall through).
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $return_node = $factory->make('Constant', const_type => 'string', value => 'return');
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::BareReturn');
+    my $stmt = $target->_emit_xs_stmt($return_node, {}, false);
+    ok(defined $stmt, 'bare return constant emits a statement');
+    like($stmt, qr/\breturn\b/, 'bare return emits C return keyword');
+    unlike($stmt, qr/newSVpvs.*return/, 'bare return does NOT emit string literal "return"');
+}
+
+# --- Test: VarDecl used as expression assigns variable ---
+# When VarDecl appears inside an expression context (e.g., if-condition),
+# the emitted code must BOTH assign the variable AND return the value.
+# Without the assignment, variables used in the if-body are uninitialized (NULL).
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $var = $factory->make('Constant', const_type => 'variable', value => '$leo');
+    my $init = $factory->make('Constant', const_type => 'string', value => 'some_expr_sv');
+    my $var_decl = $factory->make('Constructor',
+        'class'     => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
+    );
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::VarDeclExpr');
+    my $code = $target->_emit_xs_var_decl_expr($var_decl, {});
+    ok(defined $code, 'VarDecl expr emits code');
+    like($code, qr/leo_sv\s*=/, 'VarDecl expr assigns to C variable');
+    like($code, qr/some_expr_sv/, 'VarDecl expr includes init expression');
+}
+
 done_testing();
