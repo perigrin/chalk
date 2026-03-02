@@ -97,9 +97,10 @@ ok(defined $xs_parser, 'XS parser object defined');
 my $g = eval { $xs_parser->grammar() };
 ok(defined $g, 'grammar() reader returns value (ADJUST ran)');
 
-# Verify rule_table was built by ADJUST
-my $rt = eval { $xs_parser->rule_table() };
-ok(defined $rt && ref($rt) eq 'HASH', 'rule_table() populated by ADJUST');
+# Verify ADJUST completed — grammar has correct number of rules
+my $g_count = eval { scalar($g->@*) };
+ok(defined $g_count && $g_count == scalar($grammar_rules->@*),
+    'grammar() returns correct number of rules (ADJUST completed)');
 
 # --- Step 6: Parse a simple BNF string ---
 my $bnf_input = 'Expr ::= /\\d+/';

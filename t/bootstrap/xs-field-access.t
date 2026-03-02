@@ -142,7 +142,7 @@ SKIP: {
     # _ADJUST body should use ObjectFIELDS for field writes
     # (rule_table, core_index, lr0_dfa are all field assignments)
     my @adjust_field_writes;
-    while ($ecode2 =~ /ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]\s*=/g) {
+    while ($ecode2 =~ /sv_setsv\(ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]/g) {
         push @adjust_field_writes, $1;
     }
     ok(scalar @adjust_field_writes > 0,

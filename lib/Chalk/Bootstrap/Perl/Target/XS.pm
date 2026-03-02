@@ -1056,9 +1056,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $idx = $self->_emit_xs_expr($index, $declared_vars);
             return "(*av_fetch((AV*)SvRV($tgt), SvIV($idx), 0))";
         }
-        # Hash access
+        # Hash access — use lval=1 so hv_fetch creates missing keys (avoids NULL deref
+        # when used as assignment target). Compute key once via SvPV to avoid
+        # double-evaluation of side effects in key expressions.
         my $key = $self->_emit_xs_expr($index, $declared_vars);
-        return "(*hv_fetch((HV*)SvRV($tgt), SvPV_nolen($key), SvCUR($key), 0))";
+        if ($key =~ /^[a-zA-Z_]\w*$/) {
+            # Simple variable — safe to reference twice
+            return "(*hv_fetch((HV*)SvRV($tgt), SvPV_nolen($key), SvCUR($key), 1))";
+        }
+        # Complex expression — evaluate once via SvPV
+        return "({ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); (*hv_fetch((HV*)SvRV($tgt), _hkp, _hkl, 1)); })";
     }
 
     # Emit postfix deref (->@*, ->%*, ->$*)
@@ -1098,7 +1105,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         for (my $i = 0; $i < $pairs->@*; $i += 2) {
             my $key = $self->_emit_xs_expr($pairs->[$i], $declared_vars);
             my $val = $self->_emit_xs_expr($pairs->[$i + 1], $declared_vars);
-            push @stores, "hv_store(_hv, SvPV_nolen($key), SvCUR($key), SvREFCNT_inc($val), 0)";
+            if ($key =~ /^[a-zA-Z_]\w*$/) {
+                push @stores, "hv_store(_hv, SvPV_nolen($key), SvCUR($key), SvREFCNT_inc($val), 0)";
+            } else {
+                push @stores, "{ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); hv_store(_hv, _hkp, _hkl, SvREFCNT_inc($val), 0); }";
+            }
         }
         return "({ HV *_hv = newHV(); " . join("; ", @stores) . "; newRV_noinc((SV*)_hv); })";
     }
