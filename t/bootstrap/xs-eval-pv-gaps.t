@@ -717,6 +717,15 @@ my sub var_node($name) {
     is(scalar @bad_svrv, 0,
         '_run_parse: no SvRV on ANY typed field — exists/delete/fetch all fixed')
         or diag("Still has SvRV: " . join(', ', @bad_svrv));
+
+    # Range operator: SvIV on arrayref must use av_len.
+    # When the range end is a method call that returns an arrayref,
+    # SvIV(arrayref) gives a huge pointer value causing infinite loops.
+    # The emitter must guard: SvROK(x) ? av_len((AV*)SvRV(x)) : SvIV(x)
+    unlike($run_parse_code, qr/SSize_t _e = SvIV\(\(\{.*?call_method/s,
+        '_run_parse: range end does not use bare SvIV on method call result');
+    like($run_parse_code, qr/av_len.*expressions|SvROK.*av_len/s,
+        '_run_parse: range end handles arrayref (uses av_len or SvROK guard)');
 }
 
 # === Typed field SvRV check across ALL Earley methods ===

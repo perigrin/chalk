@@ -1039,9 +1039,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "(sv_derived_from_sv($left, $right, 0) ? &PL_sv_yes : &PL_sv_no)";
         }
 
-        # Range operator — construct an AV from integer start to end
+        # Range operator — construct an AV from integer start to end.
+        # Guard against arrayrefs: stale-value merge in the IR can replace
+        # `$obj->method()->@* - 1` with just `$obj->method()` which returns
+        # an arrayref. SvIV on a reference gives a pointer address (huge),
+        # causing infinite for loops. Use av_len(SvRV(x)) for references.
         if ($op eq '..') {
-            return "({ AV *_av = newAV(); SSize_t _s = SvIV($left); SSize_t _e = SvIV($right); SSize_t _j; for (_j = _s; _j <= _e; _j++) av_push(_av, newSViv(_j)); newRV_noinc((SV*)_av); })";
+            return "({ AV *_av = newAV(); "
+                . "SV *_rs = $left; SV *_re = $right; "
+                . "SSize_t _s = SvROK(_rs) ? av_len((AV*)SvRV(_rs)) : SvIV(_rs); "
+                . "SSize_t _e = SvROK(_re) ? av_len((AV*)SvRV(_re)) : SvIV(_re); "
+                . "SSize_t _j; "
+                . "for (_j = _s; _j <= _e; _j++) av_push(_av, newSViv(_j)); "
+                . "newRV_noinc((SV*)_av); })";
         }
 
         # Assignment — sv_setsv returns void, wrap in GCC stmt expr
@@ -1626,8 +1636,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $list_node->inputs()->[0]->value() eq '..') {
                 my $range_left  = $self->_emit_xs_expr($list_node->inputs()->[1], $declared_vars);
                 my $range_right = $self->_emit_xs_expr($list_node->inputs()->[2], $declared_vars);
-                return "({ AV *_mav = newAV(); SSize_t _ms = SvIV($range_left); "
-                    . "SSize_t _me = SvIV($range_right); SSize_t _mi; "
+                return "({ AV *_mav = newAV(); "
+                    . "SV *_mrs = $range_left; SV *_mre = $range_right; "
+                    . "SSize_t _ms = SvROK(_mrs) ? av_len((AV*)SvRV(_mrs)) : SvIV(_mrs); "
+                    . "SSize_t _me = SvROK(_mre) ? av_len((AV*)SvRV(_mre)) : SvIV(_mre); "
+                    . "SSize_t _mi; "
                     . "for (_mi = _ms; _mi <= _me; _mi++) "
                     . "av_push(_mav, SvREFCNT_inc($block_body)); "
                     . "newRV_noinc((SV*)_mav); })";
