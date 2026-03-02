@@ -1317,7 +1317,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     if ($is_last) {
                         $expr = "hv_exists_ent($hv, $idx, 0)";
                     } else {
-                        $expr = "(*hv_fetch($hv, SvPV_nolen($idx), SvCUR($idx), 0))";
+                        $expr = "({ SV *_hk = $idx; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); (*hv_fetch($hv, _hkp, _hkl, 0)); })";
                     }
                 }
             }
@@ -1350,7 +1350,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     if ($is_last) {
                         $expr = "hv_delete_ent($hv, $idx, 0, 0)";
                     } else {
-                        $expr = "(*hv_fetch($hv, SvPV_nolen($idx), SvCUR($idx), 0))";
+                        $expr = "({ SV *_hk = $idx; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); (*hv_fetch($hv, _hkp, _hkl, 0)); })";
                     }
                 }
             }
@@ -1427,11 +1427,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             $hv = "(HV*)SvRV($tgt)";
         }
         my $key = $self->_emit_xs_expr($index, $declared_vars);
-        if ($key =~ /^[a-zA-Z_]\w*$/) {
-            # Simple variable — safe to reference twice
-            return "(*hv_fetch($hv, SvPV_nolen($key), SvCUR($key), 1))";
-        }
-        # Complex expression — evaluate once via SvPV
+        # SvPV atomically stringifies and returns both pointer and length.
+        # SvPV_nolen + SvCUR is unsafe: SvCUR on a pure IV reads garbage memory.
         return "({ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); (*hv_fetch($hv, _hkp, _hkl, 1)); })";
     }
 
@@ -1503,11 +1500,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             my $key = $self->_emit_xs_expr($key_node, $declared_vars);
             my $val = $self->_emit_xs_expr($pairs->[$i + 1], $declared_vars);
-            if ($key =~ /^[a-zA-Z_]\w*$/) {
-                push @stores, "hv_store(_hv, SvPV_nolen($key), SvCUR($key), SvREFCNT_inc($val), 0)";
-            } else {
-                push @stores, "{ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); hv_store(_hv, _hkp, _hkl, SvREFCNT_inc($val), 0); }";
-            }
+            # SvPV atomically stringifies: SvPV_nolen + SvCUR is unsafe on pure IVs
+            push @stores, "{ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); hv_store(_hv, _hkp, _hkl, SvREFCNT_inc($val), 0); }";
         }
         return "({ HV *_hv = newHV(); " . join("; ", @stores) . "; newRV_noinc((SV*)_hv); })";
     }
@@ -1651,7 +1645,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($name eq 'push' && $args->@* >= 2) {
             my $arr_node = $args->[0];
             my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
-            my $val = $self->_emit_xs_expr($args->[1], $declared_vars);
             # PostfixDerefExpr ->@* already returns (AV*)SvRV(...), no need to double-deref
             my $av_expr;
             if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
@@ -1660,6 +1653,31 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             } else {
                 $av_expr = "(AV*)SvRV($arr)";
             }
+            # Flatten list-producing value arguments (values %hash) into
+            # individual av_push calls instead of wrapping in an extra AV.
+            my $val_node = $args->[1];
+            if ($val_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $val_node->class() eq 'BuiltinCall') {
+                my $val_name_node = $val_node->inputs()->[0];
+                my $val_name = $val_name_node->value() // '';
+                if ($val_name eq 'values') {
+                    my $val_args = $val_node->inputs()->[1];
+                    my $hash_expr = $self->_emit_xs_expr($val_args->[0], $declared_vars);
+                    my $hv_expr;
+                    if ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $val_args->[0]->class() eq 'PostfixDerefExpr') {
+                        $hv_expr = $hash_expr;
+                    } else {
+                        $hv_expr = "(HV*)SvRV($hash_expr)";
+                    }
+                    return "({ HV *_vhv = $hv_expr; "
+                        . "hv_iterinit(_vhv); HE *_he; "
+                        . "while ((_he = hv_iternext(_vhv))) "
+                        . "av_push($av_expr, SvREFCNT_inc(HeVAL(_he))); "
+                        . "$arr; })";
+                }
+            }
+            my $val = $self->_emit_xs_expr($val_node, $declared_vars);
             return "({ av_push($av_expr, SvREFCNT_inc($val)); $arr; })";
         }
 

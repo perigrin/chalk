@@ -362,4 +362,64 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/some_expr_sv/, 'VarDecl expr includes init expression');
 }
 
+# --- Test: hash subscript uses SvPV for key (not SvPV_nolen/SvCUR separately) ---
+# SvCUR on a pure IV (integer) SV reads uninitialized memory because SVt_IV
+# has no PV buffer. The emitter must use SvPV(key, len) which stringifies
+# atomically, or wrap in a statement-expression that stringifies first.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $hash_var = $factory->make('Constant', const_type => 'variable', value => '$item');
+    my $key_var  = $factory->make('Constant', const_type => 'variable', value => '$core_id');
+    my $subscript = $factory->make('Constructor',
+        'class' => 'SubscriptExpr',
+        target  => $hash_var,
+        index   => $key_var,
+        style   => $factory->make('Constant', const_type => 'string', value => 'hash'),
+    );
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::HashSvPV');
+    my $code = $target->_emit_xs_subscript_expr($subscript, { item => 1, core_id => 1 });
+    ok(defined $code, 'hash subscript with variable key emits code');
+    # Must NOT use SvCUR(core_id_sv) separately — crashes on pure IV SVs
+    unlike($code, qr/SvCUR\(core_id_sv\)/, 'hash subscript does not use separate SvCUR');
+    # Should use SvPV pattern that stringifies atomically
+    like($code, qr/SvPV\(/, 'hash subscript uses SvPV for atomic key stringification');
+}
+
+# --- Test: push with values flattens hash values into individual av_push ---
+# When `push @arr, values %hash` is emitted to XS, the hash values must be
+# pushed individually, not wrapped in an extra AV ref.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $arr_var  = $factory->make('Constant', const_type => 'variable', value => '@agenda');
+    my $hash_var = $factory->make('Constant', const_type => 'variable', value => '$core_hash');
+    my $deref    = $factory->make('Constructor',
+        'class' => 'PostfixDerefExpr',
+        target  => $hash_var,
+        sigil   => $factory->make('Constant', const_type => 'string', value => '%'),
+    );
+    my $values_call = $factory->make('Constructor',
+        'class' => 'BuiltinCall',
+        name    => $factory->make('Constant', const_type => 'string', value => 'values'),
+        args    => [$deref],
+    );
+    my $push_call = $factory->make('Constructor',
+        'class' => 'BuiltinCall',
+        name    => $factory->make('Constant', const_type => 'string', value => 'push'),
+        args    => [$arr_var, $values_call],
+    );
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::PushValues');
+    my $code = $target->_emit_xs_expr($push_call, { agenda => 1, core_hash => 1 });
+    ok(defined $code, 'push with values emits code');
+    # Must NOT wrap values in an extra AV — should iterate and push directly
+    unlike($code, qr/newRV_noinc.*_vav/, 'push+values does not create wrapper AV ref');
+    like($code, qr/hv_iternext/, 'push+values iterates hash entries');
+    like($code, qr/av_push.*HeVAL/, 'push+values pushes hash values directly');
+}
+
 done_testing();
