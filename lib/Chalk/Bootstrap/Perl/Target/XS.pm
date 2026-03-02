@@ -1328,8 +1328,23 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Hash access — use lval=1 so hv_fetch creates missing keys (avoids NULL deref
         # when used as assignment target). Compute key once via SvPV to avoid
         # double-evaluation of side effects in key expressions.
-        my $hv = (defined $field_sig && $field_sig eq '%')
-            ? "(HV*)$tgt" : "(HV*)SvRV($tgt)";
+        #
+        # Auto-vivification: when the target is itself a hash subscript result
+        # (nested hash like $hash{k1}{k2}), the intermediate hv_fetch(lval=1)
+        # may create an undef entry. SvRV(undef) returns NULL, causing segfault.
+        # Detect this case and emit an auto-vivification guard.
+        my $needs_autoviv = (!defined $field_sig || $field_sig ne '%')
+            && $tgt =~ /hv_fetch/;
+        my $hv;
+        if (defined $field_sig && $field_sig eq '%') {
+            $hv = "(HV*)$tgt";
+        } elsif ($needs_autoviv) {
+            $hv = "({ SV *_av_tgt = $tgt; "
+                . "if (!SvROK(_av_tgt)) sv_setsv(_av_tgt, newRV_noinc((SV*)newHV())); "
+                . "(HV*)SvRV(_av_tgt); })";
+        } else {
+            $hv = "(HV*)SvRV($tgt)";
+        }
         my $key = $self->_emit_xs_expr($index, $declared_vars);
         if ($key =~ /^[a-zA-Z_]\w*$/) {
             # Simple variable — safe to reference twice

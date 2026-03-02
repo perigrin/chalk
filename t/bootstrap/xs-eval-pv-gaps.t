@@ -780,4 +780,51 @@ my sub var_node($name) {
     }
 }
 
+# === 18. Nested hash subscript auto-vivification ===
+# When generating $hash{$key1}{$key2}, the intermediate hv_fetch result may be
+# undef (newly auto-vivified). SvRV(undef) returns NULL, causing segfault.
+# The emitter must guard nested hash access with auto-vivification.
+{
+    my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSAutoVivCheck') };
+    ok(defined $gen, 'autoviv: grammar setup') or BAIL_OUT($@);
+
+    my ($ir, $sa, $ctx) = eval { parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm') };
+    ok(defined $ir, 'autoviv: parse') or BAIL_OUT($@);
+
+    my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::AutoVivCheck');
+    my $output = $xs->generate_with_cfg($ir, $sa, $ctx);
+
+    # Extract _run_parse method code — stop at the next XS method definition
+    my $in_run_parse = false;
+    my $run_parse_code = '';
+    for my $line (split /\n/, $output) {
+        if ($line =~ /^_run_parse\(/) {
+            $in_run_parse = true;
+        } elsif ($in_run_parse && $line =~ /^\w+\(self/) {
+            # Next method definition starts — stop
+            last;
+        }
+        if ($in_run_parse) {
+            $run_parse_code .= "$line\n";
+        }
+    }
+
+    # Find patterns where SvRV is applied to an hv_fetch result that could be undef.
+    # Pattern: (HV*)SvRV((*hv_fetch(  — the hv_fetch with lval=1 creates undef entries
+    # for missing keys. SvRV(undef) returns NULL → segfault.
+    # The fix must use auto-vivification: check SvROK and create hashref if needed.
+    # Safe pattern uses _autoviv or similar guard.
+    my @unsafe_svrv;
+    while ($run_parse_code =~ /\(HV\*\)SvRV\(\(\*hv_fetch\(/g) {
+        my $pos = pos($run_parse_code);
+        my $ctx = substr($run_parse_code, $pos - 30, 60);
+        push @unsafe_svrv, $ctx;
+    }
+
+    is(scalar @unsafe_svrv, 0,
+        '_run_parse: no unguarded (HV*)SvRV((*hv_fetch( patterns (segfault risk)')
+        or diag("Found " . scalar(@unsafe_svrv) . " unsafe SvRV-on-hv_fetch:\n"
+            . join("\n", map { "  $_" } @unsafe_svrv));
+}
+
 done_testing();
