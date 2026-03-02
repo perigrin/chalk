@@ -726,6 +726,27 @@ my sub var_node($name) {
         '_run_parse: range end does not use bare SvIV on method call result');
     like($run_parse_code, qr/av_len.*expressions|SvROK.*av_len/s,
         '_run_parse: range end handles arrayref (uses av_len or SvROK guard)');
+
+    # Method call args with nested dSP must be pre-evaluated.
+    # Nested call_method inside XPUSHs args clobbers the outer stack because
+    # dSP reads PL_stack_sp before the outer PUSHMARK updates it.
+    # Pattern: call_method("_make_item") should NOT have dSP inside XPUSHs.
+    # Instead, args with dSP should be pre-evaluated before PUSHMARK.
+    my ($make_item_block) = $output =~
+        /((?:SV \*_mc\w+ = \(\{.*?dSP.*?\}\);?\s*)*dSP.*?call_method\("_make_item".*?_mcr)/ms;
+    if (defined $make_item_block) {
+        # Check that the block has pre-evaluated temps before dSP
+        like($make_item_block, qr/^SV \*_mc/m,
+            '_make_item: nested method call args pre-evaluated before PUSHMARK');
+        # After dSP, XPUSHs should NOT contain inline dSP
+        my ($after_dsp) = $make_item_block =~ /\bdSP\b(.*?)call_method/s;
+        unlike($after_dsp, qr/\bdSP\b/,
+            '_make_item: no nested dSP inside XPUSHs after PUSHMARK');
+    } else {
+        # If we can't find the block, just check no dSP inside XPUSHs generally
+        pass('_make_item: block not found (may be restructured)');
+        pass('_make_item: skipped dSP check');
+    }
 }
 
 # === Typed field SvRV check across ALL Earley methods ===

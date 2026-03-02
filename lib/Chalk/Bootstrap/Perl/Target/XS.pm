@@ -1083,6 +1083,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit method call using dSP/PUSHMARK/call_method/SPAGAIN stack protocol.
     # Uses GCC statement expression to return the method's scalar result.
+    # Arguments containing nested method calls (dSP) are pre-evaluated into
+    # temp variables before any XPUSHs — nested dSP reads PL_stack_sp which
+    # would clobber the outer stack entries if evaluated inline.
     method _emit_xs_method_call_expr($node, $declared_vars) {
         my $invocant_node = $node->inputs()->[0];
         my $method_name   = $node->inputs()->[1]->value();
@@ -1108,14 +1111,37 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         my $escaped_name = $self->_escape_c_string($method_name);
 
+        # Pre-evaluate args that contain nested method calls or complex
+        # expressions with dSP. These must be evaluated before PUSHMARK
+        # because nested dSP reads PL_stack_sp which hasn't been updated
+        # by the outer XPUSHs calls yet, clobbering the stack.
+        my @pre_eval;
+        my @arg_exprs;
+        for my $arg ($args->@*) {
+            my $arg_expr = $self->_emit_xs_expr($arg, $declared_vars);
+            if ($arg_expr =~ /\bdSP\b/) {
+                my $tmp = '_mca' . scalar(@pre_eval);
+                push @pre_eval, "SV *$tmp = $arg_expr";
+                push @arg_exprs, $tmp;
+            } else {
+                push @arg_exprs, $arg_expr;
+            }
+        }
+        # Also pre-evaluate invocant if it contains dSP
+        if ($invocant_expr =~ /\bdSP\b/) {
+            my $tmp = '_mci';
+            push @pre_eval, "SV *$tmp = $invocant_expr";
+            $invocant_expr = $tmp;
+        }
+
         my @stmts;
+        push @stmts, @pre_eval;
         push @stmts, 'dSP';
         push @stmts, 'ENTER; SAVETMPS';
         push @stmts, 'PUSHMARK(SP)';
         push @stmts, "XPUSHs($invocant_expr)";
-        for my $arg ($args->@*) {
-            my $arg_expr = $self->_emit_xs_expr($arg, $declared_vars);
-            push @stmts, "XPUSHs($arg_expr)";
+        for my $expr (@arg_exprs) {
+            push @stmts, "XPUSHs($expr)";
         }
         push @stmts, 'PUTBACK';
         push @stmts, "call_method(\"$escaped_name\", G_SCALAR)";
