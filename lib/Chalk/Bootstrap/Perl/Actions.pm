@@ -1874,7 +1874,10 @@ class Chalk::Bootstrap::Perl::Actions {
     # Returns Constructor:SubscriptExpr with target from first child Expression
     method Subscript($ctx) {
         my $text = $ctx->scanned_text();
-        my $style = ($text =~ /\[/) ? 'array' : 'hash';
+        # Determine style by the LAST bracket type in the scanned text.
+        # For chained subscripts like $chart->[$pos]{$core_id}, the Subscript
+        # action processes the outermost subscript (the last bracket pair).
+        my $style = ($text =~ /\]$/) ? 'array' : 'hash';
 
         my @values = _collect_ir_values($ctx);
         my $target;

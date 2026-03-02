@@ -1305,7 +1305,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $src_expr = "${src_var}_sv";
                 }
                 push @stores, "{ HV *_src = (HV*)SvRV($src_expr); hv_iterinit(_src); HE *_he; while ((_he = hv_iternext(_src))) { STRLEN _kl; char *_kp = HePV(_he, _kl); hv_store(_hv, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0); } }";
-                # The paired value is a dummy (NULL or the spread itself) — skip it
+                # Spread occupies 1 slot (not a key-value pair). Compensate for
+                # the for-loop's $i += 2 so the next iteration lands on the
+                # correct key-value pair.
+                $i--;
                 next;
             }
             my $key = $self->_emit_xs_expr($key_node, $declared_vars);

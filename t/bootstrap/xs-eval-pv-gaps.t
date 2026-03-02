@@ -589,4 +589,54 @@ my sub var_node($name) {
         'anon sub: C-local variables bound to package globals before eval_pv');
 }
 
+# --- Hash spread key-value alignment ---
+# { %$item, value => $completed_value } should produce correct hv_store
+# The spread takes 1 slot in the pairs array, so after it the key-value
+# pairs must still be correctly aligned.
+{
+    # Build a small synthetic HashRefExpr with spread to test alignment
+    my $f = Chalk::Bootstrap::IR::NodeFactory->new();
+    my $spread = $f->make('Constant', value => '%$item', const_type => 'string');
+    my $key = $f->make('Constant', value => 'value', const_type => 'string');
+    my $val = $f->make('Constant', value => '$completed_value', const_type => 'variable');
+    my $hash_node = $f->make('Constructor',
+        'class' => 'HashRefExpr',
+        pairs => [$spread, $key, $val],
+    );
+    my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::HashSpread');
+    my $declared = { item => 1, completed_value => 1 };
+    my $xs_code = $xs->_emit_xs_hash_ref_expr($hash_node, $declared);
+
+    unlike($xs_code, qr/SvREFCNT_inc\(NULL\)/,
+        'hash spread: no SvREFCNT_inc(NULL) — value should not be NULL');
+
+    # The value key uses newSVpvs("value") pattern and completed_value_sv is the value
+    like($xs_code, qr/newSVpvs\("value"\).*SvREFCNT_inc\(completed_value_sv\)/,
+        'hash spread: "value" key with completed_value_sv as value');
+}
+
+# --- Subscript style: {$core_id} after [$pos] should be hash, not array ---
+# $chart->[$pos]{$core_id} — the {$core_id} subscript is hash access.
+# The style was incorrectly array because scanned_text included the [$pos].
+{
+    use lib 't/bootstrap/lib';
+    require TestXSHelpers;
+    TestXSHelpers->import(qw(setup_xs_grammar parse_file_ir));
+
+    my $gen = setup_xs_grammar('Chalk::Grammar::Perl::SubStyle');
+    my ($ir, $sa, $ctx) = parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm');
+    my $xs_gen = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::SubStyle');
+    my $output = $xs_gen->generate_with_cfg($ir, $sa, $ctx);
+
+    # _chart_has should use hv_exists_ent for {$core_id}, not av_exists
+    # Extract just the CODE section of _chart_has XSUB
+    my ($chart_has_code) = $output =~ /_chart_has\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
+    ok(defined $chart_has_code, '_chart_has CODE section extracted from XS');
+
+    unlike($chart_has_code, qr/av_exists/,
+        '_chart_has: no av_exists — {$core_id} is hash subscript, not array');
+    like($chart_has_code, qr/hv_exists_ent/,
+        '_chart_has: uses hv_exists_ent for {$core_id} hash subscript');
+}
+
 done_testing();
