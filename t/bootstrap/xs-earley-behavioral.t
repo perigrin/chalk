@@ -118,7 +118,7 @@ ok(defined $perl_result, 'Perl parser recognizes simple BNF');
 # Run XS parse in a child process to survive segfaults.
 # The XS _run_parse is still under development and may crash.
 TODO: {
-    local $TODO = 'XS Earley parse: stale-merge loses subscript from condition subexprs (GitHub #627)';
+    local $TODO = 'XS Earley parse: segfaults in _run_parse (subscript/av_fetch fixed, other crash source) (GitHub #627)';
     my $pid = fork();
     if ($pid == 0) {
         # Child: try to parse, exit with status
