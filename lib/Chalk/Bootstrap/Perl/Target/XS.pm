@@ -524,6 +524,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Recursively collect all variable declarations from the body,
         # including those in nested scopes (if/foreach/etc.)
         $self->_collect_var_decls($body, \%declared_vars);
+        # Also collect all variable references to catch vars from list
+        # destructuring and other patterns that don't produce VarDecl nodes
+        $self->_collect_all_var_refs($body, \%declared_vars);
 
         # Detect early returns (ReturnStmt inside If CFG node or non-final position)
         my $has_early_return = $self->_has_early_return($body);
@@ -706,6 +709,47 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    # Walk the IR tree to find all variable references (Constant nodes whose
+    # value looks like $var, @var, %var) and register them in declared_vars.
+    # This catches variables from list destructuring and other patterns where
+    # the IR doesn't produce explicit VarDecl nodes for all variables.
+    method _collect_all_var_refs($nodes, $declared_vars) {
+        my @queue = grep { defined $_ } $nodes->@*;
+        my %visited;
+        while (my $node = shift @queue) {
+            next unless ref($node);
+            my $addr = refaddr($node);
+            next if $visited{$addr}++;
+
+            if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
+                my $val = $node->value() // '';
+                if ($val =~ /^\$([\w]+)$/) {
+                    my $bare = $1;
+                    next if defined $field_map && exists $field_map->{$bare};
+                    $declared_vars->{$bare} = true;
+                }
+            } elsif ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+                push @queue, grep { defined $_ && ref($_) } $node->inputs()->@*;
+            }
+
+            # Recurse into cfg_state bodies
+            if (%_cfg_lookup) {
+                my $state = $_cfg_lookup{$addr};
+                if (defined $state) {
+                    for my $key (qw(body_stmts then_stmts else_stmts try_stmts catch_stmts)) {
+                        my $stmts = $state->{$key};
+                        push @queue, grep { defined $_ } $stmts->@* if ref($stmts) eq 'ARRAY';
+                    }
+                }
+            }
+
+            # Recurse into ARRAY refs (arg lists)
+            if (ref($node) eq 'ARRAY') {
+                push @queue, grep { defined $_ && ref($_) } $node->@*;
             }
         }
     }
@@ -1118,7 +1162,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Populate hash with key/value pairs via hv_store
         my @stores;
         for (my $i = 0; $i < $pairs->@*; $i += 2) {
-            my $key = $self->_emit_xs_expr($pairs->[$i], $declared_vars);
+            my $key_node = $pairs->[$i];
+            # Detect hash spread: %$var as a key means copy all entries from var
+            if ($key_node isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $key_node->value()
+                    && $key_node->value() =~ /^%\$(\w+)$/) {
+                my $src_var = $1;
+                my $src_expr;
+                if (exists $declared_vars->{$src_var}) {
+                    $src_expr = "${src_var}_sv";
+                } elsif (defined $field_map && exists $field_map->{$src_var}) {
+                    $src_expr = "ObjectFIELDS(SvRV(self))[$field_map->{$src_var}]";
+                } else {
+                    $src_expr = "${src_var}_sv";
+                }
+                push @stores, "{ HV *_src = (HV*)SvRV($src_expr); hv_iterinit(_src); HE *_he; while ((_he = hv_iternext(_src))) { STRLEN _kl; char *_kp = HePV(_he, _kl); hv_store(_hv, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0); } }";
+                # The paired value is a dummy (NULL or the spread itself) — skip it
+                next;
+            }
+            my $key = $self->_emit_xs_expr($key_node, $declared_vars);
             my $val = $self->_emit_xs_expr($pairs->[$i + 1], $declared_vars);
             if ($key =~ /^[a-zA-Z_]\w*$/) {
                 push @stores, "hv_store(_hv, SvPV_nolen($key), SvCUR($key), SvREFCNT_inc($val), 0)";

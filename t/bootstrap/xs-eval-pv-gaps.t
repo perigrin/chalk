@@ -550,6 +550,16 @@ my sub var_node($name) {
     # Bad:  get_sv("Test::RunParse::entry", GV_ADD)
     unlike($run_parse, qr/get_sv\("Test::RunParse::entry"/,
         'while-shift var: no get_sv for entry variable');
+
+    # No get_sv calls should remain in the entire XS code for local variables
+    # Variables from list destructuring must resolve to C locals, not Perl globals
+    my @get_sv_calls;
+    while ($xs_code =~ /get_sv\("Test::RunParse::([\w\$]+)"/g) {
+        push @get_sv_calls, $1;
+    }
+    is(scalar @get_sv_calls, 0,
+        'no get_sv for local variables (all resolve to C locals)')
+        or diag("Remaining get_sv calls: " . join(', ', @get_sv_calls));
 }
 
 done_testing();
