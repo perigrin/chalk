@@ -1334,12 +1334,44 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "({ AV *_av = newAV(); " . join("; ", @pushes) . "; newRV_noinc((SV*)_av); })";
     }
 
-    # Emit anonymous sub via eval_pv with real params and body.
-    # Uses the Perl target to generate the source, then wraps in eval_pv.
+    # Emit anonymous sub by binding C-local variables to package globals,
+    # then using eval_pv to create a closure over those globals.
     method _emit_xs_anon_sub_expr($node, $declared_vars) {
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my $perl_src = $perl_target->_emit_anon_sub_expr($node);
-        my $escaped = $self->_escape_c_string($perl_src);
+
+        # Scan the sub body for variable references that are C locals.
+        # Bind them as package globals before eval_pv so the closure works.
+        my @bindings;
+        my %bound;
+        while ($perl_src =~ /\$(\w+)/g) {
+            my $var = $1;
+            next if $bound{$var}++;
+            # Skip the sub's own parameters and special variables
+            next if $var =~ /^_$/;
+            # Check if this is a C-local variable
+            my $bare = $var;
+            if (exists $declared_vars->{$bare}) {
+                push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), ${bare}_sv)";
+            } elsif (defined $field_map && exists $field_map->{$bare}) {
+                my $idx = $field_map->{$bare};
+                push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), ObjectFIELDS(SvRV(self))[$idx])";
+            }
+        }
+
+        # Rewrite variable references in the sub to use the package globals
+        my $rewritten = $perl_src;
+        for my $var (keys %bound) {
+            next unless exists $declared_vars->{$var}
+                || (defined $field_map && exists $field_map->{$var});
+            $rewritten =~ s/\$\Q$var\E/\$::_anon_$var/g;
+        }
+
+        my $escaped = $self->_escape_c_string($rewritten);
+        if (@bindings) {
+            return '({ ' . join('; ', @bindings) . '; '
+                . "eval_pv(\"$escaped\", TRUE); })";
+        }
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
@@ -1603,6 +1635,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "({ STRLEN _sl; char *_sp = SvPV($str, _sl); "
                 . "SSize_t _so = SvIV($off); "
                 . "sv_2mortal(newSVpvn(_sp + _so, _sl - _so)); })";
+        }
+
+        # Qualified function call (e.g., Chalk::Bootstrap::Terminal::match) —
+        # use call_pv with C-local args on the stack instead of eval_pv
+        if ($name =~ /::/) {
+            my @arg_exprs = map { $self->_emit_xs_expr($_, $declared_vars) } $args->@*;
+            my $escaped_name = $self->_escape_c_string($name);
+            my @stmts = ('dSP', 'ENTER', 'SAVETMPS', 'PUSHMARK(SP)');
+            for my $arg (@arg_exprs) {
+                push @stmts, "XPUSHs($arg)";
+            }
+            push @stmts, 'PUTBACK';
+            push @stmts, "call_pv(\"$escaped_name\", G_SCALAR)";
+            push @stmts, 'SPAGAIN';
+            push @stmts, 'SV *_cpv = SvREFCNT_inc(POPs)';
+            push @stmts, 'PUTBACK', 'FREETMPS', 'LEAVE';
+            push @stmts, '_cpv';
+            return '({ ' . join('; ', @stmts) . '; })';
         }
 
         # Fallback — preserve arguments via eval_pv with real Perl expression

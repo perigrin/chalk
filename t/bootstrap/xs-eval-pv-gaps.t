@@ -568,6 +568,25 @@ my sub var_node($name) {
     is(scalar @get_sv_calls, 0,
         'no get_sv for local variables (all resolve to C locals)')
         or diag("Remaining get_sv calls: " . join(', ', @get_sv_calls));
+
+    # === Remaining eval_pv calls should use native C ===
+
+    # Terminal::match should use call_pv, not eval_pv with variable references
+    unlike($xs_code, qr/eval_pv\("Chalk::Bootstrap::Terminal::match\(/,
+        'Terminal::match: no eval_pv with C-local variable references');
+
+    # Anonymous sub callback: eval_pv is OK for creating closures, but
+    # variables inside must reference package globals (::_anon_*), not C locals.
+    # Check that the sub body uses $::_anon_ prefix for captured variables.
+    if ($xs_code =~ /eval_pv\("sub \(([^)]*)\).*?\\n(.*?)\\n"\s*,\s*TRUE\)/) {
+        my $body = $2;
+        # Body should use $::_anon_ prefixed variables, not bare C locals
+        unlike($body, qr/\$(?!::_anon_|rule_name)\w+/,
+            'anon sub: captured variables use package globals, not C locals');
+    }
+    # Verify bindings are set before eval_pv
+    like($xs_code, qr/sv_setsv\(get_sv\("::_anon_/,
+        'anon sub: C-local variables bound to package globals before eval_pv');
 }
 
 done_testing();
