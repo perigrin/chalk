@@ -1090,11 +1090,139 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return '({ ' . join('; ', @stmts) . '; })';
     }
 
+    # Walk a SubscriptExpr chain to find a BuiltinCall(exists/delete) at the root.
+    # Returns the BuiltinCall node if found, undef otherwise.
+    method _find_exists_delete_in_chain($node) {
+        my $cur = $node;
+        while (defined $cur && $cur isa Chalk::Bootstrap::IR::Node::Constructor) {
+            if ($cur->class() eq 'BuiltinCall') {
+                my $name = $cur->inputs()->[0]->value() // '';
+                return $cur if $name eq 'exists' || $name eq 'delete';
+                return;
+            }
+            if ($cur->class() eq 'SubscriptExpr') {
+                $cur = $cur->inputs()->[0];
+                next;
+            }
+            # Unwrap ReturnStmt/DieCall wrappers (stale-value merge artifacts)
+            if ($cur->class() eq 'ReturnStmt' || $cur->class() eq 'DieCall') {
+                $cur = $cur->inputs()->[0];
+                next;
+            }
+            return;
+        }
+        return;
+    }
+
+    # Build native C code for exists/delete with subscript chain.
+    # Walks from the outermost SubscriptExpr inward, collecting subscripts,
+    # then emits av_fetch/hv_fetch chain with av_exists/hv_exists for last element.
+    method _build_exists_delete_native($node, $declared_vars) {
+        my @subscripts;  # [index_node, style] from innermost to outermost
+        my $cur = $node;
+        my $builtin_name;
+        my $base_node;
+
+        # Collect subscript chain (outermost first, then reverse)
+        while (defined $cur && $cur isa Chalk::Bootstrap::IR::Node::Constructor) {
+            if ($cur->class() eq 'SubscriptExpr') {
+                push @subscripts, [$cur->inputs()->[1], $cur->inputs()->[2]->value()];
+                $cur = $cur->inputs()->[0];
+                next;
+            }
+            if ($cur->class() eq 'ReturnStmt' || $cur->class() eq 'DieCall') {
+                $cur = $cur->inputs()->[0];
+                next;
+            }
+            if ($cur->class() eq 'BuiltinCall') {
+                $builtin_name = $cur->inputs()->[0]->value();
+                my $args = $cur->inputs()->[1];
+                $base_node = $args->[0] if $args->@* > 0;
+                last;
+            }
+            last;
+        }
+
+        return unless defined $builtin_name && defined $base_node;
+
+        # @subscripts is outermost-first; reverse to get innermost-first
+        @subscripts = reverse @subscripts;
+
+        my $base = $self->_emit_xs_expr($base_node, $declared_vars);
+
+        if ($builtin_name eq 'exists') {
+            # Build chain: intermediate subscripts use av_fetch/hv_fetch,
+            # last subscript uses av_exists/hv_exists_ent
+            my $expr = $base;
+            for my $i (0 .. $#subscripts) {
+                my ($idx_node, $sty) = $subscripts[$i]->@*;
+                my $idx = $self->_emit_xs_expr($idx_node, $declared_vars);
+                my $is_last = ($i == $#subscripts);
+
+                if ($sty eq 'array') {
+                    if ($is_last) {
+                        $expr = "av_exists((AV*)SvRV($expr), SvIV($idx))";
+                    } else {
+                        $expr = "(*av_fetch((AV*)SvRV($expr), SvIV($idx), 0))";
+                    }
+                } else {
+                    if ($is_last) {
+                        $expr = "hv_exists_ent((HV*)SvRV($expr), $idx, 0)";
+                    } else {
+                        $expr = "(*hv_fetch((HV*)SvRV($expr), SvPV_nolen($idx), SvCUR($idx), 0))";
+                    }
+                }
+            }
+            # av_exists/hv_exists_ent returns bool (int), wrap in SV
+            return "($expr ? &PL_sv_yes : &PL_sv_no)";
+        }
+
+        if ($builtin_name eq 'delete') {
+            # Build chain: intermediate subscripts use av_fetch/hv_fetch,
+            # last subscript uses av_delete/hv_delete_ent
+            my $expr = $base;
+            for my $i (0 .. $#subscripts) {
+                my ($idx_node, $sty) = $subscripts[$i]->@*;
+                my $idx = $self->_emit_xs_expr($idx_node, $declared_vars);
+                my $is_last = ($i == $#subscripts);
+
+                if ($sty eq 'array') {
+                    if ($is_last) {
+                        $expr = "av_delete((AV*)SvRV($expr), SvIV($idx), 0)";
+                    } else {
+                        $expr = "(*av_fetch((AV*)SvRV($expr), SvIV($idx), 0))";
+                    }
+                } else {
+                    if ($is_last) {
+                        $expr = "hv_delete_ent((HV*)SvRV($expr), $idx, 0, 0)";
+                    } else {
+                        $expr = "(*hv_fetch((HV*)SvRV($expr), SvPV_nolen($idx), SvCUR($idx), 0))";
+                    }
+                }
+            }
+            return $expr;
+        }
+
+        return;
+    }
+
     # Emit subscript access (hash or array)
     method _emit_xs_subscript_expr($node, $declared_vars) {
         my $target = $node->inputs()->[0];
         my $index  = $node->inputs()->[1];
         my $style  = $node->inputs()->[2]->value();
+
+        # Handle exists/delete with misparented subscript chain:
+        # IR produces SubscriptExpr(BuiltinCall(exists, [$var]), $key) or
+        # SubscriptExpr(ReturnStmt(BuiltinCall(exists, [$var])), $key)
+        # Collect the full subscript chain and emit native C exists/delete.
+        {
+            my $builtin = $self->_find_exists_delete_in_chain($node);
+            if (defined $builtin) {
+                my $native = $self->_build_exists_delete_native($node, $declared_vars);
+                return $native if defined $native;
+            }
+        }
 
         # Handle broken coderef call IR: SubscriptExpr with undef index
         # comes from $f->($self) where parser loses the argument

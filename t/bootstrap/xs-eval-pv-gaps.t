@@ -551,6 +551,14 @@ my sub var_node($name) {
     unlike($run_parse, qr/get_sv\("Test::RunParse::entry"/,
         'while-shift var: no get_sv for entry variable');
 
+    # exists/delete with subscript chains should not use eval_pv
+    # _chart_has uses: exists $chart->[$pos]{$core_id}[$origin]
+    # The subscript chain must be inside the exists, not wrapping it
+    unlike($xs_code, qr/eval_pv\("exists\(\$/,
+        'exists: no eval_pv("exists($var)") — subscript chain should be inside');
+    unlike($xs_code, qr/eval_pv\("delete\(\$/,
+        'delete: no eval_pv("delete($var)") — subscript chain should be inside');
+
     # No get_sv calls should remain in the entire XS code for local variables
     # Variables from list destructuring must resolve to C locals, not Perl globals
     my @get_sv_calls;

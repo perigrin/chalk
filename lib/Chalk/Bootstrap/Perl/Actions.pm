@@ -417,6 +417,59 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
+        # Fix exists/delete with subscript chain misparenting:
+        # SubscriptExpr(BuiltinCall(exists/delete, [$var]), $key, style)
+        #   → BuiltinCall(exists/delete, [SubscriptExpr($var, $key, style)])
+        # Also handles ReturnStmt wrapper from stale-value merge:
+        # SubscriptExpr(ReturnStmt(BuiltinCall(exists/delete, [$var])), $key, style)
+        #   → ReturnStmt(BuiltinCall(exists/delete, [SubscriptExpr($var, $key, style)]))
+        if ($node->class() eq 'SubscriptExpr') {
+            my $target = $node->inputs()->[0];
+            my $builtin_call;
+            my $wrapper_class;  # 'ReturnStmt' if wrapped, undef if direct
+
+            if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor) {
+                if ($target->class() eq 'BuiltinCall') {
+                    $builtin_call = $target;
+                } elsif ($target->class() eq 'ReturnStmt'
+                        || $target->class() eq 'DieCall') {
+                    my $inner = $target->inputs()->[0];
+                    if (defined $inner
+                            && $inner isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $inner->class() eq 'BuiltinCall') {
+                        $builtin_call = $inner;
+                        $wrapper_class = $target->class();
+                    }
+                }
+            }
+
+            if (defined $builtin_call) {
+                my $bname = $builtin_call->inputs()->[0]->value();
+                if ($bname eq 'exists' || $bname eq 'delete') {
+                    my @args = $builtin_call->inputs()->[1]->@*;
+                    my $inner_target = $args[-1];
+                    $args[-1] = $factory->make('Constructor',
+                        'class'  => 'SubscriptExpr',
+                        target => $inner_target,
+                        index  => $node->inputs()->[1],
+                        style  => $node->inputs()->[2],
+                    );
+                    my $new_builtin = $factory->make('Constructor',
+                        'class' => 'BuiltinCall',
+                        name    => $builtin_call->inputs()->[0],
+                        args    => \@args,
+                    );
+                    if (defined $wrapper_class) {
+                        return $factory->make('Constructor',
+                            'class' => $wrapper_class,
+                            value   => $new_builtin,
+                        );
+                    }
+                    return $new_builtin;
+                }
+            }
+        }
+
         return $node;
     }
 
@@ -1346,7 +1399,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val;
             }
         }
-        return _fixup_stmts($factory, \@stmts);
+        my $fixed = _fixup_stmts($factory, \@stmts);
+        # Fix misparented postfix chains from Earley stale-value merge
+        return [ map { _fix_postfix_chain($factory, $_) } $fixed->@* ];
     }
 
     # §18 Variable — resolve from scope if available, else Constant
@@ -1677,6 +1732,30 @@ class Chalk::Bootstrap::Perl::Actions {
                         $factory, $result, $op->inputs()->[1], $op->inputs()->[2],
                     );
                 } elsif ($op->class() eq 'SubscriptExpr') {
+                    # Push subscript inside exists/delete BuiltinCall so the
+                    # argument includes the full subscript chain:
+                    #   SubscriptExpr(BuiltinCall(exists, [$chart]), $pos)
+                    #   → BuiltinCall(exists, [SubscriptExpr($chart, $pos)])
+                    if ($result isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $result->class() eq 'BuiltinCall') {
+                        my $bname = $result->inputs()->[0]->value();
+                        if ($bname eq 'exists' || $bname eq 'delete') {
+                            my @args = $result->inputs()->[1]->@*;
+                            my $inner_target = $args[-1];
+                            $args[-1] = $factory->make('Constructor',
+                                'class'  => 'SubscriptExpr',
+                                target => $inner_target,
+                                index  => $op->inputs()->[1],
+                                style  => $op->inputs()->[2],
+                            );
+                            $result = $factory->make('Constructor',
+                                'class' => 'BuiltinCall',
+                                name    => $result->inputs()->[0],
+                                args    => \@args,
+                            );
+                            next;
+                        }
+                    }
                     $result = $factory->make('Constructor',
                         'class'  => 'SubscriptExpr',
                         target => $result,
