@@ -13,11 +13,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $field_map;  # hashref: field name => index (set during _emit_xs)
     field $field_sigils;  # hashref: field name => sigil ($, @, %) (set during _emit_xs)
     field %_cfg_lookup;  # IR node refaddr → cfg_state entry, built by generate_with_cfg
+    field $_return_context = false;  # true when emitting a method body that returns a value
 
     ADJUST {
         die "Invalid module name: $module_name"
             unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
     }
+
+    method set_return_context($val) { $_return_context = $val; }
 
     method generate($ir) {
         die "generate() requires a Constructor:Program IR node"
@@ -597,14 +600,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
             && $last_item->class() eq 'ReturnStmt');
         # Detect tail-position expressions: a bare expression as the final
-        # body item is treated as a return value (IR strips explicit return
-        # in tail position). Statement-like nodes are excluded.
-        my %void_classes = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign);
+        # body item is treated as a return value (stale-merge strips explicit
+        # return in tail position). Uses _is_bare_return_expr for detection.
         my $tail_expr_return = (!$last_is_return
             && defined $last_item
-            && scalar $body->@* == 1
-            && !(  $last_item isa Chalk::Bootstrap::IR::Node::Constructor
-                && $void_classes{$last_item->class()})
+            && $self->_is_bare_return_expr($last_item)
             );
         my $has_return = $last_is_return || $tail_expr_return || $self->_body_contains_return($body);
 
@@ -630,6 +630,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # Detect early returns (ReturnStmt inside If CFG node or non-final position)
         my $has_early_return = $self->_has_early_return($body);
+
+        # Set return context so nested emit_cfg_if can reconstruct stripped
+        # ReturnStmt nodes as RETVAL assignments (stale-merge workaround)
+        my $prev_return_context = $_return_context;
+        $_return_context = $has_return;
 
         # Emit each body item as C code, marking the last statement
         for my $idx (0 .. $body->@* - 1) {
@@ -677,6 +682,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
+        # Restore previous return context
+        $_return_context = $prev_return_context;
+
         if ($has_return) {
             # Label for early returns to jump to before OUTPUT section
             if ($has_early_return) {
@@ -699,9 +707,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 if (defined $state && defined $state->{if_node}) {
                     my $then = $state->{then_stmts};
                     return true if $self->_body_contains_return($then);
+                    # Stale-merge can strip ReturnStmt leaving bare expressions
+                    return true if $self->_body_contains_bare_return($then);
                     my $else = $state->{else_stmts};
                     return true if defined($else) && ref($else) eq 'ARRAY'
                         && $self->_body_contains_return($else);
+                    return true if defined($else) && ref($else) eq 'ARRAY'
+                        && $self->_body_contains_bare_return($else);
+                }
+                # Recurse into loop body_stmts
+                if (defined $state && defined $state->{loop}) {
+                    my $loop_body = $state->{body_stmts};
+                    return true if defined($loop_body) && ref($loop_body) eq 'ARRAY'
+                        && $self->_has_early_return($loop_body);
                 }
             }
         }
@@ -726,6 +744,31 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             return true if $item->class() eq 'ReturnStmt';
         }
+        return false;
+    }
+
+    # Check if a body array's last item is a bare return expression (stale-merge)
+    method _body_contains_bare_return($body) {
+        return false unless ref($body) eq 'ARRAY' && $body->@*;
+        my $last = $body->[-1];
+        return $self->_is_bare_return_expr($last);
+    }
+
+    # Detect if an IR node is a bare expression that was likely a return value
+    # stripped by the Earley stale-value merge. Used in emit_cfg_if to
+    # reconstruct RETVAL assignment when in return context.
+    method _is_bare_return_expr($node) {
+        return false unless defined $node;
+        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        my $class = $node->class();
+        # Void statement types are never bare return expressions
+        my %void = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign ReturnStmt
+                                        BuiltinCall BinaryExpr);
+        return false if $void{$class};
+        # SubscriptExpr and MethodCallExpr are common return-value patterns
+        return true if $class eq 'SubscriptExpr';
+        return true if $class eq 'MethodCallExpr';
+        return true if $class eq 'TernaryExpr';
         return false;
     }
 
@@ -2118,7 +2161,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         my @lines;
         push @lines, "$prefix (SvTRUE($cond_expr)) {";
-        for my $stmt ($true_stmts->@*) {
+        for my $idx (0 .. $true_stmts->@* - 1) {
+            my $stmt = $true_stmts->[$idx];
+            my $is_last_in_then = ($idx == $true_stmts->@* - 1);
+            # Stale-merge can strip ReturnStmt leaving a bare expression.
+            # When in return context (method has returns), detect the last
+            # bare expression and emit it as RETVAL assignment + goto.
+            if ($_return_context && $is_last_in_then
+                    && $self->_is_bare_return_expr($stmt)) {
+                my $val_expr = $self->_emit_xs_expr($stmt, $declared_vars);
+                $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
+                push @lines, "    RETVAL = $val_expr; goto xsreturn;";
+                next;
+            }
             my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
             push @lines, "    $code" if defined $code;
         }

@@ -422,4 +422,47 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/av_push.*HeVAL/, 'push+values pushes hash values directly');
 }
 
+# --- Test: bare expression in If body emits RETVAL when method has returns ---
+# When stale-value merge strips a ReturnStmt, a bare SubscriptExpr like
+# $item->{value} appears in then_stmts. If the method has return statements
+# elsewhere, this bare expression should be emitted as RETVAL assignment.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $start = $factory->make('Start');
+    my $cond  = $factory->make('Constant', const_type => 'string', value => 'cond_sv');
+
+    my $if_node    = $factory->make('If', control => $start, condition => $cond);
+    my $true_proj  = $factory->make('Proj', source => $if_node, index => 0);
+    my $false_proj = $factory->make('Proj', source => $if_node, index => 1);
+
+    # Build: SubscriptExpr($item, "value", 'hash') — the corrupted return
+    my $item_var = $factory->make('Constant', const_type => 'variable', value => '$item');
+    my $key      = $factory->make('Constant', const_type => 'string', value => 'value');
+    my $subscript = $factory->make('Constructor',
+        'class' => 'SubscriptExpr',
+        target  => $item_var,
+        index   => $key,
+        style   => $factory->make('Constant', const_type => 'string', value => 'hash'),
+    );
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::IfReturn');
+
+    # Without return context: should be bare expression (side-effect)
+    my $code_no_return = $target->emit_cfg_if($if_node, $true_proj, $false_proj, {},
+        [$subscript], []);
+    unlike($code_no_return, qr/RETVAL/,
+        'bare expression in if body without return context is NOT RETVAL');
+
+    # With return context: should be RETVAL + goto xsreturn
+    $target->set_return_context(true);
+    my $code_with_return = $target->emit_cfg_if($if_node, $true_proj, $false_proj, {},
+        [$subscript], []);
+    like($code_with_return, qr/RETVAL\s*=/,
+        'bare expression in if body with return context emits RETVAL');
+    like($code_with_return, qr/goto xsreturn/,
+        'bare expression in if body with return context emits goto xsreturn');
+}
+
 done_testing();

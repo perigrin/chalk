@@ -115,10 +115,8 @@ my $perl_result = $perl_parser->parse($bnf_input);
 # --- Step 7: Compare results ---
 ok(defined $perl_result, 'Perl parser recognizes simple BNF');
 
-# Run XS parse in a child process to survive segfaults.
-# The XS _run_parse is still under development and may crash.
-TODO: {
-    local $TODO = 'XS Earley parse: no longer segfaults, but return value lost (stale-merge strips ReturnStmt) (GitHub #627)';
+# Run XS parse in a child process to survive potential segfaults.
+{
     my $pid = fork();
     if ($pid == 0) {
         # Child: try to parse, exit with status
@@ -129,7 +127,7 @@ TODO: {
     my $child_exit = $? >> 8;
     my $child_signal = $? & 127;
     if ($child_signal) {
-        fail("XS parser crashed with signal $child_signal (segfault)");
+        fail("XS parser crashed with signal $child_signal");
     } elsif ($child_exit == 0) {
         pass('XS parser recognizes simple BNF');
     } else {
