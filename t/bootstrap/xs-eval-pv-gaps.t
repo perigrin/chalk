@@ -361,4 +361,64 @@ my sub var_node($name) {
     unlike($code, qr/eval_pv\("pack\(\)"/, 'pack fallback: not an empty stub');
 }
 
+# === Method call invocant: no SvRV dereference ===
+# Method call on an object should push the object reference directly,
+# not SvRV(obj). call_method needs the blessed reference on the stack.
+{
+    # $obj->method_name() where $obj is a local variable
+    my $invocant = var_node('$start_rule');
+    my $method_call = ctor('MethodCallExpr', inputs => [
+        $invocant,
+        const_node('expressions'),
+        [],
+    ]);
+
+    my $code = $xs->_emit_xs_expr($method_call, { start_rule => true });
+    like($code, qr/call_method\("expressions"/, 'method call: calls expressions');
+    like($code, qr/XPUSHs\(start_rule_sv\)/, 'method call: pushes object directly, not SvRV');
+    unlike($code, qr/XPUSHs\(SvRV\(start_rule_sv\)\)/, 'method call: no SvRV on invocant');
+}
+
+# === Method call on PostfixDerefExpr invocant ===
+# $obj->deref->method() — PostfixDerefExpr('$') wraps invocant
+# Should unwrap the deref for method call purposes
+{
+    my $inner = var_node('$rule');
+    my $deref = ctor('PostfixDerefExpr', inputs => [
+        $inner,
+        const_node('$'),
+    ]);
+    my $method_call = ctor('MethodCallExpr', inputs => [
+        $deref,
+        const_node('name'),
+        [],
+    ]);
+
+    my $code = $xs->_emit_xs_expr($method_call, { rule => true });
+    like($code, qr/call_method\("name"/, 'deref method call: calls name');
+    unlike($code, qr/XPUSHs\(SvRV\(/, 'deref method call: no SvRV wrapping invocant');
+}
+
+# === map { {} } (0 .. $n) — chart initialization ===
+# The map builtin with a block should not produce eval_pv("map(0 .. $n)")
+# because $n is a C variable not a Perl variable.
+{
+    my $range = ctor('BinaryExpr',
+        op    => const_node('..'),
+        left  => const_node('0', 'integer'),
+        right => var_node('$n'),
+    );
+    my $block = ctor('AnonSubExpr',
+        params => [],
+        body   => [ctor('HashRefExpr', pairs => [])],
+    );
+    my $map_call = ctor('BuiltinCall',
+        name => const_node('map'),
+        args => [$block, $range],
+    );
+    my $code = $xs->_emit_xs_expr($map_call, { n => true });
+    # Should not reference $n as a Perl variable in eval_pv
+    unlike($code, qr/eval_pv\("map\(/, 'map init: not a broken eval_pv with C vars');
+}
+
 done_testing();

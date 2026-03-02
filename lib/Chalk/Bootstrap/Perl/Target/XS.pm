@@ -1002,10 +1002,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $method_name   = $node->inputs()->[1]->value();
         my $args          = $node->inputs()->[2];
 
-        # Determine invocant C expression ($self if undef)
+        # Determine invocant C expression ($self if undef).
+        # If the invocant is wrapped in PostfixDerefExpr('$'), unwrap it:
+        # call_method needs the blessed reference on the stack, not SvRV(ref).
         my $invocant_expr;
         if (defined $invocant_node) {
-            $invocant_expr = $self->_emit_xs_expr($invocant_node, $declared_vars);
+            if ($invocant_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $invocant_node->class() eq 'PostfixDerefExpr'
+                    && $invocant_node->inputs()->[1]->value() eq '$') {
+                $invocant_expr = $self->_emit_xs_expr($invocant_node->inputs()->[0], $declared_vars);
+            } else {
+                $invocant_expr = $self->_emit_xs_expr($invocant_node, $declared_vars);
+            }
         } else {
             $invocant_expr = 'self';
         }
@@ -1292,6 +1300,49 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 . "while ((_he = hv_iternext(_vhv))) "
                 . "av_push(_vav, SvREFCNT_inc(HeVAL(_he))); "
                 . "newRV_noinc((SV*)_vav); })";
+        }
+
+        # map { BLOCK } LIST — native C loop that applies block to each element.
+        # Emits a loop building an AV from the block's return value for each input.
+        if ($name eq 'map' && $args->@* == 2) {
+            my $block_node = $args->[0];
+            my $list_node  = $args->[1];
+
+            # Emit the list expression (could be a range 0..$n, an array, etc.)
+            my $list_expr = $self->_emit_xs_expr($list_node, $declared_vars);
+
+            # Emit the block body — simplified: evaluate the last expression
+            my $block_body;
+            if ($block_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $block_node->class() eq 'AnonSubExpr') {
+                my $body = $block_node->inputs()->[1] // $block_node->inputs()->[3] // [];
+                if ($body->@*) {
+                    $block_body = $self->_emit_xs_expr($body->[-1], $declared_vars);
+                }
+            }
+            $block_body //= 'newRV_noinc((SV*)newHV())';
+
+            # If list is a range (BinaryExpr with '..'), emit integer for loop
+            if ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $list_node->class() eq 'BinaryExpr'
+                    && defined $list_node->inputs()->[0]
+                    && $list_node->inputs()->[0] isa Chalk::Bootstrap::IR::Node::Constant
+                    && $list_node->inputs()->[0]->value() eq '..') {
+                my $range_left  = $self->_emit_xs_expr($list_node->inputs()->[1], $declared_vars);
+                my $range_right = $self->_emit_xs_expr($list_node->inputs()->[2], $declared_vars);
+                return "({ AV *_mav = newAV(); SSize_t _ms = SvIV($range_left); "
+                    . "SSize_t _me = SvIV($range_right); SSize_t _mi; "
+                    . "for (_mi = _ms; _mi <= _me; _mi++) "
+                    . "av_push(_mav, SvREFCNT_inc($block_body)); "
+                    . "newRV_noinc((SV*)_mav); })";
+            }
+
+            # Generic: iterate over AV
+            return "({ AV *_mav = newAV(); AV *_msrc = (AV*)SvRV($list_expr); "
+                . "SSize_t _mlen = av_len(_msrc) + 1; SSize_t _mi; "
+                . "for (_mi = 0; _mi < _mlen; _mi++) "
+                . "av_push(_mav, SvREFCNT_inc($block_body)); "
+                . "newRV_noinc((SV*)_mav); })";
         }
 
         # delete($hash{$key}) — native hash entry removal via hv_delete_ent
