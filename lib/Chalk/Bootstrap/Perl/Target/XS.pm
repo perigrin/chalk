@@ -683,8 +683,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # Skip field variables — they use ObjectFIELDS, not PREINIT locals
                 next if defined $field_map && exists $field_map->{$var};
                 $declared_vars->{$var} = true;
-                # VarDecl with TryCatchStmt init: recurse into try/catch bodies
+                # Recurse into chained VarDecl init to collect inner variables
                 my $init = $item->inputs()->[1];
+                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $init->class() eq 'VarDecl') {
+                    $self->_collect_var_decls([$init], $declared_vars);
+                }
+                # VarDecl with TryCatchStmt init: recurse into try/catch bodies
                 if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
                         && $init->class() eq 'TryCatchStmt') {
                     my $state = $_cfg_lookup{refaddr($init)};
@@ -1480,6 +1485,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             $default_val = 'newRV_noinc((SV*)newHV())';
         } elsif (defined $sigil && $sigil eq '@') {
             $default_val = 'newRV_noinc((SV*)newAV())';
+        }
+
+        # Chained VarDecl: %hash_a = %hash_b = () is an IR artifact where
+        # consecutive hash/array resets are merged into a linked list of VarDecl
+        # nodes. Split into separate statements: emit inner first, then outer
+        # with its sigil-appropriate default.
+        if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                && $init->class() eq 'VarDecl') {
+            my $inner_stmt = $self->_emit_xs_var_decl($init, $declared_vars);
+            # Fall through to emit this variable with its sigil default
+            $init = undef;
+            my $this_stmt;
+            if (defined $field_map && exists $field_map->{$var}) {
+                my $idx = $field_map->{$var};
+                $this_stmt = "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
+            } else {
+                $this_stmt = "${var}_sv = $default_val;";
+            }
+            return "$inner_stmt\n$this_stmt";
         }
 
         # Field variables are stored in ObjectFIELDS, not local C variables.
