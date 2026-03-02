@@ -1400,7 +1400,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $idx = $self->_emit_xs_expr($index, $declared_vars);
             my $av = (defined $field_sig && $field_sig eq '@')
                 ? "(AV*)$tgt" : "(AV*)SvRV($tgt)";
-            return "(*av_fetch($av, SvIV($idx), 0))";
+            # av_fetch with lval=1 auto-vivifies missing slots (returns writable
+            # SV* for new indices). This matches Perl semantics and is safe for
+            # both read and write (assignment target) contexts.
+            return "(*av_fetch($av, SvIV($idx), 1))";
         }
         # Hash access — use lval=1 so hv_fetch creates missing keys (avoids NULL deref
         # when used as assignment target). Compute key once via SvPV to avoid

@@ -298,4 +298,28 @@ use Chalk::Bootstrap::Perl::Target::XS;
     unlike($code_last, qr/continue/, 'XS loop_jump last does NOT emit continue');
 }
 
+# --- Test: av_fetch with lval=1 for array subscript ---
+# av_fetch with lval=1 auto-vivifies missing slots, making it safe for
+# both read and write (assignment target) contexts.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    # Build: SubscriptExpr($arr, $idx, 'array')
+    my $arr = $factory->make('Constant', const_type => 'string', value => 'arr_sv');
+    my $idx = $factory->make('Constant', const_type => 'string', value => 'idx_sv');
+    my $subscript = $factory->make('Constructor',
+        'class' => 'SubscriptExpr',
+        target  => $arr,
+        index   => $idx,
+        style   => $factory->make('Constant', const_type => 'string', value => 'array'),
+    );
+
+    my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::AvGuard');
+    my $code = $target->_emit_xs_expr($subscript, {});
+    ok(defined $code, 'array subscript emits code');
+    # Must use lval=1 to auto-vivify missing slots (safe for assignment targets)
+    like($code, qr/av_fetch\([^,]+,[^,]+,\s*1\)/, 'array subscript uses lval=1 for auto-vivification');
+}
+
 done_testing();
