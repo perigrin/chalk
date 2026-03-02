@@ -653,4 +653,35 @@ my sub var_node($name) {
         '_chart_has: no origin_sv in PREINIT — origin is a parameter');
 }
 
+# --- Hash/array field reset: hv_clear/av_clear instead of sv_setsv ---
+# Perl 5.42 `field %hash` creates an HV* field slot, not an SV* hashref.
+# Resetting `%waiting_for = ()` must emit hv_clear, not sv_setsv with newHV.
+{
+    use lib 't/bootstrap/lib';
+    require TestXSHelpers;
+    TestXSHelpers->import(qw(setup_xs_grammar parse_file_ir));
+
+    my $gen = setup_xs_grammar('Chalk::Grammar::Perl::FieldReset');
+    my ($ir, $sa, $ctx) = parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm');
+    my $xs_gen = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::FieldReset');
+    my $output = $xs_gen->generate_with_cfg($ir, $sa, $ctx);
+
+    my ($run_parse_code) = $output =~ /_run_parse\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
+    ok(defined $run_parse_code, '_run_parse CODE section extracted');
+
+    # Hash field resets should use hv_clear, not sv_setsv with newHV
+    unlike($run_parse_code, qr/sv_setsv\(ObjectFIELDS.*?newRV_noinc\(\(SV\*\)newHV/,
+        '_run_parse: no sv_setsv(ObjectFIELDS, newRV(newHV)) — hash fields need hv_clear');
+
+    like($run_parse_code, qr/hv_clear\(\(HV\*\)ObjectFIELDS/,
+        '_run_parse: uses hv_clear for hash field reset');
+
+    # Array field resets should use av_clear, not sv_setsv with newAV
+    unlike($run_parse_code, qr/sv_setsv\(ObjectFIELDS.*?newRV_noinc\(\(SV\*\)newAV/,
+        '_run_parse: no sv_setsv(ObjectFIELDS, newRV(newAV)) — array fields need av_clear');
+
+    like($run_parse_code, qr/av_clear\(\(AV\*\)ObjectFIELDS/,
+        '_run_parse: uses av_clear for array field reset');
+}
+
 done_testing();
