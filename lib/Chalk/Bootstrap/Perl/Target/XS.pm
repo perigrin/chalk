@@ -730,6 +730,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 if ($val =~ /^\$([\w]+)$/) {
                     my $bare = $1;
                     next if defined $field_map && exists $field_map->{$bare};
+                    # Skip method parameters — they use bare C names, not _sv locals
+                    next if $declared_vars->{"param:$bare"};
                     $declared_vars->{$bare} = true;
                 }
             } elsif ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
@@ -950,6 +952,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $src = "get_sv(\"::_c$var\", GV_ADD)";
                 } elsif ($declared_vars && $declared_vars->{$var}) {
                     $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
+                } elsif ($declared_vars && $declared_vars->{"param:$var"}) {
+                    $src = "$var ? $var : &PL_sv_undef";
                 } elsif ($field_map && exists $field_map->{$var}) {
                     my $idx = $field_map->{$var};
                     $src = "ObjectFIELDS(SvRV(self))[$idx]";

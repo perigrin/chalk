@@ -637,6 +637,20 @@ my sub var_node($name) {
         '_chart_has: no av_exists — {$core_id} is hash subscript, not array');
     like($chart_has_code, qr/hv_exists_ent/,
         '_chart_has: uses hv_exists_ent for {$core_id} hash subscript');
+
+    # Method parameters should NOT appear as _sv NULL vars in PREINIT.
+    # Parameters (chart, pos, core_id, origin) are bare C names from XS typemap.
+    my ($chart_has_preinit) = $output =~ /_chart_has\(.*?\n  PREINIT:\n(.*?)\n  CODE:/ms;
+    ok(defined $chart_has_preinit, '_chart_has PREINIT extracted');
+
+    unlike($chart_has_preinit, qr/chart_sv\s*=\s*NULL/,
+        '_chart_has: no chart_sv in PREINIT — chart is a parameter');
+    unlike($chart_has_preinit, qr/pos_sv\s*=\s*NULL/,
+        '_chart_has: no pos_sv in PREINIT — pos is a parameter');
+    unlike($chart_has_preinit, qr/core_id_sv\s*=\s*NULL/,
+        '_chart_has: no core_id_sv in PREINIT — core_id is a parameter');
+    unlike($chart_has_preinit, qr/origin_sv\s*=\s*NULL/,
+        '_chart_has: no origin_sv in PREINIT — origin is a parameter');
 }
 
 done_testing();
