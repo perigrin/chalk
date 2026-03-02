@@ -12,8 +12,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;
     field $field_map;  # hashref: field name => index (set during _emit_xs)
     field %_cfg_lookup;  # IR node refaddr → cfg_state entry, built by generate_with_cfg
-    field $_sa;  # SemanticAction instance, set during generate_with_cfg
-    field $_ctx; # Context root, set during generate_with_cfg
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -48,21 +46,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             && $ir->class() eq 'Program';
 
         %_cfg_lookup = ();
-        $_sa = $sa;
-        $_ctx = $ctx;
         $self->_build_cfg_lookup($sa, $ctx);
         my $code = $self->_emit_xs($ir);
         %_cfg_lookup = ();
-        $_sa = undef;
-        $_ctx = undef;
         return $code;
     }
 
     # Generate distribution with cfg_state-aware dispatch.
     method generate_distribution_with_cfg($ir, $sa, $ctx) {
         %_cfg_lookup = ();
-        $_sa = $sa;
-        $_ctx = $ctx;
         $self->_build_cfg_lookup($sa, $ctx);
 
         my $xs_path = $self->_module_path_prefix() . '.xs';
@@ -74,8 +66,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         };
 
         %_cfg_lookup = ();
-        $_sa = undef;
-        $_ctx = undef;
         return $result;
     }
 
@@ -149,7 +139,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Field attributes (:param, :reader, :writer) are applied via class_apply_field_attributes.
     # Field defaults are set via class_set_field_defop with op_next cleared.
     # Also emits eval_pv fallback calls for methods that can't be compiled to XS.
-    method _emit_xs_boot_block($class_decl, $field_map, $fallback_methods = [], $sa = undef, $ctx = undef) {
+    method _emit_xs_boot_block($class_decl, $field_map, $fallback_methods = [], $has_adjust = false) {
         my @lines;
         push @lines, 'BOOT:';
         push @lines, '{';
@@ -224,63 +214,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
         push @lines, '';
 
-        # 4. Emit ADJUST block for class body statements (non-field, non-method)
-        # These are statements from ADJUST { ... } that leaked into the class body
-        # because AdjustBlock action returns undef. Emit as eval_pv inside class scope.
-        my @adjust_stmts;
-        for my $item ($body->@*) {
-            next if $item isa Chalk::Bootstrap::IR::Node::Constructor
-                 && ($item->class() eq 'FieldDecl' || $item->class() eq 'MethodDecl');
-            push @adjust_stmts, $item;
-        }
-
-        if (@adjust_stmts) {
-            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-            # Build cfg_lookup for the Perl target so it can emit Loop/If nodes
-            if (defined $_sa && defined $_ctx) {
-                $perl_target->_build_cfg_lookup($_sa, $_ctx);
-            }
-
-            # Build set of field variable names for stripping 'my' from
-            # VarDecl nodes that are really field assignments inside ADJUST
-            my %field_vars;
-            for my $item ($body->@*) {
-                if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'FieldDecl') {
-                    $field_vars{$item->inputs()->[0]->value()} = true;
-                }
-            }
-
-            my @body_lines;
-            for my $stmt (@adjust_stmts) {
-                my $perl_code = $perl_target->_emit_node($stmt);
-                if (defined $perl_code) {
-                    # Strip 'my' from field variable assignments — inside ADJUST,
-                    # fields are already in scope as pad variables
-                    if ($perl_code =~ /^my (\$\w+) =/ && $field_vars{$1}) {
-                        $perl_code =~ s/^my //;
-                    }
-                    push @body_lines, $perl_code;
-                }
-            }
-
-            if (@body_lines) {
-                my $adjust_body = join("\n        ", @body_lines);
-                # Compile ADJUST body as an anonymous sub, then register it
-                # via class_add_ADJUST. eval_pv("sub { ... }") returns a
-                # coderef; SvRV extracts the CV for registration.
-                my $escaped_body = $self->_escape_c_string(
-                    "package $module_name; use 5.42.0; use utf8; "
-                    . "no warnings 'experimental::class'; "
-                    . "sub {\n        $adjust_body\n    }"
-                );
-                push @lines, '    /* Register ADJUST block within class scope */';
-                push @lines, '    {';
-                push @lines, "        SV *adjust_ref = eval_pv(\"$escaped_body\", TRUE);";
-                push @lines, '        Perl_class_add_ADJUST(aTHX_ stash, (CV*)SvRV(adjust_ref));';
-                push @lines, '    }';
-                push @lines, '';
-            }
+        # 4. Register ADJUST block if one was emitted as a native XSUB.
+        # The _ADJUST XSUB is already registered in the stash by xsubpp before
+        # BOOT runs. Look it up via gv_fetchpvs and pass the CV to class_add_ADJUST.
+        if ($has_adjust) {
+            push @lines, '    /* Register _ADJUST XSUB as ADJUST block */';
+            push @lines, '    {';
+            push @lines, "        GV *adjust_gv = gv_fetchpvs(\"_ADJUST\", 0, SVt_PVCV);";
+            push @lines, '        if (adjust_gv && GvCV(adjust_gv)) {';
+            push @lines, '            Perl_class_add_ADJUST(aTHX_ stash, GvCV(adjust_gv));';
+            push @lines, '        }';
+            push @lines, '    }';
+            push @lines, '';
         }
 
         # Outer LEAVE triggers SAVEDESTRUCTOR_X which calls class_seal_stash
@@ -413,6 +358,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # attributes applied in the BOOT block — no need for XSUB readers/writers.
 
             my $body = $class_decl->inputs()->[2];
+            my @adjust_stmts;  # Non-field, non-method body items (ADJUST block)
+
             for my $item ($body->@*) {
                 if ($item isa Chalk::Bootstrap::IR::Node::Constructor
                         && $item->class() eq 'MethodDecl') {
@@ -429,11 +376,27 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         push @lines, $method_lines->@*;
                         push @lines, '';
                     }
+                } elsif (!($item isa Chalk::Bootstrap::IR::Node::Constructor
+                           && $item->class() eq 'FieldDecl')) {
+                    # Non-field, non-method items are ADJUST body statements
+                    push @adjust_stmts, $item;
+                }
+            }
+
+            # Emit ADJUST as native void XSUB if class has ADJUST statements
+            my $has_adjust = false;
+            if (@adjust_stmts) {
+                my $adjust_lines = $self->_emit_xs_complex_method('_ADJUST', [], \@adjust_stmts);
+                my $xs_output = join("\n", $adjust_lines->@*);
+                if (!$self->_needs_eval_fallback($xs_output)) {
+                    push @lines, $adjust_lines->@*;
+                    push @lines, '';
+                    $has_adjust = true;
                 }
             }
 
             # Emit BOOT block after XSUBs (includes eval_pv fallbacks)
-            push @lines, $self->_emit_xs_boot_block($class_decl, $field_map, \@fallback_methods)->@*;
+            push @lines, $self->_emit_xs_boot_block($class_decl, $field_map, \@fallback_methods, $has_adjust)->@*;
         }
 
         return join("\n", @lines) . "\n";
@@ -717,6 +680,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'VarDecl') {
                 my $var = $item->inputs()->[0]->value();
                 $var =~ s/^[\$\@\%]//;
+                # Skip field variables — they use ObjectFIELDS, not PREINIT locals
+                next if defined $field_map && exists $field_map->{$var};
                 $declared_vars->{$var} = true;
                 # VarDecl with TryCatchStmt init: recurse into try/catch bodies
                 my $init = $item->inputs()->[1];
@@ -1321,6 +1286,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $var  = $node->inputs()->[0]->value();
         $var =~ s/^[\$\@\%]//;
         my $init = $node->inputs()->[1];
+
+        # Field variables are stored in ObjectFIELDS, not local C variables.
+        # In ADJUST bodies, VarDecl for field names emits an ObjectFIELDS write.
+        if (defined $field_map && exists $field_map->{$var}) {
+            my $idx = $field_map->{$var};
+            if (defined $init) {
+                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
+                return "ObjectFIELDS(SvRV(self))[$idx] = SvREFCNT_inc($init_expr);";
+            }
+            return "ObjectFIELDS(SvRV(self))[$idx] = newSV(0);";
+        }
 
         if (defined $init) {
             # TryCatchStmt as VarDecl init is a stale-value merge artifact.

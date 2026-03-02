@@ -124,20 +124,42 @@ SKIP: {
         or diag("Earley fields using hv_fetch: " . join(', ', @earley_fallbacks));
 }
 
-# --- Test 8: ADJUST block emission for Earley.pm ---
+# --- Test 8: ADJUST block emission as native XSUB ---
 # Earley.pm has an ADJUST block that builds rule_table, core_index, lr0_dfa.
-# This must be emitted as eval_pv("ADJUST { ... }") inside the BOOT block
-# BEFORE the LEAVE that seals the class.
+# This must be emitted as a native C XSUB named _ADJUST, registered in BOOT
+# via gv_fetchpvs + class_add_ADJUST.
 SKIP: {
-    skip 'Earley.pm parse failed', 3 unless defined $eir;
+    skip 'Earley.pm parse failed', 7 unless defined $eir;
 
     my $exs2 = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::Earley2');
     my $ecode2 = eval { $exs2->generate_with_cfg($eir, $esa, $ectx) };
     ok(defined $ecode2, 'Earley.pm XS generated for ADJUST test');
 
-    # The BOOT block should register ADJUST via class_add_ADJUST
+    # _ADJUST should appear as a void XSUB in the MODULE section
+    like($ecode2, qr/^void\n_ADJUST\(self\)/m,
+        '_ADJUST emitted as void XSUB');
+
+    # _ADJUST body should use ObjectFIELDS for field writes
+    # (rule_table, core_index, lr0_dfa are all field assignments)
+    my @adjust_field_writes;
+    while ($ecode2 =~ /ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]\s*=/g) {
+        push @adjust_field_writes, $1;
+    }
+    ok(scalar @adjust_field_writes > 0,
+        '_ADJUST body contains ObjectFIELDS field writes')
+        or diag("No ObjectFIELDS writes found in _ADJUST body");
+
+    # No eval_pv("sub ...") pattern for ADJUST
+    unlike($ecode2, qr/eval_pv\(".*sub\s*\{/s,
+        'no eval_pv anonymous sub for ADJUST');
+
+    # BOOT block should register ADJUST via class_add_ADJUST
     like($ecode2, qr/class_add_ADJUST/s,
         'BOOT block contains class_add_ADJUST call');
+
+    # BOOT block should use gv_fetchpvs to find _ADJUST CV
+    like($ecode2, qr/gv_fetchpvs\("_ADJUST"/s,
+        'BOOT block uses gv_fetchpvs to find _ADJUST CV');
 
     # The ADJUST registration should appear BEFORE the outer LEAVE
     # (which seals the class)
@@ -145,9 +167,9 @@ SKIP: {
     my ($leave_pos)  = ($ecode2 =~ /(.*)LEAVE;/s);
     if (defined $adjust_pos && defined $leave_pos) {
         ok(length($adjust_pos) < length($leave_pos),
-            'ADJUST eval_pv appears before final LEAVE');
+            'ADJUST registration appears before final LEAVE');
     } else {
-        fail('ADJUST eval_pv appears before final LEAVE');
+        fail('ADJUST registration appears before final LEAVE');
     }
 }
 
