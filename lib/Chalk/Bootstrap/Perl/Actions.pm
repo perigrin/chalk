@@ -326,6 +326,87 @@ class Chalk::Bootstrap::Perl::Actions {
         return $result;
     }
 
+    # Helper: strip spurious SubscriptExpr wrappers from postfix-if conditions.
+    # The Earley stale-value merge can wrap subexpressions in a SubscriptExpr
+    # from the assignment target when body and condition share a subscripted
+    # array reference (e.g. "$arr[$i] = $x if !defined $arr[$i] || ...").
+    # Walks the condition tree recursively, unwrapping any SubscriptExpr that
+    # wraps a known boolean-producing expression (BinaryExpr with comparison/
+    # logical ops, UnaryExpr with !/not/defined, or BuiltinCall like defined).
+    my $_unwrap_condition_corruption;
+    $_unwrap_condition_corruption = sub($f, $node) {
+        return $node unless defined $node;
+        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+
+        my $class = $node->class();
+
+        # If this is a SubscriptExpr wrapping a boolean expression, unwrap it
+        if ($class eq 'SubscriptExpr') {
+            my $target = $node->inputs()->[0];
+            if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor) {
+                my $inner_class = $target->class();
+                my $is_boolean = false;
+
+                if ($inner_class eq 'BinaryExpr') {
+                    my $op = $target->inputs()->[0];
+                    if ($op isa Chalk::Bootstrap::IR::Node::Constant) {
+                        my $op_text = $op->value() // '';
+                        $is_boolean = true
+                            if $op_text =~ /^(?:\|\||&&|\/\/|==|!=|<|>|<=|>=|<=>|eq|ne|lt|gt|le|ge|cmp)$/;
+                    }
+                } elsif ($inner_class eq 'UnaryExpr') {
+                    my $op = $target->inputs()->[0];
+                    if ($op isa Chalk::Bootstrap::IR::Node::Constant) {
+                        my $op_text = $op->value() // '';
+                        $is_boolean = true if $op_text =~ /^(?:!|not|defined)$/;
+                    }
+                } elsif ($inner_class eq 'BuiltinCall') {
+                    my $name = $target->inputs()->[0];
+                    if ($name isa Chalk::Bootstrap::IR::Node::Constant) {
+                        my $name_text = $name->value() // '';
+                        $is_boolean = true if $name_text =~ /^(?:defined|exists)$/;
+                    }
+                }
+
+                if ($is_boolean) {
+                    # Unwrap and continue recursing into the unwrapped node
+                    return $_unwrap_condition_corruption->($f, $target);
+                }
+            }
+        }
+
+        # Recurse into subexpressions of BinaryExpr, UnaryExpr to fix
+        # corruption at deeper levels
+        if ($class eq 'BinaryExpr') {
+            my $op    = $node->inputs()->[0];
+            my $left  = $node->inputs()->[1];
+            my $right = $node->inputs()->[2];
+            my $fixed_left  = $_unwrap_condition_corruption->($f, $left);
+            my $fixed_right = $_unwrap_condition_corruption->($f, $right);
+            if ($fixed_left != $left || $fixed_right != $right) {
+                return $f->make('Constructor',
+                    'class' => 'BinaryExpr',
+                    op      => $op,
+                    left    => $fixed_left,
+                    right   => $fixed_right,
+                );
+            }
+        } elsif ($class eq 'UnaryExpr') {
+            my $op      = $node->inputs()->[0];
+            my $operand = $node->inputs()->[1];
+            my $fixed_operand = $_unwrap_condition_corruption->($f, $operand);
+            if ($fixed_operand != $operand) {
+                return $f->make('Constructor',
+                    'class'   => 'UnaryExpr',
+                    op      => $op,
+                    operand => $fixed_operand,
+                );
+            }
+        }
+
+        return $node;
+    };
+
     # Post-process: fix misparented postfix chains in the IR tree.
     # The Earley parser's stale-value merge can produce
     # MethodCallExpr(PostfixDerefExpr(X, S), M, A) when the correct
@@ -2093,6 +2174,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 last;
             }
         }
+
+        # Unwrap stale-value merge corruption: shared subscripts between
+        # body and condition can wrap the condition in a SubscriptExpr
+        $condition = $_unwrap_condition_corruption->($factory, $condition) if defined $condition;
 
         return undef unless defined $keyword;
 
