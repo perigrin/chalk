@@ -1242,9 +1242,77 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "eval_pv(\"$escaped\", TRUE)";
         }
 
-        # Fallback
-        my $escaped = $self->_escape_c_string("$name()");
-        return "eval_pv(\"$escaped\", TRUE)";
+        # length($str) — native string byte length via SvCUR
+        if ($name eq 'length' && $args->@* == 1) {
+            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            return "sv_2mortal(newSViv(SvCUR($arg)))";
+        }
+
+        # shift(@arr) — native array shift via av_shift
+        if ($name eq 'shift' && $args->@* == 1) {
+            my $arr_node = $args->[0];
+            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
+            my $av_expr;
+            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $arr_node->class() eq 'PostfixDerefExpr') {
+                $av_expr = $arr;
+            } else {
+                $av_expr = "(AV*)SvRV($arr)";
+            }
+            return "av_shift($av_expr)";
+        }
+
+        # keys(%hash) — native hash key count via HvUSEDKEYS
+        if ($name eq 'keys' && $args->@* == 1) {
+            my $hash_node = $args->[0];
+            my $hash = $self->_emit_xs_expr($hash_node, $declared_vars);
+            my $hv_expr;
+            if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $hash_node->class() eq 'PostfixDerefExpr') {
+                $hv_expr = $hash;
+            } else {
+                $hv_expr = "(HV*)SvRV($hash)";
+            }
+            return "sv_2mortal(newSViv(HvUSEDKEYS($hv_expr)))";
+        }
+
+        # values(%hash) — native hash value iteration via hv_iternext
+        if ($name eq 'values' && $args->@* == 1) {
+            my $hash_node = $args->[0];
+            my $hash = $self->_emit_xs_expr($hash_node, $declared_vars);
+            my $hv_expr;
+            if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $hash_node->class() eq 'PostfixDerefExpr') {
+                $hv_expr = $hash;
+            } else {
+                $hv_expr = "(HV*)SvRV($hash)";
+            }
+            return "({ AV *_vav = newAV(); HV *_vhv = $hv_expr; "
+                . "hv_iterinit(_vhv); HE *_he; "
+                . "while ((_he = hv_iternext(_vhv))) "
+                . "av_push(_vav, SvREFCNT_inc(HeVAL(_he))); "
+                . "newRV_noinc((SV*)_vav); })";
+        }
+
+        # delete($hash{$key}) — native hash entry removal via hv_delete_ent
+        if ($name eq 'delete' && $args->@* == 1) {
+            my $sub_node = $args->[0];
+            if ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $sub_node->class() eq 'SubscriptExpr') {
+                my $target = $self->_emit_xs_expr($sub_node->inputs()->[0], $declared_vars);
+                my $key = $self->_emit_xs_expr($sub_node->inputs()->[1], $declared_vars);
+                return "hv_delete_ent((HV*)SvRV($target), $key, G_DISCARD, 0)";
+            }
+        }
+
+        # Fallback — preserve arguments via eval_pv with real Perl expression
+        {
+            my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+            my @arg_strs = map { $perl_target->_emit_expr($_) } $args->@*;
+            my $perl_call = "$name(" . join(', ', @arg_strs) . ")";
+            my $escaped = $self->_escape_c_string($perl_call);
+            return "eval_pv(\"$escaped\", TRUE)";
+        }
     }
 
     # Emit backtick expression via eval_pv with actual command from IR

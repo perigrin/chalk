@@ -275,4 +275,90 @@ my sub ctor($class, %args) {
     like($boot_code, qr/newANONLIST/, 'defop boot: has [] default for $tags via newANONLIST');
 }
 
+# === Native C builtins: length, shift, keys, values, delete ===
+
+# Helper: build a variable reference node
+my sub var_node($name) {
+    return const_node($name, 'variable');
+}
+
+# length($str) — should emit SvCUR, not eval_pv("length()")
+{
+    my $builtin = ctor('BuiltinCall', inputs => [
+        const_node('length'),
+        [var_node('$input')],
+    ]);
+    my $code = $xs->_emit_xs_expr($builtin, { input => true });
+    like($code, qr/SvCUR/, 'length: emits SvCUR for native string length');
+    unlike($code, qr/eval_pv\("length\(\)"/, 'length: no broken eval_pv stub');
+}
+
+# shift(@arr) — should emit av_shift, not eval_pv("shift()")
+{
+    my $builtin = ctor('BuiltinCall', inputs => [
+        const_node('shift'),
+        [var_node('@agenda')],
+    ]);
+    my $code = $xs->_emit_xs_expr($builtin, { agenda => true });
+    like($code, qr/av_shift/, 'shift: emits av_shift for native array shift');
+    unlike($code, qr/eval_pv\("shift\(\)"/, 'shift: no broken eval_pv stub');
+}
+
+# keys(%hash) — should emit HvUSEDKEYS, not eval_pv("keys()")
+{
+    my $deref = ctor('PostfixDerefExpr', inputs => [
+        var_node('$hash'),
+        const_node('%'),
+    ]);
+    my $builtin = ctor('BuiltinCall', inputs => [
+        const_node('keys'),
+        [$deref],
+    ]);
+    my $code = $xs->_emit_xs_expr($builtin, { hash => true });
+    like($code, qr/HvUSEDKEYS/, 'keys: emits HvUSEDKEYS for native hash key count');
+    unlike($code, qr/eval_pv\("keys\(\)"/, 'keys: no broken eval_pv stub');
+}
+
+# values(%hash) — should emit hv_iternext loop, not eval_pv("values()")
+{
+    my $deref = ctor('PostfixDerefExpr', inputs => [
+        var_node('$hash'),
+        const_node('%'),
+    ]);
+    my $builtin = ctor('BuiltinCall', inputs => [
+        const_node('values'),
+        [$deref],
+    ]);
+    my $code = $xs->_emit_xs_expr($builtin, { hash => true });
+    like($code, qr/hv_iternext/, 'values: emits hv_iternext loop');
+    unlike($code, qr/eval_pv\("values\(\)"/, 'values: no broken eval_pv stub');
+}
+
+# delete($hash{$key}) — should emit hv_delete, not eval_pv("delete()")
+{
+    my $subscript = ctor('SubscriptExpr', inputs => [
+        var_node('$cache'),
+        var_node('$pos'),
+    ]);
+    my $builtin = ctor('BuiltinCall', inputs => [
+        const_node('delete'),
+        [$subscript],
+    ]);
+    my $code = $xs->_emit_xs_expr($builtin, { cache => true, pos => true });
+    like($code, qr/hv_delete/, 'delete: emits hv_delete for hash entry removal');
+    unlike($code, qr/eval_pv\("delete\(\)"/, 'delete: no broken eval_pv stub');
+}
+
+# Generic fallback: unhandled builtins should preserve arguments
+{
+    my $builtin = ctor('BuiltinCall', inputs => [
+        const_node('pack'),
+        [const_node('NN'), var_node('$core_id'), var_node('$origin')],
+    ]);
+    my $code = $xs->_emit_xs_expr($builtin, { core_id => true, origin => true });
+    like($code, qr/eval_pv/, 'pack fallback: uses eval_pv');
+    like($code, qr/pack\(/, 'pack fallback: preserves function name');
+    unlike($code, qr/eval_pv\("pack\(\)"/, 'pack fallback: not an empty stub');
+}
+
 done_testing();
