@@ -1365,6 +1365,51 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
+        # exists($hash{$key}) — native hash key existence check via hv_exists_ent
+        if ($name eq 'exists' && $args->@* == 1) {
+            my $sub_node = $args->[0];
+            if ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $sub_node->class() eq 'SubscriptExpr') {
+                my $target = $self->_emit_xs_expr($sub_node->inputs()->[0], $declared_vars);
+                my $key = $self->_emit_xs_expr($sub_node->inputs()->[1], $declared_vars);
+                return "(hv_exists_ent((HV*)SvRV($target), $key, 0) ? &PL_sv_yes : &PL_sv_no)";
+            }
+        }
+
+        # pack('NN', $a, $b) — native C for common big-endian 32-bit patterns.
+        # Falls through to eval_pv for other templates.
+        if ($name eq 'pack' && $args->@* >= 2) {
+            my $tmpl_node = $args->[0];
+            if ($tmpl_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                my $tmpl = $tmpl_node->value() // '';
+                $tmpl =~ s/^['"]|['"]$//g;
+                if ($tmpl eq 'NN' && $args->@* == 3) {
+                    my $a = $self->_emit_xs_expr($args->[1], $declared_vars);
+                    my $b = $self->_emit_xs_expr($args->[2], $declared_vars);
+                    return "({ U32 _pa = htonl((U32)SvUV($a)); U32 _pb = htonl((U32)SvUV($b)); "
+                        . "SV *_pk = sv_2mortal(newSVpvn(\"\", 0)); "
+                        . "sv_catpvn(_pk, (char*)&_pa, sizeof(U32)); "
+                        . "sv_catpvn(_pk, (char*)&_pb, sizeof(U32)); "
+                        . "_pk; })";
+                }
+            }
+        }
+
+        # substr — native C via SvPV + pointer arithmetic
+        if ($name eq 'substr' && $args->@* >= 2) {
+            my $str = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $off = $self->_emit_xs_expr($args->[1], $declared_vars);
+            if ($args->@* >= 3) {
+                my $len = $self->_emit_xs_expr($args->[2], $declared_vars);
+                return "({ STRLEN _sl; char *_sp = SvPV($str, _sl); "
+                    . "SSize_t _so = SvIV($off); SSize_t _sn = SvIV($len); "
+                    . "sv_2mortal(newSVpvn(_sp + _so, _sn)); })";
+            }
+            return "({ STRLEN _sl; char *_sp = SvPV($str, _sl); "
+                . "SSize_t _so = SvIV($off); "
+                . "sv_2mortal(newSVpvn(_sp + _so, _sl - _so)); })";
+        }
+
         # Fallback — preserve arguments via eval_pv with real Perl expression
         {
             my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();

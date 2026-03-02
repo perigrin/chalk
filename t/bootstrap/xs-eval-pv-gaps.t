@@ -349,16 +349,54 @@ my sub var_node($name) {
     unlike($code, qr/eval_pv\("delete\(\)"/, 'delete: no broken eval_pv stub');
 }
 
-# Generic fallback: unhandled builtins should preserve arguments
+# pack('NN', ...) — native C via htonl
 {
-    my $builtin = ctor('BuiltinCall', inputs => [
-        const_node('pack'),
-        [const_node('NN'), var_node('$core_id'), var_node('$origin')],
-    ]);
+    my $builtin = ctor('BuiltinCall',
+        name => const_node('pack'),
+        args => [const_node("'NN'"), var_node('$core_id'), var_node('$origin')],
+    );
     my $code = $xs->_emit_xs_expr($builtin, { core_id => true, origin => true });
-    like($code, qr/eval_pv/, 'pack fallback: uses eval_pv');
-    like($code, qr/pack\(/, 'pack fallback: preserves function name');
-    unlike($code, qr/eval_pv\("pack\(\)"/, 'pack fallback: not an empty stub');
+    like($code, qr/htonl/, 'pack NN: uses htonl for big-endian');
+    unlike($code, qr/eval_pv/, 'pack NN: no eval_pv');
+}
+
+# exists($hash{$key}) — native C via hv_exists_ent
+{
+    my $subscript = ctor('SubscriptExpr',
+        target => var_node('$chart'),
+        index  => var_node('$pos'),
+        style  => const_node('{'),
+    );
+    my $builtin = ctor('BuiltinCall',
+        name => const_node('exists'),
+        args => [$subscript],
+    );
+    my $code = $xs->_emit_xs_expr($builtin, { chart => true, pos => true });
+    like($code, qr/hv_exists_ent/, 'exists: uses hv_exists_ent');
+    unlike($code, qr/eval_pv/, 'exists: no eval_pv');
+}
+
+# substr($str, $off, $len) — native C via SvPV
+{
+    my $builtin = ctor('BuiltinCall',
+        name => const_node('substr'),
+        args => [var_node('$input'), var_node('$pos'), var_node('$len')],
+    );
+    my $code = $xs->_emit_xs_expr($builtin, { input => true, pos => true, len => true });
+    like($code, qr/SvPV/, 'substr: uses SvPV for native C');
+    unlike($code, qr/eval_pv/, 'substr: no eval_pv');
+}
+
+# Generic fallback: truly unhandled builtins should preserve arguments
+{
+    my $builtin = ctor('BuiltinCall',
+        name => const_node('unpack'),
+        args => [const_node("'NN'"), var_node('$data')],
+    );
+    my $code = $xs->_emit_xs_expr($builtin, { data => true });
+    like($code, qr/eval_pv/, 'unpack fallback: uses eval_pv');
+    like($code, qr/unpack\(/, 'unpack fallback: preserves function name');
+    unlike($code, qr/eval_pv\("unpack\(\)"/, 'unpack fallback: not an empty stub');
 }
 
 # === Method call invocant: no SvRV dereference ===
