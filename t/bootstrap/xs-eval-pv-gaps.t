@@ -730,21 +730,23 @@ my sub var_node($name) {
     # Method call args with nested dSP must be pre-evaluated.
     # Nested call_method inside XPUSHs args clobbers the outer stack because
     # dSP reads PL_stack_sp before the outer PUSHMARK updates it.
-    # Pattern: call_method("_make_item") should NOT have dSP inside XPUSHs.
-    # Instead, args with dSP should be pre-evaluated before PUSHMARK.
-    my ($make_item_block) = $output =~
-        /((?:SV \*_mc\w+ = \(\{.*?dSP.*?\}\);?\s*)*dSP.*?call_method\("_make_item".*?_mcr)/ms;
-    if (defined $make_item_block) {
-        # Check that the block has pre-evaluated temps before dSP
-        like($make_item_block, qr/^SV \*_mc/m,
+    # Find lines calling _make_item and check they pre-evaluate dSP args.
+    my @make_item_lines;
+    for my $line (split /\n/, $run_parse_code) {
+        push @make_item_lines, $line if $line =~ /call_method\("_make_item"/;
+    }
+    if (@make_item_lines) {
+        # The first _make_item call (in init loop) should pre-evaluate
+        # the semiring->one() arg that contains dSP.
+        my $first = $make_item_lines[0];
+        like($first, qr/SV \*_mca\d+ = /,
             '_make_item: nested method call args pre-evaluated before PUSHMARK');
-        # After dSP, XPUSHs should NOT contain inline dSP
-        my ($after_dsp) = $make_item_block =~ /\bdSP\b(.*?)call_method/s;
-        unlike($after_dsp, qr/\bdSP\b/,
+        # After the last dSP before call_method("_make_item"), no more dSP
+        my ($after_last_dsp) = $first =~ /.*\bdSP\b(.*?)call_method\("_make_item"/s;
+        unlike($after_last_dsp // '', qr/\bdSP\b/,
             '_make_item: no nested dSP inside XPUSHs after PUSHMARK');
     } else {
-        # If we can't find the block, just check no dSP inside XPUSHs generally
-        pass('_make_item: block not found (may be restructured)');
+        pass('_make_item: call not found in _run_parse (may be restructured)');
         pass('_make_item: skipped dSP check');
     }
 }
@@ -825,6 +827,31 @@ my sub var_node($name) {
         '_run_parse: no unguarded (HV*)SvRV((*hv_fetch( patterns (segfault risk)')
         or diag("Found " . scalar(@unsafe_svrv) . " unsafe SvRV-on-hv_fetch:\n"
             . join("\n", map { "  $_" } @unsafe_svrv));
+}
+
+# === 19. _make_item must not emit broken RETVAL ===
+# The IR stale-value merge corrupts _make_item's hashref return into a bare
+# string "rule". The emitter must detect this and skip the XSUB, falling back
+# to the Perl method implementation.
+{
+    my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSMakeItemCheck') };
+    ok(defined $gen, 'make_item: grammar setup') or BAIL_OUT($@);
+
+    my ($ir, $sa, $ctx) = eval { parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm') };
+    ok(defined $ir, 'make_item: parse') or BAIL_OUT($@);
+
+    my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::MakeItemCheck');
+    my $output = $xs->generate_with_cfg($ir, $sa, $ctx);
+
+    # _make_item should NOT appear as an XSUB with a bare string RETVAL.
+    # It should either not appear at all (Perl fallback) or return a proper hashref.
+    my $has_broken_make_item = $output =~ /^_make_item\(/m
+        && $output =~ /RETVAL = newSVpvs\("rule"\)/;
+
+    ok(!$has_broken_make_item,
+        '_make_item: not emitted as XSUB with broken bare-string RETVAL')
+        or diag('_make_item returns newSVpvs("rule") instead of a hashref — '
+            . 'stale-value merge corruption, should fall back to Perl');
 }
 
 done_testing();

@@ -323,7 +323,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Check if a method's XS output contains unsupported constructs
     # that require eval_pv fallback instead of XSUB emission.
     method _needs_eval_fallback($xs_output) {
-        return $xs_output =~ /NULL \/\* unsupported \*\// || $xs_output =~ /\/\* unknown node \*\//;
+        # Explicit unsupported markers
+        return true if $xs_output =~ /NULL \/\* unsupported \*\//;
+        return true if $xs_output =~ /\/\* unknown node \*\//;
+
+        # Stale-value merge detection: if a method computes significant values
+        # (call_method, hv_fetch) but RETVAL is just a bare string constant,
+        # the IR hashref constructor was corrupted. Fall back to Perl.
+        if ($xs_output =~ /call_method\(/ && $xs_output =~ /RETVAL = newSVpvs\("/) {
+            return true;
+        }
+
+        return false;
     }
 
     # Emit eval_pv fallback for a method that can't be compiled to XS.
@@ -392,8 +403,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
                     # Check if XSUB contains unsupported constructs
                     if ($self->_needs_eval_fallback($xs_output)) {
-                        # Collect for eval_pv fallback in BOOT block
-                        push @fallback_methods, $item;
+                        # Skip methods with unsupported constructs or stale-merge
+                        # corruption. The Perl class method will be used instead.
+                        # Only collect for eval_pv fallback if truly unsupported
+                        # (NULL markers), not stale-merge (bare string RETVAL).
+                        if ($xs_output =~ /NULL \/\* unsupported \*\//
+                                || $xs_output =~ /\/\* unknown node \*\//) {
+                            push @fallback_methods, $item;
+                        }
                     } else {
                         # Emit as XSUB
                         push @lines, $method_lines->@*;
