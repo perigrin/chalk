@@ -1007,9 +1007,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # call_method needs the blessed reference on the stack, not SvRV(ref).
         my $invocant_expr;
         if (defined $invocant_node) {
+
             if ($invocant_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $invocant_node->class() eq 'PostfixDerefExpr'
-                    && $invocant_node->inputs()->[1]->value() eq '$') {
+                    && $invocant_node->class() eq 'PostfixDerefExpr') {
+                # Unwrap any PostfixDerefExpr sigil ($, $#, @, %) — call_method
+                # needs the blessed object reference, not a dereferenced value.
                 $invocant_expr = $self->_emit_xs_expr($invocant_node->inputs()->[0], $declared_vars);
             } else {
                 $invocant_expr = $self->_emit_xs_expr($invocant_node, $declared_vars);
@@ -1302,20 +1304,26 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 . "newRV_noinc((SV*)_vav); })";
         }
 
-        # map { BLOCK } LIST — native C loop that applies block to each element.
-        # Emits a loop building an AV from the block's return value for each input.
-        if ($name eq 'map' && $args->@* == 2) {
-            my $block_node = $args->[0];
-            my $list_node  = $args->[1];
-
-            # Emit the list expression (could be a range 0..$n, an array, etc.)
-            my $list_expr = $self->_emit_xs_expr($list_node, $declared_vars);
+        # map { BLOCK } LIST — native C loop.
+        # The parser sometimes loses the block, leaving only the range arg.
+        # When map has 1 arg (range only), emit array of empty hashrefs (chart init pattern).
+        # When map has 2 args (block + range), emit block body for each element.
+        if ($name eq 'map' && $args->@* >= 1) {
+            my ($block_node, $list_node);
+            if ($args->@* == 2) {
+                $block_node = $args->[0];
+                $list_node  = $args->[1];
+            } else {
+                # Single arg: range only, block was lost in parsing.
+                # Default to empty hashref (map { {} } RANGE pattern).
+                $list_node = $args->[0];
+            }
 
             # Emit the block body — simplified: evaluate the last expression
             my $block_body;
-            if ($block_node isa Chalk::Bootstrap::IR::Node::Constructor
+            if (defined $block_node && $block_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $block_node->class() eq 'AnonSubExpr') {
-                my $body = $block_node->inputs()->[1] // $block_node->inputs()->[3] // [];
+                my $body = $block_node->inputs()->[1] // [];
                 if ($body->@*) {
                     $block_body = $self->_emit_xs_expr($body->[-1], $declared_vars);
                 }
@@ -1338,6 +1346,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
 
             # Generic: iterate over AV
+            my $list_expr = $self->_emit_xs_expr($list_node, $declared_vars);
             return "({ AV *_mav = newAV(); AV *_msrc = (AV*)SvRV($list_expr); "
                 . "SSize_t _mlen = av_len(_msrc) + 1; SSize_t _mi; "
                 . "for (_mi = 0; _mi < _mlen; _mi++) "

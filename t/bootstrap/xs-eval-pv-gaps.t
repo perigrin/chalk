@@ -367,11 +367,11 @@ my sub var_node($name) {
 {
     # $obj->method_name() where $obj is a local variable
     my $invocant = var_node('$start_rule');
-    my $method_call = ctor('MethodCallExpr', inputs => [
-        $invocant,
-        const_node('expressions'),
-        [],
-    ]);
+    my $method_call = ctor('MethodCallExpr',
+        invocant    => $invocant,
+        method_name => const_node('expressions'),
+        args        => [],
+    );
 
     my $code = $xs->_emit_xs_expr($method_call, { start_rule => true });
     like($code, qr/call_method\("expressions"/, 'method call: calls expressions');
@@ -380,19 +380,20 @@ my sub var_node($name) {
 }
 
 # === Method call on PostfixDerefExpr invocant ===
-# $obj->deref->method() — PostfixDerefExpr('$') wraps invocant
-# Should unwrap the deref for method call purposes
+# $obj->method() — IR has PostfixDerefExpr('$') wrapping invocant
+# because Perl's -> arrow implies scalar dereference. Should unwrap
+# the deref for method call purposes since call_method needs blessed ref.
 {
     my $inner = var_node('$rule');
-    my $deref = ctor('PostfixDerefExpr', inputs => [
-        $inner,
-        const_node('$'),
-    ]);
-    my $method_call = ctor('MethodCallExpr', inputs => [
-        $deref,
-        const_node('name'),
-        [],
-    ]);
+    my $deref = ctor('PostfixDerefExpr',
+        target => $inner,
+        sigil  => const_node('$'),
+    );
+    my $method_call = ctor('MethodCallExpr',
+        invocant    => $deref,
+        method_name => const_node('name'),
+        args        => [],
+    );
 
     my $code = $xs->_emit_xs_expr($method_call, { rule => true });
     like($code, qr/call_method\("name"/, 'deref method call: calls name');
