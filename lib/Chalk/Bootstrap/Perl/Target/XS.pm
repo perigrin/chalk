@@ -327,33 +327,94 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return true if $xs_output =~ /NULL \/\* unsupported \*\//;
         return true if $xs_output =~ /\/\* unknown node \*\//;
 
-        # Stale-value merge detection: if a method computes significant values
-        # (call_method, hv_fetch) but RETVAL is just a bare string constant,
-        # the IR hashref constructor was corrupted. Fall back to Perl.
-        if ($xs_output =~ /call_method\(/ && $xs_output =~ /RETVAL = newSVpvs\("/) {
-            return true;
-        }
-
         return false;
     }
 
+    # Detect stale-value merge corruption in a method's XS output:
+    # method body has call_method (real work) but RETVAL is a bare string.
+    method _is_stale_merge($xs_output) {
+        return ($xs_output =~ /call_method\(/ && $xs_output =~ /RETVAL = newSVpvs\("/);
+    }
+
+    # Repair stale-value merge corruption in XS method output.
+    # The IR hashref constructor was corrupted into a bare string constant.
+    # We reconstruct the hashref from the method's parameters and local vars.
+    method _repair_stale_merge($xs_lines, $method_decl) {
+        my $params = $method_decl->inputs()->[1];
+        my $body   = $method_decl->inputs()->[2];
+
+        # Collect parameter names (these become hashref keys)
+        my @keys;
+        for my $p ($params->@*) {
+            my $pname = $p->value();
+            $pname =~ s/^\$//;
+            push @keys, $pname;
+        }
+
+        # Collect locally declared variable names from VarDecl nodes
+        for my $item ($body->@*) {
+            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'VarDecl') {
+                my $var = $item->inputs()->[0]->value();
+                $var =~ s/^\$//;
+                push @keys, $var unless grep { $_ eq $var } @keys;
+            }
+        }
+
+        # Build hashref construction in C: hv_stores for each key
+        my @hv_lines;
+        push @hv_lines, '{ HV *_rhv = newHV();';
+        for my $key (@keys) {
+            # Resolve the C expression for this variable
+            my $c_var;
+            if ($field_map && exists $field_map->{$key}) {
+                $c_var = "ObjectFIELDS(SvRV(self))[$field_map->{$key}]";
+            } else {
+                $c_var = "${key}_sv";
+                # Method params don't have _sv suffix
+                $c_var = $key if grep { $_ eq $key } map { my $n = $_->value(); $n =~ s/^\$//; $n } $params->@*;
+            }
+            my $escaped_key = $self->_escape_c_string($key);
+            push @hv_lines, "hv_stores(_rhv, \"$escaped_key\", SvREFCNT_inc($c_var));";
+        }
+        push @hv_lines, 'RETVAL = newRV_noinc((SV*)_rhv); }';
+        my $hashref_code = join(' ', @hv_lines);
+
+        # Replace the broken RETVAL line in the XS output
+        my @fixed;
+        for my $line ($xs_lines->@*) {
+            if ($line =~ /RETVAL = newSVpvs\("/) {
+                # Replace bare string with hashref construction
+                $line =~ s/RETVAL = newSVpvs\("[^"]*"\)/$hashref_code/;
+            }
+            push @fixed, $line;
+        }
+        return \@fixed;
+    }
+
     # Emit eval_pv fallback for a method that can't be compiled to XS.
-    # Returns a single eval_pv() call that defines the method as a Perl sub.
-    # For now, emits a stub that dies - full Perl code generation comes later.
+    # Uses the Perl target to generate the method body, then wraps it as a
+    # sub installed into the module's namespace via eval_pv.
     method _emit_xs_eval_fallback($method_decl) {
         my $name = $method_decl->inputs()->[0]->value();
         my $params = $method_decl->inputs()->[1];
+        my $body = $method_decl->inputs()->[2];
 
-        # Build parameter list for Perl sub signature
-        my @param_names;
-        for my $p ($params->@*) {
-            my $pname = $p->value();
-            push @param_names, $pname;
+        # Use Perl target to generate the method body statements
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my @body_lines;
+        for my $item ($body->@*) {
+            my $code = $perl_target->_emit_node($item);
+            push @body_lines, $code if defined $code;
         }
 
-        # Generate Perl sub stub that indicates it needs implementation
+        # Build parameter list
+        my @param_names = map { $_->value() } $params->@*;
         my $param_list = join(', ', '$self', @param_names);
-        my $perl_code = "sub ${module_name}::${name} { my ($param_list) = \@_; die 'eval_pv fallback not yet implemented for $name' }";
+        my $body_code = join('; ', @body_lines);
+
+        # Wrap as sub in module namespace
+        my $perl_code = "sub ${module_name}::${name} { my ($param_list) = \@_; $body_code }";
         my $escaped = $self->_escape_c_string($perl_code);
 
         return "    eval_pv(\"$escaped\", TRUE);";
@@ -403,14 +464,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
                     # Check if XSUB contains unsupported constructs
                     if ($self->_needs_eval_fallback($xs_output)) {
-                        # Skip methods with unsupported constructs or stale-merge
-                        # corruption. The Perl class method will be used instead.
-                        # Only collect for eval_pv fallback if truly unsupported
-                        # (NULL markers), not stale-merge (bare string RETVAL).
-                        if ($xs_output =~ /NULL \/\* unsupported \*\//
-                                || $xs_output =~ /\/\* unknown node \*\//) {
-                            push @fallback_methods, $item;
-                        }
+                        # Collect for eval_pv fallback in BOOT block
+                        push @fallback_methods, $item;
+                    } elsif ($self->_is_stale_merge($xs_output)) {
+                        # Repair stale-value merge: reconstruct hashref RETVAL
+                        my $fixed = $self->_repair_stale_merge($method_lines, $item);
+                        push @lines, $fixed->@*;
+                        push @lines, '';
                     } else {
                         # Emit as XSUB
                         push @lines, $method_lines->@*;

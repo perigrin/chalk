@@ -854,4 +854,36 @@ my sub var_node($name) {
             . 'stale-value merge corruption, should fall back to Perl');
 }
 
+# === 20. stale-merge repair: _make_item emits proper hashref RETVAL ===
+# The IR stale-value merge corrupts _make_item's hashref return. The emitter
+# detects this and repairs the RETVAL to construct a proper hashref from
+# the method's parameters and local variables.
+{
+    my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSRepairCheck') };
+    ok(defined $gen, 'repair: grammar setup') or BAIL_OUT($@);
+
+    my ($ir, $sa, $ctx) = eval { parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm') };
+    ok(defined $ir, 'repair: parse') or BAIL_OUT($@);
+
+    my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::RepairCheck');
+    my $output = $xs->generate_with_cfg($ir, $sa, $ctx);
+
+    # _make_item should appear as a proper XSUB (not in BOOT eval_pv)
+    like($output, qr/^_make_item\(self/m,
+        'repair: _make_item is emitted as XSUB');
+
+    # The RETVAL should construct a hashref, not return a bare string
+    # Look for hv_stores with the expected keys (rule, alt_idx, etc.)
+    my $in_make_item = false;
+    my $make_item_code = '';
+    for my $line (split /\n/, $output) {
+        $in_make_item = true if $line =~ /^_make_item\(self/;
+        last if $in_make_item && $line =~ /^\w+\(self/ && $line !~ /^_make_item/;
+        $make_item_code .= "$line\n" if $in_make_item;
+    }
+
+    like($make_item_code, qr/newHV/,
+        'repair: _make_item RETVAL constructs a hashref');
+}
+
 done_testing();
