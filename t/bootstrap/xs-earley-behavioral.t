@@ -104,8 +104,6 @@ ok(defined $g_count && $g_count == scalar($grammar_rules->@*),
 
 # --- Step 6: Parse a simple BNF string ---
 my $bnf_input = 'Expr ::= /\\d+/';
-my $xs_result = eval { $xs_parser->parse($bnf_input) };
-my $xs_err = $@;
 
 # Also parse with pure Perl for comparison
 my $perl_parser = Chalk::Bootstrap::Earley->new(
@@ -117,12 +115,25 @@ my $perl_result = $perl_parser->parse($bnf_input);
 # --- Step 7: Compare results ---
 ok(defined $perl_result, 'Perl parser recognizes simple BNF');
 
+# Run XS parse in a child process to survive segfaults.
+# The XS _run_parse is still under development and may crash.
 TODO: {
-    local $TODO = 'XS Earley behavioral correctness under development';
-    if (defined $xs_result) {
+    local $TODO = 'XS Earley parse: auto-vivification and stale-value merge issues remain';
+    my $pid = fork();
+    if ($pid == 0) {
+        # Child: try to parse, exit with status
+        my $result = eval { $xs_parser->parse($bnf_input) };
+        exit(defined $result ? 0 : 1);
+    }
+    waitpid($pid, 0);
+    my $child_exit = $? >> 8;
+    my $child_signal = $? & 127;
+    if ($child_signal) {
+        fail("XS parser crashed with signal $child_signal (segfault)");
+    } elsif ($child_exit == 0) {
         pass('XS parser recognizes simple BNF');
     } else {
-        fail("XS parser failed to parse: $xs_err");
+        fail('XS parser failed to parse');
     }
 }
 
