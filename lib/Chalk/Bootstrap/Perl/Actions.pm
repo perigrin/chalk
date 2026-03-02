@@ -468,6 +468,54 @@ class Chalk::Bootstrap::Perl::Actions {
                     return $new_builtin;
                 }
             }
+
+            # Fix subscript chain wrapping BinaryExpr(&&/||) from stale-value merge:
+            # SubscriptExpr(BinaryExpr(&&, exists_left, exists_right), $key, style)
+            # → BinaryExpr(&&, exists_left, SubscriptExpr(exists_right, $key, style))
+            # This pushes the subscript into the right operand which is the one
+            # that needs the additional subscript depth.
+            if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $target->class() eq 'BinaryExpr') {
+                my $op = $target->inputs()->[0]->value() // '';
+                if ($op eq '&&' || $op eq '||') {
+                    my $right = $target->inputs()->[2];
+                    # Only apply if the right side contains an exists/delete
+                    my $has_exists = false;
+                    my $check; $check = sub ($n) {
+                        return unless ref $n && $n isa Chalk::Bootstrap::IR::Node::Constructor;
+                        if ($n->class() eq 'BuiltinCall') {
+                            my $bname = $n->inputs()->[0]->value() // '';
+                            $has_exists = true if $bname eq 'exists' || $bname eq 'delete';
+                            return;
+                        }
+                        for my $inp ($n->inputs()->@*) {
+                            if (ref $inp eq 'ARRAY') {
+                                $check->($_) for $inp->@*;
+                            } else {
+                                $check->($inp);
+                            }
+                        }
+                    };
+                    $check->($right);
+
+                    if ($has_exists) {
+                        my $new_right = $factory->make('Constructor',
+                            'class'  => 'SubscriptExpr',
+                            target => $right,
+                            index  => $node->inputs()->[1],
+                            style  => $node->inputs()->[2],
+                        );
+                        # Re-run fix on the new SubscriptExpr to push into exists
+                        $new_right = _fix_postfix_chain($factory, $new_right);
+                        return $factory->make('Constructor',
+                            'class'    => 'BinaryExpr',
+                            op       => $target->inputs()->[0],
+                            left     => $target->inputs()->[1],
+                            right    => $new_right,
+                        );
+                    }
+                }
+            }
         }
 
         return $node;
