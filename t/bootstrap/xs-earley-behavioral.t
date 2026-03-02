@@ -70,81 +70,58 @@ my $load_err;
 eval { require Test::XSEarley };
 $load_err = $@;
 
-TODO: {
-    local $TODO = 'ADJUST block via eval_pv cannot access field variables yet';
-    is($load_err, '', 'Test::XSEarley loads without error');
-}
-
-if ($load_err) {
-    # Module failed to load — ADJUST block field access is the known blocker.
-    # Skip all remaining tests that depend on a working XS parser instance.
-    diag("Load error (expected — ADJUST field access not yet supported):\n$load_err");
-    done_testing();
-    exit 0;
-}
+is($load_err, '', 'Test::XSEarley loads without error')
+    or do { diag("Load failed: $load_err"); done_testing(); exit 0; };
 
 # --- Step 5: Verify ADJUST ran by checking readers ---
-# Set up a simple grammar for testing
+# Use BNF meta-grammar as test input — it's a real grammar with 10 rules
 use Chalk::Grammar::BNF;
-use Chalk::Bootstrap::Desugar;
 use Chalk::Bootstrap::Semiring::Boolean;
 
-my $bnf_text = <<'BNF';
-Sum     ::= Sum /[+-]/ Product
-           | Product
-Product ::= Product /[*\/]/ Factor
-           | Factor
-Factor  ::= /\d+/
-           | /\(/ Sum /\)/
-BNF
-
 my $grammar_rules = Chalk::Grammar::BNF->grammar();
-my $bnf_earley = Chalk::Bootstrap::Earley->new(
+my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+
+# Create XS parser instance with the BNF meta-grammar
+my $xs_parser = eval { Test::XSEarley->new(
     grammar  => $grammar_rules,
-    semiring => Chalk::Bootstrap::Semiring::Boolean->new(),
+    semiring => $semiring,
+) };
+is($@, '', 'XS parser instance created') or do {
+    diag("Constructor failed: $@");
+    done_testing();
+    exit 0;
+};
+ok(defined $xs_parser, 'XS parser object defined');
+
+# Verify ADJUST ran — grammar reader should return the grammar
+my $g = eval { $xs_parser->grammar() };
+ok(defined $g, 'grammar() reader returns value (ADJUST ran)');
+
+# Verify rule_table was built by ADJUST
+my $rt = eval { $xs_parser->rule_table() };
+ok(defined $rt && ref($rt) eq 'HASH', 'rule_table() populated by ADJUST');
+
+# --- Step 6: Parse a simple BNF string ---
+my $bnf_input = 'Expr ::= /\\d+/';
+my $xs_result = eval { $xs_parser->parse($bnf_input) };
+my $xs_err = $@;
+
+# Also parse with pure Perl for comparison
+my $perl_parser = Chalk::Bootstrap::Earley->new(
+    grammar  => $grammar_rules,
+    semiring => $semiring,
 );
-my $bnf_parsed = $bnf_earley->parse($bnf_text);
+my $perl_result = $perl_parser->parse($bnf_input);
 
-SKIP: {
-    skip 'BNF parse failed', 6 unless defined $bnf_parsed;
+# --- Step 7: Compare results ---
+ok(defined $perl_result, 'Perl parser recognizes simple BNF');
 
-    my $desugared = Chalk::Bootstrap::Desugar::desugar($bnf_parsed);
-    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
-
-    # Create XS parser instance
-    my $xs_parser = eval { Test::XSEarley->new(
-        grammar  => $desugared,
-        semiring => $semiring,
-    ) };
-    is($@, '', 'XS parser instance created') or skip 'Cannot test without parser', 5;
-    ok(defined $xs_parser, 'XS parser object defined');
-
-    # Verify ADJUST ran — grammar reader should work
-    my $g = eval { $xs_parser->grammar() };
-    ok(defined $g, 'grammar() reader returns value (ADJUST ran)');
-
-    # --- Step 6: Parse a simple string ---
-    my $result = eval { $xs_parser->parse('1+2*3') };
-    my $parse_err = $@;
-
-    # Also parse with pure Perl for comparison
-    my $perl_parser = Chalk::Bootstrap::Earley->new(
-        grammar  => $desugared,
-        semiring => $semiring,
-    );
-    my $perl_result = $perl_parser->parse('1+2*3');
-
-    # --- Step 7: Compare results ---
-    # Both should recognize the same input
-    ok(defined $perl_result, 'Perl parser recognizes "1+2*3"');
-
-    TODO: {
-        local $TODO = 'XS Earley behavioral correctness under development';
-        if (defined $result) {
-            pass('XS parser recognizes "1+2*3"');
-        } else {
-            fail("XS parser failed to parse: $parse_err");
-        }
+TODO: {
+    local $TODO = 'XS Earley behavioral correctness under development';
+    if (defined $xs_result) {
+        pass('XS parser recognizes simple BNF');
+    } else {
+        fail("XS parser failed to parse: $xs_err");
     }
 }
 
