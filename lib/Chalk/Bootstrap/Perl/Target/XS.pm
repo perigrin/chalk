@@ -139,6 +139,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \%field_map;
     }
 
+    # Check if a C expression targets a typed (hash/array) class field.
+    # Returns the sigil (%, @) if so, undef otherwise.
+    # Used to skip SvRV dereference on field %hash / field @array accesses —
+    # ObjectFIELDS slots for typed fields ARE the HV*/AV* directly.
+    method _field_sigil_for_expr($expr) {
+        if ($expr =~ /^ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]$/) {
+            my $idx = $1;
+            return unless defined $field_sigils;
+            for my $name (keys $field_sigils->%*) {
+                if (defined $field_map && $field_map->{$name} == $idx) {
+                    my $sig = $field_sigils->{$name};
+                    return $sig if $sig eq '%' || $sig eq '@';
+                }
+            }
+        }
+        return;
+    }
+
     # Emit BOOT block for feature class setup using defop-based field initialization.
     # Uses ENTER/LEAVE scoping so SAVEDESTRUCTOR_X handles class sealing automatically.
     # Field attributes (:param, :reader, :writer) are applied via class_apply_field_attributes.
@@ -1248,20 +1266,28 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             ? $self->_emit_xs_expr($target, $declared_vars)
             : 'self';
 
+        # For typed class fields (field %hash, field @array), the ObjectFIELDS
+        # slot IS the HV*/AV* directly — skip SvRV dereference.
+        my $field_sig = $self->_field_sigil_for_expr($tgt);
+
         if ($style eq 'array') {
             my $idx = $self->_emit_xs_expr($index, $declared_vars);
-            return "(*av_fetch((AV*)SvRV($tgt), SvIV($idx), 0))";
+            my $av = (defined $field_sig && $field_sig eq '@')
+                ? "(AV*)$tgt" : "(AV*)SvRV($tgt)";
+            return "(*av_fetch($av, SvIV($idx), 0))";
         }
         # Hash access — use lval=1 so hv_fetch creates missing keys (avoids NULL deref
         # when used as assignment target). Compute key once via SvPV to avoid
         # double-evaluation of side effects in key expressions.
+        my $hv = (defined $field_sig && $field_sig eq '%')
+            ? "(HV*)$tgt" : "(HV*)SvRV($tgt)";
         my $key = $self->_emit_xs_expr($index, $declared_vars);
         if ($key =~ /^[a-zA-Z_]\w*$/) {
             # Simple variable — safe to reference twice
-            return "(*hv_fetch((HV*)SvRV($tgt), SvPV_nolen($key), SvCUR($key), 1))";
+            return "(*hv_fetch($hv, SvPV_nolen($key), SvCUR($key), 1))";
         }
         # Complex expression — evaluate once via SvPV
-        return "({ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); (*hv_fetch((HV*)SvRV($tgt), _hkp, _hkl, 1)); })";
+        return "({ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); (*hv_fetch($hv, _hkp, _hkl, 1)); })";
     }
 
     # Emit postfix deref (->@*, ->%*, ->$*)
@@ -1273,11 +1299,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             ? $self->_emit_xs_expr($target, $declared_vars)
             : 'self';
 
+        # For typed class fields (field %hash, field @array), the ObjectFIELDS
+        # slot IS the HV*/AV* directly — skip SvRV dereference.
+        my $field_sig = $self->_field_sigil_for_expr($tgt);
+
         # Check if this deref is used in AV/HV context (push, foreach, etc.)
         # vs SV context (variable assignment). Callers that need AV*/HV*
         # explicitly check for the cast prefix and handle it.
-        if ($sigil eq '@') { return "(AV*)SvRV($tgt)"; }
-        if ($sigil eq '%') { return "(HV*)SvRV($tgt)"; }
+        if ($sigil eq '@') {
+            return (defined $field_sig && $field_sig eq '@')
+                ? "(AV*)$tgt" : "(AV*)SvRV($tgt)";
+        }
+        if ($sigil eq '%') {
+            return (defined $field_sig && $field_sig eq '%')
+                ? "(HV*)$tgt" : "(HV*)SvRV($tgt)";
+        }
         return "SvRV($tgt)";
     }
 

@@ -694,6 +694,16 @@ my sub var_node($name) {
 
     like($run_parse_code, qr/alt_idx_sv = \(\*av_fetch\(\(AV\*\)SvRV\(\w+_sv\), 1, 0\)\)/,
         '_run_parse: alt_idx_sv = av_fetch(entry, 1) — injected from destructuring');
+
+    # Typed hash field access should NOT use SvRV — ObjectFIELDS IS the HV*.
+    # field %waiting_for: $waiting_for{key} should be hv_fetch((HV*)ObjectFIELDS[idx], ...)
+    # not hv_fetch((HV*)SvRV(ObjectFIELDS[idx]), ...)
+    unlike($run_parse_code, qr/SvRV\(ObjectFIELDS\(SvRV\(self\)\)\[\d+\]\).*hv_fetch|hv_fetch.*SvRV\(ObjectFIELDS/,
+        '_run_parse: no SvRV on hash field access — ObjectFIELDS IS the HV* directly');
+
+    # Hash field subscripts should cast directly: (HV*)ObjectFIELDS(SvRV(self))[N]
+    like($run_parse_code, qr/\(HV\*\)ObjectFIELDS\(SvRV\(self\)\)/,
+        '_run_parse: hash field subscript uses (HV*)ObjectFIELDS without SvRV');
 }
 
 done_testing();
