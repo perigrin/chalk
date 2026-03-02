@@ -1289,6 +1289,63 @@ SKIP: {
         }
     }
 
+    # Subtest A3: verify right operand of || retains subscript
+    # After unwrapping the outer SubscriptExpr, the right operand of ||
+    # should have the subscript pushed in (not bare $arr).
+    # Pattern: $arr[$pos] = $origin if !defined $arr[$pos] || $origin < $arr[$pos];
+    # Expected: BinaryExpr(||, UnaryExpr(!, BuiltinCall(defined, ...)), BinaryExpr(<, $origin, SubscriptExpr($arr, $pos)))
+    {
+        Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+        $semiring_cc->reset_cache();
+
+        my $code = '$arr[$pos] = $origin if !defined $arr[$pos] || $origin < $arr[$pos];';
+        my $result = $parser_cc->parse_value($code);
+        ok(defined $result, '_chart_set pattern parses for subscript-push test');
+
+        SKIP: {
+            skip '_chart_set did not parse', 4 unless defined $result;
+            my $sem_ctx = $result->[4];
+            my $state = $sa_cc->cfg_state($sem_ctx);
+            ok(defined $state && defined $state->{if_node}, 'if_node present');
+
+            SKIP: {
+                skip 'no if_node', 3 unless defined $state && defined $state->{if_node};
+                my $cond = $state->{if_node}->inputs()->[1];
+                ok(defined $cond, 'condition exists');
+
+                SKIP: {
+                    skip 'no condition', 2 unless defined $cond;
+                    # Condition should be BinaryExpr(||, ...)
+                    my $is_or = $cond isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $cond->class() eq 'BinaryExpr'
+                        && ($cond->inputs()->[0]->value() // '') eq '||';
+                    ok($is_or, 'condition is BinaryExpr(||)');
+
+                    SKIP: {
+                        skip 'condition is not BinaryExpr(||)', 1 unless $is_or;
+                        # Right operand: BinaryExpr(<, $origin, SubscriptExpr($arr, $pos))
+                        my $right = $cond->inputs()->[2];
+                        # The right operand of < should be SubscriptExpr, not bare variable
+                        my $right_rhs;
+                        if ($right isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $right->class() eq 'BinaryExpr') {
+                            $right_rhs = $right->inputs()->[2];  # right operand of <
+                        }
+                        if (defined $right_rhs
+                            && $right_rhs isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $right_rhs->class() eq 'SubscriptExpr') {
+                            pass('right || operand has SubscriptExpr (subscript pushed in)');
+                        } else {
+                            my $class = (defined $right_rhs && $right_rhs isa Chalk::Bootstrap::IR::Node::Constructor)
+                                ? $right_rhs->class() : (ref($right_rhs) // 'undef');
+                            fail("right || operand should have SubscriptExpr, got $class");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     # Subtest A2: simple shared-subscript variant
     {
         Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();

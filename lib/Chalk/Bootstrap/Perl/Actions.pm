@@ -326,87 +326,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return $result;
     }
 
-    # Helper: strip spurious SubscriptExpr wrappers from postfix-if conditions.
-    # The Earley stale-value merge can wrap subexpressions in a SubscriptExpr
-    # from the assignment target when body and condition share a subscripted
-    # array reference (e.g. "$arr[$i] = $x if !defined $arr[$i] || ...").
-    # Walks the condition tree recursively, unwrapping any SubscriptExpr that
-    # wraps a known boolean-producing expression (BinaryExpr with comparison/
-    # logical ops, UnaryExpr with !/not/defined, or BuiltinCall like defined).
-    my $_unwrap_condition_corruption;
-    $_unwrap_condition_corruption = sub($f, $node) {
-        return $node unless defined $node;
-        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
-
-        my $class = $node->class();
-
-        # If this is a SubscriptExpr wrapping a boolean expression, unwrap it
-        if ($class eq 'SubscriptExpr') {
-            my $target = $node->inputs()->[0];
-            if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor) {
-                my $inner_class = $target->class();
-                my $is_boolean = false;
-
-                if ($inner_class eq 'BinaryExpr') {
-                    my $op = $target->inputs()->[0];
-                    if ($op isa Chalk::Bootstrap::IR::Node::Constant) {
-                        my $op_text = $op->value() // '';
-                        $is_boolean = true
-                            if $op_text =~ /^(?:\|\||&&|\/\/|==|!=|<|>|<=|>=|<=>|eq|ne|lt|gt|le|ge|cmp)$/;
-                    }
-                } elsif ($inner_class eq 'UnaryExpr') {
-                    my $op = $target->inputs()->[0];
-                    if ($op isa Chalk::Bootstrap::IR::Node::Constant) {
-                        my $op_text = $op->value() // '';
-                        $is_boolean = true if $op_text =~ /^(?:!|not|defined)$/;
-                    }
-                } elsif ($inner_class eq 'BuiltinCall') {
-                    my $name = $target->inputs()->[0];
-                    if ($name isa Chalk::Bootstrap::IR::Node::Constant) {
-                        my $name_text = $name->value() // '';
-                        $is_boolean = true if $name_text =~ /^(?:defined|exists)$/;
-                    }
-                }
-
-                if ($is_boolean) {
-                    # Unwrap and continue recursing into the unwrapped node
-                    return $_unwrap_condition_corruption->($f, $target);
-                }
-            }
-        }
-
-        # Recurse into subexpressions of BinaryExpr, UnaryExpr to fix
-        # corruption at deeper levels
-        if ($class eq 'BinaryExpr') {
-            my $op    = $node->inputs()->[0];
-            my $left  = $node->inputs()->[1];
-            my $right = $node->inputs()->[2];
-            my $fixed_left  = $_unwrap_condition_corruption->($f, $left);
-            my $fixed_right = $_unwrap_condition_corruption->($f, $right);
-            if ($fixed_left != $left || $fixed_right != $right) {
-                return $f->make('Constructor',
-                    'class' => 'BinaryExpr',
-                    op      => $op,
-                    left    => $fixed_left,
-                    right   => $fixed_right,
-                );
-            }
-        } elsif ($class eq 'UnaryExpr') {
-            my $op      = $node->inputs()->[0];
-            my $operand = $node->inputs()->[1];
-            my $fixed_operand = $_unwrap_condition_corruption->($f, $operand);
-            if ($fixed_operand != $operand) {
-                return $f->make('Constructor',
-                    'class'   => 'UnaryExpr',
-                    op      => $op,
-                    operand => $fixed_operand,
-                );
-            }
-        }
-
-        return $node;
-    };
-
     # Post-process: fix misparented postfix chains in the IR tree.
     # The Earley parser's stale-value merge can produce
     # MethodCallExpr(PostfixDerefExpr(X, S), M, A) when the correct
@@ -498,12 +417,12 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Fix exists/delete with subscript chain misparenting:
-        # SubscriptExpr(BuiltinCall(exists/delete, [$var]), $key, style)
-        #   → BuiltinCall(exists/delete, [SubscriptExpr($var, $key, style)])
+        # Fix prefix builtin subscript chain misparenting:
+        # SubscriptExpr(BuiltinCall(defined/exists/ref/etc, [$var]), $key, style)
+        #   → BuiltinCall(defined/exists/ref/etc, [SubscriptExpr($var, $key, style)])
         # Also handles ReturnStmt wrapper from stale-value merge:
-        # SubscriptExpr(ReturnStmt(BuiltinCall(exists/delete, [$var])), $key, style)
-        #   → ReturnStmt(BuiltinCall(exists/delete, [SubscriptExpr($var, $key, style)]))
+        # SubscriptExpr(ReturnStmt(BuiltinCall(..., [$var])), $key, style)
+        #   → ReturnStmt(BuiltinCall(..., [SubscriptExpr($var, $key, style)]))
         if ($node->class() eq 'SubscriptExpr') {
             my $target = $node->inputs()->[0];
             my $builtin_call;
@@ -526,7 +445,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
             if (defined $builtin_call) {
                 my $bname = $builtin_call->inputs()->[0]->value();
-                if ($bname eq 'exists' || $bname eq 'delete') {
+                if ($PREFIX_BUILTINS{$bname}) {
                     my @args = $builtin_call->inputs()->[1]->@*;
                     my $inner_target = $args[-1];
                     $args[-1] = $factory->make('Constructor',
@@ -550,57 +469,119 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
             }
 
-            # Fix subscript chain wrapping BinaryExpr(&&/||) from stale-value merge:
-            # SubscriptExpr(BinaryExpr(&&, exists_left, exists_right), $key, style)
-            # → BinaryExpr(&&, exists_left, SubscriptExpr(exists_right, $key, style))
-            # This pushes the subscript into the right operand which is the one
-            # that needs the additional subscript depth.
+            # Fix subscript chain wrapping UnaryExpr from stale-value merge:
+            # SubscriptExpr(UnaryExpr(op, X), $key, style)
+            # → UnaryExpr(op, SubscriptExpr(X, $key, style))
+            # The subscript belongs on the operand, not wrapping the negation.
+            if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $target->class() eq 'UnaryExpr') {
+                my $operand = $target->inputs()->[1];
+                my $new_operand = $factory->make('Constructor',
+                    'class'  => 'SubscriptExpr',
+                    target => $operand,
+                    index  => $node->inputs()->[1],
+                    style  => $node->inputs()->[2],
+                );
+                # Re-run fix to push deeper if needed
+                $new_operand = _fix_postfix_chain($factory, $new_operand);
+                return $factory->make('Constructor',
+                    'class'    => 'UnaryExpr',
+                    op       => $target->inputs()->[0],
+                    operand  => $new_operand,
+                );
+            }
+
+            # Fix subscript chain wrapping BinaryExpr from stale-value merge:
+            # SubscriptExpr(BinaryExpr(op, L, R), $key, style)
+            # → BinaryExpr(op, L, SubscriptExpr(R, $key, style))
+            # Stale-value merge wraps the entire expression in a SubscriptExpr
+            # from the assignment target. The subscript belongs on the right
+            # operand (the one that lost its subscript during merge).
+            # Handles both logical (||, &&) and comparison (<, >, etc.) ops
+            # since SubscriptExpr wrapping any BinaryExpr is always corruption.
             if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor
                     && $target->class() eq 'BinaryExpr') {
-                my $op = $target->inputs()->[0]->value() // '';
-                if ($op eq '&&' || $op eq '||') {
-                    my $right = $target->inputs()->[2];
-                    # Only apply if the right side contains an exists/delete
-                    my $has_exists = false;
-                    my $check; $check = sub ($n) {
-                        return unless ref $n && $n isa Chalk::Bootstrap::IR::Node::Constructor;
-                        if ($n->class() eq 'BuiltinCall') {
-                            my $bname = $n->inputs()->[0]->value() // '';
-                            $has_exists = true if $bname eq 'exists' || $bname eq 'delete';
-                            return;
-                        }
-                        for my $inp ($n->inputs()->@*) {
-                            if (ref $inp eq 'ARRAY') {
-                                $check->($_) for $inp->@*;
-                            } else {
-                                $check->($inp);
-                            }
-                        }
-                    };
-                    $check->($right);
-
-                    if ($has_exists) {
-                        my $new_right = $factory->make('Constructor',
-                            'class'  => 'SubscriptExpr',
-                            target => $right,
-                            index  => $node->inputs()->[1],
-                            style  => $node->inputs()->[2],
-                        );
-                        # Re-run fix on the new SubscriptExpr to push into exists
-                        $new_right = _fix_postfix_chain($factory, $new_right);
-                        return $factory->make('Constructor',
-                            'class'    => 'BinaryExpr',
-                            op       => $target->inputs()->[0],
-                            left     => $target->inputs()->[1],
-                            right    => $new_right,
-                        );
-                    }
-                }
+                my $right = $target->inputs()->[2];
+                my $new_right = $factory->make('Constructor',
+                    'class'  => 'SubscriptExpr',
+                    target => $right,
+                    index  => $node->inputs()->[1],
+                    style  => $node->inputs()->[2],
+                );
+                # Re-run fix on the new SubscriptExpr to push deeper if needed
+                $new_right = _fix_postfix_chain($factory, $new_right);
+                return $factory->make('Constructor',
+                    'class'    => 'BinaryExpr',
+                    op       => $target->inputs()->[0],
+                    left     => $target->inputs()->[1],
+                    right    => $new_right,
+                );
             }
         }
 
         return $node;
     }
+
+    # Recursively apply _fix_postfix_chain to all nodes in a tree.
+    # Unlike _fix_postfix_chain (which only transforms the top node),
+    # this walks into BinaryExpr/UnaryExpr/BuiltinCall children so that
+    # inner SubscriptExpr corruption gets fixed too.
+    my $_fix_postfix_chain_deep;
+    $_fix_postfix_chain_deep = sub($f, $node) {
+        return $node unless defined $node;
+        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+
+        # First, apply the top-level fix
+        my $fixed = _fix_postfix_chain($f, $node);
+
+        # If the top-level fix changed the node, recurse on the result
+        return $_fix_postfix_chain_deep->($f, $fixed)
+            if refaddr($fixed) != refaddr($node);
+
+        # Otherwise, recurse into children
+        my $class = $node->class();
+        if ($class eq 'BinaryExpr') {
+            my $left  = $_fix_postfix_chain_deep->($f, $node->inputs()->[1]);
+            my $right = $_fix_postfix_chain_deep->($f, $node->inputs()->[2]);
+            if (refaddr($left) != refaddr($node->inputs()->[1])
+                || refaddr($right) != refaddr($node->inputs()->[2])) {
+                return $f->make('Constructor',
+                    'class' => 'BinaryExpr',
+                    op    => $node->inputs()->[0],
+                    left  => $left,
+                    right => $right,
+                );
+            }
+        } elsif ($class eq 'UnaryExpr') {
+            my $operand = $_fix_postfix_chain_deep->($f, $node->inputs()->[1]);
+            if (refaddr($operand) != refaddr($node->inputs()->[1])) {
+                return $f->make('Constructor',
+                    'class'   => 'UnaryExpr',
+                    op      => $node->inputs()->[0],
+                    operand => $operand,
+                );
+            }
+        } elsif ($class eq 'BuiltinCall') {
+            my @args = $node->inputs()->[1]->@*;
+            my $changed = false;
+            for my $i (0 .. $#args) {
+                my $fixed_arg = $_fix_postfix_chain_deep->($f, $args[$i]);
+                if (refaddr($fixed_arg) != refaddr($args[$i])) {
+                    $args[$i] = $fixed_arg;
+                    $changed = true;
+                }
+            }
+            if ($changed) {
+                return $f->make('Constructor',
+                    'class' => 'BuiltinCall',
+                    name  => $node->inputs()->[0],
+                    args  => \@args,
+                );
+            }
+        }
+
+        return $node;
+    };
 
     # Post-process statement list to fix grammar ambiguity artifacts.
     # The ambiguous grammar sometimes parses compound statements as
@@ -2175,9 +2156,14 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Unwrap stale-value merge corruption: shared subscripts between
-        # body and condition can wrap the condition in a SubscriptExpr
-        $condition = $_unwrap_condition_corruption->($factory, $condition) if defined $condition;
+        # Fix stale-value merge corruption in condition:
+        # _fix_postfix_chain_deep recursively pushes SubscriptExpr wrappers
+        # into the correct positions (BuiltinCall args, BinaryExpr right
+        # operands, UnaryExpr operands). Since If nodes are not Constructors,
+        # _fix_postfix_chain won't reach the condition from _fixup_stmts.
+        if (defined $condition) {
+            $condition = $_fix_postfix_chain_deep->($factory, $condition);
+        }
 
         return undef unless defined $keyword;
 

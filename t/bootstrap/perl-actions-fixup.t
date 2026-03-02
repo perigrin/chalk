@@ -411,4 +411,52 @@ my sub find_method_in_class($class_decl, $name) {
     };
 }
 
+# === Test: prefix builtins with subscripted args get correct IR ===
+# _fix_postfix_chain handles SubscriptExpr(BuiltinCall(exists/delete, [var]), key, style)
+# by pushing the subscript inward. The same corruption pattern occurs for all prefix
+# builtins (defined, ref, scalar, etc.) and must be handled identically.
+{
+    my @builtins_with_subscript = (
+        ['defined $arr[$i];', 'defined'],
+        ['ref $arr[$i];', 'ref'],
+        ['length $arr[$i];', 'length'],
+        ['chr $arr[$i];', 'chr'],
+    );
+
+    for my $case (@builtins_with_subscript) {
+        my ($code, $builtin_name, $expected_style) = $case->@*;
+        my $ir = parse_source($code);
+        ok(defined $ir, "$builtin_name subscript: parses");
+
+        SKIP: {
+            skip "$builtin_name did not parse", 2 unless defined $ir;
+
+            # Find the BuiltinCall in the top-level statement
+            my $stmts = $ir->inputs()->[0];
+            my $stmt = $stmts->[0];
+            ok(defined $stmt, "$builtin_name subscript: has statement");
+
+            # The statement should be BuiltinCall, NOT SubscriptExpr wrapping it
+            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor) {
+                is($stmt->class(), 'BuiltinCall',
+                    "$builtin_name subscript: top-level is BuiltinCall (not SubscriptExpr)");
+
+                # Verify the arg is a SubscriptExpr
+                if ($stmt->class() eq 'BuiltinCall') {
+                    my $args = $stmt->inputs()->[1];
+                    ok(ref($args) eq 'ARRAY' && $args->@* > 0,
+                        "$builtin_name subscript: has arguments");
+                    if (ref($args) eq 'ARRAY' && $args->@* > 0
+                        && $args->[0] isa Chalk::Bootstrap::IR::Node::Constructor) {
+                        is($args->[0]->class(), 'SubscriptExpr',
+                            "$builtin_name subscript: arg is SubscriptExpr");
+                    }
+                }
+            } else {
+                fail("$builtin_name subscript: expected Constructor node");
+            }
+        }
+    }
+}
+
 done_testing();
