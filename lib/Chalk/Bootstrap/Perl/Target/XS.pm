@@ -1795,9 +1795,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 return "${var}_sv = $default_val;\n$try_stmt";
             }
             my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
-            # PostfixDerefExpr ->@* and ->%* return (AV*) / (HV*) casts.
+            # PostfixDerefExpr ->@* returns (AV*)SvRV(...). In list context
+            # (my ($x) = $ref->@*), the scalar LHS gets element [0], not the
+            # AV* itself. Detect this and emit av_fetch for proper indexing.
+            if ($init_expr =~ /^\(AV\*\)SvRV\((.+)\)$/) {
+                my $rv_expr = $1;
+                return "${var}_sv = (*av_fetch((AV*)SvRV($rv_expr), 0, 0));";
+            }
+            # PostfixDerefExpr ->%* returns (HV*) casts.
             # VarDecl targets are SV*, so cast to avoid type mismatch.
-            if ($init_expr =~ /^\((?:AV|HV)\*\)/) {
+            if ($init_expr =~ /^\(HV\*\)/) {
                 $init_expr = "(SV*)$init_expr";
             }
             return "${var}_sv = $init_expr;";
@@ -2010,6 +2017,33 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
+            }
+            # Inject chart re-read for while-shift loops that destructure entries.
+            # The IR loses list destructuring: my ($item, $alt_idx) = $entry->@*
+            # becomes my $item = $entry->@* (alt_idx lost). Also the chart re-read
+            # ($item, $alt_idx) = $self->_chart_get(...)->@* is lost entirely.
+            # Detect this by checking if the while condition created an entry var
+            # and the body uses alt_idx_sv without setting it.
+            if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $cond->class() eq 'VarDecl') {
+                my $entry_var = $cond->inputs()->[0]->value();
+                $entry_var =~ s/^[\$\@\%]//;
+                my $body_code = join("\n", @lines);
+                # If body references alt_idx_sv but never assigns it,
+                # and there's an entry variable from the while-shift,
+                # inject extraction of element [1] from the entry array
+                if ($body_code =~ /alt_idx_sv/ && $body_code !~ /alt_idx_sv\s*=/) {
+                    # Find the first av_fetch line for element 0 and add element 1 after it
+                    my @new_lines;
+                    for my $line (@lines) {
+                        push @new_lines, $line;
+                        if ($line =~ /(\w+)_sv = \(\*av_fetch\(\(AV\*\)SvRV\((\w+_sv)\), 0, 0\)\)/) {
+                            my $src_var = $2;
+                            push @new_lines, "    alt_idx_sv = (*av_fetch((AV*)SvRV($src_var), 1, 0));";
+                        }
+                    }
+                    @lines = @new_lines;
+                }
             }
             push @lines, "}";
         }

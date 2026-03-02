@@ -682,6 +682,18 @@ my sub var_node($name) {
 
     like($run_parse_code, qr/av_clear\(\(AV\*\)ObjectFIELDS/,
         '_run_parse: uses av_clear for array field reset');
+
+    # While loop destructuring: my ($item, $alt_idx) = $entry->@*
+    # The IR loses $alt_idx. The XS emitter must extract element [0] for item
+    # and inject element [1] for alt_idx.
+    unlike($run_parse_code, qr/item_sv = \(SV\*\)\(AV\*\)SvRV/,
+        '_run_parse: no raw AV* cast for item — should use av_fetch element [0]');
+
+    like($run_parse_code, qr/item_sv = \(\*av_fetch\(\(AV\*\)SvRV\(\w+_sv\), 0, 0\)\)/,
+        '_run_parse: item_sv = av_fetch(entry, 0) — proper destructuring');
+
+    like($run_parse_code, qr/alt_idx_sv = \(\*av_fetch\(\(AV\*\)SvRV\(\w+_sv\), 1, 0\)\)/,
+        '_run_parse: alt_idx_sv = av_fetch(entry, 1) — injected from destructuring');
 }
 
 done_testing();
