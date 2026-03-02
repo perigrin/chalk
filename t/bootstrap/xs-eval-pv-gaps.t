@@ -460,4 +460,55 @@ my sub var_node($name) {
     unlike($code, qr/eval_pv\("map\(/, 'map init: not a broken eval_pv with C vars');
 }
 
+# === Hash field reset: %hash = () emits empty hashref, not undef ===
+# When a hash field is reset like %waiting_for = (), the XS emitter must
+# produce newRV_noinc((SV*)newHV()) not &PL_sv_undef. Using undef causes
+# segfaults when code later dereferences the field as a hash.
+{
+    # VarDecl for %waiting_for with no initializer (IR for %hash = ())
+    my $var_decl = ctor('VarDecl',
+        variable    => const_node('%waiting_for'),
+        initializer => undef,
+    );
+    # Simulate field_map context by calling _emit_xs_var_decl with a field map
+    # that maps waiting_for to field index 5
+    my $code = $xs->_emit_xs_var_decl($var_decl, { waiting_for => true });
+    # For % variables, default should be empty hashref, not undef
+    unlike($code, qr/PL_sv_undef/, 'hash field reset: not undef');
+    like($code, qr/newHV/, 'hash field reset: creates empty hash');
+}
+
+# === Array field reset: @arr = () emits empty arrayref, not undef ===
+{
+    my $var_decl = ctor('VarDecl',
+        variable    => const_node('@_gc_min_origin_at'),
+        initializer => undef,
+    );
+    my $code = $xs->_emit_xs_var_decl($var_decl, { _gc_min_origin_at => true });
+    unlike($code, qr/PL_sv_undef/, 'array field reset: not undef');
+    like($code, qr/newAV/, 'array field reset: creates empty array');
+}
+
+# === Local hash variable: my %hash emits empty hashref ===
+{
+    my $var_decl = ctor('VarDecl',
+        variable    => const_node('%processed'),
+        initializer => undef,
+    );
+    my $code = $xs->_emit_xs_var_decl($var_decl, {});
+    unlike($code, qr/PL_sv_undef/, 'local hash var: not undef');
+    like($code, qr/newHV/, 'local hash var: creates empty hash');
+}
+
+# === Local array variable: my @agenda emits empty arrayref ===
+{
+    my $var_decl = ctor('VarDecl',
+        variable    => const_node('@agenda'),
+        initializer => undef,
+    );
+    my $code = $xs->_emit_xs_var_decl($var_decl, {});
+    unlike($code, qr/PL_sv_undef/, 'local array var: not undef');
+    like($code, qr/newAV/, 'local array var: creates empty array');
+}
+
 done_testing();

@@ -1467,9 +1467,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit VarDecl as C statement (SV assignment)
     method _emit_xs_var_decl($node, $declared_vars) {
-        my $var  = $node->inputs()->[0]->value();
+        my $raw_var = $node->inputs()->[0]->value();
+        my ($sigil) = $raw_var =~ /^([\$\@\%])/;
+        my $var = $raw_var;
         $var =~ s/^[\$\@\%]//;
         my $init = $node->inputs()->[1];
+
+        # Default value for uninitialized variables depends on sigil:
+        # %hash → empty hashref, @array → empty arrayref, $scalar → undef
+        my $default_val = '&PL_sv_undef';
+        if (defined $sigil && $sigil eq '%') {
+            $default_val = 'newRV_noinc((SV*)newHV())';
+        } elsif (defined $sigil && $sigil eq '@') {
+            $default_val = 'newRV_noinc((SV*)newAV())';
+        }
 
         # Field variables are stored in ObjectFIELDS, not local C variables.
         # In ADJUST bodies, VarDecl for field names emits an ObjectFIELDS write.
@@ -1480,7 +1491,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
                 return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $init_expr);";
             }
-            return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], &PL_sv_undef);";
+            return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
         }
 
         if (defined $init) {
@@ -1490,7 +1501,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($init isa Chalk::Bootstrap::IR::Node::Constructor
                     && $init->class() eq 'TryCatchStmt') {
                 my $try_stmt = $self->_emit_xs_stmt($init, $declared_vars);
-                return "${var}_sv = &PL_sv_undef;\n$try_stmt";
+                return "${var}_sv = $default_val;\n$try_stmt";
             }
             my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
             # PostfixDerefExpr ->@* and ->%* return (AV*) / (HV*) casts.
@@ -1500,7 +1511,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             return "${var}_sv = $init_expr;";
         }
-        return "${var}_sv = &PL_sv_undef;";
+        return "${var}_sv = $default_val;";
     }
 
     # Emit ReturnStmt as RETVAL assignment.
