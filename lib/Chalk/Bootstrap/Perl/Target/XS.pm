@@ -601,12 +601,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             && $last_item->class() eq 'ReturnStmt');
         # Detect tail-position expressions: a bare expression as the final
         # body item is treated as a return value (stale-merge strips explicit
-        # return in tail position). Uses _is_bare_return_expr for detection.
+        # return in tail position).
+        # Two cases:
+        # 1. Unambiguous value exprs (TernaryExpr) — always treated as return
+        # 2. Ambiguous exprs (MethodCallExpr, SubscriptExpr) — only when body
+        #    also contains ReturnStmts (distinguishes from side-effects like ADJUST)
+        my $body_has_returns = $self->_body_contains_return($body);
         my $tail_expr_return = (!$last_is_return
             && defined $last_item
-            && $self->_is_bare_return_expr($last_item)
+            && ($self->_is_unambiguous_value_expr($last_item)
+                || ($body_has_returns && $self->_is_bare_return_expr($last_item)))
             );
-        my $has_return = $last_is_return || $tail_expr_return || $self->_body_contains_return($body);
+        my $has_return = $last_is_return || $tail_expr_return || $body_has_returns;
 
         # Track C variable declarations needed
         my %declared_vars;
@@ -731,7 +737,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return false unless ref($body) eq 'ARRAY';
         for my $item ($body->@*) {
             next unless $item isa Chalk::Bootstrap::IR::Node;
-            # Check CFG If nodes via cfg_lookup
+            # Check CFG If nodes and Loop bodies via cfg_lookup
             if (%_cfg_lookup && ref($item)) {
                 my $state = $_cfg_lookup{refaddr($item)};
                 if (defined $state && defined $state->{if_node}) {
@@ -739,6 +745,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     return true if $self->_body_contains_return($then);
                     my $else = $state->{else_stmts};
                     return true if defined($else) && $self->_body_contains_return($else);
+                }
+                # Recurse into loop body_stmts
+                if (defined $state && defined $state->{loop}) {
+                    my $loop_body = $state->{body_stmts};
+                    return true if defined($loop_body) && ref($loop_body) eq 'ARRAY'
+                        && $self->_body_contains_return($loop_body);
                 }
             }
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
@@ -770,6 +782,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return true if $class eq 'MethodCallExpr';
         return true if $class eq 'TernaryExpr';
         return false;
+    }
+
+    # Detect if an IR node is unambiguously a value expression (never a
+    # side-effect). TernaryExpr always produces a value; MethodCallExpr
+    # and SubscriptExpr are ambiguous (could be side-effects).
+    method _is_unambiguous_value_expr($node) {
+        return false unless defined $node;
+        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return $node->class() eq 'TernaryExpr';
     }
 
     # Recursively collect VarDecl and iterator names from IR nodes at any
