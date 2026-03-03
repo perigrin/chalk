@@ -1,5 +1,5 @@
 # ABOUTME: Tests for Chalk::Bootstrap::Desugar quantifier desugaring utility.
-# ABOUTME: Verifies grammar transformation that expands X+, X?, X* into helper rules.
+# ABOUTME: Verifies grammar transformation that expands X+ and X* into helper rules (? passes through).
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -94,8 +94,7 @@ sub reference($value, $quant = undef) {
     is(scalar $star_alt2->@*, 0, 'X+ desugaring: Rule_star second alt is epsilon');
 }
 
-# Test 4: X? generates helper with 2 alternatives: [X] and [] (epsilon)
-# Per PRD: "A? desugars to A_opt ::= A | epsilon ;"
+# Test 4: X? passes through without desugaring (handled inline by Earley parser)
 {
     my $grammar = [
         Chalk::Grammar::Rule->new(
@@ -109,26 +108,13 @@ sub reference($value, $quant = undef) {
     ];
 
     my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
-    is(scalar $result->@*, 3, 'X? desugaring: adds one helper rule');
+    is(scalar $result->@*, 2, 'X? pass-through: no helper rule created');
 
-    # Start rule should now reference Quantifier_opt
+    # Start rule should still reference Quantifier with ? quantifier
     my $start_syms = $result->[0]->expressions()->[0];
-    is($start_syms->[0]->value(), 'Quantifier_opt', 'X? desugaring: Start references Quantifier_opt');
-    ok(!$start_syms->[0]->is_quantified(), 'X? desugaring: reference is unquantified');
-
-    # Helper rule: Quantifier_opt ::= Quantifier | (epsilon)
-    my $helper = $result->[2];
-    is($helper->name(), 'Quantifier_opt', 'X? desugaring: helper rule name');
-    is($helper->alternative_count(), 2, 'X? desugaring: helper has 2 alternatives');
-
-    # First alt: [Quantifier]
-    my $alt1 = $helper->expressions()->[0];
-    is(scalar $alt1->@*, 1, 'X? desugaring: first alt has 1 symbol');
-    is($alt1->[0]->value(), 'Quantifier', 'X? desugaring: first alt sym is Quantifier');
-
-    # Second alt: [] (epsilon)
-    my $alt2 = $helper->expressions()->[1];
-    is(scalar $alt2->@*, 0, 'X? desugaring: second alt is empty (epsilon)');
+    is($start_syms->[0]->value(), 'Quantifier', 'X? pass-through: Start still references Quantifier');
+    ok($start_syms->[0]->is_quantified(), 'X? pass-through: quantifier preserved');
+    is($start_syms->[0]->quantifier(), '?', 'X? pass-through: quantifier is ?');
 }
 
 # Test 5: X* generates helper with 2 alternatives: [X, X_star] and [] (epsilon)
@@ -241,37 +227,44 @@ sub reference($value, $quant = undef) {
     isnt($result, $grammar, 'immutability: result is a different arrayref');
 }
 
-# Test 9: Full BNF desugaring produces 13 rules
-# 10 original + Rule_plus + Rule_star (from Rule+) + Quantifier_opt (from Quantifier?)
+# Test 9: Full BNF desugaring produces 12 rules
+# 10 original + Rule_plus + Rule_star (from Rule+); Quantifier? passes through
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
     my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
-    is(scalar $result->@*, 13, 'full BNF: 10 original + 3 helpers = 13 rules');
+    is(scalar $result->@*, 12, 'full BNF: 10 original + 2 helpers = 12 rules');
 
     # Check helper rule names exist
     my %names = map { $_->name() => 1 } $result->@*;
     ok($names{Rule_plus}, 'full BNF: Rule_plus helper exists');
     ok($names{Rule_star}, 'full BNF: Rule_star helper exists');
-    ok($names{Quantifier_opt}, 'full BNF: Quantifier_opt helper exists');
+    ok(!$names{Quantifier_opt}, 'full BNF: no Quantifier_opt (? handled inline)');
 }
 
-# Test 10: No quantified symbols remain in desugared output
+# Test 10: Only ? quantified symbols remain in desugared output (+ and * are desugared)
 {
     my $grammar = Chalk::Grammar::BNF->grammar();
     my $result = Chalk::Bootstrap::Desugar::desugar_grammar($grammar);
 
-    my $found_quantified = false;
+    my $found_plus_or_star = false;
+    my $found_question = false;
     for my $rule ($result->@*) {
         for my $alt ($rule->expressions()->@*) {
             for my $sym ($alt->@*) {
                 if ($sym->is_quantified()) {
-                    $found_quantified = true;
-                    diag("Found quantified symbol: " . $sym->to_string() . " in rule " . $rule->name());
+                    if ($sym->quantifier() eq '?') {
+                        $found_question = true;
+                    } else {
+                        $found_plus_or_star = true;
+                        diag("Found non-? quantified symbol: " . $sym->to_string()
+                            . " in rule " . $rule->name());
+                    }
                 }
             }
         }
     }
-    ok(!$found_quantified, 'full BNF: no quantified symbols remain after desugaring');
+    ok(!$found_plus_or_star, 'full BNF: no + or * quantified symbols remain after desugaring');
+    ok($found_question, 'full BNF: ? quantified symbols pass through (handled inline)');
 }
 
 # Integration tests with Earley parser
