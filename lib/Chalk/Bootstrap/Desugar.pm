@@ -1,5 +1,5 @@
 # ABOUTME: Pre-parse grammar transformation that expands quantified symbols into helper rules.
-# ABOUTME: Desugars X+, X?, X* so the Earley parser never sees quantifiers.
+# ABOUTME: Desugars X+ and X* into helper rules; X? passes through for inline parser handling.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -22,7 +22,7 @@ sub desugar_grammar($grammar) {
             my @new_alt;
 
             for my $sym ($alt->@*) {
-                if ($sym->is_quantified()) {
+                if ($sym->is_quantified() && $sym->quantifier() ne '?') {
                     my $helper_name = _helper_name($sym->value(), $sym->quantifier());
 
                     # Create helper rule(s) if not already seen

@@ -183,6 +183,26 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         return \@results;
     }
 
+    # Delegate on_skip_optional to each component.
+    # Semirings with on_skip_optional get the placeholder path;
+    # others fall back to multiply(value, one()) which is identity.
+    method on_skip_optional($item, $alt_idx, $pos, $symbol_name) {
+        my @results;
+        for my $i (0 .. $semirings->$#*) {
+            my $component_item = { %$item, value => $item->{value}->[$i] };
+            my $sr = $semirings->[$i];
+            my $r;
+            if ($sr->can('on_skip_optional')) {
+                $r = $sr->on_skip_optional($component_item, $alt_idx, $pos, $symbol_name);
+            } else {
+                $r = $sr->multiply($component_item->{value}, $sr->one());
+            }
+            return $self->zero() if $sr->is_zero($r);
+            push @results, $r;
+        }
+        return \@results;
+    }
+
     # should_scan: gate for scan operation, called after regex match succeeds.
     # First-false short-circuit: if ANY component returns false, return false.
     # This allows any semiring to veto a scan before on_scan is called.

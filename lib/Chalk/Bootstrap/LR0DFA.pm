@@ -49,12 +49,19 @@ class Chalk::Bootstrap::LR0DFA {
                 my $core_id = $core_index->id_for($nt, $alt_idx, 0);
                 push @result, $core_id if defined $core_id;
 
-                # If the first symbol of this alternative is a nonterminal,
-                # transitively predict it too
+                # If the first symbol(s) of this alternative are nonterminals,
+                # transitively predict them. When a symbol is X?, the next
+                # symbol also needs prediction (X? can be skipped).
                 my $alt = $expressions->[$alt_idx];
-                if (scalar $alt->@* > 0 && $alt->[0]->is_reference()) {
-                    my $ref_name = $alt->[0]->value();
+                my $dot = 0;
+                while ($dot < scalar $alt->@*) {
+                    my $sym = $alt->[$dot];
+                    last unless $sym->is_reference();
+                    my $ref_name = $sym->value();
                     push @worklist, $ref_name unless $visited{$ref_name};
+                    # Only look past optional symbols
+                    last unless $sym->is_quantified() && $sym->quantifier() eq '?';
+                    $dot++;
                 }
             }
         }

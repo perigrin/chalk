@@ -290,6 +290,24 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return;
     }
 
+    # on_skip_optional: create a placeholder Context for a skipped X? symbol.
+    # Preserves positional child indexing for actions that access children by position.
+    method on_skip_optional($item, $alt_idx, $pos, $symbol_name) {
+        my $value = $item->{value};
+        return undef if !defined $value;
+        # Create a placeholder Context representing "X was absent"
+        my $placeholder = Chalk::Bootstrap::Context->new(
+            focus    => undef,
+            children => [],
+            position => $pos,
+            rule     => "${symbol_name}_opt",
+        );
+        # Propagate cfg_state from parent to placeholder
+        my $parent_state = $self->inherited_cfg_state($value);
+        $_cfg_state{refaddr($placeholder)} = $parent_state if defined $parent_state;
+        return $self->multiply($value, $placeholder);
+    }
+
     # should_scan: gate for scan operation, called after regex match succeeds
     # Returns true to proceed with scan, false to skip it.
     # Default: always return true (no filtering).

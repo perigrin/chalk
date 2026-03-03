@@ -227,8 +227,51 @@ class Chalk::Bootstrap::Earley {
                     my $symbol = $self->_symbol_after_dot($item, $alt_idx);
 
                     if ($symbol->is_reference()) {
-                        # Index this item as waiting for the nonterminal
                         my $w_rule = $symbol->value();
+
+                        # Inline ? handling: create skip path that advances
+                        # past the optional symbol without matching it.
+                        if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
+                            my $skip_value = $semiring->can('on_skip_optional')
+                                ? $semiring->on_skip_optional($item, $alt_idx, $pos, $w_rule)
+                                : $semiring->multiply($item->{value}, $semiring->one());
+                            if (defined $skip_value && !$semiring->is_zero($skip_value)) {
+                                my $skip_item = $self->_make_item(
+                                    $item->{rule}, $alt_idx, $item->{dot} + 1,
+                                    $origin, $skip_value
+                                );
+                                my $skip_core = $skip_item->{core_id};
+                                if ($self->_chart_has(\@chart, $pos, $skip_core, $origin)) {
+                                    my $existing = $self->_chart_get(
+                                        \@chart, $pos, $skip_core, $origin
+                                    )->[0];
+                                    my $merged = $semiring->add(
+                                        $existing->{value}, $skip_value
+                                    );
+                                    if (!$semiring->is_zero($merged)) {
+                                        my $merged_item = {
+                                            %$existing, value => $merged
+                                        };
+                                        $self->_chart_set(
+                                            \@chart, $pos, $skip_core, $origin,
+                                            [$merged_item, $alt_idx]
+                                        );
+                                        my $spkey = pack('NN', $skip_core, $origin);
+                                        push @agenda, [$merged_item, $alt_idx]
+                                            unless $processed{$spkey};
+                                    }
+                                } else {
+                                    $self->_chart_set(
+                                        \@chart, $pos, $skip_core, $origin,
+                                        [$skip_item, $alt_idx]
+                                    );
+                                    push @agenda, [$skip_item, $alt_idx];
+                                }
+                            }
+                        }
+
+                        # Match path: predict and wait (for both ? and non-? references)
+                        # Index this item as waiting for the nonterminal
                         $waiting_for{$w_rule}{$pos} //= [];
                         push $waiting_for{$w_rule}{$pos}->@*, [$core_id, $origin];
                         # Predict
