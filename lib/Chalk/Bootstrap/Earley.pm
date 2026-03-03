@@ -231,6 +231,9 @@ class Chalk::Bootstrap::Earley {
 
                         # Inline ? handling: create skip path that advances
                         # past the optional symbol without matching it.
+                        # DFA prediction handles this for initially-predicted
+                        # items (dot=0 advancement); this handles mid-rule
+                        # optionals where the dot reaches B? during parsing.
                         if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
                             my $skip_value = $semiring->can('on_skip_optional')
                                 ? $semiring->on_skip_optional($item, $alt_idx, $pos, $w_rule)
@@ -270,7 +273,6 @@ class Chalk::Bootstrap::Earley {
                             }
                         }
 
-                        # Match path: predict and wait (for both ? and non-? references)
                         # Index this item as waiting for the nonterminal
                         $waiting_for{$w_rule}{$pos} //= [];
                         push $waiting_for{$w_rule}{$pos}->@*, [$core_id, $origin];
@@ -347,8 +349,12 @@ class Chalk::Bootstrap::Earley {
 
     # Predict: add items for all alternatives of a nonterminal using
     # pre-computed LR(0) DFA epsilon-closure prediction items.
+    # The DFA provides [$core_id, $skip_symbols] pairs where $skip_symbols
+    # lists ?-quantified symbol names skipped to reach that dot position
+    # (Aycock nullable optimization). For dot>0 items, on_skip_optional is
+    # called to create SemanticAction placeholders for each skipped symbol.
     # Tracks which rules have been predicted at each position to avoid
-    # re-iterating the prediction set (up to 133 items) on redundant calls.
+    # re-iterating the prediction set on redundant calls.
     method _predict($symbol, $pos, $chart, $agenda, $predicted_at = undef) {
         my $rule_name = $symbol->value();
 
@@ -361,11 +367,33 @@ class Chalk::Bootstrap::Earley {
         my $prediction_items = $lr0_dfa->prediction_items_for($rule_name);
         return unless defined $prediction_items;
 
-        for my $core_id ($prediction_items->@*) {
+        for my $pred_entry ($prediction_items->@*) {
+            my ($core_id, $skip_symbols) = $pred_entry->@*;
             unless ($self->_chart_has($chart, $pos, $core_id, $pos)) {
                 my $info = $core_index->item_for($core_id);
+                my $dot = $info->{dot};
                 my $rule = $rule_table->{$info->{rule_name}};
-                my $item = $self->_make_item($rule, $info->{alt_idx}, 0, $pos, $semiring->one());
+
+                # Build initial value. For dot>0 items with skipped ? symbols,
+                # call on_skip_optional for each skipped symbol to create
+                # SemanticAction placeholder contexts.
+                my $value = $semiring->one();
+                if ($skip_symbols && $skip_symbols->@*) {
+                    for my $sym_name ($skip_symbols->@*) {
+                        if ($semiring->can('on_skip_optional')) {
+                            my $synth = { value => $value, rule => $rule };
+                            $value = $semiring->on_skip_optional(
+                                $synth, $info->{alt_idx}, $pos, $sym_name
+                            );
+                            last if !defined $value || $semiring->is_zero($value);
+                        } else {
+                            $value = $semiring->multiply($value, $semiring->one());
+                        }
+                    }
+                    next if !defined $value || $semiring->is_zero($value);
+                }
+
+                my $item = $self->_make_item($rule, $info->{alt_idx}, $dot, $pos, $value);
                 $self->_chart_set($chart, $pos, $core_id, $pos, [$item, $info->{alt_idx}]);
                 push $agenda->@*, [$item, $info->{alt_idx}];
             }

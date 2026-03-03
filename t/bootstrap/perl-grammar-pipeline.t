@@ -131,7 +131,9 @@ SKIP: {
     use Chalk::Bootstrap::Desugar;
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($gen_grammar);
     my $expanded = scalar($desugared->@*);
-    ok($expanded > 63, "Phase 0: desugaring expands to $expanded rules (from 63)");
+    # ? quantifiers pass through without creating helper rules, so the
+    # count stays at 63 when only ? is used (no * or + in Perl grammar).
+    ok($expanded >= 63, "Phase 0: desugaring produces $expanded rules (from 63)");
     diag "Desugaring: 63 rules + quantifiers -> $expanded effective rules";
 }
 

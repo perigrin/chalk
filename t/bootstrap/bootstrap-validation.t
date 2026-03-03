@@ -207,6 +207,10 @@ package TestSymbol {
         method is_terminal() {
             return $type eq 'terminal';
         }
+
+        method is_quantified() {
+            return false;
+        }
     }
 }
 

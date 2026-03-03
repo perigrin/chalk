@@ -195,7 +195,9 @@ subtest 'prediction items have correct core IDs' => sub {
     is(scalar $items->@*, 3, 'E has 3 prediction items');
 
     # Each prediction item should be at dot position 0
-    for my $core_id ($items->@*) {
+    # Prediction items are now [$core_id, $skip_symbols] pairs
+    for my $entry ($items->@*) {
+        my $core_id = $entry->[0];
         my $info = $index->item_for($core_id);
         ok(defined $info, "core_id $core_id exists in index");
         is($info->{rule_name}, 'E', "core_id $core_id is for rule E");

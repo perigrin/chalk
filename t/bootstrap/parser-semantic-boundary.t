@@ -26,6 +26,7 @@ package TestSymbol {
     sub value { $_[0]->{_value} }
     sub is_reference { $_[0]->{_type} eq 'reference' }
     sub is_terminal { $_[0]->{_type} eq 'terminal' }
+    sub is_quantified { false }
 }
 
 package TestRule {
