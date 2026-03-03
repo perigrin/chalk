@@ -166,7 +166,7 @@ SKIP: {
         'lib/Chalk/Bootstrap/Optimizer.pm'              => 'push $passes->@* op sequence mismatch with native push opcode',
         # Parse failures — remaining ambiguities
         'lib/Chalk/Bootstrap/BNF/Target/XS.pm'          => 'Pre-existing parse failure',
-        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'O(n^2) Earley scaling: 1530 lines, Boolean recognition alone exceeds 120s',
+        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'Linear but ~90ms/line constant factor: 2595 lines exceeds 120s timeout',
     );
 
     # Emit TAP for a single file result
