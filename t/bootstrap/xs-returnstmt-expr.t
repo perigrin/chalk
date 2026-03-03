@@ -52,8 +52,14 @@ my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
     module_name => 'Test::ReturnExpr',
 );
 
-my $lines = $xs_target->_emit_xs_method($method);
-my $xs_output = join("\n", $lines->@*);
+my $result = $xs_target->_emit_xs_method($method);
+# Complex methods now return {helper, xsub} hashref; combine both for assertions
+my $xs_output;
+if (ref($result) eq 'HASH') {
+    $xs_output = join("\n", $result->{helper}->@*, $result->{xsub}->@*);
+} else {
+    $xs_output = join("\n", $result->@*);
+}
 
 # The XS output should NOT contain NULL /* unsupported */
 unlike($xs_output, qr/NULL \/\* unsupported \*\//, 'ReturnStmt-as-expression does not produce NULL');

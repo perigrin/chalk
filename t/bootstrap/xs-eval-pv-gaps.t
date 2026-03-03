@@ -8,6 +8,33 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::XS;
 
+# Extract method body code from XS output — works with both old monolithic XSUB
+# format (CODE: section) and new helper+XSUB split format (static helper body).
+sub extract_method_body {
+    my ($output, $method_name) = @_;
+    # Try new helper format first: static SV * _impl_METHOD(pTHX_ ...) { ... }
+    my ($helper) = $output =~ /static\s+SV\s*\*\s*_impl_${method_name}\(pTHX_[^)]*\)\s*\{(.*?)\n\}/ms;
+    return $helper if defined $helper;
+    # Fall back to old XSUB CODE section
+    my ($code) = $output =~ /${method_name}\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
+    return $code;
+}
+
+# Extract method var declarations — from helper locals or old PREINIT section.
+sub extract_method_vars {
+    my ($output, $method_name) = @_;
+    # Try new helper format: locals between { and first body statement
+    my ($helper) = $output =~ /static\s+SV\s*\*\s*_impl_${method_name}\(pTHX_[^)]*\)\s*\{(.*?)\n\}/ms;
+    if (defined $helper) {
+        # Var declarations are the SV * lines at the top of the helper
+        my @vars = $helper =~ /^\s*(SV\s*\*\w+\s*=\s*NULL;)/mg;
+        return join("\n", @vars);
+    }
+    # Fall back to old PREINIT section
+    my ($preinit) = $output =~ /${method_name}\(.*?\n  PREINIT:\n(.*?)\n  CODE:/ms;
+    return $preinit;
+}
+
 # Build a minimal IR to test emitter methods.
 # We construct IR nodes directly and call _emit_xs_expr on them.
 
@@ -629,27 +656,27 @@ my sub var_node($name) {
     my $output = $xs_gen->generate_with_cfg($ir, $sa, $ctx);
 
     # _chart_has should use hv_exists_ent for {$core_id}, not av_exists
-    # Extract just the CODE section of _chart_has XSUB
-    my ($chart_has_code) = $output =~ /_chart_has\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
-    ok(defined $chart_has_code, '_chart_has CODE section extracted from XS');
+    # Extract the method body (from helper or XSUB CODE section)
+    my $chart_has_code = extract_method_body($output, '_chart_has');
+    ok(defined $chart_has_code, '_chart_has body extracted from XS');
 
     unlike($chart_has_code, qr/av_exists/,
         '_chart_has: no av_exists — {$core_id} is hash subscript, not array');
     like($chart_has_code, qr/hv_exists_ent/,
         '_chart_has: uses hv_exists_ent for {$core_id} hash subscript');
 
-    # Method parameters should NOT appear as _sv NULL vars in PREINIT.
-    # Parameters (chart, pos, core_id, origin) are bare C names from XS typemap.
-    my ($chart_has_preinit) = $output =~ /_chart_has\(.*?\n  PREINIT:\n(.*?)\n  CODE:/ms;
-    ok(defined $chart_has_preinit, '_chart_has PREINIT extracted');
+    # Method parameters should NOT appear as _sv NULL vars in declarations.
+    # Parameters (chart, pos, core_id, origin) are bare C names.
+    my $chart_has_vars = extract_method_vars($output, '_chart_has');
+    ok(defined $chart_has_vars, '_chart_has PREINIT extracted');
 
-    unlike($chart_has_preinit, qr/chart_sv\s*=\s*NULL/,
+    unlike($chart_has_vars, qr/chart_sv\s*=\s*NULL/,
         '_chart_has: no chart_sv in PREINIT — chart is a parameter');
-    unlike($chart_has_preinit, qr/pos_sv\s*=\s*NULL/,
+    unlike($chart_has_vars, qr/pos_sv\s*=\s*NULL/,
         '_chart_has: no pos_sv in PREINIT — pos is a parameter');
-    unlike($chart_has_preinit, qr/core_id_sv\s*=\s*NULL/,
+    unlike($chart_has_vars, qr/core_id_sv\s*=\s*NULL/,
         '_chart_has: no core_id_sv in PREINIT — core_id is a parameter');
-    unlike($chart_has_preinit, qr/origin_sv\s*=\s*NULL/,
+    unlike($chart_has_vars, qr/origin_sv\s*=\s*NULL/,
         '_chart_has: no origin_sv in PREINIT — origin is a parameter');
 }
 
@@ -666,7 +693,7 @@ my sub var_node($name) {
     my $xs_gen = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::FieldReset');
     my $output = $xs_gen->generate_with_cfg($ir, $sa, $ctx);
 
-    my ($run_parse_code) = $output =~ /_run_parse\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
+    my $run_parse_code = extract_method_body($output, '_run_parse');
     ok(defined $run_parse_code, '_run_parse CODE section extracted');
 
     # Hash field resets should use hv_clear, not sv_setsv with newHV
@@ -766,7 +793,7 @@ my sub var_node($name) {
 
     my @methods = ('_complete', '_predict', '_scan', '_advance_from_completed');
     for my $m (@methods) {
-        my ($code) = $output =~ /${m}\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
+        my $code = extract_method_body($output, $m);
         if (defined $code) {
             my @bad;
             while ($code =~ /SvRV\(ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]\)/g) {
@@ -843,10 +870,10 @@ my sub var_node($name) {
     my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::MakeItemCheck');
     my $output = $xs->generate_with_cfg($ir, $sa, $ctx);
 
-    # _make_item should NOT appear as an XSUB with a bare string RETVAL.
+    # _make_item should NOT appear with a bare string RETVAL/retval.
     # It should either not appear at all (Perl fallback) or return a proper hashref.
-    my $has_broken_make_item = $output =~ /^_make_item\(/m
-        && $output =~ /RETVAL = newSVpvs\("rule"\)/;
+    my $has_broken_make_item = $output =~ /(?:^_make_item\(|_impl__make_item\()/m
+        && $output =~ /(?:RETVAL|retval) = newSVpvs\("rule"\)/;
 
     ok(!$has_broken_make_item,
         '_make_item: not emitted as XSUB with broken bare-string RETVAL')
@@ -869,18 +896,14 @@ my sub var_node($name) {
     my $output = $xs->generate_with_cfg($ir, $sa, $ctx);
 
     # _make_item should appear as a proper XSUB (not in BOOT eval_pv)
-    like($output, qr/^_make_item\(self/m,
+    # With helper split, it appears as both _impl__make_item helper and _make_item XSUB
+    like($output, qr/(?:^_make_item\(self|_impl__make_item\(pTHX_)/m,
         'repair: _make_item is emitted as XSUB');
 
-    # The RETVAL should construct a hashref, not return a bare string
-    # Look for hv_stores with the expected keys (rule, alt_idx, etc.)
-    my $in_make_item = false;
-    my $make_item_code = '';
-    for my $line (split /\n/, $output) {
-        $in_make_item = true if $line =~ /^_make_item\(self/;
-        last if $in_make_item && $line =~ /^\w+\(self/ && $line !~ /^_make_item/;
-        $make_item_code .= "$line\n" if $in_make_item;
-    }
+    # The body should construct a hashref, not return a bare string.
+    # Extract from helper function or XSUB CODE section.
+    my $make_item_code = extract_method_body($output, '_make_item');
+    $make_item_code //= '';
 
     like($make_item_code, qr/newHV/,
         'repair: _make_item RETVAL constructs a hashref');

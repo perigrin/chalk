@@ -54,10 +54,16 @@ for my $item ($body->@*) {
 ok(defined $complete_method, '_complete method found') or BAIL_OUT('No _complete method');
 
 # Emit _complete with cfg_lookup populated
-my $method_lines = eval { $xs->_emit_xs_method($complete_method) };
-ok(defined $method_lines, '_emit_xs_method succeeds') or BAIL_OUT("Emit failed: $@");
+my $result = eval { $xs->_emit_xs_method($complete_method) };
+ok(defined $result, '_emit_xs_method succeeds') or BAIL_OUT("Emit failed: $@");
 
-my $xs_output = join("\n", $method_lines->@*);
+# Complex methods now return {helper, xsub} hashref; combine both for assertions
+my $xs_output;
+if (ref($result) eq 'HASH') {
+    $xs_output = join("\n", $result->{helper}->@*, $result->{xsub}->@*);
+} else {
+    $xs_output = join("\n", $result->@*);
+}
 
 # Check for NULL unsupported markers
 my @null_markers;
