@@ -172,13 +172,24 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
 
     # Delegate on_complete to each component with its own slice of the value.
     # If any component returns zero, the whole tuple is zero.
+    # Threads TypeInference result (index 2) to SemanticAction (index 4)
+    # via set_type_context so SA actions can read type annotations.
     method on_complete($item, $alt_idx, $pos) {
         my @results;
+        my $ti_result;
         for my $i (0 .. $semirings->$#*) {
             my $component_item = { %$item, value => $item->{value}->[$i] };
+            # Thread TI result to SA: indices 2=TI, 4=SA match pipeline
+            # construction order in TestPipeline/build_perl_concise_parser.
+            if ($i == 4 && defined $ti_result
+                    && $semirings->[$i]->can('set_type_context')) {
+                $semirings->[$i]->set_type_context($ti_result);
+            }
             my $r = $semirings->[$i]->on_complete($component_item, $alt_idx, $pos);
             return $self->zero() if $semirings->[$i]->is_zero($r);
             push @results, $r;
+            # Capture TI result after it completes
+            $ti_result = $r if $i == 2;
         }
         return \@results;
     }

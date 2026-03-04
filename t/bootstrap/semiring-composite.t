@@ -789,4 +789,89 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is($result->[1]->extract()->value(), 'left', 'add(left, zero) returns left');
 }
 
+# ========================================================================
+# TI→SA threading: FilterComposite passes TI result to SA via set_type_context
+# ========================================================================
+
+# Test: SA has set_type_context and current_type_context methods
+{
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
+    ok($sa->can('set_type_context'), 'SA has set_type_context method');
+    ok(defined &Chalk::Bootstrap::Semiring::SemanticAction::current_type_context,
+       'SA has current_type_context class method');
+
+    # Initially undef
+    is(Chalk::Bootstrap::Semiring::SemanticAction->current_type_context(), undef,
+       'current_type_context is initially undef');
+
+    # Set and retrieve
+    my $mock_ctx = Chalk::Bootstrap::Context->new(
+        focus    => { valid => true, return_type => 'Void' },
+        children => [],
+        position => 0,
+    );
+    $sa->set_type_context($mock_ctx);
+    is(Chalk::Bootstrap::Semiring::SemanticAction->current_type_context(), $mock_ctx,
+       'current_type_context returns what was set');
+
+    # Clean up
+    $sa->set_type_context(undef);
+}
+
+# Test: FilterComposite.on_complete threads TI result to SA
+# Uses a mock SA that records what set_type_context receives.
+{
+    my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
+        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+    );
+    my $ti_sr = Chalk::Bootstrap::Semiring::TypeInference->new(
+        keyword_check  => sub { false },
+        builtin_lookup => sub { undef },
+    );
+    my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
+
+    # Build a mock SA that records set_type_context calls
+    my $captured_type_ctx;
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new();
+
+    # Monkey-patch set_type_context to capture the argument
+    my $orig_set = $sa->can('set_type_context');
+    no warnings 'redefine';
+    local *Chalk::Bootstrap::Semiring::SemanticAction::set_type_context = sub($self_sa, $ctx) {
+        $captured_type_ctx = $ctx;
+        $self_sa->$orig_set($ctx);
+    };
+    use warnings 'redefine';
+
+    my $comp = Chalk::Bootstrap::Semiring::FilterComposite->new(
+        semirings => [$bool_sr, $prec_sr, $ti_sr, $struct_sr, $sa],
+    );
+
+    # Build a minimal item for on_complete
+    my $rule = Chalk::Grammar::Rule->new(
+        name => 'TestRule',
+        expressions => [[
+            Chalk::Grammar::Symbol->new(type => 'terminal', value => '/test/'),
+        ]],
+    );
+
+    my $ti_one = $ti_sr->one();
+    my $sa_one = $sa->one();
+
+    my $item = {
+        rule   => $rule,
+        dot    => 1,
+        origin => 0,
+        value  => [$bool_sr->one(), $prec_sr->one(), $ti_one, $struct_sr->one(), $sa_one],
+    };
+
+    # Run on_complete
+    my $result = $comp->on_complete($item, 0, 1);
+
+    # SA is at index 4, TI is at index 2. The TI result should have been
+    # passed to SA via set_type_context before SA's on_complete ran.
+    ok(defined $captured_type_ctx, 'FilterComposite threads TI result to SA');
+}
+
 done_testing();

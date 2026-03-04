@@ -30,6 +30,11 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # access this via current_instance() to call cfg_state/update_cfg.
     my $_current_instance;
 
+    # TypeInference Context for the current on_complete. Set by
+    # FilterComposite before SA runs, so action methods can read
+    # type annotations (e.g., return_type) from TI.
+    my $_type_context;
+
     # Singleton for one(): a Context with undef focus and no children.
     my $_one_singleton;
 
@@ -120,6 +125,17 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # an on_complete action. Allows action methods in Actions.pm to access
     # cfg_state/update_cfg without needing a reference to the semiring.
     sub current_instance { return $_current_instance }
+
+    # Set the TypeInference Context for the current on_complete.
+    # Called by FilterComposite after TI (index 2) completes, before SA runs.
+    method set_type_context($ctx) {
+        $_type_context = $ctx;
+    }
+
+    # Class method: return the TypeInference Context for the current on_complete.
+    # Called by action methods (e.g. MethodDefinition in Actions.pm) to read
+    # type annotations computed by TypeInference.
+    sub current_type_context { return $_type_context }
 
     # Get the inherited CFG state for a context.
     # Returns the direct cfg_state if available, falls back to one() defaults.
@@ -228,8 +244,9 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $_cfg_state{refaddr($result_ctx)} = $inherited if defined $inherited;
         }
 
-        # Clear current_instance after on_complete to prevent stale access
+        # Clear current_instance and type_context after on_complete to prevent stale access
         $_current_instance = undef;
+        $_type_context = undef;
 
         return $result_ctx;
     }
