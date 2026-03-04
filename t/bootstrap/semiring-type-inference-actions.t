@@ -256,4 +256,50 @@ subtest 'Rules with unknown types' => sub {
     is($result, { valid => true }, 'MethodCall returns valid without type');
 };
 
+# Test 13: AssignmentExpression with eval_context from LHS sigil
+subtest 'AssignmentExpression eval_context from LHS' => sub {
+    # LHS is a ScalarVariable (type => 'Scalar') → eval_context = 'Scalar'
+    my $lhs = mock_ctx({ type => 'Scalar' });
+    my $rhs = mock_ctx({ type => 'List' });
+    my $ctx = mul_ctx($lhs, $rhs);
+
+    my $result = $actions->AssignmentExpression($ctx);
+    is($result->{valid}, true, 'AssignmentExpression valid');
+    is($result->{eval_context}, 'Scalar', 'AssignmentExpression LHS $var → Scalar context');
+
+    # LHS is an ArrayVariable (type => 'Array') → eval_context = 'List'
+    $lhs = mock_ctx({ type => 'Array' });
+    $rhs = mock_ctx({ type => 'Str' });
+    $ctx = mul_ctx($lhs, $rhs);
+
+    $result = $actions->AssignmentExpression($ctx);
+    is($result->{eval_context}, 'List', 'AssignmentExpression LHS @arr → List context');
+
+    # LHS is a HashVariable (type => 'Hash') → eval_context = 'List'
+    $lhs = mock_ctx({ type => 'Hash' });
+    $rhs = mock_ctx({ type => 'Str' });
+    $ctx = mul_ctx($lhs, $rhs);
+
+    $result = $actions->AssignmentExpression($ctx);
+    is($result->{eval_context}, 'List', 'AssignmentExpression LHS %hash → List context');
+
+    # No LHS type → no eval_context
+    $lhs = mock_ctx({ valid => true });
+    $rhs = mock_ctx({ type => 'Int' });
+    $ctx = mul_ctx($lhs, $rhs);
+
+    $result = $actions->AssignmentExpression($ctx);
+    ok(!exists $result->{eval_context}, 'AssignmentExpression no LHS type → no eval_context');
+};
+
+# Test 14: ExpressionStatement sets void context
+subtest 'ExpressionStatement void context' => sub {
+    my $child = mock_ctx({ type => 'Int' });
+    my $ctx = mul_ctx($child);
+
+    my $result = $actions->ExpressionStatement($ctx);
+    is($result->{valid}, true, 'ExpressionStatement valid');
+    is($result->{eval_context}, 'Void', 'ExpressionStatement sets Void context');
+};
+
 done_testing;

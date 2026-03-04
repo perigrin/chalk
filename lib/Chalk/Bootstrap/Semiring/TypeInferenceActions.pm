@@ -24,6 +24,22 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         return undef;
     };
 
+    # Helper: Get leftmost type from Context tree (for assignment LHS)
+    my $_get_leftmost_type;
+    $_get_leftmost_type = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus && exists $focus->{type}) {
+            return $focus->{type};
+        }
+        # Walk children left-to-right
+        for my $child ($ctx->children()->@*) {
+            my $t = $_get_leftmost_type->($child);
+            return $t if defined $t;
+        }
+        return undef;
+    };
+
     # Helper: Get op_text from Context tree (for operator rules)
     # Follows leaf-finding semantics: stops at focused nodes.
     my $_get_op_text;
@@ -255,7 +271,24 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     }
 
     method AssignmentExpression($ctx) {
-        return { valid => true };
+        # Derive eval_context from LHS variable sigil type
+        my $lhs_type = $_get_leftmost_type->($ctx);
+        my $eval_context;
+        if (defined $lhs_type) {
+            if ($lhs_type eq 'Scalar') {
+                $eval_context = 'Scalar';
+            } elsif ($lhs_type eq 'Array' || $lhs_type eq 'Hash') {
+                $eval_context = 'List';
+            }
+        }
+        return {
+            valid => true,
+            ($eval_context ? (eval_context => $eval_context) : ()),
+        };
+    }
+
+    method ExpressionStatement($ctx) {
+        return { valid => true, eval_context => 'Void' };
     }
 
     method MethodCall($ctx) {
