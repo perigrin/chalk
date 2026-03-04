@@ -45,49 +45,50 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Last entry in arg_types applies to all remaining positions (variadic).
     my %BUILTIN_SIGNATURES = (
         # Array operations
+        # Variadic positions use Any (Perl flattening: accepts scalars AND arrays)
         push    => { min_arity => 2, arg_types => ['Array', 'Any'],              return_type => 'Int' },
         pop     => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
         shift   => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
         unshift => { min_arity => 2, arg_types => ['Array', 'Any'],              return_type => 'Int' },
-        splice  => { min_arity => 1, arg_types => ['Array', 'Any'],              return_type => 'List' },
+        splice  => { min_arity => 1, arg_types => ['Array', 'Int', 'Int', 'Any'], return_type => 'List' },
 
         # Hash operations
         keys    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
         values  => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
-        delete  => { min_arity => 1, arg_types => ['Any'],                       return_type => 'Scalar' },
-        exists  => { min_arity => 1, arg_types => ['Any'],                       return_type => 'Bool' },
+        delete  => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Scalar' },
+        exists  => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Bool' },
         each    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
 
         # String operations
-        length  => { min_arity => 0, arg_types => ['Scalar'],                    return_type => 'Int' },
+        length  => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
         chomp   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Int' },
         chop    => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Str' },
         chr     => { min_arity => 1, arg_types => ['Int'],                       return_type => 'Str' },
         ord     => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
-        join    => { min_arity => 2, arg_types => ['Scalar', 'Any'],             return_type => 'Str' },
-        split   => { min_arity => 1, arg_types => ['Any'],                       return_type => 'List' },
+        join    => { min_arity => 2, arg_types => ['Str', 'Any'],                return_type => 'Str' },
+        split   => { min_arity => 1, arg_types => ['Scalar', 'Str', 'Int'],      return_type => 'List' },
         sprintf => { min_arity => 1, arg_types => ['Str', 'Any'],                return_type => 'Str' },
-        substr  => { min_arity => 2, arg_types => ['Str', 'Int', 'Any'],         return_type => 'Str' },
+        substr  => { min_arity => 2, arg_types => ['Str', 'Int', 'Int'],         return_type => 'Str' },
 
         # Type test
-        defined => { min_arity => 1, arg_types => ['Any'],                       return_type => 'Bool' },
-        ref     => { min_arity => 1, arg_types => ['Any'],                       return_type => 'Str' },
+        defined => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Bool' },
+        ref     => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Str' },
 
         # Context
         scalar  => { min_arity => 1, arg_types => ['Any'],                       return_type => 'Scalar' },
 
-        # Control
+        # Control (variadic: accept scalars and arrays via flattening)
         die     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'None' },
         warn    => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
 
         # OO
-        bless   => { min_arity => 1, arg_types => ['Ref', 'Any'],               return_type => 'Object' },
+        bless   => { min_arity => 1, arg_types => ['Ref', 'Str'],               return_type => 'Object' },
 
-        # I/O
+        # I/O (variadic)
         print   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
         say     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
 
-        # Flow control (parsed as CallExpression, not separate grammar rules)
+        # Flow control (variadic: return LIST)
         return  => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Any' },
 
         # Block-first builtins (parse via CallExpression alt 2/3)

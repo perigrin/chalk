@@ -178,6 +178,7 @@ for my $name (qw(foo bar class if my)) {
     my $die_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('die');
     ok(defined $die_sig, 'get_builtin(die) returns defined value');
     is($die_sig->{min_arity}, 0, 'die min_arity is 0');
+    is($die_sig->{arg_types}[0], 'Any', 'die arg type is Any (variadic)');
     is($die_sig->{return_type}, 'None', 'die return type is None');
 }
 
@@ -214,6 +215,76 @@ for my $name (qw(foo bar class if my)) {
     is($sort_sig->{min_arity}, 1, 'sort min_arity is 1');
     is($sort_sig->{arg_types}[0], 'List', 'sort first arg type is List');
     is($sort_sig->{return_type}, 'List', 'sort return type is List');
+}
+
+# Tightened builtin signatures: specific types where possible, Any for variadic (Perl list flattening)
+# push/unshift: variadic args are Any (Perl flattening: accepts scalars AND arrays)
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('push');
+    is($sig->{arg_types}[1], 'Any', 'push variadic arg type is Any (Perl list flattening)');
+}
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('unshift');
+    is($sig->{arg_types}[1], 'Any', 'unshift variadic arg type is Any (Perl list flattening)');
+}
+
+# splice: offset and length are Int, rest is Any (Perl list flattening)
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('splice');
+    is($sig->{arg_types}[1], 'Int', 'splice offset arg is Int');
+    is($sig->{arg_types}[2], 'Int', 'splice length arg is Int');
+    is($sig->{arg_types}[3], 'Any', 'splice replacement args are Any (Perl list flattening)');
+}
+
+# length: operates on Str
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('length');
+    is($sig->{arg_types}[0], 'Str', 'length arg type is Str');
+}
+
+# join: separator is Str, rest is Any (Perl list flattening)
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('join');
+    is($sig->{arg_types}[0], 'Str', 'join separator arg is Str');
+    is($sig->{arg_types}[1], 'Any', 'join rest args are Any (Perl list flattening)');
+}
+
+# split: pattern, string, limit
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('split');
+    is($sig->{arg_types}[1], 'Str', 'split string arg is Str');
+    is($sig->{arg_types}[2], 'Int', 'split limit arg is Int');
+}
+
+# substr: 3rd arg (length) is Int
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('substr');
+    is($sig->{arg_types}[2], 'Int', 'substr length arg is Int');
+}
+
+# bless: 2nd arg is class name (Str)
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('bless');
+    is($sig->{arg_types}[1], 'Str', 'bless class name arg is Str');
+}
+
+# Single-value Scalar-arg builtins: defined, ref, exists, delete
+for my $name (qw(defined ref exists delete)) {
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin($name);
+    is($sig->{arg_types}[0], 'Scalar', "$name arg type is Scalar");
+}
+
+# Variadic builtins: die, warn, print, say, chomp, chop, return, scalar stay Any
+# (Perl list flattening: these accept both scalars and arrays)
+for my $name (qw(die warn print say chomp chop return scalar)) {
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin($name);
+    is($sig->{arg_types}[0], 'Any', "$name arg type is Any (variadic, Perl list flattening)");
+}
+
+# sprintf: format args are Any (variadic, Perl list flattening)
+{
+    my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('sprintf');
+    is($sig->{arg_types}[1], 'Any', 'sprintf variadic arg type is Any (Perl list flattening)');
 }
 
 # get_builtin returns undef for unknown names
@@ -418,7 +489,7 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Scalar'),
     my $return_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('return');
     ok(defined $return_sig, 'get_builtin(return) returns defined value');
     is($return_sig->{min_arity}, 0, 'return min_arity is 0');
-    is($return_sig->{arg_types}[0], 'Any', 'return first arg type is Any');
+    is($return_sig->{arg_types}[0], 'Any', 'return first arg type is Any (variadic)');
     is($return_sig->{return_type}, 'Any', 'return return_type is Any');
 }
 
