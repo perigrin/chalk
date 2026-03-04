@@ -493,4 +493,50 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Scalar'),
     is($return_sig->{return_type}, 'Any', 'return return_type is Any');
 }
 
+# ========================================================================
+# narrow_type - context-based type narrowing
+# ========================================================================
+
+# Scalar context: Array/Hash → Int (count), List → Scalar, others unchanged
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', 'Scalar'), 'Int',
+    'narrow_type(Array, Scalar) = Int (count)');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Hash', 'Scalar'), 'Int',
+    'narrow_type(Hash, Scalar) = Int (count)');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('List', 'Scalar'), 'Scalar',
+    'narrow_type(List, Scalar) = Scalar');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'Scalar'), 'Str',
+    'narrow_type(Str, Scalar) = Str (already scalar-ish)');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Int', 'Scalar'), 'Int',
+    'narrow_type(Int, Scalar) = Int (already scalar-ish)');
+
+# Bool context: everything narrows to Bool
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('List', 'Bool'), 'Bool',
+    'narrow_type(List, Bool) = Bool');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'Bool'), 'Bool',
+    'narrow_type(Str, Bool) = Bool');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', 'Bool'), 'Bool',
+    'narrow_type(Array, Bool) = Bool');
+
+# Void context: discards type info
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Int', 'Void'), undef,
+    'narrow_type(Int, Void) = undef');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', 'Void'), undef,
+    'narrow_type(Array, Void) = undef');
+
+# No context (undef): no narrowing
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Num', undef), 'Num',
+    'narrow_type(Num, undef) = Num (no narrowing)');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', undef), 'Array',
+    'narrow_type(Array, undef) = Array (no narrowing)');
+
+# Undef type: no narrowing regardless of context
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type(undef, 'Scalar'), undef,
+    'narrow_type(undef, Scalar) = undef (no type to narrow)');
+
+# List context: keep as-is
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', 'List'), 'Array',
+    'narrow_type(Array, List) = Array (list context preserves)');
+is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
+    'narrow_type(Str, List) = Str (list context preserves)');
+
 done_testing;

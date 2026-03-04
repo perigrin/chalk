@@ -153,6 +153,27 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return false;
     }
 
+    # Narrows a type based on evaluation context.
+    # Complements type_satisfies (compatibility check) with context-based refinement.
+    # type_satisfies answers "can X be used as Y?" while narrow_type answers
+    # "what does X become when consumed in context C?"
+    sub narrow_type($type, $context) {
+        return $type unless defined $type && defined $context;
+        if ($context eq 'Scalar') {
+            return 'Int' if $type eq 'Array' || $type eq 'Hash';  # scalar(@arr) = count
+            return 'Scalar' if $type eq 'List';
+            return $type;  # already scalar-ish
+        }
+        if ($context eq 'Bool') {
+            return 'Bool';
+        }
+        if ($context eq 'Void') {
+            return undef;  # discard type info
+        }
+        # List context or unknown: keep as-is
+        return $type;
+    }
+
     # Binary operator signatures: operand types and result type.
     my %BINARY_OP_SIGNATURES;
     {
