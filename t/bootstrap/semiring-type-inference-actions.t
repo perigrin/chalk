@@ -256,4 +256,60 @@ subtest 'Rules with unknown types' => sub {
     is($result, { valid => true }, 'MethodCall returns valid without type');
 };
 
+# Test 13: ReturnExpression - tags returns with is_return and has_value
+subtest 'ReturnExpression tagging' => sub {
+    # alt 0: bare return (no value)
+    my $bare_ctx = mock_ctx({ valid => true });
+    my $result = $actions->ReturnExpression($bare_ctx, 0);
+    is($result, { valid => true, is_return => true, has_value => false },
+       'bare return tagged with is_return and has_value=false');
+
+    # alt 1: return with value
+    my $value_ctx = mul_ctx(
+        mock_ctx({ valid => true }),  # 'return' keyword
+        mock_ctx({ valid => true, type => 'Scalar' }),  # ExpressionList
+    );
+    $result = $actions->ReturnExpression($value_ctx, 1);
+    is($result, { valid => true, is_return => true, has_value => true },
+       'return with value tagged with is_return and has_value=true');
+};
+
+# Test 14: MethodDefinition - determines return_type from body returns
+subtest 'MethodDefinition return_type' => sub {
+    # Method with bare returns only → Void
+    my $bare_return = mock_ctx({ valid => true, is_return => true, has_value => false });
+    my $body = mul_ctx($bare_return);
+    my $method_ctx = mul_ctx(
+        mock_ctx({ valid => true }),  # 'method' keyword
+        mock_ctx({ valid => true }),  # QualifiedIdentifier
+        $body,                       # Block
+    );
+    my $result = $actions->MethodDefinition($method_ctx);
+    is($result->{return_type}, 'Void', 'method with bare returns → Void');
+
+    # Method with value returns → Any
+    my $value_return = mock_ctx({ valid => true, is_return => true, has_value => true });
+    $body = mul_ctx($value_return);
+    $method_ctx = mul_ctx(
+        mock_ctx({ valid => true }),  # 'method' keyword
+        mock_ctx({ valid => true }),  # QualifiedIdentifier
+        $body,                        # Block
+    );
+    $result = $actions->MethodDefinition($method_ctx);
+    is($result->{return_type}, 'Any', 'method with value returns → Any');
+
+    # Method with no returns → Void
+    my $no_return_body = mul_ctx(
+        mock_ctx({ valid => true }),  # some statement
+    );
+    $method_ctx = mul_ctx(
+        mock_ctx({ valid => true }),
+        mock_ctx({ valid => true }),
+        $no_return_body,
+    );
+    $result = $actions->MethodDefinition($method_ctx);
+    is($result->{return_type}, 'Void', 'method with no returns → Void');
+    ok($result->{valid}, 'MethodDefinition returns valid');
+};
+
 done_testing;
