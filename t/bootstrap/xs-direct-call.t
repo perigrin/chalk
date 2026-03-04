@@ -108,8 +108,10 @@ my $xs2 = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::External
 my $code2 = eval { $xs2->generate_with_cfg($ir2, $sa2, $ctx2) };
 ok(defined $code2, 'XS code generated for external call class') or BAIL_OUT("XS gen failed: $@");
 
-# External calls should still use call_method
-like($code2, qr/call_method\("some_method"/,
-    'non-self method calls still use call_method');
+# Field-invocant method calls use CV cache (call_sv), not call_method
+like($code2, qr/call_sv\(\(SV\s*\*\)_cv_other_some_method/,
+    'field-invocant method calls use CV-cached call_sv');
+like($code2, qr/static\s+CV\s*\*\s*_cv_other_some_method\s*=\s*NULL/,
+    'static CV cache variable declared for field method call');
 
 done_testing();
