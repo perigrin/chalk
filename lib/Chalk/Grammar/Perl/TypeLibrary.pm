@@ -83,6 +83,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
         print   => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
         say     => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Bool' },
 
+        # Flow control (parsed as CallExpression, not separate grammar rules)
+        return  => { min_arity => 0, arg_types => ['Any'],                       return_type => 'Any' },
+
         # Block-first builtins (parse via CallExpression alt 2/3)
         map     => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List' },
         grep    => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List' },

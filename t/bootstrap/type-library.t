@@ -112,7 +112,7 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Hash', 'Scalar'),
 # has_builtin returns true for known builtins
 for my $name (qw(push pop shift unshift splice keys values delete exists
                   each length chomp chop chr ord join split sprintf substr
-                  defined ref scalar die warn bless print say)) {
+                  defined ref scalar die warn bless print say return)) {
     ok(Chalk::Grammar::Perl::TypeLibrary::has_builtin($name),
         "has_builtin('$name') returns true");
 }
@@ -378,5 +378,14 @@ ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Regex'),
 # But Scalar does NOT satisfy Array (different branches)
 ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Array'),
     'type_satisfies(Scalar, Array) returns false (incompatible branches)');
+
+# return builtin signature: propagates argument type
+{
+    my $return_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('return');
+    ok(defined $return_sig, 'get_builtin(return) returns defined value');
+    is($return_sig->{min_arity}, 0, 'return min_arity is 0');
+    is($return_sig->{arg_types}[0], 'Any', 'return first arg type is Any');
+    is($return_sig->{return_type}, 'Any', 'return return_type is Any');
+}
 
 done_testing;
