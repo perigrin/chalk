@@ -105,6 +105,26 @@ ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Array', 'Scalar'),
 ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Hash', 'Scalar'),
     'Hash is NOT subtype of Scalar');
 
+# DualVar: sits in Scalar but outside Str/Num branches
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Scalar'),
+    'DualVar is subtype of Scalar');
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Any'),
+    'DualVar is subtype of Any (transitive)');
+ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Str'),
+    'DualVar is NOT subtype of Str');
+ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('DualVar', 'Num'),
+    'DualVar is NOT subtype of Num');
+ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Str', 'DualVar'),
+    'Str is NOT subtype of DualVar');
+
+# Glob: top-level type, distinct from GlobRef
+ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Glob', 'Any'),
+    'Glob is subtype of Any');
+ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Glob', 'Scalar'),
+    'Glob is NOT subtype of Scalar');
+ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('GlobRef', 'Glob'),
+    'GlobRef is NOT subtype of Glob (different branches)');
+
 # ========================================================================
 # Builtin signatures - get_builtin / has_builtin
 # ========================================================================
@@ -378,6 +398,20 @@ ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Regex'),
 # But Scalar does NOT satisfy Array (different branches)
 ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Scalar', 'Array'),
     'type_satisfies(Scalar, Array) returns false (incompatible branches)');
+
+# DualVar type_satisfies: not polymorphic
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('DualVar', 'Scalar'),
+    'type_satisfies(DualVar, Scalar) returns true (subtype)');
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('DualVar', 'Str'),
+    'type_satisfies(DualVar, Str) returns false (not polymorphic)');
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('DualVar', 'Num'),
+    'type_satisfies(DualVar, Num) returns false (not polymorphic)');
+
+# Glob type_satisfies
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Any'),
+    'type_satisfies(Glob, Any) returns true');
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Glob', 'Scalar'),
+    'type_satisfies(Glob, Scalar) returns false');
 
 # return builtin signature: propagates argument type
 {

@@ -17,6 +17,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         Str       => 'Scalar',
         Num       => 'Str',
         Int       => 'Num',
+        DualVar   => 'Scalar',
         Ref       => 'Scalar',
         ScalarRef => 'Ref',
         ArrayRef  => 'Ref',
@@ -32,6 +33,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
 
         # Code branch
         Code      => 'Any',
+
+        # Glob branch (symbol table entries, distinct from GlobRef)
+        Glob      => 'Any',
     );
 
     # Cache for is_subtype lookups
