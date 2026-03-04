@@ -661,11 +661,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # When the method has returns (from early return branches) but the
         # last statement is a bare expression, wrap it as RETVAL assignment
         # so the XS OUTPUT section can return it.
+        # SvREFCNT_inc ensures proper ownership: the OUTPUT section will
+        # mortalise RETVAL, which decrements the refcount. Without inc,
+        # a borrowed reference (from hv_fetch/av_fetch) would be freed
+        # while still stored in the container.
         if ($has_return && !$last_is_return && @code) {
             my $last_code = $code[-1];
             # Strip trailing semicolon from bare expression statement
             if ($last_code =~ s/;\s*$//) {
-                $code[-1] = "RETVAL = $last_code;";
+                my $wrapped = $self->_wrap_retval($last_code);
+                $code[-1] = "RETVAL = $wrapped;";
             }
         }
 
@@ -2169,14 +2174,35 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Strips sv_2mortal() from the value expression since XS's OUTPUT
     # section applies sv_2mortal to ST(0) automatically. Double-mortal
     # causes "attempt to copy freed scalar" panics.
+    # SvREFCNT_inc ensures proper ownership for borrowed references:
+    # The OUTPUT section mortalises RETVAL (decrements refcount), so we
+    # must increment to avoid freeing SVs still stored in containers.
+    # For new* values (newSViv, newRV_noinc, etc.) the refcount is already
+    # 1, so the mortalisation correctly consumes it. SvREFCNT_inc on these
+    # would leak. To handle both cases, we skip SvREFCNT_inc for values
+    # that are clearly newly-created (start with 'new' or '&PL_sv_').
     method _emit_xs_return_stmt($node, $declared_vars, $is_last = true) {
         my $value = $node->inputs()->[0];
         my $val_expr = $self->_emit_xs_expr($value, $declared_vars);
         $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
+        my $retval = $self->_wrap_retval($val_expr);
         if ($is_last) {
-            return "RETVAL = $val_expr;";
+            return "RETVAL = $retval;";
         }
-        return "RETVAL = $val_expr; goto xsreturn;";
+        return "RETVAL = $retval; goto xsreturn;";
+    }
+
+    # Wrap a value expression for RETVAL assignment with SvREFCNT_inc
+    # when the value is a borrowed reference (from hv_fetch/av_fetch).
+    # Skip for newly-created values (newSV*, newRV*, &PL_sv_*) where
+    # the refcount is already correct for mortalisation.
+    method _wrap_retval($val_expr) {
+        # Newly-created SVs already have correct refcount
+        return $val_expr if $val_expr =~ /^new[A-Z]/;      # newSViv, newRV_noinc, etc.
+        return $val_expr if $val_expr =~ /^&PL_sv_/;       # &PL_sv_yes, &PL_sv_no, etc.
+        # call_method results already have SvREFCNT_inc from the call pattern
+        return $val_expr if $val_expr =~ /SvREFCNT_inc/;
+        return "SvREFCNT_inc($val_expr)";
     }
 
     # Emit DieCall as croak
@@ -2241,7 +2267,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $self->_is_bare_return_expr($stmt)) {
                 my $val_expr = $self->_emit_xs_expr($stmt, $declared_vars);
                 $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
-                push @lines, "    RETVAL = $val_expr; goto xsreturn;";
+                my $wrapped = $self->_wrap_retval($val_expr);
+                push @lines, "    RETVAL = $wrapped; goto xsreturn;";
                 next;
             }
             my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
