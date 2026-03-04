@@ -582,14 +582,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return \@lines;
         }
 
-        return $self->_emit_xs_complex_method($name, $params, $body);
+        # Pass return_type from IR to complex method emitter
+        my $return_type_node = $method_decl->inputs()->[3];
+        my $return_type = $return_type_node ? $return_type_node->value() : undef;
+        return $self->_emit_xs_complex_method($name, $params, $body, $return_type);
     }
 
     # Emit a multi-statement method body as an XSUB using Perl API calls.
     # Collects variable declarations into PREINIT section and body statements
     # into CODE section. Uses eval_pv() for constructs too complex for pure C
     # (regex, backticks, complex interpolation).
-    method _emit_xs_complex_method($name, $params, $body) {
+    # $ir_return_type: 'Any' or 'Void' from TypeInference, or undef to fall
+    # back to heuristic detection.
+    method _emit_xs_complex_method($name, $params, $body, $ir_return_type = undef) {
         my @lines;
         my @code;
 
@@ -620,8 +625,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             && ($self->_is_unambiguous_value_expr($last_item)
                 || ($body_has_returns && $self->_is_bare_return_expr($last_item)))
             );
-        my $has_return = $last_is_return || $tail_expr_return
-            || $single_stmt_return || $body_has_returns;
+        # Use IR return_type when available, fall back to heuristic
+        my $has_return = defined $ir_return_type
+            ? ($ir_return_type ne 'Void')
+            : ($last_is_return || $tail_expr_return
+               || $single_stmt_return || $body_has_returns);
 
         # Track C variable declarations needed
         my %declared_vars;

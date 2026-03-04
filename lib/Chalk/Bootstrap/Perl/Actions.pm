@@ -1119,6 +1119,13 @@ class Chalk::Bootstrap::Perl::Actions {
         # Determine return_type by walking body IR for ReturnStmt nodes.
         # ReturnStmt with a value input → method returns something (Any).
         # All returns bare or no explicit returns → method is void (Void).
+        # Stale-merge artifact detection: `return unless COND` gets
+        # mis-parsed as ReturnStmt(value: ...BuiltinCall("unless",...)).
+        # These contain a BuiltinCall with a postfix-modifier keyword name
+        # as part of the return value chain and are actually bare returns.
+        my %postfix_keywords = map { $_ => true }
+            qw(unless if while until for foreach);
+
         my $has_value_return = false;
         my @walk = @body;
         while (@walk) {
@@ -1128,12 +1135,15 @@ class Chalk::Bootstrap::Perl::Actions {
             if ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && $item->class() eq 'ReturnStmt') {
                 my $value = $item->inputs()->[0];
-                if (defined $value) {
+                if (defined $value && !$self->_is_postfix_modifier_artifact($value, \%postfix_keywords)) {
                     $has_value_return = true;
                     last;
                 }
                 next;
             }
+            # Skip anonymous subs — their returns belong to a different scope
+            next if $item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'AnonSubExpr';
             # Recurse into Constructor inputs to find nested ReturnStmts
             for my $input ($item->inputs()->@*) {
                 if (ref($input) eq 'ARRAY') {
@@ -1153,6 +1163,36 @@ class Chalk::Bootstrap::Perl::Actions {
             return_type   => $factory->make('Constant',
                                 const_type => 'string', value => $return_type),
         );
+    }
+
+    # Detect stale-merge artifact: `return unless COND` mis-parsed as
+    # ReturnStmt(value: ...BuiltinCall("unless",...)).
+    # Walks the value tree looking for a BuiltinCall node whose name is
+    # a postfix modifier keyword (unless/if/while/until/for/foreach).
+    method _is_postfix_modifier_artifact($node, $keywords) {
+        my @stack = ($node);
+        while (@stack) {
+            my $n = pop @stack;
+            next unless defined $n;
+            next unless $n isa Chalk::Bootstrap::IR::Node;
+            if ($n isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $n->class() eq 'BuiltinCall') {
+                my $name_node = $n->inputs()->[0];
+                if (defined $name_node
+                        && $name_node isa Chalk::Bootstrap::IR::Node::Constant
+                        && $keywords->{$name_node->value()}) {
+                    return true;
+                }
+            }
+            for my $input ($n->inputs()->@*) {
+                if (ref($input) eq 'ARRAY') {
+                    push @stack, $input->@*;
+                } else {
+                    push @stack, $input;
+                }
+            }
+        }
+        return false;
     }
 
     # §9 SubroutineDefinition — pass through (for Tier A we skip sub definitions)
