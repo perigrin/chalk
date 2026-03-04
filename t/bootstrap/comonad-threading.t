@@ -2,7 +2,7 @@
 # ABOUTME: Verifies comonad laws: left identity, right identity, associativity
 use 5.42.0;
 use utf8;
-use Test::More tests => 9;
+use Test::More tests => 14;
 
 use lib 'lib';
 use Chalk::Bootstrap::Context;
@@ -129,6 +129,47 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is(scalar($ctx_of_ctxs->children()->@*), 2, 'duplicate preserves children count');
     is($ctx_of_ctxs->children()->[0]->extract()->value(), 'child1',
        'duplicate preserves first child');
+}
+
+# Test 6: annotations field defaults to empty hashref
+{
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => 'test',
+        children => [],
+        position => 0,
+    );
+
+    is_deeply($ctx->annotations(), {}, 'annotations defaults to empty hashref');
+}
+
+# Test 7: annotations field can be set via constructor
+{
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus       => 'test',
+        children    => [],
+        position    => 0,
+        annotations => { return_type => 'Void', valid => true },
+    );
+
+    is($ctx->annotations()->{return_type}, 'Void', 'annotations can be set via constructor');
+    is($ctx->annotations()->{valid}, true, 'annotations preserves all keys');
+}
+
+# Test 8: extend preserves annotations
+{
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus       => 'original',
+        children    => [],
+        position    => 0,
+        rule        => 'TestRule',
+        annotations => { return_type => 'Any', type => 'Scalar' },
+    );
+
+    my $extended = $ctx->extend(sub ($c) { return 'transformed' });
+
+    is($extended->extract(), 'transformed', 'extend changes focus');
+    is($extended->annotations()->{return_type}, 'Any',
+       'extend preserves annotations');
 }
 
 done_testing();

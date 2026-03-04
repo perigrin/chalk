@@ -5,10 +5,11 @@ use utf8;
 use experimental 'class';
 
 class Chalk::Bootstrap::Context {
-    field $focus    :param :reader;
-    field $children :param :reader = [];
-    field $position :param :reader = 0;
-    field $rule     :param :reader = undef;
+    field $focus       :param :reader;
+    field $children    :param :reader = [];
+    field $position    :param :reader = 0;
+    field $rule        :param :reader = undef;
+    field $annotations :param :reader = {};
 
     # Extract the current focus value from the context
     method extract() {
@@ -20,10 +21,11 @@ class Chalk::Bootstrap::Context {
     method extend($f) {
         my $new_focus = $f->($self);
         return Chalk::Bootstrap::Context->new(
-            focus    => $new_focus,
-            children => $children,
-            position => $position,
-            rule     => $rule,
+            focus       => $new_focus,
+            children    => $children,
+            position    => $position,
+            rule        => $rule,
+            annotations => $annotations,
         );
     }
 
