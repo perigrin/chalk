@@ -1116,11 +1116,42 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
+        # Determine return_type by walking body IR for ReturnStmt nodes.
+        # ReturnStmt with a value input → method returns something (Any).
+        # All returns bare or no explicit returns → method is void (Void).
+        my $has_value_return = false;
+        my @walk = @body;
+        while (@walk) {
+            my $item = pop @walk;
+            next unless defined $item;
+            next unless $item isa Chalk::Bootstrap::IR::Node;
+            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'ReturnStmt') {
+                my $value = $item->inputs()->[0];
+                if (defined $value) {
+                    $has_value_return = true;
+                    last;
+                }
+                next;
+            }
+            # Recurse into Constructor inputs to find nested ReturnStmts
+            for my $input ($item->inputs()->@*) {
+                if (ref($input) eq 'ARRAY') {
+                    push @walk, $input->@*;
+                } else {
+                    push @walk, $input;
+                }
+            }
+        }
+        my $return_type = $has_value_return ? 'Any' : 'Void';
+
         return $factory->make('Constructor',
-            'class'  => 'MethodDecl',
-            name   => $method_name,
-            params => \@params,
-            body   => \@body,
+            'class'       => 'MethodDecl',
+            name          => $method_name,
+            params        => \@params,
+            body          => \@body,
+            return_type   => $factory->make('Constant',
+                                const_type => 'string', value => $return_type),
         );
     }
 
