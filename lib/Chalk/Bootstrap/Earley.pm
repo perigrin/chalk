@@ -238,7 +238,8 @@ class Chalk::Bootstrap::Earley {
                             my $skip_value = $semiring->can('on_skip_optional')
                                 ? $semiring->on_skip_optional($item, $alt_idx, $pos, $w_rule)
                                 : $semiring->multiply($item->{value}, $semiring->one());
-                            if (defined $skip_value && !$semiring->is_zero($skip_value)) {
+                            my $skip_is_zero = defined $skip_value ? $semiring->is_zero($skip_value) : true;
+                            if (defined $skip_value && !$skip_is_zero) {
                                 my $skip_item = $self->_make_item(
                                     $item->{rule}, $alt_idx, $item->{dot} + 1,
                                     $origin, $skip_value
@@ -251,7 +252,8 @@ class Chalk::Bootstrap::Earley {
                                     my $merged = $semiring->add(
                                         $existing->{value}, $skip_value
                                     );
-                                    if (!$semiring->is_zero($merged)) {
+                                    my $merged_is_zero = $semiring->is_zero($merged);
+                                    if (!$merged_is_zero) {
                                         my $merged_item = {
                                             %$existing, value => $merged
                                         };
@@ -313,9 +315,9 @@ class Chalk::Bootstrap::Earley {
                 for my $gc_pos ($oldest_live_pos .. $safe_floor - 1) {
                     next if $gc_pos >= $pos;
                     if (keys $chart[$gc_pos]->%*) {
+                        $_gc_stats{positions_freed}++;
                         $chart[$gc_pos] = {};
                         delete $_scan_cache{$gc_pos};
-                        $_gc_stats{positions_freed}++;
                     }
                 }
                 $oldest_live_pos = $safe_floor if $safe_floor > $oldest_live_pos;
@@ -339,7 +341,8 @@ class Chalk::Bootstrap::Earley {
     # Parse input string, returns boolean indicating success
     method parse($input) {
         my $value = $self->_run_parse($input);
-        return defined($value) ? !$semiring->is_zero($value) : false;
+        return false unless defined $value;
+        return $semiring->is_zero($value) ? false : true;
     }
 
     # Parse input string, returns raw semiring value (or undef on failure)

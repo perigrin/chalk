@@ -14,6 +14,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $field_sigils;  # hashref: field name => sigil ($, @, %) (set during _emit_xs)
     field %_cfg_lookup;  # IR node refaddr → cfg_state entry, built by generate_with_cfg
     field $_return_context = false;  # true when emitting a method body that returns a value
+    field $_loop_depth = 0;  # nesting depth inside loops (suppresses bare-return detection)
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -602,17 +603,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Detect tail-position expressions: a bare expression as the final
         # body item is treated as a return value (stale-merge strips explicit
         # return in tail position).
-        # Two cases:
+        # Three cases:
         # 1. Unambiguous value exprs (TernaryExpr) — always treated as return
         # 2. Ambiguous exprs (MethodCallExpr, SubscriptExpr) — only when body
         #    also contains ReturnStmts (distinguishes from side-effects like ADJUST)
+        # 3. Single-statement bodies with expression-type tail — stale-merge
+        #    stripped the only ReturnStmt, so no other returns exist to trigger
+        #    case 2. Treat non-void expressions as return values.
         my $body_has_returns = $self->_body_contains_return($body);
+        my $single_stmt_return = (!$last_is_return
+            && scalar($body->@*) == 1
+            && defined $last_item
+            && $self->_is_single_stmt_return_expr($last_item));
         my $tail_expr_return = (!$last_is_return
             && defined $last_item
             && ($self->_is_unambiguous_value_expr($last_item)
                 || ($body_has_returns && $self->_is_bare_return_expr($last_item)))
             );
-        my $has_return = $last_is_return || $tail_expr_return || $body_has_returns;
+        my $has_return = $last_is_return || $tail_expr_return
+            || $single_stmt_return || $body_has_returns;
 
         # Track C variable declarations needed
         my %declared_vars;
@@ -785,12 +794,45 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     }
 
     # Detect if an IR node is unambiguously a value expression (never a
-    # side-effect). TernaryExpr always produces a value; MethodCallExpr
-    # and SubscriptExpr are ambiguous (could be side-effects).
+    # side-effect). TernaryExpr always produces a value; comparison and
+    # logical BinaryExprs produce values. MethodCallExpr and SubscriptExpr
+    # are ambiguous (could be side-effects).
     method _is_unambiguous_value_expr($node) {
         return false unless defined $node;
         return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
-        return $node->class() eq 'TernaryExpr';
+        my $class = $node->class();
+        return true if $class eq 'TernaryExpr';
+        # BinaryExpr with a comparison or logical operator produces a value
+        if ($class eq 'BinaryExpr') {
+            my $inputs = $node->inputs();
+            if (defined $inputs && $inputs->@* >= 1) {
+                my $op_node = $inputs->[0];
+                if ($op_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                    my $op = $op_node->value();
+                    my %value_ops = map { $_ => 1 } qw(
+                        >= <= > < == != <=> eq ne lt gt le ge cmp
+                        && || // and or
+                    );
+                    return true if $value_ops{$op};
+                }
+            }
+        }
+        return false;
+    }
+
+    # Detect if a single-statement method body's expression is a return
+    # value whose ReturnStmt was stripped by stale-merge. For single-body
+    # methods (not ADJUST), expression-type nodes are return values unless
+    # they are clearly void (VarDecl, DieCall, CompoundAssign).
+    method _is_single_stmt_return_expr($node) {
+        return false unless defined $node;
+        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        my $class = $node->class();
+        my %void_classes = map { $_ => 1 } qw(
+            VarDecl DieCall CompoundAssign
+        );
+        return false if $void_classes{$class};
+        return true;
     }
 
     # Recursively collect VarDecl and iterator names from IR nodes at any
@@ -2188,7 +2230,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Stale-merge can strip ReturnStmt leaving a bare expression.
             # When in return context (method has returns), detect the last
             # bare expression and emit it as RETVAL assignment + goto.
-            if ($_return_context && $is_last_in_then
+            # Inside loops, MethodCallExpr at tail is likely a void side-effect
+            # (e.g., _complete()), not a return value. Only allow unambiguous
+            # value expressions (SubscriptExpr, TernaryExpr) inside loops.
+            my $is_loop_safe_return = !$_loop_depth
+                || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($stmt->class() eq 'SubscriptExpr'
+                        || $stmt->class() eq 'TernaryExpr'));
+            if ($_return_context && $is_loop_safe_return && $is_last_in_then
                     && $self->_is_bare_return_expr($stmt)) {
                 my $val_expr = $self->_emit_xs_expr($stmt, $declared_vars);
                 $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
@@ -2299,10 +2348,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @lines, "        SV *${iter_name}_sv = (_elem && *_elem) ? *_elem : &PL_sv_undef;";
             }
 
+            $_loop_depth++;
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "        $code" if defined $code;
             }
+            $_loop_depth--;
             push @lines, "    }";
             # No explicit SvREFCNT_dec needed — sv_2mortal handles cleanup
             push @lines, "}";
@@ -2336,10 +2387,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @lines, "while (SvTRUE($cond_expr)) {";
             }
 
+            $_loop_depth++;
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
             }
+            $_loop_depth--;
             # Inject chart re-read for while-shift loops that destructure entries.
             # The IR loses list destructuring: my ($item, $alt_idx) = $entry->@*
             # becomes my $item = $entry->@* (alt_idx lost). Also the chart re-read
