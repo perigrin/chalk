@@ -360,7 +360,7 @@ SignatureSlurpy -> ‘@’ Gap %IDENT% | ‘@’
 Expression -> Atom | UnaryExpression | PostfixExpression
 |  BinaryExpression | TernaryExpression
 |  AssignmentExpression
-|  LoopControlExpression | ReturnExpression
+|  LoopControlExpression
 
 # Atoms
 
@@ -498,8 +498,6 @@ LoopControlExpression -> %LOOP_CONTROL_KW%
 |  ‘goto’ Ws Expression
 |  ‘goto’ Ws ‘&’ Gap %IDENT%
 
-ReturnExpression -> ‘return’
-|  ‘return’ Ws ExpressionList
 
 # ============================================================================
 
