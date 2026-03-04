@@ -248,43 +248,6 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         return { valid => true, type => 'HashRef' };
     }
 
-    # ReturnExpression: tag with is_return and whether it has a value
-    # alt 0 = bare 'return' (no value), alt 1 = 'return ExpressionList' (has value)
-    method ReturnExpression($ctx, $alt_idx = 0) {
-        return {
-            valid     => true,
-            is_return => true,
-            has_value => ($alt_idx == 1 ? true : false),
-        };
-    }
-
-    # MethodDefinition: determine return type by searching body for return tags
-    # Walks the Context tree looking for is_return focuses. If any has_value,
-    # return_type is 'Any'. If all bare or no returns, return_type is 'Void'.
-    method MethodDefinition($ctx) {
-        my $has_value_return = false;
-        my $has_any_return = false;
-
-        # Walk the full Context tree looking for is_return tags
-        my @stack = ($ctx);
-        while (@stack) {
-            my $node = pop @stack;
-            my $f = $node->extract();
-            if (defined $f && ref($f) eq 'HASH' && $f->{is_return}) {
-                $has_any_return = true;
-                if ($f->{has_value}) {
-                    $has_value_return = true;
-                    last;  # One value return is enough to know
-                }
-                next;  # Don't recurse into return nodes
-            }
-            push @stack, reverse $node->children()->@*;
-        }
-
-        my $return_type = $has_value_return ? 'Any' : 'Void';
-        return { valid => true, return_type => $return_type };
-    }
-
     # Unknown types (no static type information)
 
     method TernaryExpression($ctx) {

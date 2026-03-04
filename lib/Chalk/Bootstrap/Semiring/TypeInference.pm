@@ -23,7 +23,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     # Rules that need $alt_idx passed to the Actions method via closure.
     my %_needs_alt_idx = map { $_ => true } qw(
-        PostfixDeref Subscript ExpressionList ReturnExpression
+        PostfixDeref Subscript ExpressionList
     );
 
     # Singleton for one(): a Context with { valid => true } focus and no children.
