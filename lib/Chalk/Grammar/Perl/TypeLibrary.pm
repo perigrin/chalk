@@ -50,7 +50,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         pop     => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
         shift   => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
         unshift => { min_arity => 2, arg_types => ['Array', 'Any'],              return_type => 'Int' },
-        splice  => { min_arity => 1, arg_types => ['Array', 'Int', 'Int', 'Any'], return_type => 'List' },
+        splice  => { min_arity => 1, arg_types => ['Array', 'Num', 'Num', 'Any'], return_type => 'List' },
 
         # Hash operations
         keys    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
@@ -66,9 +66,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
         chr     => { min_arity => 1, arg_types => ['Int'],                       return_type => 'Str' },
         ord     => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
         join    => { min_arity => 2, arg_types => ['Str', 'Any'],                return_type => 'Str' },
-        split   => { min_arity => 1, arg_types => ['Scalar', 'Str', 'Int'],      return_type => 'List' },
+        split   => { min_arity => 1, arg_types => ['Scalar', 'Str', 'Num'],      return_type => 'List' },
         sprintf => { min_arity => 1, arg_types => ['Str', 'Any'],                return_type => 'Str' },
-        substr  => { min_arity => 2, arg_types => ['Str', 'Int', 'Int'],         return_type => 'Str' },
+        substr  => { min_arity => 2, arg_types => ['Str', 'Num', 'Num'],         return_type => 'Str' },
 
         # Type test
         defined => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Bool' },

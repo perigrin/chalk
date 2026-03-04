@@ -231,8 +231,8 @@ for my $name (qw(foo bar class if my)) {
 # splice: offset and length are Int, rest is Any (Perl list flattening)
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('splice');
-    is($sig->{arg_types}[1], 'Int', 'splice offset arg is Int');
-    is($sig->{arg_types}[2], 'Int', 'splice length arg is Int');
+    is($sig->{arg_types}[1], 'Num', 'splice offset arg is Num');
+    is($sig->{arg_types}[2], 'Num', 'splice length arg is Num');
     is($sig->{arg_types}[3], 'Any', 'splice replacement args are Any (Perl list flattening)');
 }
 
@@ -253,13 +253,13 @@ for my $name (qw(foo bar class if my)) {
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('split');
     is($sig->{arg_types}[1], 'Str', 'split string arg is Str');
-    is($sig->{arg_types}[2], 'Int', 'split limit arg is Int');
+    is($sig->{arg_types}[2], 'Num', 'split limit arg is Num');
 }
 
 # substr: 3rd arg (length) is Int
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('substr');
-    is($sig->{arg_types}[2], 'Int', 'substr length arg is Int');
+    is($sig->{arg_types}[2], 'Num', 'substr length arg is Num');
 }
 
 # bless: 2nd arg is class name (Str)
@@ -538,5 +538,33 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Array', 'List'), 'Array',
     'narrow_type(Array, List) = Array (list context preserves)');
 is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
     'narrow_type(Str, List) = Str (list context preserves)');
+
+# ========================================================================
+# Builtin arg types: Num-accepting position args (substr, splice, split)
+# ========================================================================
+# Arithmetic expressions produce Num, so builtins that take positional
+# integer args must accept Num to avoid rejecting e.g. substr($s, 0, $x - $y).
+
+{
+    my $substr_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('substr');
+    is($substr_sig->{arg_types}[1], 'Num',
+        'substr arg 2 (offset) accepts Num');
+    is($substr_sig->{arg_types}[2], 'Num',
+        'substr arg 3 (length) accepts Num');
+}
+
+{
+    my $splice_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('splice');
+    is($splice_sig->{arg_types}[1], 'Num',
+        'splice arg 2 (offset) accepts Num');
+    is($splice_sig->{arg_types}[2], 'Num',
+        'splice arg 3 (length) accepts Num');
+}
+
+{
+    my $split_sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('split');
+    is($split_sig->{arg_types}[2], 'Num',
+        'split arg 3 (limit) accepts Num');
+}
 
 done_testing;
