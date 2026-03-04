@@ -315,7 +315,15 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     if ($arity < $sig->{min_arity}) {
                         return undef;
                     }
-                    $return_type = $sig->{return_type};
+                    # For 'return', propagate the argument's type instead of
+                    # the signature's return_type ('Any'). This lets the enclosing
+                    # method know what type is actually being returned.
+                    if ($call_sym eq 'return') {
+                        my $arg_types = $_get_item_types->($value);
+                        $return_type = $arg_types->[0] if $arg_types && $arg_types->@*;
+                    } else {
+                        $return_type = $sig->{return_type};
+                    }
                     $return_type = undef if defined $return_type && $return_type eq 'Any';
                 }
             }

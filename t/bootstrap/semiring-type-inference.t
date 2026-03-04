@@ -1923,4 +1923,48 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'split-tree CallExpression: keys(Scalar) → rejected through split tree');
 }
 
+# ========================================================================
+# return builtin type propagation
+# ========================================================================
+
+# return 42: propagates Int from argument, not 'Any' from signature
+{
+    my $val = make_ctx(
+        call_symbol => 'return',
+        item_types  => ['Int'],
+        list_arity  => 1,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'return(Int) is valid');
+    is(get_tags($result)->{type}, 'Int',
+        'return(Int) propagates Int type from argument');
+}
+
+# return $str: propagates Str
+{
+    my $val = make_ctx(
+        call_symbol => 'return',
+        item_types  => ['Str'],
+        list_arity  => 1,
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'return(Str) is valid');
+    is(get_tags($result)->{type}, 'Str',
+        'return(Str) propagates Str type from argument');
+}
+
+# bare return: no type (no item_types)
+{
+    my $val = make_ctx(
+        call_symbol => 'return',
+    );
+    my $item = make_item('CallExpression', $val);
+    my $result = $ti->on_complete($item, 0, 10);
+    ok(!$ti->is_zero($result), 'bare return is valid');
+    ok(!exists get_tags($result)->{type},
+        'bare return has no type tag');
+}
+
 done_testing;
