@@ -21,6 +21,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
     }
 
+    # Map a TypeInference return type to a C type for XS output.
+    # Conservative: all non-void types emit SV*. Extension point for
+    # future typed returns (Int → IV, Num → NV, etc.).
+    my sub _xs_c_type_for($ti_type) {
+        return 'void' if !defined $ti_type || $ti_type eq 'Void';
+        return 'SV *';
+    }
+
     method set_return_context($val) { $_return_context = $val; }
 
     method generate($ir) {
@@ -592,8 +600,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Collects variable declarations into PREINIT section and body statements
     # into CODE section. Uses eval_pv() for constructs too complex for pure C
     # (regex, backticks, complex interpolation).
-    # $ir_return_type: 'Any' or 'Void' from TypeInference, or undef to fall
-    # back to heuristic detection.
+    # $ir_return_type: rich type from TypeInference (Int, Str, Bool, etc.),
+    # 'Void' for void methods, or undef to fall back to heuristic detection.
     method _emit_xs_complex_method($name, $params, $body, $ir_return_type = undef) {
         my @lines;
         my @code;
@@ -682,11 +690,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        if ($has_return) {
-            push @lines, 'SV *';
-        } else {
-            push @lines, 'void';
-        }
+        push @lines, _xs_c_type_for($ir_return_type);
         # XS signature line uses bare names; typed declarations go below
         my @bare_params = map { /^SV \*(.*)/ ? $1 : $_ } @xs_params;
         push @lines, "${name}(" . join(', ', @bare_params) . ")";

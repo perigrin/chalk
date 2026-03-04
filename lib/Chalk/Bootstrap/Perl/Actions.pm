@@ -1116,44 +1116,24 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        # Determine return_type by walking body IR for ReturnStmt nodes.
-        # ReturnStmt with a value input → method returns something (Any).
-        # All returns bare or no explicit returns → method is void (Void).
-        # Stale-merge artifact detection: `return unless COND` gets
-        # mis-parsed as ReturnStmt(value: ...BuiltinCall("unless",...)).
-        # These contain a BuiltinCall with a postfix-modifier keyword name
-        # as part of the return value chain and are actually bare returns.
-        my %postfix_keywords = map { $_ => true }
-            qw(unless if while until for foreach);
+        # TypeInference is the sole authority for method return types.
+        # TI's body analysis produces rich types (Int, Str, Bool, etc.)
+        # via TypeInferenceActions::MethodDefinition which sets
+        # method_return_type in the TI focus hash.
+        my $method_name_str = defined $method_name ? $method_name->value() : '<unknown>';
+        my $ti_ctx = Chalk::Bootstrap::Semiring::SemanticAction::current_type_context();
+        die "MethodDefinition: TI context unavailable for '$method_name_str'"
+            unless defined $ti_ctx;
+        my $ti_focus = $ti_ctx->extract();
+        die "MethodDefinition: TI focus missing for '$method_name_str'"
+            unless defined $ti_focus && ref($ti_focus) eq 'HASH';
 
-        my $has_value_return = false;
-        my @walk = @body;
-        while (@walk) {
-            my $item = pop @walk;
-            next unless defined $item;
-            next unless $item isa Chalk::Bootstrap::IR::Node;
-            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'ReturnStmt') {
-                my $value = $item->inputs()->[0];
-                if (defined $value && !$self->_is_postfix_modifier_artifact($value, \%postfix_keywords)) {
-                    $has_value_return = true;
-                    last;
-                }
-                next;
-            }
-            # Skip anonymous subs — their returns belong to a different scope
-            next if $item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'AnonSubExpr';
-            # Recurse into Constructor inputs to find nested ReturnStmts
-            for my $input ($item->inputs()->@*) {
-                if (ref($input) eq 'ARRAY') {
-                    push @walk, $input->@*;
-                } else {
-                    push @walk, $input;
-                }
-            }
+        my $return_type;
+        if (defined $ti_focus->{method_return_type}) {
+            $return_type = $ti_focus->{method_return_type};
+        } else {
+            $return_type = 'Void';
         }
-        my $return_type = $has_value_return ? 'Any' : 'Void';
 
         return $factory->make('Constructor',
             'class'       => 'MethodDecl',
