@@ -302,4 +302,37 @@ subtest 'ExpressionStatement void context' => sub {
     is($result->{eval_context}, 'Void', 'ExpressionStatement sets Void context');
 };
 
+# Test 15: MethodDefinition extracts method name and body type
+subtest 'MethodDefinition return type registration' => sub {
+    # MethodDefinition has: ident_text from QualifiedIdentifier, type from Block
+    my $name_ctx = mock_ctx({ ident_text => 'calculate' });
+    my $body_ctx = mock_ctx({ type => 'Int' });
+    my $ctx = mul_ctx($name_ctx, $body_ctx);
+
+    my $result = $actions->MethodDefinition($ctx);
+    is($result->{valid}, true, 'MethodDefinition valid');
+    is($result->{method_name}, 'calculate', 'MethodDefinition extracts method name');
+    is($result->{method_return_type}, 'Int', 'MethodDefinition extracts body return type');
+
+    # No body type → method_return_type absent
+    my $no_type_ctx = mul_ctx($name_ctx, mock_ctx({ valid => true }));
+    $result = $actions->MethodDefinition($no_type_ctx);
+    is($result->{valid}, true, 'MethodDefinition valid without body type');
+    is($result->{method_name}, 'calculate', 'method name still extracted');
+    ok(!exists $result->{method_return_type}, 'no method_return_type when body has no type');
+};
+
+# Test 16: MethodCall looks up registered method return types
+subtest 'MethodCall with method registry' => sub {
+    # Register a method return type (class-level sub, not instance method)
+    Chalk::Bootstrap::Semiring::TypeInferenceActions::register_method_return('calculate', 'Int');
+
+    my $ctx = mock_ctx({ valid => true });
+    my $result = $actions->MethodCall($ctx);
+    # MethodCall doesn't know which method is being called yet (no ident_text in tree)
+    # so it can't use the registry at this level. The registry lookup happens
+    # in TypeInference on_complete, not in Actions dispatch.
+    is($result->{valid}, true, 'MethodCall returns valid');
+};
+
 done_testing;

@@ -40,6 +40,26 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         return undef;
     };
 
+    # Helper: Get ident_text from Context tree (for method/function names)
+    my $_get_ident_text;
+    $_get_ident_text = sub($ctx) {
+        return undef unless defined $ctx;
+        my $focus = $ctx->extract();
+        if (defined $focus && exists $focus->{ident_text}) {
+            return $focus->{ident_text};
+        }
+        for my $child ($ctx->children()->@*) {
+            my $found = $_get_ident_text->($child);
+            return $found if defined $found;
+        }
+        return undef;
+    };
+
+    # Method return type registry: method_name => return_type
+    # Populated by MethodDefinition on_complete, consumed by MethodCall lookups.
+    # Scoped per file parse (reset via reset_method_registry).
+    my %_method_returns;
+
     # Helper: Get op_text from Context tree (for operator rules)
     # Follows leaf-finding semantics: stops at focused nodes.
     my $_get_op_text;
@@ -293,5 +313,35 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     method MethodCall($ctx) {
         return { valid => true };
+    }
+
+    # MethodDefinition: extract method name and body return type for registry
+    method MethodDefinition($ctx) {
+        my $method_name = $_get_ident_text->($ctx);
+        my $body_type = $_get_rightmost_type->($ctx);
+
+        # Register method return type if both name and type are available
+        if (defined $method_name && defined $body_type) {
+            $_method_returns{$method_name} = $body_type;
+        }
+
+        return {
+            valid => true,
+            ($method_name ? (method_name => $method_name) : ()),
+            ($body_type ? (method_return_type => $body_type) : ()),
+        };
+    }
+
+    # Registry access methods for method return types
+    sub register_method_return($name, $type) {
+        $_method_returns{$name} = $type;
+    }
+
+    sub lookup_method_return($name) {
+        return $_method_returns{$name};
+    }
+
+    sub reset_method_registry() {
+        %_method_returns = ();
     }
 }

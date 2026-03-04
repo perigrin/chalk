@@ -137,6 +137,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     method reset_cache() {
         %_ctx_cache = ();
         $_one_singleton = undef;
+        Chalk::Bootstrap::Semiring::TypeInferenceActions::reset_method_registry();
     }
 
     method multiply($left, $right) {
@@ -194,14 +195,15 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         # In QualifiedIdentifier context, tag bare builtins with their name
         # so CallExpression can look up the full signature for validation.
-        if ($rule_name eq 'QualifiedIdentifier'
-            && $matched_text !~ /::/
-            && $builtin_lookup->($matched_text))
-        {
+        # All QualifiedIdentifier scans also get ident_text for method name extraction.
+        if ($rule_name eq 'QualifiedIdentifier') {
+            if ($matched_text !~ /::/ && $builtin_lookup->($matched_text)) {
+                return $self->multiply($existing,
+                    _ctx({ valid => true, call_symbol => $matched_text, ident_text => $matched_text }));
+            }
             return $self->multiply($existing,
-                _ctx({ valid => true, call_symbol => $matched_text }));
+                _ctx({ valid => true, ident_text => $matched_text }));
         }
-
 
         # Tag variable scans with their type
         if ($rule_name eq 'ScalarVariable') {
