@@ -23,6 +23,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
     field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
+    field %_class_scope_vars;  # var_name => 1 for class-level lexicals (e.g., my $ZERO = [])
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -632,6 +633,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return false;
     }
 
+    # Detect methods that reference class-scope lexical variables.
+    # These variables (e.g., `my $ZERO = []` at class body scope) are shared
+    # across methods in Perl but would become separate uninitialized local
+    # copies in each XS _impl_ helper. Methods using them must fall back to Perl.
+    method _uses_class_scope_vars($xs_output) {
+        return false unless keys %_class_scope_vars;
+        for my $var (keys %_class_scope_vars) {
+            return true if $xs_output =~ /\b\Q${var}\E_sv\b/;
+        }
+        return false;
+    }
+
     # Detect stale-value merge corruption in a method's XS output:
     # method body has call_method (real work) but RETVAL is a bare string.
     method _is_stale_merge($xs_output) {
@@ -778,6 +791,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
+        # Collect class-scope variable names from ADJUST statements.
+        # Methods that reference these variables cannot be safely compiled to XS
+        # because the variables are class-level lexicals shared across methods,
+        # but the XS emitter would create separate uninitialized local copies.
+        %_class_scope_vars = ();
+        for my $stmt (@adjust_stmts) {
+            next unless $stmt isa Chalk::Bootstrap::IR::Node::Constructor;
+            if ($stmt->class() eq 'VarDecl') {
+                my $var = $stmt->inputs()->[0]->value();
+                $var =~ s/^[\$\@\%]//;
+                $_class_scope_vars{$var} = true;
+            }
+        }
+
         # Save method metadata for forward declaration generation after Pass 2
         # (we defer this so we can filter out methods that fall to eval_pv fallback)
         my %pre_fwd_methods;
@@ -835,6 +862,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 if ($self->_needs_eval_fallback($helper_output)) {
                     delete $_class_methods->{$mname};
                     push @fallback_methods, $item;
+                } elsif ($self->_uses_class_scope_vars($helper_output)) {
+                    # Method references class-level lexicals (e.g., my $ZERO = []).
+                    # The XS emitter creates uninitialized local copies instead of
+                    # sharing the class-scope value. Fall back to Perl.
+                    delete $_class_methods->{$mname};
+                    push @fallback_methods, $item;
                 } elsif ($self->_is_stale_merge($helper_output)) {
                     my $fixed = $self->_repair_stale_merge($result->{helper}, $item);
                     push @helper_lines, $fixed->@*;
@@ -851,6 +884,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $method_lines = $result;
                 my $xs_output = join("\n", $method_lines->@*);
                 if ($self->_needs_eval_fallback($xs_output)) {
+                    push @fallback_methods, $item;
+                } elsif ($self->_uses_class_scope_vars($xs_output)) {
+                    delete $_class_methods->{$mname};
                     push @fallback_methods, $item;
                 } elsif ($self->_is_stale_merge($xs_output)) {
                     my $fixed = $self->_repair_stale_merge($method_lines, $item);
