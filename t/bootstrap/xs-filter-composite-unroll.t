@@ -139,4 +139,108 @@ SKIP: {
         'should_scan body has no call_method("should_scan")');
 }
 
+# === Heterogeneous composite: two different component types ===
+
+# --- SemiringA: has is_zero ---
+my ($fh_a, $file_a) = tempfile(SUFFIX => '.pm', UNLINK => 1);
+print $fh_a <<'PERL';
+use 5.42.0;
+use utf8;
+no warnings 'experimental::class';
+
+class SemiringA {
+    field $zero_val :param;
+
+    method is_zero($value) {
+        return $value;
+    }
+}
+PERL
+close $fh_a;
+
+# --- SemiringB: has is_zero ---
+my ($fh_b, $file_b) = tempfile(SUFFIX => '.pm', UNLINK => 1);
+print $fh_b <<'PERL';
+use 5.42.0;
+use utf8;
+no warnings 'experimental::class';
+
+class SemiringB {
+    field $zero_val :param;
+
+    method is_zero($value) {
+        return $value;
+    }
+}
+PERL
+close $fh_b;
+
+# --- HeteroComposite: iterates over two different semiring types ---
+my ($fh_hc, $file_hc) = tempfile(SUFFIX => '.pm', UNLINK => 1);
+print $fh_hc <<'PERL';
+use 5.42.0;
+use utf8;
+no warnings 'experimental::class';
+
+class HeteroComposite {
+    field $semirings :param :reader;
+
+    method is_zero($value) {
+        for my $i (0 .. $semirings->$#*) {
+            return $value if $semirings->[$i]->is_zero($value->[$i]);
+        }
+        return $value;
+    }
+}
+PERL
+close $fh_hc;
+
+my ($ir_a2, $sa_a2, $ctx_a2) = eval { parse_file_ir($gen, $file_a) };
+ok(defined $ir_a2, 'SemiringA parses') or BAIL_OUT("Parse failed: $@");
+
+my ($ir_b2, $sa_b2, $ctx_b2) = eval { parse_file_ir($gen, $file_b) };
+ok(defined $ir_b2, 'SemiringB parses') or BAIL_OUT("Parse failed: $@");
+
+my ($ir_hc, $sa_hc, $ctx_hc) = eval { parse_file_ir($gen, $file_hc) };
+ok(defined $ir_hc, 'HeteroComposite parses') or BAIL_OUT("Parse failed: $@");
+
+my $reg2 = Chalk::Bootstrap::Perl::Target::ClassRegistry->new();
+$reg2->register('SemiringA', { ir => $ir_a2, sa => $sa_a2, ctx => $ctx_a2, uses => [] });
+$reg2->register('SemiringB', { ir => $ir_b2, sa => $sa_b2, ctx => $ctx_b2, uses => [] });
+$reg2->register('HeteroComposite', {
+    ir => $ir_hc, sa => $sa_hc, ctx => $ctx_hc,
+    uses => ['SemiringA', 'SemiringB'],
+    composite_components => {
+        semirings => ['SemiringA', 'SemiringB'],
+    },
+});
+
+my $xs2 = Chalk::Bootstrap::Perl::Target::XS->new(
+    module_name => 'Test::HeteroUnroll',
+    class_registry => $reg2,
+);
+
+my $code2 = eval { $xs2->generate_multi_class([
+    { class_name => 'SemiringA', ir => $ir_a2, sa => $sa_a2, ctx => $ctx_a2 },
+    { class_name => 'SemiringB', ir => $ir_b2, sa => $sa_b2, ctx => $ctx_b2 },
+    { class_name => 'HeteroComposite', ir => $ir_hc, sa => $sa_hc, ctx => $ctx_hc },
+]) };
+ok(defined $code2, 'heterogeneous multi-class generation succeeds')
+    or BAIL_OUT("Hetero multi-class gen failed: $@");
+
+# --- Test: heterogeneous is_zero should use BOTH component _impl_ calls ---
+my $hc_iz_body = extract_impl_body($code2, '_impl_heterocomposite_is_zero');
+ok(defined $hc_iz_body, 'HeteroComposite is_zero helper emitted');
+
+SKIP: {
+    skip 'HeteroComposite is_zero body not found', 3 unless defined $hc_iz_body;
+
+    like($hc_iz_body, qr/_impl_semiringa_is_zero\(aTHX_/,
+        'hetero is_zero calls _impl_semiringa_is_zero');
+    like($hc_iz_body, qr/_impl_semiringb_is_zero\(aTHX_/,
+        'hetero is_zero calls _impl_semiringb_is_zero');
+    unlike($hc_iz_body, qr/call_method\("is_zero"/,
+        'hetero is_zero has no call_method("is_zero")');
+}
+
 done_testing();

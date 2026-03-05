@@ -234,6 +234,95 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@lines;
     }
 
+    # Try to generate a composite method override for methods that iterate over
+    # a composite field with known component types. Returns { helper => [...], xsub => [...] }
+    # or undef if the method is not a composite dispatch candidate.
+    method _try_composite_method_override($mname, $method_item) {
+        return unless defined $_composite_field_types && keys $_composite_field_types->%*;
+        return unless defined $_class_methods && exists $_class_methods->{$mname};
+
+        my $meta = $_class_methods->{$mname};
+        my @params = $meta->{params}->@*;
+
+        # Find the composite field used in this method by scanning the IR
+        # for SubscriptExpr patterns on known composite fields.
+        my $composite_field;
+        for my $fname (keys $_composite_field_types->%*) {
+            $composite_field = $fname;
+            last;
+        }
+        return unless defined $composite_field && defined $field_map
+            && exists $field_map->{$composite_field};
+
+        my $component_slugs = $_composite_field_types->{$composite_field};
+        my $field_idx = $field_map->{$composite_field};
+
+        # Verify all component slugs have the method in _multi_class_methods
+        for my $slug ($component_slugs->@*) {
+            return unless exists $_multi_class_methods{$slug}
+                && exists $_multi_class_methods{$slug}{$mname};
+        }
+
+        # Generate the unrolled helper function
+        my @helper;
+        my @fwd_params = ('SV *self');
+        push @fwd_params, "SV *$_" for @params;
+        my $sig = join(', ', @fwd_params);
+
+        push @helper, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
+        push @helper, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
+
+        # Generate unrolled calls per component
+        for my $i (0 .. $component_slugs->$#*) {
+            my $slug = $component_slugs->[$i];
+            push @helper, "    /* Component [$i]: $slug */";
+
+            # Build argument list: first arg is the component semiring,
+            # rest are the original args (with tuple indexing for is_zero-style methods)
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+
+            # Determine if any param is a tuple that needs per-component indexing
+            # Heuristic: if the method takes a single arg and the composite has multiple
+            # components, assume the arg is a tuple that needs av_fetch indexing
+            my @call_args = ("aTHX_ $sr_elem");
+            for my $p (@params) {
+                # If this param is likely a tuple (single param for is_zero-style),
+                # index it. Otherwise pass through.
+                if (@params == 1 && $component_slugs->@* > 1) {
+                    push @call_args, "(*av_fetch((AV*)SvRV($p), $i, 0))";
+                } else {
+                    push @call_args, $p;
+                }
+            }
+
+            my $call = "_impl_${slug}_${mname}(" . join(', ', @call_args) . ")";
+            push @helper, "    if (SvTRUE($call)) {";
+            push @helper, "        return &PL_sv_yes;";
+            push @helper, "    }";
+        }
+
+        push @helper, "    return &PL_sv_no;";
+        push @helper, '}';
+
+        # Generate XSUB wrapper
+        my @xsub;
+        my @xsub_params = @params;
+        push @xsub, 'SV *';
+        push @xsub, "$mname(self, " . join(', ', @xsub_params) . ')';
+        push @xsub, '    SV *self';
+        for my $p (@xsub_params) {
+            push @xsub, "    SV *$p";
+        }
+        push @xsub, 'CODE:';
+        my @xsub_call_args = ('aTHX_ self', @xsub_params);
+        push @xsub, "    RETVAL = _impl_${_current_slug}_${mname}(" . join(', ', @xsub_call_args) . ");";
+        push @xsub, 'OUTPUT:';
+        push @xsub, '    RETVAL';
+        push @xsub, '';
+
+        return { helper => \@helper, xsub => \@xsub };
+    }
+
     # Emit BOOT block for feature class setup using defop-based field initialization.
     # Uses ENTER/LEAVE scoping so SAVEDESTRUCTOR_X handles class sealing automatically.
     # Field attributes (:param, :reader, :writer) are applied via class_apply_field_attributes.
@@ -675,6 +764,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Pass 2: emit all methods (with $_class_methods finalized)
         for my $item (@method_items) {
             my $mname = $item->inputs()->[0]->value();
+
+            # Composite override: emit hand-crafted C for methods that iterate
+            # over a composite field with known component types.
+            my $override = $self->_try_composite_method_override($mname, $item);
+            if (defined $override) {
+                push @helper_lines, $override->{helper}->@*;
+                push @helper_lines, '';
+                push @xsub_lines, $override->{xsub}->@*;
+                push @xsub_lines, '';
+                next;
+            }
+
             my $result = $self->_emit_xs_method($item);
 
             if (ref($result) eq 'HASH') {
