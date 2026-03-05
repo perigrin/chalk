@@ -2722,6 +2722,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
+        # Handle stale-merge parse artifact: return [EXPR] is parsed as
+        # SubscriptExpr("return", EXPR, "array") instead of ReturnStmt([EXPR]).
+        # The inner EXPR (e.g., map builtin) already produces the array content,
+        # so emit it directly — the map handler wraps results in newRV_noinc(AV*).
+        if ($style eq 'array'
+                && defined $target
+                && $target isa Chalk::Bootstrap::IR::Node::Constant
+                && $target->value() eq 'return') {
+            return $self->_emit_xs_expr($index, $declared_vars);
+        }
+
         # Handle broken coderef call IR: SubscriptExpr with undef index
         # comes from $f->($self) where parser loses the argument
         if (!defined $index) {
@@ -3134,16 +3145,34 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $list_node = $args->[0];
             }
 
-            # Emit the block body — simplified: evaluate the last expression
+            # Emit the block body — evaluate the last expression.
+            # The block may be an AnonSubExpr (explicit block) or a bare
+            # expression node (e.g., MethodCallExpr from map { $_->m() } @arr).
+            # For bare expressions, we bind $_ to the current element via _mtopic.
             my $block_body;
+            my $needs_topic_binding = false;
             if (defined $block_node && $block_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $block_node->class() eq 'AnonSubExpr') {
                 my $body = $block_node->inputs()->[1] // [];
                 if ($body->@*) {
                     $block_body = $self->_emit_xs_expr($body->[-1], $declared_vars);
                 }
+            } elsif (defined $block_node) {
+                # Bare expression block: bind $_ (topic) to current element
+                $needs_topic_binding = true;
+                my $topic_vars = { ($declared_vars ? $declared_vars->%* : ()), '_' => 1 };
+                $block_body = $self->_emit_xs_expr($block_node, $topic_vars);
             }
             $block_body //= 'newRV_noinc((SV*)newHV())';
+
+            # Build topic binding prefix for loops with bare expression blocks.
+            # When $_ is used in the block body, it maps to __sv (the C variable
+            # for $_ following the ${var}_sv naming convention where var='_').
+            # The PREINIT section already declares __sv from _collect_var_decls.
+            my $topic_range = $needs_topic_binding ? '__sv = newSViv(_mi); ' : '';
+            my $topic_array = $needs_topic_binding
+                ? '{ SV **_mep = av_fetch(_msrc, _mi, 0); __sv = (_mep && *_mep) ? *_mep : &PL_sv_undef; } '
+                : '';
 
             # If list is a range (BinaryExpr with '..'), emit integer for loop
             if ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
@@ -3158,17 +3187,23 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     . "SSize_t _ms = SvROK(_mrs) ? av_len((AV*)SvRV(_mrs)) : SvIV(_mrs); "
                     . "SSize_t _me = SvROK(_mre) ? av_len((AV*)SvRV(_mre)) : SvIV(_mre); "
                     . "SSize_t _mi; "
-                    . "for (_mi = _ms; _mi <= _me; _mi++) "
-                    . "av_push(_mav, SvREFCNT_inc($block_body)); "
+                    . "for (_mi = _ms; _mi <= _me; _mi++) { ${topic_range}"
+                    . "av_push(_mav, SvREFCNT_inc($block_body)); } "
                     . "newRV_noinc((SV*)_mav); })";
             }
 
             # Generic: iterate over AV
             my $list_expr = $self->_emit_xs_expr($list_node, $declared_vars);
-            return "({ AV *_mav = newAV(); AV *_msrc = (AV*)SvRV($list_expr); "
+            # PostfixDerefExpr with '@' already returns (AV*)SvRV(...) —
+            # don't double-dereference.
+            my $av_init = ($list_expr =~ /^\(AV\*\)/)
+                ? "AV *_msrc = $list_expr; "
+                : "AV *_msrc = (AV*)SvRV($list_expr); ";
+            return "({ AV *_mav = newAV(); "
+                . $av_init
                 . "SSize_t _mlen = av_len(_msrc) + 1; SSize_t _mi; "
-                . "for (_mi = 0; _mi < _mlen; _mi++) "
-                . "av_push(_mav, SvREFCNT_inc($block_body)); "
+                . "for (_mi = 0; _mi < _mlen; _mi++) { ${topic_array}"
+                . "av_push(_mav, SvREFCNT_inc($block_body)); } "
                 . "newRV_noinc((SV*)_mav); })";
         }
 
