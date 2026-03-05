@@ -2576,7 +2576,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $key_node->value() =~ /^%\$(\w+)$/) {
                 my $src_var = $1;
                 my $src_expr;
-                if (exists $declared_vars->{$src_var}) {
+                if (exists $declared_vars->{"param:$src_var"}) {
+                    $src_expr = $src_var;
+                } elsif (exists $declared_vars->{$src_var}) {
                     $src_expr = "${src_var}_sv";
                 } elsif (defined $field_map && exists $field_map->{$src_var}) {
                     $src_expr = "ObjectFIELDS(SvRV(self))[$field_map->{$src_var}]";
