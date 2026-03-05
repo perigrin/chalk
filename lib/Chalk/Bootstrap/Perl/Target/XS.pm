@@ -18,10 +18,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_class_methods;  # hashref: name => { returns => bool, params => \@param_names }
     field $_cv_cache;  # hashref: "fieldname_methodname" => { field_name, field_idx, method_name }
     field $_semiring_intrinsics :param(semiring_intrinsics) = undef;  # hashref: field_name => { components => [...] }
+    field $_current_slug = '';  # class-derived identifier prefix for multi-class collision avoidance
 
     ADJUST {
         die "Invalid module name: $module_name"
             unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
+    }
+
+    # Derive a short lowercase slug from a class name for identifier namespacing.
+    # Takes the last component of a qualified name and lowercases it.
+    # e.g., "Chalk::Bootstrap::Earley" → "earley", "SlugTest" → "slugtest"
+    method _class_slug($class_name) {
+        my ($last) = $class_name =~ /(?:.*::)?(\w+)$/;
+        return lc($last // $class_name);
     }
 
     # Map a TypeInference return type to a C type for XS output.
@@ -180,7 +189,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $field_idx = $field_map->{$field_name};
         my @lines;
 
-        push @lines, "static int _inline_is_zero(pTHX_ SV *semiring_field, SV *value) {";
+        push @lines, "static int _inline_${_current_slug}_is_zero(pTHX_ SV *semiring_field, SV *value) {";
         push @lines, '    if (!value || !SvROK(value)) return 1;';
         push @lines, '    AV *tuple = (AV*)SvRV(value);';
         push @lines, '    SV **p;';
@@ -513,6 +522,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @fallback_methods;  # Collect methods needing eval_pv fallback
 
         if (defined $class_decl) {
+            # Set the current class slug for identifier namespacing
+            my $class_name = $class_decl->inputs()->[0]->value();
+            $_current_slug = $self->_class_slug($class_name);
+
             # Build field map once and store it for use throughout code generation
             $field_map = $self->_build_field_index_map($class_decl);
 
@@ -554,14 +567,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 for my $pname ($meta->{params}->@*) {
                     push @fwd_params, "SV *$pname";
                 }
-                push @fwd_decl_lines, "static SV * _impl_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+                push @fwd_decl_lines, "static SV * _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
             }
 
             # Emit static CV cache declarations for field-invocant method calls
             if ($_cv_cache && keys $_cv_cache->%*) {
                 push @fwd_decl_lines, '';
                 for my $key (sort keys $_cv_cache->%*) {
-                    push @fwd_decl_lines, "static CV *_cv_${key} = NULL;";
+                    push @fwd_decl_lines, "static CV *_cv_${_current_slug}_${key} = NULL;";
                 }
             }
 
@@ -1099,7 +1112,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # expressions. Void methods return &PL_sv_undef. The XSUB wrapper
         # preserves the original void/SV* distinction for Perl callers.
         my @helper;
-        my $helper_name = "_impl_${name}";
+        my $helper_name = "_impl_${_current_slug}_${name}";
         push @helper, "static SV * $helper_name(pTHX_ " . join(', ', @xs_params) . ") {";
 
         # Local variable declarations (were PREINIT in XSUB)
@@ -1807,7 +1820,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($invocant_expr eq 'self' && defined $_class_methods
                 && defined $_class_methods->{$method_name}) {
             my @call_args = ('aTHX_ self', @arg_exprs);
-            my $call = "_impl_${method_name}(" . join(', ', @call_args) . ")";
+            my $call = "_impl_${_current_slug}_${method_name}(" . join(', ', @call_args) . ")";
             if (@pre_eval) {
                 my @stmts = (@pre_eval, $call);
                 return '({ ' . join('; ', @stmts) . '; })';
@@ -1832,7 +1845,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     # We pass the field's _semirings (obtained via method call once,
                     # but the inline function caches it).
                     my $arg = $arg_exprs[0] // 'NULL';
-                    my $intrinsic = "_inline_is_zero(aTHX_ ObjectFIELDS(SvRV(self))[$fidx], $arg)";
+                    my $intrinsic = "_inline_${_current_slug}_is_zero(aTHX_ ObjectFIELDS(SvRV(self))[$fidx], $arg)";
                     # Wrap in GCC statement expression so _fixup_ternary_assignment
                     # can detect and rewrite ternary patterns that assign the result.
                     my $expr = "({ SV *_izr = ($intrinsic ? &PL_sv_yes : &PL_sv_no); _izr; })";
@@ -1867,7 +1880,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (defined $cv_cache_key) {
             # Lazy-resolve CV on first call, then use call_sv for dispatch
             my $field_idx = $_cv_cache->{$cv_cache_key}{field_idx};
-            push @stmts, "if (!_cv_${cv_cache_key}) { GV *_gv = gv_fetchmethod_autoload(SvSTASH(SvRV(ObjectFIELDS(SvRV(self))[$field_idx])), \"$escaped_name\", TRUE); if (_gv) _cv_${cv_cache_key} = GvCV(_gv); }";
+            my $cv_var = "_cv_${_current_slug}_${cv_cache_key}";
+            push @stmts, "if (!${cv_var}) { GV *_gv = gv_fetchmethod_autoload(SvSTASH(SvRV(ObjectFIELDS(SvRV(self))[$field_idx])), \"$escaped_name\", TRUE); if (_gv) ${cv_var} = GvCV(_gv); }";
             push @stmts, 'dSP';
             push @stmts, 'ENTER; SAVETMPS';
             push @stmts, 'PUSHMARK(SP)';
@@ -1876,7 +1890,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @stmts, "XPUSHs($expr)";
             }
             push @stmts, 'PUTBACK';
-            push @stmts, "call_sv((SV*)_cv_${cv_cache_key}, G_SCALAR)";
+            push @stmts, "call_sv((SV*)${cv_var}, G_SCALAR)";
             push @stmts, 'SPAGAIN';
             push @stmts, 'SV *_mcr = SvREFCNT_inc(POPs)';
             push @stmts, 'PUTBACK; FREETMPS; LEAVE';

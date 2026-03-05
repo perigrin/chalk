@@ -12,8 +12,8 @@ use Chalk::Bootstrap::Perl::Target::XS;
 # format (CODE: section) and new helper+XSUB split format (static helper body).
 sub extract_method_body {
     my ($output, $method_name) = @_;
-    # Try new helper format first: static SV * _impl_METHOD(pTHX_ ...) { ... }
-    my ($helper) = $output =~ /static\s+SV\s*\*\s*_impl_${method_name}\(pTHX_[^)]*\)\s*\{(.*?)\n\}/ms;
+    # Try new helper format first: static SV * _impl_SLUG_METHOD(pTHX_ ...) { ... }
+    my ($helper) = $output =~ /static\s+SV\s*\*\s*_impl_\w+_${method_name}\(pTHX_[^)]*\)\s*\{(.*?)\n\}/ms;
     return $helper if defined $helper;
     # Fall back to old XSUB CODE section
     my ($code) = $output =~ /${method_name}\(.*?\n  CODE:\n(.*?)\n  OUTPUT:/ms;
@@ -24,7 +24,7 @@ sub extract_method_body {
 sub extract_method_vars {
     my ($output, $method_name) = @_;
     # Try new helper format: locals between { and first body statement
-    my ($helper) = $output =~ /static\s+SV\s*\*\s*_impl_${method_name}\(pTHX_[^)]*\)\s*\{(.*?)\n\}/ms;
+    my ($helper) = $output =~ /static\s+SV\s*\*\s*_impl_\w+_${method_name}\(pTHX_[^)]*\)\s*\{(.*?)\n\}/ms;
     if (defined $helper) {
         # Var declarations are the SV * lines at the top of the helper
         my @vars = $helper =~ /^\s*(SV\s*\*\w+\s*=\s*NULL;)/mg;
@@ -872,7 +872,7 @@ my sub var_node($name) {
 
     # _make_item should NOT appear with a bare string RETVAL/retval.
     # It should either not appear at all (Perl fallback) or return a proper hashref.
-    my $has_broken_make_item = $output =~ /(?:^_make_item\(|_impl__make_item\()/m
+    my $has_broken_make_item = $output =~ /(?:^_make_item\(|_impl_\w+__make_item\()/m
         && $output =~ /(?:RETVAL|retval) = newSVpvs\("rule"\)/;
 
     ok(!$has_broken_make_item,
@@ -896,8 +896,8 @@ my sub var_node($name) {
     my $output = $xs->generate_with_cfg($ir, $sa, $ctx);
 
     # _make_item should appear as a proper XSUB (not in BOOT eval_pv)
-    # With helper split, it appears as both _impl__make_item helper and _make_item XSUB
-    like($output, qr/(?:^_make_item\(self|_impl__make_item\(pTHX_)/m,
+    # With helper split, it appears as both _impl_SLUG__make_item helper and _make_item XSUB
+    like($output, qr/(?:^_make_item\(self|_impl_\w+__make_item\(pTHX_)/m,
         'repair: _make_item is emitted as XSUB');
 
     # The body should construct a hashref, not return a bare string.

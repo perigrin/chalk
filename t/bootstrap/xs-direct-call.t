@@ -45,31 +45,31 @@ my $code = eval { $xs->generate_with_cfg($ir, $sa, $ctx) };
 ok(defined $code, 'XS code generated') or BAIL_OUT("XS gen failed: $@");
 
 # --- Test 1: Static helper function emitted for complex methods ---
-like($code, qr/static\s+SV\s*\*\s*_impl_helper\(pTHX_/,
+like($code, qr/static\s+SV\s*\*\s*_impl_directcalltest_helper\(pTHX_/,
     'static helper function emitted for helper method');
 
-like($code, qr/static\s+SV\s*\*\s*_impl_caller_method\(pTHX_/,
+like($code, qr/static\s+SV\s*\*\s*_impl_directcalltest_caller_method\(pTHX_/,
     'static helper function emitted for caller_method');
 
 # --- Test 2: Helper functions appear BEFORE MODULE line ---
 my $module_pos = index($code, 'MODULE =');
-my $helper_pos = index($code, '_impl_helper');
+my $helper_pos = index($code, '_impl_directcalltest_helper');
 ok($helper_pos >= 0 && $module_pos >= 0, 'both helper and MODULE line exist');
 ok($helper_pos < $module_pos, 'helper function appears before MODULE line');
 
 # --- Test 3: XSUB wrapper calls _impl_ helper ---
 # After the MODULE line, the XSUB wrapper should call the helper
 my $after_module = substr($code, $module_pos);
-like($after_module, qr/_impl_helper\(aTHX_/,
-    'XSUB wrapper for helper calls _impl_helper');
-like($after_module, qr/_impl_caller_method\(aTHX_/,
-    'XSUB wrapper for caller_method calls _impl_caller_method');
+like($after_module, qr/_impl_directcalltest_helper\(aTHX_/,
+    'XSUB wrapper for helper calls _impl_directcalltest_helper');
+like($after_module, qr/_impl_directcalltest_caller_method\(aTHX_/,
+    'XSUB wrapper for caller_method calls _impl_directcalltest_caller_method');
 
 # --- Test 4: Self-method calls use direct helper, not call_method ---
-# In the _impl_caller_method body, $self->helper($y) should become
-# _impl_helper(aTHX_ self, y) instead of call_method("helper", ...)
-like($code, qr/_impl_helper\(aTHX_\s*self/,
-    'self->helper() call uses direct _impl_helper(aTHX_ self, ...)');
+# In the _impl_directcalltest_caller_method body, $self->helper($y) should become
+# _impl_directcalltest_helper(aTHX_ self, y) instead of call_method("helper", ...)
+like($code, qr/_impl_directcalltest_helper\(aTHX_\s*self/,
+    'self->helper() call uses direct _impl_directcalltest_helper(aTHX_ self, ...)');
 
 # The direct call should NOT use call_method for same-module self methods
 # Count call_method occurrences — should be zero for "helper" since it's same-module
@@ -109,9 +109,9 @@ my $code2 = eval { $xs2->generate_with_cfg($ir2, $sa2, $ctx2) };
 ok(defined $code2, 'XS code generated for external call class') or BAIL_OUT("XS gen failed: $@");
 
 # Field-invocant method calls use CV cache (call_sv), not call_method
-like($code2, qr/call_sv\(\(SV\s*\*\)_cv_other_some_method/,
+like($code2, qr/call_sv\(\(SV\s*\*\)_cv_externalcalltest_other_some_method/,
     'field-invocant method calls use CV-cached call_sv');
-like($code2, qr/static\s+CV\s*\*\s*_cv_other_some_method\s*=\s*NULL/,
+like($code2, qr/static\s+CV\s*\*\s*_cv_externalcalltest_other_some_method\s*=\s*NULL/,
     'static CV cache variable declared for field method call');
 
 done_testing();

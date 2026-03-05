@@ -160,18 +160,18 @@ my $code3 = eval { $xs3->generate_with_cfg($ir3, $sa3, $ctx3) };
 ok(defined $code3, 'XS code with semiring intrinsics generated')
     or BAIL_OUT("XS gen failed: $@");
 
-# Test 7a: Static _inline_is_zero function is emitted
-like($code3, qr/static\s+int\s+_inline_is_zero/,
-    'static _inline_is_zero function emitted');
+# Test 7a: Static _inline_SLUG_is_zero function is emitted
+like($code3, qr/static\s+int\s+_inline_semiringtest_is_zero/,
+    'static _inline_semiringtest_is_zero function emitted');
 
 # Test 7b: The inline function appears before MODULE line
 {
     my $module_pos3 = index($code3, 'MODULE =');
-    my $inline_pos3 = index($code3, '_inline_is_zero');
+    my $inline_pos3 = index($code3, '_inline_semiringtest_is_zero');
     ok($inline_pos3 >= 0 && $module_pos3 >= 0,
-        'both _inline_is_zero and MODULE line exist');
+        'both _inline_semiringtest_is_zero and MODULE line exist');
     ok($inline_pos3 < $module_pos3,
-        '_inline_is_zero appears before MODULE line');
+        '_inline_semiringtest_is_zero appears before MODULE line');
 }
 
 # Test 7c: The inline function contains component checks
@@ -189,8 +189,8 @@ ok(scalar @svok_checks >= 2,
 # Test 7d: is_zero call sites use intrinsic, not call_sv
 unlike($code3, qr/call_sv\(\(SV\s*\*\)_cv_\w+_is_zero/,
     'no call_sv for is_zero — uses intrinsic instead');
-like($code3, qr/_inline_is_zero\(aTHX_/,
-    'is_zero call sites use _inline_is_zero intrinsic');
+like($code3, qr/_inline_semiringtest_is_zero\(aTHX_/,
+    'is_zero call sites use _inline_semiringtest_is_zero intrinsic');
 
 # Test 7e: Non-is_zero methods still use call_sv or call_method
 # multiply() and zero() should NOT be inlined
@@ -203,8 +203,8 @@ my $xs3_no_intrinsic = Chalk::Bootstrap::Perl::Target::XS->new(
 );
 my $code3_no = eval { $xs3_no_intrinsic->generate_with_cfg($ir3, $sa3, $ctx3) };
 ok(defined $code3_no, 'XS code without intrinsics generated');
-unlike($code3_no, qr/static\s+int\s+_inline_is_zero/,
-    'no _inline_is_zero without semiring_intrinsics config');
+unlike($code3_no, qr/static\s+int\s+_inline_\w+_is_zero/,
+    'no _inline_SLUG_is_zero without semiring_intrinsics config');
 like($code3_no, qr/call_method\("is_zero"|call_sv\(\(SV\s*\*\)_cv_\w+_is_zero/,
     'is_zero uses Perl dispatch when no intrinsics configured');
 
