@@ -180,9 +180,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $field_idx = $field_map->{$field_name};
         my @lines;
 
-        push @lines, 'static SV *_boolean_zero = NULL;';
-        push @lines, '';
         push @lines, "static int _inline_is_zero(pTHX_ SV *semiring_field, SV *value) {";
+        push @lines, '    if (!value || !SvROK(value)) return 1;';
         push @lines, '    AV *tuple = (AV*)SvRV(value);';
         push @lines, '    SV **p;';
         push @lines, '';
@@ -194,18 +193,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, "    /* Component [$i]: $type */";
 
             if ($type eq 'boolean_refaddr') {
-                # Lazy-init Boolean zero sentinel on first call
-                push @lines, '    if (!_boolean_zero) {';
-                push @lines, '        AV *_sr_av = (AV*)SvRV(semiring_field);';
-                push @lines, '        SV *_sr0 = *av_fetch(_sr_av, 0, 0);';
-                push @lines, '        dSP; ENTER; SAVETMPS; PUSHMARK(SP);';
-                push @lines, '        XPUSHs(_sr0); PUTBACK;';
-                push @lines, '        call_method("zero", G_SCALAR); SPAGAIN;';
-                push @lines, '        _boolean_zero = SvREFCNT_inc(POPs);';
-                push @lines, '        PUTBACK; FREETMPS; LEAVE;';
-                push @lines, '    }';
+                # Boolean values: zero = [] (empty AV, a reference),
+                # non-zero = true (a non-reference SV). So is_zero is simply
+                # SvROK — if it's a reference, it's the zero sentinel.
                 push @lines, "    p = av_fetch(tuple, $i, 0);";
-                push @lines, '    if (p && SvROK(*p) && SvRV(*p) == SvRV(_boolean_zero)) return 1;';
+                push @lines, '    if (p && SvROK(*p)) return 1;';
             } elsif ($type eq 'hash_valid') {
                 push @lines, "    p = av_fetch(tuple, $i, 0);";
                 push @lines, '    if (p && SvROK(*p)) {';
@@ -1841,7 +1833,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     # but the inline function caches it).
                     my $arg = $arg_exprs[0] // 'NULL';
                     my $intrinsic = "_inline_is_zero(aTHX_ ObjectFIELDS(SvRV(self))[$fidx], $arg)";
-                    my $expr = "($intrinsic ? &PL_sv_yes : &PL_sv_no)";
+                    # Wrap in GCC statement expression so _fixup_ternary_assignment
+                    # can detect and rewrite ternary patterns that assign the result.
+                    my $expr = "({ SV *_izr = ($intrinsic ? &PL_sv_yes : &PL_sv_no); _izr; })";
                     if (@pre_eval) {
                         my @stmts = (@pre_eval, $expr);
                         return '({ ' . join('; ', @stmts) . '; })';

@@ -175,8 +175,8 @@ like($code3, qr/static\s+int\s+_inline_is_zero/,
 }
 
 # Test 7c: The inline function contains component checks
-like($code3, qr/_boolean_zero/,
-    'inline is_zero has Boolean refaddr sentinel');
+like($code3, qr/Component \[0\]: boolean_refaddr/,
+    'inline is_zero has Boolean refaddr check');
 like($code3, qr/hv_fetchs\([^,]+,\s*"valid"/,
     'inline is_zero has Precedence valid check');
 like($code3, qr/SvIV\([^)]+\)\s*==\s*-1/,

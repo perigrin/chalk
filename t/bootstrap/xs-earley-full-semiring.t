@@ -49,7 +49,20 @@ my ($ir, $sa, $ctx) = eval { parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm'
 ok(defined $ir, 'Earley.pm parses to IR') or BAIL_OUT("Parse failed: $@");
 
 # --- Step 2: Generate XS distribution ---
-my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::XSEarleyFull');
+my $xs = Chalk::Bootstrap::Perl::Target::XS->new(
+    module_name => 'Test::XSEarleyFull',
+    semiring_intrinsics => {
+        semiring => {
+            components => [
+                { type => 'boolean_refaddr' },
+                { type => 'hash_valid' },
+                { type => 'defined' },
+                { type => 'integer_eq', value => -1 },
+                { type => 'defined' },
+            ],
+        },
+    },
+);
 my $dist = eval { $xs->generate_distribution_with_cfg($ir, $sa, $ctx) };
 ok(ref($dist) eq 'HASH', 'XS distribution generated') or BAIL_OUT("XS gen failed: $@");
 
