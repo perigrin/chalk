@@ -22,6 +22,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_current_slug = '';  # class-derived identifier prefix for multi-class collision avoidance
     field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
+    field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -90,6 +91,31 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $result = {
             $xs_path   => $self->_emit_xs($ir),
             $pm_path   => $self->_emit_pm_stub($ir),
+            'Build.PL' => $self->_emit_build_pl(),
+        };
+
+        %_cfg_lookup = ();
+        return $result;
+    }
+
+    # Generate a full distribution from multi-class XS compilation.
+    # $entries is an arrayref of { class_name, ir, sa, ctx } hashrefs.
+    method generate_distribution_multi_class($entries) {
+        # Build cfg_lookup for all entries
+        %_cfg_lookup = ();
+        for my $entry ($entries->@*) {
+            $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx});
+        }
+
+        my $xs_path = $self->_module_path_prefix() . '.xs';
+        my $pm_path = $self->_module_path_prefix() . '.pm';
+
+        # Use the first class's IR for PM stub (module name comes from $module_name)
+        my $first_ir = $entries->[0]{ir};
+
+        my $result = {
+            $xs_path   => $self->generate_multi_class($entries),
+            $pm_path   => $self->_emit_pm_stub($first_ir),
             'Build.PL' => $self->_emit_build_pl(),
         };
 
@@ -257,10 +283,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $component_slugs = $_composite_field_types->{$composite_field};
         my $field_idx = $field_map->{$composite_field};
 
-        # Verify all component slugs have the method in _multi_class_methods
+        # Verify all component slugs have the method compiled as _impl_ helpers
+        # (not eval_pv fallback — those don't get _impl_ functions)
         for my $slug ($component_slugs->@*) {
             return unless exists $_multi_class_methods{$slug}
                 && exists $_multi_class_methods{$slug}{$mname};
+            # Skip if this method fell to eval_pv fallback
+            return if exists $_fallback_method_slugs{"$slug:$mname"};
         }
 
         # Generate the unrolled helper function
@@ -450,8 +479,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '        HV *old_stash = PL_curstash;';
         push @lines, '        PL_curstash = stash;';
         push @lines, '';
-        push @lines, '        ENTER;';
-        push @lines, '        Perl_class_setup_stash(aTHX_ stash);';
+        # Skip class setup if the class already exists (loaded from Perl source).
+        # Only apply eval_pv method overrides for pre-existing classes.
+        push @lines, "        if (!HvSTASH_IS_CLASS(stash)) {";
+        push @lines, '            ENTER;';
+        push @lines, '            Perl_class_setup_stash(aTHX_ stash);';
         push @lines, '';
 
         # Apply :isa inheritance
@@ -498,8 +530,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
 
             if (defined $default) {
-                # Indent defop lines one extra level for the inner block
-                my @defop = split /\n/, $self->_emit_defop($default);
+                # _emit_defop returns a list of C lines
+                my @defop = $self->_emit_defop($default);
                 push @lines, map { "    $_" } @defop;
             }
 
@@ -517,15 +549,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, '        }';
         }
 
-        push @lines, '        LEAVE;';
+        push @lines, '            LEAVE;';
 
-        # Eval fallbacks
+        # Eval fallbacks for methods that couldn't compile to native XS.
+        # Only needed for fresh classes — pre-existing classes already have
+        # working Perl methods from their source files.
         if ($fallback_methods->@*) {
-            push @lines, '        /* eval_pv fallback for unsupported methods */';
+            push @lines, '            /* eval_pv fallback for unsupported methods */';
             for my $method ($fallback_methods->@*) {
-                push @lines, '    ' . $self->_emit_xs_eval_fallback($method);
+                push @lines, '        ' . $self->_emit_xs_eval_fallback($method);
             }
         }
+
+        push @lines, '        }';  # end if (!HvSTASH_IS_CLASS(stash))
 
         push @lines, '        PL_curstash = old_stash;';
         push @lines, '    }';
@@ -588,6 +624,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Explicit unsupported markers
         return true if $xs_output =~ /NULL \/\* unsupported \*\//;
         return true if $xs_output =~ /\/\* unknown node \*\//;
+
+        # C keywords used as identifiers (e.g., SvREFCNT_inc(return))
+        return true if $xs_output =~ /\b(?:return|break|continue|switch|case|default|goto)\s*[);,]/
+            && $xs_output =~ /SvREFCNT_inc\((?:return|break|continue)\)/;
 
         return false;
     }
@@ -729,6 +769,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $is_complex = $self->_is_complex_method($item);
                 if (!$is_complex) {
                     delete $_class_methods->{$mname};
+                    # Mark simple methods as "no _impl_" for cross-class dispatch
+                    $_fallback_method_slugs{"$_current_slug:$mname"} = 1;
                 }
             } elsif (!($item isa Chalk::Bootstrap::IR::Node::Constructor
                        && $item->class() eq 'FieldDecl')) {
@@ -736,14 +778,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        # Emit forward declarations for complex methods (those with helpers)
+        # Save method metadata for forward declaration generation after Pass 2
+        # (we defer this so we can filter out methods that fall to eval_pv fallback)
+        my %pre_fwd_methods;
         for my $mname (sort keys $_class_methods->%*) {
-            my $meta = $_class_methods->{$mname};
-            my @fwd_params = ('SV *self');
-            for my $pname ($meta->{params}->@*) {
-                push @fwd_params, "SV *$pname";
-            }
-            push @fwd_decl_lines, "static SV * _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+            $pre_fwd_methods{$mname} = $_class_methods->{$mname};
         }
 
         # Emit static CV cache declarations for field-invocant method calls
@@ -843,6 +882,28 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
+        # Record fallback methods per slug for cross-class dispatch filtering
+        my %fallback_names;
+        for my $fb_item (@fallback_methods) {
+            my $fb_name = $fb_item->inputs()->[0]->value();
+            $_fallback_method_slugs{"$_current_slug:$fb_name"} = 1;
+            $fallback_names{$fb_name} = 1;
+        }
+
+        # Emit forward declarations only for methods that got _impl_ helpers
+        # (skip those that fell to eval_pv fallback)
+        my @method_fwd_decls;
+        for my $mname (sort keys %pre_fwd_methods) {
+            next if exists $fallback_names{$mname};
+            my $meta = $pre_fwd_methods{$mname};
+            my @fwd_params = ('SV *self');
+            for my $pname ($meta->{params}->@*) {
+                push @fwd_params, "SV *$pname";
+            }
+            push @method_fwd_decls, "static SV * _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+        }
+        unshift @fwd_decl_lines, @method_fwd_decls;
+
         $_class_methods = undef;
 
         return {
@@ -914,6 +975,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Pre-pass: collect method metadata from all classes for cross-class dispatch.
         # Also populate composite_field_types for classes with composite_components.
         %_multi_class_methods = ();
+        %_fallback_method_slugs = ();
         $_composite_field_types = undef;
 
         for my $entry ($entries->@*) {
@@ -960,30 +1022,28 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, $sections->{helpers}->@*;
         }
 
-        # Phase 2: emit MODULE/PACKAGE sections with XSUBs (first class gets BOOT)
-        my $first = true;
+        # Phase 2: emit MODULE/PACKAGE sections with XSUBs
         for my $entry (@all_sections) {
             my $pkg = $entry->{class_name};
             push @lines, "MODULE = $module_name  PACKAGE = $pkg";
             push @lines, '';
             push @lines, $entry->{sections}{xsubs}->@*;
-
-            if ($first) {
-                # Consolidated BOOT block with all classes
-                push @lines, 'BOOT:';
-                push @lines, '{';
-                for my $e (@all_sections) {
-                    my $s = $e->{sections};
-                    my $boot_inner = $self->_emit_xs_boot_block_inner(
-                        $s->{class_decl}, $s->{field_map},
-                        $s->{fallback_methods}, $s->{has_adjust},
-                    );
-                    push @lines, $boot_inner->@*;
-                }
-                push @lines, '}';
-                $first = false;
-            }
         }
+
+        # Phase 3: consolidated BOOT block after all MODULE sections.
+        # BOOT must come last because xsubpp treats everything after BOOT:
+        # as C code until the next MODULE directive.
+        push @lines, 'BOOT:';
+        push @lines, '{';
+        for my $e (@all_sections) {
+            my $s = $e->{sections};
+            my $boot_inner = $self->_emit_xs_boot_block_inner(
+                $s->{class_decl}, $s->{field_map},
+                $s->{fallback_methods}, $s->{has_adjust},
+            );
+            push @lines, $boot_inner->@*;
+        }
+        push @lines, '}';
 
         %_cfg_lookup = ();
         %_multi_class_methods = ();
@@ -2159,9 +2219,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         $unique_slugs{$_} = 1 for $component_slugs->@*;
                         if (keys %unique_slugs == 1) {
                             my ($target_slug) = keys %unique_slugs;
-                            # Verify the method exists in the target class
+                            # Verify the method exists and was compiled (not eval_pv fallback)
                             if (exists $_multi_class_methods{$target_slug}
-                                    && exists $_multi_class_methods{$target_slug}{$method_name}) {
+                                    && exists $_multi_class_methods{$target_slug}{$method_name}
+                                    && !exists $_fallback_method_slugs{"$target_slug:$method_name"}) {
                                 my @call_args = ("aTHX_ $invocant_expr", @arg_exprs);
                                 my $call = "_impl_${target_slug}_${method_name}(" . join(', ', @call_args) . ")";
                                 if (@pre_eval) {
