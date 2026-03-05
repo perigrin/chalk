@@ -23,7 +23,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
     field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
-    field %_class_scope_vars;  # var_name => 1 for class-level lexicals (e.g., my $ZERO = [])
+    field %_class_scope_vars;  # var_name => { sigil, init, static_name } for class-level lexicals
     field %_class_subs;  # sub_name => { params => [...], is_sub => 1 } for class-scope sub declarations
 
     ADJUST {
@@ -565,9 +565,61 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         push @lines, '        }';  # end if (!HvSTASH_IS_CLASS(stash))
 
+        # Initialize static class-scope variables.
+        # These live outside the class setup block because they must be
+        # initialized even when the class already exists from Perl source.
+        if (keys %_class_scope_vars) {
+            push @lines, '';
+            push @lines, '        /* Initialize class-scope static variables */';
+            for my $var (sort keys %_class_scope_vars) {
+                my $info = $_class_scope_vars{$var};
+                my $sname = $info->{static_name};
+                push @lines, "        if (!$sname) {";
+                if (defined $info->{init}) {
+                    # Has an initializer — emit the C expression
+                    my $init_expr = eval { $self->_emit_xs_expr($info->{init}, {}) };
+                    if (defined $init_expr) {
+                        if ($info->{sigil} eq '%') {
+                            push @lines, "            $sname = (HV*)SvRV($init_expr);";
+                            push @lines, "            SvREFCNT_inc((SV*)$sname);";
+                        } elsif ($info->{sigil} eq '@') {
+                            push @lines, "            $sname = (AV*)SvRV($init_expr);";
+                            push @lines, "            SvREFCNT_inc((SV*)$sname);";
+                        } else {
+                            push @lines, "            $sname = SvREFCNT_inc($init_expr);";
+                        }
+                    } else {
+                        # Initializer too complex — use default
+                        push @lines, $self->_emit_csv_default($info, $sname)->@*;
+                    }
+                } else {
+                    # Bare declaration — use type-appropriate default
+                    push @lines, $self->_emit_csv_default($info, $sname)->@*;
+                }
+                push @lines, "        }";
+            }
+        }
+
         push @lines, '        PL_curstash = old_stash;';
         push @lines, '    }';
 
+        return \@lines;
+    }
+
+    # Emit default initialization for a class-scope static variable.
+    # Returns arrayref of C lines for use inside the BOOT block.
+    method _emit_csv_default($info, $sname) {
+        my @lines;
+        if ($info->{sigil} eq '%') {
+            push @lines, "            $sname = newHV();";
+            push @lines, "            SvREFCNT_inc((SV*)$sname);";
+        } elsif ($info->{sigil} eq '@') {
+            push @lines, "            $sname = newAV();";
+            push @lines, "            SvREFCNT_inc((SV*)$sname);";
+        } else {
+            push @lines, "            $sname = newSV(0);";
+            push @lines, "            SvREFCNT_inc($sname);";
+        }
         return \@lines;
     }
 
@@ -650,15 +702,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return false;
     }
 
-    # Detect methods that reference class-scope lexical variables.
-    # These variables (e.g., `my $ZERO = []` at class body scope) are shared
-    # across methods in Perl but would become separate uninitialized local
-    # copies in each XS _impl_ helper. Methods using them must fall back to Perl.
+    # Class-scope variables are now compiled as static C variables.
+    # This method is retained for backwards compatibility but always returns
+    # false — methods referencing class-scope vars can now compile to XS.
     method _uses_class_scope_vars($xs_output) {
-        return false unless keys %_class_scope_vars;
-        for my $var (keys %_class_scope_vars) {
-            return true if $xs_output =~ /\b\Q${var}\E_sv\b/;
-        }
         return false;
     }
 
@@ -827,18 +874,26 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        # Collect class-scope variable names from ALL VarDecl items in class body.
-        # This includes VarDecl items that were excluded from @adjust_stmts
-        # (e.g., VarDecl with SubDecl initializer). Methods that reference these
-        # variables cannot be safely compiled to XS because the variables are
-        # class-level lexicals shared across methods.
+        # Collect class-scope variable metadata from ALL VarDecl items in class body.
+        # These are compiled as static C variables, initialized in BOOT, and
+        # referenced directly by _impl_ helpers instead of falling to eval_pv.
         %_class_scope_vars = ();
         for my $item ($body->@*) {
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             if ($item->class() eq 'VarDecl') {
-                my $var = $item->inputs()->[0]->value();
+                my $raw_var = $item->inputs()->[0]->value();
+                my $sigil = substr($raw_var, 0, 1);
+                my $var = $raw_var;
                 $var =~ s/^[\$\@\%]//;
-                $_class_scope_vars{$var} = true;
+                my $init = $item->inputs()->[1];
+                # Skip VarDecl whose init is a SubDecl (those are sub definitions)
+                next if defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $init->class() eq 'SubDecl';
+                $_class_scope_vars{$var} = {
+                    sigil       => $sigil,
+                    init        => $init,
+                    static_name => "_csv_${_current_slug}_${var}",
+                };
             }
         }
 
@@ -1050,6 +1105,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @method_fwd_decls, "static SV * _impl_${_current_slug}_${sname}($param_str);";
         }
         unshift @fwd_decl_lines, @method_fwd_decls;
+
+        # Emit static declarations for class-scope variables
+        if (keys %_class_scope_vars) {
+            my @csv_decls;
+            push @csv_decls, "/* Class-scope variables for $_current_slug */";
+            for my $var (sort keys %_class_scope_vars) {
+                my $info = $_class_scope_vars{$var};
+                my $c_type = $info->{sigil} eq '%' ? 'HV *'
+                           : $info->{sigil} eq '@' ? 'AV *'
+                           :                         'SV *';
+                push @csv_decls, "static $c_type$info->{static_name} = NULL;";
+            }
+            unshift @fwd_decl_lines, @csv_decls, '';
+        }
 
         $_class_methods = undef;
 
@@ -2007,6 +2076,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $var =~ s/^[\$\@\%]//;
                 # Skip field variables — they use ObjectFIELDS, not PREINIT locals
                 next if defined $field_map && exists $field_map->{$var};
+                # Skip class-scope variables — they use static C vars, not PREINIT locals
+                next if %_class_scope_vars && exists $_class_scope_vars{$var};
                 $declared_vars->{$var} = true;
                 # Recurse into chained VarDecl init to collect inner variables
                 my $init = $item->inputs()->[1];
@@ -2215,6 +2286,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # globals set by _emit_xs_regex_match wrapper
             if ($var =~ /^\d+$/) {
                 return "get_sv(\"::_c$var\", GV_ADD)";
+            }
+            # Class-scope static variable — check before declared_vars because
+            # _collect_var_decls may create a local SV* for VarDecl in the
+            # method body, but the actual shared value lives in the static.
+            if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
+                my $info = $_class_scope_vars{$var};
+                # Hash/array statics: return a mortal reference so SvRV()
+                # in SubscriptExpr handler correctly unwraps to HV*/AV*.
+                if ($info->{sigil} eq '%' || $info->{sigil} eq '@') {
+                    return "sv_2mortal(newRV_inc((SV*)$info->{static_name}))";
+                }
+                return $info->{static_name};
             }
             if ($declared_vars && $declared_vars->{$var}) {
                 return "${var}_sv";
