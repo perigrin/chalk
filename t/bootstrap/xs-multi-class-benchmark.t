@@ -257,8 +257,86 @@ undef $single_dist;
 
 # ========================================================================
 # Phase D: Build and benchmark multi-class XS (Earley + all semirings)
+# Runs entirely in a subprocess to avoid OOM — parsing 7 files to IR
+# peaks at ~738MB RSS, and Perl doesn't return freed memory to the OS.
+# By running in a subprocess, the OS reclaims all memory on exit.
 # ========================================================================
 
+{
+    my $cwd = Cwd::getcwd();
+
+    # Write subprocess script to a temp file. Uses non-interpolating heredoc
+    # to avoid escaping nightmares. The benchmark source file path is passed
+    # as a command-line argument ($ARGV[0]).
+    require File::Temp;
+    my ($script_fh, $script_path) = File::Temp::tempfile(
+        'xs-bench-multi-XXXX', SUFFIX => '.pl', TMPDIR => 1, UNLINK => 1,
+    );
+    print $script_fh <<'END_SCRIPT';
+use 5.42.0;
+use utf8;
+use Time::HiRes qw(time);
+use File::Temp qw(tempdir);
+use File::Path qw(make_path);
+use File::Basename qw(dirname);
+
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+sub get_rss_mb() {
+    open my $fh, '<', '/proc/self/status' or return 0;
+    while (<$fh>) { return $1 / 1024 if /^VmRSS:\s+(\d+)\s+kB/ }
+    return 0;
+}
+
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Desugar;
+use Chalk::Bootstrap::Perl::Target::XS;
+use Chalk::Bootstrap::Perl::Target::ClassRegistry;
+use Chalk::Bootstrap::Semiring::FilterComposite;
+use Chalk::Bootstrap::Semiring::Boolean;
+use Chalk::Bootstrap::Semiring::Precedence;
+use Chalk::Bootstrap::Semiring::TypeInference;
+use Chalk::Bootstrap::Semiring::Structural;
+use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::Bootstrap::ConciseTree::Actions;
+use Chalk::Grammar::Perl::PrecedenceTable;
+use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Grammar::Perl::TypeLibrary;
+
+my $bench_file = $ARGV[0] or die "Usage: $0 <source-file>\n";
+
+# --- Step 1: Rebuild grammar ---
+print STDERR "multi-class: rebuilding grammar...\n";
+my $t_start = time();
+
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $perl_ir = perl_pipeline();
+die "Grammar failed" unless defined $perl_ir;
+
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $bnf_target->generate($perl_ir);
+$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSBenchMultiProc/g;
+eval $generated;
+die "Grammar compile: $@" if $@;
+
+my $gen_grammar = Chalk::Grammar::Perl::XSBenchMultiProc::grammar();
+my @ordered = sort {
+    ($a->name() eq 'Program' ? 0 : 1) <=> ($b->name() eq 'Program' ? 0 : 1)
+} $gen_grammar->@*;
+my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@ordered);
+
+# Free grammar IR — no longer needed
+undef $perl_ir;
+undef $generated;
+undef $bnf_target;
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+print STDERR sprintf("multi-class: grammar ready (%.1fs, RSS=%.0fMB)\n", time() - $t_start, get_rss_mb());
+
+# --- Step 2: Parse each file to IR ---
 my @class_files = (
     ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
     ['Chalk::Bootstrap::Semiring::Precedence',      'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
@@ -269,24 +347,44 @@ my @class_files = (
     ['Chalk::Bootstrap::Earley',                    'lib/Chalk/Bootstrap/Earley.pm'],
 );
 
-# Reuse Earley IR from single-class step; parse only the 6 semiring classes
-my %parsed;
-$parsed{'Chalk::Bootstrap::Earley'} = { ir => $earley_ir, sa => $earley_sa, ctx => $earley_ctx };
-pass('Chalk::Bootstrap::Earley reused from single-class');
+sub parse_one_file($grammar_ref, $file_path) {
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    open my $fh, '<:utf8', $file_path or die "Cannot read $file_path: $!";
+    local $/;
+    my $source = <$fh>;
+    close $fh;
 
-for my $entry (@class_files) {
-    my ($class_name, $file) = $entry->@*;
-    next if $class_name eq 'Chalk::Bootstrap::Earley';
-    my ($ir, $sa, $ctx) = parse_file_to_ir($file);
-    ok(defined $ir, "$class_name parses") or BAIL_OUT("Parse failed");
-    $parsed{$class_name} = { ir => $ir, sa => $sa, ctx => $ctx };
+    my $parser = build_perl_ir_parser($grammar_ref, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
+    my $result = $parser->parse_value($source);
+    return unless defined $result;
+
+    my $sa = $semiring->semirings()->[4];
+    my $sem_ctx = $result->[4];
+    return unless defined $sem_ctx;
+    my $ir = $sem_ctx->extract();
+    return unless defined $ir;
+
+    return ($ir, $sa, $sem_ctx);
 }
 
-# Register classes
+my %parsed;
+for my $entry (@class_files) {
+    my ($class_name, $class_file) = $entry->@*;
+    print STDERR "multi-class: parsing $class_name...\n";
+    my ($ir, $sa, $ctx) = parse_one_file($gen_grammar, $class_file);
+    die "Parse failed for $class_name" unless defined $ir;
+    $parsed{$class_name} = { ir => $ir, sa => $sa, ctx => $ctx };
+    print STDERR sprintf("multi-class: parsed $class_name OK (RSS=%.0fMB)\n", get_rss_mb());
+}
+
+# --- Step 3: Register classes and generate multi-class XS ---
 my @semiring_classes = map { $_->[0] } @class_files[0..4];
 my $reg = Chalk::Bootstrap::Perl::Target::ClassRegistry->new();
 for my $entry (@class_files) {
-    my ($class_name, $file) = $entry->@*;
+    my ($class_name, $class_file) = $entry->@*;
     next if $class_name eq 'Chalk::Bootstrap::Semiring::FilterComposite';
     next if $class_name eq 'Chalk::Bootstrap::Earley';
     $reg->register($class_name, {
@@ -331,37 +429,88 @@ my @entries = map {
     { class_name => $_->[0], ir => $p->{ir}, sa => $p->{sa}, ctx => $p->{ctx} }
 } @class_files;
 
-my $multi_dist = eval { $multi_xs->generate_distribution_multi_class(\@entries) };
-ok(ref($multi_dist) eq 'HASH', 'multi-class XS generated')
-    or BAIL_OUT("Multi-class gen failed: $@");
+print STDERR "multi-class: generating XS distribution...\n";
+my $dist = eval { $multi_xs->generate_distribution_multi_class(\@entries) };
+die "Multi-class gen failed: $@" unless ref($dist) eq 'HASH';
+print STDERR sprintf("multi-class: XS generated (RSS=%.0fMB)\n", get_rss_mb());
 
-# Extract stats from the generated XS file in the distribution
-{
-    my ($xs_key) = grep { /\.xs$/ } keys $multi_dist->%*;
-    if ($xs_key) {
-        my $multi_code = $multi_dist->{$xs_key};
-        my @impl = ($multi_code =~ /_impl_/g);
-        my @cm = ($multi_code =~ /call_method/g);
-        diag sprintf("Multi-class: _impl_=%d  call_method=%d  lines=%d",
-            scalar @impl, scalar @cm, scalar(split /\n/, $multi_code));
-    }
+# Report XS stats
+my ($xs_key) = grep { /\.xs$/ } keys $dist->%*;
+if ($xs_key) {
+    my $multi_code = $dist->{$xs_key};
+    my @impl = ($multi_code =~ /_impl_/g);
+    my @cm = ($multi_code =~ /call_method/g);
+    print STDERR sprintf("multi-class: _impl_=%d  call_method=%d  lines=%d\n",
+        scalar @impl, scalar @cm, scalar(split /\n/, $multi_code));
 }
 
-my $multi_tmpdir = build_xs_dist($multi_dist, 'multi-class');
-eval { require Test::XSBenchMulti };
-is($@, '', 'multi-class XS loads') or BAIL_OUT("Load failed: $@");
+# --- Step 4: Build XS ---
+# CLEANUP => 0 because the parent process needs the blib/ after we exit
+my $tmpdir = tempdir(CLEANUP => 0);
+for my $path (sort keys $dist->%*) {
+    my $full_path = "$tmpdir/$path";
+    my $dir = dirname($full_path);
+    make_path($dir) unless -d $dir;
+    open(my $wfh, '>:encoding(UTF-8)', $full_path) or die "Cannot write $full_path: $!";
+    print $wfh $dist->{$path};
+    close $wfh;
+}
 
-# Benchmark multi-class XS in a separate process to avoid OOM.
-# The parent process uses ~3GB after parsing 7 files to IR and building
-# two XS distributions. Forking copies all that memory. Instead, spawn
-# a fresh perl process that rebuilds the grammar (fast, ~2s) and loads
-# only the multi-class XS module.
+# Free parsed IR and dist before building — no longer needed
+undef %parsed;
+undef $dist;
+undef $reg;
+undef $multi_xs;
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+print STDERR sprintf("multi-class: freed IR (RSS=%.0fMB)\n", get_rss_mb());
+
 {
-    my $blib_lib  = "$multi_tmpdir/blib/lib";
-    my $blib_arch = "$multi_tmpdir/blib/arch";
-    my $cwd = Cwd::getcwd();
+    my $output = `cd "$tmpdir" && "$^X" -Ilib Build.PL 2>&1`;
+    die "Build.PL failed: $output" if ($? >> 8) != 0;
+}
+{
+    my $libs = join(':', 'lib', $ENV{PERL5LIB} // '');
+    my $output = `cd "$tmpdir" && PERL5LIB="$libs" "$^X" Build 2>&1`;
+    die "Build failed: $output" if ($? >> 8) != 0;
+}
 
-    my $bench_script = <<"END_SCRIPT";
+print STDERR sprintf("multi-class: built OK (%.1fs total, RSS=%.0fMB)\n", time() - $t_start, get_rss_mb());
+
+# Output the temp directory path so the parent can run the benchmark
+# in a fresh process after this subprocess exits (freeing ~758MB RSS).
+print "TMPDIR:$tmpdir\n";
+END_SCRIPT
+    close $script_fh;
+
+    # Phase D.1: Run the build subprocess (parse 7 files, generate XS, compile)
+    my $build_cmd = qq{"$^X" -Ilib "$script_path" "$file" 2>&1};
+    diag "multi-class: running build subprocess (parse+generate+compile)...";
+    my $build_output = `cd "$cwd" && $build_cmd`;
+    my $build_exit = $? >> 8;
+    my $build_signal = $? & 127;
+
+    # Show subprocess diagnostics
+    for my $line (split /\n/, $build_output) {
+        diag "  $line" if $line =~ /^multi-class:/;
+    }
+
+    if ($build_signal) {
+        fail("Multi-class XS build subprocess crashed with signal $build_signal");
+        diag "Output: $build_output";
+    } elsif ($build_exit != 0) {
+        fail("Multi-class XS build subprocess failed (exit=$build_exit)");
+        diag "Output: $build_output";
+    } elsif ($build_output =~ /^TMPDIR:(.+)/m) {
+        my $multi_tmpdir = $1;
+        pass('multi-class XS built successfully');
+
+        # Phase D.2: Run benchmark in a fresh process. The build subprocess
+        # has exited, freeing its ~758MB. This process (the parent) is ~200MB.
+        # The benchmark process starts fresh at ~63MB.
+        my ($bench_fh, $bench_path) = File::Temp::tempfile(
+            'xs-bench-run-XXXX', SUFFIX => '.pl', TMPDIR => 1, UNLINK => 1,
+        );
+        print $bench_fh <<'BENCH_SCRIPT';
 use 5.42.0;
 use utf8;
 use Time::HiRes qw(time);
@@ -384,48 +533,49 @@ use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
 
-# Rebuild grammar (fast, ~2s)
+my $bench_file = $ARGV[0] or die "Usage: $0 <source-file>\n";
+
+# Rebuild grammar (~2s, ~73MB)
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my \$perl_ir = perl_pipeline();
-die "Grammar failed" unless defined \$perl_ir;
+my $perl_ir = perl_pipeline();
+die "Grammar failed" unless defined $perl_ir;
 
-my \$bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
-my \$generated = \$bnf_target->generate(\$perl_ir);
-\$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSBenchSubproc/g;
-eval \$generated;
-die "Grammar compile: \$@" if \$@;
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $bnf_target->generate($perl_ir);
+$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSBenchRun/g;
+eval $generated;
+die "Grammar compile: $@" if $@;
 
-my \$gen_grammar = Chalk::Grammar::Perl::XSBenchSubproc::grammar();
-my \@ordered = sort {
-    (\$a->name() eq 'Program' ? 0 : 1) <=> (\$b->name() eq 'Program' ? 0 : 1)
-} \$gen_grammar->\@*;
-my \$desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\\\@ordered);
+my $gen_grammar = Chalk::Grammar::Perl::XSBenchRun::grammar();
+my @ordered = sort {
+    ($a->name() eq 'Program' ? 0 : 1) <=> ($b->name() eq 'Program' ? 0 : 1)
+} $gen_grammar->@*;
+my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@ordered);
 
-# Free IR before loading XS
-undef \$perl_ir;
-undef \$generated;
-undef \$bnf_target;
+# Free grammar IR
+undef $perl_ir;
+undef $generated;
+undef $bnf_target;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
-# Load multi-class XS module (overrides Earley + semiring methods)
+# Load multi-class XS module
 require Test::XSBenchMulti;
 
 # Read source
-open my \$fh, '<:utf8', '$file' or die "Cannot read: \$!";
-my \$source = do { local \$/; <\$fh> };
-close \$fh;
-my \$line_count = scalar(split /\\n/, \$source);
+open my $fh, '<:utf8', $bench_file or die "Cannot read $bench_file: $!";
+my $source = do { local $/; <$fh> };
+close $fh;
 
 # Build semiring and parser
-my \$semiring = Chalk::Bootstrap::Semiring::FilterComposite->new(
+my $semiring = Chalk::Bootstrap::Semiring::FilterComposite->new(
     semirings => [
         Chalk::Bootstrap::Semiring::Boolean->new(),
         Chalk::Bootstrap::Semiring::Precedence->new(
-            lookup => \\&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+            lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
         ),
         Chalk::Bootstrap::Semiring::TypeInference->new(
-            keyword_check  => \\&Chalk::Grammar::Perl::KeywordTable::is_keyword,
-            builtin_lookup => \\&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+            keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+            builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
         ),
         Chalk::Bootstrap::Semiring::Structural->new(),
         Chalk::Bootstrap::Semiring::SemanticAction->new(
@@ -433,46 +583,51 @@ my \$semiring = Chalk::Bootstrap::Semiring::FilterComposite->new(
         ),
     ],
 );
-my \$parser = Chalk::Bootstrap::Earley->new(
-    grammar  => \$desugared,
-    semiring => \$semiring,
+my $parser = Chalk::Bootstrap::Earley->new(
+    grammar  => $desugared,
+    semiring => $semiring,
 );
-\$semiring->reset_cache();
+$semiring->reset_cache();
 
-my \$t0 = time();
-my \$result = eval { \$parser->parse(\$source) };
-my \$elapsed = time() - \$t0;
+my $t0 = time();
+my $result = eval { $parser->parse($source) };
+my $elapsed = time() - $t0;
 
-if (defined \$result && \$result) {
-    print "OK:\$elapsed\\n";
+if (defined $result && $result) {
+    print "OK:$elapsed\n";
 } else {
-    print "FAIL:err=\$@ result=" . (defined \$result ? "'\$result'" : 'undef') . "\\n";
+    print "FAIL:err=$@ result=" . (defined $result ? "'$result'" : 'undef') . "\n";
 }
-END_SCRIPT
+BENCH_SCRIPT
+        close $bench_fh;
 
-    require File::Temp;
-    my ($script_fh, $script_path) = File::Temp::tempfile(
-        'xs-bench-XXXX', SUFFIX => '.pl', TMPDIR => 1, UNLINK => 1,
-    );
-    print $script_fh $bench_script;
-    close $script_fh;
+        my $bench_cmd = qq{"$^X" -I"$multi_tmpdir/blib/lib" -I"$multi_tmpdir/blib/arch" -Ilib "$bench_path" "$file" 2>&1};
 
-    my $cmd = qq{"$^X" -I"$blib_lib" -I"$blib_arch" -Ilib "$script_path" 2>&1};
-    my $output = `cd "$cwd" && $cmd`;
-    my $exit = $? >> 8;
-    my $signal = $? & 127;
+        diag "multi-class: running benchmark in fresh process...";
+        my $bench_output = `cd "$cwd" && $bench_cmd`;
+        my $bench_exit = $? >> 8;
+        my $bench_signal = $? & 127;
 
-    if ($signal) {
-        fail("Multi-class XS crashed with signal $signal");
-        diag "Output: $output";
-    } elsif ($output =~ /^OK:(.+)/m) {
-        my $elapsed = $1 + 0;
-        pass('Multi-class XS Earley parses Boolean.pm');
-        diag sprintf('  Multi-class XS:    %6.2fs  (%5.1fms/line)',
-            $elapsed, $elapsed / $line_count * 1000);
+        # Show bench diagnostics
+        for my $line (split /\n/, $bench_output) {
+            diag "  $line" if $line =~ /^bench:/;
+        }
+
+        if ($bench_signal) {
+            fail("Multi-class XS benchmark crashed with signal $bench_signal");
+            diag "Output: $bench_output";
+        } elsif ($bench_output =~ /^OK:(.+)/m) {
+            my $elapsed = $1 + 0;
+            pass('Multi-class XS Earley parses Boolean.pm');
+            diag sprintf('  Multi-class XS:    %6.2fs  (%5.1fms/line)',
+                $elapsed, $elapsed / $line_count * 1000);
+        } else {
+            fail("Multi-class XS benchmark failed (exit=$bench_exit)");
+            diag "Output: $bench_output";
+        }
     } else {
-        fail("Multi-class XS failed (exit=$exit)");
-        diag "Output: $output";
+        fail("Multi-class XS build produced no TMPDIR");
+        diag "Output: $build_output";
     }
 }
 
