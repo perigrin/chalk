@@ -17,6 +17,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_loop_depth = 0;  # nesting depth inside loops (suppresses bare-return detection)
     field $_class_methods;  # hashref: name => { returns => bool, params => \@param_names }
     field $_cv_cache;  # hashref: "fieldname_methodname" => { field_name, field_idx, method_name }
+    field $_semiring_intrinsics :param(semiring_intrinsics) = undef;  # hashref: field_name => { components => [...] }
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -169,6 +170,64 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
         return;
+    }
+
+    # Emit a static C function that inlines FilterComposite is_zero logic.
+    # Takes a semiring_intrinsics component spec and generates short-circuit
+    # checks for each component position. Returns arrayref of C source lines.
+    method _emit_inline_is_zero($field_name, $spec) {
+        my $components = $spec->{components};
+        my $field_idx = $field_map->{$field_name};
+        my @lines;
+
+        push @lines, 'static SV *_boolean_zero = NULL;';
+        push @lines, '';
+        push @lines, "static int _inline_is_zero(pTHX_ SV *semiring_field, SV *value) {";
+        push @lines, '    AV *tuple = (AV*)SvRV(value);';
+        push @lines, '    SV **p;';
+        push @lines, '';
+
+        for my $i (0 .. $components->$#*) {
+            my $comp = $components->[$i];
+            my $type = $comp->{type};
+
+            push @lines, "    /* Component [$i]: $type */";
+
+            if ($type eq 'boolean_refaddr') {
+                # Lazy-init Boolean zero sentinel on first call
+                push @lines, '    if (!_boolean_zero) {';
+                push @lines, '        AV *_sr_av = (AV*)SvRV(semiring_field);';
+                push @lines, '        SV *_sr0 = *av_fetch(_sr_av, 0, 0);';
+                push @lines, '        dSP; ENTER; SAVETMPS; PUSHMARK(SP);';
+                push @lines, '        XPUSHs(_sr0); PUTBACK;';
+                push @lines, '        call_method("zero", G_SCALAR); SPAGAIN;';
+                push @lines, '        _boolean_zero = SvREFCNT_inc(POPs);';
+                push @lines, '        PUTBACK; FREETMPS; LEAVE;';
+                push @lines, '    }';
+                push @lines, "    p = av_fetch(tuple, $i, 0);";
+                push @lines, '    if (p && SvROK(*p) && SvRV(*p) == SvRV(_boolean_zero)) return 1;';
+            } elsif ($type eq 'hash_valid') {
+                push @lines, "    p = av_fetch(tuple, $i, 0);";
+                push @lines, '    if (p && SvROK(*p)) {';
+                push @lines, '        SV **vp = hv_fetchs((HV*)SvRV(*p), "valid", 0);';
+                push @lines, '        if (!vp || !SvTRUE(*vp)) return 1;';
+                push @lines, '    }';
+            } elsif ($type eq 'defined') {
+                push @lines, "    p = av_fetch(tuple, $i, 0);";
+                push @lines, '    if (!p || !SvOK(*p)) return 1;';
+            } elsif ($type eq 'integer_eq') {
+                my $val = $comp->{value};
+                push @lines, "    p = av_fetch(tuple, $i, 0);";
+                push @lines, "    if (p && SvIV(*p) == $val) return 1;";
+            }
+
+            push @lines, '';
+        }
+
+        push @lines, '    return 0;';
+        push @lines, '}';
+
+        return \@lines;
     }
 
     # Emit BOOT block for feature class setup using defop-based field initialization.
@@ -511,6 +570,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @fwd_decl_lines, '';
                 for my $key (sort keys $_cv_cache->%*) {
                     push @fwd_decl_lines, "static CV *_cv_${key} = NULL;";
+                }
+            }
+
+            # Emit inline semiring intrinsics (e.g., _inline_is_zero)
+            if (defined $_semiring_intrinsics) {
+                for my $fname (sort keys $_semiring_intrinsics->%*) {
+                    if (defined $field_map && exists $field_map->{$fname}) {
+                        my $spec = $_semiring_intrinsics->{$fname};
+                        if (defined $spec->{components}) {
+                            push @helper_lines, $self->_emit_inline_is_zero($fname, $spec)->@*;
+                            push @helper_lines, '';
+                        }
+                    }
                 }
             }
 
@@ -1749,6 +1821,34 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 return '({ ' . join('; ', @stmts) . '; })';
             }
             return $call;
+        }
+
+        # Semiring intrinsic: when invocant is a field with intrinsics configured
+        # and method is is_zero, emit a direct C call instead of Perl dispatch.
+        # Eliminates the entire ENTER/SAVETMPS/call_sv/FREETMPS/LEAVE bridge.
+        if ($method_name eq 'is_zero' && defined $_semiring_intrinsics
+                && defined $invocant_node
+                && $invocant_node isa Chalk::Bootstrap::IR::Node::Constant) {
+            my $val = $invocant_node->value();
+            if ($val =~ /^[\$\@\%](.+)/) {
+                my $var = $1;
+                if (defined $field_map && exists $field_map->{$var}
+                        && exists $_semiring_intrinsics->{$var}) {
+                    my $fidx = $field_map->{$var};
+                    # The semiring field stores the FilterComposite; its _semirings
+                    # arrayref is passed to _inline_is_zero for lazy Boolean zero init.
+                    # We pass the field's _semirings (obtained via method call once,
+                    # but the inline function caches it).
+                    my $arg = $arg_exprs[0] // 'NULL';
+                    my $intrinsic = "_inline_is_zero(aTHX_ ObjectFIELDS(SvRV(self))[$fidx], $arg)";
+                    my $expr = "($intrinsic ? &PL_sv_yes : &PL_sv_no)";
+                    if (@pre_eval) {
+                        my @stmts = (@pre_eval, $expr);
+                        return '({ ' . join('; ', @stmts) . '; })';
+                    }
+                    return $expr;
+                }
+            }
         }
 
         # CV cache optimization: when invocant is a field variable and method
