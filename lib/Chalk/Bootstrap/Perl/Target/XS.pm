@@ -634,6 +634,22 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return false;
     }
 
+    # Detect methods that call uncompiled my sub (lexical subs).
+    # Lexical subs are not in the package namespace, so neither call_pv
+    # nor eval_pv can reach them. Methods calling them must keep their
+    # original Perl implementation where the lexical sub is visible.
+    method _calls_uncompiled_my_subs($xs_output) {
+        return false unless keys %_class_subs;
+        for my $sname (keys %_class_subs) {
+            next if $_class_subs{$sname}{compiled};
+            # Uncompiled my sub called via call_pv — won't work at runtime
+            if ($xs_output =~ /call_pv\([^)]*\Q${sname}\E/) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     # Detect methods that reference class-scope lexical variables.
     # These variables (e.g., `my $ZERO = []` at class body scope) are shared
     # across methods in Perl but would become separate uninitialized local
@@ -897,6 +913,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         # Pass 2: emit all methods (with $_class_methods finalized)
+        # skip_method_names: methods that call uncompiled my subs — neither
+        # XSUB nor eval_pv can reach lexical subs, so the original Perl
+        # method must stay in place. Tracked as fallbacks for cross-class
+        # dispatch filtering but not emitted.
+        my %skip_method_names;
         for my $item (@method_items) {
             my $mname = $item->inputs()->[0]->value();
 
@@ -922,7 +943,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             if (ref($result) eq 'HASH') {
                 my $helper_output = join("\n", $result->{helper}->@*);
-                if ($self->_needs_eval_fallback($helper_output)) {
+                if ($self->_calls_uncompiled_my_subs($helper_output)) {
+                    # Method calls a lexical sub that can't be compiled.
+                    # Neither XSUB nor eval_pv can reach it — keep
+                    # the original Perl method in place.
+                    delete $_class_methods->{$mname};
+                    $skip_method_names{$mname} = 1;
+                } elsif ($self->_needs_eval_fallback($helper_output)) {
                     delete $_class_methods->{$mname};
                     push @fallback_methods, $item;
                 } elsif ($self->_uses_class_scope_vars($helper_output)) {
@@ -946,7 +973,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             } else {
                 my $method_lines = $result;
                 my $xs_output = join("\n", $method_lines->@*);
-                if ($self->_needs_eval_fallback($xs_output)) {
+                if ($self->_calls_uncompiled_my_subs($xs_output)) {
+                    delete $_class_methods->{$mname};
+                    $skip_method_names{$mname} = 1;
+                } elsif ($self->_needs_eval_fallback($xs_output)) {
                     push @fallback_methods, $item;
                 } elsif ($self->_uses_class_scope_vars($xs_output)) {
                     delete $_class_methods->{$mname};
@@ -981,12 +1011,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        # Record fallback methods per slug for cross-class dispatch filtering
+        # Record fallback and skipped methods per slug for cross-class dispatch filtering
         my %fallback_names;
         for my $fb_item (@fallback_methods) {
             my $fb_name = $fb_item->inputs()->[0]->value();
             $_fallback_method_slugs{"$_current_slug:$fb_name"} = 1;
             $fallback_names{$fb_name} = 1;
+        }
+        # Skipped methods (call uncompiled my subs) also need fallback slug tracking
+        for my $sname (keys %skip_method_names) {
+            $_fallback_method_slugs{"$_current_slug:$sname"} = 1;
+            $fallback_names{$sname} = 1;
         }
 
         # Emit forward declarations only for methods that got _impl_ helpers

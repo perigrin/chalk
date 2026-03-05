@@ -181,12 +181,9 @@ is(ref($zero), 'ARRAY', 'zero() returns an arrayref');
 is(scalar $zero->@*, 5, 'zero() has 5 elements (one per semiring)');
 
 my $one = eval { $semiring->one() };
-TODO: {
-    local $TODO = 'SemanticAction one() eval_pv fallback calls private _one_ctx sub';
-    ok(defined $one, 'one() returns a value') or diag "Error: $@";
-    is(ref($one), 'ARRAY', 'one() returns an arrayref');
-    is(scalar $one->@*, 5, 'one() has 5 elements (one per semiring)');
-}
+ok(defined $one, 'one() returns a value') or diag "Error: $@";
+is(ref($one), 'ARRAY', 'one() returns an arrayref');
+is(scalar $one->@*, 5, 'one() has 5 elements (one per semiring)');
 
 # Verify the zero tuple is actually zero
 ok($semiring->is_zero($zero), 'zero() produces a tuple that is_zero recognizes');
