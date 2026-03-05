@@ -24,6 +24,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
     field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
     field %_class_scope_vars;  # var_name => 1 for class-level lexicals (e.g., my $ZERO = [])
+    field %_class_subs;  # sub_name => { params => [...], is_sub => 1 } for class-scope sub declarations
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -623,7 +624,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # that require eval_pv fallback instead of XSUB emission.
     method _needs_eval_fallback($xs_output) {
         # Explicit unsupported markers
-        return true if $xs_output =~ /NULL \/\* unsupported \*\//;
+        return true if $xs_output =~ /NULL \/\* unsupported[^*]*\*\//;
         return true if $xs_output =~ /\/\* unknown node \*\//;
 
         # C keywords used as identifiers (e.g., SvREFCNT_inc(return))
@@ -772,8 +773,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $body = $class_decl->inputs()->[2];
         my @adjust_stmts;
         my @method_items;
+        my @sub_items;
 
-        # Pass 1: classify methods as simple or complex
+        # Pass 1: classify methods and subs as simple or complex
         for my $item ($body->@*) {
             if ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && $item->class() eq 'MethodDecl') {
@@ -785,23 +787,84 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     # Mark simple methods as "no _impl_" for cross-class dispatch
                     $_fallback_method_slugs{"$_current_slug:$mname"} = 1;
                 }
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'SubDecl') {
+                push @sub_items, $item;
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'VarDecl') {
+                # Check for mis-parented SubDecl inside VarDecl initializer.
+                # Parser sometimes nests SubDecl as VarDecl initializer when
+                # `my %_cache; sub _intern(...)` are adjacent statements.
+                my $init = $item->inputs()->[1];
+                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $init->class() eq 'SubDecl') {
+                    push @sub_items, $init;
+                    # Don't add to @adjust_stmts — the SubDecl body would
+                    # break ADJUST compilation. The var name is still tracked
+                    # for class-scope-vars via the loop below.
+                } else {
+                    push @adjust_stmts, $item;
+                }
             } elsif (!($item isa Chalk::Bootstrap::IR::Node::Constructor
                        && $item->class() eq 'FieldDecl')) {
                 push @adjust_stmts, $item;
             }
         }
 
-        # Collect class-scope variable names from ADJUST statements.
-        # Methods that reference these variables cannot be safely compiled to XS
-        # because the variables are class-level lexicals shared across methods,
-        # but the XS emitter would create separate uninitialized local copies.
+        # Collect class-scope variable names from ALL VarDecl items in class body.
+        # This includes VarDecl items that were excluded from @adjust_stmts
+        # (e.g., VarDecl with SubDecl initializer). Methods that reference these
+        # variables cannot be safely compiled to XS because the variables are
+        # class-level lexicals shared across methods.
         %_class_scope_vars = ();
-        for my $stmt (@adjust_stmts) {
-            next unless $stmt isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($stmt->class() eq 'VarDecl') {
-                my $var = $stmt->inputs()->[0]->value();
+        for my $item ($body->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            if ($item->class() eq 'VarDecl') {
+                my $var = $item->inputs()->[0]->value();
                 $var =~ s/^[\$\@\%]//;
                 $_class_scope_vars{$var} = true;
+            }
+        }
+
+        # Pass 1b: try to compile class-scope subs BEFORE method emission.
+        # Subs that compile successfully stay in %_class_subs so method bodies
+        # can emit _impl_ direct calls. Failed subs are removed so methods
+        # fall back to call_pv with the fully-qualified name.
+        for my $sub_item (@sub_items) {
+            my $sname = $sub_item->inputs()->[0]->value();
+            my $sparams = $sub_item->inputs()->[1];
+            my $sbody = $sub_item->inputs()->[2];
+
+            my @param_nodes;
+            for my $p ($sparams->@*) {
+                push @param_nodes, $p;
+            }
+
+            my $result = eval {
+                $self->_emit_xs_sub($sname, \@param_nodes, $sbody);
+            };
+            if (!defined $result && $@) {
+                delete $_class_methods->{$sname};
+                $_class_subs{$sname}{compiled} = false;
+                next;
+            }
+
+            if (ref($result) eq 'HASH') {
+                my $helper_output = join("\n", $result->{helper}->@*);
+                # Reject subs that need eval_pv, reference class-scope vars,
+                # or contain any eval_pv calls (indicating partially-unsupported body)
+                if ($self->_needs_eval_fallback($helper_output)
+                        || $self->_uses_class_scope_vars($helper_output)
+                        || $helper_output =~ /eval_pv\(/) {
+                    # Sub can't be compiled — mark as uncompiled but keep in
+                    # %_class_subs so call sites use call_pv (not eval_pv)
+                    delete $_class_methods->{$sname};
+                    $_class_subs{$sname}{compiled} = false;
+                } else {
+                    $_class_subs{$sname}{compiled} = true;
+                    push @helper_lines, $result->{helper}->@*;
+                    push @helper_lines, '';
+                }
             }
         }
 
@@ -931,12 +994,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @method_fwd_decls;
         for my $mname (sort keys %pre_fwd_methods) {
             next if exists $fallback_names{$mname};
+            # Skip subs — they get their own forward decls (with different param lists)
+            next if exists $_class_subs{$mname};
             my $meta = $pre_fwd_methods{$mname};
             my @fwd_params = ('SV *self');
             for my $pname ($meta->{params}->@*) {
                 push @fwd_params, "SV *$pname";
             }
             push @method_fwd_decls, "static SV * _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+        }
+        # Forward declarations for compiled class-scope subs (no $self parameter)
+        for my $sname (sort keys %_class_subs) {
+            my $meta = $_class_subs{$sname};
+            next unless $meta->{compiled};
+            my @fwd_params;
+            for my $pname ($meta->{params}->@*) {
+                push @fwd_params, "SV *$pname";
+            }
+            my $param_str = @fwd_params ? 'pTHX_ ' . join(', ', @fwd_params) : 'pTHX';
+            push @method_fwd_decls, "static SV * _impl_${_current_slug}_${sname}($param_str);";
         }
         unshift @fwd_decl_lines, @method_fwd_decls;
 
@@ -1213,9 +1289,27 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $body = $class_decl->inputs()->[2];
         my %methods;
 
+        # Collect all MethodDecl and SubDecl nodes from the class body.
+        # SubDecl may be mis-parented as VarDecl initializer due to parser
+        # ambiguity (e.g., `my %_cache; sub _intern(...)` parsed as one unit).
+        # Recurse one level into VarDecl initializers to find these.
+        my @items_to_scan;
         for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
-                && $item->class() eq 'MethodDecl';
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            push @items_to_scan, $item;
+            # Check VarDecl initializer for mis-parented SubDecl
+            if ($item->class() eq 'VarDecl') {
+                my $init = $item->inputs()->[1];
+                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $init->class() eq 'SubDecl') {
+                    push @items_to_scan, $init;
+                }
+            }
+        }
+
+        for my $item (@items_to_scan) {
+            my $class = $item->class();
+            next unless $class eq 'MethodDecl' || $class eq 'SubDecl';
 
             my $name   = $item->inputs()->[0]->value();
             my $params = $item->inputs()->[1];
@@ -1227,11 +1321,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @param_names, $pname;
             }
 
-            # Default to true (returning) — conservative assumption.
-            $methods{$name} = {
+            my $entry = {
                 returns => true,
                 params  => \@param_names,
             };
+
+            # Track subs separately so the emitter knows they lack $self
+            if ($class eq 'SubDecl') {
+                $entry->{is_sub} = true;
+                $entry->{class_name} = $class_decl->inputs()->[0]->value();
+                $_class_subs{$name} = $entry;
+            }
+
+            $methods{$name} = $entry;
         }
 
         return \%methods;
@@ -1504,10 +1606,26 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # retval via the 'retval = ...; goto xsreturn;' pattern.
         if (!$last_is_return && @code) {
             my $last_code = $code[-1];
-            # Strip trailing semicolon from bare expression statement
-            if ($last_code =~ s/;\s*$//) {
-                my $wrapped = $self->_wrap_retval($last_code);
-                $code[-1] = "retval = $wrapped;";
+            # Handle multi-line code entries (e.g., chained VarDecl):
+            # split into separate entries, only wrap the final line as retval.
+            if ($last_code =~ /\n/) {
+                my @parts = split(/\n/, $last_code);
+                my $final_line = pop @parts;
+                # Replace the multi-line entry with the leading lines
+                $code[-1] = join("\n", @parts);
+                # Wrap the final line as retval
+                if ($final_line =~ s/;\s*$//) {
+                    my $wrapped = $self->_wrap_retval($final_line);
+                    push @code, "retval = $wrapped;";
+                } else {
+                    push @code, $final_line;
+                }
+            } else {
+                # Strip trailing semicolon from bare expression statement
+                if ($last_code =~ s/;\s*$//) {
+                    my $wrapped = $self->_wrap_retval($last_code);
+                    $code[-1] = "retval = $wrapped;";
+                }
             }
         }
 
@@ -1575,6 +1693,104 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         return { helper => \@helper, xsub => \@xsub, returns => $has_return };
+    }
+
+    # Emit a class-scope sub declaration as a static C helper function.
+    # Unlike methods, subs have no implicit $self parameter.
+    # Returns hashref { helper => [...] } (no xsub — subs are internal only).
+    method _emit_xs_sub($name, $params, $body) {
+        my @code;
+
+        my $last_item = $body->[-1];
+        my $last_is_return = (defined $last_item
+            && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
+            && $last_item->class() eq 'ReturnStmt');
+        my $body_has_returns = $self->_body_contains_return($body);
+        my $single_stmt_return = (!$last_is_return
+            && scalar($body->@*) == 1
+            && defined $last_item
+            && $self->_is_single_stmt_return_expr($last_item));
+        my $tail_expr_return = (!$last_is_return
+            && defined $last_item
+            && ($self->_is_unambiguous_value_expr($last_item)
+                || ($body_has_returns && $self->_is_bare_return_expr($last_item)))
+            );
+        my $has_return = $last_is_return || $tail_expr_return
+               || $single_stmt_return || $body_has_returns;
+
+        my %declared_vars;
+
+        # Build params list (no $self for subs)
+        my @xs_params;
+        for my $p ($params->@*) {
+            my $pname;
+            if ($p isa Chalk::Bootstrap::IR::Node) {
+                $pname = $p->value();
+            } else {
+                $pname = "$p";
+            }
+            $pname =~ s/^\$//;
+            push @xs_params, "SV *$pname";
+            $declared_vars{"param:$pname"} = true;
+        }
+
+        $self->_collect_var_decls($body, \%declared_vars);
+        $self->_collect_all_var_refs($body, \%declared_vars);
+
+        my $has_early_return = $self->_has_early_return($body);
+
+        my $prev_return_context = $_return_context;
+        $_return_context = $has_return;
+
+        for my $idx (0 .. $body->@* - 1) {
+            my $is_last = ($idx == $body->@* - 1);
+            my $stmt = $self->_emit_xs_stmt($body->[$idx], \%declared_vars, $is_last);
+            push @code, $stmt if defined $stmt;
+        }
+
+        if (!$last_is_return && @code) {
+            my $last_code = $code[-1];
+            if ($last_code =~ s/;\s*$//) {
+                my $wrapped = $self->_wrap_retval($last_code);
+                $code[-1] = "retval = $wrapped;";
+            }
+        }
+
+        $_return_context = $prev_return_context;
+
+        # Build the static helper function (no XSUB wrapper — internal only)
+        my @helper;
+        my $helper_name = "_impl_${_current_slug}_${name}";
+        my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
+        push @helper, "static SV * $helper_name($param_str) {";
+
+        push @helper, '    SV *retval = NULL;';
+        for my $var (sort keys %declared_vars) {
+            next if $var eq 'hash';
+            next if $var =~ /^param:/;
+            push @helper, "    SV *${var}_sv = NULL;";
+        }
+
+        for my $stmt (@code) {
+            my $rewritten = $stmt;
+            $rewritten =~ s/\bRETVAL\b/retval/g;
+            $rewritten =~ s/\breturn\s*;/return \&PL_sv_undef;/g;
+            for my $line (split /\n/, $rewritten) {
+                push @helper, "    $line";
+            }
+        }
+
+        if ($has_early_return) {
+            push @helper, '    xsreturn:';
+        }
+        if ($has_return) {
+            push @helper, '    return retval;';
+        } else {
+            push @helper, '    return &PL_sv_undef;';
+        }
+        push @helper, '}';
+
+        return { helper => \@helper };
     }
 
     # Check if a body contains early returns (ReturnStmt inside if body)
@@ -3042,6 +3258,44 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @stmts, 'PUTBACK', 'FREETMPS', 'LEAVE';
             push @stmts, '_cpv';
             return '({ ' . join('; ', @stmts) . '; })';
+        }
+
+        # Check if this is a call to a known class-scope sub.
+        # Compiled subs get direct _impl_ C calls.
+        # Uncompiled subs get call_pv with the FQ package name (not eval_pv).
+        if (%_class_subs && exists $_class_subs{$name}) {
+            my @c_args;
+            for my $arg ($args->@*) {
+                push @c_args, $self->_emit_xs_expr($arg, $declared_vars);
+            }
+
+            if ($_class_subs{$name}{compiled}) {
+                # Direct C call to compiled helper
+                my $helper_name = "_impl_${_current_slug}_${name}";
+                my $call_args = 'aTHX_';
+                if (@c_args) {
+                    $call_args .= ' ' . join(', ', @c_args);
+                }
+                return "$helper_name($call_args)";
+            } else {
+                # Uncompiled sub — use call_pv with fully-qualified name.
+                # The sub exists in the Perl namespace, just can't be compiled to C.
+                my $class_name = $_class_subs{$name}{class_name} // '';
+                my $fq_name = $class_name ? "${class_name}::${name}" : $name;
+                my $escaped_name = $self->_escape_c_string($fq_name);
+                my @stmts;
+                push @stmts, 'dSP', 'ENTER', 'SAVETMPS', 'PUSHMARK(SP)';
+                for my $c_arg (@c_args) {
+                    push @stmts, "XPUSHs($c_arg)";
+                }
+                push @stmts, 'PUTBACK';
+                push @stmts, "call_pv(\"$escaped_name\", G_SCALAR)";
+                push @stmts, 'SPAGAIN';
+                push @stmts, 'SV *_cpv = SvREFCNT_inc(POPs)';
+                push @stmts, 'PUTBACK', 'FREETMPS', 'LEAVE';
+                push @stmts, '_cpv';
+                return '({ ' . join('; ', @stmts) . '; })';
+            }
         }
 
         # Fallback — preserve arguments via eval_pv with real Perl expression

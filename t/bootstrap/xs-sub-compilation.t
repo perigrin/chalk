@@ -83,4 +83,38 @@ if (@sub_decls) {
     }
 }
 
+# --- Step 3: Generate XS and verify SubDecl produces _impl_ helpers ---
+my $reg = Chalk::Bootstrap::Perl::Target::ClassRegistry->new();
+$reg->register('Chalk::Bootstrap::Semiring::Precedence', {
+    ir => $ir, sa => $sa, ctx => $ctx, uses => [],
+});
+
+my $xs = Chalk::Bootstrap::Perl::Target::XS->new(
+    module_name => 'Test::XSSubCompile',
+    class_registry => $reg,
+);
+
+my @entries = ({
+    class_name => 'Chalk::Bootstrap::Semiring::Precedence',
+    ir => $ir, sa => $sa, ctx => $ctx,
+});
+
+my $xs_code = eval { $xs->generate_multi_class(\@entries) };
+ok(defined $xs_code, 'multi-class XS generation succeeds')
+    or diag "XS gen failed: $@";
+
+# The XS emitter should recognize SubDecl nodes and emit _impl_ helpers
+# for class-scope subs like _intern, so they can be called directly from C
+# instead of via broken eval_pv calls.
+if (defined $xs_code) {
+    # _intern references %_cache (class-scope var) so it can't be fully compiled.
+    # But calls to it should use call_pv with FQ name, NOT eval_pv with bare name.
+    unlike($xs_code, qr/eval_pv\("_intern/,
+        'XS code does NOT use eval_pv for bare _intern calls');
+
+    # Should use call_pv with the fully-qualified package name
+    like($xs_code, qr/call_pv\("Chalk::Bootstrap::Semiring::Precedence::_intern"/,
+        'XS code uses call_pv with FQ name for _intern');
+}
+
 done_testing();
