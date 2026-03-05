@@ -10,7 +10,7 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
 my %PREFIX_BUILTINS = map { $_ => 1 } qw(scalar defined ref exists delete keys values each length chr ord substr sprintf join split);
-my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl ReturnStmt DieCall);
+my %STMT_BOUNDARY_CLASSES = map { $_ => 1 } qw(ClassDecl MethodDecl FieldDecl ReturnStmt DieCall SubDecl VarDecl);
 my %STMT_BOUNDARY_OPS = map { $_ => 1 } qw(If Loop);
 my %STOP_KEYWORDS = map { $_ => 1 } qw(push unshift return die my for if unless while until);
 
