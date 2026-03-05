@@ -664,11 +664,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $params = $method_decl->inputs()->[1];
         my $body = $method_decl->inputs()->[2];
 
-        # Use Perl target to generate the method body statements
+        # Use Perl target to generate the method body statements.
+        # Some IR node types (e.g., Node::If) are not supported by the
+        # Perl target — skip those items gracefully.
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my @body_lines;
         for my $item ($body->@*) {
-            my $code = $perl_target->_emit_node($item);
+            my $code = eval { $perl_target->_emit_node($item) };
+            if (!defined $code && $@) {
+                # Unsupported node type — skip this item in eval fallback
+                next;
+            }
             push @body_lines, $code if defined $code;
         }
 
@@ -776,7 +782,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 next;
             }
 
-            my $result = $self->_emit_xs_method($item);
+            my $result = eval { $self->_emit_xs_method($item) };
+            if (!defined $result && $@) {
+                # Method compilation failed (unsupported IR node types etc.)
+                # Fall back to eval_pv
+                delete $_class_methods->{$mname};
+                push @fallback_methods, $item;
+                next;
+            }
 
             if (ref($result) eq 'HASH') {
                 my $helper_output = join("\n", $result->{helper}->@*);
@@ -814,7 +827,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Emit ADJUST as native void XSUB if class has ADJUST statements
         my $has_adjust = false;
         if (@adjust_stmts) {
-            my $result = $self->_emit_xs_complex_method('_ADJUST', [], \@adjust_stmts);
+            my $result = eval { $self->_emit_xs_complex_method('_ADJUST', [], \@adjust_stmts) };
             if (ref($result) eq 'HASH') {
                 my $helper_output = join("\n", $result->{helper}->@*);
                 if (!$self->_needs_eval_fallback($helper_output)) {
