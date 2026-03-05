@@ -346,6 +346,102 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@lines;
     }
 
+    # Emit the inner content of a BOOT block for a single class (no BOOT:{} wrapper).
+    # Used by generate_multi_class to consolidate multiple classes into one BOOT.
+    method _emit_xs_boot_block_inner($class_decl, $fmap, $fallback_methods = [], $has_adjust = false) {
+        my @lines;
+        my $class_name = $class_decl->inputs()->[0]->value();
+        my $escaped_class = $self->_escape_c_string($class_name);
+
+        push @lines, "    /* Class: $class_name */";
+        push @lines, '    {';
+        push @lines, "        HV *stash = gv_stashpv(\"$escaped_class\", GV_ADD);";
+        push @lines, '        HV *old_stash = PL_curstash;';
+        push @lines, '        PL_curstash = stash;';
+        push @lines, '';
+        push @lines, '        ENTER;';
+        push @lines, '        Perl_class_setup_stash(aTHX_ stash);';
+        push @lines, '';
+
+        # Apply :isa inheritance
+        my $parent = $class_decl->inputs()->[1];
+        if (defined $parent) {
+            my $parent_name = $parent->value();
+            my $isa_attr = "isa($parent_name)";
+            my $escaped_attr = $self->_escape_c_string($isa_attr);
+            push @lines, '        {';
+            push @lines, "            OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";
+            push @lines, '            OP *list = newLISTOP(OP_LIST, 0, attr, NULL);';
+            push @lines, '            Perl_class_apply_attributes(aTHX_ stash, list);';
+            push @lines, '        }';
+            push @lines, '';
+        }
+
+        # Register fields
+        my $body = $class_decl->inputs()->[2];
+        for my $item ($body->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
+                     && $item->class() eq 'FieldDecl';
+
+            my $name_node = $item->inputs()->[0];
+            my $attrs = $item->inputs()->[1];
+            my $default = $item->inputs()->[2];
+            my $field_name = $name_node->value();
+            my $escaped = $self->_escape_c_string($field_name);
+
+            push @lines, '        {';
+            push @lines, '            ENTER;';
+            push @lines, '            Perl_class_prepare_initfield_parse(aTHX);';
+            push @lines, "            PADOFFSET padix = pad_add_name_pvs(\"$escaped\", padadd_FIELD, NULL, NULL);";
+            push @lines, '            PADNAME *pn = PadnamelistARRAY(PadlistNAMES(CvPADLIST(PL_compcv)))[padix];';
+
+            if (ref($attrs) eq 'ARRAY') {
+                for my $attr ($attrs->@*) {
+                    my $attr_name = $attr->inputs()->[0]->value();
+                    my $escaped_attr = $self->_escape_c_string($attr_name);
+                    push @lines, '            {';
+                    push @lines, "                OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";
+                    push @lines, '                Perl_class_apply_field_attributes(aTHX_ pn, attr);';
+                    push @lines, '            }';
+                }
+            }
+
+            if (defined $default) {
+                # Indent defop lines one extra level for the inner block
+                my @defop = split /\n/, $self->_emit_defop($default);
+                push @lines, map { "    $_" } @defop;
+            }
+
+            push @lines, '            LEAVE;';
+            push @lines, '        }';
+        }
+
+        # Register ADJUST
+        if ($has_adjust) {
+            push @lines, '        {';
+            push @lines, "            GV *adjust_gv = gv_fetchpvs(\"_ADJUST\", 0, SVt_PVCV);";
+            push @lines, '            if (adjust_gv && GvCV(adjust_gv)) {';
+            push @lines, '                Perl_class_add_ADJUST(aTHX_ stash, GvCV(adjust_gv));';
+            push @lines, '            }';
+            push @lines, '        }';
+        }
+
+        push @lines, '        LEAVE;';
+
+        # Eval fallbacks
+        if ($fallback_methods->@*) {
+            push @lines, '        /* eval_pv fallback for unsupported methods */';
+            for my $method ($fallback_methods->@*) {
+                push @lines, '    ' . $self->_emit_xs_eval_fallback($method);
+            }
+        }
+
+        push @lines, '        PL_curstash = old_stash;';
+        push @lines, '    }';
+
+        return \@lines;
+    }
+
     # Emit C code for a field default op (defop) to be set via class_set_field_defop.
     # Returns array of C lines with proper indentation for the BOOT block context.
     method _emit_defop($default) {
@@ -497,18 +593,160 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "    eval_pv(\"$escaped\", TRUE);";
     }
 
-    # Emit the .xs file
-    method _emit_xs($ir) {
+    # Extract per-class XS code sections for assembly into single or multi-class .xs files.
+    # Returns hashref: { fwd_decls => [...], helpers => [...], xsubs => [...],
+    #   boot_lines => [...], class_decl => $node, field_map => $map }
+    # Sets $_current_slug, $field_map, $_class_methods, $_cv_cache as side effects.
+    method _emit_class_sections($ir) {
         my $class_decl = $self->_find_class_decl($ir);
-        my @lines;
+        return unless defined $class_decl;
 
-        # XS preamble
+        # Set the current class slug for identifier namespacing
+        my $class_name = $class_decl->inputs()->[0]->value();
+        $_current_slug = $self->_class_slug($class_name);
+
+        # Build field map once and store it for use throughout code generation
+        $field_map = $self->_build_field_index_map($class_decl);
+
+        # Pre-scan methods to build $_class_methods for direct call optimization
+        $_class_methods = $self->_scan_class_methods($class_decl);
+
+        # Pre-scan for field-invocant method calls to build CV cache
+        $_cv_cache = $self->_scan_field_method_calls($class_decl);
+
+        my @fwd_decl_lines;
+        my @helper_lines;
+        my @xsub_lines;
+        my @fallback_methods;
+
+        my $body = $class_decl->inputs()->[2];
+        my @adjust_stmts;
+        my @method_items;
+
+        # Pass 1: classify methods as simple or complex
+        for my $item ($body->@*) {
+            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'MethodDecl') {
+                push @method_items, $item;
+                my $mname = $item->inputs()->[0]->value();
+                my $is_complex = $self->_is_complex_method($item);
+                if (!$is_complex) {
+                    delete $_class_methods->{$mname};
+                }
+            } elsif (!($item isa Chalk::Bootstrap::IR::Node::Constructor
+                       && $item->class() eq 'FieldDecl')) {
+                push @adjust_stmts, $item;
+            }
+        }
+
+        # Emit forward declarations for complex methods (those with helpers)
+        for my $mname (sort keys $_class_methods->%*) {
+            my $meta = $_class_methods->{$mname};
+            my @fwd_params = ('SV *self');
+            for my $pname ($meta->{params}->@*) {
+                push @fwd_params, "SV *$pname";
+            }
+            push @fwd_decl_lines, "static SV * _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+        }
+
+        # Emit static CV cache declarations for field-invocant method calls
+        if ($_cv_cache && keys $_cv_cache->%*) {
+            push @fwd_decl_lines, '';
+            for my $key (sort keys $_cv_cache->%*) {
+                push @fwd_decl_lines, "static CV *_cv_${_current_slug}_${key} = NULL;";
+            }
+        }
+
+        # Emit inline semiring intrinsics (e.g., _inline_is_zero)
+        if (defined $_semiring_intrinsics) {
+            for my $fname (sort keys $_semiring_intrinsics->%*) {
+                if (defined $field_map && exists $field_map->{$fname}) {
+                    my $spec = $_semiring_intrinsics->{$fname};
+                    if (defined $spec->{components}) {
+                        push @helper_lines, $self->_emit_inline_is_zero($fname, $spec)->@*;
+                        push @helper_lines, '';
+                    }
+                }
+            }
+        }
+
+        # Pass 2: emit all methods (with $_class_methods finalized)
+        for my $item (@method_items) {
+            my $mname = $item->inputs()->[0]->value();
+            my $result = $self->_emit_xs_method($item);
+
+            if (ref($result) eq 'HASH') {
+                my $helper_output = join("\n", $result->{helper}->@*);
+                if ($self->_needs_eval_fallback($helper_output)) {
+                    delete $_class_methods->{$mname};
+                    push @fallback_methods, $item;
+                } elsif ($self->_is_stale_merge($helper_output)) {
+                    my $fixed = $self->_repair_stale_merge($result->{helper}, $item);
+                    push @helper_lines, $fixed->@*;
+                    push @helper_lines, '';
+                    push @xsub_lines, $result->{xsub}->@*;
+                    push @xsub_lines, '';
+                } else {
+                    push @helper_lines, $result->{helper}->@*;
+                    push @helper_lines, '';
+                    push @xsub_lines, $result->{xsub}->@*;
+                    push @xsub_lines, '';
+                }
+            } else {
+                my $method_lines = $result;
+                my $xs_output = join("\n", $method_lines->@*);
+                if ($self->_needs_eval_fallback($xs_output)) {
+                    push @fallback_methods, $item;
+                } elsif ($self->_is_stale_merge($xs_output)) {
+                    my $fixed = $self->_repair_stale_merge($method_lines, $item);
+                    push @xsub_lines, $fixed->@*;
+                    push @xsub_lines, '';
+                } else {
+                    push @xsub_lines, $method_lines->@*;
+                    push @xsub_lines, '';
+                }
+            }
+        }
+
+        # Emit ADJUST as native void XSUB if class has ADJUST statements
+        my $has_adjust = false;
+        if (@adjust_stmts) {
+            my $result = $self->_emit_xs_complex_method('_ADJUST', [], \@adjust_stmts);
+            if (ref($result) eq 'HASH') {
+                my $helper_output = join("\n", $result->{helper}->@*);
+                if (!$self->_needs_eval_fallback($helper_output)) {
+                    my $first_line = $result->{helper}[0];
+                    (my $fwd = $first_line) =~ s/\s*\{\s*$/;/;
+                    push @fwd_decl_lines, $fwd;
+                    push @helper_lines, $result->{helper}->@*;
+                    push @helper_lines, '';
+                    push @xsub_lines, $result->{xsub}->@*;
+                    push @xsub_lines, '';
+                    $has_adjust = true;
+                }
+            }
+        }
+
+        $_class_methods = undef;
+
+        return {
+            fwd_decls        => \@fwd_decl_lines,
+            helpers          => \@helper_lines,
+            xsubs            => \@xsub_lines,
+            fallback_methods => \@fallback_methods,
+            class_decl       => $class_decl,
+            field_map        => $field_map,
+            has_adjust       => $has_adjust,
+        };
+    }
+
+    # Emit the common XS preamble (includes and class C API declarations).
+    method _emit_xs_preamble() {
+        my @lines;
         push @lines, '#include "EXTERN.h"';
         push @lines, '#include "perl.h"';
         push @lines, '#include "XSUB.h"';
         push @lines, '';
-
-        # Forward declarations for feature class C API
         push @lines, 'extern void Perl_class_setup_stash(pTHX_ HV *stash);';
         push @lines, 'extern void Perl_class_prepare_initfield_parse(pTHX);';
         push @lines, 'extern void Perl_class_set_field_defop(pTHX_ PADNAME *pn, int defmode, OP *defop);';
@@ -516,171 +754,96 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, 'extern void Perl_class_apply_field_attributes(pTHX_ PADNAME *pn, OP *attrlist);';
         push @lines, 'extern void Perl_class_add_ADJUST(pTHX_ HV *stash, CV *cv);';
         push @lines, '';
+        return @lines;
+    }
 
-        my @fwd_decl_lines;  # Forward declarations for static helpers
-        my @helper_lines;    # Static C helpers, emitted before MODULE line
-        my @xsub_lines;      # XSUBs, emitted after MODULE line
-        my @fallback_methods;  # Collect methods needing eval_pv fallback
+    # Emit the .xs file for a single class.
+    method _emit_xs($ir) {
+        my @lines = $self->_emit_xs_preamble();
 
-        if (defined $class_decl) {
-            # Set the current class slug for identifier namespacing
-            my $class_name = $class_decl->inputs()->[0]->value();
-            $_current_slug = $self->_class_slug($class_name);
+        my $sections = $self->_emit_class_sections($ir);
 
-            # Build field map once and store it for use throughout code generation
-            $field_map = $self->_build_field_index_map($class_decl);
-
-            # Pre-scan methods to build $_class_methods for direct call optimization
-            $_class_methods = $self->_scan_class_methods($class_decl);
-
-            # Pre-scan for field-invocant method calls to build CV cache
-            $_cv_cache = $self->_scan_field_method_calls($class_decl);
-
-            # Field readers/writers are auto-generated by seal_stash via :reader/:writer
-            # attributes applied in the BOOT block — no need for XSUB readers/writers.
-
-            my $body = $class_decl->inputs()->[2];
-            my @adjust_stmts;  # Non-field, non-method body items (ADJUST block)
-            my @method_items;  # MethodDecl items for emission
-
-            # Pass 1: classify methods as simple or complex to finalize
-            # $_class_methods before any body code is emitted. This ensures
-            # direct calls reference only methods that have helpers.
-            for my $item ($body->@*) {
-                if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'MethodDecl') {
-                    push @method_items, $item;
-                    my $mname = $item->inputs()->[0]->value();
-                    my $is_complex = $self->_is_complex_method($item);
-                    if (!$is_complex) {
-                        delete $_class_methods->{$mname};
-                    }
-                } elsif (!($item isa Chalk::Bootstrap::IR::Node::Constructor
-                           && $item->class() eq 'FieldDecl')) {
-                    push @adjust_stmts, $item;
-                }
-            }
-
-            # Emit forward declarations for complex methods (those with helpers)
-            for my $mname (sort keys $_class_methods->%*) {
-                my $meta = $_class_methods->{$mname};
-                my @fwd_params = ('SV *self');
-                for my $pname ($meta->{params}->@*) {
-                    push @fwd_params, "SV *$pname";
-                }
-                push @fwd_decl_lines, "static SV * _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
-            }
-
-            # Emit static CV cache declarations for field-invocant method calls
-            if ($_cv_cache && keys $_cv_cache->%*) {
-                push @fwd_decl_lines, '';
-                for my $key (sort keys $_cv_cache->%*) {
-                    push @fwd_decl_lines, "static CV *_cv_${_current_slug}_${key} = NULL;";
-                }
-            }
-
-            # Emit inline semiring intrinsics (e.g., _inline_is_zero)
-            if (defined $_semiring_intrinsics) {
-                for my $fname (sort keys $_semiring_intrinsics->%*) {
-                    if (defined $field_map && exists $field_map->{$fname}) {
-                        my $spec = $_semiring_intrinsics->{$fname};
-                        if (defined $spec->{components}) {
-                            push @helper_lines, $self->_emit_inline_is_zero($fname, $spec)->@*;
-                            push @helper_lines, '';
-                        }
-                    }
-                }
-            }
-
-            # Pass 2: emit all methods (with $_class_methods finalized)
-            for my $item (@method_items) {
-                my $mname = $item->inputs()->[0]->value();
-                my $result = $self->_emit_xs_method($item);
-
-                if (ref($result) eq 'HASH') {
-                    # Complex method: {helper, xsub, returns} triple
-                    my $helper_output = join("\n", $result->{helper}->@*);
-                    if ($self->_needs_eval_fallback($helper_output)) {
-                        delete $_class_methods->{$mname};
-                        push @fallback_methods, $item;
-                    } elsif ($self->_is_stale_merge($helper_output)) {
-                        # Keep in $_class_methods — the helper is emitted
-                        # after repair, so direct calls still work.
-                        my $fixed = $self->_repair_stale_merge($result->{helper}, $item);
-                        push @helper_lines, $fixed->@*;
-                        push @helper_lines, '';
-                        push @xsub_lines, $result->{xsub}->@*;
-                        push @xsub_lines, '';
-                    } else {
-                        push @helper_lines, $result->{helper}->@*;
-                        push @helper_lines, '';
-                        push @xsub_lines, $result->{xsub}->@*;
-                        push @xsub_lines, '';
-                    }
-                } else {
-                    # Simple method (Tier A/B): arrayref of XSUB lines
-                    my $method_lines = $result;
-                    my $xs_output = join("\n", $method_lines->@*);
-                    if ($self->_needs_eval_fallback($xs_output)) {
-                        push @fallback_methods, $item;
-                    } elsif ($self->_is_stale_merge($xs_output)) {
-                        my $fixed = $self->_repair_stale_merge($method_lines, $item);
-                        push @xsub_lines, $fixed->@*;
-                        push @xsub_lines, '';
-                    } else {
-                        push @xsub_lines, $method_lines->@*;
-                        push @xsub_lines, '';
-                    }
-                }
-            }
-
-            # Emit ADJUST as native void XSUB if class has ADJUST statements
-            my $has_adjust = false;
-            if (@adjust_stmts) {
-                my $result = $self->_emit_xs_complex_method('_ADJUST', [], \@adjust_stmts);
-                if (ref($result) eq 'HASH') {
-                    my $helper_output = join("\n", $result->{helper}->@*);
-                    if (!$self->_needs_eval_fallback($helper_output)) {
-                        my $first_line = $result->{helper}[0];
-                        (my $fwd = $first_line) =~ s/\s*\{\s*$/;/;
-                        push @fwd_decl_lines, $fwd;
-                        push @helper_lines, $result->{helper}->@*;
-                        push @helper_lines, '';
-                        push @xsub_lines, $result->{xsub}->@*;
-                        push @xsub_lines, '';
-                        $has_adjust = true;
-                    }
-                }
-            }
-
-            # Forward declarations, then static helper functions, before MODULE line
-            if (@fwd_decl_lines) {
-                push @lines, @fwd_decl_lines;
+        if (defined $sections) {
+            if ($sections->{fwd_decls}->@*) {
+                push @lines, $sections->{fwd_decls}->@*;
                 push @lines, '';
             }
-            push @lines, @helper_lines;
+            push @lines, $sections->{helpers}->@*;
 
             push @lines, "MODULE = $module_name  PACKAGE = $module_name";
             push @lines, '';
+            push @lines, $sections->{xsubs}->@*;
 
-            # XSUBs go after MODULE line
-            push @lines, @xsub_lines;
-
-            # Emit BOOT block after XSUBs (includes eval_pv fallbacks)
-            push @lines, $self->_emit_xs_boot_block($class_decl, $field_map, \@fallback_methods, $has_adjust)->@*;
+            push @lines, $self->_emit_xs_boot_block(
+                $sections->{class_decl}, $sections->{field_map},
+                $sections->{fallback_methods}, $sections->{has_adjust},
+            )->@*;
         } else {
             push @lines, "MODULE = $module_name  PACKAGE = $module_name";
             push @lines, '';
         }
 
-        $_class_methods = undef;
         my $xs_text = join("\n", @lines) . "\n";
-
-        # Post-processing: fix list destructuring patterns lost in IR.
-        # The IR can't represent ($a, $b) = $expr->@*, so the second
-        # variable is dropped. Fix by injecting av_fetch for element 1.
         $xs_text = $self->_fixup_xs_list_destructuring($xs_text);
+        return $xs_text;
+    }
 
+    # Emit a multi-class .xs file from an array of class entries.
+    # Each entry: { class_name, ir, sa, ctx }
+    # Produces one preamble, per-class helpers/XSUBs, and consolidated BOOT.
+    method generate_multi_class($entries) {
+        my @lines = $self->_emit_xs_preamble();
+        my @all_sections;
+
+        # Phase 1: emit all helpers and forward declarations
+        for my $entry ($entries->@*) {
+            %_cfg_lookup = ();
+            $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx});
+
+            my $sections = $self->_emit_class_sections($entry->{ir});
+            next unless defined $sections;
+
+            push @all_sections, {
+                sections    => $sections,
+                class_name  => $entry->{class_name},
+            };
+
+            if ($sections->{fwd_decls}->@*) {
+                push @lines, $sections->{fwd_decls}->@*;
+                push @lines, '';
+            }
+            push @lines, $sections->{helpers}->@*;
+        }
+
+        # Phase 2: emit MODULE/PACKAGE sections with XSUBs (first class gets BOOT)
+        my $first = true;
+        for my $entry (@all_sections) {
+            my $pkg = $entry->{class_name};
+            push @lines, "MODULE = $module_name  PACKAGE = $pkg";
+            push @lines, '';
+            push @lines, $entry->{sections}{xsubs}->@*;
+
+            if ($first) {
+                # Consolidated BOOT block with all classes
+                push @lines, 'BOOT:';
+                push @lines, '{';
+                for my $e (@all_sections) {
+                    my $s = $e->{sections};
+                    my $boot_inner = $self->_emit_xs_boot_block_inner(
+                        $s->{class_decl}, $s->{field_map},
+                        $s->{fallback_methods}, $s->{has_adjust},
+                    );
+                    push @lines, $boot_inner->@*;
+                }
+                push @lines, '}';
+                $first = false;
+            }
+        }
+
+        %_cfg_lookup = ();
+
+        my $xs_text = join("\n", @lines) . "\n";
+        $xs_text = $self->_fixup_xs_list_destructuring($xs_text);
         return $xs_text;
     }
 
