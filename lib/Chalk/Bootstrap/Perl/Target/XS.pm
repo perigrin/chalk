@@ -3117,6 +3117,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "(SvROK($arg) ? sv_2mortal(newSVpv(sv_reftype(SvRV($arg), TRUE), 0)) : sv_2mortal(newSVpvs(\"\")))";
         }
 
+        # refaddr() — return the pointer value of the referent as UV
+        if ($name eq 'refaddr' && $args->@* == 1) {
+            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            return "sv_2mortal(newSVuv(PTR2UV(SvRV($arg))))";
+        }
+
         # scalar() — for arrays, return count
         if ($name eq 'scalar' && $args->@* == 1) {
             my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
