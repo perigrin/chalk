@@ -20,6 +20,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_semiring_intrinsics :param(semiring_intrinsics) = undef;  # hashref: field_name => { components => [...] }
     field $_class_registry :param(class_registry) = undef;  # ClassRegistry for multi-class compilation
     field $_current_slug = '';  # class-derived identifier prefix for multi-class collision avoidance
+    field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
+    field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -795,6 +797,35 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines = $self->_emit_xs_preamble();
         my @all_sections;
 
+        # Pre-pass: collect method metadata from all classes for cross-class dispatch.
+        # Also populate composite_field_types for classes with composite_components.
+        %_multi_class_methods = ();
+        $_composite_field_types = undef;
+
+        for my $entry ($entries->@*) {
+            my $slug = $self->_class_slug($entry->{class_name});
+            # Quick scan: find class decl and scan methods
+            my $class_decl = $self->_find_class_decl($entry->{ir});
+            next unless defined $class_decl;
+            my $methods = $self->_scan_class_methods($class_decl);
+            $_multi_class_methods{$slug} = $methods if defined $methods;
+        }
+
+        # Build composite field type mappings from registry metadata
+        if (defined $_class_registry) {
+            for my $entry ($entries->@*) {
+                my $reg_entry = $_class_registry->resolve($entry->{class_name});
+                next unless defined $reg_entry && defined $reg_entry->{composite_components};
+                my $cc = $reg_entry->{composite_components};
+                # cc is hashref: field_name => [class_name, class_name, ...]
+                $_composite_field_types //= {};
+                for my $fname (sort keys $cc->%*) {
+                    my @slugs = map { $self->_class_slug($_) } $cc->{$fname}->@*;
+                    $_composite_field_types->{$fname} = \@slugs;
+                }
+            }
+        }
+
         # Phase 1: emit all helpers and forward declarations
         for my $entry ($entries->@*) {
             %_cfg_lookup = ();
@@ -841,6 +872,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         %_cfg_lookup = ();
+        %_multi_class_methods = ();
+        $_composite_field_types = undef;
 
         my $xs_text = join("\n", @lines) . "\n";
         $xs_text = $self->_fixup_xs_list_destructuring($xs_text);
@@ -1990,6 +2023,43 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 return '({ ' . join('; ', @stmts) . '; })';
             }
             return $call;
+        }
+
+        # Composite field dispatch: when invocant is $field->[$i] and $field has
+        # composite_components with all components of a single known type,
+        # emit _impl_SLUG_method(aTHX_ element, args) instead of call_method.
+        # This replaces Perl method dispatch with a direct C call.
+        if (defined $_composite_field_types && defined $invocant_node
+                && $invocant_node isa Chalk::Bootstrap::IR::Node::Constructor
+                && $invocant_node->class() eq 'SubscriptExpr') {
+            my $target_node = $invocant_node->inputs()->[0];
+            if (defined $target_node
+                    && $target_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                my $val = $target_node->value();
+                if ($val =~ /^[\$\@\%](.+)/) {
+                    my $field_name = $1;
+                    if (exists $_composite_field_types->{$field_name}) {
+                        my $component_slugs = $_composite_field_types->{$field_name};
+                        # Check all components are the same type (uniform dispatch)
+                        my %unique_slugs;
+                        $unique_slugs{$_} = 1 for $component_slugs->@*;
+                        if (keys %unique_slugs == 1) {
+                            my ($target_slug) = keys %unique_slugs;
+                            # Verify the method exists in the target class
+                            if (exists $_multi_class_methods{$target_slug}
+                                    && exists $_multi_class_methods{$target_slug}{$method_name}) {
+                                my @call_args = ("aTHX_ $invocant_expr", @arg_exprs);
+                                my $call = "_impl_${target_slug}_${method_name}(" . join(', ', @call_args) . ")";
+                                if (@pre_eval) {
+                                    my @stmts = (@pre_eval, $call);
+                                    return '({ ' . join('; ', @stmts) . '; })';
+                                }
+                                return $call;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         # Semiring intrinsic: when invocant is a field with intrinsics configured
