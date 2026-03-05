@@ -49,6 +49,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:UseDecl'    => ['module_name', 'import_args'],
         'Constructor:ClassDecl'  => ['name', 'parent', 'body'],
         'Constructor:MethodDecl' => ['name', 'params', 'body', 'return_type'],
+        'Constructor:SubDecl'    => ['name', 'params', 'body', 'scope'],
         'Constructor:ReturnStmt' => ['value'],
         'Constructor:DieCall'    => ['args'],
         'Constructor:_Attribute' => ['name', 'parent', 'body'],

@@ -1175,9 +1175,58 @@ class Chalk::Bootstrap::Perl::Actions {
         return false;
     }
 
-    # §9 SubroutineDefinition — pass through (for Tier A we skip sub definitions)
+    # §9 SubroutineDefinition — compile sub declarations into SubDecl IR nodes.
+    # Grammar: /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
+    #        | /(?:my|our|state)\b/ WS /sub\b/ WS QualifiedIdentifier _ Signature? _ Block
+    # Produces SubDecl with same structure as MethodDecl: name, params, body.
+    # Also records the scope (bare = package, my/our/state = lexical).
     method SubroutineDefinition($ctx) {
-        return undef;
+        my @leaves = _collect_ir_leaves($ctx);
+        my $sub_name;
+        my @params;
+        my @body;
+        my $scope = 'package';  # default for bare `sub`
+
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            my $rule = $leaf->rule();
+
+            if ($focus isa Chalk::Bootstrap::IR::Node::Constant
+                    && !defined $sub_name) {
+                my $val = $focus->value();
+                # Check for lexical scope prefix (my/our/state)
+                if ($val =~ /^(?:my|our|state)$/) {
+                    $scope = $val;
+                    next;
+                }
+                # Skip the 'sub' keyword itself
+                next if $val eq 'sub';
+                $sub_name = $focus;
+            } elsif (ref($focus) eq 'ARRAY') {
+                if (defined $rule && ($rule eq 'Signature'
+                        || $rule eq 'SignatureParams')) {
+                    @params = $focus->@*;
+                } elsif (defined $rule && $rule eq 'Block') {
+                    @body = $focus->@*;
+                } else {
+                    if (!@body) {
+                        @body = $focus->@*;
+                    }
+                }
+            }
+        }
+
+        # If we couldn't find the sub name, skip this node
+        return unless defined $sub_name;
+
+        return $factory->make('Constructor',
+            'class'  => 'SubDecl',
+            name     => $sub_name,
+            params   => \@params,
+            body     => \@body,
+            scope    => $factory->make('Constant',
+                            const_type => 'string', value => $scope),
+        );
     }
 
     # §9 AdjustBlock — not in Tier A
