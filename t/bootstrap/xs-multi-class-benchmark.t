@@ -7,6 +7,7 @@ use File::Temp qw(tempdir);
 use File::Path qw(make_path);
 use File::Basename qw(dirname);
 use Time::HiRes qw(time);
+use Cwd;
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
@@ -346,55 +347,132 @@ ok(ref($multi_dist) eq 'HASH', 'multi-class XS generated')
     }
 }
 
-build_xs_dist($multi_dist, 'multi-class');
+my $multi_tmpdir = build_xs_dist($multi_dist, 'multi-class');
 eval { require Test::XSBenchMulti };
 is($@, '', 'multi-class XS loads') or BAIL_OUT("Load failed: $@");
 
-# Free heavy data structures before benchmark forks to reduce memory pressure.
-# After parsing 7 files to IR, the process uses significant memory.
-# Forked children inherit this, so aggressively free what we can.
-undef %parsed;
-undef $earley_ir;
-undef $earley_sa;
-undef $earley_ctx;
-undef $multi_dist;
-undef @entries;
-undef $reg;
-undef $multi_xs;
-undef $perl_ir;
-undef $generated;
-undef $bnf_target;
+# Benchmark multi-class XS in a separate process to avoid OOM.
+# The parent process uses ~3GB after parsing 7 files to IR and building
+# two XS distributions. Forking copies all that memory. Instead, spawn
+# a fresh perl process that rebuilds the grammar (fast, ~2s) and loads
+# only the multi-class XS module.
+{
+    my $blib_lib  = "$multi_tmpdir/blib/lib";
+    my $blib_arch = "$multi_tmpdir/blib/arch";
+    my $cwd = Cwd::getcwd();
+
+    my $bench_script = <<"END_SCRIPT";
+use 5.42.0;
+use utf8;
+use Time::HiRes qw(time);
+
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+use TestPipeline qw(perl_pipeline);
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Desugar;
+use Chalk::Bootstrap::Semiring::FilterComposite;
+use Chalk::Bootstrap::Semiring::Boolean;
+use Chalk::Bootstrap::Semiring::Precedence;
+use Chalk::Bootstrap::Semiring::TypeInference;
+use Chalk::Bootstrap::Semiring::Structural;
+use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::Bootstrap::ConciseTree::Actions;
+use Chalk::Grammar::Perl::PrecedenceTable;
+use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Grammar::Perl::TypeLibrary;
+
+# Rebuild grammar (fast, ~2s)
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my \$perl_ir = perl_pipeline();
+die "Grammar failed" unless defined \$perl_ir;
+
+my \$bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my \$generated = \$bnf_target->generate(\$perl_ir);
+\$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSBenchSubproc/g;
+eval \$generated;
+die "Grammar compile: \$@" if \$@;
+
+my \$gen_grammar = Chalk::Grammar::Perl::XSBenchSubproc::grammar();
+my \@ordered = sort {
+    (\$a->name() eq 'Program' ? 0 : 1) <=> (\$b->name() eq 'Program' ? 0 : 1)
+} \$gen_grammar->\@*;
+my \$desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\\\@ordered);
+
+# Free IR before loading XS
+undef \$perl_ir;
+undef \$generated;
+undef \$bnf_target;
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
-# Benchmark multi-class XS
-# After loading multi-class XS, Earley and semiring methods are overridden,
-# so Chalk::Bootstrap::Earley->new creates a parser using multi-class methods.
-# TODO: Currently OOMs in forked child after heavy setup phase (~3GB parent).
-# Needs dedicated investigation: either reduce parent memory before fork,
-# or run multi-class benchmark in a separate process entirely.
-TODO: {
-    local $TODO = 'multi-class benchmark OOMs after heavy setup phase';
-    my $semiring = build_full_semiring();
-    my $parser = eval { Chalk::Bootstrap::Earley->new(
-        grammar  => $desugared,
-        semiring => $semiring,
-    ) };
-    is($@, '', 'multi-class XS parser created') or do {
-        done_testing();
-        exit 0;
-    };
-    $semiring->reset_cache();
+# Load multi-class XS module (overrides Earley + semiring methods)
+require Test::XSBenchMulti;
 
-    my $r = fork_parse($parser, $source);
-    if ($r->{signal}) {
-        fail("Multi-class XS crashed with signal $r->{signal}");
-    } elsif ($r->{output} =~ /^OK:(.+)/) {
+# Read source
+open my \$fh, '<:utf8', '$file' or die "Cannot read: \$!";
+my \$source = do { local \$/; <\$fh> };
+close \$fh;
+my \$line_count = scalar(split /\\n/, \$source);
+
+# Build semiring and parser
+my \$semiring = Chalk::Bootstrap::Semiring::FilterComposite->new(
+    semirings => [
+        Chalk::Bootstrap::Semiring::Boolean->new(),
+        Chalk::Bootstrap::Semiring::Precedence->new(
+            lookup => \\&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+        ),
+        Chalk::Bootstrap::Semiring::TypeInference->new(
+            keyword_check  => \\&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+            builtin_lookup => \\&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        ),
+        Chalk::Bootstrap::Semiring::Structural->new(),
+        Chalk::Bootstrap::Semiring::SemanticAction->new(
+            actions => Chalk::Bootstrap::ConciseTree::Actions->new(),
+        ),
+    ],
+);
+my \$parser = Chalk::Bootstrap::Earley->new(
+    grammar  => \$desugared,
+    semiring => \$semiring,
+);
+\$semiring->reset_cache();
+
+my \$t0 = time();
+my \$result = eval { \$parser->parse(\$source) };
+my \$elapsed = time() - \$t0;
+
+if (defined \$result && \$result) {
+    print "OK:\$elapsed\\n";
+} else {
+    print "FAIL:err=\$@ result=" . (defined \$result ? "'\$result'" : 'undef') . "\\n";
+}
+END_SCRIPT
+
+    require File::Temp;
+    my ($script_fh, $script_path) = File::Temp::tempfile(
+        'xs-bench-XXXX', SUFFIX => '.pl', TMPDIR => 1, UNLINK => 1,
+    );
+    print $script_fh $bench_script;
+    close $script_fh;
+
+    my $cmd = qq{"$^X" -I"$blib_lib" -I"$blib_arch" -Ilib "$script_path" 2>&1};
+    my $output = `cd "$cwd" && $cmd`;
+    my $exit = $? >> 8;
+    my $signal = $? & 127;
+
+    if ($signal) {
+        fail("Multi-class XS crashed with signal $signal");
+        diag "Output: $output";
+    } elsif ($output =~ /^OK:(.+)/m) {
         my $elapsed = $1 + 0;
         pass('Multi-class XS Earley parses Boolean.pm');
         diag sprintf('  Multi-class XS:    %6.2fs  (%5.1fms/line)',
             $elapsed, $elapsed / $line_count * 1000);
     } else {
-        fail("Multi-class XS failed: $r->{output}");
+        fail("Multi-class XS failed (exit=$exit)");
+        diag "Output: $output";
     }
 }
 
