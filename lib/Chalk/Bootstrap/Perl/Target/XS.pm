@@ -18,6 +18,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_class_methods;  # hashref: name => { returns => bool, params => \@param_names }
     field $_cv_cache;  # hashref: "fieldname_methodname" => { field_name, field_idx, method_name }
     field $_semiring_intrinsics :param(semiring_intrinsics) = undef;  # hashref: field_name => { components => [...] }
+    field $_class_registry :param(class_registry) = undef;  # ClassRegistry for multi-class compilation
     field $_current_slug = '';  # class-derived identifier prefix for multi-class collision avoidance
 
     ADJUST {
