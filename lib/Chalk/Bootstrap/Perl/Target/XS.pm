@@ -578,7 +578,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 if (defined $info->{init}) {
                     # Has an initializer — emit the C expression
                     my $init_expr = eval { $self->_emit_xs_expr($info->{init}, {}) };
-                    if (defined $init_expr) {
+                    if (defined $init_expr && $init_expr !~ /unsupported/) {
                         if ($info->{sigil} eq '%') {
                             push @lines, "            $sname = (HV*)SvRV($init_expr);";
                             push @lines, "            SvREFCNT_inc((SV*)$sname);";
@@ -900,6 +900,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
+        # Filter class-scope VarDecl out of adjust_stmts — they're
+        # initialized as static C variables in BOOT, not in ADJUST.
+        @adjust_stmts = grep {
+            if ($_ isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $_->class() eq 'VarDecl') {
+                my $v = $_->inputs()->[0]->value();
+                $v =~ s/^[\$\@\%]//;
+                !exists $_class_scope_vars{$v};
+            } else {
+                true;
+            }
+        } @adjust_stmts;
+
         # Pass 1b: try to compile class-scope subs BEFORE method emission.
         # Subs that compile successfully stay in %_class_subs so method bodies
         # can emit _impl_ direct calls. Failed subs are removed so methods
@@ -1134,6 +1147,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             class_decl       => $class_decl,
             field_map        => $field_map,
             has_adjust       => $has_adjust,
+            class_scope_vars => { %_class_scope_vars },
         };
     }
 
@@ -1257,6 +1271,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '{';
         for my $e (@all_sections) {
             my $s = $e->{sections};
+            # Restore per-class class-scope vars for BOOT initialization
+            %_class_scope_vars = $s->{class_scope_vars}->%*;
             my $boot_inner = $self->_emit_xs_boot_block_inner(
                 $s->{class_decl}, $s->{field_map},
                 $s->{fallback_methods}, $s->{has_adjust},
@@ -3532,8 +3548,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "({ sv_setsv($accessor, &PL_sv_undef); $accessor; })";
         }
 
-        # Class-scope variables: VarDecl in method body is a no-op since
-        # the static was already initialized in BOOT. Return the static.
+        # Class-scope variables in expression context: evaluate init (if any)
+        # and return the static. Statement-level resets (hv_clear etc.) are
+        # handled by _emit_xs_var_decl.
         if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
             my $info = $_class_scope_vars{$var};
             if (defined $init) {
@@ -3589,7 +3606,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $this_stmt = "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
                 }
             } elsif (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-                $this_stmt = '/* class-scope var initialized in BOOT */';
+                my $csv_info = $_class_scope_vars{$var};
+                my $csv_sname = $csv_info->{static_name};
+                if ($csv_info->{sigil} eq '%') {
+                    $this_stmt = "({ hv_clear($csv_sname); (SV*)$csv_sname; });";
+                } elsif ($csv_info->{sigil} eq '@') {
+                    $this_stmt = "({ av_clear($csv_sname); (SV*)$csv_sname; });";
+                } else {
+                    $this_stmt = "({ sv_setsv($csv_sname, $default_val); $csv_sname; });";
+                }
             } else {
                 $this_stmt = "${var}_sv = $default_val;";
             }
@@ -3616,10 +3641,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
         }
 
-        # Class-scope variables: VarDecl in method body is a no-op since
-        # the static was already initialized in BOOT.
+        # Class-scope variables: method-body VarDecl emits the real
+        # operation on the static (e.g. hv_clear for %hash = ()).
+        # Uses statement-expression form so the result is usable as a
+        # return value when this is the last statement in a method body.
         if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-            return '/* class-scope var initialized in BOOT */';
+            my $info = $_class_scope_vars{$var};
+            my $sname = $info->{static_name};
+            if (defined $init) {
+                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
+                return "({ sv_setsv($sname, $init_expr); (SV*)$sname; });";
+            }
+            # No init = reset to empty: %hash = () or @array = () or $scalar = undef
+            if ($info->{sigil} eq '%') {
+                return "({ hv_clear($sname); (SV*)$sname; });";
+            } elsif ($info->{sigil} eq '@') {
+                return "({ av_clear($sname); (SV*)$sname; });";
+            } else {
+                return "({ sv_setsv($sname, &PL_sv_undef); $sname; });";
+            }
         }
 
         if (defined $init) {
