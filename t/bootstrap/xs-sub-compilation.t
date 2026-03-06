@@ -107,14 +107,18 @@ ok(defined $xs_code, 'multi-class XS generation succeeds')
 # for class-scope subs like _intern, so they can be called directly from C
 # instead of via broken eval_pv calls.
 if (defined $xs_code) {
-    # _intern references %_cache (class-scope var) so it can't be fully compiled.
-    # But calls to it should use call_pv with FQ name, NOT eval_pv with bare name.
+    # _intern references %_cache (class-scope var). Now that class-scope vars
+    # compile as static C variables, _intern should compile to an _impl_ helper
+    # (direct call) or at minimum use call_pv with FQ name (not eval_pv).
     unlike($xs_code, qr/eval_pv\("_intern/,
         'XS code does NOT use eval_pv for bare _intern calls');
 
-    # Should use call_pv with the fully-qualified package name
-    like($xs_code, qr/call_pv\("Chalk::Bootstrap::Semiring::Precedence::_intern"/,
-        'XS code uses call_pv with FQ name for _intern');
+    # With static class-scope vars, _intern may compile to _impl_ helper
+    # or fall back to call_pv with FQ name. Either is acceptable.
+    my $has_impl = $xs_code =~ /_impl_precedence__intern/;
+    my $has_call_pv = $xs_code =~ /call_pv\("Chalk::Bootstrap::Semiring::Precedence::_intern"/;
+    ok($has_impl || $has_call_pv,
+        'XS code uses _impl_ helper or call_pv with FQ name for _intern');
 }
 
 done_testing();

@@ -889,6 +889,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # Skip VarDecl whose init is a SubDecl (those are sub definitions)
                 next if defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
                     && $init->class() eq 'SubDecl';
+                # Skip VarDecl for variables that are fields (ADJUST assigns them,
+                # but they're already handled by the field map)
+                next if defined $field_map && exists $field_map->{$var};
                 $_class_scope_vars{$var} = {
                     sigil       => $sigil,
                     init        => $init,
@@ -922,11 +925,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             if (ref($result) eq 'HASH') {
                 my $helper_output = join("\n", $result->{helper}->@*);
-                # Reject subs that need eval_pv, reference class-scope vars,
-                # or contain any eval_pv calls (indicating partially-unsupported body)
+                # Reject subs that need eval_pv, contain any eval_pv calls
+                # (indicating partially-unsupported body), or reference `self`
+                # (subs don't have a self parameter — only methods do).
                 if ($self->_needs_eval_fallback($helper_output)
-                        || $self->_uses_class_scope_vars($helper_output)
-                        || $helper_output =~ /eval_pv\(/) {
+                        || $helper_output =~ /eval_pv\(/
+                        || $helper_output =~ /\bself\b/) {
                     # Sub can't be compiled — mark as uncompiled but keep in
                     # %_class_subs so call sites use call_pv (not eval_pv)
                     delete $_class_methods->{$sname};
@@ -2125,6 +2129,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     next if defined $field_map && exists $field_map->{$bare};
                     # Skip method parameters — they use bare C names, not _sv locals
                     next if $declared_vars->{"param:$bare"};
+                    # Skip class-scope variables — they use static C vars
+                    next if %_class_scope_vars && exists $_class_scope_vars{$bare};
                     $declared_vars->{$bare} = true;
                 }
             } elsif ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
@@ -2342,7 +2348,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my ($lit, $var) = ($1, $2);
                 push @parts, qq{sv_catpvs(_qr, "${\$self->_escape_c_string($lit)}")} if length $lit;
                 # Resolve the variable to its C expression
-                if ($declared_vars && $declared_vars->{$var}) {
+                if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
+                    my $info = $_class_scope_vars{$var};
+                    push @parts, "sv_catsv(_qr, (SV*)$info->{static_name})";
+                } elsif ($declared_vars && $declared_vars->{$var}) {
                     push @parts, "sv_catsv(_qr, ${var}_sv)";
                 } elsif ($declared_vars && $declared_vars->{"param:$var"}) {
                     push @parts, "sv_catsv(_qr, $var)";
@@ -2388,6 +2397,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # globals set by _emit_xs_regex_match wrapper
                 if ($var =~ /^\d+$/) {
                     $src = "get_sv(\"::_c$var\", GV_ADD)";
+                } elsif (%_class_scope_vars && exists $_class_scope_vars{$var}) {
+                    my $info = $_class_scope_vars{$var};
+                    $src = ($info->{sigil} eq '%' || $info->{sigil} eq '@')
+                        ? "(SV*)$info->{static_name}"
+                        : $info->{static_name};
                 } elsif ($declared_vars && $declared_vars->{$var}) {
                     $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
                 } elsif ($declared_vars && $declared_vars->{"param:$var"}) {
@@ -3518,6 +3532,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "({ sv_setsv($accessor, &PL_sv_undef); $accessor; })";
         }
 
+        # Class-scope variables: VarDecl in method body is a no-op since
+        # the static was already initialized in BOOT. Return the static.
+        if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
+            my $info = $_class_scope_vars{$var};
+            if (defined $init) {
+                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
+                return "({ $init_expr; $info->{static_name}; })";
+            }
+            return $info->{static_name};
+        }
+
         my $c_var = "${var}_sv";
         if (defined $init) {
             my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
@@ -3563,6 +3588,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 } else {
                     $this_stmt = "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
                 }
+            } elsif (%_class_scope_vars && exists $_class_scope_vars{$var}) {
+                $this_stmt = '/* class-scope var initialized in BOOT */';
             } else {
                 $this_stmt = "${var}_sv = $default_val;";
             }
@@ -3587,6 +3614,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 return "av_clear((AV*)ObjectFIELDS(SvRV(self))[$idx]);";
             }
             return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
+        }
+
+        # Class-scope variables: VarDecl in method body is a no-op since
+        # the static was already initialized in BOOT.
+        if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
+            return '/* class-scope var initialized in BOOT */';
         }
 
         if (defined $init) {
