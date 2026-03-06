@@ -578,7 +578,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 if (defined $info->{init}) {
                     # Has an initializer — emit the C expression
                     my $init_expr = eval { $self->_emit_xs_expr($info->{init}, {}) };
-                    if (defined $init_expr && $init_expr !~ /unsupported/) {
+                    if (defined $init_expr
+                            && !$self->_needs_eval_fallback($init_expr)
+                            && $init_expr !~ /get_sv\(/) {
                         if ($info->{sigil} eq '%') {
                             push @lines, "            $sname = (HV*)SvRV($init_expr);";
                             push @lines, "            SvREFCNT_inc((SV*)$sname);";
