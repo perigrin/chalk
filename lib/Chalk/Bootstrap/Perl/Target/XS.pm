@@ -2525,12 +2525,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq '-')  { return "sv_2mortal(newSVnv(SvNV($left) - SvNV($right)))"; }
         if ($op eq '*')  { return "sv_2mortal(newSVnv(SvNV($left) * SvNV($right)))"; }
         if ($op eq '/')  { return "sv_2mortal(newSVnv(SvNV($left) / SvNV($right)))"; }
-        if ($op eq '==') { return "(SvNV($left) == SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
-        if ($op eq '!=') { return "(SvNV($left) != SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
-        if ($op eq '<')  { return "(SvNV($left) < SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
-        if ($op eq '>')  { return "(SvNV($left) > SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
-        if ($op eq '<=') { return "(SvNV($left) <= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
-        if ($op eq '>=') { return "(SvNV($left) >= SvNV($right) ? &PL_sv_yes : &PL_sv_no)"; }
+        # Numeric comparison: use integer comparison when both operands are
+        # IV/UV to avoid precision loss. SvNV on a 64-bit UV (e.g., from
+        # refaddr/PTR2UV) can lose low bits since double has only 52-bit
+        # mantissa, causing identity comparisons to fail.
+        if ($op eq '==' || $op eq '!=' || $op eq '<' || $op eq '>'
+                || $op eq '<=' || $op eq '>=') {
+            my $c_op = $op;
+            my $cmp = "(SvIOK($left) && SvIOK($right)"
+                . " ? (SvUOK($left) || SvUOK($right)"
+                .   " ? SvUV($left) $c_op SvUV($right)"
+                .   " : SvIV($left) $c_op SvIV($right))"
+                . " : SvNV($left) $c_op SvNV($right))";
+            return "($cmp ? &PL_sv_yes : &PL_sv_no)";
+        }
 
         # isa — check if left derives from the class named in right
         if ($op eq 'isa') {
