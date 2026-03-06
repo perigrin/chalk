@@ -696,7 +696,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return false unless keys %_class_subs;
         for my $sname (keys %_class_subs) {
             next if $_class_subs{$sname}{compiled};
-            # Uncompiled my sub called via call_pv — won't work at runtime
+            my $scope = $_class_subs{$sname}{scope} // 'package';
+            # Package/our subs are in the stash — call_pv works fine
+            next if $scope eq 'package' || $scope eq 'our';
+            # Lexical sub called via call_pv — won't work at runtime
             if ($xs_output =~ /call_pv\([^)]*\Q${sname}\E/) {
                 return true;
             }
@@ -939,21 +942,58 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
 
             if (ref($result) eq 'HASH') {
-                my $helper_output = join("\n", $result->{helper}->@*);
-                # Reject subs that need eval_pv, contain any eval_pv calls
-                # (indicating partially-unsupported body), or reference `self`
-                # (subs don't have a self parameter — only methods do).
-                if ($self->_needs_eval_fallback($helper_output)
-                        || $helper_output =~ /eval_pv\(/
-                        || $helper_output =~ /\bself\b/) {
-                    # Sub can't be compiled — mark as uncompiled but keep in
-                    # %_class_subs so call sites use call_pv (not eval_pv)
-                    delete $_class_methods->{$sname};
+                # Check for incomplete compilation: /* unknown node */ or
+                # /* unsupported op */ means the emitter couldn't translate
+                # some IR nodes to C (e.g., __SUB__ recursion, hash sigil
+                # dereference, complex loop patterns). These subs need their
+                # IR support expanded before they can compile natively.
+                # TODO: eval_pv in sub output indicates unsupported IR nodes
+                # that should be compiled natively. Regular expressions may be
+                # the only legitimate case, and even those should use the C
+                # regex API (pregcomp/pregexec) rather than eval_pv.
+                my $helper_text = join("\n", $result->{helper}->@*);
+                if ($helper_text =~ m{/\* (?:unknown node|unsupported op)}) {
                     $_class_subs{$sname}{compiled} = false;
-                } else {
-                    $_class_subs{$sname}{compiled} = true;
-                    push @helper_lines, $result->{helper}->@*;
-                    push @helper_lines, '';
+                    next;
+                }
+                $_class_subs{$sname}{compiled} = true;
+                push @helper_lines, $result->{helper}->@*;
+                push @helper_lines, '';
+
+                # Package/our subs get XSUB wrappers so Perl code can call them.
+                # Lexical subs (my/state) are only callable via direct C calls.
+                my $sub_scope = $_class_subs{$sname}{scope} // 'package';
+                if ($sub_scope eq 'package' || $sub_scope eq 'our') {
+                    my @xsub;
+                    my @param_names;
+                    for my $p ($sparams->@*) {
+                        my $pname = $p->value();
+                        $pname =~ s/^\$//;
+                        push @param_names, $pname;
+                    }
+                    my $impl_name = "_impl_${_current_slug}_${sname}";
+                    my $call_args;
+                    if (@param_names) {
+                        $call_args = 'aTHX_ ' . join(', ', map { "${_}_sv" } @param_names);
+                    } else {
+                        $call_args = 'aTHX';
+                    }
+
+                    push @xsub, 'SV *';
+                    if (@param_names) {
+                        push @xsub, "$sname(" . join(', ', @param_names) . ')';
+                        for my $pn (@param_names) {
+                            push @xsub, "    SV *${pn}_sv";
+                        }
+                    } else {
+                        push @xsub, "$sname()";
+                    }
+                    push @xsub, '  CODE:';
+                    push @xsub, "    RETVAL = $impl_name($call_args);";
+                    push @xsub, '  OUTPUT:';
+                    push @xsub, '    RETVAL';
+                    push @xsub, '';
+                    push @xsub_lines, @xsub;
                 }
             }
         }
@@ -1456,6 +1496,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'SubDecl') {
                 $entry->{is_sub} = true;
                 $entry->{class_name} = $class_decl->inputs()->[0]->value();
+                # SubDecl inputs: [name, params, body, scope]
+                my $scope_node = $item->inputs()->[3];
+                $entry->{scope} = defined $scope_node ? $scope_node->value() : 'package';
                 $_class_subs{$name} = $entry;
             }
 
@@ -1831,6 +1874,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $last_is_return = (defined $last_item
             && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
             && $last_item->class() eq 'ReturnStmt');
+        # Bare 'return' keyword appears as a Constant (not ReturnStmt Constructor)
+        $last_is_return ||= (defined $last_item
+            && $last_item isa Chalk::Bootstrap::IR::Node::Constant
+            && ($last_item->value() // '') eq 'return');
         my $body_has_returns = $self->_body_contains_return($body);
         my $single_stmt_return = (!$last_is_return
             && scalar($body->@*) == 1
@@ -3420,16 +3467,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $len = $self->_emit_xs_expr($args->[2], $declared_vars);
                 return "({ SV *_s = $str; SSize_t _o = SvIV($off); SSize_t _n = SvIV($len); "
                     . "STRLEN _sl; char *_sp = SvPV(_s, _sl); "
-                    . "STRLEN _bo = (STRLEN)_o; STRLEN _bn = (STRLEN)_n; "
+                    . "I32 _bo = (I32)_o; I32 _bn = (I32)_n; "
                     . "if (SvUTF8(_s)) sv_pos_u2b(_s, &_bo, &_bn); "
-                    . "SV *_r = newSVpvn(_sp + _bo, _bn); "
+                    . "SV *_r = newSVpvn(_sp + (STRLEN)_bo, (STRLEN)_bn); "
                     . "if (SvUTF8(_s)) SvUTF8_on(_r); sv_2mortal(_r); })";
             }
             return "({ SV *_s = $str; SSize_t _o = SvIV($off); "
                 . "STRLEN _sl; char *_sp = SvPV(_s, _sl); "
-                . "STRLEN _bo = (STRLEN)_o; "
-                . "if (SvUTF8(_s)) { STRLEN _dummy = 0; sv_pos_u2b(_s, &_bo, &_dummy); } "
-                . "SV *_r = newSVpvn(_sp + _bo, _sl - _bo); "
+                . "I32 _bo = (I32)_o; "
+                . "if (SvUTF8(_s)) { I32 _dummy = 0; sv_pos_u2b(_s, &_bo, &_dummy); } "
+                . "SV *_r = newSVpvn(_sp + (STRLEN)_bo, _sl - (STRLEN)_bo); "
                 . "if (SvUTF8(_s)) SvUTF8_on(_r); sv_2mortal(_r); })";
         }
 
@@ -3463,9 +3510,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($_class_subs{$name}{compiled}) {
                 # Direct C call to compiled helper
                 my $helper_name = "_impl_${_current_slug}_${name}";
-                my $call_args = 'aTHX_';
+                # Pad missing args with &PL_sv_undef for default params
+                my $expected = $_class_subs{$name}{params} // [];
+                while (scalar @c_args < scalar $expected->@*) {
+                    push @c_args, '&PL_sv_undef';
+                }
+                my $call_args;
                 if (@c_args) {
-                    $call_args .= ' ' . join(', ', @c_args);
+                    $call_args = 'aTHX_ ' . join(', ', @c_args);
+                } else {
+                    $call_args = 'aTHX';
                 }
                 return "$helper_name($call_args)";
             } else {
