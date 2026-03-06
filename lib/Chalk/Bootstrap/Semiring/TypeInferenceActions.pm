@@ -8,9 +8,8 @@ use Chalk::Grammar::Perl::TypeLibrary;
 class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Helper: Get rightmost type from Context tree (for wrapper rules)
-    my $_get_rightmost_type;
-    $_get_rightmost_type = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_rightmost_type($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus && exists $focus->{type}) {
             return $focus->{type};
@@ -18,42 +17,40 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         # Walk children right-to-left
         my @children = $ctx->children()->@*;
         for my $child (reverse @children) {
-            my $t = $_get_rightmost_type->($child);
+            my $t = __SUB__->($child);
             return $t if defined $t;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Helper: Get leftmost type from Context tree (for assignment LHS)
-    my $_get_leftmost_type;
-    $_get_leftmost_type = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_leftmost_type($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus && exists $focus->{type}) {
             return $focus->{type};
         }
         # Walk children left-to-right
         for my $child ($ctx->children()->@*) {
-            my $t = $_get_leftmost_type->($child);
+            my $t = __SUB__->($child);
             return $t if defined $t;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Helper: Get ident_text from Context tree (for method/function names)
-    my $_get_ident_text;
-    $_get_ident_text = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_ident_text($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus && exists $focus->{ident_text}) {
             return $focus->{ident_text};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_ident_text->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Method return type registry: method_name => return_type
     # Populated by MethodDefinition on_complete, consumed by MethodCall lookups.
@@ -62,41 +59,40 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Helper: Get op_text from Context tree (for operator rules)
     # Follows leaf-finding semantics: stops at focused nodes.
-    my $_get_op_text;
-    $_get_op_text = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_op_text($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             return $focus->{op_text};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_op_text->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Wrapper rules: passthrough child's type
 
     method Atom($ctx) {
-        my $child_type = $_get_rightmost_type->($ctx);
+        my $child_type = _get_rightmost_type($ctx);
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
     method Expression($ctx) {
-        my $child_type = $_get_rightmost_type->($ctx);
+        my $child_type = _get_rightmost_type($ctx);
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
     method PostfixExpression($ctx) {
-        my $child_type = $_get_rightmost_type->($ctx);
+        my $child_type = _get_rightmost_type($ctx);
         return { valid => true, ($child_type ? (type => $child_type) : ()) };
     }
 
     # Rich rules: compute type from operator/signature
 
     method BinaryExpression($ctx) {
-        my $op = $_get_op_text->($ctx);
+        my $op = _get_op_text($ctx);
         my $result_type;
         if (defined $op) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_binary_op($op);
@@ -106,13 +102,13 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
             # result 'Any' → leave type undef (unknown)
         } else {
             # No op_text: preserve child type (intermediate completion)
-            $result_type = $_get_rightmost_type->($ctx);
+            $result_type = _get_rightmost_type($ctx);
         }
         return { valid => true, ($result_type ? (type => $result_type) : ()) };
     }
 
     method UnaryExpression($ctx) {
-        my $op = $_get_op_text->($ctx);
+        my $op = _get_op_text($ctx);
         my $result_type;
         if (defined $op) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op($op);
@@ -122,49 +118,46 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     }
 
     # Helper: Get list_arity from Context tree
-    my $_get_list_arity;
-    $_get_list_arity = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_list_arity($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             return $focus->{list_arity};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_list_arity->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Helper: Get item_types from Context tree
-    my $_get_item_types;
-    $_get_item_types = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_item_types($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             return $focus->{item_types};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_item_types->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Helper: Search for item_types in previous ExpressionList children
-    my $_get_prev_item_types;
-    $_get_prev_item_types = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_prev_item_types($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus && exists $focus->{item_types}) {
             return $focus->{item_types};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_prev_item_types->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     # ExpressionList: arity/item_types tracking
     # alt 0 = single Expression (arity 1)
@@ -176,17 +169,17 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         my ($arity, $item_types);
         if ($alt_idx == 0) {
             $arity = 1;
-            my $type = $_get_rightmost_type->($ctx);
+            my $type = _get_rightmost_type($ctx);
             # type can be undef for non-typed expressions (e.g. function calls)
             $item_types = [$type];
         } elsif ($alt_idx == 1 || $alt_idx == 2) {
-            $arity = ($_get_list_arity->($ctx) // 1) + 1;
-            my $prev = $_get_prev_item_types->($ctx) // [];
-            my $new_type = $_get_rightmost_type->($ctx);
+            $arity = (_get_list_arity($ctx) // 1) + 1;
+            my $prev = _get_prev_item_types($ctx) // [];
+            my $new_type = _get_rightmost_type($ctx);
             $item_types = [$prev->@*, $new_type];
         } else {
-            $arity = $_get_list_arity->($ctx);
-            $item_types = $_get_item_types->($ctx) // $_get_prev_item_types->($ctx);
+            $arity = _get_list_arity($ctx);
+            $item_types = _get_item_types($ctx) // _get_prev_item_types($ctx);
         }
         return {
             valid => true,
@@ -202,7 +195,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     # Boundary rules: preserve type, clear call_symbol/op_text
 
     method ParenExpr($ctx) {
-        my $child_type = $_get_rightmost_type->($ctx);
+        my $child_type = _get_rightmost_type($ctx);
         return {
             valid => true,
             ($child_type ? (type => $child_type) : ()),
@@ -210,7 +203,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     }
 
     method Block($ctx) {
-        my $child_type = $_get_rightmost_type->($ctx);
+        my $child_type = _get_rightmost_type($ctx);
         return {
             valid => true,
             ($child_type ? (type => $child_type) : ()),
@@ -218,7 +211,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     }
 
     method Signature($ctx) {
-        my $child_type = $_get_rightmost_type->($ctx);
+        my $child_type = _get_rightmost_type($ctx);
         return {
             valid => true,
             ($child_type ? (type => $child_type) : ()),
@@ -226,7 +219,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     }
 
     method Attribute($ctx) {
-        my $child_type = $_get_rightmost_type->($ctx);
+        my $child_type = _get_rightmost_type($ctx);
         return {
             valid => true,
             ($child_type ? (type => $child_type) : ()),
@@ -292,7 +285,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     method AssignmentExpression($ctx) {
         # Derive eval_context from LHS variable sigil type
-        my $lhs_type = $_get_leftmost_type->($ctx);
+        my $lhs_type = _get_leftmost_type($ctx);
         my $eval_context;
         if (defined $lhs_type) {
             if ($lhs_type eq 'Scalar') {
@@ -317,8 +310,8 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # MethodDefinition: extract method name and body return type for registry
     method MethodDefinition($ctx) {
-        my $method_name = $_get_ident_text->($ctx);
-        my $body_type = $_get_rightmost_type->($ctx);
+        my $method_name = _get_ident_text($ctx);
+        my $body_type = _get_rightmost_type($ctx);
 
         # Register method return type if both name and type are available
         if (defined $method_name && defined $body_type) {

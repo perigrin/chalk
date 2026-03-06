@@ -1,5 +1,5 @@
 # ABOUTME: Integration test for multi-class XS compilation of Earley + all semirings.
-# ABOUTME: Verifies multi-class XS codegen compiles, loads, and methods are callable.
+# ABOUTME: Verifies multi-class XS codegen compiles, loads, and methods execute correctly.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -32,6 +32,10 @@ use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;
 use Chalk::Bootstrap::Semiring::Structural;
 use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::Bootstrap::ConciseTree::Actions;
+use Chalk::Grammar::Perl::PrecedenceTable;
+use Chalk::Grammar::Perl::KeywordTable;
+use Chalk::Grammar::Perl::TypeLibrary;
 
 # --- Step 1: Parse all classes to IR ---
 my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSMultiInteg') };
@@ -60,7 +64,7 @@ for my $entry (@class_files) {
 
 # --- Step 2: Register classes with ClassRegistry ---
 SKIP: {
-    skip 'Not all classes parsed', 9
+    skip 'Not all classes parsed', 14
         unless keys %parsed == scalar @class_files;
 
     my $reg = Chalk::Bootstrap::Perl::Target::ClassRegistry->new();
@@ -127,7 +131,7 @@ SKIP: {
     ok(defined $multi_code, 'multi-class XS generation succeeds')
         or do {
             diag "Multi-class gen failed: $@";
-            skip 'Multi-class generation failed', 8;
+            skip 'Multi-class generation failed', 13;
         };
 
     # Basic structural checks
@@ -153,7 +157,7 @@ SKIP: {
     ok(ref($dist) eq 'HASH', 'multi-class distribution generated')
         or do {
             diag "Distribution gen failed";
-            skip 'Distribution failed', 5;
+            skip 'Distribution failed', 10;
         };
 
     for my $path (sort keys $dist->%*) {
@@ -177,7 +181,7 @@ SKIP: {
         my $exit = $? >> 8;
         is($exit, 0, './Build compiles multi-class XS') or do {
             diag "Build failed: $output";
-            skip 'Build failed', 3;
+            skip 'Build failed', 8;
         };
     }
 
@@ -188,20 +192,78 @@ SKIP: {
     is($@, '', 'Test::XSMultiInteg loads without error')
         or do {
             diag "Load failed: $@";
-            skip 'Load failed', 2;
+            skip 'Load failed', 7;
         };
 
     # --- Step 6: Verify XS method registration ---
-    # The XS module overrides Perl methods with XS implementations.
-    # Count how many methods were redefined to verify XSUB registration.
-    # Full parse performance testing is done in xs-earley-full-semiring.t.
-
-    # Verify the Earley class has XS-compiled parse method by checking
-    # that the module's symbol table contains expected methods.
     ok(Chalk::Bootstrap::Earley->can('parse'),
         'Earley parse method available after XS load');
     ok(Chalk::Bootstrap::Earley->can('_run_parse'),
         'Earley _run_parse method available after XS load');
+
+    # --- Step 7: Execute XS-compiled methods (fork for segfault safety) ---
+    # All XS execution happens in a forked child. If XS methods segfault,
+    # the parent catches the signal and reports a test failure.
+    pipe(my $rd, my $wr) or die "pipe: $!";
+    my $pid = fork();
+    if ($pid == 0) {
+        close $rd;
+        my @results;
+
+        # Boolean: test BOOT initialization of class-scope static vars
+        my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
+        my $zero = eval { $bool->zero() };
+        push @results, (defined $zero ? 'PASS' : 'FAIL') . ':Boolean::zero()';
+        push @results, (ref($zero) ? 'PASS' : 'FAIL') . ':Boolean::zero() is a ref';
+
+        my $one = eval { $bool->one() };
+        push @results, (defined $one ? 'PASS' : 'FAIL') . ':Boolean::one()';
+        push @results, ($bool->is_zero($zero) ? 'PASS' : 'FAIL') . ':is_zero(zero())';
+        push @results, (!$bool->is_zero($one) ? 'PASS' : 'FAIL') . ':!is_zero(one())';
+
+        # FilterComposite: test multi-class map dispatch
+        my $fc = Chalk::Bootstrap::Semiring::FilterComposite->new(
+            semirings => [
+                Chalk::Bootstrap::Semiring::Boolean->new(),
+                Chalk::Bootstrap::Semiring::Precedence->new(
+                    lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+                ),
+                Chalk::Bootstrap::Semiring::TypeInference->new(
+                    keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+                    builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+                ),
+                Chalk::Bootstrap::Semiring::Structural->new(),
+                Chalk::Bootstrap::Semiring::SemanticAction->new(
+                    actions => Chalk::Bootstrap::ConciseTree::Actions->new(),
+                ),
+            ],
+        );
+        my $fc_zero = eval { $fc->zero() };
+        push @results, (defined $fc_zero && ref($fc_zero) eq 'ARRAY' ? 'PASS' : 'FAIL')
+            . ':FilterComposite::zero() returns arrayref';
+
+        print $wr join("\n", @results) . "\nDONE\n";
+        close $wr;
+        exit 0;
+    }
+    close $wr;
+    my $child_output = do { local $/; <$rd> };
+    close $rd;
+    waitpid($pid, 0);
+    my $child_signal = $? & 127;
+
+    if ($child_signal) {
+        fail("XS method execution crashed with signal $child_signal");
+        # Skip remaining execution tests
+        for (1..5) { fail("skipped — child crashed") }
+    } else {
+        for my $line (split /\n/, $child_output) {
+            next if $line eq 'DONE' || $line eq '';
+            my ($status, $desc) = split /:/, $line, 2;
+            if ($status eq 'PASS') { pass($desc) }
+            else                   { fail($desc) }
+        }
+    }
 }
 
 done_testing();

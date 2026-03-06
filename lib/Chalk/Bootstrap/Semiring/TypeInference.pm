@@ -71,9 +71,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     # Search the multiply tree leaves for one with call_symbol in its focus.
     # Returns the call_symbol string or undef.
-    my $_get_call_symbol;
-    $_get_call_symbol = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_call_symbol($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             # Focused node (leaf): check for call_symbol and stop
@@ -81,43 +80,41 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
         # Unfocused multiply node: recurse into children
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_call_symbol->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Search the multiply tree leaves for one with item_types in its focus.
     # Returns the item_types arrayref or undef.
-    my $_get_item_types;
-    $_get_item_types = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_item_types($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             return $focus->{item_types};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_item_types->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     # Search the multiply tree leaves for one with list_arity in its focus.
     # Returns the list_arity integer or undef.
-    my $_get_list_arity;
-    $_get_list_arity = sub($ctx) {
-        return undef unless defined $ctx;
+    my sub _get_list_arity($ctx) {
+        return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             return $focus->{list_arity};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = $_get_list_arity->($child);
+            my $found = __SUB__->($child);
             return $found if defined $found;
         }
-        return undef;
-    };
+        return;
+    }
 
     method zero() {
         return undef;
@@ -293,11 +290,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # builtin_lookup and type_satisfies for per-position validation.
         if ($rule_name eq 'CallExpression') {
             my $return_type;
-            my $call_sym = $_get_call_symbol->($value);
+            my $call_sym = _get_call_symbol($value);
             if ($call_sym) {
                 my $sig = $builtin_lookup->($call_sym);
                 if ($sig) {
-                    my $item_types = $_get_item_types->($value);
+                    my $item_types = _get_item_types($value);
                     if ($item_types) {
                         my $arg_types = $sig->{arg_types};
                         my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
@@ -310,7 +307,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                             }
                         }
                     }
-                    my $arity = $_get_list_arity->($value) // 1;
+                    my $arity = _get_list_arity($value) // 1;
                     $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
                     if ($arity < $sig->{min_arity}) {
                         return undef;
@@ -319,7 +316,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     # the signature's return_type ('Any'). This lets the enclosing
                     # method know what type is actually being returned.
                     if ($call_sym eq 'return') {
-                        my $arg_types = $_get_item_types->($value);
+                        my $arg_types = _get_item_types($value);
                         $return_type = $arg_types->[0] if $arg_types && $arg_types->@*;
                     } else {
                         $return_type = $sig->{return_type};
