@@ -71,10 +71,10 @@ class FilterComposite {
 PERL
 close $fh_fc;
 
-my ($ir_sr, $sa_sr, $ctx_sr) = eval { parse_file_ir($gen, $file_sr) };
+my ($ir_sr, $sa_sr, $ctx_sr, $cfg_sr) = eval { parse_file_ir($gen, $file_sr) };
 ok(defined $ir_sr, 'SimpleSemiring parses') or BAIL_OUT("Parse failed: $@");
 
-my ($ir_fc, $sa_fc, $ctx_fc) = eval { parse_file_ir($gen, $file_fc) };
+my ($ir_fc, $sa_fc, $ctx_fc, $cfg_fc) = eval { parse_file_ir($gen, $file_fc) };
 ok(defined $ir_fc, 'FilterComposite parses') or BAIL_OUT("Parse failed: $@");
 
 # --- Register classes with component mapping ---
@@ -97,8 +97,8 @@ my $xs = Chalk::Bootstrap::Perl::Target::XS->new(
 );
 
 my $code = eval { $xs->generate_multi_class([
-    { class_name => 'SimpleSemiring', ir => $ir_sr, sa => $sa_sr, ctx => $ctx_sr },
-    { class_name => 'FilterComposite', ir => $ir_fc, sa => $sa_fc, ctx => $ctx_fc },
+    { class_name => 'SimpleSemiring', ir => $ir_sr, sa => $sa_sr, ctx => $ctx_sr, cfg_snapshot => $cfg_sr },
+    { class_name => 'FilterComposite', ir => $ir_fc, sa => $sa_fc, ctx => $ctx_fc, cfg_snapshot => $cfg_fc },
 ]) };
 ok(defined $code, 'multi-class generation succeeds')
     or BAIL_OUT("Multi-class gen failed: $@");
@@ -195,13 +195,13 @@ class HeteroComposite {
 PERL
 close $fh_hc;
 
-my ($ir_a2, $sa_a2, $ctx_a2) = eval { parse_file_ir($gen, $file_a) };
+my ($ir_a2, $sa_a2, $ctx_a2, $cfg_a2) = eval { parse_file_ir($gen, $file_a) };
 ok(defined $ir_a2, 'SemiringA parses') or BAIL_OUT("Parse failed: $@");
 
-my ($ir_b2, $sa_b2, $ctx_b2) = eval { parse_file_ir($gen, $file_b) };
+my ($ir_b2, $sa_b2, $ctx_b2, $cfg_b2) = eval { parse_file_ir($gen, $file_b) };
 ok(defined $ir_b2, 'SemiringB parses') or BAIL_OUT("Parse failed: $@");
 
-my ($ir_hc, $sa_hc, $ctx_hc) = eval { parse_file_ir($gen, $file_hc) };
+my ($ir_hc, $sa_hc, $ctx_hc, $cfg_hc) = eval { parse_file_ir($gen, $file_hc) };
 ok(defined $ir_hc, 'HeteroComposite parses') or BAIL_OUT("Parse failed: $@");
 
 my $reg2 = Chalk::Bootstrap::Perl::Target::ClassRegistry->new();
@@ -221,9 +221,9 @@ my $xs2 = Chalk::Bootstrap::Perl::Target::XS->new(
 );
 
 my $code2 = eval { $xs2->generate_multi_class([
-    { class_name => 'SemiringA', ir => $ir_a2, sa => $sa_a2, ctx => $ctx_a2 },
-    { class_name => 'SemiringB', ir => $ir_b2, sa => $sa_b2, ctx => $ctx_b2 },
-    { class_name => 'HeteroComposite', ir => $ir_hc, sa => $sa_hc, ctx => $ctx_hc },
+    { class_name => 'SemiringA', ir => $ir_a2, sa => $sa_a2, ctx => $ctx_a2, cfg_snapshot => $cfg_a2 },
+    { class_name => 'SemiringB', ir => $ir_b2, sa => $sa_b2, ctx => $ctx_b2, cfg_snapshot => $cfg_b2 },
+    { class_name => 'HeteroComposite', ir => $ir_hc, sa => $sa_hc, ctx => $ctx_hc, cfg_snapshot => $cfg_hc },
 ]) };
 ok(defined $code2, 'heterogeneous multi-class generation succeeds')
     or BAIL_OUT("Hetero multi-class gen failed: $@");

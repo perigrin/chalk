@@ -101,12 +101,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     }
 
     # Generate a full distribution from multi-class XS compilation.
-    # $entries is an arrayref of { class_name, ir, sa, ctx } hashrefs.
+    # $entries is an arrayref of { class_name, ir, sa, ctx, cfg_snapshot? } hashrefs.
+    # cfg_snapshot is optional; when present, it preserves cfg_state from parse time
+    # (needed because SemanticAction's %_cfg_state is shared and gets wiped by reset_cache).
     method generate_distribution_multi_class($entries) {
         # Build cfg_lookup for all entries
         %_cfg_lookup = ();
         for my $entry ($entries->@*) {
-            $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx});
+            $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx}, $entry->{cfg_snapshot});
         }
 
         my $xs_path = $self->_module_path_prefix() . '.xs';
@@ -125,12 +127,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return $result;
     }
 
-    # First-found wins: parent rules that wire body expressions take priority
-    method _build_cfg_lookup($sa, $ctx) {
+    # First-found wins: parent rules that wire body expressions take priority.
+    # $cfg_snapshot is an optional hashref mapping Context refaddr to cfg_state,
+    # pre-built at parse time. When provided, it is used instead of $sa->cfg_state()
+    # which may have been wiped by subsequent parses (shared class-scope lexical).
+    method _build_cfg_lookup($sa, $ctx, $cfg_snapshot = undef) {
         my @stack = ($ctx);
         while (@stack) {
             my $node = pop @stack;
-            my $state = $sa->cfg_state($node);
+            my $state = defined $cfg_snapshot
+                ? $cfg_snapshot->{refaddr($node)}
+                : $sa->cfg_state($node);
             if (defined $state && (defined $state->{if_node} || defined $state->{loop} || defined $state->{try_node})) {
                 my $ir_node = $node->extract();
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}) {
@@ -956,6 +963,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $_class_subs{$sname}{compiled} = false;
                     next;
                 }
+                # Subs that reference $self but don't have $self as a parameter
+                # can't compile as static C functions — self isn't available.
+                # This happens with class-scope `my sub` declarations that
+                # close over $self from the enclosing class.
+                if ($helper_text =~ /\bself\b/
+                        && !grep { $_->value() =~ /^\$?self$/ } $sparams->@*) {
+                    $_class_subs{$sname}{compiled} = false;
+                    next;
+                }
                 $_class_subs{$sname}{compiled} = true;
                 push @helper_lines, $result->{helper}->@*;
                 push @helper_lines, '';
@@ -1281,7 +1297,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Phase 1: emit all helpers and forward declarations
         for my $entry ($entries->@*) {
             %_cfg_lookup = ();
-            $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx});
+            $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx}, $entry->{cfg_snapshot});
 
             my $sections = $self->_emit_class_sections($entry->{ir});
             next unless defined $sections;
@@ -3309,7 +3325,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "av_shift($av_expr)";
         }
 
-        # keys(%hash) — native hash key count via HvUSEDKEYS
+        # keys(%hash) — scalar context returns count, list context returns AV of keys.
+        # Standalone keys() returns count via HvUSEDKEYS. When used as argument
+        # to sort/map/grep, the caller invokes _emit_xs_keys_list directly.
         if ($name eq 'keys' && $args->@* == 1) {
             my $hash_node = $args->[0];
             my $hash = $self->_emit_xs_expr($hash_node, $declared_vars);
@@ -3321,6 +3339,36 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $hv_expr = "(HV*)SvRV($hash)";
             }
             return "sv_2mortal(newSViv(HvUSEDKEYS($hv_expr)))";
+        }
+
+        # sort — bare sort (no block) using sortsv with sv_cmp
+        if ($name eq 'sort' && $args->@* == 1) {
+            my $list_node = $args->[0];
+            # Detect sort keys %$hash — emit keys as list, then sort
+            my $list_expr;
+            if ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $list_node->class() eq 'BuiltinCall'
+                    && $list_node->inputs()->[0]->value() eq 'keys') {
+                $list_expr = $self->_emit_xs_keys_list($list_node->inputs()->[1]->[0], $declared_vars);
+            } else {
+                $list_expr = $self->_emit_xs_expr($list_node, $declared_vars);
+            }
+            my $av_init = ($list_expr =~ /^\(AV\*\)/)
+                ? "AV *_ssrc = $list_expr; "
+                : "AV *_ssrc = (AV*)SvRV($list_expr); ";
+            return "({ ${av_init}"
+                . "SSize_t _slen = av_len(_ssrc) + 1; "
+                . "AV *_sorted = newAV(); av_extend(_sorted, _slen - 1); "
+                . "SV **_stmp = (SV**)safemalloc((_slen ? _slen : 1) * sizeof(SV*)); "
+                . "SSize_t _si; "
+                . "for (_si = 0; _si < _slen; _si++) { "
+                .   "SV **_ep = av_fetch(_ssrc, _si, 0); "
+                .   "_stmp[_si] = _ep ? SvREFCNT_inc(*_ep) : &PL_sv_undef; "
+                . "} "
+                . "sortsv(_stmp, _slen, Perl_sv_cmp_locale); "
+                . "for (_si = 0; _si < _slen; _si++) av_push(_sorted, _stmp[_si]); "
+                . "Safefree(_stmp); "
+                . "newRV_noinc((SV*)_sorted); })";
         }
 
         # values(%hash) — native hash value iteration via hv_iternext
@@ -3365,7 +3413,26 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if (defined $block_node && $block_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $block_node->class() eq 'AnonSubExpr') {
                 my $body = $block_node->inputs()->[1] // [];
-                if ($body->@*) {
+                if ($body->@* > 1) {
+                    # Multi-statement block: emit all stmts as compound statement expr.
+                    # VarDecl items declare local C variables; last item is the return value.
+                    $needs_topic_binding = true;
+                    my %map_vars = ($declared_vars ? $declared_vars->%* : ());
+                    $map_vars{'_'} = 1;
+                    my @block_stmts;
+                    for my $stmt ($body->@*) {
+                        if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $stmt->class() eq 'VarDecl') {
+                            my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
+                            $map_vars{$vname} = 1;
+                            my $init = $self->_emit_xs_expr($stmt->inputs()->[1], \%map_vars);
+                            push @block_stmts, "SV *${vname}_sv = $init";
+                        } else {
+                            push @block_stmts, $self->_emit_xs_expr($stmt, \%map_vars);
+                        }
+                    }
+                    $block_body = '({ ' . join('; ', @block_stmts) . '; })';
+                } elsif ($body->@*) {
                     $block_body = $self->_emit_xs_expr($body->[-1], $declared_vars);
                 }
             } elsif (defined $block_node) {
@@ -3559,6 +3626,26 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $escaped = $self->_escape_c_string($perl_call);
             return "eval_pv(\"$escaped\", TRUE)";
         }
+    }
+
+    # Emit keys() in list context — returns AV ref of all hash keys.
+    # Used when keys is argument to sort/map/grep (not standalone scalar context).
+    method _emit_xs_keys_list($hash_node, $declared_vars) {
+        my $hash = $self->_emit_xs_expr($hash_node, $declared_vars);
+        my $hv_expr;
+        if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
+                && $hash_node->class() eq 'PostfixDerefExpr') {
+            $hv_expr = $hash;
+        } else {
+            $hv_expr = "(HV*)SvRV($hash)";
+        }
+        return "({ HV *_khv = $hv_expr; HE *_khe; I32 _klen = HvUSEDKEYS(_khv); "
+            . "AV *_kav = newAV(); av_extend(_kav, _klen - 1); "
+            . "hv_iterinit(_khv); "
+            . "while ((_khe = hv_iternext(_khv))) { "
+            .   "av_push(_kav, newSVhek(HeKEY_hek(_khe))); "
+            . "} "
+            . "newRV_noinc((SV*)_kav); })";
     }
 
     # Emit backtick expression via eval_pv with actual command from IR

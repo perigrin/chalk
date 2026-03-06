@@ -367,16 +367,28 @@ sub parse_one_file($grammar_ref, $file_path) {
     my $ir = $sem_ctx->extract();
     return unless defined $ir;
 
-    return ($ir, $sa, $sem_ctx);
+    # Snapshot cfg_state before subsequent parses wipe it via reset_cache().
+    my %cfg_snapshot;
+    my @stack = ($sem_ctx);
+    while (@stack) {
+        my $node = pop @stack;
+        my $state = $sa->cfg_state($node);
+        if (defined $state) {
+            $cfg_snapshot{refaddr($node)} = $state;
+        }
+        push @stack, $node->children()->@*;
+    }
+
+    return ($ir, $sa, $sem_ctx, \%cfg_snapshot);
 }
 
 my %parsed;
 for my $entry (@class_files) {
     my ($class_name, $class_file) = $entry->@*;
     print STDERR "multi-class: parsing $class_name...\n";
-    my ($ir, $sa, $ctx) = parse_one_file($gen_grammar, $class_file);
+    my ($ir, $sa, $ctx, $cfg_snapshot) = parse_one_file($gen_grammar, $class_file);
     die "Parse failed for $class_name" unless defined $ir;
-    $parsed{$class_name} = { ir => $ir, sa => $sa, ctx => $ctx };
+    $parsed{$class_name} = { ir => $ir, sa => $sa, ctx => $ctx, cfg_snapshot => $cfg_snapshot };
     print STDERR sprintf("multi-class: parsed $class_name OK (RSS=%.0fMB)\n", get_rss_mb());
 }
 
@@ -426,7 +438,7 @@ my $multi_xs = Chalk::Bootstrap::Perl::Target::XS->new(
 
 my @entries = map {
     my $p = $parsed{$_->[0]};
-    { class_name => $_->[0], ir => $p->{ir}, sa => $p->{sa}, ctx => $p->{ctx} }
+    { class_name => $_->[0], ir => $p->{ir}, sa => $p->{sa}, ctx => $p->{ctx}, cfg_snapshot => $p->{cfg_snapshot} }
 } @class_files;
 
 print STDERR "multi-class: generating XS distribution...\n";

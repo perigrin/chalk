@@ -55,10 +55,10 @@ class Worker {
 PERL
 close $fh_b;
 
-my ($ir_a, $sa_a, $ctx_a) = eval { parse_file_ir($gen, $file_a) };
+my ($ir_a, $sa_a, $ctx_a, $cfg_a) = eval { parse_file_ir($gen, $file_a) };
 ok(defined $ir_a, 'Helper class parses') or BAIL_OUT("Parse failed: $@");
 
-my ($ir_b, $sa_b, $ctx_b) = eval { parse_file_ir($gen, $file_b) };
+my ($ir_b, $sa_b, $ctx_b, $cfg_b) = eval { parse_file_ir($gen, $file_b) };
 ok(defined $ir_b, 'Worker class parses') or BAIL_OUT("Parse failed: $@");
 
 # --- Register both classes ---
@@ -78,8 +78,8 @@ my $xs = Chalk::Bootstrap::Perl::Target::XS->new(
 
 can_ok($xs, 'generate_multi_class');
 my $code = eval { $xs->generate_multi_class([
-    { class_name => 'Helper', ir => $ir_a, sa => $sa_a, ctx => $ctx_a },
-    { class_name => 'Worker', ir => $ir_b, sa => $sa_b, ctx => $ctx_b },
+    { class_name => 'Helper', ir => $ir_a, sa => $sa_a, ctx => $ctx_a, cfg_snapshot => $cfg_a },
+    { class_name => 'Worker', ir => $ir_b, sa => $sa_b, ctx => $ctx_b, cfg_snapshot => $cfg_b },
 ]) };
 ok(defined $code, 'generate_multi_class produces output')
     or BAIL_OUT("Multi-class gen failed: $@");

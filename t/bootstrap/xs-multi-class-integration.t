@@ -59,12 +59,12 @@ my @class_files = (
 
 for my $entry (@class_files) {
     my ($class_name, $file) = $entry->@*;
-    my ($ir, $sa, $ctx) = eval { parse_file_ir($gen, $file) };
+    my ($ir, $sa, $ctx, $cfg_snapshot) = eval { parse_file_ir($gen, $file) };
     ok(defined $ir, "$class_name parses to IR") or do {
         diag "Parse failed: $@";
         next;
     };
-    $parsed{$class_name} = { ir => $ir, sa => $sa, ctx => $ctx };
+    $parsed{$class_name} = { ir => $ir, sa => $sa, ctx => $ctx, cfg_snapshot => $cfg_snapshot };
 }
 
 # --- Step 2: Register classes with ClassRegistry ---
@@ -129,6 +129,7 @@ SKIP: {
         {
             class_name => $_->[0],
             ir => $p->{ir}, sa => $p->{sa}, ctx => $p->{ctx},
+            cfg_snapshot => $p->{cfg_snapshot},
         }
     } @class_files;
 
@@ -243,11 +244,10 @@ SKIP: {
 
         my $one = eval { $bool->one() };
         push @results, (defined $one ? 'PASS' : 'FAIL') . ':Boolean::one()';
-        # is_zero uses refaddr to compare against $ZERO. When is_zero falls
-        # back to eval_pv (Perl lexical $ZERO) but zero() uses the C static
-        # _csv_boolean_ZERO, the refaddrs differ. This is the split-brain
-        # issue tracked as a known architectural concern.
-        push @results, ($bool->is_zero($zero) ? 'PASS' : 'TODO') . ':is_zero(zero()) [split-brain: XS static vs Perl lexical]';
+        # is_zero uses refaddr to compare against $ZERO. Both zero() and
+        # is_zero() now compile to native _impl_ helpers using the same
+        # _csv_Boolean_ZERO static, so refaddrs match.
+        push @results, ($bool->is_zero($zero) ? 'PASS' : 'FAIL') . ':is_zero(zero())';
         push @results, (!$bool->is_zero($one) ? 'PASS' : 'FAIL') . ':!is_zero(one())';
 
         # FilterComposite: test multi-class map dispatch

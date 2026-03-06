@@ -39,8 +39,13 @@ sub setup_xs_grammar($namespace) {
 }
 
 # Parses a .pm file to IR using the given grammar.
-# In list context: returns ($ir, $sa, $sem_ctx) for cfg-aware generation, or () on failure.
+# In list context: returns ($ir, $sa, $sem_ctx, $cfg_snapshot) for cfg-aware generation, or () on failure.
 # In scalar context: returns $ir for backward compatibility.
+#
+# The cfg_snapshot in the returned $sa captures cfg_state entries at parse time.
+# SemanticAction's %_cfg_state is a class-scope lexical shared across all instances,
+# so subsequent parses (which call reset_cache) wipe earlier entries. The snapshot
+# preserves cfg_state so _build_cfg_lookup can use it in multi-class builds.
 sub parse_file_ir($gen_grammar, $file) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
@@ -61,7 +66,22 @@ sub parse_file_ir($gen_grammar, $file) {
     my $ir = $sem_ctx->extract();
     return unless defined $ir;
 
-    return wantarray ? ($ir, $sa, $sem_ctx) : $ir;
+    # Snapshot cfg_state before a subsequent parse wipes it via reset_cache().
+    # SemanticAction's %_cfg_state is a class-scope lexical shared across all
+    # instances — subsequent parse_file_ir calls will wipe it. This snapshot
+    # maps Context refaddr to cfg_state, for _build_cfg_lookup to use later.
+    my %cfg_snapshot;
+    my @stack = ($sem_ctx);
+    while (@stack) {
+        my $node = pop @stack;
+        my $state = $sa->cfg_state($node);
+        if (defined $state) {
+            $cfg_snapshot{refaddr($node)} = $state;
+        }
+        push @stack, $node->children()->@*;
+    }
+
+    return wantarray ? ($ir, $sa, $sem_ctx, \%cfg_snapshot) : $ir;
 }
 
 # Builds, compiles, and loads an XS module from IR with cfg_state dispatch.
