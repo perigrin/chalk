@@ -36,6 +36,11 @@ use Chalk::Bootstrap::ConciseTree::Actions;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
+use Chalk::Bootstrap::Earley;
+use Chalk::Bootstrap::Desugar;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::IR::NodeFactory;
+use TestPipeline qw(perl_pipeline);
 
 # --- Step 1: Parse all classes to IR ---
 my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSMultiInteg') };
@@ -64,7 +69,7 @@ for my $entry (@class_files) {
 
 # --- Step 2: Register classes with ClassRegistry ---
 SKIP: {
-    skip 'Not all classes parsed', 14
+    skip 'Not all classes parsed', 15
         unless keys %parsed == scalar @class_files;
 
     my $reg = Chalk::Bootstrap::Perl::Target::ClassRegistry->new();
@@ -131,7 +136,7 @@ SKIP: {
     ok(defined $multi_code, 'multi-class XS generation succeeds')
         or do {
             diag "Multi-class gen failed: $@";
-            skip 'Multi-class generation failed', 13;
+            skip 'Multi-class generation failed', 14;
         };
 
     # Basic structural checks
@@ -157,7 +162,7 @@ SKIP: {
     ok(ref($dist) eq 'HASH', 'multi-class distribution generated')
         or do {
             diag "Distribution gen failed";
-            skip 'Distribution failed', 10;
+            skip 'Distribution failed', 11;
         };
 
     for my $path (sort keys $dist->%*) {
@@ -181,8 +186,28 @@ SKIP: {
         my $exit = $? >> 8;
         is($exit, 0, './Build compiles multi-class XS') or do {
             diag "Build failed: $output";
-            skip 'Build failed', 8;
+            skip 'Build failed', 9;
         };
+    }
+
+    # --- Step 4.5: Build Perl grammar for integration parse (before XS load) ---
+    # Must happen before Step 5 because loading the XS module replaces
+    # Earley methods, which breaks the BNF pipeline.
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $integ_ir = eval { perl_pipeline() };
+    my $integ_desugared;
+    if (defined $integ_ir) {
+        my $integ_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+        my $integ_generated = $integ_target->generate($integ_ir);
+        $integ_generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSMultiIntegParseGrammar/g;
+        eval $integ_generated;
+        unless ($@) {
+            my $integ_grammar = Chalk::Grammar::Perl::XSMultiIntegParseGrammar::grammar();
+            my @integ_ordered = sort {
+                ($a->name() eq 'Program' ? 0 : 1) <=> ($b->name() eq 'Program' ? 0 : 1)
+            } $integ_grammar->@*;
+            $integ_desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@integ_ordered);
+        }
     }
 
     # --- Step 5: Load the XS module ---
@@ -192,7 +217,7 @@ SKIP: {
     is($@, '', 'Test::XSMultiInteg loads without error')
         or do {
             diag "Load failed: $@";
-            skip 'Load failed', 7;
+            skip 'Load failed', 8;
         };
 
     # --- Step 6: Verify XS method registration ---
@@ -270,6 +295,85 @@ SKIP: {
             }
             else                   { fail($desc) }
         }
+    }
+
+    # --- Step 8: Integration parse test (actual Earley parse with XS-compiled classes) ---
+    # Uses the grammar built in Step 4.5 (before XS load replaced Earley methods).
+    # Parse runs in a forked child for segfault safety.
+    unless (defined $integ_desugared) {
+        fail('Integration parse skipped — grammar setup failed');
+        last;  # exit SKIP block
+    }
+
+    # Read source file
+    my $parse_file = 'lib/Chalk/Bootstrap/Semiring/Boolean.pm';
+    open my $pfh, '<:utf8', $parse_file or die "Cannot read $parse_file: $!";
+    my $parse_source = do { local $/; <$pfh> };
+    close $pfh;
+
+    pipe(my $prd, my $pwr) or die "pipe: $!";
+    my $parse_pid = fork();
+    if ($parse_pid == 0) {
+        close $prd;
+
+        my $semiring = Chalk::Bootstrap::Semiring::FilterComposite->new(
+            semirings => [
+                Chalk::Bootstrap::Semiring::Boolean->new(),
+                Chalk::Bootstrap::Semiring::Precedence->new(
+                    lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+                ),
+                Chalk::Bootstrap::Semiring::TypeInference->new(
+                    keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+                    builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+                ),
+                Chalk::Bootstrap::Semiring::Structural->new(),
+                Chalk::Bootstrap::Semiring::SemanticAction->new(
+                    actions => Chalk::Bootstrap::ConciseTree::Actions->new(),
+                ),
+            ],
+        );
+        $semiring->reset_cache();
+
+        my $parser = Chalk::Bootstrap::Earley->new(
+            grammar  => $integ_desugared,
+            semiring => $semiring,
+        );
+
+        my $t0 = time();
+        my $result = eval { $parser->parse($parse_source) };
+        my $elapsed = time() - $t0;
+        my $err = $@;
+
+        if (defined $result && $result) {
+            print $pwr "PARSE_OK:$elapsed\n";
+        } else {
+            print $pwr "PARSE_FAIL:err=$err result=" . (defined $result ? "'$result'" : 'undef') . "\n";
+        }
+        close $pwr;
+        exit 0;
+    }
+    close $pwr;
+    my $parse_output = do { local $/; <$prd> };
+    close $prd;
+    waitpid($parse_pid, 0);
+    my $parse_signal = $? & 127;
+
+    if ($parse_signal) {
+        fail("Integration parse crashed with signal $parse_signal");
+    } elsif ($parse_output =~ /^PARSE_OK:(.+)/) {
+        my $elapsed = $1 + 0;
+        pass('XS-compiled Earley parses Boolean.pm');
+        diag sprintf("Integration parse: %.2fs", $elapsed);
+    } elsif ($parse_output =~ /_tag_key/) {
+        # XS-compiled _ctx() calls _tag_key via call_pv, but _tag_key is a
+        # lexical sub not in the package stash. Same split-brain issue as
+        # is_zero(zero()) above.
+        TODO: {
+            local $TODO = 'split-brain: XS call_pv cannot reach my sub _tag_key';
+            fail('XS-compiled Earley parses Boolean.pm');
+        }
+    } else {
+        fail("Integration parse failed: $parse_output");
     }
 }
 
