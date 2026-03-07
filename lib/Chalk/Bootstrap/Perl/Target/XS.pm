@@ -3235,9 +3235,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         # refaddr() — return the pointer value of the referent as UV
+        # Guard with SvROK check: Perl's refaddr() returns undef for non-refs.
+        # Without this, SvRV on a non-reference (e.g. true/false) segfaults.
         if ($name eq 'refaddr' && $args->@* == 1) {
             my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
-            return "sv_2mortal(newSVuv(PTR2UV(SvRV($arg))))";
+            return "(SvROK($arg) ? sv_2mortal(newSVuv(PTR2UV(SvRV($arg)))) : &PL_sv_undef)";
         }
 
         # scalar() — for arrays, return count
