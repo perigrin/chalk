@@ -16,26 +16,45 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     }
 
     method zero() {
-        return [ map { $_->zero() } $semirings->@* ];
+        my @z;
+        for my $sr ($semirings->@*) {
+            push @z, $sr->zero();
+        }
+        return \@z;
     }
 
     method one() {
-        return [ map { $_->one() } $semirings->@* ];
+        my @o;
+        for my $sr ($semirings->@*) {
+            push @o, $sr->one();
+        }
+        return \@o;
     }
 
     # Staged filter: ANY component zero → whole tuple is zero
     method is_zero($value) {
-        for my $i (0 .. $semirings->$#*) {
-            return true if $semirings->[$i]->is_zero($value->[$i]);
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$i];
+            my $vi = $value->[$i];
+            return true if $sr->is_zero($vi);
         }
         return false;
     }
 
     method multiply($left, $right) {
-        my @result = map { $semirings->[$_]->multiply($left->[$_], $right->[$_]) } 0 .. $semirings->$#*;
+        my @result;
+        for my $idx (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$idx];
+            my $lr = $left->[$idx];
+            my $rr = $right->[$idx];
+            my $mr = $sr->multiply($lr, $rr);
+            push @result, $mr;
+        }
         # Annihilator: if any component multiply returns zero, the whole tuple is zero.
-        for my $i (0 .. $#result) {
-            return $self->zero() if $semirings->[$i]->is_zero($result[$i]);
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$i];
+            my $ri = $result[$i];
+            return $self->zero() if $sr->is_zero($ri);
         }
         return \@result;
     }
@@ -56,10 +75,10 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     #
     # Returns: 'right_loses' | 'left_loses' | 'neither'
     method _filter_compare($left, $right) {
-        for my $i (0 .. $semirings->$#*) {
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $semiring = $semirings->[$i];
             my $li = $left->[$i];
             my $ri = $right->[$i];
-            my $semiring = $semirings->[$i];
 
             # Skip identity: same value means this semiring cannot distinguish.
             my $same;
@@ -127,9 +146,12 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # added later if needed for debugging.
     method add($left, $right) {
         # Zero handling: if ANY component of left is zero, return right (and vice versa).
-        for my $i (0 .. $semirings->$#*) {
-            return $right if $semirings->[$i]->is_zero($left->[$i]);
-            return $left  if $semirings->[$i]->is_zero($right->[$i]);
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$i];
+            my $li = $left->[$i];
+            my $ri = $right->[$i];
+            return $right if $sr->is_zero($li);
+            return $left  if $sr->is_zero($ri);
         }
 
         # Determine which tuple wins by scanning for semiring preferences.
@@ -148,9 +170,12 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         # Post-merge hook: allow semirings to transfer side-table state from
         # loser to winner. This fixes the Earley stale-value merge problem
         # where cfg_state updates are lost when add() picks the older value.
-        for my $i (0 .. $semirings->$#*) {
-            if ($semirings->[$i]->can('on_merge')) {
-                $semirings->[$i]->on_merge($winner->[$i], $loser->[$i]);
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$i];
+            if ($sr->can('on_merge')) {
+                my $wi = $winner->[$i];
+                my $lo = $loser->[$i];
+                $sr->on_merge($wi, $lo);
             }
         }
 
@@ -161,10 +186,11 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # If any component returns zero, the whole tuple is zero.
     method on_scan($item, $alt_idx, $pos, $matched_text) {
         my @results;
-        for my $i (0 .. $semirings->$#*) {
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$i];
             my $component_item = { %$item, value => $item->{value}->[$i] };
-            my $r = $semirings->[$i]->on_scan($component_item, $alt_idx, $pos, $matched_text);
-            return $self->zero() if $semirings->[$i]->is_zero($r);
+            my $r = $sr->on_scan($component_item, $alt_idx, $pos, $matched_text);
+            return $self->zero() if $sr->is_zero($r);
             push @results, $r;
         }
         return \@results;
@@ -177,16 +203,17 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     method on_complete($item, $alt_idx, $pos) {
         my @results;
         my $ti_result;
-        for my $i (0 .. $semirings->$#*) {
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$i];
             my $component_item = { %$item, value => $item->{value}->[$i] };
             # Thread TI result to SA: indices 2=TI, 4=SA match pipeline
             # construction order in TestPipeline/build_perl_concise_parser.
             if ($i == 4 && defined $ti_result
-                    && $semirings->[$i]->can('set_type_context')) {
-                $semirings->[$i]->set_type_context($ti_result);
+                    && $sr->can('set_type_context')) {
+                $sr->set_type_context($ti_result);
             }
-            my $r = $semirings->[$i]->on_complete($component_item, $alt_idx, $pos);
-            return $self->zero() if $semirings->[$i]->is_zero($r);
+            my $r = $sr->on_complete($component_item, $alt_idx, $pos);
+            return $self->zero() if $sr->is_zero($r);
             push @results, $r;
             # Capture TI result after it completes
             $ti_result = $r if $i == 2;
@@ -199,7 +226,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # others fall back to multiply(value, one()) which is identity.
     method on_skip_optional($item, $alt_idx, $pos, $symbol_name) {
         my @results;
-        for my $i (0 .. $semirings->$#*) {
+        for my $i (0 .. scalar($semirings->@*) - 1) {
             my $component_item = { %$item, value => $item->{value}->[$i] };
             my $sr = $semirings->[$i];
             my $r;
@@ -218,9 +245,10 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # First-false short-circuit: if ANY component returns false, return false.
     # This allows any semiring to veto a scan before on_scan is called.
     method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
-        for my $i (0 .. $semirings->$#*) {
+        for my $i (0 .. scalar($semirings->@*) - 1) {
+            my $sr = $semirings->[$i];
             my $component_item = { %$item, value => $item->{value}->[$i] };
-            return false unless $semirings->[$i]->should_scan(
+            return false unless $sr->should_scan(
                 $component_item, $alt_idx, $pos, $matched_text, $is_predicted
             );
         }

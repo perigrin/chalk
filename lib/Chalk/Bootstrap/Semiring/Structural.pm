@@ -31,10 +31,13 @@ class Chalk::Bootstrap::Semiring::Structural {
     # (e.g. Chalk::Bootstrap::Semiring::Structural::STRUCT_IS_CALL)
     # to avoid depending on Exporter, which Chalk cannot compile.
 
+    # Sentinel value outside the 0-255 valid bitfield range, marking dead parse paths.
+    my $ZERO = -1;
+
     # zero() returns -1: the sentinel value outside the 0-255 valid bitfield range.
     # This marks a dead parse path.
     method zero() {
-        return -1;
+        return $ZERO;
     }
 
     # one() returns 0: the identity value with no bits set (valid, no structural tags).
@@ -44,13 +47,13 @@ class Chalk::Bootstrap::Semiring::Structural {
 
     # is_zero($value): true iff value is the sentinel -1.
     method is_zero($value) {
-        return $value == -1;
+        return $value == $ZERO;
     }
 
     method multiply($left, $right) {
         # Propagate zero
-        return -1 if $left == -1;
-        return -1 if $right == -1;
+        return $ZERO if $left == $ZERO;
+        return $ZERO if $right == $ZERO;
 
         # Combine tags from both sides using bitwise OR
         return $left | $right;
@@ -58,8 +61,8 @@ class Chalk::Bootstrap::Semiring::Structural {
 
     method add($left, $right) {
         # Return first non-zero alternative
-        return $right if $left == -1;
-        return $left  if $right == -1;
+        return $right if $left == $ZERO;
+        return $left  if $right == $ZERO;
 
         # Both valid: prefer non-list over list (Expression vs ExpressionList)
         my $left_list  = $left  & STRUCT_IS_LIST;
@@ -210,7 +213,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         my $existing = $item->{value};
 
         # Propagate zero
-        return -1 if $existing == -1;
+        return $ZERO if $existing == $ZERO;
 
         # Transparent pass-through
         return $existing;
@@ -218,7 +221,7 @@ class Chalk::Bootstrap::Semiring::Structural {
 
     method on_complete($item, $alt_idx, $pos) {
         my $value = $item->{value};
-        return -1 if $value == -1;
+        return $ZERO if $value == $ZERO;
 
         my $rule_name = $item->{rule}->name();
 

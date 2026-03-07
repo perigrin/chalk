@@ -271,6 +271,24 @@ SKIP: {
         push @results, (defined $fc_zero && ref($fc_zero) eq 'ARRAY' ? 'PASS' : 'FAIL')
             . ':FilterComposite::zero() returns arrayref';
 
+        # Test one() and multiply(one, one)
+        my $fc_one = eval { $fc->one() };
+        push @results, (defined $fc_one && ref($fc_one) eq 'ARRAY' ? 'PASS' : 'FAIL')
+            . ':FilterComposite::one() returns arrayref';
+        push @results, (defined $fc_one && scalar($fc_one->@*) == 5 ? 'PASS' : 'FAIL')
+            . ':FilterComposite::one() has 5 elements';
+
+        my $fc_mul = eval { $fc->multiply($fc_one, $fc_one) };
+        if ($@) {
+            push @results, "FAIL:FilterComposite::multiply(one,one) err=$@";
+        } elsif (!defined $fc_mul) {
+            push @results, 'FAIL:FilterComposite::multiply(one,one) returns undef';
+        } elsif ($fc->is_zero($fc_mul)) {
+            push @results, 'FAIL:FilterComposite::multiply(one,one) is_zero';
+        } else {
+            push @results, 'PASS:FilterComposite::multiply(one,one) not zero';
+        }
+
         print $wr join("\n", @results) . "\nDONE\n";
         close $wr;
         exit 0;
@@ -365,6 +383,7 @@ SKIP: {
         pass('XS-compiled Earley parses Boolean.pm');
         diag sprintf("Integration parse: %.2fs", $elapsed);
     } elsif ($parse_output =~ /PARSE_FAIL/) {
+        diag "Parse output: $parse_output";
         # XS codegen issues in FilterComposite::multiply (double SvRV unwrap,
         # $#array not compiled to av_len) and Structural return statements
         # (return -1 compiled as "return" - 1) break the parse pipeline.
