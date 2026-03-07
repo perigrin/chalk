@@ -1743,11 +1743,23 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             && ($self->_is_unambiguous_value_expr($last_item)
                 || ($body_has_returns && $self->_is_bare_return_expr($last_item)))
             );
-        # Use IR return_type when available, fall back to heuristic
-        my $has_return = defined $ir_return_type
-            ? ($ir_return_type ne 'Void')
-            : ($last_is_return || $tail_expr_return
-               || $single_stmt_return || $body_has_returns);
+        # Use IR return_type when available, fall back to heuristic.
+        # Override Void when the body clearly has returns (IR type inference
+        # sometimes misclassifies methods calling my-sub helpers as Void
+        # because it can't see inside the sub to determine the return type).
+        my $heuristic_has_return = $last_is_return || $tail_expr_return
+               || $single_stmt_return || $body_has_returns;
+        my $has_return;
+        if (defined $ir_return_type && $ir_return_type eq 'Void'
+                && ($last_is_return || $body_has_returns)) {
+            # Body has explicit returns but IR says Void — trust the body
+            $has_return = true;
+            $ir_return_type = 'Any';  # fall back to generic SV* for XSUB type
+        } elsif (defined $ir_return_type) {
+            $has_return = $ir_return_type ne 'Void';
+        } else {
+            $has_return = $heuristic_has_return;
+        }
 
         # Track C variable declarations needed
         my %declared_vars;
@@ -1942,6 +1954,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($last_code =~ s/;\s*$//) {
                 my $wrapped = $self->_wrap_retval($last_code);
                 $code[-1] = "retval = $wrapped;";
+                # We assigned to retval, so ensure the function returns it
+                $has_return = true;
             }
         }
 
@@ -3394,10 +3408,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # When map has 1 arg (range only), emit array of empty hashrefs (chart init pattern).
         # When map has 2 args (block + range), emit block body for each element.
         if ($name eq 'map' && $args->@* >= 1) {
-            my ($block_node, $list_node);
+            my ($block_node, $list_node, @block_body_items);
             if ($args->@* == 2) {
                 $block_node = $args->[0];
                 $list_node  = $args->[1];
+            } elsif ($args->@* > 2) {
+                # Multi-item from _fixup_stmts: first N-1 args are block body,
+                # last arg is the list source (e.g., map { STMT; EXPR } LIST).
+                $list_node = $args->[-1];
+                @block_body_items = $args->@[0 .. $#{$args} - 1];
             } else {
                 # Single arg: range only, block was lost in parsing.
                 # Default to empty hashref (map { {} } RANGE pattern).
@@ -3410,7 +3429,26 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # For bare expressions, we bind $_ to the current element via _mtopic.
             my $block_body;
             my $needs_topic_binding = false;
-            if (defined $block_node && $block_node isa Chalk::Bootstrap::IR::Node::Constructor
+            if (@block_body_items) {
+                # Multi-item block from _fixup_stmts LIST_BUILTIN consumption.
+                # Items are the block body statements; last is the return value.
+                $needs_topic_binding = true;
+                my %map_vars = ($declared_vars ? $declared_vars->%* : ());
+                $map_vars{'_'} = 1;
+                my @block_stmts;
+                for my $stmt (@block_body_items) {
+                    if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $stmt->class() eq 'VarDecl') {
+                        my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
+                        $map_vars{$vname} = 1;
+                        my $init = $self->_emit_xs_expr($stmt->inputs()->[1], \%map_vars);
+                        push @block_stmts, "SV *${vname}_sv = $init";
+                    } else {
+                        push @block_stmts, $self->_emit_xs_expr($stmt, \%map_vars);
+                    }
+                }
+                $block_body = '({ ' . join('; ', @block_stmts) . '; })';
+            } elsif (defined $block_node && $block_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $block_node->class() eq 'AnonSubExpr') {
                 my $body = $block_node->inputs()->[1] // [];
                 if ($body->@* > 1) {

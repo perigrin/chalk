@@ -722,6 +722,21 @@ class Chalk::Bootstrap::Perl::Actions {
                     last if $next isa Chalk::Bootstrap::IR::Node::Constant
                         && defined $next->value()
                         && $STOP_KEYWORDS{$next->value()};
+                    # Nest PREFIX_BUILTIN inside LIST_BUILTIN: sort keys %$h → sort(keys(%$h))
+                    if ($next isa Chalk::Bootstrap::IR::Node::Constant
+                            && defined $next->value()
+                            && $PREFIX_BUILTINS{$next->value()}
+                            && $i + 2 <= $#$stmts) {
+                        my $prefix_name = $next->value();
+                        $i += 2;
+                        my $prefix_arg = $stmts->[$i];
+                        push @args, $factory->make('Constructor',
+                            'class' => 'BuiltinCall',
+                            name  => _make_const($factory, $prefix_name),
+                            args  => [$prefix_arg],
+                        );
+                        next;
+                    }
                     $i++;
                     push @args, $next;
                 }

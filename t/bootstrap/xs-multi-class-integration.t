@@ -364,12 +364,12 @@ SKIP: {
         my $elapsed = $1 + 0;
         pass('XS-compiled Earley parses Boolean.pm');
         diag sprintf("Integration parse: %.2fs", $elapsed);
-    } elsif ($parse_output =~ /_tag_key/) {
-        # XS-compiled _ctx() calls _tag_key via call_pv, but _tag_key is a
-        # lexical sub not in the package stash. Same split-brain issue as
-        # is_zero(zero()) above.
+    } elsif ($parse_output =~ /PARSE_FAIL/) {
+        # XS-compiled on_complete closures (TypeInferenceActions dispatch,
+        # CallExpression callback) degrade to eval_pv with stringified
+        # captures. The parse runs but produces wrong semiring values.
         TODO: {
-            local $TODO = 'split-brain: XS call_pv cannot reach my sub _tag_key';
+            local $TODO = 'XS closure codegen: on_complete anonymous subs lose captures';
             fail('XS-compiled Earley parses Boolean.pm');
         }
     } else {

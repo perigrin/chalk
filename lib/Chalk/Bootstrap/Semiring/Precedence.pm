@@ -58,7 +58,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
     };
 
     # Rules that reset precedence context (parenthesized expressions)
-    my %RESETS = map { $_ => true } qw(ParenExpr ArrayConstructor HashConstructor);
+    my $RESETS = {ParenExpr => true, ArrayConstructor => true, HashConstructor => true};
 
     method zero() {
         return _intern(false, undef, undef, false);
@@ -308,7 +308,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         my $rule_name = $item->{rule}->name();
 
         # Parenthesized expressions reset precedence context
-        if ($RESETS{$rule_name}) {
+        if ($RESETS->{$rule_name}) {
             return $self->one();
         }
 

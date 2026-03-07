@@ -22,20 +22,24 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     my %_ctx_cache;
 
     # Rules that need $alt_idx passed to the Actions method via closure.
-    my %_needs_alt_idx = map { $_ => true } qw(
-        PostfixDeref Subscript ExpressionList
-    );
+    my $_needs_alt_idx = {PostfixDeref => true, Subscript => true, ExpressionList => true};
 
     # Singleton for one(): a Context with { valid => true } focus and no children.
     my $_one_singleton;
 
     # Serialize a tag hash to a stable string key for hash-consing.
     # Handles arrayref values (e.g. item_types) by joining with semicolons.
+    # Serialize arrayref values by joining elements with semicolons.
+    # Separate sub avoids nested map (XS codegen shares $_ across maps).
+    my sub _join_array($arr) {
+        return join(';', map { $_ // '' } $arr->@*);
+    }
+
     my sub _tag_key($tags) {
         return join(",", map {
             my $v = $tags->{$_};
-            "$_=" . (ref($v) eq 'ARRAY' ? join(';', map { $_ // '' } @$v) : ($v // ''))
-        } sort keys %$tags);
+            "$_=" . (ref($v) eq 'ARRAY' ? _join_array($v) : ($v // ''))
+        } sort keys $tags->%*);
     }
 
     # Create a leaf Context with the given tag hash as focus.
@@ -338,7 +342,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # _extend_ctx. Alt-dependent rules capture $alt_idx via closure.
         my $method = $actions->can($rule_name);
         if ($method) {
-            my $f = $_needs_alt_idx{$rule_name}
+            my $f = $_needs_alt_idx->{$rule_name}
                 ? sub($ctx) { $actions->$method($ctx, $alt_idx) }
                 : sub($ctx) { $actions->$method($ctx) };
             my $result = _extend_ctx($value, $f, $rule_name);

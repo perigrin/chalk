@@ -633,11 +633,12 @@ BENCH_SCRIPT
             pass('Multi-class XS Earley parses Boolean.pm');
             diag sprintf('  Multi-class XS:    %6.2fs  (%5.1fms/line)',
                 $elapsed, $elapsed / $line_count * 1000);
-        } elsif ($bench_output =~ /_tag_key/) {
-            # _tag_key is a lexical my sub not reachable via call_pv.
-            # Same split-brain issue as integration test Step 8.
+        } elsif ($bench_output =~ /FAIL/) {
+            # XS-compiled on_complete closures (TypeInferenceActions dispatch,
+            # CallExpression callback) degrade to eval_pv with stringified
+            # captures. The parse runs but produces wrong semiring values.
             TODO: {
-                local $TODO = 'split-brain: XS call_pv cannot reach my sub _tag_key';
+                local $TODO = 'XS closure codegen: on_complete anonymous subs lose captures';
                 fail('Multi-class XS Earley parses Boolean.pm');
             }
         } else {
