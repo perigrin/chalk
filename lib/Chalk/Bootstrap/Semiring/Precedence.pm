@@ -69,7 +69,8 @@ class Chalk::Bootstrap::Semiring::Precedence {
     }
 
     method is_zero($value) {
-        return !$value->{valid};
+        my $valid = $value->{valid};
+        return !$valid;
     }
 
     method multiply($left, $right) {
@@ -158,7 +159,8 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # The is_operator flag distinguishes an operator context (where $right
         # is a BinaryOp completion carrying is_operator) from a right-operand
         # context (where $right is an Expression completion without is_operator).
-        if ($parent_assoc eq 'left' && !$right->{is_operator}) {
+        my $right_is_op = $right->{is_operator};
+        if ($parent_assoc eq 'left' && !$right_is_op) {
             return $self->zero();
         }
 
