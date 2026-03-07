@@ -27,6 +27,20 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Singleton for one(): a Context with { valid => true } focus and no children.
     my $_one_singleton;
 
+    # Pre-cached scan Contexts for constant tag combinations.
+    # Avoids calling _ctx() (a my sub) at runtime, which the XS codegen
+    # renders as broken eval_pv with lost variable captures.
+    my $_scan_regex;
+    my $_scan_scalar;
+    my $_scan_array;
+    my $_scan_hash;
+    my $_scan_str;
+    my $_scan_coderef;
+    my $_scan_num;
+    my $_scan_int;
+    my $_scan_undef;
+    my $_scan_bool;
+
     # Serialize a tag hash to a stable string key for hash-consing.
     # Handles arrayref values (e.g. item_types) by joining with semicolons.
     # Serialize arrayref values by joining elements with semicolons.
@@ -63,6 +77,24 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         my $extended = $value->extend($f);
         my $focus = $extended->extract();
         return undef unless defined $focus;
+        my $focus_key = _tag_key($focus);
+        my $children_key = join(":", map { refaddr($_) } $extended->children()->@*);
+        my $key = "ext:$rule_name:" . $extended->position() . ":$focus_key:$children_key";
+        return ($_ctx_cache{$key} //= $extended);
+    }
+
+    # Construct an extended Context with a pre-computed focus (no closure needed).
+    # Equivalent to _extend_ctx($value, sub { $focus }, $rule_name) but avoids
+    # anonymous sub creation, which the XS codegen cannot properly capture.
+    my sub _extend_ctx_with_focus($value, $focus, $rule_name) {
+        return undef unless defined $focus;
+        my $extended = Chalk::Bootstrap::Context->new(
+            focus       => $focus,
+            children    => $value->children(),
+            position    => $value->position(),
+            rule        => $value->rule(),
+            annotations => $value->annotations(),
+        );
         my $focus_key = _tag_key($focus);
         my $children_key = join(":", map { refaddr($_) } $extended->children()->@*);
         my $key = "ext:$rule_name:" . $extended->position() . ":$focus_key:$children_key";
@@ -138,7 +170,89 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     method reset_cache() {
         %_ctx_cache = ();
         $_one_singleton = undef;
+        $_scan_regex = undef;
+        $_scan_scalar = undef;
+        $_scan_array = undef;
+        $_scan_hash = undef;
+        $_scan_str = undef;
+        $_scan_coderef = undef;
+        $_scan_num = undef;
+        $_scan_int = undef;
+        $_scan_undef = undef;
+        $_scan_bool = undef;
         Chalk::Bootstrap::Semiring::TypeInferenceActions::reset_method_registry();
+    }
+
+    # _init_scan_cache is a method (not my sub) so the XS codegen compiles
+    # it natively. my subs fall back to eval_pv which cannot access class-scope
+    # lexicals like $_scan_regex.
+    method _init_scan_cache() {
+        $_scan_regex   //= $self->_scan_ctx_type('Regex');
+        $_scan_scalar  //= $self->_scan_ctx_type('Scalar');
+        $_scan_array   //= $self->_scan_ctx_type('Array');
+        $_scan_hash    //= $self->_scan_ctx_type('Hash');
+        $_scan_str     //= $self->_scan_ctx_type('Str');
+        $_scan_coderef //= $self->_scan_ctx_type('CodeRef');
+        $_scan_num     //= $self->_scan_ctx_type('Num');
+        $_scan_int     //= $self->_scan_ctx_type('Int');
+        $_scan_undef   //= $self->_scan_ctx_type('Undef');
+        $_scan_bool    //= $self->_scan_ctx_type('Bool');
+    }
+
+    # Build a scan Context with a dynamic tag hash.
+    # Constructs the hash, hash-conses via _tag_key, and creates a Context
+    # directly — avoiding _ctx() my sub calls with hash constructor arguments
+    # that the XS codegen renders as broken eval_pv.
+    method _scan_ctx_ident($matched_text) {
+        my $tags = { valid => true, ident_text => $matched_text };
+        my $key = "scan:" . _tag_key($tags);
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus    => $tags,
+            children => [],
+            position => 0,
+            rule     => undef,
+        ));
+    }
+
+    method _scan_ctx_call_ident($matched_text) {
+        my $tags = { valid => true, call_symbol => $matched_text, ident_text => $matched_text };
+        my $key = "scan:" . _tag_key($tags);
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus    => $tags,
+            children => [],
+            position => 0,
+            rule     => undef,
+        ));
+    }
+
+    method _scan_ctx_op($matched_text) {
+        my $tags = { valid => true, op_text => $matched_text };
+        my $key = "scan:" . _tag_key($tags);
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus    => $tags,
+            children => [],
+            position => 0,
+            rule     => undef,
+        ));
+    }
+
+    method _scan_ctx_type($type_str) {
+        my $tags = { valid => true, type => $type_str };
+        my $key = "scan:" . _tag_key($tags);
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
+            focus    => $tags,
+            children => [],
+            position => 0,
+            rule     => undef,
+        ));
+    }
+
+    # Wrap builtin lookup as a method call so XS codegen can compile it.
+    # Calls the package sub directly rather than going through the field
+    # coderef, because XS codegen drops arguments for coderef calls
+    # ($coderef->($arg) loses $arg in the IR).
+    method _lookup_builtin($name) {
+        return Chalk::Grammar::Perl::TypeLibrary::get_builtin($name);
     }
 
     method multiply($left, $right) {
@@ -179,6 +293,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Propagate zero
         return undef if !defined $existing;
 
+        # Lazy-init pre-cached scan Contexts on first call
+        $self->_init_scan_cache() if !defined $_scan_regex;
+
         my $rule_name = $item->{rule}->name();
 
         # Reject empty regex // and m// — these are the defined-or operator, not a regex
@@ -190,83 +307,69 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         # Non-empty RegexLiteral → type => 'Regex'
         if ($rule_name eq 'RegexLiteral') {
-            return $self->multiply($existing,
-                _ctx({ valid => true, type => 'Regex' }));
+            return $self->multiply($existing, $_scan_regex);
         }
 
         # In QualifiedIdentifier context, tag bare builtins with their name
         # so CallExpression can look up the full signature for validation.
         # All QualifiedIdentifier scans also get ident_text for method name extraction.
         if ($rule_name eq 'QualifiedIdentifier') {
-            if ($matched_text !~ /::/ && $builtin_lookup->($matched_text)) {
+            if (!($matched_text =~ /::/) && $self->_lookup_builtin($matched_text)) {
                 return $self->multiply($existing,
-                    _ctx({ valid => true, call_symbol => $matched_text, ident_text => $matched_text }));
+                    $self->_scan_ctx_call_ident($matched_text));
             }
             return $self->multiply($existing,
-                _ctx({ valid => true, ident_text => $matched_text }));
+                $self->_scan_ctx_ident($matched_text));
         }
 
         # Tag variable scans with their type
         if ($rule_name eq 'ScalarVariable') {
-            return $self->multiply($existing,
-                _ctx({ valid => true, type => 'Scalar' }));
+            return $self->multiply($existing, $_scan_scalar);
         }
         if ($rule_name eq 'ArrayVariable') {
-            return $self->multiply($existing,
-                _ctx({ valid => true, type => 'Array' }));
+            return $self->multiply($existing, $_scan_array);
         }
         if ($rule_name eq 'HashVariable') {
-            return $self->multiply($existing,
-                _ctx({ valid => true, type => 'Hash' }));
+            return $self->multiply($existing, $_scan_hash);
         }
 
         # NumericLiteral: distinguish Int vs Num based on pattern
         if ($rule_name eq 'NumericLiteral') {
             # Hex (0x), binary (0b), octal (0[0-7]), or plain integer → Int
             # Float (has .) or scientific (has e/E but not hex 0x) → Num
-            my $num_type;
             if ($matched_text =~ /[.]/
-                || ($matched_text =~ /[eE]/ && $matched_text !~ /^0[xX]/))
+                || ($matched_text =~ /[eE]/ && !($matched_text =~ /^0[xX]/)))
             {
-                $num_type = 'Num';
-            } else {
-                $num_type = 'Int';
+                return $self->multiply($existing, $_scan_num);
             }
-            return $self->multiply($existing,
-                _ctx({ valid => true, type => $num_type }));
+            return $self->multiply($existing, $_scan_int);
         }
 
         # StringLiteral → type => 'Str'
         if ($rule_name eq 'StringLiteral') {
-            return $self->multiply($existing,
-                _ctx({ valid => true, type => 'Str' }));
+            return $self->multiply($existing, $_scan_str);
         }
 
         # Literal: undef/true/false
         if ($rule_name eq 'Literal') {
-            my $lit_type;
             if ($matched_text eq 'undef') {
-                $lit_type = 'Undef';
-            } elsif ($matched_text eq 'true' || $matched_text eq 'false') {
-                $lit_type = 'Bool';
+                return $self->multiply($existing, $_scan_undef);
             }
-            if (defined $lit_type) {
-                return $self->multiply($existing,
-                    _ctx({ valid => true, type => $lit_type }));
+            if ($matched_text eq 'true' || $matched_text eq 'false') {
+                return $self->multiply($existing, $_scan_bool);
             }
         }
 
         # Atom: __SUB__ → type => 'CodeRef'
         if ($rule_name eq 'Atom' && $matched_text eq '__SUB__') {
-            return $self->multiply($existing,
-                _ctx({ valid => true, type => 'CodeRef' }));
+            return $self->multiply($existing, $_scan_coderef);
         }
 
         # BinaryOp: capture operator text for later consumption at
         # BinaryExpression on_complete.
         if ($rule_name eq 'BinaryOp') {
             return $self->multiply($existing,
-                _ctx({ valid => true, op_text => $matched_text }));
+                $self->_scan_ctx_op($matched_text));
         }
 
         # UnaryExpression operator scan: capture op_text.
@@ -274,7 +377,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             && $matched_text =~ /^(?:[!~\\]|not|[+-])$/)
         {
             return $self->multiply($existing,
-                _ctx({ valid => true, op_text => $matched_text }));
+                $self->_scan_ctx_op($matched_text));
         }
 
         # Non-QualifiedIdentifier or non-keyword: transparent
@@ -296,7 +399,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             my $return_type;
             my $call_sym = _get_call_symbol($value);
             if ($call_sym) {
-                my $sig = $builtin_lookup->($call_sym);
+                my $sig = $self->_lookup_builtin($call_sym);
                 if ($sig) {
                     my $item_types = _get_item_types($value);
                     if ($item_types) {
@@ -328,26 +431,19 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     $return_type = undef if defined $return_type && $return_type eq 'Any';
                 }
             }
-            return _extend_ctx(
-                $value,
-                sub($ctx) {
-                    return { valid => true, ($return_type ? (type => $return_type) : ()) };
-                },
-                $rule_name,
-            );
+            my $new_focus = { valid => true };
+            $new_focus->{type} = $return_type if $return_type;
+            return _extend_ctx_with_focus($value, $new_focus, $rule_name);
         }
 
         # Dispatch to TypeInferenceActions for rules with registered methods.
-        # All methods receive ($ctx) via extend() and are hash-consed by
-        # _extend_ctx. Alt-dependent rules capture $alt_idx via closure.
-        my $method = $actions->can($rule_name);
-        if ($method) {
-            my $f = $_needs_alt_idx->{$rule_name}
-                ? sub($ctx) { $actions->$method($ctx, $alt_idx) }
-                : sub($ctx) { $actions->$method($ctx) };
-            my $result = _extend_ctx($value, $f, $rule_name);
-            return undef unless defined $result && defined $result->extract();
-            return $result;
+        # Methods receive the Context directly and return a focus hash.
+        # Alt-dependent rules receive $alt_idx as an extra parameter.
+        if ($actions->can($rule_name)) {
+            my $action_focus = $actions->dispatch($rule_name, $value,
+                $_needs_alt_idx->{$rule_name} ? $alt_idx : undef);
+            return undef unless defined $action_focus;
+            return _extend_ctx_with_focus($value, $action_focus, $rule_name);
         }
 
         # Catch-all: transparent passthrough for rules without Actions methods.
@@ -370,8 +466,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # Qualified identifiers with :: are never keywords (Foo::class is OK)
         return true if $matched_text =~ /::/;
 
-        # Check if matched text is a keyword
-        return true unless $keyword_check->($matched_text);
+        # Check if matched text is a keyword.
+        # Calls the package sub directly instead of through the field coderef
+        # because XS codegen drops arguments for coderef calls.
+        return true unless Chalk::Grammar::Perl::KeywordTable::is_keyword($matched_text);
 
         # Hard keywords are always rejected as identifiers, regardless of
         # prediction state. Prevents non-deterministic parsing when nullable
@@ -383,7 +481,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return true unless $keyword_rules;
 
         for my $kr ($keyword_rules->@*) {
-            if ($is_predicted->($kr)) {
+            my $predicted = ref($is_predicted) eq 'HASH'
+                ? exists $is_predicted->{$kr}
+                : $is_predicted->($kr);
+            if ($predicted) {
                 # A rule that consumes this keyword is predicted here.
                 # Reject this keyword-as-identifier scan.
                 return false;

@@ -291,7 +291,7 @@ class Chalk::Bootstrap::Earley {
                         );
                     } else {
                         # Scan (allow at end of input for zero-width matches)
-                        $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart, $n, \@agenda);
+                        $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart, $n, \@agenda, \%predicted_at);
                     }
                 }
             }
@@ -404,7 +404,7 @@ class Chalk::Bootstrap::Earley {
     }
 
     # Scan: match terminal and advance to next position
-    method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $n, $agenda = undef) {
+    method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $n, $agenda = undef, $predicted_at = undef) {
         my $pattern_str = $symbol->value();
 
         # Check scan result cache before attempting regex match
@@ -422,10 +422,12 @@ class Chalk::Bootstrap::Earley {
         # Capture matched text
         my $matched = substr($input, $pos, $end_pos - $pos);
 
-        # Build $is_predicted callback for this position
-        my $is_predicted = sub($rule_name) {
-            return exists $waiting_for{$rule_name}{$pos};
-        };
+        # Pass predicted_at hashref from _run_parse to should_scan.
+        # predicted_at tracks which rules have been predicted at this position,
+        # which is exactly what should_scan needs for keyword rejection.
+        # Using the caller's hashref avoids iterating field hash keys (which
+        # the XS codegen cannot handle).
+        my $is_predicted = $predicted_at // {};
 
         # Ask semiring if scan should proceed
         return unless $semiring->should_scan($item, $alt_idx, $pos, $matched, $is_predicted);

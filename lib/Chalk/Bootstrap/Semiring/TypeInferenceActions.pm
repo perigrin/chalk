@@ -325,6 +325,19 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         };
     }
 
+    # Dispatch an action method by name, returning the focus hash.
+    # Avoids closure capture and dynamic coderef calls that the XS
+    # codegen cannot handle. The caller passes the rule name as a
+    # string; this method resolves it via can() and calls it.
+    method dispatch($rule_name, $ctx, $alt_idx) {
+        my $method = $self->can($rule_name);
+        return unless $method;
+        if (defined $alt_idx) {
+            return $self->$method($ctx, $alt_idx);
+        }
+        return $self->$method($ctx);
+    }
+
     # Registry access methods for method return types
     sub register_method_return($name, $type) {
         $_method_returns{$name} = $type;
