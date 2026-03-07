@@ -365,11 +365,11 @@ SKIP: {
         pass('XS-compiled Earley parses Boolean.pm');
         diag sprintf("Integration parse: %.2fs", $elapsed);
     } elsif ($parse_output =~ /PARSE_FAIL/) {
-        # XS-compiled on_complete closures (TypeInferenceActions dispatch,
-        # CallExpression callback) degrade to eval_pv with stringified
-        # captures. The parse runs but produces wrong semiring values.
+        # XS codegen issues in FilterComposite::multiply (double SvRV unwrap,
+        # $#array not compiled to av_len) and Structural return statements
+        # (return -1 compiled as "return" - 1) break the parse pipeline.
         TODO: {
-            local $TODO = 'XS closure codegen: on_complete anonymous subs lose captures';
+            local $TODO = 'XS codegen: multiply SvRV double-unwrap and return statement emission';
             fail('XS-compiled Earley parses Boolean.pm');
         }
     } else {
