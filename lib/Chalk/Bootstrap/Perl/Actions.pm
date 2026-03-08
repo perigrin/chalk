@@ -1206,6 +1206,15 @@ class Chalk::Bootstrap::Perl::Actions {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule();
 
+            # Plain string from regex scan (e.g., /(?:my|our|state)\b/ or /sub\b/)
+            if (!ref($focus) && defined $focus && !defined $sub_name) {
+                if ($focus =~ /^(?:my|our|state)$/) {
+                    $scope = $focus;
+                    next;
+                }
+                next if $focus eq 'sub';
+            }
+
             if ($focus isa Chalk::Bootstrap::IR::Node::Constant
                     && !defined $sub_name) {
                 my $val = $focus->value();
