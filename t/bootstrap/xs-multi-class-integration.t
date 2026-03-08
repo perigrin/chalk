@@ -351,9 +351,12 @@ SKIP: {
     my $parse_pid = fork();
     if ($parse_pid == 0) {
         close $prd;
+        $pwr->autoflush(1);
 
         # Isolate: test Boolean-only parse first, then full-semiring parse.
         # Each in its own eval to catch segfaults incrementally.
+
+        print $pwr "DIAG:child_started\n";
 
         # A) Boolean-only parse of "1;\n" — with Perl Earley to verify grammar works
         my $bool_only = Chalk::Bootstrap::Semiring::Boolean->new();
@@ -406,13 +409,13 @@ SKIP: {
         print $pwr "DIAG:fc_created=" . (defined $fs ? 'yes' : "no:$@") . "\n";
         $pwr->flush();
 
+        print $pwr "DIAG:about_to_call_one\n";
         my $fs_one = eval { $fs->one() };
         print $pwr "DIAG:fc_one=" . (defined $fs_one ? ref($fs_one) : "undef:$@") . "\n";
-        $pwr->flush();
 
+        print $pwr "DIAG:about_to_call_mul\n";
         my $fs_mul = eval { $fs->multiply($fs_one, $fs_one) };
         print $pwr "DIAG:fc_mul=" . (defined $fs_mul ? 'ok' : "undef:$@") . "\n";
-        $pwr->flush();
 
         # Try to trace what _run_parse does by catching the exception
         # Actually, _run_parse returns undef cleanly. Let me check the
@@ -425,10 +428,11 @@ SKIP: {
         # The ADJUST should have set up rule_table, core_index, lr0_dfa.
         # Verify they exist.
         my $g = $test_parser->grammar();
-        my $s = $test_parser->semiring();
         print $pwr "DIAG:parser_grammar=" . (ref($g) eq 'ARRAY' ? scalar($g->@*) . ' rules' : ref($g)) . "\n";
+        print $pwr "DIAG:about_to_get_semiring\n";
+        my $s = $test_parser->semiring();
         print $pwr "DIAG:parser_semiring=" . ref($s) . "\n";
-        $pwr->flush();
+        print $pwr "DIAG:about_to_get_start_rule\n";
 
         # Now parse — it returns undef, but we want to know why.
         # Let me check if the first rule (Program) has alternatives.
@@ -516,6 +520,7 @@ SKIP: {
     my $parse_signal = $? & 127;
 
     if ($parse_signal) {
+        diag "Child output before crash: $parse_output" if $parse_output;
         fail("Integration parse crashed with signal $parse_signal");
     } elsif ($parse_output =~ /^PARSE_OK:(.+)/) {
         my $elapsed = $1 + 0;

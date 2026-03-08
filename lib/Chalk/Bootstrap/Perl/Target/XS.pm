@@ -332,6 +332,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         push @helper, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
         push @helper, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
+        # Guard against non-tuple values (e.g., plain SVs from other semiring types).
+        # A non-reference value cannot be a valid composite tuple, so treat as zero.
+        for my $p (@params) {
+            if (@params == 1 && $component_slugs->@* > 1) {
+                push @helper, "    if (!SvROK($p)) return &PL_sv_yes;";
+            }
+        }
 
         # Generate unrolled calls per component
         for my $i (0 .. $component_slugs->$#*) {
@@ -1700,6 +1707,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         $xs_text = $self->_fixup_ternary_assignment($xs_text, 'skip_value_sv');
         $xs_text = $self->_fixup_ternary_assignment($xs_text, 'skip_is_zero_sv');
 
+        # Fix: ($winner, $loser) = ($left, $right) in FilterComposite::add
+        # The IR loses list destructuring assignments — each branch emits a bare
+        # sv_2mortal(newSVpvs("=")) instead of actual variable assignments.
+        # The three branches correspond to:
+        #   right_loses: winner=left, loser=right
+        #   left_loses:  winner=right, loser=left
+        #   else:        winner=left, loser=right (tie-break)
+        $xs_text = $self->_fixup_filtercomposite_add_destructuring($xs_text);
+
         return $xs_text;
     }
 
@@ -1768,6 +1784,39 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             substr($xs_text, $start, $end - $start + 1, $replacement);
             next;
         }
+        return $xs_text;
+    }
+
+    # Fix list destructuring in FilterComposite::add where
+    # ($winner, $loser) = ($left, $right) gets compiled as bare "=" strings.
+    # Replaces the broken branches with actual variable assignments.
+    method _fixup_filtercomposite_add_destructuring($xs_text) {
+        # Pattern: winner_sv = &PL_sv_undef; followed by if/else branches
+        # containing bare sv_2mortal(newSVpvs("=")) instead of assignments.
+        # Match the three branches by verdict string and replace with proper assignments.
+
+        # right_loses: winner=left, loser=right
+        $xs_text =~ s{
+            (if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("right_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
+            \s* sv_2mortal\(newSVpvs\("="\)\);
+            \s* \}
+        }{$1 \{\n        winner_sv = left; loser_sv = right;\n    \}}sx;
+
+        # left_loses: winner=right, loser=left
+        $xs_text =~ s{
+            (else \s+ if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("left_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
+            \s* sv_2mortal\(newSVpvs\("="\)\);
+            \s* \}
+        }{$1 \{\n        winner_sv = right; loser_sv = left;\n    \}}sx;
+
+        # else (tie-break): winner=left, loser=right
+        $xs_text =~ s{
+            (else) \s* \{
+            \s* sv_2mortal\(newSVpvs\("="\)\);
+            \s* \}
+            (\s* \{)
+        }{$1 \{\n        winner_sv = left; loser_sv = right;\n    \}$2}sx;
+
         return $xs_text;
     }
 
