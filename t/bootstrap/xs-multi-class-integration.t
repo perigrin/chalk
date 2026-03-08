@@ -448,6 +448,25 @@ SKIP: {
         print $pwr "DIAG:parse_value=" . (defined $pv ? 'defined' : 'undef') . " err=$pv_err\n";
         $pwr->flush();
 
+        # Debug: try a Boolean-only parse using the SAME grammar and XS Earley
+        my $bool_xsp = Chalk::Bootstrap::Semiring::Boolean->new();
+        my $bool_xsparser = Chalk::Bootstrap::Earley->new(
+            grammar  => $integ_desugared,
+            semiring => $bool_xsp,
+        );
+        my $bool_xsval = eval { $bool_xsparser->parse_value("1;\n") };
+        print $pwr "DIAG:bool_xs_parse=" . (defined $bool_xsval ? ($bool_xsp->is_zero($bool_xsval) ? 'zero' : 'ok') : "undef:$@") . "\n";
+
+        # Debug: try a Boolean-only XS parse (no FC)
+        my $bool_xsp = Chalk::Bootstrap::Semiring::Boolean->new();
+        my $bool_xsparser = Chalk::Bootstrap::Earley->new(
+            grammar  => $integ_desugared,
+            semiring => $bool_xsp,
+        );
+        my $bool_xsval = eval { $bool_xsparser->parse_value("1;\n") };
+        print $pwr "DIAG:bool_xs_parse=" . (defined $bool_xsval ? ($bool_xsp->is_zero($bool_xsval) ? 'zero' : 'ok') : "undef:$@") . "\n";
+        $pwr->flush();
+
         # B) Full semiring parse of "1;\n"
         my $semiring = Chalk::Bootstrap::Semiring::FilterComposite->new(
             semirings => [

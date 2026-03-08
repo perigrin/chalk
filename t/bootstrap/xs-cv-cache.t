@@ -41,38 +41,35 @@ my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::CvCache')
 my $code = eval { $xs->generate_with_cfg($ir, $sa, $ctx) };
 ok(defined $code, 'XS code generated') or BAIL_OUT("XS gen failed: $@");
 
-# --- Test 1: Static CV cache variables declared ---
-like($code, qr/static\s+CV\s*\*\s*_cv_\w+_process\s*=\s*NULL/,
-    'static CV cache variable for process() declared');
+# --- Test 1: :param fields do NOT get CV cache ---
+# :param fields hold objects whose type varies per instance, so caching
+# CVs in process-wide statics would dispatch to the wrong method.
+unlike($code, qr/static\s+CV\s*\*\s*_cv_\w+_process\s*=\s*NULL/,
+    'no static CV cache for :param field process()');
 
-like($code, qr/static\s+CV\s*\*\s*_cv_\w+_validate\s*=\s*NULL/,
-    'static CV cache variable for validate() declared');
+unlike($code, qr/static\s+CV\s*\*\s*_cv_\w+_validate\s*=\s*NULL/,
+    'no static CV cache for :param field validate()');
 
-# --- Test 2: CV cache declarations appear before MODULE line ---
-my $module_pos = index($code, 'MODULE =');
-my $cv_cache_pos = index($code, '_cv_');
-ok($cv_cache_pos >= 0 && $module_pos >= 0, 'both CV cache and MODULE line exist');
-ok($cv_cache_pos < $module_pos, 'CV cache declarations appear before MODULE line');
-
-# --- Test 3: call_sv used instead of call_method for field methods ---
-like($code, qr/call_sv\(\(SV\s*\*\)_cv_\w+_process/,
-    'field->process() uses call_sv with cached CV');
-
-like($code, qr/call_sv\(\(SV\s*\*\)_cv_\w+_validate/,
-    'field->validate() uses call_sv with cached CV');
-
-# --- Test 4: No call_method for cached field methods ---
+# --- Test 2: :param field methods use call_method ---
 my @cm_process = ($code =~ /call_method\("process"/g);
-is(scalar @cm_process, 0,
-    'no call_method("process") — uses CV cache instead');
+ok(scalar @cm_process > 0,
+    ':param field->process() uses call_method');
 
 my @cm_validate = ($code =~ /call_method\("validate"/g);
-is(scalar @cm_validate, 0,
-    'no call_method("validate") — uses CV cache instead');
+ok(scalar @cm_validate > 0,
+    ':param field->validate() uses call_method');
 
-# --- Test 5: Lazy resolution via gv_fetchmethod_autoload ---
-like($code, qr/gv_fetchmethod_autoload/,
-    'lazy CV resolution uses gv_fetchmethod_autoload');
+# --- Test 3: No call_sv for :param field methods ---
+unlike($code, qr/call_sv\(\(SV\s*\*\)_cv_\w+_process/,
+    'no call_sv for :param field process()');
+
+unlike($code, qr/call_sv\(\(SV\s*\*\)_cv_\w+_validate/,
+    'no call_sv for :param field validate()');
+
+# --- Test 4: No gv_fetchmethod_autoload for :param field methods ---
+# (lazy init was the old CV cache pattern)
+unlike($code, qr/gv_fetchmethod_autoload.*process/,
+    'no lazy CV resolution for :param field methods');
 
 # --- Test 6: Non-field method calls still use call_method ---
 # Parse a class where method is called on a local variable (not a field)
@@ -205,7 +202,7 @@ my $code3_no = eval { $xs3_no_intrinsic->generate_with_cfg($ir3, $sa3, $ctx3) };
 ok(defined $code3_no, 'XS code without intrinsics generated');
 unlike($code3_no, qr/static\s+int\s+_inline_\w+_is_zero/,
     'no _inline_SLUG_is_zero without semiring_intrinsics config');
-like($code3_no, qr/call_method\("is_zero"|call_sv\(\(SV\s*\*\)_cv_\w+_is_zero/,
+like($code3_no, qr/call_method\("is_zero"/,
     'is_zero uses Perl dispatch when no intrinsics configured');
 
 done_testing();

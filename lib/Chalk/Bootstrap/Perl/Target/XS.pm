@@ -17,6 +17,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_loop_depth = 0;  # nesting depth inside loops (suppresses bare-return detection)
     field $_class_methods;  # hashref: name => { returns => bool, params => \@param_names }
     field $_cv_cache;  # hashref: "fieldname_methodname" => { field_name, field_idx, method_name }
+    field $_param_fields;  # hashref: field_name => 1 for :param fields (type varies per instance)
     field $_semiring_intrinsics :param(semiring_intrinsics) = undef;  # hashref: field_name => { components => [...] }
     field $_class_registry :param(class_registry) = undef;  # ClassRegistry for multi-class compilation
     field $_current_slug = '';  # class-derived identifier prefix for multi-class collision avoidance
@@ -183,6 +184,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $body = $class_decl->inputs()->[2];
         my %field_map;
         my %sigils;
+        my %params;
         my $index = 0;
 
         for my $item ($body->@*) {
@@ -194,10 +196,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $field_name =~ s/^[\$\@\%]//;  # Strip sigil
                 $field_map{$field_name} = $index++;
                 $sigils{$field_name} = $sigil // '$';
+                # Detect :param attribute — these fields vary per instance
+                my $attrs = $item->inputs()->[1];
+                if (ref($attrs) eq 'ARRAY') {
+                    for my $attr ($attrs->@*) {
+                        my $attr_name = $attr->inputs()->[0]->value();
+                        if ($attr_name eq 'param') {
+                            $params{$field_name} = 1;
+                        }
+                    }
+                }
             }
         }
 
         $field_sigils = \%sigils;
+        $_param_fields = \%params;
         return \%field_map;
     }
 
@@ -1093,8 +1106,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Pre-scan methods to build $_class_methods for direct call optimization
         $_class_methods = $self->_scan_class_methods($class_decl);
 
-        # Pre-scan for field-invocant method calls to build CV cache
-        $_cv_cache = $self->_scan_field_method_calls($class_decl);
+        # Pre-scan for field-invocant method calls to build CV cache.
+        # Filter out :param fields — their object types vary per instance,
+        # so caching CVs in process-wide statics is incorrect (e.g., Earley's
+        # $semiring field can be Boolean or FilterComposite). Non-:param fields
+        # (initialized in ADJUST) have stable types and can safely use CV caching.
+        my $raw_cv_cache = $self->_scan_field_method_calls($class_decl);
+        $_cv_cache = {};
+        for my $key (sort keys $raw_cv_cache->%*) {
+            my $field_name = $raw_cv_cache->{$key}{field_name};
+            next if $_param_fields && $_param_fields->{$field_name};
+            $_cv_cache->{$key} = $raw_cv_cache->{$key};
+        }
 
         my @fwd_decl_lines;
         my @helper_lines;
