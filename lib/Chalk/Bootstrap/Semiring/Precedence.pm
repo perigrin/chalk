@@ -13,6 +13,13 @@ class Chalk::Bootstrap::Semiring::Precedence {
     # not affect the identity of a Precedence value for disambiguation purposes.
     my %_cache;
 
+    # Wrapper for the $lookup coderef. Calling $lookup->($text) directly
+    # in XS drops arguments (field coderef call bug). This method calls
+    # the package sub directly, which the XS codegen compiles as call_pv.
+    method _do_lookup($text) {
+        return Chalk::Grammar::Perl::PrecedenceTable::lookup($text);
+    }
+
     # Return (or create and cache) the canonical object for the given 4-tuple.
     # The key scheme is:
     #   "0"          for valid=false (zero)
@@ -244,7 +251,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # In BinaryOp or AssignOp context, look up operator and validate
         # the LEFT operand's precedence (accumulated in $existing).
         if ($rule_name eq 'BinaryOp' || $rule_name eq 'AssignOp') {
-            my $op_info = $lookup->($matched_text);
+            my $op_info = $self->_do_lookup($matched_text);
             if (defined $op_info) {
                 my $op_level = $op_info->{level};
 
