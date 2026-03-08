@@ -40,7 +40,9 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # Return a singleton one() Context, creating it on first call.
     # Also initializes the cfg_state side-table entry for this context.
-    my sub _one_ctx() {
+    # Implemented as a method (not my sub) so the XS codegen can compile it
+    # natively — my sub cannot access class-scope lexicals in XS.
+    method _one_ctx() {
         if (!defined $_one_singleton) {
             $_one_singleton = Chalk::Bootstrap::Context->new(
                 focus    => undef,
@@ -55,14 +57,6 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             };
         }
         return $_one_singleton;
-    }
-
-    # Dispatch to an action method via coderef. Takes the actions object,
-    # the method coderef from can(), and the Context to pass as argument.
-    # Uses regular coderef call (not method dispatch) since the coderef
-    # from can() is already bound to the correct method.
-    my sub _dispatch_action($actions_obj, $method_ref, $ctx) {
-        return $method_ref->($actions_obj, $ctx);
     }
 
     # Check if two cfg_state hashrefs can be merged (both defined with control).
@@ -123,7 +117,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # one returns the singleton empty context with undef focus
     method one() {
-        return _one_ctx();
+        return $self->_one_ctx();
     }
 
     # Clear hash-cons cache between parses to prevent unbounded growth.
@@ -177,7 +171,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     method inherited_cfg_state($ctx) {
         my $state = $_cfg_state{refaddr($ctx)};
         return $state if defined $state;
-        return $_cfg_state{refaddr(_one_ctx())};
+        return $_cfg_state{refaddr($self->_one_ctx())};
     }
 
     # Check if value is zero (undef)
@@ -247,18 +241,18 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return undef if !defined $value;
 
         my $rule_name = $item->{rule}->name();
-        my $method = undef;
+        my $has_method = false;
         if ($actions) {
-            $method = $actions->can($rule_name);
+            $has_method = defined $actions->can($rule_name);
         }
         my $result;
         $_pending_cfg_update = undef;  # Clear before action call
         $_current_instance = $self;     # Make accessible to action methods
-        if (defined $method) {
-            # Dispatch the action and wrap result in a Context manually.
-            # This avoids closures (which XS eval_pv cannot capture) and
-            # dynamic method calls (which the XS codegen drops entirely).
-            my $new_focus = _dispatch_action($actions, $method, $value);
+        if ($has_method) {
+            # Dispatch the action via string method name. Using $rule_name
+            # as a string method call compiles to call_method in XS, avoiding
+            # coderef calls which the XS codegen drops arguments from.
+            my $new_focus = $actions->$rule_name($value);
             $result = Chalk::Bootstrap::Context->new(
                 focus    => $new_focus,
                 children => $value->children(),
