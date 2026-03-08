@@ -276,6 +276,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return unless defined $_composite_field_types && keys $_composite_field_types->%*;
         return unless defined $_class_methods && exists $_class_methods->{$mname};
 
+        # Only is_zero has the short-circuit boolean pattern where checking
+        # each component and returning true/false is correct. Other methods
+        # (on_scan, multiply, add, etc.) need to build result tuples, so they
+        # must use the normal IR-based compilation path.
+        return unless $mname eq 'is_zero';
+
         my $meta = $_class_methods->{$mname};
         my @params = $meta->{params}->@*;
 
@@ -359,6 +365,232 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @xsub, '';
 
         return { helper => \@helper, xsub => \@xsub };
+    }
+
+    # Emit native C for _copy_cfg_with_scope: copy a cfg_state hashref
+    # replacing the scope field. The IR can't handle hash spread ($base->%*)
+    # or for loops over hash keys, so emit the HV iteration directly in C.
+    method _emit_native_copy_cfg_with_scope() {
+        my $slug = $_current_slug;
+        my $fn = "_impl_${slug}__copy_cfg_with_scope";
+        my @helper;
+        push @helper, "static SV * ${fn}(pTHX_ SV *base, SV *new_scope) {";
+        push @helper, '    HV *src = (HV*)SvRV(base);';
+        push @helper, '    HV *dst = newHV();';
+        push @helper, '    hv_iterinit(src);';
+        push @helper, '    HE *entry;';
+        push @helper, '    while ((entry = hv_iternext(src)) != NULL) {';
+        push @helper, '        STRLEN klen;';
+        push @helper, '        char *key = hv_iterkey(entry, (I32*)&klen);';
+        push @helper, '        SV *val = hv_iterval(src, entry);';
+        push @helper, '        hv_store(dst, key, klen, SvREFCNT_inc(val), 0);';
+        push @helper, '    }';
+        push @helper, '    /* Replace scope with new value */';
+        push @helper, '    hv_store(dst, "scope", 5, SvREFCNT_inc(new_scope), 0);';
+        push @helper, '    return newRV_noinc((SV*)dst);';
+        push @helper, '}';
+
+        # No XSUB wrapper needed — this is a lexical sub only called from C
+        return { helper => \@helper, xsub => undef };
+    }
+
+    # Emit native C for _dispatch_action: call a coderef with two arguments.
+    # The IR loses coderef-call arguments ($method_ref->($obj, $ctx)), so
+    # this emits the call_sv + argument pushing directly, bypassing IR.
+    method _emit_native_dispatch_action() {
+        my $slug = $_current_slug;
+        my $fn = "_impl_${slug}__dispatch_action";
+        my @helper;
+        push @helper, "static SV * ${fn}(pTHX_ SV *actions_obj, SV *method_ref, SV *ctx) {";
+        push @helper, '    SV *retval = NULL;';
+        push @helper, '    {';
+        push @helper, '        dSP;';
+        push @helper, '        ENTER; SAVETMPS;';
+        push @helper, '        PUSHMARK(SP);';
+        push @helper, '        XPUSHs(actions_obj);';
+        push @helper, '        XPUSHs(ctx);';
+        push @helper, '        PUTBACK;';
+        push @helper, '        call_sv(method_ref, G_SCALAR);';
+        push @helper, '        SPAGAIN;';
+        push @helper, '        retval = SvREFCNT_inc(POPs);';
+        push @helper, '        PUTBACK;';
+        push @helper, '        FREETMPS; LEAVE;';
+        push @helper, '    }';
+        push @helper, '    return retval;';
+        push @helper, '}';
+
+        my @xsub;
+        push @xsub, 'SV *';
+        push @xsub, '_dispatch_action(actions_obj, method_ref, ctx)';
+        push @xsub, '    SV *actions_obj';
+        push @xsub, '    SV *method_ref';
+        push @xsub, '    SV *ctx';
+        push @xsub, '  CODE:';
+        push @xsub, "    SV *actions_obj_sv = actions_obj;";
+        push @xsub, "    SV *method_ref_sv = method_ref;";
+        push @xsub, "    SV *ctx_sv = ctx;";
+        push @xsub, "    RETVAL = ${fn}(aTHX_ actions_obj_sv, method_ref_sv, ctx_sv);";
+        push @xsub, '  OUTPUT:';
+        push @xsub, '    RETVAL';
+        push @xsub, '';
+
+        return { helper => \@helper, xsub => \@xsub };
+    }
+
+    # Emit native C for set_cfg_state: store cfg_state for a Context.
+    # eval_pv can't access class-scope %_cfg_state, so emit direct HV store.
+    method _emit_native_set_cfg_state() {
+        my $slug = $_current_slug;
+        my $fn = "_impl_${slug}_set_cfg_state";
+        my $csv = "_csv_${slug}__cfg_state";
+        my @helper;
+        push @helper, "static void ${fn}(pTHX_ SV *self, SV *ctx, SV *state) {";
+        push @helper, '    PERL_UNUSED_VAR(self);';
+        push @helper, "    char key[32];";
+        push @helper, '    int klen = snprintf(key, sizeof(key), "%p", (void*)SvRV(ctx));';
+        push @helper, "    hv_store($csv, key, klen, SvREFCNT_inc(state), 0);";
+        push @helper, '}';
+
+        my @xsub;
+        push @xsub, 'void';
+        push @xsub, 'set_cfg_state(self, ctx, state)';
+        push @xsub, '    SV *self';
+        push @xsub, '    SV *ctx';
+        push @xsub, '    SV *state';
+        push @xsub, '  CODE:';
+        push @xsub, "    ${fn}(aTHX_ self, ctx, state);";
+        push @xsub, '';
+
+        return { helper => \@helper, xsub => \@xsub, is_void => true };
+    }
+
+    # Emit native C for update_cfg: set pending cfg state update.
+    # eval_pv can't access class-scope $_pending_cfg_update.
+    method _emit_native_update_cfg() {
+        my $slug = $_current_slug;
+        my $fn = "_impl_${slug}_update_cfg";
+        my $csv = "_csv_${slug}__pending_cfg_update";
+        my @helper;
+        push @helper, "static void ${fn}(pTHX_ SV *self, SV *state) {";
+        push @helper, '    PERL_UNUSED_VAR(self);';
+        push @helper, "    sv_setsv($csv, state);";
+        push @helper, '}';
+
+        my @xsub;
+        push @xsub, 'void';
+        push @xsub, 'update_cfg(self, state)';
+        push @xsub, '    SV *self';
+        push @xsub, '    SV *state';
+        push @xsub, '  CODE:';
+        push @xsub, "    ${fn}(aTHX_ self, state);";
+        push @xsub, '';
+
+        return { helper => \@helper, xsub => \@xsub, is_void => true };
+    }
+
+    # Emit native C for on_merge: transfer/merge cfg_state from loser to winner.
+    # The eval_pv fallback is completely broken:
+    # 1. "return unless defined($x) && defined($y)" compiles to broken syntax
+    # 2. %_cfg_state class-scope lexical inaccessible from eval_pv
+    # 3. Method body gets truncated (complex conditionals lost)
+    method _emit_native_on_merge() {
+        my $slug = $_current_slug;
+        my $fn = "_impl_${slug}_on_merge";
+        my $csv_cfg = "_csv_${slug}__cfg_state";
+        my $can_merge_fn = "_impl_${slug}__can_merge_cfg";
+        my $copy_cfg_fn = "_impl_${slug}__copy_cfg_with_scope";
+        my @helper;
+        push @helper, "static void ${fn}(pTHX_ SV *self, SV *winner, SV *loser) {";
+        push @helper, '    PERL_UNUSED_VAR(self);';
+        push @helper, '    if (!SvOK(winner) || !SvOK(loser)) return;';
+        push @helper, '';
+        push @helper, '    /* Look up cfg_state for winner and loser by refaddr */';
+        push @helper, '    char w_key[32], l_key[32];';
+        push @helper, '    int w_klen = snprintf(w_key, sizeof(w_key), "%p", (void*)SvRV(winner));';
+        push @helper, '    int l_klen = snprintf(l_key, sizeof(l_key), "%p", (void*)SvRV(loser));';
+        push @helper, '';
+        push @helper, "    SV **w_ent = hv_fetch($csv_cfg, w_key, w_klen, 0);";
+        push @helper, "    SV **l_ent = hv_fetch($csv_cfg, l_key, l_klen, 0);";
+        push @helper, '    SV *winner_state = (w_ent && *w_ent && SvOK(*w_ent)) ? *w_ent : NULL;';
+        push @helper, '    SV *loser_state  = (l_ent && *l_ent && SvOK(*l_ent)) ? *l_ent : NULL;';
+        push @helper, '';
+        push @helper, '    /* If loser has state but winner does not, transfer it */';
+        push @helper, '    if (loser_state && !winner_state) {';
+        push @helper, "        hv_store($csv_cfg, w_key, w_klen, SvREFCNT_inc(loser_state), 0);";
+        push @helper, '        return;';
+        push @helper, '    }';
+        push @helper, '';
+        push @helper, '    /* If both have state, try to merge */';
+        push @helper, "    SV *can_merge = ${can_merge_fn}(aTHX_ winner_state ? winner_state : &PL_sv_undef,";
+        push @helper, '                                            loser_state ? loser_state : &PL_sv_undef);';
+        push @helper, '    if (!SvTRUE(can_merge)) return;';
+        push @helper, '';
+        push @helper, '    /* Get control->operation() for both sides */';
+        push @helper, '    HV *w_hv = (HV*)SvRV(winner_state);';
+        push @helper, '    HV *l_hv = (HV*)SvRV(loser_state);';
+        push @helper, '    SV **w_ctrl_ent = hv_fetch(w_hv, "control", 7, 0);';
+        push @helper, '    SV **l_ctrl_ent = hv_fetch(l_hv, "control", 7, 0);';
+        push @helper, '';
+        push @helper, '    /* Call operation() on each control node */';
+        push @helper, '    dSP;';
+        push @helper, '    SV *w_op_sv, *l_op_sv;';
+        push @helper, '    {';
+        push @helper, '        ENTER; SAVETMPS; PUSHMARK(SP);';
+        push @helper, '        XPUSHs(*w_ctrl_ent); PUTBACK;';
+        push @helper, '        call_method("operation", G_SCALAR);';
+        push @helper, '        SPAGAIN; w_op_sv = SvREFCNT_inc(POPs); PUTBACK;';
+        push @helper, '        FREETMPS; LEAVE;';
+        push @helper, '    }';
+        push @helper, '    {';
+        push @helper, '        ENTER; SAVETMPS; PUSHMARK(SP);';
+        push @helper, '        XPUSHs(*l_ctrl_ent); PUTBACK;';
+        push @helper, '        call_method("operation", G_SCALAR);';
+        push @helper, '        SPAGAIN; l_op_sv = SvREFCNT_inc(POPs); PUTBACK;';
+        push @helper, '        FREETMPS; LEAVE;';
+        push @helper, '    }';
+        push @helper, '';
+        push @helper, '    /* Pick base: if winner is Start and loser is not, use loser */';
+        push @helper, '    STRLEN w_len, l_len;';
+        push @helper, '    const char *w_op = SvPV(w_op_sv, w_len);';
+        push @helper, '    const char *l_op = SvPV(l_op_sv, l_len);';
+        push @helper, '    int w_is_start = (w_len == 5 && strEQ(w_op, "Start"));';
+        push @helper, '    int l_is_start = (l_len == 5 && strEQ(l_op, "Start"));';
+        push @helper, '    SV *base = (w_is_start && !l_is_start) ? loser_state : winner_state;';
+        push @helper, '';
+        push @helper, '    SvREFCNT_dec(w_op_sv);';
+        push @helper, '    SvREFCNT_dec(l_op_sv);';
+        push @helper, '';
+        push @helper, '    /* Merge scopes: winner_state->{scope}->merge(loser_state->{scope}) */';
+        push @helper, '    SV **w_scope_ent = hv_fetch(w_hv, "scope", 5, 0);';
+        push @helper, '    SV **l_scope_ent = hv_fetch(l_hv, "scope", 5, 0);';
+        push @helper, '    SV *merged_scope;';
+        push @helper, '    {';
+        push @helper, '        ENTER; SAVETMPS; PUSHMARK(SP);';
+        push @helper, '        XPUSHs(*w_scope_ent);';
+        push @helper, '        XPUSHs(*l_scope_ent);';
+        push @helper, '        PUTBACK;';
+        push @helper, '        call_method("merge", G_SCALAR);';
+        push @helper, '        SPAGAIN; merged_scope = SvREFCNT_inc(POPs); PUTBACK;';
+        push @helper, '        FREETMPS; LEAVE;';
+        push @helper, '    }';
+        push @helper, '';
+        push @helper, '    /* Copy base with merged scope, store as winner cfg_state */';
+        push @helper, "    SV *result = ${copy_cfg_fn}(aTHX_ base, merged_scope);";
+        push @helper, '    SvREFCNT_dec(merged_scope);';
+        push @helper, "    hv_store($csv_cfg, w_key, w_klen, result, 0);";
+        push @helper, '}';
+
+        my @xsub;
+        push @xsub, 'void';
+        push @xsub, 'on_merge(self, winner, loser)';
+        push @xsub, '    SV *self';
+        push @xsub, '    SV *winner';
+        push @xsub, '    SV *loser';
+        push @xsub, '  CODE:';
+        push @xsub, "    ${fn}(aTHX_ self, winner, loser);";
+        push @xsub, '';
+
+        return { helper => \@helper, xsub => \@xsub, is_void => true };
     }
 
     # Emit BOOT block for feature class setup using defop-based field initialization.
@@ -934,6 +1166,28 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $sparams = $sub_item->inputs()->[1];
             my $sbody = $sub_item->inputs()->[2];
 
+            # Native emitters for subs that use patterns the XS codegen
+            # can't handle (coderef calls with args, hash spread, loops
+            # over hash keys).
+            my $native_emitter = {
+                '_dispatch_action'    => '_emit_native_dispatch_action',
+                '_copy_cfg_with_scope' => '_emit_native_copy_cfg_with_scope',
+            };
+            if (exists $native_emitter->{$sname}) {
+                my $method = $native_emitter->{$sname};
+                my $native = $self->$method();
+                if (defined $native) {
+                    $_class_subs{$sname}{compiled} = true;
+                    push @helper_lines, $native->{helper}->@*;
+                    push @helper_lines, '';
+                    if ($native->{xsub}) {
+                        push @xsub_lines, $native->{xsub}->@*;
+                        push @xsub_lines, '';
+                    }
+                    next;
+                }
+            }
+
             my @param_nodes;
             for my $p ($sparams->@*) {
                 push @param_nodes, $p;
@@ -1047,6 +1301,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # XSUB nor eval_pv can reach lexical subs, so the original Perl
         # method must stay in place. Tracked as fallbacks for cross-class
         # dispatch filtering but not emitted.
+        # Native method emitter dispatch table: method_name => emitter_method.
+        # These emit hand-crafted C for methods that use patterns the XS
+        # codegen can't handle (class-scope lexicals, complex unless/&&).
+        my %native_method_emitters = (
+            'set_cfg_state' => '_emit_native_set_cfg_state',
+            'update_cfg'    => '_emit_native_update_cfg',
+            'on_merge'      => '_emit_native_on_merge',
+        );
+
         my %skip_method_names;
         for my $item (@method_items) {
             my $mname = $item->inputs()->[0]->value();
@@ -1060,6 +1323,32 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @xsub_lines, $override->{xsub}->@*;
                 push @xsub_lines, '';
                 next;
+            }
+
+            # Native method emitters for methods that use patterns the XS
+            # codegen can't handle (class-scope lexicals, complex unless/&&).
+            if (exists $native_method_emitters{$mname}) {
+                my $emitter = $native_method_emitters{$mname};
+                my $native = $self->$emitter();
+                if (defined $native) {
+                    # Emit forward declaration with correct return type
+                    my $ret_type = $native->{is_void} ? 'void' : 'SV *';
+                    my $meta = $_class_methods->{$mname};
+                    my @fwd_params = ('SV *self');
+                    if ($meta) {
+                        for my $pname ($meta->{params}->@*) {
+                            push @fwd_params, "SV *$pname";
+                        }
+                    }
+                    push @fwd_decl_lines, "static $ret_type _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+                    push @helper_lines, $native->{helper}->@*;
+                    push @helper_lines, '';
+                    if ($native->{xsub}) {
+                        push @xsub_lines, $native->{xsub}->@*;
+                        push @xsub_lines, '';
+                    }
+                    next;
+                }
             }
 
             my $result = eval { $self->_emit_xs_method($item) };
@@ -1159,6 +1448,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @method_fwd_decls;
         for my $mname (sort keys %pre_fwd_methods) {
             next if exists $fallback_names{$mname};
+            # Skip methods with native emitters — they emit their own fwd decls
+            next if exists $native_method_emitters{$mname};
             # Skip subs — they get their own forward decls (with different param lists)
             next if exists $_class_subs{$mname};
             my $meta = $pre_fwd_methods{$mname};

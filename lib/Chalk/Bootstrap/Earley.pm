@@ -202,7 +202,11 @@ class Chalk::Bootstrap::Earley {
                 # since this entry was pushed to the agenda. Using the chart
                 # value ensures we process the fully-merged value, not the
                 # stale pre-merge value from the agenda entry.
-                ($item, $alt_idx) = $self->_chart_get(\@chart, $pos, $core_id, $origin)->@*;
+                # Uses explicit indexing instead of list destructuring for
+                # XS codegen compatibility.
+                my $chart_entry = $self->_chart_get(\@chart, $pos, $core_id, $origin);
+                $item = $chart_entry->[0];
+                $alt_idx = $chart_entry->[1];
 
                 if ($self->_is_complete($item, $alt_idx)) {
                     # Apply on_complete for completed rule before propagating

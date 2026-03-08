@@ -87,7 +87,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # level, validate that the left operand's precedence is high enough
         # for this operator. E.g. ($a && $b) =~ /x/ is invalid because
         # && (level=10) has lower precedence than =~ (level=1).
-        if ($right->{is_operator} && defined $left->{level}) {
+        if ($right->{is_operator} && defined($left->{level})) {
             my $op_level = $right->{level};
             my $left_level = $left->{level};
             if ($left_level > $op_level) {
@@ -252,7 +252,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 # or equal precedence (lower or equal level number) than the
                 # operator. Otherwise, the left operand has lower precedence
                 # and can't be a direct child of this operator.
-                if (defined $existing->{level} && $existing->{level} > $op_level) {
+                if (defined($existing->{level}) && $existing->{level} > $op_level) {
                     if ($ENV{DEBUG_PRECEDENCE}) {
                         warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$op_level ($matched_text)\n";
                     }
@@ -280,7 +280,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 # Validate left operand: reject if its level exceeds assignment
                 # precedence. Also reject same-level left operands (right-assoc):
                 # `(my $x = $y) //= 1` has left level=101 == op level=101.
-                if (defined $existing->{level}) {
+                if (defined($existing->{level})) {
                     if ($existing->{level} > $assign_level) {
                         if ($ENV{DEBUG_PRECEDENCE}) {
                             warn "  PREC_REJECT: left_level=$existing->{level} > op_level=$assign_level ($matched_text)\n";
@@ -320,9 +320,9 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # be a postfix target. This kills `($a && $b)->foo()` where
         # `$a && $b` has level=10, while allowing `$x->foo()` (no level)
         # and `($a + $b)->foo()` via parenthesized ParenExpr (resets level).
-        if (defined $EXPR_LEVELS->{$rule_name}) {
+        if (defined($EXPR_LEVELS->{$rule_name})) {
             my $expr_level = $EXPR_LEVELS->{$rule_name};
-            if ($expr_level < 0 && defined $value->{level} && $value->{level} >= 0) {
+            if ($expr_level < 0 && defined($value->{level}) && $value->{level} >= 0) {
                 return $self->zero();
             }
             return _intern(true, $expr_level, undef, false);
@@ -359,7 +359,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # that level must survive so PostfixExpression can reject it:
         # `($x = $h){$k}` is invalid without parens.
         if ($rule_name eq 'Subscript') {
-            if (defined $value->{level} && $value->{level} >= 100) {
+            if (defined($value->{level}) && $value->{level} >= 100) {
                 return _intern(true, $value->{level}, $value->{assoc}, false);
             }
             return $self->one();

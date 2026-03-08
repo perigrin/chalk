@@ -57,6 +57,41 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return $_one_singleton;
     }
 
+    # Dispatch to an action method via coderef. Takes the actions object,
+    # the method coderef from can(), and the Context to pass as argument.
+    # Uses regular coderef call (not method dispatch) since the coderef
+    # from can() is already bound to the correct method.
+    my sub _dispatch_action($actions_obj, $method_ref, $ctx) {
+        return $method_ref->($actions_obj, $ctx);
+    }
+
+    # Check if two cfg_state hashrefs can be merged (both defined with control).
+    # Avoids complex && chains that the XS codegen mis-compiles.
+    my sub _can_merge_cfg($state_a, $state_b) {
+        return false if !defined $state_a;
+        return false if !defined $state_b;
+        return false if !defined $state_a->{control};
+        return false if !defined $state_b->{control};
+        return true;
+    }
+
+    # Copy a cfg_state hashref, replacing the scope field.
+    # Uses explicit key copying instead of $base->%* hash spread
+    # which the XS codegen can't handle.
+    my sub _copy_cfg_with_scope($base, $new_scope) {
+        my $copy = {
+            control => $base->{control},
+            scope   => $new_scope,
+        };
+        # Preserve extra fields (then_stmts, if_node, etc.)
+        for my $key (keys %{$base}) {
+            if ($key ne 'control' && $key ne 'scope') {
+                $copy->{$key} = $base->{$key};
+            }
+        }
+        return $copy;
+    }
+
     # Return a hash-consed scan leaf Context for the given text and position.
     # Two calls with the same text+pos return the same object (same refaddr).
     my sub _scan_ctx($text, $pos) {
@@ -171,7 +206,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             # Right is later in sequence, but whitespace/punctuation rules
             # carry Start state which should not overwrite a Region/If from left.
             my $inherited;
-            if (defined $right_state && defined $left_state) {
+            my $can_merge = _can_merge_cfg($left_state, $right_state);
+            if ($can_merge) {
                 my $l_ctrl = $left_state->{control}->operation();
                 my $r_ctrl = $right_state->{control}->operation();
                 # Pick the more advanced control token and preserve
@@ -185,7 +221,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 }
                 # Merge scopes: left's bindings + right's bindings
                 my $merged_scope = $left_state->{scope}->merge($right_state->{scope});
-                $inherited = { $base->%*, scope => $merged_scope };
+                $inherited = _copy_cfg_with_scope($base, $merged_scope);
             } else {
                 $inherited = $right_state // $left_state;
             }
@@ -211,13 +247,24 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         return undef if !defined $value;
 
         my $rule_name = $item->{rule}->name();
-        my $method = $actions ? $actions->can($rule_name) : undef;
+        my $method = undef;
+        if ($actions) {
+            $method = $actions->can($rule_name);
+        }
         my $result;
         $_pending_cfg_update = undef;  # Clear before action call
         $_current_instance = $self;     # Make accessible to action methods
-        if ($method) {
-            # Call the method via the actions object instance
-            $result = $value->extend(sub { $actions->$method(@_) });
+        if (defined $method) {
+            # Dispatch the action and wrap result in a Context manually.
+            # This avoids closures (which XS eval_pv cannot capture) and
+            # dynamic method calls (which the XS codegen drops entirely).
+            my $new_focus = _dispatch_action($actions, $method, $value);
+            $result = Chalk::Bootstrap::Context->new(
+                focus    => $new_focus,
+                children => $value->children(),
+                position => $value->position(),
+                rule     => $value->rule(),
+            );
         } else {
             # No action registered - preserve value as-is
             $result = $value;
@@ -287,7 +334,8 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # If both have cfg_state, merge them:
         # Control: prefer non-Start over Start
         # Scope: merge both sides (loser may have bindings winner lacks)
-        if (defined $loser_state && defined $winner_state) {
+        my $can_merge = _can_merge_cfg($winner_state, $loser_state);
+        if ($can_merge) {
             my $w_ctrl = $winner_state->{control}->operation();
             my $l_ctrl = $loser_state->{control}->operation();
             # Pick the side with the more advanced control and preserve
@@ -299,10 +347,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
                 $base = $winner_state;
             }
             my $merged_scope = $winner_state->{scope}->merge($loser_state->{scope});
-            $_cfg_state{refaddr($winner)} = {
-                $base->%*,
-                scope => $merged_scope,
-            };
+            $_cfg_state{refaddr($winner)} = _copy_cfg_with_scope($base, $merged_scope);
         }
         return;
     }

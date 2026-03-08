@@ -140,6 +140,13 @@ SKIP: {
             skip 'Multi-class generation failed', 14;
         };
 
+    # Save XS for debugging
+    if (defined $multi_code) {
+        open my $dbg_fh, '>', '/tmp/xs_multi_debug.c';
+        print $dbg_fh $multi_code;
+        close $dbg_fh;
+    }
+
     # Basic structural checks
     my @module_sections = ($multi_code =~ /^MODULE\s*=/mg);
     is(scalar @module_sections, scalar @class_files,
@@ -209,6 +216,17 @@ SKIP: {
             } $integ_grammar->@*;
             $integ_desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@integ_ordered);
         }
+    }
+
+    # Verify Perl Earley can parse "1;\n" before XS load
+    if (defined $integ_desugared) {
+        my $perl_bool = Chalk::Bootstrap::Semiring::Boolean->new();
+        my $perl_parser = Chalk::Bootstrap::Earley->new(
+            grammar  => $integ_desugared,
+            semiring => $perl_bool,
+        );
+        my $perl_result = $perl_parser->parse("1;\n");
+        diag "Perl Earley parse '1;\\n' (Boolean): " . ($perl_result ? 'ok' : 'FAIL');
     }
 
     # --- Step 5: Load the XS module ---
@@ -334,6 +352,99 @@ SKIP: {
     if ($parse_pid == 0) {
         close $prd;
 
+        # Isolate: test Boolean-only parse first, then full-semiring parse.
+        # Each in its own eval to catch segfaults incrementally.
+
+        # A) Boolean-only parse of "1;\n" — with Perl Earley to verify grammar works
+        my $bool_only = Chalk::Bootstrap::Semiring::Boolean->new();
+
+        my $bool_parser = Chalk::Bootstrap::Earley->new(
+            grammar  => $integ_desugared,
+            semiring => $bool_only,
+        );
+        my $bool_value = eval { $bool_parser->parse_value("1;\n") };
+        my $bool_err = $@;
+        my $bool_info = $bool_err ? "err:$bool_err"
+                      : !defined $bool_value ? 'undef'
+                      : $bool_only->is_zero($bool_value) ? 'zero'
+                      : 'ok';
+        print $pwr "BOOL_TINY:$bool_info\n";
+
+        # Diagnostic: check if ADJUST ran (rule_table populated)
+        my $rule_count = eval {
+            my $rt = $bool_parser->grammar();
+            ref($rt) eq 'ARRAY' ? scalar($rt->@*) : 'not-array';
+        };
+        print $pwr "DIAG:grammar_rules=$rule_count err=$@\n";
+
+        # Check the parser's internal state
+        my $parser_class = ref($bool_parser);
+        print $pwr "DIAG:parser_class=$parser_class\n";
+
+        # Diagnostic: try calling XS methods incrementally to find the crash point
+        print $pwr "DIAG:step1_start\n";
+        $pwr->flush();
+
+        my $fs = eval {
+            Chalk::Bootstrap::Semiring::FilterComposite->new(
+                semirings => [
+                    Chalk::Bootstrap::Semiring::Boolean->new(),
+                    Chalk::Bootstrap::Semiring::Precedence->new(
+                        lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+                    ),
+                    Chalk::Bootstrap::Semiring::TypeInference->new(
+                        keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+                        builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+                    ),
+                    Chalk::Bootstrap::Semiring::Structural->new(),
+                    Chalk::Bootstrap::Semiring::SemanticAction->new(
+                        actions => Chalk::Bootstrap::ConciseTree::Actions->new(),
+                    ),
+                ],
+            );
+        };
+        print $pwr "DIAG:fc_created=" . (defined $fs ? 'yes' : "no:$@") . "\n";
+        $pwr->flush();
+
+        my $fs_one = eval { $fs->one() };
+        print $pwr "DIAG:fc_one=" . (defined $fs_one ? ref($fs_one) : "undef:$@") . "\n";
+        $pwr->flush();
+
+        my $fs_mul = eval { $fs->multiply($fs_one, $fs_one) };
+        print $pwr "DIAG:fc_mul=" . (defined $fs_mul ? 'ok' : "undef:$@") . "\n";
+        $pwr->flush();
+
+        # Try to trace what _run_parse does by catching the exception
+        # Actually, _run_parse returns undef cleanly. Let me check the
+        # Earley internal chart after a parse attempt.
+        $fs->reset_cache();
+        my $test_parser = Chalk::Bootstrap::Earley->new(
+            grammar  => $integ_desugared,
+            semiring => $fs,
+        );
+        # The ADJUST should have set up rule_table, core_index, lr0_dfa.
+        # Verify they exist.
+        my $g = $test_parser->grammar();
+        my $s = $test_parser->semiring();
+        print $pwr "DIAG:parser_grammar=" . (ref($g) eq 'ARRAY' ? scalar($g->@*) . ' rules' : ref($g)) . "\n";
+        print $pwr "DIAG:parser_semiring=" . ref($s) . "\n";
+        $pwr->flush();
+
+        # Now parse — it returns undef, but we want to know why.
+        # Let me check if the first rule (Program) has alternatives.
+        my $first_rule = $g->[0];
+        my $rule_name = eval { $first_rule->name() };
+        my $num_alts = eval { scalar($first_rule->expressions()->@*) };
+        print $pwr "DIAG:start_rule=$rule_name alts=$num_alts\n";
+        $pwr->flush();
+
+        # Try parse
+        my $pv = eval { $test_parser->parse_value("1;\n") };
+        my $pv_err = $@;
+        print $pwr "DIAG:parse_value=" . (defined $pv ? 'defined' : 'undef') . " err=$pv_err\n";
+        $pwr->flush();
+
+        # B) Full semiring parse of "1;\n"
         my $semiring = Chalk::Bootstrap::Semiring::FilterComposite->new(
             semirings => [
                 Chalk::Bootstrap::Semiring::Boolean->new(),
@@ -351,21 +462,49 @@ SKIP: {
             ],
         );
         $semiring->reset_cache();
-
-        my $parser = Chalk::Bootstrap::Earley->new(
+        my $full_parser = Chalk::Bootstrap::Earley->new(
             grammar  => $integ_desugared,
             semiring => $semiring,
         );
+        my $full_value = eval { $full_parser->parse_value("1;\n") };
+        my $full_err = $@;
+        my $full_info = $full_err ? "err:$full_err"
+                      : !defined $full_value ? 'undef'
+                      : $semiring->is_zero($full_value) ? 'zero'
+                      : 'ok';
+        print $pwr "FULL_TINY:$full_info\n";
 
-        my $t0 = time();
-        my $result = eval { $parser->parse($parse_source) };
-        my $elapsed = time() - $t0;
-        my $err = $@;
+        # C) Full parse of Boolean.pm source (only if tiny Boolean parse works)
+        if ($bool_info eq 'ok') {
+            $semiring->reset_cache();
+            my $parser = Chalk::Bootstrap::Earley->new(
+                grammar  => $integ_desugared,
+                semiring => $semiring,
+            );
+            my $t0 = time();
+            my $parse_value = eval { $parser->parse_value($parse_source) };
+            my $elapsed = time() - $t0;
+            my $err = $@;
 
-        if (defined $result && $result) {
-            print $pwr "PARSE_OK:$elapsed\n";
+            if ($err) {
+                print $pwr "PARSE_FAIL:err=$err\n";
+            } elsif (!defined $parse_value) {
+                print $pwr "PARSE_FAIL:result=undef\n";
+            } elsif ($semiring->is_zero($parse_value)) {
+                my @components = qw(Boolean Precedence TypeInference Structural SemanticAction);
+                my @zero_info;
+                for my $i (0 .. 4) {
+                    my $sr = $semiring->semirings()->[$i];
+                    my $vi = $parse_value->[$i];
+                    my $iz = $sr->is_zero($vi);
+                    push @zero_info, "$components[$i]=" . ($iz ? 'ZERO' : 'ok');
+                }
+                print $pwr "PARSE_FAIL:result=zero [" . join(', ', @zero_info) . "]\n";
+            } else {
+                print $pwr "PARSE_OK:$elapsed\n";
+            }
         } else {
-            print $pwr "PARSE_FAIL:err=$err result=" . (defined $result ? "'$result'" : 'undef') . "\n";
+            print $pwr "PARSE_FAIL:tiny_parse_failed bool=$bool_info full=$full_info\n";
         }
         close $pwr;
         exit 0;
