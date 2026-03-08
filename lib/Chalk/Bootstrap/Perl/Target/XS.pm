@@ -3363,6 +3363,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             ? $self->_emit_xs_expr($target, $declared_vars)
             : 'self';
 
+        # Built-in Perl hash variables (%ENV, %SIG, %INC) are compiled by
+        # _emit_xs_const_expr as get_sv (scalar lookup), but subscript access
+        # needs get_hv (hash lookup). Detect and fix: wrap get_hv result in a
+        # reference so the SvRV dereference below works correctly.
+        if ($style eq 'hash' && defined $target) {
+            my $is_const = $target isa Chalk::Bootstrap::IR::Node::Constant;
+            if ($is_const) {
+                my $var_name = $target->value();
+                if ($var_name =~ /\A(ENV|SIG|INC)\z/) {
+                    $tgt = "sv_2mortal(newRV_inc((SV*)get_hv(\"$1\", 0)))";
+                }
+            }
+            # Also check if tgt string contains get_sv for a known hash var
+            if ($tgt =~ /get_sv\("[^"]*::(ENV|SIG|INC)"/) {
+                $tgt = "sv_2mortal(newRV_inc((SV*)get_hv(\"$1\", 0)))";
+            }
+        }
+
         # For typed class fields (field %hash, field @array), the ObjectFIELDS
         # slot IS the HV*/AV* directly — skip SvRV dereference.
         my $field_sig = $self->_field_sigil_for_expr($tgt);

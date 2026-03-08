@@ -541,7 +541,7 @@ SKIP: {
     if ($parse_signal) {
         diag "Child output before crash: $parse_output" if $parse_output;
         fail("Integration parse crashed with signal $parse_signal");
-    } elsif ($parse_output =~ /^PARSE_OK:(.+)/) {
+    } elsif ($parse_output =~ /PARSE_OK:(.+)/) {
         my $elapsed = $1 + 0;
         pass('XS-compiled Earley parses Boolean.pm');
         diag sprintf("Integration parse: %.2fs", $elapsed);
