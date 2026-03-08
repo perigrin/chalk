@@ -228,7 +228,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines;
 
         push @lines, "static int _inline_${_current_slug}_is_zero(pTHX_ SV *semiring_field, SV *value) {";
-        push @lines, '    if (!value || !SvROK(value)) return 1;';
+        push @lines, '    if (!value) return 1;';
+        # Non-reference values can't be FilterComposite tuples.
+        # Fall back to method dispatch for non-tuple semiring values
+        # (e.g., Boolean semiring uses plain SVs, not arrayrefs).
+        push @lines, '    if (!SvROK(value)) {';
+        push @lines, '        dSP; ENTER; SAVETMPS; PUSHMARK(SP);';
+        push @lines, '        XPUSHs(semiring_field); XPUSHs(value);';
+        push @lines, '        PUTBACK; call_method("is_zero", G_SCALAR);';
+        push @lines, '        SPAGAIN; int r = SvTRUE(POPs); PUTBACK;';
+        push @lines, '        FREETMPS; LEAVE; return r;';
+        push @lines, '    }';
+        push @lines, '    if (SvTYPE(SvRV(value)) != SVt_PVAV) {';
+        push @lines, '        dSP; ENTER; SAVETMPS; PUSHMARK(SP);';
+        push @lines, '        XPUSHs(semiring_field); XPUSHs(value);';
+        push @lines, '        PUTBACK; call_method("is_zero", G_SCALAR);';
+        push @lines, '        SPAGAIN; int r = SvTRUE(POPs); PUTBACK;';
+        push @lines, '        FREETMPS; LEAVE; return r;';
+        push @lines, '    }';
         push @lines, '    AV *tuple = (AV*)SvRV(value);';
         push @lines, '    SV **p;';
         push @lines, '';
