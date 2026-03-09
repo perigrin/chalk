@@ -23,8 +23,12 @@ use utf8;
 no warnings 'experimental::class';
 
 class SlugTest {
-    field $worker :param;
     field $data :param :reader;
+    field $worker;
+
+    ADJUST {
+        $worker = Validator->new();
+    }
 
     method helper($x) {
         return $x;
@@ -68,13 +72,13 @@ like($code, qr/_impl_slugtest_helper\(aTHX_\s*self/,
     'self->helper() uses _impl_slugtest_helper direct call');
 
 # --- Test 4: CV cache variables have class slug prefix ---
-TODO: {
-    local $TODO = 'CV cache vars not yet slugged in XS emitter';
-    like($code, qr/static\s+CV\s*\*\s*_cv_slugtest_worker_validate\s*=\s*NULL/,
-        'CV cache variable has class slug prefix');
-    like($code, qr/call_sv\(\(SV\s*\*\)_cv_slugtest_worker_validate/,
-        'call_sv uses slugged CV cache key');
-}
+# $worker is ADJUST-initialized (not :param), so CV caching applies.
+# The XS emitter slugs CV cache variable names with the class slug
+# to prevent collisions when multiple classes share one .xs file.
+like($code, qr/static\s+CV\s*\*\s*_cv_slugtest_worker_validate\s*=\s*NULL/,
+    'CV cache variable has class slug prefix');
+like($code, qr/call_sv\(\(SV\s*\*\)_cv_slugtest_worker_validate/,
+    'call_sv uses slugged CV cache key');
 
 # --- Test 5: Forward declarations use slugged names ---
 like($code, qr/_impl_slugtest_helper\(pTHX_/,
