@@ -68,7 +68,7 @@ my $str_die_msg = $f->make('Constant', const_type => 'string', value => 'Subclas
     );
     ok(defined $meth, 'MethodDecl created');
     is($meth->class(), 'MethodDecl', 'MethodDecl class');
-    is(scalar $meth->inputs()->@*, 3, 'MethodDecl has 3 inputs');
+    is(scalar $meth->inputs()->@*, 4, 'MethodDecl has 4 inputs (name, params, body, return_type)');
     is($meth->inputs()->[0], $str_op, 'MethodDecl name is operation');
     is(ref($meth->inputs()->[1]), 'ARRAY', 'MethodDecl params is arrayref');
     is(scalar $meth->inputs()->[1]->@*, 0, 'MethodDecl params is empty');
