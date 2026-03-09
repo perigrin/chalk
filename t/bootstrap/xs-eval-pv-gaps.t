@@ -605,21 +605,10 @@ my sub var_node($name) {
     unlike($xs_code, qr/eval_pv\("Chalk::Bootstrap::Terminal::match\(/,
         'Terminal::match: no eval_pv with C-local variable references');
 
-    # Anonymous sub callback: eval_pv is OK for creating closures, but
-    # variables inside must reference package globals (::_anon_*), not C locals.
-    # Check that the sub body uses $::_anon_ prefix for captured variables.
-    if ($xs_code =~ /eval_pv\("sub \(([^)]*)\).*?\\n(.*?)\\n"\s*,\s*TRUE\)/) {
-        my $body = $2;
-        # Body should use $::_anon_ prefixed variables, not bare C locals
-        unlike($body, qr/\$(?!::_anon_|rule_name)\w+/,
-            'anon sub: captured variables use package globals, not C locals');
-    }
-    # Verify bindings are set before eval_pv
-    TODO: {
-        local $TODO = 'anon sub C-local to package-global binding not yet emitted';
-        like($xs_code, qr/sv_setsv\(get_sv\("::_anon_/,
-            'anon sub: C-local variables bound to package globals before eval_pv');
-    }
+    # Anonymous sub: Earley.pm has no closures, so no eval_pv("sub...") should appear.
+    # All callbacks were converted to native XS (hashref-based $is_predicted, etc.).
+    unlike($xs_code, qr/eval_pv\("sub\b/,
+        'anon sub: no eval_pv-based closures in generated XS');
 }
 
 # --- Hash spread key-value alignment ---
