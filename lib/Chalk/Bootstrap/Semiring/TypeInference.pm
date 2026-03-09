@@ -28,8 +28,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     my $_one_singleton;
 
     # Pre-cached scan Contexts for constant tag combinations.
-    # Avoids calling _ctx() (a my sub) at runtime, which the XS codegen
-    # renders as broken eval_pv with lost variable captures.
+    # Avoids calling _ctx() at runtime by pre-caching common tag combinations
+    # during initialization.
     my $_scan_regex;
     my $_scan_scalar;
     my $_scan_array;
@@ -41,25 +41,25 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     my $_scan_undef;
     my $_scan_bool;
 
-    # Serialize a tag hash to a stable string key for hash-consing.
-    # Handles arrayref values (e.g. item_types) by joining with semicolons.
     # Serialize arrayref values by joining elements with semicolons.
-    # Separate sub avoids nested map (XS codegen shares $_ across maps).
-    my sub _join_array($arr) {
+    # Separate method avoids nested map (XS codegen shares $_ across maps).
+    method _join_array($arr) {
         return join(';', map { $_ // '' } $arr->@*);
     }
 
-    my sub _tag_key($tags) {
+    # Serialize a tag hash to a stable string key for hash-consing.
+    # Handles arrayref values (e.g. item_types) by joining with semicolons.
+    method _tag_key($tags) {
         return join(",", map {
             my $v = $tags->{$_};
-            "$_=" . (ref($v) eq 'ARRAY' ? _join_array($v) : ($v // ''))
+            "$_=" . (ref($v) eq 'ARRAY' ? $self->_join_array($v) : ($v // ''))
         } sort keys $tags->%*);
     }
 
     # Create a leaf Context with the given tag hash as focus.
     # Hash-consed: same tag content → same object.
-    my sub _ctx($tags) {
-        my $key = "scan:" . _tag_key($tags);
+    method _ctx($tags) {
+        my $key = "scan:" . $self->_tag_key($tags);
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $tags,
             children => [],
@@ -68,25 +68,12 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         ));
     }
 
-    # Create an on_complete result Context using comonad extend().
-    # Calls $f on the full Context tree, producing a new Context with
-    # the result as focus and children preserved. Hash-consed by focus
-    # content and children refaddrs to ensure identical derivations share
-    # the same refaddr (required by FilterComposite identity comparison).
-    my sub _extend_ctx($value, $f, $rule_name) {
-        my $extended = $value->extend($f);
-        my $focus = $extended->extract();
-        return undef unless defined $focus;
-        my $focus_key = _tag_key($focus);
-        my $children_key = join(":", map { refaddr($_) } $extended->children()->@*);
-        my $key = "ext:$rule_name:" . $extended->position() . ":$focus_key:$children_key";
-        return ($_ctx_cache{$key} //= $extended);
-    }
-
     # Construct an extended Context with a pre-computed focus (no closure needed).
-    # Equivalent to _extend_ctx($value, sub { $focus }, $rule_name) but avoids
-    # anonymous sub creation, which the XS codegen cannot properly capture.
-    my sub _extend_ctx_with_focus($value, $focus, $rule_name) {
+    # Builds a new Context preserving children/position/rule/annotations from
+    # $value but replacing the focus. Hash-consed by focus content and children
+    # refaddrs to ensure identical derivations share the same refaddr
+    # (required by FilterComposite identity comparison).
+    method _extend_ctx_with_focus($value, $focus, $rule_name) {
         return undef unless defined $focus;
         my $extended = Chalk::Bootstrap::Context->new(
             focus       => $focus,
@@ -95,7 +82,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             rule        => $value->rule(),
             annotations => $value->annotations(),
         );
-        my $focus_key = _tag_key($focus);
+        my $focus_key = $self->_tag_key($focus);
         my $children_key = join(":", map { refaddr($_) } $extended->children()->@*);
         my $key = "ext:$rule_name:" . $extended->position() . ":$focus_key:$children_key";
         return ($_ctx_cache{$key} //= $extended);
@@ -107,7 +94,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     # Search the multiply tree leaves for one with call_symbol in its focus.
     # Returns the call_symbol string or undef.
-    my sub _get_call_symbol($ctx) {
+    method _get_call_symbol($ctx) {
         return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
@@ -116,7 +103,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }
         # Unfocused multiply node: recurse into children
         for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
+            my $found = $self->_get_call_symbol($child);
             return $found if defined $found;
         }
         return;
@@ -124,14 +111,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     # Search the multiply tree leaves for one with item_types in its focus.
     # Returns the item_types arrayref or undef.
-    my sub _get_item_types($ctx) {
+    method _get_item_types($ctx) {
         return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             return $focus->{item_types};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
+            my $found = $self->_get_item_types($child);
             return $found if defined $found;
         }
         return;
@@ -139,14 +126,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     # Search the multiply tree leaves for one with list_arity in its focus.
     # Returns the list_arity integer or undef.
-    my sub _get_list_arity($ctx) {
+    method _get_list_arity($ctx) {
         return unless defined $ctx;
         my $focus = $ctx->extract();
         if (defined $focus) {
             return $focus->{list_arity};
         }
         for my $child ($ctx->children()->@*) {
-            my $found = __SUB__->($child);
+            my $found = $self->_get_list_arity($child);
             return $found if defined $found;
         }
         return;
@@ -157,7 +144,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     }
 
     method one() {
-        return ($_one_singleton //= _ctx({ valid => true }));
+        return ($_one_singleton //= $self->_ctx({ valid => true }));
     }
 
     method is_zero($value) {
@@ -183,9 +170,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         Chalk::Bootstrap::Semiring::TypeInferenceActions::reset_method_registry();
     }
 
-    # _init_scan_cache is a method (not my sub) so the XS codegen compiles
-    # it natively. my subs fall back to eval_pv which cannot access class-scope
-    # lexicals like $_scan_regex.
+    # _init_scan_cache pre-populates cached scan Contexts for common
+    # constant-tag combinations (types, variables) on first use.
     method _init_scan_cache() {
         $_scan_regex   //= $self->_scan_ctx_type('Regex');
         $_scan_scalar  //= $self->_scan_ctx_type('Scalar');
@@ -201,11 +187,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     # Build a scan Context with a dynamic tag hash.
     # Constructs the hash, hash-conses via _tag_key, and creates a Context
-    # directly — avoiding _ctx() my sub calls with hash constructor arguments
-    # that the XS codegen renders as broken eval_pv.
+    # directly for dynamic scan content (identifiers, operators).
     method _scan_ctx_ident($matched_text) {
         my $tags = { valid => true, ident_text => $matched_text };
-        my $key = "scan:" . _tag_key($tags);
+        my $key = "scan:" . $self->_tag_key($tags);
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $tags,
             children => [],
@@ -216,7 +201,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     method _scan_ctx_call_ident($matched_text) {
         my $tags = { valid => true, call_symbol => $matched_text, ident_text => $matched_text };
-        my $key = "scan:" . _tag_key($tags);
+        my $key = "scan:" . $self->_tag_key($tags);
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $tags,
             children => [],
@@ -227,7 +212,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     method _scan_ctx_op($matched_text) {
         my $tags = { valid => true, op_text => $matched_text };
-        my $key = "scan:" . _tag_key($tags);
+        my $key = "scan:" . $self->_tag_key($tags);
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $tags,
             children => [],
@@ -238,7 +223,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
     method _scan_ctx_type($type_str) {
         my $tags = { valid => true, type => $type_str };
-        my $key = "scan:" . _tag_key($tags);
+        my $key = "scan:" . $self->_tag_key($tags);
         return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus    => $tags,
             children => [],
@@ -397,11 +382,11 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # builtin_lookup and type_satisfies for per-position validation.
         if ($rule_name eq 'CallExpression') {
             my $return_type;
-            my $call_sym = _get_call_symbol($value);
+            my $call_sym = $self->_get_call_symbol($value);
             if ($call_sym) {
                 my $sig = $self->_lookup_builtin($call_sym);
                 if ($sig) {
-                    my $item_types = _get_item_types($value);
+                    my $item_types = $self->_get_item_types($value);
                     if ($item_types) {
                         my $arg_types = $sig->{arg_types};
                         my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
@@ -414,7 +399,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                             }
                         }
                     }
-                    my $arity = _get_list_arity($value) // 1;
+                    my $arity = $self->_get_list_arity($value) // 1;
                     $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
                     if ($arity < $sig->{min_arity}) {
                         return undef;
@@ -423,7 +408,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     # the signature's return_type ('Any'). This lets the enclosing
                     # method know what type is actually being returned.
                     if ($call_sym eq 'return') {
-                        my $arg_types = _get_item_types($value);
+                        my $arg_types = $self->_get_item_types($value);
                         $return_type = $arg_types->[0] if $arg_types && $arg_types->@*;
                     } else {
                         $return_type = $sig->{return_type};
@@ -433,7 +418,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             }
             my $new_focus = { valid => true };
             $new_focus->{type} = $return_type if $return_type;
-            return _extend_ctx_with_focus($value, $new_focus, $rule_name);
+            return $self->_extend_ctx_with_focus($value, $new_focus, $rule_name);
         }
 
         # Dispatch to TypeInferenceActions for rules with registered methods.
@@ -443,7 +428,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             my $action_focus = $actions->dispatch($rule_name, $value,
                 $_needs_alt_idx->{$rule_name} ? $alt_idx : undef);
             return undef unless defined $action_focus;
-            return _extend_ctx_with_focus($value, $action_focus, $rule_name);
+            return $self->_extend_ctx_with_focus($value, $action_focus, $rule_name);
         }
 
         # Catch-all: transparent passthrough for rules without Actions methods.
