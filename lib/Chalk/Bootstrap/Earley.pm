@@ -217,7 +217,8 @@ class Chalk::Bootstrap::Earley {
                 # codegen compatibility (postfix next-if with && falls to eval_pv)
                 my $p_slot = $processed[$core_id];
                 if (defined $p_slot) {
-                    next if $p_slot->[$origin];
+                    my $already = $p_slot->[$origin];
+                    next if $already;
                 }
                 $processed[$core_id] //= [];
                 $processed[$core_id][$origin] = true;
@@ -284,8 +285,9 @@ class Chalk::Bootstrap::Earley {
                                         };
                                         $chart[$pos][$skip_core]{$origin} = [$merged_item, $alt_idx];
                                         my $sp_slot = $processed[$skip_core];
+                                        my $sp_done = defined $sp_slot && $sp_slot->[$origin];
                                         push @agenda, [$merged_item, $alt_idx]
-                                            unless defined $sp_slot && $sp_slot->[$origin];
+                                            unless $sp_done;
                                     }
                                 } else {
                                     ($chart[$pos][$skip_core] //= {})->{$origin} = [$skip_item, $alt_idx];
