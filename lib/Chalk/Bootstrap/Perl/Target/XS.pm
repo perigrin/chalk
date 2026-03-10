@@ -669,12 +669,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @helper, "    if (_iz) {";
             }
             push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
-            push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
-            push @helper, "        XPUSHs(self);";
-            push @helper, "        PUTBACK; call_method(\"zero\", G_SCALAR);";
-            push @helper, "        SPAGAIN; SV *z = SvREFCNT_inc(POPs); PUTBACK;";
-            push @helper, "        FREETMPS; LEAVE;";
-            push @helper, "        return z;";
+            push @helper, "        return _impl_${_current_slug}_zero(aTHX_ self);";
             push @helper, "    }";
 
             push @helper, "    av_push(result, SvREFCNT_inc(cr));";
@@ -759,12 +754,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @helper, "    if (_iz) {";
             }
             push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
-            push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
-            push @helper, "        XPUSHs(self);";
-            push @helper, "        PUTBACK; call_method(\"zero\", G_SCALAR);";
-            push @helper, "        SPAGAIN; SV *z = SvREFCNT_inc(POPs); PUTBACK;";
-            push @helper, "        FREETMPS; LEAVE;";
-            push @helper, "        return z;";
+            push @helper, "        return _impl_${_current_slug}_zero(aTHX_ self);";
             push @helper, "    }";
 
             push @helper, "    av_push(result, SvREFCNT_inc(cr));";
