@@ -306,11 +306,22 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return unless defined $_composite_field_types && keys $_composite_field_types->%*;
         return unless defined $_class_methods && exists $_class_methods->{$mname};
 
-        # Only is_zero has the short-circuit boolean pattern where checking
-        # each component and returning true/false is correct. Other methods
-        # (on_scan, multiply, add, etc.) need to build result tuples, so they
-        # must use the normal IR-based compilation path.
-        return unless $mname eq 'is_zero';
+        # Strategy dispatch: each FilterComposite method has a specific unrolling
+        # pattern based on its semantics.
+        my %composite_strategies = (
+            is_zero          => 'short_circuit_true',   # any component true → return true
+            should_scan      => 'short_circuit_false',  # any component false → return false
+            multiply         => 'tuple_annihilator',    # build tuple, zero-check
+            on_scan          => 'tuple_item_slice',     # build tuple with item value slicing
+            on_complete      => 'tuple_item_slice_ti',  # tuple + item slice + TI→SA threading
+            on_skip_optional => 'tuple_can_check',      # tuple + can() check per component
+            add              => 'filter_select',        # zero-check → _filter_compare → on_merge
+            _filter_compare  => 'filter_compare',       # per-component add + equality check
+            zero             => 'tuple_delegate_zero',  # build zero tuple from components
+            one              => 'tuple_delegate_one',   # build one tuple from components
+        );
+        return unless exists $composite_strategies{$mname};
+        my $strategy = $composite_strategies{$mname};
 
         my $meta = $_class_methods->{$mname};
         my @params = $meta->{params}->@*;
@@ -318,7 +329,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Find the composite field used in this method by scanning the IR
         # for SubscriptExpr patterns on known composite fields.
         my $composite_field;
-        for my $fname (keys $_composite_field_types->%*) {
+        for my $fname (sort keys $_composite_field_types->%*) {
             $composite_field = $fname;
             last;
         }
@@ -328,68 +339,32 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $component_slugs = $_composite_field_types->{$composite_field};
         my $field_idx = $field_map->{$composite_field};
 
-        # Verify all component slugs have the method compiled as _impl_ helpers
-        # (not eval_pv fallback — those don't get _impl_ functions)
-        for my $slug ($component_slugs->@*) {
-            return unless exists $_multi_class_methods{$slug}
-                && exists $_multi_class_methods{$slug}{$mname};
-            # Skip if this method fell to eval_pv fallback
-            return if exists $_fallback_method_slugs{"$slug:$mname"};
-        }
-
-        # Generate the unrolled helper function
-        my @helper;
-        my @fwd_params = ('SV *self');
-        push @fwd_params, "SV *$_" for @params;
-        my $sig = join(', ', @fwd_params);
-
-        push @helper, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
-        push @helper, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
-        # Guard against non-tuple values (e.g., plain SVs from other semiring types).
-        # A non-reference value cannot be a valid composite tuple, so treat as zero.
-        for my $p (@params) {
-            if (@params == 1 && $component_slugs->@* > 1) {
-                push @helper, "    if (!SvROK($p)) return &PL_sv_yes;";
+        # For is_zero, verify all component slugs have the method compiled as
+        # _impl_ helpers. For other strategies, we allow per-component fallback
+        # to call_method where _impl_ is unavailable (e.g., Structural).
+        if ($strategy eq 'short_circuit_true') {
+            for my $slug ($component_slugs->@*) {
+                return unless exists $_multi_class_methods{$slug}
+                    && exists $_multi_class_methods{$slug}{$mname};
+                return if exists $_fallback_method_slugs{"$slug:$mname"};
             }
         }
 
-        # Generate unrolled calls per component
-        for my $i (0 .. $component_slugs->$#*) {
-            my $slug = $component_slugs->[$i];
-            push @helper, "    /* Component [$i]: $slug */";
-
-            # Build argument list: first arg is the component semiring,
-            # rest are the original args (with tuple indexing for is_zero-style methods)
-            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
-
-            # Determine if any param is a tuple that needs per-component indexing
-            # Heuristic: if the method takes a single arg and the composite has multiple
-            # components, assume the arg is a tuple that needs av_fetch indexing
-            my @call_args = ("aTHX_ $sr_elem");
-            for my $p (@params) {
-                # If this param is likely a tuple (single param for is_zero-style),
-                # index it. Otherwise pass through.
-                if (@params == 1 && $component_slugs->@* > 1) {
-                    push @call_args, "(*av_fetch((AV*)SvRV($p), $i, 0))";
-                } else {
-                    push @call_args, $p;
-                }
-            }
-
-            my $call = "_impl_${slug}_${mname}(" . join(', ', @call_args) . ")";
-            push @helper, "    if (SvTRUE($call)) {";
-            push @helper, "        return &PL_sv_yes;";
-            push @helper, "    }";
-        }
-
-        push @helper, "    return &PL_sv_no;";
-        push @helper, '}';
+        # Dispatch to strategy-specific emitter
+        my @helper = $self->_emit_composite_body(
+            $strategy, $mname, \@params, $component_slugs, $field_idx,
+        );
+        return unless @helper;
 
         # Generate XSUB wrapper
         my @xsub;
         my @xsub_params = @params;
         push @xsub, 'SV *';
-        push @xsub, "$mname(self, " . join(', ', @xsub_params) . ')';
+        if (@xsub_params) {
+            push @xsub, "$mname(self, " . join(', ', @xsub_params) . ')';
+        } else {
+            push @xsub, "$mname(self)";
+        }
         push @xsub, '    SV *self';
         for my $p (@xsub_params) {
             push @xsub, "    SV *$p";
@@ -402,6 +377,199 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @xsub, '';
 
         return { helper => \@helper, xsub => \@xsub };
+    }
+
+    # Dispatch to strategy-specific composite body emitters.
+    # Returns list of C lines for the static helper function, or empty list on failure.
+    method _emit_composite_body($strategy, $mname, $params, $slugs, $field_idx) {
+        if ($strategy eq 'short_circuit_true') {
+            return $self->_emit_composite_short_circuit_true($mname, $params, $slugs, $field_idx);
+        } elsif ($strategy eq 'tuple_annihilator') {
+            return $self->_emit_composite_tuple_annihilator($mname, $params, $slugs, $field_idx);
+        } elsif ($strategy eq 'short_circuit_false') {
+            return $self->_emit_composite_short_circuit_false($mname, $params, $slugs, $field_idx);
+        } elsif ($strategy eq 'tuple_item_slice') {
+            return $self->_emit_composite_tuple_item_slice($mname, $params, $slugs, $field_idx, false);
+        } elsif ($strategy eq 'tuple_item_slice_ti') {
+            return $self->_emit_composite_tuple_item_slice($mname, $params, $slugs, $field_idx, true);
+        } elsif ($strategy eq 'tuple_can_check') {
+            return $self->_emit_composite_tuple_can_check($mname, $params, $slugs, $field_idx);
+        } elsif ($strategy eq 'filter_select') {
+            return $self->_emit_composite_filter_select($mname, $params, $slugs, $field_idx);
+        } elsif ($strategy eq 'filter_compare') {
+            return $self->_emit_composite_filter_compare($mname, $params, $slugs, $field_idx);
+        } elsif ($strategy eq 'tuple_delegate_zero') {
+            return $self->_emit_composite_tuple_delegate($mname, $params, $slugs, $field_idx, 'zero');
+        } elsif ($strategy eq 'tuple_delegate_one') {
+            return $self->_emit_composite_tuple_delegate($mname, $params, $slugs, $field_idx, 'one');
+        }
+        return;
+    }
+
+    # Helper: check if a component slug has a compiled _impl_ for the given method.
+    method _has_impl($slug, $mname) {
+        return exists $_multi_class_methods{$slug}
+            && exists $_multi_class_methods{$slug}{$mname}
+            && !exists $_fallback_method_slugs{"$slug:$mname"};
+    }
+
+    # Helper: emit a call_method fallback for a component that lacks _impl_.
+    # Returns a list of C lines that call the method via Perl dispatch and
+    # store the result in $result_var.
+    method _emit_component_call_method($sr_expr, $mname, $arg_exprs, $result_var) {
+        my @lines;
+        push @lines, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+        push @lines, "      XPUSHs($sr_expr);";
+        for my $arg ($arg_exprs->@*) {
+            push @lines, "      XPUSHs($arg);";
+        }
+        push @lines, "      PUTBACK; call_method(\"$mname\", G_SCALAR);";
+        push @lines, "      SPAGAIN; $result_var = SvREFCNT_inc(POPs); PUTBACK;";
+        push @lines, "      FREETMPS; LEAVE; }";
+        return @lines;
+    }
+
+    # Helper: emit the C function signature preamble and semiring array access.
+    method _emit_composite_preamble($mname, $params, $field_idx) {
+        my @lines;
+        my @fwd_params = ('SV *self');
+        push @fwd_params, "SV *$_" for $params->@*;
+        my $sig = join(', ', @fwd_params);
+        push @lines, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
+        push @lines, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
+        return @lines;
+    }
+
+    # Strategy: short_circuit_true — any component returning true → return true.
+    # Used for is_zero: checks each component, first truthy result short-circuits.
+    method _emit_composite_short_circuit_true($mname, $params, $slugs, $field_idx) {
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+
+        # Guard against non-tuple values
+        for my $p ($params->@*) {
+            if ($params->@* == 1 && $slugs->@* > 1) {
+                push @helper, "    if (!SvROK($p)) return &PL_sv_yes;";
+            }
+        }
+
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            push @helper, "    /* Component [$i]: $slug */";
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            my @call_args = ("aTHX_ $sr_elem");
+            for my $p ($params->@*) {
+                if ($params->@* == 1 && $slugs->@* > 1) {
+                    push @call_args, "(*av_fetch((AV*)SvRV($p), $i, 0))";
+                } else {
+                    push @call_args, $p;
+                }
+            }
+            my $call = "_impl_${slug}_${mname}(" . join(', ', @call_args) . ")";
+            push @helper, "    if (SvTRUE($call)) {";
+            push @helper, "        return &PL_sv_yes;";
+            push @helper, "    }";
+        }
+
+        push @helper, "    return &PL_sv_no;";
+        push @helper, '}';
+        return @helper;
+    }
+
+    # Strategy: tuple_annihilator — build result tuple, annihilate on zero.
+    # Used for multiply: calls each component's multiply, checks for zero.
+    method _emit_composite_tuple_annihilator($mname, $params, $slugs, $field_idx) {
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+        my $n = scalar $slugs->@*;
+
+        push @helper, "    AV *result = newAV();";
+        push @helper, "    av_extend(result, ${\($n - 1)});";
+        push @helper, "    SV *mr;";
+        push @helper, '';
+
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            push @helper, "    /* Component [$i]: $slug */";
+
+            # Build per-component args: index into left/right tuples
+            my @comp_args;
+            for my $p ($params->@*) {
+                push @comp_args, "(*av_fetch((AV*)SvRV($p), $i, 0))";
+            }
+
+            if ($self->_has_impl($slug, $mname)) {
+                my @call_args = ("aTHX_ $sr_elem", @comp_args);
+                push @helper, "    mr = _impl_${slug}_${mname}(" . join(', ', @call_args) . ");";
+            } else {
+                push @helper, $self->_emit_component_call_method(
+                    $sr_elem, $mname, \@comp_args, 'mr',
+                );
+            }
+            push @helper, "    av_push(result, SvREFCNT_inc(mr));";
+            push @helper, '';
+        }
+
+        # Annihilator: check if any component result is zero.
+        # Use _impl_*_is_zero (the composite short-circuit check) rather than
+        # _inline_*_is_zero (which lives in the Earley class, not FilterComposite).
+        push @helper, "    /* Annihilator check */";
+        push @helper, "    SV *result_ref = newRV_noinc((SV*)result);";
+        push @helper, "    if (SvTRUE(_impl_${_current_slug}_is_zero(aTHX_ self, result_ref))) {";
+        push @helper, "        SvREFCNT_dec(result_ref);";
+        # Call self->zero() via method dispatch
+        push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+        push @helper, "        XPUSHs(self);";
+        push @helper, "        PUTBACK; call_method(\"zero\", G_SCALAR);";
+        push @helper, "        SPAGAIN; SV *z = SvREFCNT_inc(POPs); PUTBACK;";
+        push @helper, "        FREETMPS; LEAVE;";
+        push @helper, "        return z;";
+        push @helper, "    }";
+        push @helper, "    return result_ref;";
+        push @helper, '}';
+        return @helper;
+    }
+
+    # Strategy: short_circuit_false — any component returning false → return false.
+    # Used for should_scan: all components must agree (first false vetoes).
+    method _emit_composite_short_circuit_false($mname, $params, $slugs, $field_idx) {
+        # Stub: fall through to normal IR compilation for now
+        return;
+    }
+
+    # Strategy: tuple_item_slice — build result tuple with item value slicing.
+    # Used for on_scan and on_complete. When $thread_ti is true, threads TI
+    # result (index 2) to SA (index 4) via set_type_context.
+    method _emit_composite_tuple_item_slice($mname, $params, $slugs, $field_idx, $thread_ti) {
+        # Stub: fall through to normal IR compilation for now
+        return;
+    }
+
+    # Strategy: tuple_can_check — build tuple with per-component can() check.
+    # Used for on_skip_optional: calls on_skip_optional if available, else
+    # falls back to multiply(value, one()).
+    method _emit_composite_tuple_can_check($mname, $params, $slugs, $field_idx) {
+        # Stub: fall through to normal IR compilation for now
+        return;
+    }
+
+    # Strategy: filter_select — zero-check, _filter_compare, on_merge.
+    # Used for add: the most complex composite method.
+    method _emit_composite_filter_select($mname, $params, $slugs, $field_idx) {
+        # Stub: fall through to normal IR compilation for now
+        return;
+    }
+
+    # Strategy: filter_compare — per-component add + identity comparison.
+    # Used for _filter_compare: first semiring expressing preference wins.
+    method _emit_composite_filter_compare($mname, $params, $slugs, $field_idx) {
+        # Stub: fall through to normal IR compilation for now
+        return;
+    }
+
+    # Strategy: tuple_delegate — build tuple by calling zero()/one() on each component.
+    method _emit_composite_tuple_delegate($mname, $params, $slugs, $field_idx, $delegate) {
+        # Stub: fall through to normal IR compilation for now
+        return;
     }
 
     # Emit native C for _copy_cfg_with_scope: copy a cfg_state hashref
