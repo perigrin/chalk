@@ -127,16 +127,18 @@ class Chalk::Bootstrap::Earley {
 
     # Advance an existing item by one dot position using cached integer mapping.
     # Avoids the string-join + hash lookup of id_for() by using advance().
+    # Uses individual hash assignments instead of hashref literal to avoid
+    # stale-value merge corruption in XS codegen.
     method _advance_item($item, $value) {
         my $new_core_id = $core_index->advance($item->{core_id});
-        return {
-            rule    => $item->{rule},
-            alt_idx => $item->{alt_idx},
-            core_id => $new_core_id,
-            dot     => $item->{dot} + 1,
-            origin  => $item->{origin},
-            value   => $value,
-        };
+        my $new_item = {};
+        $new_item->{rule}    = $item->{rule};
+        $new_item->{alt_idx} = $item->{alt_idx};
+        $new_item->{core_id} = $new_core_id;
+        $new_item->{dot}     = $item->{dot} + 1;
+        $new_item->{origin}  = $item->{origin};
+        $new_item->{value}   = $value;
+        return $new_item;
     }
 
     # Get the symbol after the dot in an item
