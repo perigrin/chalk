@@ -600,8 +600,91 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Used for on_scan and on_complete. When $thread_ti is true, threads TI
     # result (index 2) to SA (index 4) via set_type_context.
     method _emit_composite_tuple_item_slice($mname, $params, $slugs, $field_idx, $thread_ti) {
-        # Stub: fall through to normal IR compilation for now
-        return;
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+        my $n = scalar $slugs->@*;
+
+        push @helper, "    AV *result = newAV();";
+        push @helper, "    av_extend(result, ${\($n - 1)});";
+        push @helper, "    SV *cr;";
+        push @helper, "    HV *item_hv = (HV*)SvRV(item);";
+        push @helper, "    SV **val_pp = hv_fetchs(item_hv, \"value\", 0);";
+        push @helper, "    AV *val_av = (AV*)SvRV(*val_pp);";
+        if ($thread_ti) {
+            push @helper, "    SV *ti_result = NULL;";
+        }
+        push @helper, '';
+
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            push @helper, "    /* Component [$i]: $slug */";
+
+            # Build component_item
+            push @helper, "    {";
+            push @helper, "    " . $_ for $self->_emit_component_item_build("ci_$i", 'item_hv', 'val_av', $i);
+            push @helper, "    SV *ci_ref_$i = newRV_noinc((SV*)ci_$i);";
+
+            # Thread TI result to SA via set_type_context (on_complete only)
+            if ($thread_ti && $i == 4) {
+                push @helper, "    if (ti_result) {";
+                if ($self->_has_impl($slug, 'set_type_context')) {
+                    push @helper, "        _impl_${slug}_set_type_context(aTHX_ $sr_elem, ti_result);";
+                } else {
+                    push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                    push @helper, "        XPUSHs($sr_elem); XPUSHs(ti_result);";
+                    push @helper, "        PUTBACK; call_method(\"set_type_context\", G_SCALAR);";
+                    push @helper, "        SPAGAIN; (void)POPs; PUTBACK; FREETMPS; LEAVE;";
+                    push @helper, "    ";
+                }
+                push @helper, "    }";
+            }
+
+            # Build the extra args after 'item' (alt_idx, pos, matched_text/etc)
+            my @extra_params = $params->@*;
+            shift @extra_params;  # Remove 'item'
+
+            if ($self->_has_impl($slug, $mname)) {
+                my @call_args = ("aTHX_ $sr_elem", "ci_ref_$i", @extra_params);
+                push @helper, "    cr = _impl_${slug}_${mname}(" . join(', ', @call_args) . ");";
+            } else {
+                my @cm_args = ("ci_ref_$i", @extra_params);
+                push @helper, $self->_emit_component_call_method($sr_elem, $mname, \@cm_args, 'cr');
+            }
+
+            # Zero check per component
+            if ($self->_has_impl($slug, 'is_zero')) {
+                push @helper, "    if (SvTRUE(_impl_${slug}_is_zero(aTHX_ $sr_elem, cr))) {";
+            } else {
+                push @helper, "    {";
+                push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push @helper, "        XPUSHs($sr_elem); XPUSHs(cr);";
+                push @helper, "        PUTBACK; call_method(\"is_zero\", G_SCALAR);";
+                push @helper, "        SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
+                push @helper, "    if (_iz) {";
+            }
+            push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
+            push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+            push @helper, "        XPUSHs(self);";
+            push @helper, "        PUTBACK; call_method(\"zero\", G_SCALAR);";
+            push @helper, "        SPAGAIN; SV *z = SvREFCNT_inc(POPs); PUTBACK;";
+            push @helper, "        FREETMPS; LEAVE;";
+            push @helper, "        return z;";
+            push @helper, "    }";
+
+            push @helper, "    av_push(result, SvREFCNT_inc(cr));";
+
+            # Save TI result for threading to SA
+            if ($thread_ti && $i == 2) {
+                push @helper, "    ti_result = cr;";
+            }
+
+            push @helper, "    }";  # Close the block scope for ci_$i
+            push @helper, '';
+        }
+
+        push @helper, "    return newRV_noinc((SV*)result);";
+        push @helper, '}';
+        return @helper;
     }
 
     # Strategy: tuple_can_check — build tuple with per-component can() check.
