@@ -509,22 +509,28 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @helper, '';
         }
 
-        # Annihilator: check if any component result is zero.
-        # Use _impl_*_is_zero (the composite short-circuit check) rather than
-        # _inline_*_is_zero (which lives in the Earley class, not FilterComposite).
-        push @helper, "    /* Annihilator check */";
-        push @helper, "    SV *result_ref = newRV_noinc((SV*)result);";
-        push @helper, "    if (SvTRUE(_impl_${_current_slug}_is_zero(aTHX_ self, result_ref))) {";
-        push @helper, "        SvREFCNT_dec(result_ref);";
-        # Call self->zero() via method dispatch
-        push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
-        push @helper, "        XPUSHs(self);";
-        push @helper, "        PUTBACK; call_method(\"zero\", G_SCALAR);";
-        push @helper, "        SPAGAIN; SV *z = SvREFCNT_inc(POPs); PUTBACK;";
-        push @helper, "        FREETMPS; LEAVE;";
-        push @helper, "        return z;";
-        push @helper, "    }";
-        push @helper, "    return result_ref;";
+        # Annihilator: check each component result for zero inline.
+        # More efficient than calling _impl_filtercomposite_is_zero which
+        # would re-wrap and re-unwrap the result tuple.
+        push @helper, "    /* Annihilator check — per-component is_zero */";
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            my $ri = "(*av_fetch(result, $i, 0))";
+            if ($self->_has_impl($slug, 'is_zero')) {
+                push @helper, "    if (SvTRUE(_impl_${slug}_is_zero(aTHX_ $sr_elem, $ri))) {";
+            } else {
+                push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push @helper, "      XPUSHs($sr_elem); XPUSHs($ri);";
+                push @helper, "      PUTBACK; call_method(\"is_zero\", G_SCALAR);";
+                push @helper, "      SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
+                push @helper, "    if (_iz) {";
+            }
+            push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
+            push @helper, "        return _impl_${_current_slug}_zero(aTHX_ self);";
+            push @helper, "    }";
+        }
+        push @helper, "    return newRV_noinc((SV*)result);";
         push @helper, '}';
         return @helper;
     }
