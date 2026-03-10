@@ -531,9 +531,69 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Strategy: short_circuit_false — any component returning false → return false.
     # Used for should_scan: all components must agree (first false vetoes).
+    # Optimisation: only TypeInference (index 2) has meaningful should_scan logic;
+    # all other semirings return true unconditionally. So we only call TI.
     method _emit_composite_short_circuit_false($mname, $params, $slugs, $field_idx) {
-        # Stub: fall through to normal IR compilation for now
-        return;
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+
+        # Find TypeInference index (should be 2) — only one with real should_scan
+        my $ti_idx;
+        for my $i (0 .. $slugs->$#*) {
+            if ($self->_has_impl($slugs->[$i], $mname)) {
+                $ti_idx = $i;
+                last;
+            }
+        }
+
+        # If no component has _impl_ for this method, nothing to unroll
+        return unless defined $ti_idx;
+
+        my $ti_slug = $slugs->[$ti_idx];
+
+        # Build component_item: copy all item hash keys, replace value with
+        # the component's slice of the tuple value.
+        push @helper, "    HV *item_hv = (HV*)SvRV(item);";
+        push @helper, "    SV **val_pp = hv_fetchs(item_hv, \"value\", 0);";
+        push @helper, "    AV *val_av = (AV*)SvRV(*val_pp);";
+        push @helper, '';
+        push @helper, "    /* Build component item for $ti_slug (index $ti_idx) */";
+        push @helper, $self->_emit_component_item_build('ci', 'item_hv', 'val_av', $ti_idx);
+        push @helper, "    SV *ci_ref = newRV_noinc((SV*)ci);";
+        push @helper, '';
+
+        # Call _impl_TI_should_scan with the component item
+        my @extra_params = $params->@*;
+        shift @extra_params;  # Remove 'item' — we replace it with ci_ref
+        my @call_args = ("aTHX_ (*av_fetch(_sr, $ti_idx, 0))", 'ci_ref');
+        push @call_args, @extra_params;
+        push @helper, "    if (!SvTRUE(_impl_${ti_slug}_${mname}(" . join(', ', @call_args) . ")))";
+        push @helper, "        return &PL_sv_no;";
+        push @helper, '';
+        push @helper, "    return &PL_sv_yes;";
+        push @helper, '}';
+        return @helper;
+    }
+
+    # Helper: emit C lines to build a component_item HV by shallow-copying
+    # an item hashref and replacing the value slot with a tuple element.
+    # $hv_var is the name for the new HV*, $src_hv is the source item HV*,
+    # $val_av is the tuple AV*, $idx is the component index.
+    method _emit_component_item_build($hv_var, $src_hv, $val_av, $idx) {
+        my @lines;
+        push @lines, "    HV *$hv_var = newHV();";
+        # Copy all keys except 'value' from source item
+        push @lines, "    hv_iterinit($src_hv);";
+        push @lines, "    HE *_he;";
+        push @lines, "    while ((_he = hv_iternext($src_hv)) != NULL) {";
+        push @lines, "        STRLEN klen;";
+        push @lines, "        char *key = hv_iterkey(_he, (I32*)&klen);";
+        push @lines, "        if (klen == 5 && memEQ(key, \"value\", 5)) continue;";
+        push @lines, "        SV *val = hv_iterval($src_hv, _he);";
+        push @lines, "        hv_store($hv_var, key, klen, SvREFCNT_inc(val), 0);";
+        push @lines, "    }";
+        # Set value to the component's slice
+        push @lines, "    hv_stores($hv_var, \"value\", SvREFCNT_inc(*av_fetch($val_av, $idx, 0)));";
+        return @lines;
     }
 
     # Strategy: tuple_item_slice — build result tuple with item value slicing.
