@@ -199,7 +199,7 @@ class Chalk::Bootstrap::Earley {
                 next unless defined $origin_hash;
                 push @agenda, values $origin_hash->%*;
             }
-            my %processed;
+            my @processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
 
             while (my $entry = shift @agenda) {
@@ -207,10 +207,9 @@ class Chalk::Bootstrap::Earley {
                 my $core_id = $item->{core_id};
                 my $origin = $item->{origin};
 
-                # Skip if already processed (pack for fast hash key)
-                my $pkey = pack('NN', $core_id, $origin);
-                next if $processed{$pkey};
-                $processed{$pkey} = true;
+                # Skip if already processed (2D array avoids pack + hash lookup)
+                next if $processed[$core_id][$origin];
+                $processed[$core_id][$origin] = true;
 
                 # Re-read from chart: the value may have been updated by a
                 # merge (via add() in _complete or _advance_from_completed)
@@ -277,9 +276,8 @@ class Chalk::Bootstrap::Earley {
                                             \@chart, $pos, $skip_core, $origin,
                                             [$merged_item, $alt_idx]
                                         );
-                                        my $spkey = pack('NN', $skip_core, $origin);
                                         push @agenda, [$merged_item, $alt_idx]
-                                            unless $processed{$spkey};
+                                            unless $processed[$skip_core][$origin];
                                     }
                                 } else {
                                     $self->_chart_set(
