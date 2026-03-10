@@ -3885,8 +3885,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # When $_ is used in the block body, it maps to __sv (the C variable
             # for $_ following the ${var}_sv naming convention where var='_').
             # The PREINIT section already declares __sv from _collect_var_decls.
-            my $topic_range = $needs_topic_binding ? '__sv = newSViv(_mi); ' : '';
-            my $topic_array = $needs_topic_binding
+            # Only emit topic binding when the block body actually references __sv,
+            # otherwise it would reference an undeclared variable.
+            my $body_uses_topic = $needs_topic_binding
+                && defined $block_body && $block_body =~ /__sv/;
+            my $topic_range = $body_uses_topic ? '__sv = newSViv(_mi); ' : '';
+            my $topic_array = $body_uses_topic
                 ? '{ SV **_mep = av_fetch(_msrc, _mi, 0); __sv = (_mep && *_mep) ? *_mep : &PL_sv_undef; } '
                 : '';
 
