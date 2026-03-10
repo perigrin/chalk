@@ -124,6 +124,20 @@ class Chalk::Bootstrap::Earley {
         };
     }
 
+    # Advance an existing item by one dot position using cached integer mapping.
+    # Avoids the string-join + hash lookup of id_for() by using advance().
+    method _advance_item($item, $value) {
+        my $new_core_id = $core_index->advance($item->{core_id});
+        return {
+            rule    => $item->{rule},
+            alt_idx => $item->{alt_idx},
+            core_id => $new_core_id,
+            dot     => $item->{dot} + 1,
+            origin  => $item->{origin},
+            value   => $value,
+        };
+    }
+
     # Get the symbol after the dot in an item
     method _symbol_after_dot($item, $alt_index) {
         my $rule = $item->{rule};
@@ -245,10 +259,7 @@ class Chalk::Bootstrap::Earley {
                                 : $semiring->multiply($item->{value}, $semiring->one());
                             my $skip_is_zero = defined $skip_value ? $semiring->is_zero($skip_value) : true;
                             if (defined $skip_value && !$skip_is_zero) {
-                                my $skip_item = $self->_make_item(
-                                    $item->{rule}, $alt_idx, $item->{dot} + 1,
-                                    $origin, $skip_value
-                                );
+                                my $skip_item = $self->_advance_item($item, $skip_value);
                                 my $skip_core = $skip_item->{core_id};
                                 if ($self->_chart_has(\@chart, $pos, $skip_core, $origin)) {
                                     my $existing = $self->_chart_get(
@@ -444,13 +455,7 @@ class Chalk::Bootstrap::Earley {
         return if $semiring->is_zero($new_value);
 
         # Advance dot
-        my $new_item = $self->_make_item(
-            $item->{rule},
-            $alt_idx,
-            $item->{dot} + 1,
-            $item->{origin},
-            $new_value
-        );
+        my $new_item = $self->_advance_item($item, $new_value);
 
         my $new_core_id = $new_item->{core_id};
         my $origin = $new_item->{origin};
@@ -459,13 +464,7 @@ class Chalk::Bootstrap::Earley {
             # Merge with existing item using semiring add (create new item, don't mutate)
             my $existing = $self->_chart_get($chart, $end_pos, $new_core_id, $origin)->[0];
             my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
-            my $merged_item = $self->_make_item(
-                $existing->{rule},
-                $alt_idx,
-                $existing->{dot},
-                $existing->{origin},
-                $merged_value,
-            );
+            my $merged_item = { %$existing, value => $merged_value };
             $self->_chart_set($chart, $end_pos, $new_core_id, $origin, [$merged_item, $alt_idx]);
             # If zero-width match, add to current agenda for immediate processing
             if ($end_pos == $pos && $agenda) {
@@ -504,13 +503,7 @@ class Chalk::Bootstrap::Earley {
             unless ($semiring->is_zero($combined)) {
                 my $top = $leo->{top_item};
                 my $top_alt = $leo->{top_alt};
-                my $new_item = $self->_make_item(
-                    $top->{rule},
-                    $top_alt,
-                    $top->{dot} + 1,
-                    $top->{origin},
-                    $combined,
-                );
+                my $new_item = $self->_advance_item($top, $combined);
                 my $new_core_id = $new_item->{core_id};
                 my $new_origin = $new_item->{origin};
 
@@ -522,10 +515,7 @@ class Chalk::Bootstrap::Earley {
                     } catch ($e) {
                         die "Ambiguity resolving Leo item for '$rule_name': $e";
                     }
-                    my $merged_item = $self->_make_item(
-                        $existing->{rule}, $top_alt,
-                        $existing->{dot}, $existing->{origin}, $merged_value,
-                    );
+                    my $merged_item = { %$existing, value => $merged_value };
                     $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $top_alt]);
                 } else {
                     $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $top_alt]);
@@ -568,13 +558,7 @@ class Chalk::Bootstrap::Earley {
             # completions (e.g. keyword-as-Identifier) to parent items
             next if $semiring->is_zero($new_value);
 
-            my $new_item = $self->_make_item(
-                $waiting_item->{rule},
-                $waiting_alt_idx,
-                $waiting_item->{dot} + 1,
-                $waiting_item->{origin},
-                $new_value
-            );
+            my $new_item = $self->_advance_item($waiting_item, $new_value);
 
             my $new_core_id = $new_item->{core_id};
             my $new_origin = $new_item->{origin};
@@ -594,13 +578,7 @@ class Chalk::Bootstrap::Earley {
                     die "Ambiguity in rule '$rule_name' (dot=$dot, origin=$origin, pos=$pos) "
                         . "completing='$comp_rule' (origin=$comp_origin): $e";
                 }
-                my $merged_item = $self->_make_item(
-                    $existing->{rule},
-                    $waiting_alt_idx,
-                    $existing->{dot},
-                    $existing->{origin},
-                    $merged_value,
-                );
+                my $merged_item = { %$existing, value => $merged_value };
                 $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $waiting_alt_idx]);
             } else {
                 $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $waiting_alt_idx]);
@@ -691,13 +669,7 @@ class Chalk::Bootstrap::Earley {
             # completions to parent items
             next if $semiring->is_zero($new_value);
 
-            my $new_item = $self->_make_item(
-                $item->{rule},
-                $alt_idx,
-                $item->{dot} + 1,
-                $item->{origin},
-                $new_value
-            );
+            my $new_item = $self->_advance_item($item, $new_value);
 
             my $new_core_id = $new_item->{core_id};
             my $new_origin = $new_item->{origin};
@@ -705,13 +677,7 @@ class Chalk::Bootstrap::Earley {
             if ($self->_chart_has($chart, $pos, $new_core_id, $new_origin)) {
                 my $existing = $self->_chart_get($chart, $pos, $new_core_id, $new_origin)->[0];
                 my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
-                my $merged_item = $self->_make_item(
-                    $existing->{rule},
-                    $alt_idx,
-                    $existing->{dot},
-                    $existing->{origin},
-                    $merged_value,
-                );
+                my $merged_item = { %$existing, value => $merged_value };
                 $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $alt_idx]);
             } else {
                 $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $alt_idx]);
