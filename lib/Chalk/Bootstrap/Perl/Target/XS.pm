@@ -698,15 +698,150 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Strategy: filter_select — zero-check, _filter_compare, on_merge.
     # Used for add: the most complex composite method.
     method _emit_composite_filter_select($mname, $params, $slugs, $field_idx) {
-        # Stub: fall through to normal IR compilation for now
-        return;
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+        my $n = scalar $slugs->@*;
+        my $slug = $_current_slug;
+
+        # Per-component zero checks: if any component of left is zero, return right.
+        # If any component of right is zero, return left.
+        push @helper, "    /* Per-component zero checks */";
+        for my $i (0 .. $slugs->$#*) {
+            my $cs = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            my $li = "(*av_fetch((AV*)SvRV(left), $i, 0))";
+            my $ri = "(*av_fetch((AV*)SvRV(right), $i, 0))";
+            if ($self->_has_impl($cs, 'is_zero')) {
+                push @helper, "    if (SvTRUE(_impl_${cs}_is_zero(aTHX_ $sr_elem, $li))) return right;";
+                push @helper, "    if (SvTRUE(_impl_${cs}_is_zero(aTHX_ $sr_elem, $ri))) return left;";
+            } else {
+                push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push @helper, "      XPUSHs($sr_elem); XPUSHs($li);";
+                push @helper, "      PUTBACK; call_method(\"is_zero\", G_SCALAR);";
+                push @helper, "      SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
+                push @helper, "      if (_iz) return right; }";
+                push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push @helper, "      XPUSHs($sr_elem); XPUSHs($ri);";
+                push @helper, "      PUTBACK; call_method(\"is_zero\", G_SCALAR);";
+                push @helper, "      SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
+                push @helper, "      if (_iz) return left; }";
+            }
+        }
+        push @helper, '';
+
+        # Call _filter_compare
+        push @helper, "    /* Call _filter_compare for disambiguation */";
+        push @helper, "    SV *verdict = _impl_${slug}__filter_compare(aTHX_ self, left, right);";
+        push @helper, "    STRLEN vlen;";
+        push @helper, "    char *vstr = SvPV(verdict, vlen);";
+        push @helper, '';
+
+        # Determine winner/loser
+        push @helper, "    SV *winner, *loser;";
+        push @helper, "    if (vlen == 11 && memEQ(vstr, \"right_loses\", 11)) {";
+        push @helper, "        winner = left; loser = right;";
+        push @helper, "    } else if (vlen == 10 && memEQ(vstr, \"left_loses\", 10)) {";
+        push @helper, "        winner = right; loser = left;";
+        push @helper, "    } else {";
+        push @helper, "        winner = left; loser = right;";
+        push @helper, "    }";
+        push @helper, '';
+
+        # Post-merge hook: call on_merge on components that support it
+        push @helper, "    /* Post-merge: on_merge for side-table state transfer */";
+        for my $i (0 .. $slugs->$#*) {
+            my $cs = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            # Only SemanticAction has on_merge
+            if ($self->_has_impl($cs, 'on_merge')) {
+                push @helper, "    _impl_${cs}_on_merge(aTHX_ $sr_elem,";
+                push @helper, "        (*av_fetch((AV*)SvRV(winner), $i, 0)),";
+                push @helper, "        (*av_fetch((AV*)SvRV(loser), $i, 0)));";
+            }
+        }
+        push @helper, '';
+        push @helper, "    return winner;";
+        push @helper, '}';
+        return @helper;
     }
 
     # Strategy: filter_compare — per-component add + identity comparison.
     # Used for _filter_compare: first semiring expressing preference wins.
     method _emit_composite_filter_compare($mname, $params, $slugs, $field_idx) {
-        # Stub: fall through to normal IR compilation for now
-        return;
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+        my $n = scalar $slugs->@*;
+
+        push @helper, '';
+        for my $i (0 .. $slugs->$#*) {
+            my $cs = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            my $li = "(*av_fetch((AV*)SvRV(left), $i, 0))";
+            my $ri = "(*av_fetch((AV*)SvRV(right), $i, 0))";
+
+            push @helper, "    /* Component [$i]: $cs */";
+            push @helper, "    {";
+            push @helper, "        SV *_li = $li;";
+            push @helper, "        SV *_ri = $ri;";
+
+            # Identity check: skip if left[i] and right[i] are identical
+            push @helper, "        int same = 0;";
+            push @helper, "        if (SvROK(_li) && SvROK(_ri))";
+            push @helper, "            same = (SvRV(_li) == SvRV(_ri));";
+            push @helper, "        else if (!SvROK(_li) && !SvROK(_ri))";
+            push @helper, "            same = (SvIV(_li) == SvIV(_ri));";
+            push @helper, "        if (same) goto next_$i;";
+            push @helper, '';
+
+            # Call component's add
+            push @helper, "        SV *r;";
+            if ($self->_has_impl($cs, 'add')) {
+                push @helper, "        r = _impl_${cs}_add(aTHX_ $sr_elem, _li, _ri);";
+            } else {
+                push @helper, $self->_emit_component_call_method($sr_elem, 'add', ['_li', '_ri'], 'r');
+            }
+            push @helper, '';
+
+            # Normalize result to arrayref
+            push @helper, "        AV *rarr;";
+            push @helper, "        if (SvROK(r) && SvTYPE(SvRV(r)) == SVt_PVAV) {";
+            push @helper, "            rarr = (AV*)SvRV(r);";
+            push @helper, "        } else {";
+            push @helper, "            rarr = newAV();";
+            push @helper, "            av_push(rarr, SvREFCNT_inc(r));";
+            push @helper, "        }";
+            push @helper, '';
+
+            # Check result array length: skip if 0 or >1
+            push @helper, "        SSize_t rlen = av_len(rarr) + 1;";
+            push @helper, "        if (rlen != 1) goto next_$i;";
+            push @helper, '';
+
+            # Compare result[0] to left[i] and right[i]
+            push @helper, "        SV *rv = *av_fetch(rarr, 0, 0);";
+            push @helper, "        int eq_left = 0, eq_right = 0;";
+            push @helper, "        if (SvROK(rv) && SvROK(_li))  eq_left  = (SvRV(rv) == SvRV(_li));";
+            push @helper, "        else if (!SvROK(rv) && !SvROK(_li)) eq_left  = (SvIV(rv) == SvIV(_li));";
+            push @helper, "        if (SvROK(rv) && SvROK(_ri))  eq_right = (SvRV(rv) == SvRV(_ri));";
+            push @helper, "        else if (!SvROK(rv) && !SvROK(_ri)) eq_right = (SvIV(rv) == SvIV(_ri));";
+            push @helper, '';
+
+            # If matches both or neither, no preference
+            push @helper, "        if (eq_left && eq_right) goto next_$i;";
+            push @helper, "        if (!eq_left && !eq_right) goto next_$i;";
+            push @helper, '';
+
+            # First preference wins
+            push @helper, "        return eq_left";
+            push @helper, "            ? sv_2mortal(newSVpvs(\"right_loses\"))";
+            push @helper, "            : sv_2mortal(newSVpvs(\"left_loses\"));";
+
+            push @helper, "    next_$i: ;";
+            push @helper, "    }";
+            push @helper, '';
+        }
+
+        push @helper, "    return sv_2mortal(newSVpvs(\"neither\"));";
+        push @helper, '}';
+        return @helper;
     }
 
     # Strategy: tuple_delegate — build tuple by calling zero()/one() on each component.
