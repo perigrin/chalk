@@ -548,10 +548,13 @@ class Chalk::Bootstrap::Earley {
         for my $wref ($waiting_refs->@*) {
             my ($w_core_id, $w_origin) = $wref->@*;
 
-            # Skip the waiting item already handled by Leo resolution above
-            next if defined $leo_resolved_core_id
-                && $w_core_id == $leo_resolved_core_id
-                && $w_origin  == $leo_resolved_origin;
+            # Skip the waiting item already handled by Leo resolution above.
+            # Uses explicit if-block because postfix `next if ... &&` miscompiles
+            # in XS codegen (garbled eval_pv fallback).
+            if (defined $leo_resolved_core_id) {
+                next if $w_core_id == $leo_resolved_core_id
+                    && $w_origin  == $leo_resolved_origin;
+            }
 
             my $entry = $self->_chart_get($chart, $origin, $w_core_id, $w_origin);
             next unless defined $entry;
