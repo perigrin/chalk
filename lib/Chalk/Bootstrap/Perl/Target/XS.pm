@@ -429,6 +429,36 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return @lines;
     }
 
+    # Helper: emit an is_zero check for a component, using _impl_ or call_method.
+    # Returns C lines that evaluate to an `if (is_zero) {` block opener.
+    # The caller must emit the body and closing `}`.
+    method _emit_component_is_zero_check($slug, $sr_expr, $value_expr, $idx) {
+        my @lines;
+        if ($self->_has_impl($slug, 'is_zero')) {
+            push @lines, "    if (SvTRUE(_impl_${slug}_is_zero(aTHX_ $sr_expr, $value_expr))) {";
+        } else {
+            # Declare _iz outside dSP scope so it's visible to the if check
+            push @lines, "    { int _iz_$idx;";
+            push @lines, "      { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+            push @lines, "        XPUSHs($sr_expr); XPUSHs($value_expr);";
+            push @lines, "        PUTBACK; call_method(\"is_zero\", G_SCALAR);";
+            push @lines, "        SPAGAIN; _iz_$idx = SvTRUE(POPs); PUTBACK;";
+            push @lines, "        FREETMPS; LEAVE; }";
+            push @lines, "    if (_iz_$idx) {";
+        }
+        return @lines;
+    }
+
+    # Helper: close an is_zero check block. For _impl_ path this is just `}`.
+    # For call_method path this closes both the if and the outer scope.
+    method _emit_component_is_zero_close($slug) {
+        if ($self->_has_impl($slug, 'is_zero')) {
+            return ("    }");
+        } else {
+            return ("    } }");  # close if + outer scope
+        }
+    }
+
     # Helper: emit the C function signature preamble and semiring array access.
     method _emit_composite_preamble($mname, $params, $field_idx) {
         my @lines;
@@ -517,18 +547,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $slug = $slugs->[$i];
             my $sr_elem = "(*av_fetch(_sr, $i, 0))";
             my $ri = "(*av_fetch(result, $i, 0))";
-            if ($self->_has_impl($slug, 'is_zero')) {
-                push @helper, "    if (SvTRUE(_impl_${slug}_is_zero(aTHX_ $sr_elem, $ri))) {";
-            } else {
-                push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
-                push @helper, "      XPUSHs($sr_elem); XPUSHs($ri);";
-                push @helper, "      PUTBACK; call_method(\"is_zero\", G_SCALAR);";
-                push @helper, "      SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
-                push @helper, "    if (_iz) {";
-            }
+            push @helper, $self->_emit_component_is_zero_check($slug, $sr_elem, $ri, $i);
             push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
             push @helper, "        return _impl_${_current_slug}_zero(aTHX_ self);";
-            push @helper, "    }";
+            push @helper, $self->_emit_component_is_zero_close($slug);
         }
         push @helper, "    return newRV_noinc((SV*)result);";
         push @helper, '}';
@@ -564,7 +586,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @helper, '';
         push @helper, "    /* Build component item for $ti_slug (index $ti_idx) */";
         push @helper, $self->_emit_component_item_build('ci', 'item_hv', 'val_av', $ti_idx);
-        push @helper, "    SV *ci_ref = newRV_noinc((SV*)ci);";
+        push @helper, "    SV *ci_ref = sv_2mortal(newRV_noinc((SV*)ci));";
         push @helper, '';
 
         # Call _impl_TI_should_scan with the component item
@@ -628,7 +650,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Build component_item
             push @helper, "    {";
             push @helper, "    " . $_ for $self->_emit_component_item_build("ci_$i", 'item_hv', 'val_av', $i);
-            push @helper, "    SV *ci_ref_$i = newRV_noinc((SV*)ci_$i);";
+            push @helper, "    SV *ci_ref_$i = sv_2mortal(newRV_noinc((SV*)ci_$i));";
 
             # Thread TI result to SA via set_type_context (on_complete only)
             if ($thread_ti && $i == 4) {
@@ -658,19 +680,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
 
             # Zero check per component
-            if ($self->_has_impl($slug, 'is_zero')) {
-                push @helper, "    if (SvTRUE(_impl_${slug}_is_zero(aTHX_ $sr_elem, cr))) {";
-            } else {
-                push @helper, "    {";
-                push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
-                push @helper, "        XPUSHs($sr_elem); XPUSHs(cr);";
-                push @helper, "        PUTBACK; call_method(\"is_zero\", G_SCALAR);";
-                push @helper, "        SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
-                push @helper, "    if (_iz) {";
-            }
+            push @helper, $self->_emit_component_is_zero_check($slug, $sr_elem, 'cr', $i);
             push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
             push @helper, "        return _impl_${_current_slug}_zero(aTHX_ self);";
-            push @helper, "    }";
+            push @helper, $self->_emit_component_is_zero_close($slug);
 
             push @helper, "    av_push(result, SvREFCNT_inc(cr));";
 
@@ -711,7 +724,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             # Build component_item
             push @helper, "    " . $_ for $self->_emit_component_item_build("ci_$i", 'item_hv', 'val_av', $i);
-            push @helper, "    SV *ci_ref_$i = newRV_noinc((SV*)ci_$i);";
+            push @helper, "    SV *ci_ref_$i = sv_2mortal(newRV_noinc((SV*)ci_$i));";
             push @helper, "    SV *comp_val = (*av_fetch(val_av, $i, 0));";
 
             # Extra params after 'item' (alt_idx, pos, symbol_name)
@@ -744,18 +757,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
 
             # Zero check
-            if ($self->_has_impl($slug, 'is_zero')) {
-                push @helper, "    if (SvTRUE(_impl_${slug}_is_zero(aTHX_ $sr_elem, cr))) {";
-            } else {
-                push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
-                push @helper, "      XPUSHs($sr_elem); XPUSHs(cr);";
-                push @helper, "      PUTBACK; call_method(\"is_zero\", G_SCALAR);";
-                push @helper, "      SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
-                push @helper, "    if (_iz) {";
-            }
+            push @helper, $self->_emit_component_is_zero_check($slug, $sr_elem, 'cr', $i);
             push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
             push @helper, "        return _impl_${_current_slug}_zero(aTHX_ self);";
-            push @helper, "    }";
+            push @helper, $self->_emit_component_is_zero_close($slug);
 
             push @helper, "    av_push(result, SvREFCNT_inc(cr));";
             push @helper, "    }";  # Close block scope
@@ -800,18 +805,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
         push @helper, '';
 
-        # Call _filter_compare
+        # Call _filter_compare (returns int: 1=right_loses, -1=left_loses, 0=neither)
         push @helper, "    /* Call _filter_compare for disambiguation */";
-        push @helper, "    SV *verdict = _impl_${slug}__filter_compare(aTHX_ self, left, right);";
-        push @helper, "    STRLEN vlen;";
-        push @helper, "    char *vstr = SvPV(verdict, vlen);";
+        push @helper, "    int verdict = _impl_${slug}__filter_compare(aTHX_ self, left, right);";
         push @helper, '';
 
         # Determine winner/loser
         push @helper, "    SV *winner, *loser;";
-        push @helper, "    if (vlen == 11 && memEQ(vstr, \"right_loses\", 11)) {";
+        push @helper, "    if (verdict > 0) {";
         push @helper, "        winner = left; loser = right;";
-        push @helper, "    } else if (vlen == 10 && memEQ(vstr, \"left_loses\", 10)) {";
+        push @helper, "    } else if (verdict < 0) {";
         push @helper, "        winner = right; loser = left;";
         push @helper, "    } else {";
         push @helper, "        winner = left; loser = right;";
@@ -839,7 +842,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Strategy: filter_compare — per-component add + identity comparison.
     # Used for _filter_compare: first semiring expressing preference wins.
     method _emit_composite_filter_compare($mname, $params, $slugs, $field_idx) {
-        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+        # Return type is int: 1=right_loses, -1=left_loses, 0=neither.
+        # This avoids string allocation overhead and the AV leak from
+        # wrapping scalar add() results in a temporary arrayref.
+        my @helper;
+        # Custom preamble: return int instead of SV*
+        push @helper, "static int _impl_${_current_slug}_${mname}(pTHX_ SV *self, SV *left, SV *right) {";
+        push @helper, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
         my $n = scalar $slugs->@*;
 
         push @helper, '';
@@ -872,23 +881,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             push @helper, '';
 
-            # Normalize result to arrayref
-            push @helper, "        AV *rarr;";
+            # Check result: if arrayref, inspect length; if scalar, treat as single-element
+            push @helper, "        SV *rv; int rlen;";
             push @helper, "        if (SvROK(r) && SvTYPE(SvRV(r)) == SVt_PVAV) {";
-            push @helper, "            rarr = (AV*)SvRV(r);";
+            push @helper, "            AV *rarr = (AV*)SvRV(r);";
+            push @helper, "            rlen = av_len(rarr) + 1;";
+            push @helper, "            rv = (rlen == 1) ? *av_fetch(rarr, 0, 0) : NULL;";
             push @helper, "        } else {";
-            push @helper, "            rarr = newAV();";
-            push @helper, "            av_push(rarr, SvREFCNT_inc(r));";
+            push @helper, "            rlen = 1;";
+            push @helper, "            rv = r;";
             push @helper, "        }";
-            push @helper, '';
-
-            # Check result array length: skip if 0 or >1
-            push @helper, "        SSize_t rlen = av_len(rarr) + 1;";
             push @helper, "        if (rlen != 1) goto next_$i;";
             push @helper, '';
 
-            # Compare result[0] to left[i] and right[i]
-            push @helper, "        SV *rv = *av_fetch(rarr, 0, 0);";
+            # Compare result to left[i] and right[i]
             push @helper, "        int eq_left = 0, eq_right = 0;";
             push @helper, "        if (SvROK(rv) && SvROK(_li))  eq_left  = (SvRV(rv) == SvRV(_li));";
             push @helper, "        else if (!SvROK(rv) && !SvROK(_li)) eq_left  = (SvIV(rv) == SvIV(_li));";
@@ -901,17 +907,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @helper, "        if (!eq_left && !eq_right) goto next_$i;";
             push @helper, '';
 
-            # First preference wins
-            push @helper, "        return eq_left";
-            push @helper, "            ? sv_2mortal(newSVpvs(\"right_loses\"))";
-            push @helper, "            : sv_2mortal(newSVpvs(\"left_loses\"));";
+            # First preference wins: 1=right_loses, -1=left_loses
+            push @helper, "        return eq_left ? 1 : -1;";
 
             push @helper, "    next_$i: ;";
             push @helper, "    }";
             push @helper, '';
         }
 
-        push @helper, "    return sv_2mortal(newSVpvs(\"neither\"));";
+        push @helper, "    return 0;";
         push @helper, '}';
         return @helper;
     }
@@ -1903,6 +1907,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         );
 
         my %skip_method_names;
+        my %composite_overridden;  # Methods handled by composite override (custom fwd decls)
         for my $item (@method_items) {
             my $mname = $item->inputs()->[0]->value();
 
@@ -1914,6 +1919,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @helper_lines, '';
                 push @xsub_lines, $override->{xsub}->@*;
                 push @xsub_lines, '';
+                $composite_overridden{$mname} = 1;
                 next;
             }
 
@@ -2042,6 +2048,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             next if exists $fallback_names{$mname};
             # Skip methods with native emitters — they emit their own fwd decls
             next if exists $native_method_emitters{$mname};
+            # Skip composite-overridden methods — they emit their own signatures
+            next if exists $composite_overridden{$mname};
             # Skip subs — they get their own forward decls (with different param lists)
             next if exists $_class_subs{$mname};
             my $meta = $pre_fwd_methods{$mname};
