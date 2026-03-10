@@ -691,8 +691,84 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Used for on_skip_optional: calls on_skip_optional if available, else
     # falls back to multiply(value, one()).
     method _emit_composite_tuple_can_check($mname, $params, $slugs, $field_idx) {
-        # Stub: fall through to normal IR compilation for now
-        return;
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+        my $n = scalar $slugs->@*;
+
+        push @helper, "    AV *result = newAV();";
+        push @helper, "    av_extend(result, ${\($n - 1)});";
+        push @helper, "    SV *cr;";
+        push @helper, "    HV *item_hv = (HV*)SvRV(item);";
+        push @helper, "    SV **val_pp = hv_fetchs(item_hv, \"value\", 0);";
+        push @helper, "    AV *val_av = (AV*)SvRV(*val_pp);";
+        push @helper, '';
+
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            push @helper, "    /* Component [$i]: $slug */";
+            push @helper, "    {";
+
+            # Build component_item
+            push @helper, "    " . $_ for $self->_emit_component_item_build("ci_$i", 'item_hv', 'val_av', $i);
+            push @helper, "    SV *ci_ref_$i = newRV_noinc((SV*)ci_$i);";
+            push @helper, "    SV *comp_val = (*av_fetch(val_av, $i, 0));";
+
+            # Extra params after 'item' (alt_idx, pos, symbol_name)
+            my @extra_params = $params->@*;
+            shift @extra_params;  # Remove 'item'
+
+            if ($self->_has_impl($slug, $mname)) {
+                # Component has on_skip_optional: call it directly
+                my @call_args = ("aTHX_ $sr_elem", "ci_ref_$i", @extra_params);
+                push @helper, "    cr = _impl_${slug}_${mname}(" . join(', ', @call_args) . ");";
+            } else {
+                # Fallback: multiply(value, one())
+                push @helper, "    SV *one_val;";
+                if ($self->_has_impl($slug, 'one')) {
+                    push @helper, "    one_val = _impl_${slug}_one(aTHX_ $sr_elem);";
+                } else {
+                    push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                    push @helper, "      XPUSHs($sr_elem);";
+                    push @helper, "      PUTBACK; call_method(\"one\", G_SCALAR);";
+                    push @helper, "      SPAGAIN; one_val = SvREFCNT_inc(POPs); PUTBACK;";
+                    push @helper, "      FREETMPS; LEAVE; }";
+                }
+                if ($self->_has_impl($slug, 'multiply')) {
+                    push @helper, "    cr = _impl_${slug}_multiply(aTHX_ $sr_elem, comp_val, one_val);";
+                } else {
+                    push @helper, $self->_emit_component_call_method(
+                        $sr_elem, 'multiply', ['comp_val', 'one_val'], 'cr',
+                    );
+                }
+            }
+
+            # Zero check
+            if ($self->_has_impl($slug, 'is_zero')) {
+                push @helper, "    if (SvTRUE(_impl_${slug}_is_zero(aTHX_ $sr_elem, cr))) {";
+            } else {
+                push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push @helper, "      XPUSHs($sr_elem); XPUSHs(cr);";
+                push @helper, "      PUTBACK; call_method(\"is_zero\", G_SCALAR);";
+                push @helper, "      SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
+                push @helper, "    if (_iz) {";
+            }
+            push @helper, "        SvREFCNT_dec(newRV_noinc((SV*)result));";
+            push @helper, "        dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+            push @helper, "        XPUSHs(self);";
+            push @helper, "        PUTBACK; call_method(\"zero\", G_SCALAR);";
+            push @helper, "        SPAGAIN; SV *z = SvREFCNT_inc(POPs); PUTBACK;";
+            push @helper, "        FREETMPS; LEAVE;";
+            push @helper, "        return z;";
+            push @helper, "    }";
+
+            push @helper, "    av_push(result, SvREFCNT_inc(cr));";
+            push @helper, "    }";  # Close block scope
+            push @helper, '';
+        }
+
+        push @helper, "    return newRV_noinc((SV*)result);";
+        push @helper, '}';
+        return @helper;
     }
 
     # Strategy: filter_select — zero-check, _filter_compare, on_merge.
@@ -846,8 +922,35 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Strategy: tuple_delegate — build tuple by calling zero()/one() on each component.
     method _emit_composite_tuple_delegate($mname, $params, $slugs, $field_idx, $delegate) {
-        # Stub: fall through to normal IR compilation for now
-        return;
+        my @helper = $self->_emit_composite_preamble($mname, $params, $field_idx);
+        my $n = scalar $slugs->@*;
+
+        push @helper, "    AV *result = newAV();";
+        push @helper, "    av_extend(result, ${\($n - 1)});";
+        push @helper, "    SV *cr;";
+        push @helper, '';
+
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
+            push @helper, "    /* Component [$i]: $slug */";
+
+            if ($self->_has_impl($slug, $delegate)) {
+                push @helper, "    cr = _impl_${slug}_${delegate}(aTHX_ $sr_elem);";
+            } else {
+                push @helper, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push @helper, "      XPUSHs($sr_elem);";
+                push @helper, "      PUTBACK; call_method(\"$delegate\", G_SCALAR);";
+                push @helper, "      SPAGAIN; cr = SvREFCNT_inc(POPs); PUTBACK;";
+                push @helper, "      FREETMPS; LEAVE; }";
+            }
+            push @helper, "    av_push(result, SvREFCNT_inc(cr));";
+            push @helper, '';
+        }
+
+        push @helper, "    return newRV_noinc((SV*)result);";
+        push @helper, '}';
+        return @helper;
     }
 
     # Emit native C for _copy_cfg_with_scope: copy a cfg_state hashref
