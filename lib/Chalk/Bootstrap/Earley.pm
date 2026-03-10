@@ -182,7 +182,9 @@ class Chalk::Bootstrap::Earley {
         # Initialize chart[0] with start rule items (one per alternative)
         for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
             my $item = $self->_make_item($start_rule, $alt_idx, 0, 0, $semiring->one());
-            $self->_chart_set(\@chart, 0, $item->{core_id}, 0, [$item, $alt_idx]);
+            my $_ci = $item->{core_id};
+            ($chart[0][$_ci] //= {})->{0} = [$item, $alt_idx];
+            $_gc_min_origin_at[0] = 0 if !defined $_gc_min_origin_at[0];
         }
 
         # GC tracking
@@ -218,7 +220,7 @@ class Chalk::Bootstrap::Earley {
                 # stale pre-merge value from the agenda entry.
                 # Uses explicit indexing instead of list destructuring for
                 # XS codegen compatibility.
-                my $chart_entry = $self->_chart_get(\@chart, $pos, $core_id, $origin);
+                my $chart_entry = $chart[$pos][$core_id]{$origin};
                 $item = $chart_entry->[0];
                 $alt_idx = $chart_entry->[1];
 
@@ -227,7 +229,7 @@ class Chalk::Bootstrap::Earley {
                     my $completed_value = $semiring->on_complete($item, $alt_idx, $pos);
                     $item = { %$item, value => $completed_value };
                     # Update the chart entry with the action-applied value
-                    $self->_chart_set(\@chart, $pos, $core_id, $origin, [$item, $alt_idx]);
+                    $chart[$pos][$core_id]{$origin} = [$item, $alt_idx];
                     # Index this completed item for _advance_from_completed lookups
                     my $c_rule = $item->{rule}->name();
                     my $c_origin = $item->{origin};
@@ -260,10 +262,8 @@ class Chalk::Bootstrap::Earley {
                             if (defined $skip_value && !$skip_is_zero) {
                                 my $skip_item = $self->_advance_item($item, $skip_value);
                                 my $skip_core = $skip_item->{core_id};
-                                if ($self->_chart_has(\@chart, $pos, $skip_core, $origin)) {
-                                    my $existing = $self->_chart_get(
-                                        \@chart, $pos, $skip_core, $origin
-                                    )->[0];
+                                if (defined $chart[$pos][$skip_core] && exists $chart[$pos][$skip_core]{$origin}) {
+                                    my $existing = $chart[$pos][$skip_core]{$origin}->[0];
                                     my $merged = $semiring->add(
                                         $existing->{value}, $skip_value
                                     );
@@ -272,18 +272,14 @@ class Chalk::Bootstrap::Earley {
                                         my $merged_item = {
                                             %$existing, value => $merged
                                         };
-                                        $self->_chart_set(
-                                            \@chart, $pos, $skip_core, $origin,
-                                            [$merged_item, $alt_idx]
-                                        );
+                                        $chart[$pos][$skip_core]{$origin} = [$merged_item, $alt_idx];
                                         push @agenda, [$merged_item, $alt_idx]
                                             unless $processed[$skip_core][$origin];
                                     }
                                 } else {
-                                    $self->_chart_set(
-                                        \@chart, $pos, $skip_core, $origin,
-                                        [$skip_item, $alt_idx]
-                                    );
+                                    ($chart[$pos][$skip_core] //= {})->{$origin} = [$skip_item, $alt_idx];
+                                    $_gc_min_origin_at[$pos] = $origin
+                                        if !defined $_gc_min_origin_at[$pos] || $origin < $_gc_min_origin_at[$pos];
                                     push @agenda, [$skip_item, $alt_idx];
                                 }
                             }
@@ -343,8 +339,8 @@ class Chalk::Bootstrap::Earley {
             my $end_dot = scalar($start_rule->expressions()->[$alt_idx]->@*);
             my $core_id = $core_index->id_for($start_rule->name(), $alt_idx, $end_dot);
 
-            if ($self->_chart_has(\@chart, $n, $core_id, 0)) {
-                my $item = $self->_chart_get(\@chart, $n, $core_id, 0)->[0];
+            if (defined $chart[$n][$core_id] && exists $chart[$n][$core_id]{0}) {
+                my $item = $chart[$n][$core_id]{0}->[0];
                 return $item->{value};
             }
         }
