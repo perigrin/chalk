@@ -89,17 +89,17 @@ class Chalk::Bootstrap::Earley {
         return \%_gc_stats;
     }
 
-    # Chart access helpers. Chart structure: $chart[$pos]{$core_id}{$origin} = [$item, $alt_idx]
+    # Chart access helpers. Chart structure: $chart[$pos][$core_id]{$origin} = [$item, $alt_idx]
     method _chart_has($chart, $pos, $core_id, $origin) {
-        return exists $chart->[$pos]{$core_id} && exists $chart->[$pos]{$core_id}{$origin};
+        return defined $chart->[$pos][$core_id] && exists $chart->[$pos][$core_id]{$origin};
     }
 
     method _chart_get($chart, $pos, $core_id, $origin) {
-        return $chart->[$pos]{$core_id}{$origin};
+        return $chart->[$pos][$core_id]{$origin};
     }
 
     method _chart_set($chart, $pos, $core_id, $origin, $entry) {
-        $chart->[$pos]{$core_id}{$origin} = $entry;
+        ($chart->[$pos][$core_id] //= {})->{$origin} = $entry;
         # Track minimum origin per position for GC
         $_gc_min_origin_at[$pos] = $origin
             if !defined $_gc_min_origin_at[$pos] || $origin < $_gc_min_origin_at[$pos];
@@ -147,8 +147,8 @@ class Chalk::Bootstrap::Earley {
     method _run_parse($input) {
         my $n = length($input);
 
-        # Chart: array of hashes, where each hash is {core_id}{origin} => [$item, $alt_idx]
-        my @chart = map { {} } (0 .. $n);
+        # Chart: array of arrays, where each entry is [$core_id]{$origin} => [$item, $alt_idx]
+        my @chart = map { [] } (0 .. $n);
 
         # Reset secondary indexes for this parse
         %waiting_for = ();
@@ -181,8 +181,9 @@ class Chalk::Bootstrap::Earley {
 
             # Build agenda from all entries at this position
             my @agenda;
-            for my $core_hash (values $chart[$pos]->%*) {
-                push @agenda, values $core_hash->%*;
+            for my $origin_hash ($chart[$pos]->@*) {
+                next unless defined $origin_hash;
+                push @agenda, values $origin_hash->%*;
             }
             my %processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
@@ -318,9 +319,9 @@ class Chalk::Bootstrap::Earley {
                 }
                 for my $gc_pos ($oldest_live_pos .. $safe_floor - 1) {
                     next if $gc_pos >= $pos;
-                    if (keys $chart[$gc_pos]->%*) {
+                    if ($chart[$gc_pos]->@*) {
                         $_gc_stats{positions_freed}++;
-                        $chart[$gc_pos] = {};
+                        $chart[$gc_pos] = [];
                         delete $_scan_cache{$gc_pos};
                     }
                 }
