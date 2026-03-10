@@ -91,7 +91,8 @@ class Chalk::Bootstrap::Earley {
 
     # Chart access helpers. Chart structure: $chart[$pos][$core_id]{$origin} = [$item, $alt_idx]
     method _chart_has($chart, $pos, $core_id, $origin) {
-        return defined $chart->[$pos][$core_id] && exists $chart->[$pos][$core_id]{$origin};
+        my $oh = $chart->[$pos][$core_id];
+        return defined $oh && exists $oh->{$origin};
     }
 
     method _chart_get($chart, $pos, $core_id, $origin) {
@@ -210,7 +211,13 @@ class Chalk::Bootstrap::Earley {
                 my $origin = $item->{origin};
 
                 # Skip if already processed (2D array avoids pack + hash lookup)
-                next if $processed[$core_id][$origin];
+                # Uses explicit if-block instead of postfix next-if for XS
+                # codegen compatibility (postfix next-if with && falls to eval_pv)
+                my $p_slot = $processed[$core_id];
+                if (defined $p_slot) {
+                    next if $p_slot->[$origin];
+                }
+                $processed[$core_id] //= [];
                 $processed[$core_id][$origin] = true;
 
                 # Re-read from chart: the value may have been updated by a
@@ -262,8 +269,9 @@ class Chalk::Bootstrap::Earley {
                             if (defined $skip_value && !$skip_is_zero) {
                                 my $skip_item = $self->_advance_item($item, $skip_value);
                                 my $skip_core = $skip_item->{core_id};
-                                if (defined $chart[$pos][$skip_core] && exists $chart[$pos][$skip_core]{$origin}) {
-                                    my $existing = $chart[$pos][$skip_core]{$origin}->[0];
+                                my $skip_oh = $chart[$pos][$skip_core];
+                                if (defined $skip_oh && exists $skip_oh->{$origin}) {
+                                    my $existing = $skip_oh->{$origin}->[0];
                                     my $merged = $semiring->add(
                                         $existing->{value}, $skip_value
                                     );
@@ -273,8 +281,9 @@ class Chalk::Bootstrap::Earley {
                                             %$existing, value => $merged
                                         };
                                         $chart[$pos][$skip_core]{$origin} = [$merged_item, $alt_idx];
+                                        my $sp_slot = $processed[$skip_core];
                                         push @agenda, [$merged_item, $alt_idx]
-                                            unless $processed[$skip_core][$origin];
+                                            unless defined $sp_slot && $sp_slot->[$origin];
                                     }
                                 } else {
                                     ($chart[$pos][$skip_core] //= {})->{$origin} = [$skip_item, $alt_idx];
@@ -339,8 +348,9 @@ class Chalk::Bootstrap::Earley {
             my $end_dot = scalar($start_rule->expressions()->[$alt_idx]->@*);
             my $core_id = $core_index->id_for($start_rule->name(), $alt_idx, $end_dot);
 
-            if (defined $chart[$n][$core_id] && exists $chart[$n][$core_id]{0}) {
-                my $item = $chart[$n][$core_id]{0}->[0];
+            my $end_oh = $chart[$n][$core_id];
+            if (defined $end_oh && exists $end_oh->{0}) {
+                my $item = $end_oh->{0}->[0];
                 return $item->{value};
             }
         }
