@@ -169,6 +169,14 @@ SKIP: {
             'no eval_pv fallback for Structural methods (bitwise | and & supported)');
     }
 
+    # Verify loop bodies have scope boundaries for mortal SV cleanup
+    {
+        # Look for standalone ENTER; SAVETMPS; lines (not inline dSP patterns)
+        my @standalone_enter = ($multi_code =~ /^\s+ENTER; SAVETMPS;\s*$/mg);
+        ok(scalar(@standalone_enter) > 0,
+            "loop bodies have ENTER/SAVETMPS scope boundaries (" . scalar(@standalone_enter) . " found)");
+    }
+
     # --- Step 4: Write to temp directory and build ---
     my $tmpdir = tempdir(CLEANUP => 1);
 

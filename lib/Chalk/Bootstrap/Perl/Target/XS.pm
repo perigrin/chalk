@@ -4491,12 +4491,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @lines, "        SV *${iter_name}_sv = (_elem && *_elem) ? *_elem : &PL_sv_undef;";
             }
 
+            # Scope boundary frees mortal SVs per iteration instead of per-function
+            push @lines, "        ENTER; SAVETMPS;";
             $_loop_depth++;
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "        $code" if defined $code;
             }
             $_loop_depth--;
+            push @lines, "        FREETMPS; LEAVE;";
             push @lines, "    }";
             # No explicit SvREFCNT_dec needed — sv_2mortal handles cleanup
             push @lines, "}";
@@ -4530,12 +4533,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @lines, "while (SvTRUE($cond_expr)) {";
             }
 
+            # Scope boundary frees mortal SVs per iteration instead of per-function
+            push @lines, "    ENTER; SAVETMPS;";
             $_loop_depth++;
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
             }
             $_loop_depth--;
+            push @lines, "    FREETMPS; LEAVE;";
             # Inject chart re-read for while-shift loops that destructure entries.
             # The IR loses list destructuring: my ($item, $alt_idx) = $entry->@*
             # becomes my $item = $entry->@* (alt_idx lost). Also the chart re-read
