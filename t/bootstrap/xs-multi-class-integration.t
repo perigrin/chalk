@@ -177,6 +177,24 @@ SKIP: {
             "loop bodies have ENTER/SAVETMPS scope boundaries (" . scalar(@standalone_enter) . " found)");
     }
 
+    # Verify FilterComposite methods use direct _impl_ calls instead of call_method
+    # for component dispatch. Count call_method inside FC method bodies.
+    {
+        my $fc_call_methods = 0;
+        while ($multi_code =~ /^static SV \* _impl_filtercomposite_(\w+)\(pTHX_.*?\n(.*?)^}/smg) {
+            my ($mname, $body) = ($1, $2);
+            # Skip non-dispatch methods
+            next if $mname =~ /^(?:reset_cache|_can_merge_cfg|_copy_cfg_with_scope|_intern|_mul_ctx|_scan_ctx|current_)/;
+            my @cms = ($body =~ /call_method/g);
+            $fc_call_methods += scalar @cms;
+        }
+        # Some components lack _impl_ for certain methods (e.g., Boolean::one,
+        # TypeInference::zero), so call_method is used for those specific cases.
+        # Target: significantly fewer than the 40 before unrolling.
+        ok($fc_call_methods < 30,
+            "FilterComposite dispatch uses direct _impl_ calls ($fc_call_methods call_method remaining)");
+    }
+
     # --- Step 4: Write to temp directory and build ---
     my $tmpdir = tempdir(CLEANUP => 1);
 

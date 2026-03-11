@@ -306,19 +306,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return unless defined $_composite_field_types && keys $_composite_field_types->%*;
         return unless defined $_class_methods && exists $_class_methods->{$mname};
 
-        # Only is_zero has the short-circuit boolean pattern where checking
-        # each component and returning true/false is correct. Other methods
-        # (on_scan, multiply, add, etc.) need to build result tuples, so they
-        # must use the normal IR-based compilation path.
-        return unless $mname eq 'is_zero';
+        # Methods eligible for composite dispatch unrolling
+        my %composite_methods = map { $_ => 1 }
+            qw(is_zero multiply should_scan on_scan on_complete add
+               _filter_compare on_skip_optional zero one);
+        return unless exists $composite_methods{$mname};
 
         my $meta = $_class_methods->{$mname};
         my @params = $meta->{params}->@*;
 
-        # Find the composite field used in this method by scanning the IR
-        # for SubscriptExpr patterns on known composite fields.
+        # Find the composite field (semirings arrayref)
         my $composite_field;
-        for my $fname (keys $_composite_field_types->%*) {
+        for my $fname (sort keys $_composite_field_types->%*) {
             $composite_field = $fname;
             last;
         }
@@ -328,80 +327,445 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $component_slugs = $_composite_field_types->{$composite_field};
         my $field_idx = $field_map->{$composite_field};
 
-        # Verify all component slugs have the method compiled as _impl_ helpers
-        # (not eval_pv fallback — those don't get _impl_ functions)
+        # Check which components have _impl_ for this method.
+        # Methods that ALL components have compiled can use _impl_ directly.
+        # Others fall back to call_method for specific components.
+        my %has_impl;
         for my $slug ($component_slugs->@*) {
-            return unless exists $_multi_class_methods{$slug}
-                && exists $_multi_class_methods{$slug}{$mname};
-            # Skip if this method fell to eval_pv fallback
-            return if exists $_fallback_method_slugs{"$slug:$mname"};
+            $has_impl{$slug} = (exists $_multi_class_methods{$slug}
+                && exists $_multi_class_methods{$slug}{$mname}
+                && !exists $_fallback_method_slugs{"$slug:$mname"});
         }
 
-        # Generate the unrolled helper function
-        my @helper;
-        my @fwd_params = ('SV *self');
-        push @fwd_params, "SV *$_" for @params;
-        my $sig = join(', ', @fwd_params);
-
-        push @helper, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
-        push @helper, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
-        # Guard against non-tuple values (e.g., plain SVs from other semiring types).
-        # A non-reference value cannot be a valid composite tuple, so treat as zero.
-        for my $p (@params) {
-            if (@params == 1 && $component_slugs->@* > 1) {
-                push @helper, "    if (!SvROK($p)) return &PL_sv_yes;";
+        # For the core methods (multiply, add, is_zero, on_scan, on_complete),
+        # all components must have _impl_ — otherwise skip unrolling.
+        if ($mname =~ /^(?:multiply|add|is_zero|on_scan|on_complete|_filter_compare)$/) {
+            for my $slug ($component_slugs->@*) {
+                return unless $has_impl{$slug};
             }
         }
 
-        # Generate unrolled calls per component
-        for my $i (0 .. $component_slugs->$#*) {
-            my $slug = $component_slugs->[$i];
-            push @helper, "    /* Component [$i]: $slug */";
-
-            # Build argument list: first arg is the component semiring,
-            # rest are the original args (with tuple indexing for is_zero-style methods)
-            my $sr_elem = "(*av_fetch(_sr, $i, 0))";
-
-            # Determine if any param is a tuple that needs per-component indexing
-            # Heuristic: if the method takes a single arg and the composite has multiple
-            # components, assume the arg is a tuple that needs av_fetch indexing
-            my @call_args = ("aTHX_ $sr_elem");
-            for my $p (@params) {
-                # If this param is likely a tuple (single param for is_zero-style),
-                # index it. Otherwise pass through.
-                if (@params == 1 && $component_slugs->@* > 1) {
-                    push @call_args, "(*av_fetch((AV*)SvRV($p), $i, 0))";
-                } else {
-                    push @call_args, $p;
-                }
-            }
-
-            my $call = "_impl_${slug}_${mname}(" . join(', ', @call_args) . ")";
-            push @helper, "    if (SvTRUE($call)) {";
-            push @helper, "        return &PL_sv_yes;";
-            push @helper, "    }";
-        }
-
-        push @helper, "    return &PL_sv_no;";
-        push @helper, '}';
+        # Generate the helper function body via dispatch
+        my @helper = $self->_emit_composite_helper(
+            $mname, \@params, $component_slugs, $field_idx, \%has_impl);
+        return unless @helper;
 
         # Generate XSUB wrapper
+        my @xsub = $self->_emit_composite_xsub($mname, \@params);
+
+        return { helper => \@helper, xsub => \@xsub };
+    }
+
+    # Generate XSUB wrapper for a composite method override.
+    method _emit_composite_xsub($mname, $params) {
         my @xsub;
-        my @xsub_params = @params;
-        push @xsub, 'SV *';
-        push @xsub, "$mname(self, " . join(', ', @xsub_params) . ')';
-        push @xsub, '    SV *self';
-        for my $p (@xsub_params) {
-            push @xsub, "    SV *$p";
+        if ($params->@*) {
+            push @xsub, 'SV *';
+            push @xsub, "$mname(self, " . join(', ', $params->@*) . ')';
+            push @xsub, '    SV *self';
+            push @xsub, "    SV *$_" for $params->@*;
+        } else {
+            push @xsub, 'SV *';
+            push @xsub, "$mname(self)";
+            push @xsub, '    SV *self';
         }
         push @xsub, 'CODE:';
-        my @xsub_call_args = ('aTHX_ self', @xsub_params);
-        push @xsub, "    RETVAL = _impl_${_current_slug}_${mname}(" . join(', ', @xsub_call_args) . ");";
+        my $call_args = join(', ', 'aTHX_ self', $params->@*);
+        push @xsub, "    RETVAL = _impl_${_current_slug}_${mname}($call_args);";
         push @xsub, 'OUTPUT:';
         push @xsub, '    RETVAL';
         push @xsub, '';
+        return @xsub;
+    }
 
-        return { helper => \@helper, xsub => \@xsub };
+    # Emit a call to a component's method — _impl_ if available, call_method otherwise.
+    # $args_str format: "aTHX_ sr_expr, arg1, arg2, ..." for _impl_ calls.
+    # For call_method, aTHX_ is stripped and the rest become XPUSHs arguments.
+    # Uses paren-aware splitting to handle nested expressions like av_fetch(_sr, 0, 0).
+    method _emit_component_call($slug, $mname, $sr_elem, $args_str, $has_impl) {
+        if ($has_impl->{$slug}) {
+            return "_impl_${slug}_${mname}($args_str)";
+        }
+        # Parse args: split on top-level commas (respecting parentheses)
+        my @parts;
+        my $depth = 0;
+        my $current = '';
+        for my $ch (split //, $args_str) {
+            if ($ch eq '(' || $ch eq '{') { $depth++; $current .= $ch; }
+            elsif ($ch eq ')' || $ch eq '}') { $depth--; $current .= $ch; }
+            elsif ($ch eq ',' && $depth == 0) {
+                push @parts, $current;
+                $current = '';
+            } else {
+                $current .= $ch;
+            }
+        }
+        push @parts, $current if length $current;
+        # Remove aTHX_ prefix: may be standalone part or prefix of first arg
+        if (@parts && $parts[0] =~ /^\s*aTHX_\s*$/) {
+            shift @parts;
+        } elsif (@parts && $parts[0] =~ s/^\s*aTHX_\s+//) {
+            # aTHX_ was joined with first arg (no comma separator)
+        }
+        # Trim whitespace
+        @parts = map { s/^\s+//r =~ s/\s+$//r } @parts;
+        my $pushes = join(' ', map { "XPUSHs($_);" } @parts);
+        return "({ dSP; ENTER; SAVETMPS; PUSHMARK(SP); $pushes PUTBACK;"
+            . " call_method(\"$mname\", G_SCALAR); SPAGAIN;"
+            . " SV *_mcr = SvREFCNT_inc(POPs); PUTBACK; FREETMPS; LEAVE; _mcr; })";
+    }
+
+    # Generate the static helper function for a composite method.
+    method _emit_composite_helper($mname, $params, $component_slugs, $field_idx, $has_impl) {
+        my @fwd_params = ('SV *self');
+        push @fwd_params, "SV *$_" for $params->@*;
+        my $sig = join(', ', @fwd_params);
+
+        my @h;
+        push @h, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
+        push @h, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
+
+        if ($mname eq 'is_zero') {
+            $self->_emit_composite_is_zero(\@h, $params, $component_slugs, $has_impl);
+        } elsif ($mname eq 'zero' || $mname eq 'one') {
+            $self->_emit_composite_zero_one(\@h, $mname, $component_slugs, $has_impl);
+        } elsif ($mname eq 'multiply') {
+            $self->_emit_composite_multiply(\@h, $component_slugs, $has_impl);
+        } elsif ($mname eq 'should_scan') {
+            $self->_emit_composite_should_scan(\@h, $params, $component_slugs, $has_impl);
+        } elsif ($mname eq 'on_scan') {
+            $self->_emit_composite_on_scan(\@h, $params, $component_slugs, $has_impl);
+        } elsif ($mname eq 'on_complete') {
+            $self->_emit_composite_on_complete(\@h, $params, $component_slugs, $has_impl);
+        } elsif ($mname eq 'on_skip_optional') {
+            $self->_emit_composite_on_skip_optional(\@h, $params, $component_slugs, $has_impl);
+        } elsif ($mname eq 'add') {
+            $self->_emit_composite_add(\@h, $component_slugs, $has_impl);
+        } elsif ($mname eq '_filter_compare') {
+            $self->_emit_composite_filter_compare(\@h, $component_slugs, $has_impl);
+        } else {
+            return ();
+        }
+
+        push @h, '}';
+        return @h;
+    }
+
+    # is_zero: short-circuit OR — any component zero → return true
+    method _emit_composite_is_zero($h, $params, $slugs, $has_impl) {
+        # Guard: non-tuple values fall back to method dispatch
+        push $h->@*, "    if (!SvROK(value)) return &PL_sv_yes;";
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            my $vi = "(*av_fetch((AV*)SvRV(value), $i, 0))";
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            my $call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, $vi", $has_impl);
+            push $h->@*, "        if (SvTRUE($call)) return &PL_sv_yes;";
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return &PL_sv_no;";
+    }
+
+    # zero/one: build tuple from component zero()/one() calls
+    method _emit_composite_zero_one($h, $mname, $slugs, $has_impl) {
+        push $h->@*, "    AV *_result = newAV();";
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            my $call = $self->_emit_component_call($slug, $mname, $sr, "aTHX_ $sr", $has_impl);
+            push $h->@*, "        av_push(_result, SvREFCNT_inc($call));";
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return newRV_noinc((SV*)_result);";
+    }
+
+    # multiply: build result tuple, then annihilator check
+    method _emit_composite_multiply($h, $slugs, $has_impl) {
+        push $h->@*, "    AV *_result = newAV();";
+        push $h->@*, "    SV *_mr;";
+        # Build result tuple
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            my $lr = "(*av_fetch((AV*)SvRV(left), $i, 0))";
+            my $rr = "(*av_fetch((AV*)SvRV(right), $i, 0))";
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            my $call = $self->_emit_component_call($slug, 'multiply', $sr, "aTHX_ $sr, $lr, $rr", $has_impl);
+            push $h->@*, "        _mr = $call;";
+            push $h->@*, "        av_push(_result, SvREFCNT_inc(_mr));";
+            push $h->@*, "    }";
+        }
+        # Annihilator: if any component is zero, return zero tuple
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            my $ri = "(*av_fetch(_result, $i, 0))";
+            my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, $ri", $has_impl);
+            push $h->@*, "    if (SvTRUE($iz_call)) {";
+            push $h->@*, "        SvREFCNT_dec((SV*)_result);";
+            push $h->@*, "        return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return newRV_noinc((SV*)_result);";
+    }
+
+    # should_scan: short-circuit AND — first false returns false
+    method _emit_composite_should_scan($h, $params, $slugs, $has_impl) {
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            # Build component_item: copy item hash, replace value with component slice
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp))";
+            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, matched_text, is_predicted";
+            my $call = $self->_emit_component_call($slug, 'should_scan', $sr, $args, $has_impl);
+            push $h->@*, "        SV *_r = $call;";
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
+            push $h->@*, "        if (!SvTRUE(_r)) return &PL_sv_no;";
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return &PL_sv_yes;";
+    }
+
+    # on_scan: build result tuple with component item slicing, zero check per component
+    method _emit_composite_on_scan($h, $params, $slugs, $has_impl) {
+        push $h->@*, "    AV *_result = newAV();";
+        push $h->@*, "    SV *_r;";
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            # Build component_item hash
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp))";
+            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, matched_text";
+            my $call = $self->_emit_component_call($slug, 'on_scan', $sr, $args, $has_impl);
+            push $h->@*, "        _r = $call;";
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
+            # Zero check: if component returns zero, return composite zero
+            my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
+            push $h->@*, "        if (SvTRUE($iz_call)) {";
+            push $h->@*, "            SvREFCNT_dec((SV*)_result);";
+            push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "        }";
+            push $h->@*, "        av_push(_result, SvREFCNT_inc(_r));";
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return newRV_noinc((SV*)_result);";
+    }
+
+    # on_complete: like on_scan but threads TI result to SA via set_type_context
+    method _emit_composite_on_complete($h, $params, $slugs, $has_impl) {
+        push $h->@*, "    AV *_result = newAV();";
+        push $h->@*, "    SV *_r;";
+        push $h->@*, "    SV *_ti_result = NULL;";
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            # Thread TI result (index 2) to SA (index 4)
+            if ($i == 4) {
+                push $h->@*, "        if (_ti_result) {";
+                # SA set_type_context — use _impl_ if available
+                if ($has_impl->{'semanticaction'} && exists $_multi_class_methods{'semanticaction'}{'set_type_context'}) {
+                    push $h->@*, "            _impl_semanticaction_set_type_context(aTHX_ $sr, _ti_result);";
+                } else {
+                    push $h->@*, "            { dSP; ENTER; SAVETMPS; PUSHMARK(SP); XPUSHs($sr); XPUSHs(_ti_result); PUTBACK;";
+                    push $h->@*, "              call_method(\"set_type_context\", G_SCALAR); SPAGAIN; POPs; PUTBACK; FREETMPS; LEAVE; }";
+                }
+                push $h->@*, "        }";
+            }
+            # Build component_item hash
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp))";
+            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos";
+            my $call = $self->_emit_component_call($slug, 'on_complete', $sr, $args, $has_impl);
+            push $h->@*, "        _r = $call;";
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
+            # Zero check
+            my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
+            push $h->@*, "        if (SvTRUE($iz_call)) {";
+            push $h->@*, "            SvREFCNT_dec((SV*)_result);";
+            push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "        }";
+            push $h->@*, "        av_push(_result, SvREFCNT_inc(_r));";
+            # Capture TI result at index 2
+            if ($i == 2) {
+                push $h->@*, "        _ti_result = _r;";
+            }
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return newRV_noinc((SV*)_result);";
+    }
+
+    # on_skip_optional: like on_scan but uses on_skip_optional where available,
+    # falls back to multiply(value, one()) for components without it
+    method _emit_composite_on_skip_optional($h, $params, $slugs, $has_impl) {
+        push $h->@*, "    AV *_result = newAV();";
+        push $h->@*, "    SV *_r;";
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            # Build component_item hash
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp))";
+            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
+            if ($has_impl->{$slug} && exists $_multi_class_methods{$slug}{'on_skip_optional'}
+                    && !exists $_fallback_method_slugs{"$slug:on_skip_optional"}) {
+                my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, symbol_name";
+                my $call = $self->_emit_component_call($slug, 'on_skip_optional', $sr, $args, $has_impl);
+                push $h->@*, "        _r = $call;";
+            } else {
+                # Fall back to multiply(value, one())
+                my $comp_val = "({ SV **__vp = hv_fetchs(_ci, \"value\", 0); __vp ? *__vp : &PL_sv_undef; })";
+                my $one_call = $self->_emit_component_call($slug, 'one', $sr, "aTHX_ $sr", $has_impl);
+                my $mul_call = $self->_emit_component_call($slug, 'multiply', $sr, "aTHX_ $sr, $comp_val, $one_call", $has_impl);
+                push $h->@*, "        _r = $mul_call;";
+            }
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
+            # Zero check
+            my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
+            push $h->@*, "        if (SvTRUE($iz_call)) {";
+            push $h->@*, "            SvREFCNT_dec((SV*)_result);";
+            push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "        }";
+            push $h->@*, "        av_push(_result, SvREFCNT_inc(_r));";
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return newRV_noinc((SV*)_result);";
+    }
+
+    # add: zero checks, _filter_compare, verdict logic, post-merge hook
+    method _emit_composite_add($h, $slugs, $has_impl) {
+        # Zero handling: if any left component is zero, return right (and vice versa)
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            my $li = "(*av_fetch((AV*)SvRV(left), $i, 0))";
+            my $ri = "(*av_fetch((AV*)SvRV(right), $i, 0))";
+            my $iz_left = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, $li", $has_impl);
+            my $iz_right = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, $ri", $has_impl);
+            push $h->@*, "    if (SvTRUE($iz_left)) return right;";
+            push $h->@*, "    if (SvTRUE($iz_right)) return left;";
+        }
+        # Call _filter_compare
+        push $h->@*, "    SV *_verdict = _impl_${_current_slug}__filter_compare(aTHX_ self, left, right);";
+        push $h->@*, '    SV *_winner, *_loser;';
+        push $h->@*, '    STRLEN _vl; const char *_vp = SvPV(_verdict, _vl);';
+        push $h->@*, '    if (_vl == 11 && memEQ(_vp, "right_loses", 11)) {';
+        push $h->@*, '        _winner = left; _loser = right;';
+        push $h->@*, '    } else if (_vl == 10 && memEQ(_vp, "left_loses", 10)) {';
+        push $h->@*, '        _winner = right; _loser = left;';
+        push $h->@*, '    } else {';
+        push $h->@*, '        _winner = left; _loser = right;';
+        push $h->@*, '    }';
+        # Post-merge hook: call on_merge if available
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            # Only SA has on_merge — check at codegen time
+            if (exists $_multi_class_methods{$slug}{'on_merge'}
+                    && !exists $_fallback_method_slugs{"$slug:on_merge"}) {
+                my $wi = "(*av_fetch((AV*)SvRV(_winner), $i, 0))";
+                my $lo = "(*av_fetch((AV*)SvRV(_loser), $i, 0))";
+                push $h->@*, "    _impl_${slug}_on_merge(aTHX_ $sr, $wi, $lo);";
+            } elsif ($slug eq 'semanticaction') {
+                # SA may have on_merge via call_method
+                my $wi = "(*av_fetch((AV*)SvRV(_winner), $i, 0))";
+                my $lo = "(*av_fetch((AV*)SvRV(_loser), $i, 0))";
+                push $h->@*, "    { dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push $h->@*, "      XPUSHs($sr); XPUSHs(sv_2mortal(newSVpvs(\"on_merge\"))); PUTBACK;";
+                push $h->@*, "      call_method(\"can\", G_SCALAR); SPAGAIN;";
+                push $h->@*, "      int _has = SvTRUE(POPs); PUTBACK; FREETMPS; LEAVE;";
+                push $h->@*, "      if (_has) {";
+                push $h->@*, "          dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push $h->@*, "          XPUSHs($sr); XPUSHs($wi); XPUSHs($lo); PUTBACK;";
+                push $h->@*, "          call_method(\"on_merge\", G_DISCARD); FREETMPS; LEAVE;";
+                push $h->@*, "      }";
+                push $h->@*, "    }";
+            }
+        }
+        push $h->@*, "    return _winner;";
+    }
+
+    # _filter_compare: scan each component for preference between left and right
+    method _emit_composite_filter_compare($h, $slugs, $has_impl) {
+        for my $i (0 .. $slugs->$#*) {
+            my $slug = $slugs->[$i];
+            my $sr = "(*av_fetch(_sr, $i, 0))";
+            my $li = "(*av_fetch((AV*)SvRV(left), $i, 0))";
+            my $ri = "(*av_fetch((AV*)SvRV(right), $i, 0))";
+            push $h->@*, "    { /* Component [$i]: $slug */";
+            push $h->@*, "        SV *_li = $li; SV *_ri = $ri;";
+            # Skip identity: same value means no preference
+            push $h->@*, "        int _same = 0;";
+            push $h->@*, "        if (SvROK(_li) && SvROK(_ri)) _same = (SvRV(_li) == SvRV(_ri));";
+            push $h->@*, "        else if (!SvROK(_li) && !SvROK(_ri)) _same = (SvIV(_li) == SvIV(_ri));";
+            push $h->@*, "        if (!_same) {";
+            # Call component add
+            my $add_call = $self->_emit_component_call($slug, 'add', $sr, "aTHX_ $sr, _li, _ri", $has_impl);
+            push $h->@*, "            SV *_result = $add_call;";
+            # Normalize to AV: wrap non-array results
+            push $h->@*, "            AV *_rav;";
+            push $h->@*, "            if (SvROK(_result) && SvTYPE(SvRV(_result)) == SVt_PVAV) {";
+            push $h->@*, "                _rav = (AV*)SvRV(_result);";
+            push $h->@*, "            } else {";
+            push $h->@*, "                _rav = newAV(); av_push(_rav, SvREFCNT_inc(_result));";
+            push $h->@*, "            }";
+            push $h->@*, "            SSize_t _rlen = av_len(_rav) + 1;";
+            push $h->@*, "            if (_rlen == 1) {";
+            push $h->@*, "                SV *_r = *av_fetch(_rav, 0, 0);";
+            # Compare: ref by pointer, non-ref by IV
+            push $h->@*, "                int _r_eq_left = (SvROK(_r) && SvROK(_li)) ? (SvRV(_r) == SvRV(_li))";
+            push $h->@*, "                    : (!SvROK(_r) && !SvROK(_li)) ? (SvIV(_r) == SvIV(_li)) : 0;";
+            push $h->@*, "                int _r_eq_right = (SvROK(_r) && SvROK(_ri)) ? (SvRV(_r) == SvRV(_ri))";
+            push $h->@*, "                    : (!SvROK(_r) && !SvROK(_ri)) ? (SvIV(_r) == SvIV(_ri)) : 0;";
+            push $h->@*, "                if (!(_r_eq_left && _r_eq_right) && (_r_eq_left || _r_eq_right))";
+            push $h->@*, "                    return _r_eq_left ? sv_2mortal(newSVpvs(\"right_loses\")) : sv_2mortal(newSVpvs(\"left_loses\"));";
+            push $h->@*, "            }";
+            push $h->@*, "        }";
+            push $h->@*, "    }";
+        }
+        push $h->@*, "    return sv_2mortal(newSVpvs(\"neither\"));";
     }
 
     # Emit native C for _copy_cfg_with_scope: copy a cfg_state hashref
