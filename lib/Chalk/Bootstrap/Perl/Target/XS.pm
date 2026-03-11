@@ -2935,6 +2935,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq '-')  { return "sv_2mortal(newSVnv(SvNV($left) - SvNV($right)))"; }
         if ($op eq '*')  { return "sv_2mortal(newSVnv(SvNV($left) * SvNV($right)))"; }
         if ($op eq '/')  { return "sv_2mortal(newSVnv(SvNV($left) / SvNV($right)))"; }
+        # Integer bitwise ops — used by Structural semiring for flag manipulation
+        if ($op eq '|')  { return "sv_2mortal(newSViv(SvIV($left) | SvIV($right)))"; }
+        if ($op eq '&')  { return "sv_2mortal(newSViv(SvIV($left) & SvIV($right)))"; }
         # Numeric comparison: use integer comparison when both operands are
         # IV/UV to avoid precision loss. SvNV on a 64-bit UV (e.g., from
         # refaddr/PTR2UV) can lose low bits since double has only 52-bit

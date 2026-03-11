@@ -162,6 +162,13 @@ SKIP: {
     diag sprintf("Multi-class: _impl_=%d  call_method=%d  lines=%d",
         scalar @impl, scalar @cm, scalar(split /\n/, $multi_code));
 
+    # Verify Structural semiring methods compile natively (no eval_pv fallback)
+    {
+        my @structural_fallbacks = ($multi_code =~ /eval_pv\("sub [^"]*::(?:multiply|add|on_complete)\b/g);
+        is(scalar @structural_fallbacks, 0,
+            'no eval_pv fallback for Structural methods (bitwise | and & supported)');
+    }
+
     # --- Step 4: Write to temp directory and build ---
     my $tmpdir = tempdir(CLEANUP => 1);
 
