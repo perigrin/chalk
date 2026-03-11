@@ -24,6 +24,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
     field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
+    field $_regex_counter = 0;  # monotonic counter for unique regex static variable names
+    field $_regex_statics;  # arrayref of { var, pat } for lazy-compiled REGEXP* statics
     field %_class_scope_vars;  # var_name => { sigil, init, static_name } for class-level lexicals
     field %_class_subs;  # sub_name => { params => [...], is_sub => 1 } for class-scope sub declarations
 
@@ -1092,13 +1094,18 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    LEAVE;';
         push @lines, '';
 
-        # Emit eval_pv fallback for unsupported methods
+        # Emit eval_pv fallback for unsupported methods (skips trivial stubs)
         if ($fallback_methods->@*) {
-            push @lines, '    /* eval_pv fallback for unsupported methods */';
+            my @fallback_lines;
             for my $method ($fallback_methods->@*) {
-                push @lines, $self->_emit_xs_eval_fallback($method);
+                my $line = $self->_emit_xs_eval_fallback($method);
+                push @fallback_lines, $line if defined $line;
             }
-            push @lines, '';
+            if (@fallback_lines) {
+                push @lines, '    /* eval_pv fallback for unsupported methods */';
+                push @lines, @fallback_lines;
+                push @lines, '';
+            }
         }
 
         # Restore PL_curstash
@@ -1196,10 +1203,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Eval fallbacks for methods that couldn't compile to native XS.
         # Only needed for fresh classes — pre-existing classes already have
         # working Perl methods from their source files.
+        # Skips trivial stubs (the real Perl methods are already loaded).
         if ($fallback_methods->@*) {
-            push @lines, '            /* eval_pv fallback for unsupported methods */';
+            my @fb;
             for my $method ($fallback_methods->@*) {
-                push @lines, '        ' . $self->_emit_xs_eval_fallback($method);
+                my $line = $self->_emit_xs_eval_fallback($method);
+                push @fb, '        ' . $line if defined $line;
+            }
+            if (@fb) {
+                push @lines, '            /* eval_pv fallback for unsupported methods */';
+                push @lines, @fb;
             }
         }
 
@@ -1420,7 +1433,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit eval_pv fallback for a method that can't be compiled to XS.
     # Uses the Perl target to generate the method body, then wraps it as a
-    # sub installed into the module's namespace via eval_pv.
+    # Emit eval_pv fallback for a method that can't be compiled to XS.
+    # Generates a Perl sub installed into the module's namespace via eval_pv.
+    # Returns undef if the generated body is trivially empty (the real Perl
+    # method from the loaded module will be used instead).
     method _emit_xs_eval_fallback($method_decl) {
         my $name = $method_decl->inputs()->[0]->value();
         my $params = $method_decl->inputs()->[1];
@@ -1438,6 +1454,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 next;
             }
             push @body_lines, $code if defined $code;
+        }
+
+        # Skip trivial stubs — if the body only contains variable declarations
+        # and a bare 'return', the original Perl method is already loaded and
+        # will be used via normal method dispatch.
+        my @meaningful = grep { $_ ne "'return'" && !/^my\b/ } @body_lines;
+        if (!@meaningful) {
+            return;
         }
 
         # Build parameter list
@@ -1966,6 +1990,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines = $self->_emit_xs_preamble();
         my @all_sections;
 
+        # Reset regex statics for this compilation unit
+        $_regex_statics = [];
+        $_regex_counter = 0;
+
         # Pre-pass: collect method metadata from all classes for cross-class dispatch.
         # Also populate composite_field_types for classes with composite_components.
         %_multi_class_methods = ();
@@ -1997,6 +2025,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         # Phase 1: emit all helpers and forward declarations
+        my @fwd_lines;
+        my @helper_lines;
         for my $entry ($entries->@*) {
             %_cfg_lookup = ();
             $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx}, $entry->{cfg_snapshot});
@@ -2010,11 +2040,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             };
 
             if ($sections->{fwd_decls}->@*) {
-                push @lines, $sections->{fwd_decls}->@*;
-                push @lines, '';
+                push @fwd_lines, $sections->{fwd_decls}->@*;
+                push @fwd_lines, '';
             }
-            push @lines, $sections->{helpers}->@*;
+            push @helper_lines, $sections->{helpers}->@*;
         }
+
+        # Emit forward declarations first
+        push @lines, @fwd_lines;
+
+        # Emit static REGEXP* declarations for lazy-compiled regex patterns
+        if ($_regex_statics && $_regex_statics->@*) {
+            for my $rx ($_regex_statics->@*) {
+                push @lines, "static REGEXP *$rx->{var} = NULL;";
+            }
+            push @lines, '';
+        }
+
+        # Emit helpers (which reference the regex statics)
+        push @lines, @helper_lines;
 
         # Phase 2: emit MODULE/PACKAGE sections with XSUBs
         for my $entry (@all_sections) {
@@ -3950,21 +3994,60 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
-    # Emit regex match via eval_pv, setting $_ to target first.
-    # Saves capture variables ($1-$3) into package globals so they
-    # persist after eval_pv returns (captures are scoped to eval).
+    # Emit regex match using native Perl regex C API (pregcomp/pregexec).
+    # Compiles the regex once into a static REGEXP* and reuses it.
+    # None of the regex patterns used in this codebase have capture groups,
+    # so captures are not extracted (the capture-saving boilerplate was dead code).
     method _emit_xs_regex_match($node, $declared_vars) {
         my $target  = $node->inputs()->[0];
         my $pattern = $node->inputs()->[1]->value();
-        # Wrap match to save captures into package globals before returning
-        my $match_perl = '$_ =~ ' . $pattern
-            . ' and do { $::_c1=$1; $::_c2=$2; $::_c3=$3; 1 }';
-        my $escaped = $self->_escape_c_string($match_perl);
-        if (defined $target) {
-            my $tgt = $self->_emit_xs_expr($target, $declared_vars);
-            return "({ sv_setsv(DEFSV, $tgt); eval_pv(\"$escaped\", TRUE); })";
+
+        # Extract the raw regex and flags from the pattern (e.g., /foo/i, m{bar}x)
+        my ($raw_pat, $flags);
+        if ($pattern =~ m{^m\{(.*)\}([msixpodualngcer]*)$}s) {
+            ($raw_pat, $flags) = ($1, $2);
+        } elsif ($pattern =~ m{^/(.*)/([msixpodualngcer]*)$}s) {
+            ($raw_pat, $flags) = ($1, $2);
         }
-        return "eval_pv(\"$escaped\", TRUE)";
+
+        if (!defined $raw_pat) {
+            # Unrecognized pattern format — fall back to eval_pv
+            my $match_perl = '$_ =~ ' . $pattern
+                . ' and do { $::_c1=$1; $::_c2=$2; $::_c3=$3; 1 }';
+            my $escaped = $self->_escape_c_string($match_perl);
+            if (defined $target) {
+                my $tgt = $self->_emit_xs_expr($target, $declared_vars);
+                return "({ sv_setsv(DEFSV, $tgt); eval_pv(\"$escaped\", TRUE); })";
+            }
+            return "eval_pv(\"$escaped\", TRUE)";
+        }
+
+        # Build a unique static variable name for the compiled regex
+        $_regex_counter //= 0;
+        my $rx_var = "_rx_" . $_regex_counter++;
+
+        # Escape the pattern for C string literal
+        my $c_pat = $self->_escape_c_string($raw_pat);
+
+        # Store regex patterns to declare as statics at top of generated file
+        $_regex_statics //= [];
+        push $_regex_statics->@*, {
+            var   => $rx_var,
+            pat   => $c_pat,
+        };
+
+        my $tgt;
+        if (defined $target) {
+            $tgt = $self->_emit_xs_expr($target, $declared_vars);
+        }
+
+        # Emit pregexec call with lazy compilation
+        my $tgt_expr = defined $tgt ? $tgt : 'DEFSV';
+        return "({ "
+            . "if (!$rx_var) { $rx_var = pregcomp(newSVpvs(\"$c_pat\"), 0); } "
+            . "STRLEN _rxl; char *_rxs = SvPV($tgt_expr, _rxl); "
+            . "(pregexec($rx_var, _rxs, _rxs + _rxl, _rxs, 0, $tgt_expr, 1)) "
+            . "? &PL_sv_yes : &PL_sv_no; })";
     }
 
     # Emit regex substitution via eval_pv, setting $_ to target first
@@ -4075,6 +4158,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 "if (_i > 0) sv_catsv(_result, $sep); " .
                 "sv_catsv(_result, *av_fetch(_items, _i, 0)); " .
                 "} _result; })";
+        }
+
+        # warn — native Perl_warn with string argument
+        if ($name eq 'warn' && $args->@* >= 1) {
+            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            return "({ Perl_warn(aTHX_ \"%s\", SvPV_nolen($arg)); &PL_sv_undef; })";
         }
 
         # split — eval_pv with actual args from IR

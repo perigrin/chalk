@@ -177,6 +177,19 @@ SKIP: {
             "loop bodies have ENTER/SAVETMPS scope boundaries (" . scalar(@standalone_enter) . " found)");
     }
 
+    # Verify zero eval_pv calls in generated C
+    {
+        my @eval_pvs = ($multi_code =~ /eval_pv\(/g);
+        is(scalar @eval_pvs, 0,
+            "no eval_pv calls in generated C (" . scalar(@eval_pvs) . " found)");
+        if (@eval_pvs) {
+            # Show which eval_pv calls remain for debugging
+            while ($multi_code =~ /(eval_pv\([^\n]{0,80})/g) {
+                diag "  eval_pv: $1";
+            }
+        }
+    }
+
     # Verify FilterComposite methods use direct _impl_ calls instead of call_method
     # for component dispatch. Count call_method inside FC method bodies.
     {
