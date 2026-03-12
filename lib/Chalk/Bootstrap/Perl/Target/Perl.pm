@@ -445,6 +445,16 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($style eq 'array') {
             return "$tgt\->[" . $self->_emit_expr($index) . "]";
         }
+        if ($style eq 'call') {
+            # Coderef call: $f->($arg1, $arg2)
+            my @args;
+            if (ref($index) eq 'ARRAY') {
+                @args = map { $self->_emit_expr($_) } $index->@*;
+            } elsif (defined $index) {
+                @args = ($self->_emit_expr($index));
+            }
+            return "$tgt\->(" . join(', ', @args) . ")";
+        }
         return "$tgt\->{" . $self->_emit_expr($index) . "}";
     }
 

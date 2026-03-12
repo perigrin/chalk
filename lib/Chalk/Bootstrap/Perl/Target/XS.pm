@@ -3854,8 +3854,29 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return $self->_emit_xs_expr($index, $declared_vars);
         }
 
-        # Handle broken coderef call IR: SubscriptExpr with undef index
-        # comes from $f->($self) where parser loses the argument
+        # Coderef call: $f->($arg1, $arg2) — emit call_sv with arguments.
+        if ($style eq 'call') {
+            my $tgt = defined $target
+                ? $self->_emit_xs_expr($target, $declared_vars)
+                : 'self';
+            my @push_stmts;
+            if (ref($index) eq 'ARRAY') {
+                for my $arg ($index->@*) {
+                    my $arg_expr = $self->_emit_xs_expr($arg, $declared_vars);
+                    push @push_stmts, "XPUSHs($arg_expr)";
+                }
+            } elsif (defined $index) {
+                my $arg_expr = $self->_emit_xs_expr($index, $declared_vars);
+                push @push_stmts, "XPUSHs($arg_expr)";
+            }
+            my $pushes = join('; ', @push_stmts);
+            $pushes = " $pushes; " if $pushes;
+            return "({ dSP; ENTER; SAVETMPS; PUSHMARK(SP);${pushes}PUTBACK; "
+                 . "call_sv($tgt, G_SCALAR); SPAGAIN; SV *_cr = SvREFCNT_inc(POPs); "
+                 . "PUTBACK; FREETMPS; LEAVE; _cr; })";
+        }
+
+        # Fallback for undef index (legacy IR from before "call" style was added)
         if (!defined $index) {
             my $tgt = defined $target
                 ? $self->_emit_xs_expr($target, $declared_vars)

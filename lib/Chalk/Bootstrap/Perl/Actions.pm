@@ -2063,7 +2063,10 @@ class Chalk::Bootstrap::Perl::Actions {
         # Determine style by the LAST bracket type in the scanned text.
         # For chained subscripts like $chart->[$pos]{$core_id}, the Subscript
         # action processes the outermost subscript (the last bracket pair).
-        my $style = ($text =~ /\]$/) ? 'array' : 'hash';
+        # Paren subscripts like $f->($arg) are coderef calls (style "call").
+        my $style = ($text =~ /\]$/) ? 'array'
+                  : ($text =~ /\)$/) ? 'call'
+                  :                    'hash';
 
         my @values = _collect_ir_values($ctx);
         my $target;
@@ -2076,6 +2079,10 @@ class Chalk::Bootstrap::Perl::Actions {
                     $index = $val;
                     last;
                 }
+            } elsif (ref($val) eq 'ARRAY' && $style eq 'call' && !defined $index) {
+                # ExpressionList returns arrayref — capture as call arguments
+                $index = $val;
+                last;
             }
         }
 
