@@ -28,6 +28,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_regex_statics;  # arrayref of { var, pat } for lazy-compiled REGEXP* statics
     field %_class_scope_vars;  # var_name => { sigil, init, static_name } for class-level lexicals
     field %_class_subs;  # sub_name => { params => [...], is_sub => 1 } for class-scope sub declarations
+    field @_anon_sub_fwd_decls;  # forward declarations for anonymous sub CV statics
+    field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
+    field @_anon_sub_boot;  # BOOT lines to register anonymous sub CVs via newXS
+    field $_anon_sub_counter = 0;  # monotonic counter for unique anonymous sub names
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -2003,9 +2007,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @lines = $self->_emit_xs_preamble();
         my @all_sections;
 
-        # Reset regex statics for this compilation unit
+        # Reset regex statics and anon sub state for this compilation unit
         $_regex_statics = [];
         $_regex_counter = 0;
+        @_anon_sub_fwd_decls = ();
+        @_anon_sub_helpers = ();
+        @_anon_sub_boot = ();
+        $_anon_sub_counter = 0;
 
         # Pre-pass: collect method metadata from all classes for cross-class dispatch.
         # Also populate composite_field_types for classes with composite_components.
@@ -2070,8 +2078,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, '';
         }
 
-        # Emit helpers (which reference the regex statics)
+        # Emit forward declarations for anonymous sub CV statics
+        # (must appear before helper_lines which may reference them)
+        if (@_anon_sub_fwd_decls) {
+            push @lines, @_anon_sub_fwd_decls;
+            push @lines, '';
+        }
+
+        # Emit helpers (which reference the regex statics and anon sub CV vars)
         push @lines, @helper_lines;
+
+        # Emit anonymous sub static helpers accumulated during method compilation
+        if (@_anon_sub_helpers) {
+            push @lines, '';
+            push @lines, @_anon_sub_helpers;
+        }
 
         # Phase 2: emit MODULE/PACKAGE sections with XSUBs
         for my $entry (@all_sections) {
@@ -2095,6 +2116,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $s->{fallback_methods}, $s->{has_adjust},
             );
             push @lines, $boot_inner->@*;
+        }
+        # Register anonymous sub CVs so call_sv can dispatch to them
+        if (@_anon_sub_boot) {
+            push @lines, @_anon_sub_boot;
         }
         push @lines, '}';
 
@@ -4038,75 +4063,94 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "({ AV *_av = newAV(); " . join("; ", @pushes) . "; newRV_noinc((SV*)_av); })";
     }
 
-    # Emit anonymous sub by binding C-local variables to package globals,
-    # then using eval_pv to create a closure over those globals.
+    # Compile anonymous sub as a static C function with a CV wrapper.
+    # The body is compiled to native C just like regular methods. A CV
+    # is created via newXS in the BOOT block so call_sv can dispatch to it.
+    # The CV is cached in a static SV* for zero-overhead repeated use.
     method _emit_xs_anon_sub_expr($node, $declared_vars) {
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $perl_src = $perl_target->_emit_anon_sub_expr($node);
+        my $params_node = $node->inputs()->[0];
+        my $body_items  = $node->inputs()->[1] // [];
 
-        # Extract the sub's own parameter names to avoid rewriting them.
-        # Parameters in the signature (sub ($x, $y)) must keep their names.
-        my %sub_params;
-        my $sub_params_node = $node->inputs()->[0];
-        for my $p ($sub_params_node->@*) {
+        my $idx = $_anon_sub_counter++;
+        my $fn_name = "_anon_${_current_slug}_${idx}";
+        my $cv_var  = "_cv_${fn_name}";
+
+        # Build parameter list for the static function
+        my @c_params;
+        my @xsub_params;
+        # Anon subs have their own scope — don't inherit outer declared_vars
+        # which would cause param names to collide with outer var declarations.
+        my %anon_vars;
+        for my $p ($params_node->@*) {
             my $pname = $p->value();
             $pname =~ s/^\$//;
-            $sub_params{$pname} = true;
+            push @c_params, "SV *$pname";
+            push @xsub_params, $pname;
+            $anon_vars{"param:$pname"} = 1;
         }
 
-        # Scan the sub body for variable references that are C locals.
-        # Bind them as package globals before eval_pv so the closure works.
-        my @bindings;
-        my %bound;
-        while ($perl_src =~ /\$(\w+)/g) {
-            my $var = $1;
-            next if $bound{$var}++;
-            # Skip the sub's own parameters and special variables
-            next if $var =~ /^_$/;
-            next if $sub_params{$var};
-            # Check if this is a C-local variable or method parameter
-            my $bare = $var;
-            if (exists $declared_vars->{"param:$bare"}) {
-                # Method parameter: XS declares as bare name, not _sv suffix
-                push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), $bare)";
-            } elsif (exists $declared_vars->{$bare}) {
-                push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), ${bare}_sv)";
-            } elsif (defined $field_map && exists $field_map->{$bare}) {
-                my $idx = $field_map->{$bare};
-                # Hash/array fields are raw HV*/AV* in ObjectFIELDS — wrap
-                # in newRV_inc to create a reference for sv_setsv into a scalar.
-                my $sigil = $field_sigils ? ($field_sigils->{$bare} // '$') : '$';
-                if ($sigil eq '%' || $sigil eq '@') {
-                    push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), newRV_inc(ObjectFIELDS(SvRV(self))[$idx]))";
-                } else {
-                    push @bindings, "sv_setsv(get_sv(\"::_anon_$bare\", GV_ADD), ObjectFIELDS(SvRV(self))[$idx])";
+        # Try to compile the body to native C
+        my @body_c;
+        my $compile_ok = true;
+        for my $stmt ($body_items->@*) {
+            my $c = eval { $self->_emit_xs_expr($stmt, \%anon_vars) };
+            if (!defined $c || $@) {
+                $compile_ok = false;
+                last;
+            }
+            push @body_c, $c;
+        }
+
+        if ($compile_ok && @body_c) {
+            # Emit the static C function
+            my $sig = @c_params ? join(', ', @c_params) : 'void';
+            push @_anon_sub_helpers, "static SV *${fn_name}(pTHX_ $sig) {";
+            # Last expression is the return value
+            if (@body_c == 1) {
+                push @_anon_sub_helpers, "    return SvREFCNT_inc($body_c[0]);";
+            } else {
+                for my $i (0 .. $#body_c - 1) {
+                    push @_anon_sub_helpers, "    $body_c[$i];";
                 }
+                push @_anon_sub_helpers, "    return SvREFCNT_inc($body_c[-1]);";
             }
+            push @_anon_sub_helpers, '}';
+            push @_anon_sub_helpers, '';
+
+            # Emit the XSUB wrapper for call_sv dispatch
+            push @_anon_sub_helpers, "XS_INTERNAL(XS_${fn_name});";
+            push @_anon_sub_helpers, "XS_INTERNAL(XS_${fn_name})";
+            push @_anon_sub_helpers, '{';
+            push @_anon_sub_helpers, '    dXSARGS;';
+            my @fetch;
+            for my $i (0 .. $#xsub_params) {
+                push @fetch, "    SV *$xsub_params[$i] = ST($i);";
+            }
+            push @_anon_sub_helpers, @fetch;
+            my $call_args = @xsub_params
+                ? 'aTHX_ ' . join(', ', @xsub_params)
+                : 'aTHX';
+            push @_anon_sub_helpers, "    SV *retval = ${fn_name}($call_args);";
+            push @_anon_sub_helpers, '    ST(0) = retval;';
+            push @_anon_sub_helpers, '    sv_2mortal(retval);';
+            push @_anon_sub_helpers, '    XSRETURN(1);';
+            push @_anon_sub_helpers, '}';
+            push @_anon_sub_helpers, '';
+
+            # Forward-declare the CV cache and register in BOOT
+            push @_anon_sub_fwd_decls, "static SV *${cv_var} = NULL;";
+
+            push @_anon_sub_boot, "    ${cv_var} = (SV*)newXS(\"::${fn_name}\", XS_${fn_name}, __FILE__);";
+            push @_anon_sub_boot, "    SvREFCNT_inc(${cv_var});";
+
+            return $cv_var;
         }
 
-        # Rewrite variable references in the sub BODY to use package globals.
-        # Split at the first '{' to avoid rewriting the signature line.
-        my $rewritten = $perl_src;
-        if ($perl_src =~ /^(sub\s*\([^)]*\)\s*\{)(.*)$/s) {
-            my ($sig_line, $body) = ($1, $2);
-            for my $var (keys %bound) {
-                next if $sub_params{$var};
-                next unless exists $declared_vars->{$var}
-                    || exists $declared_vars->{"param:$var"}
-                    || (defined $field_map && exists $field_map->{$var});
-                $body =~ s/\$\Q$var\E/\$::_anon_$var/g;
-            }
-            $rewritten = $sig_line . $body;
-        }
-
-        # Prepend 'use feature "signatures"; no warnings "experimental::signatures";'
-        # because eval_pv runs in a bare scope without feature bundles.
+        # Fallback: compile via eval_pv if body compilation fails
+        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
+        my $perl_src = $perl_target->_emit_anon_sub_expr($node);
         my $prefix = 'use feature "signatures"; no warnings "experimental::signatures"; ';
-        my $escaped = $self->_escape_c_string($prefix . $rewritten);
-        if (@bindings) {
-            return '({ ' . join('; ', @bindings) . '; '
-                . "eval_pv(\"$escaped\", TRUE); })";
-        }
+        my $escaped = $self->_escape_c_string($prefix . $perl_src);
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
