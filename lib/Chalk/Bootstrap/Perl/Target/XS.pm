@@ -384,6 +384,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # $args_str format: "aTHX_ sr_expr, arg1, arg2, ..." for _impl_ calls.
     # For call_method, aTHX_ is stripped and the rest become XPUSHs arguments.
     # Uses paren-aware splitting to handle nested expressions like av_fetch(_sr, 0, 0).
+    # Emit a component call expression for composite dispatch.
+    # Returns an owned SV (refcount >= 1). Callers that store in AV should
+    # NOT add SvREFCNT_inc — the returned SV is already owned by the caller.
     method _emit_component_call($slug, $mname, $sr_elem, $args_str, $has_impl) {
         if ($has_impl->{$slug}) {
             return "_impl_${slug}_${mname}($args_str)";
@@ -571,7 +574,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
             push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
             push $h->@*, "        }";
-            push $h->@*, "        av_push(_result, SvREFCNT_inc(_r));";
+            push $h->@*, "        av_push(_result, _r);";
             push $h->@*, "    }";
         }
         push $h->@*, "    return newRV_noinc((SV*)_result);";
@@ -620,7 +623,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
             push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
             push $h->@*, "        }";
-            push $h->@*, "        av_push(_result, SvREFCNT_inc(_r));";
+            push $h->@*, "        av_push(_result, _r);";
             # Capture TI result at index 2
             if ($i == 2) {
                 push $h->@*, "        _ti_result = _r;";
@@ -670,7 +673,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
             push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
             push $h->@*, "        }";
-            push $h->@*, "        av_push(_result, SvREFCNT_inc(_r));";
+            push $h->@*, "        av_push(_result, _r);";
             push $h->@*, "    }";
         }
         push $h->@*, "    return newRV_noinc((SV*)_result);";
@@ -747,11 +750,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $add_call = $self->_emit_component_call($slug, 'add', $sr, "aTHX_ $sr, _li, _ri", $has_impl);
             push $h->@*, "            SV *_result = $add_call;";
             # Normalize to AV: wrap non-array results
-            push $h->@*, "            AV *_rav;";
+            push $h->@*, "            AV *_rav; int _rav_owned = 0;";
             push $h->@*, "            if (SvROK(_result) && SvTYPE(SvRV(_result)) == SVt_PVAV) {";
             push $h->@*, "                _rav = (AV*)SvRV(_result);";
             push $h->@*, "            } else {";
-            push $h->@*, "                _rav = newAV(); av_push(_rav, SvREFCNT_inc(_result));";
+            push $h->@*, "                _rav = newAV(); av_push(_rav, SvREFCNT_inc(_result)); _rav_owned = 1;";
             push $h->@*, "            }";
             push $h->@*, "            SSize_t _rlen = av_len(_rav) + 1;";
             push $h->@*, "            if (_rlen == 1) {";
@@ -761,9 +764,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "                    : (!SvROK(_r) && !SvROK(_li)) ? (SvIV(_r) == SvIV(_li)) : 0;";
             push $h->@*, "                int _r_eq_right = (SvROK(_r) && SvROK(_ri)) ? (SvRV(_r) == SvRV(_ri))";
             push $h->@*, "                    : (!SvROK(_r) && !SvROK(_ri)) ? (SvIV(_r) == SvIV(_ri)) : 0;";
-            push $h->@*, "                if (!(_r_eq_left && _r_eq_right) && (_r_eq_left || _r_eq_right))";
+            push $h->@*, "                if (!(_r_eq_left && _r_eq_right) && (_r_eq_left || _r_eq_right)) {";
+            push $h->@*, "                    if (_rav_owned) SvREFCNT_dec((SV*)_rav);";
             push $h->@*, "                    return _r_eq_left ? sv_2mortal(newSVpvs(\"right_loses\")) : sv_2mortal(newSVpvs(\"left_loses\"));";
+            push $h->@*, "                }";
             push $h->@*, "            }";
+            push $h->@*, "            if (_rav_owned) SvREFCNT_dec((SV*)_rav);";
             push $h->@*, "        }";
             push $h->@*, "    }";
         }
@@ -1431,8 +1437,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@fixed;
     }
 
-    # Emit eval_pv fallback for a method that can't be compiled to XS.
-    # Uses the Perl target to generate the method body, then wraps it as a
     # Emit eval_pv fallback for a method that can't be compiled to XS.
     # Generates a Perl sub installed into the module's namespace via eval_pv.
     # Returns undef if the generated body is trivially empty (the real Perl
@@ -4026,8 +4030,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         $_regex_counter //= 0;
         my $rx_var = "_rx_" . $_regex_counter++;
 
+        # Wrap flags as inline modifiers: pattern → (?flags:pattern)
+        my $full_pat = length($flags) ? "(?$flags:$raw_pat)" : $raw_pat;
+
         # Escape the pattern for C string literal
-        my $c_pat = $self->_escape_c_string($raw_pat);
+        my $c_pat = $self->_escape_c_string($full_pat);
 
         # Store regex patterns to declare as statics at top of generated file
         $_regex_statics //= [];
@@ -4041,10 +4048,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             $tgt = $self->_emit_xs_expr($target, $declared_vars);
         }
 
-        # Emit pregexec call with lazy compilation
+        # Emit pregexec call with lazy compilation.
+        # Pattern SV is freed after pregcomp since pregcomp copies it internally.
         my $tgt_expr = defined $tgt ? $tgt : 'DEFSV';
         return "({ "
-            . "if (!$rx_var) { $rx_var = pregcomp(newSVpvs(\"$c_pat\"), 0); } "
+            . "if (!$rx_var) { SV *_pat_sv = newSVpvs(\"$c_pat\"); $rx_var = pregcomp(_pat_sv, 0); SvREFCNT_dec(_pat_sv); } "
             . "STRLEN _rxl; char *_rxs = SvPV($tgt_expr, _rxl); "
             . "(pregexec($rx_var, _rxs, _rxs + _rxl, _rxs, 0, $tgt_expr, 1)) "
             . "? &PL_sv_yes : &PL_sv_no; })";
