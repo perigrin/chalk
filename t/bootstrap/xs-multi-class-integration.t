@@ -48,6 +48,7 @@ ok(defined $gen, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 
 my %parsed;
 my @class_files = (
+    ['Chalk::Bootstrap::Context',                   'lib/Chalk/Bootstrap/Context.pm'],
     ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
     ['Chalk::Bootstrap::Semiring::Precedence',      'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
     ['Chalk::Bootstrap::Semiring::TypeInference',   'lib/Chalk/Bootstrap/Semiring/TypeInference.pm'],
@@ -87,8 +88,8 @@ SKIP: {
         });
     }
 
-    # FilterComposite depends on all 5 semirings
-    my @semiring_classes = map { $_->[0] } @class_files[0..4];
+    # FilterComposite depends on all 5 semirings (indices 1..5, after Context)
+    my @semiring_classes = map { $_->[0] } @class_files[1..5];
     $reg->register('Chalk::Bootstrap::Semiring::FilterComposite', {
         ir => $parsed{'Chalk::Bootstrap::Semiring::FilterComposite'}{ir},
         sa => $parsed{'Chalk::Bootstrap::Semiring::FilterComposite'}{sa},
