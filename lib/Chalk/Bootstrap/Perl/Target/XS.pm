@@ -331,12 +331,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # Check which components have _impl_ for this method.
         # Methods that ALL components have compiled can use _impl_ directly.
-        # Others fall back to call_method for specific components.
         my %has_impl;
         for my $slug ($component_slugs->@*) {
             $has_impl{$slug} = (exists $_multi_class_methods{$slug}
-                && exists $_multi_class_methods{$slug}{$mname}
-                && !exists $_fallback_method_slugs{"$slug:$mname"});
+                && exists $_multi_class_methods{$slug}{$mname});
         }
 
         # For the core methods (multiply, add, is_zero, on_scan, on_complete),
@@ -1527,12 +1525,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $item->class() eq 'MethodDecl') {
                 push @method_items, $item;
                 my $mname = $item->inputs()->[0]->value();
-                my $is_complex = $self->_is_complex_method($item);
-                if (!$is_complex) {
-                    delete $_class_methods->{$mname};
-                    # Mark simple methods as "no _impl_" for cross-class dispatch
-                    $_fallback_method_slugs{"$_current_slug:$mname"} = 1;
-                }
+                # All methods (simple or complex) compile via _emit_xs_method
+                # and get _impl_ helpers — no need to exclude any from dispatch.
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && $item->class() eq 'SubDecl') {
                 push @sub_items, $item;
@@ -1794,6 +1788,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if (!defined $result && $@) {
                 # Method compilation failed (unsupported IR node types etc.)
                 # Fall back to eval_pv
+                warn "DEBUG: ${_current_slug}::${mname} compile failed: $@" if $ENV{DEBUG_XS_COMPILE};
                 delete $_class_methods->{$mname};
                 push @fallback_methods, $item;
                 next;
@@ -2448,14 +2443,47 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                          && ($value->const_type() // '') ne 'variable'
                          && $value->value() !~ /^[\$\@\%]/) {
                     my $str = $self->_escape_c_string($value->value());
-                    push @lines, 'SV *';
-                    push @lines, "${name}(self, ...)";
-                    push @lines, '    SV *self';
-                    push @lines, '  CODE:';
-                    push @lines, "    RETVAL = newSVpvs(\"$str\");";
-                    push @lines, '  OUTPUT:';
-                    push @lines, '    RETVAL';
-                    return \@lines;
+                    # Produce _impl_ helper + XSUB so composite dispatch can
+                    # call this method directly without call_method overhead.
+                    my $c_expr = "newSVpvs(\"$str\")";
+                    # Map well-known constants to efficient C representations
+                    my $raw = $value->value();
+                    if ($raw eq '1' || $raw eq 'true') {
+                        $c_expr = 'SvREFCNT_inc(&PL_sv_yes)';
+                    } elsif ($raw eq '0' || $raw eq 'false' || $raw eq '') {
+                        $c_expr = 'SvREFCNT_inc(&PL_sv_no)';
+                    } elsif ($raw eq 'undef') {
+                        $c_expr = 'SvREFCNT_inc(&PL_sv_undef)';
+                    } elsif ($raw =~ /\A-?\d+\z/) {
+                        $c_expr = "newSViv($raw)";
+                    }
+                    # Build parameter lists for both helper and XSUB
+                    my @helper_params = ('SV *self');
+                    my @xsub_params = ('SV *self');
+                    for my $p ($params->@*) {
+                        my $pname = $p->value();
+                        $pname =~ s/^\$//;
+                        push @helper_params, "SV *$pname";
+                        push @xsub_params, "SV *$pname";
+                    }
+                    my @helper;
+                    push @helper, "static SV *_impl_${_current_slug}_${name}(pTHX_ " . join(', ', @helper_params) . ") {";
+                    push @helper, "    return $c_expr;";
+                    push @helper, "}";
+                    my $xsub_call_args = join(', ', 'aTHX_ self', map { my $p = $_; $p =~ s/^SV \*//; $p } @xsub_params[1..$#xsub_params]);
+                    my @xsub;
+                    push @xsub, 'SV *';
+                    if (@xsub_params > 1) {
+                        push @xsub, "${name}(" . join(', ', map { my $p = $_; $p =~ s/^SV \*//; $p } @xsub_params) . ')';
+                    } else {
+                        push @xsub, "${name}(self, ...)";
+                    }
+                    push @xsub, "    $_" for @xsub_params;
+                    push @xsub, '  CODE:';
+                    push @xsub, "    RETVAL = _impl_${_current_slug}_${name}($xsub_call_args);";
+                    push @xsub, '  OUTPUT:';
+                    push @xsub, '    RETVAL';
+                    return { helper => \@helper, xsub => \@xsub };
                 }
                 # Non-trivial return value — fall through to complex handler
             }
