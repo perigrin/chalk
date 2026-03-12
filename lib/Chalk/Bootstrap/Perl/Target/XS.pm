@@ -4295,6 +4295,22 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         . "av_push($av_expr, SvREFCNT_inc(HeVAL(_he))); "
                         . "$arr; })";
                 }
+                # push @arr, reverse @src — iterate source backwards, push each element
+                if ($val_name eq 'reverse') {
+                    my $val_args = $val_node->inputs()->[1];
+                    my $src_expr = $self->_emit_xs_expr($val_args->[0], $declared_vars);
+                    my $src_av;
+                    if ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $val_args->[0]->class() eq 'PostfixDerefExpr') {
+                        $src_av = $src_expr;
+                    } else {
+                        $src_av = "(AV*)SvRV($src_expr)";
+                    }
+                    return "({ AV *_rsrc = $src_av; I32 _rlen = av_len(_rsrc); "
+                        . "I32 _ri; for (_ri = _rlen; _ri >= 0; _ri--) "
+                        . "av_push($av_expr, SvREFCNT_inc(*av_fetch(_rsrc, _ri, 0))); "
+                        . "$arr; })";
+                }
             }
             my $val = $self->_emit_xs_expr($val_node, $declared_vars);
             return "({ av_push($av_expr, SvREFCNT_inc($val)); $arr; })";
@@ -4357,6 +4373,38 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $av_expr = "(AV*)SvRV($arr)";
             }
             return "av_shift($av_expr)";
+        }
+
+        # pop(@arr) — native array pop via av_pop
+        if ($name eq 'pop' && $args->@* == 1) {
+            my $arr_node = $args->[0];
+            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
+            my $av_expr;
+            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $arr_node->class() eq 'PostfixDerefExpr') {
+                $av_expr = $arr;
+            } else {
+                $av_expr = "(AV*)SvRV($arr)";
+            }
+            return "av_pop($av_expr)";
+        }
+
+        # reverse(@arr) — reverse an array into a new AV
+        if ($name eq 'reverse' && $args->@* == 1) {
+            my $arr_node = $args->[0];
+            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
+            my $av_expr;
+            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $arr_node->class() eq 'PostfixDerefExpr') {
+                $av_expr = $arr;
+            } else {
+                $av_expr = "(AV*)SvRV($arr)";
+            }
+            return "({ AV *_src = $av_expr; I32 _len = av_len(_src); "
+                . "AV *_rev = newAV(); av_extend(_rev, _len); "
+                . "I32 _ri; for (_ri = _len; _ri >= 0; _ri--) "
+                . "av_push(_rev, SvREFCNT_inc(*av_fetch(_src, _ri, 0))); "
+                . "sv_2mortal(newRV_noinc((SV*)_rev)); })";
         }
 
         # keys(%hash) — scalar context returns count, list context returns AV of keys.
