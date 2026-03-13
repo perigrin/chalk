@@ -393,7 +393,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                         for my $i (0 .. $#$item_types) {
                             my $actual = $item_types->[$i];
                             my $sig_idx = $i + $sig_offset;
-                            my $expected = $arg_types->[$sig_idx] // $arg_types->[-1];
+                            my $expected = $arg_types->[$sig_idx];
+                            $expected = $arg_types->[-1] if !defined $expected;
                             if (!Chalk::Grammar::Perl::TypeLibrary::type_satisfies($actual, $expected)) {
                                 return undef;
                             }

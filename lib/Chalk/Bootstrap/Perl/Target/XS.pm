@@ -28,6 +28,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     field $_regex_statics;  # arrayref of { var, pat } for lazy-compiled REGEXP* statics
     field %_class_scope_vars;  # var_name => { sigil, init, static_name } for class-level lexicals
     field %_class_subs;  # sub_name => { params => [...], is_sub => 1 } for class-scope sub declarations
+    field %_use_constants;  # constant_name => numeric_value from `use constant { ... }` declarations
     field @_anon_sub_fwd_decls;  # forward declarations for anonymous sub CV statics
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
     field @_anon_sub_boot;  # BOOT lines to register anonymous sub CVs via newXS
@@ -490,6 +491,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # multiply: build result tuple, then annihilator check
     method _emit_composite_multiply($h, $slugs, $has_impl) {
+        # Guard: non-tuple values fall back to zero (should never happen,
+        # but prevents segfault from SvRV on non-reference)
+        push $h->@*, "    if (!SvROK(left) || SvTYPE(SvRV(left)) != SVt_PVAV) return _impl_${_current_slug}_zero(aTHX_ self);";
+        push $h->@*, "    if (!SvROK(right) || SvTYPE(SvRV(right)) != SVt_PVAV) return _impl_${_current_slug}_zero(aTHX_ self);";
         push $h->@*, "    AV *_result = newAV();";
         push $h->@*, "    SV *_mr;";
         # Build result tuple
@@ -533,8 +538,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
             push $h->@*, "        }";
             push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
-            push $h->@*, "        if (_vp && SvROK(*_vp))";
-            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
             push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
             my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, matched_text, is_predicted";
             my $call = $self->_emit_component_call($slug, 'should_scan', $sr, $args, $has_impl);
@@ -563,8 +570,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
             push $h->@*, "        }";
             push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
-            push $h->@*, "        if (_vp && SvROK(*_vp))";
-            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
             push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
             my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, matched_text";
             my $call = $self->_emit_component_call($slug, 'on_scan', $sr, $args, $has_impl);
@@ -612,8 +621,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
             push $h->@*, "        }";
             push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
-            push $h->@*, "        if (_vp && SvROK(*_vp))";
-            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
             push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
             my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos";
             my $call = $self->_emit_component_call($slug, 'on_complete', $sr, $args, $has_impl);
@@ -653,23 +664,32 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
             push $h->@*, "        }";
             push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
-            push $h->@*, "        if (_vp && SvROK(*_vp))";
-            push $h->@*, "            hv_stores(_ci, \"value\", SvREFCNT_inc(*av_fetch((AV*)SvRV(*_vp), $i, 0)));";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
             push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
             if ($has_impl->{$slug} && exists $_multi_class_methods{$slug}{'on_skip_optional'}) {
                 my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, symbol_name";
                 my $call = $self->_emit_component_call($slug, 'on_skip_optional', $sr, $args, $has_impl);
                 push $h->@*, "        _r = $call;";
             } else {
-                # Fall back to multiply(value, one())
+                # Fall back to multiply(value, one()).
+                # Use a per-method has_impl lookup: $has_impl was built for on_skip_optional,
+                # but the fallback calls multiply/one/is_zero which may be compiled even when
+                # on_skip_optional is not. Without this, _emit_component_call falls through to
+                # call_method with nested dSP, causing stack corruption.
+                my %core_impl = ($slug => (exists $_multi_class_methods{$slug} ? 1 : 0));
                 my $comp_val = "({ SV **__vp = hv_fetchs(_ci, \"value\", 0); __vp ? *__vp : &PL_sv_undef; })";
-                my $one_call = $self->_emit_component_call($slug, 'one', $sr, "aTHX_ $sr", $has_impl);
-                my $mul_call = $self->_emit_component_call($slug, 'multiply', $sr, "aTHX_ $sr, $comp_val, $one_call", $has_impl);
+                my $one_call = $self->_emit_component_call($slug, 'one', $sr, "aTHX_ $sr", \%core_impl);
+                my $mul_call = $self->_emit_component_call($slug, 'multiply', $sr, "aTHX_ $sr, $comp_val, $one_call", \%core_impl);
                 push $h->@*, "        _r = $mul_call;";
             }
             push $h->@*, "        SvREFCNT_dec(_ci_ref);";
-            # Zero check
-            my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
+            # Zero check — use per-method impl lookup since $has_impl is keyed
+            # on on_skip_optional, not is_zero
+            my %core_impl_iz = ($slug => (exists $_multi_class_methods{$slug} ? 1 : 0));
+            my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", \%core_impl_iz);
             push $h->@*, "        if (SvTRUE($iz_call)) {";
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
             push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
@@ -682,6 +702,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # add: zero checks, _filter_compare, verdict logic, post-merge hook
     method _emit_composite_add($h, $slugs, $has_impl) {
+        # Guard: non-tuple values fall back to method dispatch
+        push $h->@*, "    if (!SvROK(left) || SvTYPE(SvRV(left)) != SVt_PVAV) return right;";
+        push $h->@*, "    if (!SvROK(right) || SvTYPE(SvRV(right)) != SVt_PVAV) return left;";
         # Zero handling: if any left component is zero, return right (and vice versa)
         for my $i (0 .. $slugs->$#*) {
             my $slug = $slugs->[$i];
@@ -1576,6 +1599,36 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     init        => $init,
                     static_name => "_csv_${_current_slug}_${var}",
                 };
+            }
+        }
+
+        # Extract `use constant { NAME => value, ... }` declarations.
+        # Constants are inlined as numeric literals in the generated C,
+        # since C doesn't have Perl's constant sub mechanism.
+        %_use_constants = ();
+        for my $item ($body->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            next unless $item->class() eq 'UseDecl';
+            my $mn = $item->inputs()->[0];
+            next unless defined $mn && $mn->value() eq 'constant';
+            my $args = $item->inputs()->[1];
+            next unless defined $args && ref($args) eq 'ARRAY';
+            my $hash_expr = $args->[0];
+            next unless $hash_expr isa Chalk::Bootstrap::IR::Node::Constructor
+                     && $hash_expr->class() eq 'HashRefExpr';
+            my $pairs = $hash_expr->inputs()->[0];
+            next unless defined $pairs && ref($pairs) eq 'ARRAY';
+            for (my $i = 0; $i < $pairs->@*; $i += 2) {
+                my $key_node = $pairs->[$i];
+                my $val_node = $pairs->[$i + 1];
+                next unless $key_node isa Chalk::Bootstrap::IR::Node::Constant;
+                next unless $val_node isa Chalk::Bootstrap::IR::Node::Constant;
+                my $kv = $key_node->value();
+                my $vv = $val_node->value();
+                # Only inline numeric constant values
+                if ($vv =~ /^-?[0-9]+$/) {
+                    $_use_constants{$kv} = $vv;
+                }
             }
         }
 
@@ -3199,8 +3252,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
             # Loop control keywords: next→continue, last→break, return→return in C
             my $val = $node->value() // '';
-            if ($val eq 'next')   { return "continue;"; }
-            if ($val eq 'last')   { return "break;"; }
+            # Inside scoped loops (ENTER/SAVETMPS per iteration), must
+            # FREETMPS/LEAVE before continue/break to avoid leaking the scope.
+            if ($val eq 'next')   { return $_loop_depth ? "{ FREETMPS; LEAVE; continue; }" : "continue;"; }
+            if ($val eq 'last')   { return $_loop_depth ? "{ FREETMPS; LEAVE; break; }" : "break;"; }
             if ($val eq 'return') { return "return;"; }
             return $self->_emit_xs_expr($node, $declared_vars) . ";";
         }
@@ -3263,6 +3318,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
             my $var = $val;
             $var =~ s/^[\$\@\%]//;
+            # $#$arrayref — last index of array referenced by scalar
+            # IR value: $#$item_types → after sigil strip: #$item_types
+            # Also handles $#array → after sigil strip: #array
+            if ($var =~ /^#\$?(.+)/) {
+                my $inner = $1;
+                my $inner_expr;
+                if ($declared_vars && $declared_vars->{$inner}) {
+                    $inner_expr = "${inner}_sv";
+                } elsif ($declared_vars && $declared_vars->{"param:$inner"}) {
+                    $inner_expr = $inner;
+                } elsif ($field_map && exists $field_map->{$inner}) {
+                    my $idx = $field_map->{$inner};
+                    $inner_expr = "ObjectFIELDS(SvRV(self))[$idx]";
+                } else {
+                    $inner_expr = "get_sv(\"${module_name}::$inner\", GV_ADD)";
+                }
+                return "sv_2mortal(newSViv(av_len((AV*)SvRV($inner_expr))))";
+            }
             # $self is the XS method receiver — use the C parameter directly
             if ($var eq 'self') {
                 return 'self';
@@ -3347,6 +3420,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $cat_ops = join('; ', @parts);
                 return qq{({ SV *_qr = sv_2mortal(newSVpvs("")); $cat_ops; _qr; })};
             }
+        }
+
+        # Resolve `use constant` names to their numeric values.
+        # Without this, constants like STRUCT_IS_LIST become string literals
+        # in the generated C, producing "isn't numeric" warnings and wrong results.
+        if (%_use_constants && exists $_use_constants{$val}) {
+            return "sv_2mortal(newSViv($_use_constants{$val}))";
         }
 
         # String literal — sv_2mortal prevents leaks when used as sub-expressions
@@ -4945,6 +5025,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($init_expr =~ /^\(HV\*\)/) {
                 $init_expr = "(SV*)$init_expr";
             }
+            # Array variable declared with a scalar init (e.g., my @stack = ($self)):
+            # wrap the scalar in a fresh AV ref. Without this, the variable aliases
+            # the init SV directly, and av_push/av_pop on it corrupt the original.
+            # Skip if the init already produces an array ref (newRV, newAV patterns).
+            if (defined $sigil && $sigil eq '@'
+                    && $init_expr !~ /newRV_noinc/
+                    && $init_expr !~ /newAV\(\)/) {
+                $init_expr = "({ AV *_av = newAV(); av_push(_av, SvREFCNT_inc($init_expr)); newRV_noinc((SV*)_av); })";
+            }
             return "${var}_sv = $init_expr;";
         }
         return "${var}_sv = $default_val;";
@@ -4970,7 +5059,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($is_last) {
             return "RETVAL = $retval;";
         }
-        return "RETVAL = $retval; goto xsreturn;";
+        # Inside scoped loops, unwind ENTER/SAVETMPS scopes before goto
+        my $unwind = "FREETMPS; LEAVE; " x $_loop_depth;
+        return "${unwind}RETVAL = $retval; goto xsreturn;";
     }
 
     # Wrap a value expression for RETVAL assignment with SvREFCNT_inc
@@ -5015,6 +5106,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $cond = $if_node->inputs()->[1];
         my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
         my $c_keyword = $jump_keyword eq 'last' ? 'break' : 'continue';
+        # Inside scoped loops (ENTER/SAVETMPS per iteration), must
+        # FREETMPS/LEAVE before continue/break to avoid leaking the scope.
+        if ($_loop_depth) {
+            return "if (SvTRUE($cond_expr)) { FREETMPS; LEAVE; $c_keyword; }";
+        }
         return "if (SvTRUE($cond_expr)) $c_keyword;";
     }
 
@@ -5049,7 +5145,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $val_expr = $self->_emit_xs_expr($stmt, $declared_vars);
                 $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
                 my $wrapped = $self->_wrap_retval($val_expr);
-                push @lines, "    RETVAL = $wrapped; goto xsreturn;";
+                # Inside scoped loops, unwind ENTER/SAVETMPS scopes before goto
+                my $unwind = "FREETMPS; LEAVE; " x $_loop_depth;
+                push @lines, "    ${unwind}RETVAL = $wrapped; goto xsreturn;";
                 next;
             }
             my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
@@ -5193,6 +5291,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
                     push @lines, "while (SvTRUE($cond_expr)) {";
                 }
+            # Detect while (@array): array variable in boolean context
+            # should check element count, not SvTRUE (which is always true
+            # for a reference). Emit av_len >= 0 for proper empty-array check.
+            } elsif ($cond isa Chalk::Bootstrap::IR::Node::Constant
+                    && $cond->value() =~ /^\@/) {
+                my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+                push @lines, "while (av_len((AV*)SvRV($cond_expr)) >= 0) {";
             } else {
                 my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
                 push @lines, "while (SvTRUE($cond_expr)) {";

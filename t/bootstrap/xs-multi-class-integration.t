@@ -402,6 +402,11 @@ SKIP: {
 
         # Isolate: test Boolean-only parse first, then full-semiring parse.
         # Each in its own eval to catch segfaults incrementally.
+        $SIG{SEGV} = sub {
+            print $pwr "SEGV:caught at " . join(' ', caller) . "\n";
+            $pwr->flush();
+            exit 139;
+        };
 
         print $pwr "DIAG:child_started\n";
 
@@ -544,8 +549,31 @@ SKIP: {
                       : 'ok';
         print $pwr "FULL_TINY:$full_info\n";
 
-        # C) Full parse of Boolean.pm source (only if tiny Boolean parse works)
+        # C) Isolate crash: test semiring subsets at 13 lines
         if ($bool_info eq 'ok') {
+            my @src_lines = split /\n/, $parse_source;
+            my $chunk13 = join("\n", @src_lines[0 .. 12]) . "\n";
+            my $chars13 = length($chunk13);
+            print $pwr "CHUNK13:$chars13 chars\n";
+            $pwr->flush();
+
+            # Test line-count bisect with the full 5-ary semiring
+            for my $end_line (1, 5, 9, 12, 13, 14, 15) {
+                last if $end_line > $#src_lines;
+                my $chunk = join("\n", @src_lines[0 .. $end_line - 1]) . "\n";
+                my $chars = length($chunk);
+                $semiring->reset_cache();
+                my $p = Chalk::Bootstrap::Earley->new(
+                    grammar  => $integ_desugared,
+                    semiring => $semiring,
+                );
+                my $r = eval { $p->parse_value($chunk) };
+                my $e = $@;
+                my $status = $e ? "ERR:$e" : !defined($r) ? "undef" : "defined";
+                print $pwr "BISECT:lines=$end_line chars=$chars => $status\n";
+                $pwr->flush();
+            }
+
             $semiring->reset_cache();
             my $parser = Chalk::Bootstrap::Earley->new(
                 grammar  => $integ_desugared,
