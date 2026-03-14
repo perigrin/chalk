@@ -306,6 +306,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
             }
         }
 
+        # Subscript bracket boundary: reject if the target is a bare
+        # BinaryExpression. When `[` or `{` scans inside a Subscript rule,
+        # the accumulated level comes from the target Expression. A level
+        # in 0..99 means the target is a BinaryExpression (e.g., `$a // $b`),
+        # which cannot be a subscript target without parentheses. This kills
+        # the wrong parse of `$a->[$i] // $a->[-1]` as `($a->[$i] // $a)->[-1]`.
+        if ($rule_name eq 'Subscript' && $matched_text =~ /^[\[\{]$/
+                && defined($existing->{level}) && $existing->{level} >= 0) {
+            return $self->zero();
+        }
+
         # Non-operator scan: multiply with one (transparent)
         return $self->multiply($existing, $self->one());
     }

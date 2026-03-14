@@ -281,6 +281,55 @@ SKIP: {
         my $result = parse_ok('$x = $y = $z = 1;');
         ok(defined $result, 'triple chained = is right-associative');
     }
+    # --- Category 11: BinaryExpression as Subscript target ---
+    # `$a->[$i] // $a->[-1]` must parse as:
+    #   BinaryExpr(//, Subscript($a,$i), Subscript($a,-1))
+    # NOT as:
+    #   Subscript(BinaryExpr(//, Subscript($a,$i), $a), -1)
+    # The Precedence semiring must reject the second parse because a
+    # BinaryExpression (level >= 0) cannot be the target of a Subscript.
+    # Without this, the XS codegen emits ($a->[$i] // $a)->[-1] which
+    # calls SvRV on a string, causing a segfault.
+    {
+        my $result = parse_ok('my $x = $a->[$i] // $a->[-1];');
+        ok(defined $result, '$a->[$i] // $a->[-1] parses successfully');
+        # Verify the outermost op is dor (defined-or), not aelem (array element).
+        # If the wrong parse wins, aelem would be outermost because the //
+        # would be nested inside the Subscript.
+        if (defined $result) {
+            my $sa_ctx = $result->[4];  # SemanticAction result (Context)
+            my $tree = $sa_ctx->extract();  # ConciseTree
+            my $ops = $tree->ops();
+            # The dor op should appear in the sequence, confirming //
+            # is the outermost binary op (not nested inside a Subscript).
+            my $has_dor = grep { $_->name() eq 'dor' } $ops->@*;
+            ok($has_dor, '$a->[$i] // $a->[-1]: op sequence contains dor');
+        }
+    }
+    {
+        my $result = parse_ok('my $x = $a->[$i] || $a->[0];');
+        ok(defined $result, '$a->[$i] || $a->[0] parses correctly');
+        if (defined $result) {
+            my $sa_ctx = $result->[4];
+            my $tree = $sa_ctx->extract();
+            my $ops = $tree->ops();
+            my $has_or = grep { $_->name() eq 'or' } $ops->@*;
+            ok($has_or, '$a->[$i] || $a->[0]: op sequence contains or');
+        }
+    }
+    {
+        my $result = parse_ok('my $x = $a->[$i] && $a->{$k};');
+        ok(defined $result, '$a->[$i] && $a->{$k} mixed subscript styles parse correctly');
+    }
+    # Verify that legitimate subscripts with arithmetic indices still work
+    {
+        my $result = parse_ok('my $x = $a->[$i + $offset];');
+        ok(defined $result, '$a->[$i + $offset] arithmetic in subscript index still works');
+    }
+    {
+        my $result = parse_ok('my $x = $a->[$i + 1]->value();');
+        ok(defined $result, '$a->[$i + 1]->value() subscript + method chain still works');
+    }
 }
 
 done_testing();
