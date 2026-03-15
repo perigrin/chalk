@@ -2252,8 +2252,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     #   VAR = (SvTRUE(({ SV *_tmp = COND; _tmp; })) ? BRANCH_A : BRANCH_B);
     method _fixup_ternary_assignment($xs_text, $var_name) {
         my $pattern = qr/\(SvTRUE\(\(\{\s*\Q$var_name\E\s*=\s*/;
-        while ($xs_text =~ /$pattern/) {
-            my $start = $-[0];
+        while ($xs_text =~ /($pattern)/g) {
+            my $match_len = length($1);
+            my $start = pos($xs_text) - $match_len;
             # Find the full ternary by balancing parens from start
             my $pos = $start;
             my $depth = 0;
