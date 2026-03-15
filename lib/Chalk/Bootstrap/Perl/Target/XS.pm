@@ -2210,6 +2210,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @lines, '';
         }
 
+        # Emit static HV* stash pointers for speculative :param dispatch.
+        # Initialized in BOOT to avoid per-call gv_stashpv lookup.
+        {
+            my %stash_slugs;
+            for my $slug (sort keys %_multi_class_methods) {
+                $stash_slugs{$slug} = 1;
+            }
+            for my $slug (sort keys %stash_slugs) {
+                push @lines, "static HV *_stash_${slug} = NULL;";
+            }
+            push @lines, '' if keys %stash_slugs;
+        }
+
         # Emit forward declarations for anonymous sub CV statics
         # (must appear before helper_lines which may reference them)
         if (@_anon_sub_fwd_decls) {
@@ -2239,6 +2252,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # as C code until the next MODULE directive.
         push @lines, 'BOOT:';
         push @lines, '{';
+        # Initialize stash pointers for speculative :param dispatch
+        for my $entry ($entries->@*) {
+            my $slug = $self->_class_slug($entry->{class_name});
+            push @lines, "    _stash_${slug} = gv_stashpv(\"$entry->{class_name}\", GV_ADD);";
+        }
         for my $e (@all_sections) {
             my $s = $e->{sections};
             # Restore per-class class-scope vars for BOOT initialization
@@ -3848,6 +3866,78 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     return '({ ' . join('; ', @stmts) . '; })';
                 }
                 return $call;
+            }
+        }
+
+        # Speculative inline for :param fields: when the invocant is a :param
+        # field and we know the primary type from the class registry, emit a
+        # stash check + direct _impl_ call. Falls back to call_method on mismatch.
+        # This is a monomorphic inline cache — one pointer comparison per call.
+        if ($invocant_expr ne 'self' && defined $invocant_node
+                && $invocant_node isa Chalk::Bootstrap::IR::Node::Constant
+                && defined $_param_fields) {
+            my $val = $invocant_node->value();
+            if ($val =~ /^[\$\@\%](.+)/) {
+                my $var = $1;
+                if (exists $_param_fields->{$var} && defined $field_map && exists $field_map->{$var}) {
+                    # Find which compiled classes define this method (excluding self).
+                    # Prioritize the class from the `uses` registration for this field.
+                    my @candidates;
+                    for my $slug (sort keys %_multi_class_methods) {
+                        next if $slug eq $_current_slug;
+                        if (exists $_multi_class_methods{$slug}{$method_name}
+                                && !exists $_fallback_method_slugs{"$slug:$method_name"}) {
+                            push @candidates, $slug;
+                        }
+                    }
+                    # Pick the best target: when there are multiple candidates,
+                    # prefer the one registered as a `uses` dependency for this
+                    # class (e.g., FilterComposite for Earley's $semiring).
+                    if (@candidates >= 1) {
+                        my $target_slug = $candidates[0];
+                        if (defined $_class_registry && @candidates > 1) {
+                            # Check the current class's uses deps for a better target
+                            for my $cname ($_class_registry->all_classes()) {
+                                my $reg = $_class_registry->resolve($cname);
+                                next unless defined $reg && defined $reg->{uses};
+                                my $cslug = $self->_class_slug($cname);
+                                next unless $cslug eq $_current_slug;
+                                for my $dep ($reg->{uses}->@*) {
+                                    my $dep_slug = $self->_class_slug($dep);
+                                    if (grep { $_ eq $dep_slug } @candidates) {
+                                        $target_slug = $dep_slug;
+                                        last;
+                                    }
+                                }
+                                last;  # found current class entry, stop searching
+                            }
+                        }
+                        my @call_args = ("aTHX_ $invocant_expr", @arg_exprs);
+                        my $impl_call = "_impl_${target_slug}_${method_name}(" . join(', ', @call_args) . ")";
+                        my $stash_var = "_stash_${target_slug}";
+
+                        # Build call_method fallback as statement expression
+                        my @cm_parts;
+                        push @cm_parts, "dSP; ENTER; SAVETMPS; PUSHMARK(SP)";
+                        push @cm_parts, "XPUSHs($invocant_expr)";
+                        push @cm_parts, "XPUSHs($_)" for @arg_exprs;
+                        push @cm_parts, "PUTBACK; call_method(\"$escaped_name\", G_SCALAR)";
+                        push @cm_parts, "SPAGAIN; SV *_mcr = SvREFCNT_inc(POPs); PUTBACK";
+                        push @cm_parts, "FREETMPS; LEAVE; _mcr";
+                        my $cm_expr = '({ ' . join('; ', @cm_parts) . '; })';
+
+                        my $expr = "({ SV *_inv = $invocant_expr; "
+                            . "(SvROK(_inv) && SvOBJECT(SvRV(_inv)) && SvSTASH(SvRV(_inv)) == $stash_var) "
+                            . "? $impl_call "
+                            . ": $cm_expr; })";
+
+                        if (@pre_eval) {
+                            my @stmts = (@pre_eval, $expr);
+                            return '({ ' . join('; ', @stmts) . '; })';
+                        }
+                        return $expr;
+                    }
+                }
             }
         }
 
