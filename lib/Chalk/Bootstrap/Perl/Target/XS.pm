@@ -1475,8 +1475,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
         my @body_lines;
         for my $item ($body->@*) {
-            my $code = eval { $perl_target->_emit_node($item) };
-            if (!defined $code && $@) {
+            my $code;
+            try {
+                $code = $perl_target->_emit_node($item);
+            } catch ($e) {
                 # Unsupported node type — skip this item in eval fallback
                 next;
             }
@@ -1681,10 +1683,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @param_nodes, $p;
             }
 
-            my $result = eval {
-                $self->_emit_xs_sub($sname, \@param_nodes, $sbody);
-            };
-            if (!defined $result && $@) {
+            my $result;
+            try {
+                $result = $self->_emit_xs_sub($sname, \@param_nodes, $sbody);
+            } catch ($e) {
                 delete $_class_methods->{$sname};
                 $_class_subs{$sname}{compiled} = false;
                 next;
@@ -1855,11 +1857,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 }
             }
 
-            my $result = eval { $self->_emit_xs_method($item) };
-            if (!defined $result && $@) {
+            my $result;
+            try {
+                $result = $self->_emit_xs_method($item);
+            } catch ($e) {
                 # Method compilation failed (unsupported IR node types etc.)
                 # Fall back to eval_pv
-                warn "DEBUG: ${_current_slug}::${mname} compile failed: $@" if $ENV{DEBUG_XS_COMPILE};
+                warn "DEBUG: ${_current_slug}::${mname} compile failed: $e" if $ENV{DEBUG_XS_COMPILE};
                 delete $_class_methods->{$mname};
                 push @fallback_methods, $item;
                 next;
@@ -4199,8 +4203,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @body_c;
         my $compile_ok = true;
         for my $stmt ($body_items->@*) {
-            my $c = eval { $self->_emit_xs_expr($stmt, \%anon_vars) };
-            if (!defined $c || $@) {
+            my $c;
+            try {
+                $c = $self->_emit_xs_expr($stmt, \%anon_vars);
+            } catch ($e) {
+                $compile_ok = false;
+                last;
+            }
+            if (!defined $c) {
                 $compile_ok = false;
                 last;
             }
