@@ -439,9 +439,65 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @fwd_params, "SV *$_" for $params->@*;
         my $sig = join(', ', @fwd_params);
 
+        my $n_components = scalar $component_slugs->@*;
         my @h;
         push @h, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
         push @h, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
+        # Guard: component count must match compiled dispatch.
+        # A FilterComposite with fewer components (e.g., 2-element BNF pipeline
+        # vs 5-element Perl pipeline) falls through to a generic loop that uses
+        # call_method on each component individually. This avoids infinite
+        # recursion (call_method on self would re-enter this function).
+        push @h, "    if (av_len(_sr) + 1 != $n_components) {";
+        push @h, "        /* Fallback: dispatch to each component via call_method */";
+        if ($mname eq 'zero' || $mname eq 'one') {
+            push @h, "        AV *_fb = newAV();";
+            push @h, "        I32 _n = av_len(_sr) + 1; I32 _j;";
+            push @h, "        for (_j = 0; _j < _n; _j++) {";
+            push @h, "            SV *_comp = *av_fetch(_sr, _j, 0);";
+            push @h, "            dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+            push @h, "            XPUSHs(_comp);";
+            push @h, "            PUTBACK; call_method(\"$mname\", G_SCALAR);";
+            push @h, "            SPAGAIN; av_push(_fb, SvREFCNT_inc(POPs)); PUTBACK;";
+            push @h, "            FREETMPS; LEAVE;";
+            push @h, "        }";
+            push @h, "        return newRV_noinc((SV*)_fb);";
+        } elsif ($mname eq 'is_zero') {
+            push @h, "        I32 _n = av_len(_sr) + 1; I32 _j;";
+            push @h, "        for (_j = 0; _j < _n; _j++) {";
+            push @h, "            SV *_comp = *av_fetch(_sr, _j, 0);";
+            push @h, "            SV *_val = *av_fetch((AV*)SvRV(value), _j, 0);";
+            push @h, "            dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+            push @h, "            XPUSHs(_comp); XPUSHs(_val);";
+            push @h, "            PUTBACK; call_method(\"is_zero\", G_SCALAR);";
+            push @h, "            SPAGAIN; int _iz = SvTRUE(POPs); PUTBACK;";
+            push @h, "            FREETMPS; LEAVE;";
+            push @h, "            if (_iz) return &PL_sv_yes;";
+            push @h, "        }";
+            push @h, "        return &PL_sv_no;";
+        } else {
+            # multiply, add, on_scan, on_complete, etc. — iterate components
+            my $has_value_params = ($mname =~ /^(?:multiply|add|_filter_compare)$/);
+            if ($has_value_params && $mname eq 'multiply') {
+                push @h, "        AV *_la = (AV*)SvRV(left); AV *_ra = (AV*)SvRV(right);";
+                push @h, "        AV *_fb = newAV();";
+                push @h, "        I32 _n = av_len(_sr) + 1; I32 _j;";
+                push @h, "        for (_j = 0; _j < _n; _j++) {";
+                push @h, "            SV *_comp = *av_fetch(_sr, _j, 0);";
+                push @h, "            dSP; ENTER; SAVETMPS; PUSHMARK(SP);";
+                push @h, "            XPUSHs(_comp); XPUSHs(*av_fetch(_la, _j, 0)); XPUSHs(*av_fetch(_ra, _j, 0));";
+                push @h, "            PUTBACK; call_method(\"multiply\", G_SCALAR);";
+                push @h, "            SPAGAIN; av_push(_fb, SvREFCNT_inc(POPs)); PUTBACK;";
+                push @h, "            FREETMPS; LEAVE;";
+                push @h, "        }";
+                push @h, "        return newRV_noinc((SV*)_fb);";
+            } else {
+                # For other methods, fall back to eval_pv with the Perl implementation
+                # This is a cold path — only used for non-standard component counts
+                push @h, "        croak(\"FilterComposite::$mname: component count mismatch (%d != $n_components)\", (int)(av_len(_sr) + 1));";
+            }
+        }
+        push @h, "    }";
 
         if ($mname eq 'is_zero') {
             $self->_emit_composite_is_zero(\@h, $params, $component_slugs, $has_impl);

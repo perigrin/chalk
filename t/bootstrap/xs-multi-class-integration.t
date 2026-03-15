@@ -412,6 +412,31 @@ SKIP: {
 
         print $pwr "DIAG:child_started\n";
 
+        # Stage 2 bootstrap: rebuild grammar with post-XS Rule/Symbol objects.
+        {
+            Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+            my $s2_ir = eval { perl_pipeline() };
+            if (defined $s2_ir) {
+                my $s2_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+                my $s2_gen = $s2_target->generate($s2_ir);
+                $s2_gen =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSMultiIntegParseGrammar/g;
+                eval $s2_gen;
+                unless ($@) {
+                    my $s2_grammar = Chalk::Grammar::Perl::XSMultiIntegParseGrammar::grammar();
+                    my @s2_ordered = sort {
+                        ($a->name() eq 'Program' ? 0 : 1) <=> ($b->name() eq 'Program' ? 0 : 1)
+                    } $s2_grammar->@*;
+                    $integ_desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@s2_ordered);
+                    print $pwr "DIAG:stage2_rebuild=" . scalar(@s2_ordered) . " rules\n";
+                } else {
+                    print $pwr "DIAG:stage2_failed=$@\n";
+                }
+            } else {
+                print $pwr "DIAG:stage2_pipeline_failed\n";
+            }
+            $pwr->flush();
+        }
+
         # A) Boolean-only parse of "1;\n" — with Perl Earley to verify grammar works
         my $bool_only = Chalk::Bootstrap::Semiring::Boolean->new();
 
