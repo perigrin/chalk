@@ -4443,18 +4443,30 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 "); _sv; })";
         }
 
-        # join — native C via sv_catsv loop
+        # join — native C via sv_catsv
         if ($name eq 'join' && $args->@* >= 2) {
             my $sep = $self->_emit_xs_expr($args->[0], $declared_vars);
-            my $arr = $self->_emit_xs_expr($args->[1], $declared_vars);
-            return "({ SV *_result = sv_2mortal(newSVpvs(\"\")); " .
-                "AV *_items = (AV*)SvRV($arr); " .
-                "I32 _len = av_len(_items); " .
-                "I32 _i; " .
-                "for (_i = 0; _i <= _len; _i++) { " .
-                "if (_i > 0) sv_catsv(_result, $sep); " .
-                "sv_catsv(_result, *av_fetch(_items, _i, 0)); " .
-                "} _result; })";
+            if ($args->@* == 2) {
+                # join($sep, @array) — iterate over arrayref
+                my $arr = $self->_emit_xs_expr($args->[1], $declared_vars);
+                return "({ SV *_result = sv_2mortal(newSVpvs(\"\")); " .
+                    "AV *_items = (AV*)SvRV($arr); " .
+                    "I32 _len = av_len(_items); " .
+                    "I32 _i; " .
+                    "for (_i = 0; _i <= _len; _i++) { " .
+                    "if (_i > 0) sv_catsv(_result, $sep); " .
+                    "sv_catsv(_result, *av_fetch(_items, _i, 0)); " .
+                    "} _result; })";
+            } else {
+                # join($sep, $a, $b, ...) — concatenate scalar args directly
+                my @c_args = map { $self->_emit_xs_expr($_, $declared_vars) } $args->@[1 .. $args->$#*];
+                my $code = "({ SV *_result = sv_2mortal(newSVsv($c_args[0])); ";
+                for my $i (1 .. $#c_args) {
+                    $code .= "sv_catsv(_result, $sep); sv_catsv(_result, $c_args[$i]); ";
+                }
+                $code .= "_result; })";
+                return $code;
+            }
         }
 
         # warn — native Perl_warn with string argument
