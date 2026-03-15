@@ -1409,7 +1409,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Detect stale-value merge corruption in a method's XS output:
     # method body has call_method (real work) but RETVAL is a bare string.
     method _is_stale_merge($xs_output) {
-        return ($xs_output =~ /(?:call_method|_impl_)\(/ && $xs_output =~ /(?:RETVAL|retval) = newSVpvs\("/);
+        my $has_dispatch = $xs_output =~ /(?:call_method|_impl_)\(/;
+        my $has_bare_str = $xs_output =~ /(?:RETVAL|retval) = newSVpvs\("/;
+        if ($ENV{DEBUG_STALE_MERGE} && $has_bare_str) {
+            warn "STALE_MERGE_CHECK: dispatch=$has_dispatch bare_str=$has_bare_str\n";
+            # Show the offending line
+            for my $line (split /\n/, $xs_output) {
+                warn "  LINE: $line\n" if $line =~ /(?:RETVAL|retval) = newSVpvs/;
+            }
+        }
+        return ($has_dispatch && $has_bare_str);
     }
 
     # Repair stale-value merge corruption in XS method output.

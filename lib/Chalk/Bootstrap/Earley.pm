@@ -117,17 +117,18 @@ class Chalk::Bootstrap::Earley {
     }
 
     # Earley item: {rule, alt_idx, core_id, dot, origin, value}
-    # We use hashrefs for items to make debugging easier
+    # Uses individual hash assignments instead of hashref literal to avoid
+    # stale-value merge corruption in XS codegen (same pattern as _advance_item).
     method _make_item($rule, $alt_idx, $dot, $origin, $value) {
         my $core_id = $core_index->id_for($rule->name(), $alt_idx, $dot);
-        return {
-            rule    => $rule,
-            alt_idx => $alt_idx,
-            core_id => $core_id,
-            dot     => $dot,
-            origin  => $origin,
-            value   => $value,
-        };
+        my $item = {};
+        $item->{rule}    = $rule;
+        $item->{alt_idx} = $alt_idx;
+        $item->{core_id} = $core_id;
+        $item->{dot}     = $dot;
+        $item->{origin}  = $origin;
+        $item->{value}   = $value;
+        return $item;
     }
 
     # Advance an existing item by one dot position using cached integer mapping.

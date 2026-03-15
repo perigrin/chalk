@@ -48,12 +48,8 @@ ok(defined $gen, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 
 my %parsed;
 my @class_files = (
-    # Grammar data model classes — compiles and loads, but parse segfaults
-    # due to stale-merge corruption in _make_item: hashref {rule => $rule, ...}
-    # collapses to string "rule". _is_stale_merge detection doesn't trigger.
-    # gdb backtrace: hv_fetch on non-hashref at GDBRepro.c:2735
-    # ['Chalk::Grammar::Symbol',                      'lib/Chalk/Grammar/Symbol.pm'],
-    # ['Chalk::Grammar::Rule',                        'lib/Chalk/Grammar/Rule.pm'],
+    ['Chalk::Grammar::Symbol',                      'lib/Chalk/Grammar/Symbol.pm'],
+    ['Chalk::Grammar::Rule',                        'lib/Chalk/Grammar/Rule.pm'],
     ['Chalk::Bootstrap::Context',                   'lib/Chalk/Bootstrap/Context.pm'],
     ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
     ['Chalk::Bootstrap::Semiring::Precedence',      'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
@@ -94,8 +90,8 @@ SKIP: {
         });
     }
 
-    # FilterComposite depends on all 5 semirings (indices 1..5, after Context)
-    my @semiring_classes = map { $_->[0] } @class_files[1..5];
+    # FilterComposite depends on all 5 semirings (indices 3..7, after Symbol+Rule+Context)
+    my @semiring_classes = map { $_->[0] } @class_files[3..7];
     $reg->register('Chalk::Bootstrap::Semiring::FilterComposite', {
         ir => $parsed{'Chalk::Bootstrap::Semiring::FilterComposite'}{ir},
         sa => $parsed{'Chalk::Bootstrap::Semiring::FilterComposite'}{sa},
