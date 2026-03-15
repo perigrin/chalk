@@ -48,9 +48,10 @@ ok(defined $gen, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 
 my %parsed;
 my @class_files = (
-    # Grammar data model classes NOT compiled to XS yet — pre-existing objects
-    # created before XS module load segfault when _impl_ methods access fields
-    # via ObjectFIELDS. See GitHub issue for investigation.
+    # TODO: Grammar data model classes (Symbol, Rule, CoreItemIndex) need
+    # Stage 2 bootstrap — rebuild grammar after XS load so objects are created
+    # under the XS class layout. Currently blocked by XS intrinsics assuming
+    # 5-component FilterComposite while BNF pipeline uses 2 components.
     # ['Chalk::Grammar::Symbol',                      'lib/Chalk/Grammar/Symbol.pm'],
     # ['Chalk::Grammar::Rule',                        'lib/Chalk/Grammar/Rule.pm'],
     # ['Chalk::Bootstrap::CoreItemIndex',              'lib/Chalk/Bootstrap/CoreItemIndex.pm'],
