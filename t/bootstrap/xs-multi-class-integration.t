@@ -48,13 +48,12 @@ ok(defined $gen, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 
 my %parsed;
 my @class_files = (
-    # TODO: Grammar data model classes (Symbol, Rule, CoreItemIndex) need
-    # Stage 2 bootstrap — rebuild grammar after XS load so objects are created
-    # under the XS class layout. Currently blocked by XS intrinsics assuming
-    # 5-component FilterComposite while BNF pipeline uses 2 components.
+    # Grammar data model classes — compiles and loads, but parse segfaults
+    # due to stale-merge corruption in _make_item: hashref {rule => $rule, ...}
+    # collapses to string "rule". _is_stale_merge detection doesn't trigger.
+    # gdb backtrace: hv_fetch on non-hashref at GDBRepro.c:2735
     # ['Chalk::Grammar::Symbol',                      'lib/Chalk/Grammar/Symbol.pm'],
     # ['Chalk::Grammar::Rule',                        'lib/Chalk/Grammar/Rule.pm'],
-    # ['Chalk::Bootstrap::CoreItemIndex',              'lib/Chalk/Bootstrap/CoreItemIndex.pm'],
     ['Chalk::Bootstrap::Context',                   'lib/Chalk/Bootstrap/Context.pm'],
     ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
     ['Chalk::Bootstrap::Semiring::Precedence',      'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
