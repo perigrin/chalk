@@ -607,6 +607,14 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
                     && defined $item->value()
+                    && $item->value() eq 'return') {
+                # Bare return; with no following value — emit ReturnStmt(undef)
+                push @result, $factory->make('Constructor',
+                    'class' => 'ReturnStmt',
+                    value => _make_const($factory, 'undef'),
+                );
+            } elsif ($item isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $item->value()
                     && $item->value() eq 'die'
                     && $i + 1 <= $#$stmts) {
                 # Merge die + single argument into DieCall.

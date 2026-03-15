@@ -12,6 +12,11 @@ class Chalk::Bootstrap::Earley {
     field $grammar  :param :reader;
     field $semiring :param :reader;
 
+    # Source file path for diagnostics (set per parse_value call)
+    field $_parse_file;
+    field $_last_active_pos;
+    field $_diag_expected;
+
     # Build a lookup table for rules by name
     field $rule_table;
 
@@ -175,6 +180,8 @@ class Chalk::Bootstrap::Earley {
         $_waiting_for_min = 0;
         $_leo_origin_min = undef;
         %_gc_stats = (positions_freed => 0);
+        $_last_active_pos = 0;
+        $_diag_expected = {};
         @_gc_min_origin_at = ();
         $_gc_current_pos = undef;
         $_gc_future_min = undef;
@@ -203,6 +210,10 @@ class Chalk::Bootstrap::Earley {
             for my $origin_hash ($chart[$pos]->@*) {
                 next unless defined $origin_hash;
                 push @agenda, values $origin_hash->%*;
+            }
+            # Track furthest position with active items for diagnostics
+            if (@agenda) {
+                $_last_active_pos = $pos;
             }
             my @processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
@@ -319,6 +330,33 @@ class Chalk::Bootstrap::Earley {
                 }
             }
 
+            # Snapshot expected tokens after full agenda processing.
+            # At this point all predictions have been added so the chart
+            # contains items waiting for their next symbol — exactly the
+            # set of tokens that would allow parsing to continue.
+            # Snapshot expected tokens after full agenda processing.
+            # At this point all predictions have been added so the chart
+            # contains items waiting for their next symbol — exactly the
+            # set of tokens that would allow parsing to continue.
+            if ($pos == $_last_active_pos) {
+                $_diag_expected = {};
+                for my $origin_hash ($chart[$pos]->@*) {
+                    next unless defined $origin_hash;
+                    for my $entry (values $origin_hash->%*) {
+                        # Explicit indexing for XS codegen compatibility
+                        # (list destructuring $entry->@* segfaults in XS)
+                        my $diag_item = $entry->[0];
+                        my $diag_alt = $entry->[1];
+                        if (!$self->_is_complete($diag_item, $diag_alt)) {
+                            my $sym = $self->_symbol_after_dot($diag_item, $diag_alt);
+                            if (!$sym->is_reference()) {
+                                $_diag_expected->{$sym->value()} = 1;
+                            }
+                        }
+                    }
+                }
+            }
+
             # Safe-set chart GC: determine the safe floor using incrementally
             # tracked minimum positions. _complete reads chart[$origin] to
             # find waiting items, so any position that has waiting items must
@@ -369,9 +407,111 @@ class Chalk::Bootstrap::Earley {
         return $semiring->is_zero($value) ? false : true;
     }
 
-    # Parse input string, returns raw semiring value (or undef on failure)
-    method parse_value($input) {
-        return $self->_run_parse($input);
+    # Parse input string, returns raw semiring value (or undef on failure).
+    # Optional $file param shown in diagnostic on failure.
+    method parse_value($input, $file = undef) {
+        $_parse_file = $file;
+        my $result = $self->_run_parse($input);
+        if (!defined $result) {
+            $self->_emit_parse_diagnostic($input, $_last_active_pos);
+        }
+        return $result;
+    }
+
+    # Extract expected tokens and emit a Rust-style parse error diagnostic.
+    # Called from parse_value on failure. Delegates to _format_parse_error
+    # which does the actual formatting and warn() output.
+    method _emit_parse_diagnostic($input, $last_active_pos) {
+        $self->_format_parse_error($input, $last_active_pos);
+    }
+
+    # Format a Rust-style parse error diagnostic and warn it to STDERR.
+    # Uses $_diag_expected field (populated by _run_parse before returning).
+    method _format_parse_error($input, $last_active_pos) {
+        my $file = $_parse_file;
+        $file = '<input>' if !defined $file;
+        my $n = length($input);
+
+        # Calculate line and column from byte position
+        my $line_num = 1;
+        my $col = 1;
+        for my $i (0 .. $last_active_pos - 1) {
+            if (substr($input, $i, 1) eq "\n") {
+                $line_num++;
+                $col = 1;
+            } else {
+                $col++;
+            }
+        }
+
+        # Extract source lines around failure position
+        my @lines;
+        my $line_start = 0;
+        for my $j (0 .. $n - 1) {
+            if (substr($input, $j, 1) eq "\n") {
+                push @lines, substr($input, $line_start, $j - $line_start);
+                $line_start = $j + 1;
+            }
+        }
+        if ($line_start <= $n) {
+            push @lines, substr($input, $line_start);
+        }
+
+        # Context window around failure
+        my $context_radius = 2;
+        my $start_idx = $line_num - $context_radius - 1;
+        $start_idx = 0 if $start_idx < 0;
+        my $end_idx = $line_num + $context_radius - 1;
+        $end_idx = $#lines if $end_idx > $#lines;
+        my $num_width = length($end_idx + 1);
+
+        # Build source context
+        my @context;
+        for my $i ($start_idx .. $end_idx) {
+            my $display_num = $i + 1;
+            my $num_str = "$display_num";
+            my $pad_needed = $num_width - length($num_str);
+            my $padded = $pad_needed > 0 ? (' ' x $pad_needed) . $num_str : $num_str;
+            my $src_line = $lines[$i];
+            push @context, "$padded | $src_line";
+            # Add caret line for the failure line
+            if ($display_num == $line_num) {
+                my $padding = ' ' x $num_width;
+                my $spaces = $col > 1 ? (' ' x ($col - 1)) : '';
+                push @context, "$padding | $spaces^";
+            }
+        }
+
+        # Format expected tokens (sort, truncate at 10)
+        my @expected = sort keys $_diag_expected->%*;
+        my $expected_str;
+        my $exp_count = scalar(@expected);
+        if ($exp_count > 10) {
+            my @first_ten;
+            for my $ei (0 .. 9) {
+                push @first_ten, $expected[$ei];
+            }
+            $expected_str = join(', ', @first_ten) . ', ...';
+        } elsif ($exp_count > 0) {
+            $expected_str = join(', ', @expected);
+        } else {
+            $expected_str = '(none)';
+        }
+
+        # Progress note
+
+        # Assemble Rust-style diagnostic
+        my $msg = "error: parse failed at line $line_num, column $col\n";
+        $msg .= "  --> $file:$line_num:$col\n";
+        $msg .= ' ' x ($num_width) . " |\n";
+        for my $line (@context) {
+            $msg .= "$line\n";
+        }
+        $msg .= ' ' x ($num_width) . " |\n";
+        $msg .= "   = expected: $expected_str\n";
+        $msg .= "   = note: parsing stopped at $last_active_pos of $n bytes\n";
+
+        warn $msg;
     }
 
     # Predict: add items for all alternatives of a nonterminal using

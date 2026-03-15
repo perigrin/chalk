@@ -2812,12 +2812,27 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push @xsub, 'void';
         }
         my @bare_params = map { /^SV \*(.*)/ ? $1 : $_ } @xs_params;
-        push @xsub, "${name}(" . join(', ', @bare_params) . ")";
-        for my $p (@xs_params) {
-            push @xsub, "    $p";
+        # Use varargs (self, ...) when method has >1 param to support
+        # optional parameters. Pull each param from the stack with
+        # &PL_sv_undef as the default for missing args.
+        my @non_self_params = @bare_params[1..$#bare_params];
+        if (@non_self_params > 1) {
+            push @xsub, "${name}(self, ...)";
+            push @xsub, "    SV *self";
+            push @xsub, '  PREINIT:';
+            for my $idx (0 .. $#non_self_params) {
+                my $p = $non_self_params[$idx];
+                my $stack_idx = $idx + 1;  # ST(0) = self
+                push @xsub, "    SV *$p = items > $stack_idx ? ST($stack_idx) : &PL_sv_undef;";
+            }
+        } else {
+            push @xsub, "${name}(" . join(', ', @bare_params) . ")";
+            for my $p (@xs_params) {
+                push @xsub, "    $p";
+            }
         }
         push @xsub, '  CODE:';
-        my $call_args = join(', ', 'aTHX_ self', map { /^SV \*(.*)/ ? $1 : $_ } @xs_params[1..$#xs_params]);
+        my $call_args = join(', ', 'aTHX_ self', @non_self_params);
         if ($has_return) {
             push @xsub, "    RETVAL = $helper_name($call_args);";
             push @xsub, '  OUTPUT:';
@@ -3519,9 +3534,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if ($op eq '-')  { return "sv_2mortal(newSVnv(SvNV($left) - SvNV($right)))"; }
         if ($op eq '*')  { return "sv_2mortal(newSVnv(SvNV($left) * SvNV($right)))"; }
         if ($op eq '/')  { return "sv_2mortal(newSVnv(SvNV($left) / SvNV($right)))"; }
+        if ($op eq '%')  { return "sv_2mortal(newSViv(SvIV($left) % SvIV($right)))"; }
         # Integer bitwise ops — used by Structural semiring for flag manipulation
         if ($op eq '|')  { return "sv_2mortal(newSViv(SvIV($left) | SvIV($right)))"; }
         if ($op eq '&')  { return "sv_2mortal(newSViv(SvIV($left) & SvIV($right)))"; }
+        # String repetition — 'str' x $n
+        if ($op eq 'x') {
+            return "({ SV *_xs = $left; SV *_xn = $right; "
+                . "STRLEN _xlen; const char *_xp = SvPV(_xs, _xlen); "
+                . "IV _xc = SvIV(_xn); SV *_xr; "
+                . "if (_xc < 1 || _xlen == 0) { _xr = sv_2mortal(newSVpvs(\"\")); } "
+                . "else { _xr = sv_2mortal(newSV(_xlen * _xc + 1)); SvPOK_on(_xr); "
+                . "repeatcpy(SvPVX(_xr), _xp, _xlen, _xc); "
+                . "SvCUR_set(_xr, _xlen * _xc); *SvEND(_xr) = '\\0'; } _xr; })";
+        }
         # Numeric comparison: use integer comparison when both operands are
         # IV/UV to avoid precision loss. SvNV on a 64-bit UV (e.g., from
         # refaddr/PTR2UV) can lose low bits since double has only 52-bit
