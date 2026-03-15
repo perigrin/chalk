@@ -267,6 +267,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '        FREETMPS; LEAVE; return r;';
         push @lines, '    }';
         push @lines, '    AV *tuple = (AV*)SvRV(value);';
+        # Guard: tuple must have the expected number of components.
+        # A FilterComposite with fewer components (e.g., 2-element BNF
+        # pipeline vs 5-element Perl pipeline) falls back to method dispatch.
+        push @lines, "    if (av_len(tuple) + 1 != ${\scalar $components->@*}) {";
+        push @lines, '        dSP; ENTER; SAVETMPS; PUSHMARK(SP);';
+        push @lines, '        XPUSHs(semiring_field); XPUSHs(value);';
+        push @lines, '        PUTBACK; call_method("is_zero", G_SCALAR);';
+        push @lines, '        SPAGAIN; int r = SvTRUE(POPs); PUTBACK;';
+        push @lines, '        FREETMPS; LEAVE; return r;';
+        push @lines, '    }';
         push @lines, '    SV **p;';
         push @lines, '';
 
