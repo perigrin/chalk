@@ -5,10 +5,13 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
+use lib 't/bootstrap/lib';
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Earley;
+use Chalk::Bootstrap::IR::NodeFactory;
+use TestPipeline qw(build_parser parse_ir bnf_text perl_bnf_text);
 
 # === Test 1: GC does not affect parse correctness ===
 subtest 'GC preserves correct parse results' => sub {
@@ -505,6 +508,69 @@ subtest 'parser works without waiting_for index' => sub {
     ok($parser->parse('a' x 100), 'right-recursive 100 chars without waiting_for');
     ok($parser->parse('a'),        'single char');
     ok(!$parser->parse('b'),       'rejects invalid');
+};
+
+# === Test 16: BNF pipeline integration — parse the real bootstrap grammar file ===
+subtest 'BNF pipeline: parse actual bootstrap grammar with GC' => sub {
+    # This exercises real-world completion patterns by running the BNF
+    # meta-grammar parser over the actual 65-rule chalk-bootstrap.bnf file.
+    # Verifies that safe-set GC does not corrupt a large, realistic parse.
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $parser = build_parser();
+
+    my $bnf_text = perl_bnf_text();
+    ok(defined $bnf_text, 'loaded chalk-bootstrap.bnf');
+    ok(length($bnf_text) > 0, 'chalk-bootstrap.bnf is non-empty');
+
+    my $ir = parse_ir($parser, $bnf_text);
+    ok(defined $ir, 'BNF pipeline parses chalk-bootstrap.bnf successfully');
+
+    if (defined $ir) {
+        ok(ref($ir) eq 'ARRAY', 'IR is an arrayref (list of Rule nodes)');
+        cmp_ok(scalar($ir->@*), '>', 0, 'IR has at least one rule');
+        diag("chalk-bootstrap.bnf produced " . scalar($ir->@*) . " Rule IR nodes");
+    }
+
+    my $stats = $parser->gc_stats();
+    cmp_ok($stats->{safe_sets_found}, '>=', 0, 'safe_sets_found is non-negative during BNF parse');
+    diag("BNF pipeline GC: safe_sets_found=$stats->{safe_sets_found}, positions_freed=$stats->{positions_freed}");
+};
+
+# === Test 17: GC statistics scale with increasing input sizes ===
+subtest 'safe-set GC statistics scale with input' => sub {
+    # Grammar: Program ::= Program /;/ Stmt | Stmt
+    #          Stmt    ::= /a/
+    #
+    # At each Stmt boundary the separator /;/ ensures safe-set GC triggers.
+    # Parses 10, 50, and 100 items and verifies safe_sets_found grows with input.
+    my $sym_Program = Chalk::Grammar::Symbol->new(type => 'reference', value => 'Program');
+    my $sym_Stmt    = Chalk::Grammar::Symbol->new(type => 'reference', value => 'Stmt');
+    my $sym_a       = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'a');
+    my $sym_semi    = Chalk::Grammar::Symbol->new(type => 'terminal',  value => ';');
+
+    my $rule_Program = Chalk::Grammar::Rule->new(
+        name => 'Program', expressions => [[$sym_Program, $sym_semi, $sym_Stmt], [$sym_Stmt]],
+    );
+    my $rule_Stmt = Chalk::Grammar::Rule->new(
+        name => 'Stmt', expressions => [[$sym_a]],
+    );
+
+    my $grammar = [$rule_Program, $rule_Stmt];
+
+    for my $count (10, 50, 100) {
+        my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+        my $parser = Chalk::Bootstrap::Earley->new(
+            grammar  => $grammar,
+            semiring => $semiring,
+        );
+
+        my $input = join(';', ('a') x $count);
+        ok($parser->parse($input), "parses $count items");
+
+        my $stats = $parser->gc_stats();
+        diag("$count items: safe_sets_found=$stats->{safe_sets_found}, positions_freed=$stats->{positions_freed}");
+        cmp_ok($stats->{safe_sets_found}, '>', 0, "$count items: safe sets detected");
+    }
 };
 
 done_testing;

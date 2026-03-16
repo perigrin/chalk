@@ -208,4 +208,30 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
     cmp_ok($found, '>', 0, "Boolean parse safe_sets_found > 0 with safe-set GC (got $found)");
 }
 
+# --- Test 20: Epoch GC and safe-set GC coexist without interference ---
+
+# Test 20: Both GC systems active simultaneously produce correct results
+subtest 'epoch GC and safe-set GC coexist' => sub {
+    # Uses the full 5-ary FilterComposite semiring (epoch GC via SemanticAction
+    # on_epoch_commit) plus safe-set detection (Aycock Properties 1-3).
+    # Verifies both contribute GC and the parse result is still correct.
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $parser = build_perl_ir_parser($grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
+    my $source = "my \$a = 1;\nmy \$b = 2;\nmy \$c = 3;\nmy \$d = 4;\n";
+    my $result = $parser->parse_value($source);
+    ok(defined $result, 'full semiring 4-statement parse succeeds');
+    ok(!$semiring->is_zero($result), 'result is not zero');
+
+    my $gc = $parser->gc_stats();
+    my $freed  = $gc->{positions_freed} // 0;
+    my $ssfound = $gc->{safe_sets_found} // 0;
+    diag("epoch+safe-set GC: positions_freed=$freed, safe_sets_found=$ssfound");
+
+    cmp_ok($freed,   '>', 0, 'epoch GC freed positions (positions_freed > 0)');
+    cmp_ok($ssfound, '>', 0, 'safe-set GC detected safe sets (safe_sets_found > 0)');
+};
+
 done_testing();
