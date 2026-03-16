@@ -3511,7 +3511,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $rest = $body;
             while ($rest =~ /\G(.*?)\$(\w+)/gcs) {
                 my ($lit, $var) = ($1, $2);
-                push @parts, qq{sv_catpvs(_qr, "${\$self->_escape_c_string($lit)}")} if length $lit;
+                my $escaped_lit = $self->_escape_c_string($lit);
+                push @parts, "sv_catpvs(_qr, \"$escaped_lit\")" if length $lit;
                 # Resolve the variable to its C expression
                 if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
                     my $info = $_class_scope_vars{$var};
@@ -3527,11 +3528,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             # Remaining literal after last variable
             my $tail = substr($body, pos($rest) // 0);
-            push @parts, qq{sv_catpvs(_qr, "${\$self->_escape_c_string($tail)}")} if length $tail;
+            if (length $tail) {
+                my $escaped_tail = $self->_escape_c_string($tail);
+                push @parts, "sv_catpvs(_qr, \"$escaped_tail\")";
+            }
 
             if (@parts) {
                 my $cat_ops = join('; ', @parts);
-                return qq{({ SV *_qr = sv_2mortal(newSVpvs("")); $cat_ops; _qr; })};
+                return '({ SV *_qr = sv_2mortal(newSVpvs("")); ' . $cat_ops . '; _qr; })';
             }
         }
 
