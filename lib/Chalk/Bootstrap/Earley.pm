@@ -98,6 +98,62 @@ class Chalk::Bootstrap::Earley {
     field %_profile_data;
     method profile_data() { return \%_profile_data; }
 
+    # Aycock Ch6: check if an Earley set is "safe" — locally unambiguous.
+    # A safe set allows freeing all chart positions between the previous
+    # safe set and this one.
+    # Properties checked:
+    #   1. At least one final (completed) item exists
+    #   2. No non-final item competes for the same last symbol as a final item
+    #   3. No nullable (empty rule) final items
+    method _is_safe_set($chart, $pos) {
+        my @final_items;
+        my %final_last_symbols;
+
+        for my $oh ($chart->[$pos]->@*) {
+            next unless defined $oh;
+            for my $entry (values $oh->%*) {
+                my $item = $entry->[0];
+                my $alt_idx = $entry->[1];
+                if ($self->_is_complete($item, $alt_idx)) {
+                    # Property 3: reject nullable completions (dot == 0 means empty rule)
+                    my $rhs = $item->{rule}->expressions()->[$alt_idx];
+                    return false if scalar($rhs->@*) == 0;
+
+                    push @final_items, $item;
+                    # Track the last symbol of the completed rule's RHS
+                    if ($rhs->@*) {
+                        my $last_sym = $rhs->[-1];
+                        $final_last_symbols{$last_sym->value()} = 1;
+                    }
+                }
+            }
+        }
+
+        # Property 1: must have at least one final item
+        return false unless @final_items;
+
+        # Property 2: no non-final item is waiting for a symbol that a
+        # final item just completed over
+        for my $oh ($chart->[$pos]->@*) {
+            next unless defined $oh;
+            for my $entry (values $oh->%*) {
+                my $item = $entry->[0];
+                my $alt_idx = $entry->[1];
+                next if $self->_is_complete($item, $alt_idx);
+                my $sym = $self->_symbol_after_dot($item, $alt_idx);
+                next unless defined $sym;
+                if (exists $final_last_symbols{$sym->value()}) {
+                    return false;
+                }
+            }
+        }
+
+        if ($ENV{EARLEY_SAFE_DEBUG}) {
+            warn sprintf("SAFE_SET pos=%d finals=%d\n", $pos, scalar @final_items);
+        }
+        return true;
+    }
+
     # Debug: dump the minimum origin at each active chart position.
     # Called after parse to inspect what's keeping positions alive.
     method debug_chart_origins($chart_ref) {
@@ -223,6 +279,7 @@ class Chalk::Bootstrap::Earley {
 
         # GC tracking
         my $oldest_live_pos = 0;
+        my $last_safe_pos = -1;  # Aycock safe-set tracking
 
         # Epoch GC: callback for statement-boundary sweeping
         my @pending_sweeps;
@@ -457,6 +514,39 @@ class Chalk::Bootstrap::Earley {
                     }
                 }
                 @pending_sweeps = ();
+            }
+
+            # Aycock safe-set GC: if this position is a safe set, free
+            # all chart positions between the previous safe set and this one.
+            # TODO: detection is too aggressive, breaks BNF pipeline parse.
+            # Need to investigate Property 2 check.
+            # TODO: safe-set detection works (Properties 1-3) but window
+            # freeing breaks cross-boundary references in waiting_for/completed_at.
+            # Need to also clean up these indexes or defer freeing.
+            if (false && $self->_is_safe_set(\@chart, $pos)) {
+                if ($last_safe_pos >= 0 && $pos > $last_safe_pos + 1) {
+                    for my $sp ($last_safe_pos + 1 .. $pos - 1) {
+                        if (defined $chart[$sp] && $chart[$sp]->@*) {
+                            $chart[$sp] = [];
+                            delete $_scan_cache{$sp};
+                            $_gc_stats{positions_freed}++;
+                        }
+                        # Clean up waiting_for entries at freed positions
+                        for my $rule_name (keys %waiting_for) {
+                            delete $waiting_for{$rule_name}{$sp};
+                        }
+                        # Clean up completed_at entries at freed positions
+                        for my $rule_name (keys %completed_at) {
+                            for my $origin (keys $completed_at{$rule_name}->%*) {
+                                delete $completed_at{$rule_name}{$origin}{$sp};
+                            }
+                            delete $completed_at{$rule_name}{$sp};
+                        }
+                    }
+                    $oldest_live_pos = $last_safe_pos
+                        if $last_safe_pos > $oldest_live_pos;
+                }
+                $last_safe_pos = $pos;
             }
 
             # Debug: compute true minimum origin across all active positions
