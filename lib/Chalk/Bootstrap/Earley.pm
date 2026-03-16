@@ -98,6 +98,25 @@ class Chalk::Bootstrap::Earley {
     field %_profile_data;
     method profile_data() { return \%_profile_data; }
 
+    # Debug: dump the minimum origin at each active chart position.
+    # Called after parse to inspect what's keeping positions alive.
+    method debug_chart_origins($chart_ref) {
+        my @chart = $chart_ref->@*;
+        my %origin_at_pos;
+        for my $pos (0 .. $#chart) {
+            next unless defined $chart[$pos] && $chart[$pos]->@*;
+            my $min_origin = $pos;
+            for my $oh ($chart[$pos]->@*) {
+                next unless defined $oh;
+                for my $o (keys $oh->%*) {
+                    $min_origin = $o if $o < $min_origin;
+                }
+            }
+            $origin_at_pos{$pos} = $min_origin;
+        }
+        return \%origin_at_pos;
+    }
+
     # Chart access helpers. Chart structure: $chart[$pos][$core_id]{$origin} = [$item, $alt_idx]
     method _chart_has($chart, $pos, $core_id, $origin) {
         my $oh = $chart->[$pos][$core_id];
@@ -438,6 +457,27 @@ class Chalk::Bootstrap::Earley {
                     }
                 }
                 @pending_sweeps = ();
+            }
+
+            # Debug: compute true minimum origin across all active positions
+            if ($ENV{EARLEY_ORIGIN_DEBUG} && $pos > 0 && $pos % 10 == 0) {
+                my $true_min = $pos;
+                my $min_at_q = -1;
+                for my $q ($oldest_live_pos .. $pos) {
+                    next unless defined $chart[$q] && $chart[$q]->@*;
+                    for my $oh ($chart[$q]->@*) {
+                        next unless defined $oh;
+                        for my $o (keys $oh->%*) {
+                            if ($o < $true_min) {
+                                $true_min = $o;
+                                $min_at_q = $q;
+                            }
+                        }
+                    }
+                }
+                warn sprintf("ORIGIN_DEBUG pos=%d true_min=%d (at q=%d) oldest_live=%d could_free=%d\n",
+                    $pos, $true_min, $min_at_q, $oldest_live_pos,
+                    $true_min - $oldest_live_pos);
             }
 
             # Profiling: track chart size and live positions per position
