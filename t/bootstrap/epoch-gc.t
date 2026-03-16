@@ -150,4 +150,39 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
     cmp_ok($freed, '>', 0, "gc_freed > 0 after multi-statement parse (got $freed)");
 }
 
+# --- Component E: Full semiring parse has GC ---
+
+# Test 11: Full semiring parse frees positions
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $parser = build_perl_ir_parser($grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
+    my $result = $parser->parse_value("my \$a = 1;\nmy \$b = 2;\nmy \$c = 3;\n");
+    ok(defined $result, 'full semiring 3-statement parse succeeds');
+    my $gc = $parser->gc_stats();
+    my $freed = $gc->{positions_freed} // 0;
+    cmp_ok($freed, '>', 0, "full semiring gc_freed > 0 (got $freed)");
+}
+
+# Test 12: Parse result is correct despite GC
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $parser = build_perl_ir_parser($grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
+    my $result = $parser->parse_value("my \$x = 42;\n");
+    ok(defined $result, 'single statement parse with GC succeeds');
+    ok(!$semiring->is_zero($result), 'result is not zero');
+    # Check the SemanticAction produced a valid IR
+    my $sa_val = $result->[4];
+    ok(defined $sa_val, 'SemanticAction component has value');
+    if (defined $sa_val) {
+        my $ir = $sa_val->extract();
+        ok(defined $ir, 'IR extraction succeeds after GC');
+    }
+}
+
 done_testing();
