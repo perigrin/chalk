@@ -226,4 +226,64 @@ subtest 'BNF alternatives parsing with GC' => sub {
     ok(!$parser->parse('|'), 'rejects bare pipe');
 };
 
+# === Test 7: waiting_core_ids precomputed lookup table ===
+subtest 'waiting_core_ids precomputed from CoreItemIndex' => sub {
+    # Grammar: S ::= A B
+    #          A ::= /a/
+    #          B ::= /b/
+    my $sym_A = Chalk::Grammar::Symbol->new(type => 'reference', value => 'A');
+    my $sym_B = Chalk::Grammar::Symbol->new(type => 'reference', value => 'B');
+    my $sym_a = Chalk::Grammar::Symbol->new(type => 'terminal', value => 'a');
+    my $sym_b = Chalk::Grammar::Symbol->new(type => 'terminal', value => 'b');
+
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name => 'S',
+        expressions => [[$sym_A, $sym_B]],
+    );
+    my $rule_A = Chalk::Grammar::Rule->new(
+        name => 'A',
+        expressions => [[$sym_a]],
+    );
+    my $rule_B = Chalk::Grammar::Rule->new(
+        name => 'B',
+        expressions => [[$sym_b]],
+    );
+
+    my $grammar  = [$rule_S, $rule_A, $rule_B];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    my $waiting = $parser->waiting_core_ids();
+    ok(defined $waiting, 'waiting_core_ids() returns defined hashref');
+
+    # A is the first nonterminal after the dot in S -> . A B (dot=0)
+    ok(exists $waiting->{A}, 'waiting_core_ids has entry for A');
+    ok(scalar($waiting->{A}->@*) > 0, 'A has at least one waiting core ID');
+
+    # B is the nonterminal after the dot in S -> A . B (dot=1)
+    ok(exists $waiting->{B}, 'waiting_core_ids has entry for B');
+    ok(scalar($waiting->{B}->@*) > 0, 'B has at least one waiting core ID');
+
+    # Verify the core IDs point to the correct rule and dot positions
+    my $core_index = $parser->core_index();
+
+    # For A: the waiting item is S -> . A B, so rule_name=S, dot=0
+    my ($cid_for_A) = $waiting->{A}->@*;
+    my $info_A = $core_index->item_for($cid_for_A);
+    is($info_A->{rule_name}, 'S',  'core ID for A belongs to rule S');
+    is($info_A->{dot},       0,    'core ID for A has dot=0 (before A)');
+
+    # For B: the waiting item is S -> A . B, so rule_name=S, dot=1
+    my ($cid_for_B) = $waiting->{B}->@*;
+    my $info_B = $core_index->item_for($cid_for_B);
+    is($info_B->{rule_name}, 'S',  'core ID for B belongs to rule S');
+    is($info_B->{dot},       1,    'core ID for B has dot=1 (before B)');
+
+    # S has no entries — it appears nowhere as the next expected nonterminal
+    ok(!exists $waiting->{S}, 'S has no waiting core IDs (nothing expects S as next sym)');
+};
+
 done_testing;

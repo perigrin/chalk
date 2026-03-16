@@ -21,7 +21,7 @@ class Chalk::Bootstrap::Earley {
     field $rule_table;
 
     # Core item index: maps (rule_name, alt_idx, dot) to small integer IDs
-    field $core_index;
+    field $core_index :reader;
 
     # LR(0) DFA for prediction clustering
     field $lr0_dfa;
@@ -32,6 +32,13 @@ class Chalk::Bootstrap::Earley {
     # completed_at: {rule_name}{origin_pos}{chart_pos} = [[core_id, origin], ...] — completed items
     field %waiting_for;
     field %completed_at;
+
+    # Precomputed from CoreItemIndex: maps each nonterminal name to the list of
+    # core item IDs where the dot is immediately before that nonterminal.
+    # I.e., for nonterminal R, _waiting_core_ids{R} = [id, ...] where each id
+    # represents an item of the form [B -> alpha . R beta].
+    # Built once at construction time; never mutated during parsing.
+    field %_waiting_core_ids;
 
     # Leo items: {rule_name}{pos} = $leo_item
     # A Leo item represents a chain of deterministic completions,
@@ -87,7 +94,27 @@ class Chalk::Bootstrap::Earley {
             rule_table => $rule_table,
         );
         $lr0_dfa->build();
+
+        # Precompute %_waiting_core_ids: for each nonterminal R, collect all
+        # core item IDs where the dot immediately precedes R.
+        for my $id (0 .. $core_index->count() - 1) {
+            my $info = $core_index->item_for($id);
+            my $rule = $rule_table->{$info->{rule_name}};
+            my $rhs  = $rule->expressions()->[$info->{alt_idx}];
+            my $dot  = $info->{dot};
+            if ($dot < scalar($rhs->@*)) {
+                my $sym = $rhs->[$dot];
+                if ($sym->is_reference()) {
+                    $_waiting_core_ids{$sym->value()} //= [];
+                    push $_waiting_core_ids{$sym->value()}->@*, $id;
+                }
+            }
+        }
     }
+
+    # Precomputed lookup: nonterminal name => arrayref of core item IDs where
+    # the dot is immediately before that nonterminal.
+    method waiting_core_ids() { return \%_waiting_core_ids; }
 
     # GC statistics accessor
     method gc_stats() {
