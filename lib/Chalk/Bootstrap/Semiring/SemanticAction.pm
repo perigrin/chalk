@@ -285,6 +285,13 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
             $_cfg_state{refaddr($result_ctx)} = $inherited if defined $inherited;
         }
 
+        # Signal epoch boundary for statement-level completions.
+        # StatementItem wraps individual statements — its completion means
+        # the statement's internal parse positions can be swept.
+        if (defined $on_epoch_commit && $rule_name eq 'StatementItem') {
+            $on_epoch_commit->($item->{origin}, $pos);
+        }
+
         # Clear current_instance and type_context after on_complete to prevent stale access
         $_current_instance = undef;
         $_type_context = undef;

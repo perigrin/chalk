@@ -66,4 +66,69 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
     ok(!defined $callback_args, 'callback not fired without wiring (Component B needed)');
 }
 
+# --- Component B: SemanticAction fires callback on Statement completion ---
+
+# Test 5: SemanticAction calls on_epoch_commit for StatementItem rule
+{
+    use Chalk::Bootstrap::ConciseTree::Actions;
+    my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);
+
+    my @epochs;
+    my $cb = sub ($origin, $end) {
+        push @epochs, [$origin, $end];
+    };
+
+    # Simulate a completed StatementItem — the rule that wraps individual
+    # statements in the grammar
+    my $fake_rule = bless({}, 'FakeStatementRule');
+    no warnings 'redefine';
+    local *FakeStatementRule::name = sub { 'StatementItem' };
+    local *FakeStatementRule::expressions = sub { [[]] };
+
+    # Create a Context as the item value (SemanticAction expects this)
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => { class => 'VarDecl', inputs => [] },
+        children => [],
+        position => 0,
+    );
+
+    my $item = { rule => $fake_rule, value => $ctx, origin => 5 };
+    $sa->on_complete($item, 0, 20, $cb);
+
+    ok(scalar @epochs > 0, 'on_epoch_commit fires for StatementItem completion');
+    if (@epochs) {
+        is($epochs[0][0], 5, 'epoch origin matches item origin');
+        is($epochs[0][1], 20, 'epoch end matches completion position');
+    }
+}
+
+# Test 6: SemanticAction does NOT fire callback for non-statement rules
+{
+    use Chalk::Bootstrap::ConciseTree::Actions;
+    my $actions = Chalk::Bootstrap::ConciseTree::Actions->new();
+    my $sa = Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions);
+
+    my @epochs;
+    my $cb = sub ($origin, $end) {
+        push @epochs, [$origin, $end];
+    };
+
+    my $fake_rule = bless({}, 'FakeExprRule');
+    no warnings 'redefine';
+    local *FakeExprRule::name = sub { 'Expression' };
+    local *FakeExprRule::expressions = sub { [[]] };
+
+    my $ctx = Chalk::Bootstrap::Context->new(
+        focus    => { class => 'NumericLiteral', value => '42' },
+        children => [],
+        position => 0,
+    );
+
+    my $item = { rule => $fake_rule, value => $ctx, origin => 0 };
+    $sa->on_complete($item, 0, 5, $cb);
+
+    is(scalar @epochs, 0, 'on_epoch_commit does NOT fire for Expression completion');
+}
+
 done_testing();
