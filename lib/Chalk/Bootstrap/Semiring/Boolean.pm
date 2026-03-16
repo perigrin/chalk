@@ -49,7 +49,7 @@ class Chalk::Bootstrap::Semiring::Boolean {
     }
 
     # on_complete: no-op for Boolean, return value unchanged
-    method on_complete($item, $alt_idx, $pos) {
+    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
         return $item->{value};
     }
 

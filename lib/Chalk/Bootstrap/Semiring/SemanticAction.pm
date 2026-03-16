@@ -236,7 +236,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # Looks up action by rule_name via can(), applies via extend, sets rule field.
     # Not hash-consed: semantic actions may have side effects and the result
     # focus depends on the actions object, so caching by input refaddr is unsafe.
-    method on_complete($item, $alt_idx, $pos) {
+    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
         my $value = $item->{value};
         return undef if !defined $value;
 

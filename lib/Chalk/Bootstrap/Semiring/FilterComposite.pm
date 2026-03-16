@@ -200,7 +200,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # If any component returns zero, the whole tuple is zero.
     # Threads TypeInference result (index 2) to SemanticAction (index 4)
     # via set_type_context so SA actions can read type annotations.
-    method on_complete($item, $alt_idx, $pos) {
+    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
         my @results;
         my $ti_result;
         for my $i (0 .. scalar($semirings->@*) - 1) {
@@ -212,7 +212,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
                     && $sr->can('set_type_context')) {
                 $sr->set_type_context($ti_result);
             }
-            my $r = $sr->on_complete($component_item, $alt_idx, $pos);
+            my $r = $sr->on_complete($component_item, $alt_idx, $pos, $on_epoch_commit);
             return $self->zero() if $sr->is_zero($r);
             push @results, $r;
             # Capture TI result after it completes

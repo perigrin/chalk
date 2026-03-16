@@ -369,7 +369,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return $self->multiply($existing, $self->one());
     }
 
-    method on_complete($item, $alt_idx, $pos) {
+    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
         my $value = $item->{value};
         return undef if !defined $value;
 

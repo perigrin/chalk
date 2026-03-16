@@ -219,7 +219,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         return $existing;
     }
 
-    method on_complete($item, $alt_idx, $pos) {
+    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
         my $value = $item->{value};
         return $ZERO if $value == $ZERO;
 
