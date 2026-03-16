@@ -286,4 +286,135 @@ subtest 'waiting_core_ids precomputed from CoreItemIndex' => sub {
     ok(!exists $waiting->{S}, 'S has no waiting core IDs (nothing expects S as next sym)');
 };
 
+# === Test 8: Chart-based lookup correctness — deep completion chains ===
+# These tests verify that completion propagation works for grammars with
+# deep chains (right-recursive, left-recursive, ambiguous). They serve as
+# a regression baseline for the chart-based _complete rewrite.
+subtest 'chart-based completion: right-recursive chain' => sub {
+    # Grammar: S ::= /a/ S | /a/
+    # Right-recursive — requires long completion chains propagating back
+    # through many chart positions, stressing the completion mechanism.
+    my $sym_S   = Chalk::Grammar::Symbol->new(type => 'reference', value => 'S');
+    my $sym_a   = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'a');
+
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name        => 'S',
+        expressions => [[$sym_a, $sym_S], [$sym_a]],
+    );
+
+    my $grammar  = [$rule_S];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    ok($parser->parse('a'),           'right-recursive: accepts "a"');
+    ok($parser->parse('aa'),          'right-recursive: accepts "aa"');
+    ok($parser->parse('a' x 20),     'right-recursive: accepts 20 "a"s');
+    ok(!$parser->parse(''),           'right-recursive: rejects empty');
+    ok(!$parser->parse('b'),          'right-recursive: rejects "b"');
+    ok(!$parser->parse('ab'),         'right-recursive: rejects "ab"');
+};
+
+subtest 'chart-based completion: left-recursive chain' => sub {
+    # Grammar: S ::= S /a/ | /a/
+    # Left-recursive — requires Leo optimization to work efficiently;
+    # also exercises the case where completions trigger backward-looking
+    # chart lookups across many positions.
+    my $sym_S   = Chalk::Grammar::Symbol->new(type => 'reference', value => 'S');
+    my $sym_a   = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'a');
+
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name        => 'S',
+        expressions => [[$sym_S, $sym_a], [$sym_a]],
+    );
+
+    my $grammar  = [$rule_S];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    ok($parser->parse('a'),           'left-recursive: accepts "a"');
+    ok($parser->parse('aa'),          'left-recursive: accepts "aa"');
+    ok($parser->parse('a' x 20),     'left-recursive: accepts 20 "a"s');
+    ok(!$parser->parse(''),           'left-recursive: rejects empty');
+    ok(!$parser->parse('b'),          'left-recursive: rejects "b"');
+};
+
+subtest 'chart-based completion: multi-level nested completion' => sub {
+    # Grammar: S ::= A B C
+    #          A ::= /a/
+    #          B ::= /b/
+    #          C ::= /c/
+    # Three-level completion chain: C completes → advances B-item → B
+    # completes → advances A-item → A completes → advances S-item.
+    my $sym_A = Chalk::Grammar::Symbol->new(type => 'reference', value => 'A');
+    my $sym_B = Chalk::Grammar::Symbol->new(type => 'reference', value => 'B');
+    my $sym_C = Chalk::Grammar::Symbol->new(type => 'reference', value => 'C');
+    my $sym_a = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'a');
+    my $sym_b = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'b');
+    my $sym_c = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'c');
+
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name        => 'S',
+        expressions => [[$sym_A, $sym_B, $sym_C]],
+    );
+    my $rule_A = Chalk::Grammar::Rule->new(
+        name        => 'A',
+        expressions => [[$sym_a]],
+    );
+    my $rule_B = Chalk::Grammar::Rule->new(
+        name        => 'B',
+        expressions => [[$sym_b]],
+    );
+    my $rule_C = Chalk::Grammar::Rule->new(
+        name        => 'C',
+        expressions => [[$sym_c]],
+    );
+
+    my $grammar  = [$rule_S, $rule_A, $rule_B, $rule_C];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    ok($parser->parse('abc'),  'nested: accepts "abc"');
+    ok(!$parser->parse('ab'),  'nested: rejects "ab" (missing C)');
+    ok(!$parser->parse('ac'),  'nested: rejects "ac" (missing B)');
+    ok(!$parser->parse('bc'),  'nested: rejects "bc" (missing A)');
+    ok(!$parser->parse('cba'), 'nested: rejects "cba"');
+};
+
+subtest 'chart-based completion: ambiguous grammar' => sub {
+    # Grammar: E ::= E /\+/ E | /\d+/
+    # Ambiguous: "1+2+3" has two parse trees.
+    # Tests that the Boolean semiring (which uses add/multiply = or/and)
+    # handles ambiguous completions without dying.
+    my $sym_E    = Chalk::Grammar::Symbol->new(type => 'reference', value => 'E');
+    my $sym_plus = Chalk::Grammar::Symbol->new(type => 'terminal',  value => '\\+');
+    my $sym_num  = Chalk::Grammar::Symbol->new(type => 'terminal',  value => '\\d+');
+
+    my $rule_E = Chalk::Grammar::Rule->new(
+        name        => 'E',
+        expressions => [[$sym_E, $sym_plus, $sym_E], [$sym_num]],
+    );
+
+    my $grammar  = [$rule_E];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    ok($parser->parse('1'),     'ambiguous: accepts single number');
+    ok($parser->parse('1+2'),   'ambiguous: accepts "1+2"');
+    ok($parser->parse('1+2+3'), 'ambiguous: accepts "1+2+3" (ambiguous)');
+    ok(!$parser->parse('+'),    'ambiguous: rejects bare "+"');
+    ok(!$parser->parse('1+'),   'ambiguous: rejects trailing "+"');
+};
+
 done_testing;

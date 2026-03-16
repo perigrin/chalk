@@ -868,7 +868,9 @@ class Chalk::Bootstrap::Earley {
     }
 
     # Complete: combine completed items with items waiting for them.
-    # Uses %waiting_for index for O(1) lookup instead of scanning the full chart.
+    # Uses %_waiting_core_ids (precomputed at construction) to identify which
+    # core item IDs can be waiting for the completed nonterminal, then scans
+    # the chart at the completion origin to find all live waiting items.
     # Leo optimization: when a completion is deterministic (exactly one waiting
     # item, at penultimate position), create a Leo item that represents the
     # entire chain of completions in O(1) instead of O(n).
@@ -918,68 +920,72 @@ class Chalk::Bootstrap::Earley {
             $leo_resolved_origin = $leo->{wait_origin};
         }
 
-        # Look up items at origin that are waiting for this rule name
-        my $waiting_refs = $waiting_for{$rule_name}{$origin};
-        return unless defined $waiting_refs;
+        # Look up items waiting for this rule name via chart-based scan.
+        # %_waiting_core_ids{$rule_name} lists the core item IDs where the dot
+        # is immediately before $rule_name. We scan chart[$origin][core_id] for
+        # each such core_id to find all live waiting items (keyed by w_origin).
+        my $chart_waiting_ids = $_waiting_core_ids{$rule_name};
+        return unless defined $chart_waiting_ids;
 
         # Count non-zero waiting items and track the single candidate for Leo
         my $eligible_count = 0;
         my $leo_candidate_entry;
         my $leo_candidate_value;
 
-        for my $wref ($waiting_refs->@*) {
-            my ($w_core_id, $w_origin) = $wref->@*;
+        for my $w_core_id ($chart_waiting_ids->@*) {
+            my $oh = $chart->[$origin][$w_core_id];
+            next unless defined $oh;
 
-            # Skip the waiting item already handled by Leo resolution above.
-            # Uses explicit if-block because postfix `next if ... &&` miscompiles
-            # in XS codegen (garbled eval_pv fallback).
-            if (defined $leo_resolved_core_id) {
-                next if $w_core_id == $leo_resolved_core_id
-                    && $w_origin  == $leo_resolved_origin;
-            }
-
-            my $entry = $self->_chart_get($chart, $origin, $w_core_id, $w_origin);
-            next unless defined $entry;
-            my ($waiting_item, $waiting_alt_idx) = $entry->@*;
-
-            # Advance the waiting item
-            my $new_value = $semiring->multiply($waiting_item->{value}, $completed_item->{value});
-
-            # Skip if multiply produced zero — don't propagate rejected
-            # completions (e.g. keyword-as-Identifier) to parent items
-            next if $semiring->is_zero($new_value);
-
-            my $new_item = $self->_advance_item($waiting_item, $new_value);
-
-            my $new_core_id = $new_item->{core_id};
-            my $new_origin = $new_item->{origin};
-
-            if ($self->_chart_has($chart, $pos, $new_core_id, $new_origin)) {
-                # Merge with existing item using semiring add (create new item, don't mutate)
-                my $existing = $self->_chart_get($chart, $pos, $new_core_id, $new_origin)->[0];
-                my $merged_value;
-                try {
-                    $merged_value = $semiring->add($existing->{value}, $new_item->{value});
-                } catch ($e) {
-                    my $rule_name = $existing->{rule}->name();
-                    my $dot = $existing->{dot};
-                    my $origin = $existing->{origin};
-                    my $comp_rule = $completed_item->{rule}->name();
-                    my $comp_origin = $completed_item->{origin};
-                    die "Ambiguity in rule '$rule_name' (dot=$dot, origin=$origin, pos=$pos) "
-                        . "completing='$comp_rule' (origin=$comp_origin): $e";
+            for my $w_origin (keys $oh->%*) {
+                # Skip the waiting item already handled by Leo resolution above.
+                # Uses explicit if-block because postfix `next if ... &&` miscompiles
+                # in XS codegen (garbled eval_pv fallback).
+                if (defined $leo_resolved_core_id) {
+                    next if $w_core_id == $leo_resolved_core_id
+                        && $w_origin  == $leo_resolved_origin;
                 }
-                my $merged_item = { %$existing, value => $merged_value };
-                $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $waiting_alt_idx]);
-            } else {
-                $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $waiting_alt_idx]);
-                push $agenda->@*, [$new_item, $waiting_alt_idx];
-            }
 
-            # Track Leo eligibility: count non-zero waiting items
-            $eligible_count++;
-            $leo_candidate_entry = $entry;
-            $leo_candidate_value = $new_value;
+                my $entry = $oh->{$w_origin};
+                next unless defined $entry;
+                my ($waiting_item, $waiting_alt_idx) = $entry->@*;
+
+                # Advance the waiting item
+                my $new_value = $semiring->multiply($waiting_item->{value}, $completed_item->{value});
+
+                # Skip if multiply produced zero — don't propagate rejected
+                # completions (e.g. keyword-as-Identifier) to parent items
+                next if $semiring->is_zero($new_value);
+
+                my $new_item = $self->_advance_item($waiting_item, $new_value);
+
+                my $new_core_id = $new_item->{core_id};
+                my $new_origin  = $new_item->{origin};
+
+                if ($self->_chart_has($chart, $pos, $new_core_id, $new_origin)) {
+                    # Merge with existing item using semiring add (create new item, don't mutate)
+                    my $existing = $self->_chart_get($chart, $pos, $new_core_id, $new_origin)->[0];
+                    my $merged_value;
+                    try {
+                        $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+                    } catch ($e) {
+                        my $rn     = $existing->{rule}->name();
+                        my $dot    = $existing->{dot};
+                        my $e_orig = $existing->{origin};
+                        die "Ambiguity in rule '$rn' (dot=$dot, origin=$e_orig, pos=$pos) "
+                            . "completing='$rule_name' (origin=$origin): $e";
+                    }
+                    my $merged_item = { %$existing, value => $merged_value };
+                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $waiting_alt_idx]);
+                } else {
+                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $waiting_alt_idx]);
+                    push $agenda->@*, [$new_item, $waiting_alt_idx];
+                }
+
+                # Track Leo eligibility: count non-zero waiting items
+                $eligible_count++;
+                $leo_candidate_entry = $entry;
+                $leo_candidate_value = $new_value;
+            }
         }
 
         # Leo creation: if exactly one waiting item produced a non-zero result
