@@ -417,4 +417,23 @@ subtest 'chart-based completion: ambiguous grammar' => sub {
     ok(!$parser->parse('1+'),   'ambiguous: rejects trailing "+"');
 };
 
+# === Test 13: Parser works without %waiting_for index ===
+subtest 'parser works without waiting_for index' => sub {
+    # Right-recursive grammar (deep completion chains) — validates that
+    # chart-based lookup alone drives completion correctly.
+    my $sym_S = Chalk::Grammar::Symbol->new(type => 'reference', value => 'S');
+    my $sym_a = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'a');
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name => 'S', expressions => [[$sym_a, $sym_S], [$sym_a]],
+    );
+    my $grammar  = [$rule_S];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar => $grammar, semiring => $semiring,
+    );
+    ok($parser->parse('a' x 100), 'right-recursive 100 chars without waiting_for');
+    ok($parser->parse('a'),        'single char');
+    ok(!$parser->parse('b'),       'rejects invalid');
+};
+
 done_testing;

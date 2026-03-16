@@ -28,9 +28,7 @@ class Chalk::Bootstrap::Earley {
 
     # Secondary indexes for O(1) lookup during complete/advance
     # Reset at the start of each parse.
-    # waiting_for: {rule_name}{pos} = [[core_id, origin], ...] — items waiting for a nonterminal
     # completed_at: {rule_name}{origin_pos}{chart_pos} = [[core_id, origin], ...] — completed items
-    field %waiting_for;
     field %completed_at;
 
     # Precomputed from CoreItemIndex: maps each nonterminal name to the list of
@@ -48,9 +46,13 @@ class Chalk::Bootstrap::Earley {
     # Whether the semiring supports Leo optimization (cached at construction)
     field $_leo_enabled;
 
-    # Minimum position referenced by waiting_for entries and Leo item origins
+    # Minimum origin across all items placed in the chart this parse.
+    # Updated O(1) per insert in _chart_set; used as a conservative lower
+    # bound for the GC safe floor (chart[$origin] is read by _complete).
+    field $_chart_origin_min;
+
+    # Minimum Leo item origin position
     # (tracked incrementally to avoid O(n) scan at every GC step)
-    field $_waiting_for_min;
     field $_leo_origin_min;
 
     # Scan result cache: {pos}{pattern_string} => $end_pos (or undef)
@@ -215,6 +217,9 @@ class Chalk::Bootstrap::Earley {
         # Track minimum origin per position for GC
         $_gc_min_origin_at[$pos] = $origin
             if !defined $_gc_min_origin_at[$pos] || $origin < $_gc_min_origin_at[$pos];
+        # Track global minimum origin across all chart positions (O(1) per insert)
+        $_chart_origin_min = $origin
+            if !defined $_chart_origin_min || $origin < $_chart_origin_min;
         # Track minimum origin across future positions (items placed by scan)
         if (defined $_gc_current_pos && $pos > $_gc_current_pos) {
             $_gc_future_min = $origin
@@ -280,11 +285,10 @@ class Chalk::Bootstrap::Earley {
         my @chart = map { [] } (0 .. $n);
 
         # Reset secondary indexes for this parse
-        %waiting_for = ();
         %completed_at = ();
         %leo_items = ();
         %_scan_cache = ();
-        $_waiting_for_min = 0;
+        $_chart_origin_min = undef;
         $_leo_origin_min = undef;
         %_gc_stats = (positions_freed => 0);
         $_last_active_pos = 0;
@@ -423,9 +427,6 @@ class Chalk::Bootstrap::Earley {
                             }
                         }
 
-                        # Index this item as waiting for the nonterminal
-                        $waiting_for{$w_rule}{$pos} //= [];
-                        push $waiting_for{$w_rule}{$pos}->@*, [$core_id, $origin];
                         # Predict
                         $self->_predict($symbol, $pos, \@chart, \@agenda, \%predicted_at);
                         # Advance from already-completed items at this position.
@@ -471,16 +472,17 @@ class Chalk::Bootstrap::Earley {
                 }
             }
 
-            # Safe-set chart GC: determine the safe floor using incrementally
-            # tracked minimum positions. _complete reads chart[$origin] to
-            # find waiting items, so any position that has waiting items must
-            # stay alive. $_waiting_for_min is updated when entries are added
-            # to %waiting_for, avoiding O(n) scan per position.
+            # Safe-set chart GC: determine the safe floor. _complete reads
+            # chart[$origin] to find waiting items via _waiting_core_ids, so
+            # any chart position that is an origin for items at a later position
+            # must remain live until those items are processed.
+            # $_chart_origin_min is maintained O(1) per insert in _chart_set.
             {
                 my $safe_floor = $pos;
-                # Use incrementally tracked minimums from waiting_for and Leo items
-                $safe_floor = $_waiting_for_min
-                    if defined $_waiting_for_min && $_waiting_for_min < $safe_floor;
+                # Protect positions referenced as origins by live chart items
+                $safe_floor = $_chart_origin_min
+                    if defined $_chart_origin_min && $_chart_origin_min < $safe_floor;
+                # Also protect Leo item origin positions
                 $safe_floor = $_leo_origin_min
                     if defined $_leo_origin_min && $_leo_origin_min < $safe_floor;
                 # Also check future items placed by scanning
@@ -548,7 +550,7 @@ class Chalk::Bootstrap::Earley {
             # TODO: detection is too aggressive, breaks BNF pipeline parse.
             # Need to investigate Property 2 check.
             # TODO: safe-set detection works (Properties 1-3) but window
-            # freeing breaks cross-boundary references in waiting_for/completed_at.
+            # freeing breaks cross-boundary references in completed_at.
             # Need to also clean up these indexes or defer freeing.
             if (false && $self->_is_safe_set(\@chart, $pos)) {
                 if ($last_safe_pos >= 0 && $pos > $last_safe_pos + 1) {
@@ -557,10 +559,6 @@ class Chalk::Bootstrap::Earley {
                             $chart[$sp] = [];
                             delete $_scan_cache{$sp};
                             $_gc_stats{positions_freed}++;
-                        }
-                        # Clean up waiting_for entries at freed positions
-                        for my $rule_name (keys %waiting_for) {
-                            delete $waiting_for{$rule_name}{$sp};
                         }
                         # Clean up completed_at entries at freed positions
                         for my $rule_name (keys %completed_at) {
