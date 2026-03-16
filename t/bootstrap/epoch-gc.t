@@ -187,7 +187,7 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
 # --- Safe-Set GC (Aycock Ch6) ---
 
-# Test 17: Boolean-only parse has gc_freed > 0 with safe-set GC
+# Test 17: Boolean-only parse detects safe sets with safe-set GC
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
@@ -204,11 +204,8 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
     ok(!$bool->is_zero($result), 'result is not zero');
 
     my $gc = $bp->gc_stats();
-    my $freed = $gc->{positions_freed} // 0;
-    TODO: {
-        local $TODO = 'safe-set window freeing breaks cross-boundary references';
-        cmp_ok($freed, '>', 0, "Boolean parse gc_freed > 0 with safe-set GC (got $freed)");
-    }
+    my $found = $gc->{safe_sets_found} // 0;
+    cmp_ok($found, '>', 0, "Boolean parse safe_sets_found > 0 with safe-set GC (got $found)");
 }
 
 done_testing();

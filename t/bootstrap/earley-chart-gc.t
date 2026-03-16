@@ -126,7 +126,9 @@ subtest 'gc_stats tracking' => sub {
     my $stats = $parser->gc_stats();
     ok(defined $stats, 'gc_stats returns defined value');
     ok(exists $stats->{positions_freed}, 'stats has positions_freed');
+    ok(exists $stats->{safe_sets_found}, 'stats has safe_sets_found');
     cmp_ok($stats->{positions_freed}, '>=', 0, 'positions_freed is non-negative');
+    cmp_ok($stats->{safe_sets_found}, '>=', 0, 'safe_sets_found is non-negative');
 };
 
 # === Test 4b: GC frees positions in list-like grammar ===
@@ -415,6 +417,75 @@ subtest 'chart-based completion: ambiguous grammar' => sub {
     ok($parser->parse('1+2+3'), 'ambiguous: accepts "1+2+3" (ambiguous)');
     ok(!$parser->parse('+'),    'ambiguous: rejects bare "+"');
     ok(!$parser->parse('1+'),   'ambiguous: rejects trailing "+"');
+};
+
+# === Test 14: safe-set GC detects safe sets in list grammar ===
+subtest 'safe-set GC detects safe sets' => sub {
+    # Grammar: Program ::= Program /;/ Stmt | Stmt
+    #          Stmt    ::= /a/
+    #
+    # This terminal-separator grammar produces safe-set detections.
+    # At each Stmt completion position (after /a/), Property 2 passes:
+    #   - final_last_symbols = { a, Stmt } (from Stmt->a. and Program->Stmt.)
+    #   - The in-progress item Program->Program . /;/ Stmt has sym_after_dot=';'
+    #   - ';' is NOT in final_last_symbols, so Property 2 passes
+    #   - Property 3 passes (no nullable completions)
+    #   -> safe-set fires, safe_sets_found increments
+    #
+    # Note: actual positions_freed may be 0 for short inputs because the
+    # origin guard protects positions needed by in-progress multi-token rules.
+    # safe_sets_found > 0 verifies the detection algorithm works correctly.
+    my $sym_Program = Chalk::Grammar::Symbol->new(type => 'reference', value => 'Program');
+    my $sym_Stmt    = Chalk::Grammar::Symbol->new(type => 'reference', value => 'Stmt');
+    my $sym_a       = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'a');
+    my $sym_semi    = Chalk::Grammar::Symbol->new(type => 'terminal',  value => ';');
+
+    my $rule_Program = Chalk::Grammar::Rule->new(
+        name => 'Program', expressions => [[$sym_Program, $sym_semi, $sym_Stmt], [$sym_Stmt]],
+    );
+    my $rule_Stmt = Chalk::Grammar::Rule->new(
+        name => 'Stmt', expressions => [[$sym_a]],
+    );
+
+    my $grammar  = [$rule_Program, $rule_Stmt];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    my $input = join(';', ('a') x 20);
+    ok($parser->parse($input), 'accepts 20-statement program');
+    my $stats = $parser->gc_stats();
+    cmp_ok($stats->{safe_sets_found}, '>', 0,
+        "safe-set GC detected safe sets (got $stats->{safe_sets_found})");
+};
+
+# === Test 15: safe-set GC preserves correctness on left-recursive grammar ===
+subtest 'safe-set GC preserves parse correctness on long inputs' => sub {
+    # Grammar: S ::= S /a/ | S /b/ | /a/ | /b/
+    # Left-recursive — stresses the GC by having a rule that accumulates
+    # completions across many positions.
+    my $sym_S = Chalk::Grammar::Symbol->new(type => 'reference', value => 'S');
+    my $sym_a = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'a');
+    my $sym_b = Chalk::Grammar::Symbol->new(type => 'terminal',  value => 'b');
+
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name => 'S',
+        expressions => [[$sym_S, $sym_a], [$sym_S, $sym_b], [$sym_a], [$sym_b]],
+    );
+
+    my $grammar  = [$rule_S];
+    my $semiring = Chalk::Bootstrap::Semiring::Boolean->new();
+    my $parser   = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    ok($parser->parse('abababab'), 'left-recursive: accepts mixed input');
+    ok($parser->parse('a' x 200), 'left-recursive: accepts 200 chars');
+    ok(!$parser->parse(''),       'left-recursive: rejects empty');
+    ok(!$parser->parse('c'),      'left-recursive: rejects invalid');
 };
 
 # === Test 13: Parser works without %waiting_for index ===

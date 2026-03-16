@@ -134,44 +134,85 @@ class Chalk::Bootstrap::Earley {
     #   1. At least one final (completed) item exists
     #   2. No non-final item competes for the same last symbol as a final item
     #   3. No nullable (empty rule) final items
+    # Check whether position $pos is an Aycock safe set (Chapter 6).
+    # A position is safe when there is no ambiguity about what was just
+    # recognized, so the chart window before it can be freed.
+    #
+    # Three properties must hold (Aycock §6.2):
+    #   Property 1: at least one final item (completed rule) at this position.
+    #   Property 2: no non-final item's last-consumed symbol matches any final
+    #               item's last symbol. "Last-consumed" = symbol before the dot
+    #               (dot > 0 items only; predicted items with dot=0 have no
+    #               consumed symbol and cannot conflict).
+    #   Property 3: no final item resulted from an empty (nullable) rule.
+    #
+    # Note: left-recursive list grammars `A ::= A B | B` produce safe-set
+    # boundaries at each `B` completion because the in-progress item
+    # `A -> A . B` has last_consumed=`A`, which is never in the final items'
+    # last_symbols set (those contain `B` or whatever B ends with).
+    # Right-recursive grammars `A ::= B A | B` do NOT produce safe-set
+    # boundaries because the in-progress item `A -> B . A` has
+    # last_consumed=`B`, which conflicts with the base-case `A -> B .`
+    # whose last_symbol is also `B`.
     method _is_safe_set($chart, $pos) {
         my @final_items;
         my %final_last_symbols;
 
+        # Pass 1: collect final items and their last symbols
         for my $oh ($chart->[$pos]->@*) {
             next unless defined $oh;
             for my $entry (values $oh->%*) {
-                my $item = $entry->[0];
+                my $item    = $entry->[0];
                 my $alt_idx = $entry->[1];
-                if ($self->_is_complete($item, $alt_idx)) {
-                    # Property 3: reject nullable completions (dot == 0 means empty rule)
-                    my $rhs = $item->{rule}->expressions()->[$alt_idx];
-                    return false if scalar($rhs->@*) == 0;
+                next unless $self->_is_complete($item, $alt_idx);
 
-                    push @final_items, $item;
-                    # Track the last symbol of the completed rule's RHS
-                    if ($rhs->@*) {
-                        my $last_sym = $rhs->[-1];
-                        $final_last_symbols{$last_sym->value()} = 1;
-                    }
-                }
+                my $rhs = $item->{rule}->expressions()->[$alt_idx];
+                # Property 3: reject empty-rule completions
+                return false if scalar($rhs->@*) == 0;
+
+                push @final_items, $item;
+                $final_last_symbols{$rhs->[-1]->value()} = 1 if $rhs->@*;
             }
         }
 
         # Property 1: must have at least one final item
         return false unless @final_items;
 
-        # Property 2: no non-final item is waiting for a symbol that a
-        # final item just completed over
+        if ($ENV{EARLEY_SAFE_DEBUG}) {
+            warn sprintf("SAFE_SET_TRACE pos=%d final_count=%d last_syms=%s\n",
+                $pos, scalar @final_items, join(',', sort keys %final_last_symbols));
+        }
+
+        # Pass 2: check Property 2 — no non-final item at this position is
+        # expecting a symbol that a final item just completed over.
+        # This checks the symbol AFTER the dot (the next expected symbol),
+        # which catches both:
+        #   - in-progress items (dot > 0) that have consumed up to a
+        #     symbol that conflicts with a final item's last symbol
+        #   - predicted items (dot = 0) that expect the same symbol as
+        #     a final item's last symbol (indicating ambiguity about
+        #     whether the symbol was "consumed" or "expected next")
+        #
+        # The more liberal "last-consumed" (symbol before dot) check from
+        # Aycock's spec is valid in theory but allows false safe-sets
+        # for grammars with zero-matching terminals (like /(?:\s|#[^\n]*)*/)
+        # because predicted items at dot=0 are skipped, missing cases where
+        # a newly predicted rule expects the same symbol a final rule matched.
         for my $oh ($chart->[$pos]->@*) {
             next unless defined $oh;
             for my $entry (values $oh->%*) {
-                my $item = $entry->[0];
+                my $item    = $entry->[0];
                 my $alt_idx = $entry->[1];
                 next if $self->_is_complete($item, $alt_idx);
+
                 my $sym = $self->_symbol_after_dot($item, $alt_idx);
                 next unless defined $sym;
+
                 if (exists $final_last_symbols{$sym->value()}) {
+                    if ($ENV{EARLEY_SAFE_DEBUG}) {
+                        warn sprintf("SAFE_SET_TRACE pos=%d Property2_fail rule=%s dot=%d sym_after_dot=%s\n",
+                            $pos, $item->{rule}->name(), $item->{dot}, $sym->value());
+                    }
                     return false;
                 }
             }
@@ -290,7 +331,7 @@ class Chalk::Bootstrap::Earley {
         %_scan_cache = ();
         $_chart_origin_min = undef;
         $_leo_origin_min = undef;
-        %_gc_stats = (positions_freed => 0);
+        %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
         $_last_active_pos = 0;
         $_diag_expected = {};
         @_gc_min_origin_at = ();
@@ -547,14 +588,51 @@ class Chalk::Bootstrap::Earley {
 
             # Aycock safe-set GC: if this position is a safe set, free
             # all chart positions between the previous safe set and this one.
-            # TODO: detection is too aggressive, breaks BNF pipeline parse.
-            # Need to investigate Property 2 check.
-            # TODO: safe-set detection works (Properties 1-3) but window
-            # freeing breaks cross-boundary references in completed_at.
-            # Need to also clean up these indexes or defer freeing.
-            if (false && $self->_is_safe_set(\@chart, $pos)) {
+            # Only positions strictly interior to the window are freed;
+            # the safe-set boundary positions themselves are kept alive.
+            #
+            # Safety guard: find the minimum origin referenced by any item
+            # at the current position. Only positions strictly below this
+            # minimum (but within the window) can be freed. This prevents
+            # freeing positions that active items (at pos) reference as origins,
+            # which would cause _complete to fail silently when looking up
+            # chart[origin] for those items.
+            if ($self->_is_safe_set(\@chart, $pos)) {
                 if ($last_safe_pos >= 0 && $pos > $last_safe_pos + 1) {
-                    for my $sp ($last_safe_pos + 1 .. $pos - 1) {
+                    # Find the minimum origin referenced by any OPEN item
+                    # across ALL chart positions in the candidate window
+                    # (last_safe_pos+1 .. pos). This includes items at the
+                    # current position (pos) AND at intermediate positions —
+                    # any open item referencing an origin within the window
+                    # will need that origin position to be live when it
+                    # eventually completes and _complete looks up chart[origin].
+                    #
+                    # Final items have already fired _complete and no longer
+                    # need their origin positions. Only OPEN items require
+                    # their origin to remain live.
+                    my $min_window_origin = $pos;
+                    for my $check_pos ($last_safe_pos + 1 .. $pos) {
+                        next unless defined $chart[$check_pos] && $chart[$check_pos]->@*;
+                        for my $cid (0 .. $#{ $chart[$check_pos] }) {
+                            my $oh = $chart[$check_pos][$cid];
+                            next unless defined $oh;
+                            for my $org (keys $oh->%*) {
+                                next unless $org > $last_safe_pos && $org < $pos;
+                                next unless $org < $min_window_origin;
+                                my $entry = $oh->{$org};
+                                next unless defined $entry;
+                                my ($it, $ai) = $entry->@*;
+                                # Skip final items — they've already used their origin
+                                next if $self->_is_complete($it, $ai);
+                                $min_window_origin = $org;
+                            }
+                        }
+                    }
+                    # Only free positions strictly below min_window_origin.
+                    # This preserves positions that items at pos reference
+                    # as their origins (needed by _complete lookups).
+                    my $free_end = $min_window_origin - 1;
+                    for my $sp ($last_safe_pos + 1 .. $free_end) {
                         if (defined $chart[$sp] && $chart[$sp]->@*) {
                             $chart[$sp] = [];
                             delete $_scan_cache{$sp};
@@ -568,10 +646,16 @@ class Chalk::Bootstrap::Earley {
                             delete $completed_at{$rule_name}{$sp};
                         }
                     }
+                    if ($ENV{EARLEY_SAFE_DEBUG}) {
+                        warn sprintf("SAFE_SET_WINDOW pos=%d last_safe=%d min_window_origin=%d free_end=%d freed=%d\n",
+                            $pos, $last_safe_pos, $min_window_origin, $free_end,
+                            $free_end >= $last_safe_pos + 1 ? $free_end - $last_safe_pos : 0);
+                    }
                     $oldest_live_pos = $last_safe_pos
                         if $last_safe_pos > $oldest_live_pos;
                 }
                 $last_safe_pos = $pos;
+                $_gc_stats{safe_sets_found}++;
             }
 
             # Debug: compute true minimum origin across all active positions
