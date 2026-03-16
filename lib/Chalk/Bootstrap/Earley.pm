@@ -94,6 +94,10 @@ class Chalk::Bootstrap::Earley {
         return \%_gc_stats;
     }
 
+    # Detailed parse profiling — enabled by setting $ENV{EARLEY_PROFILE}
+    field %_profile_data;
+    method profile_data() { return \%_profile_data; }
+
     # Chart access helpers. Chart structure: $chart[$pos][$core_id]{$origin} = [$item, $alt_idx]
     method _chart_has($chart, $pos, $core_id, $origin) {
         my $oh = $chart->[$pos][$core_id];
@@ -383,6 +387,33 @@ class Chalk::Bootstrap::Earley {
                     }
                 }
                 $oldest_live_pos = $safe_floor if $safe_floor > $oldest_live_pos;
+            }
+
+            # Profiling: track chart size and live positions per position
+            if ($ENV{EARLEY_PROFILE}) {
+                my $items_at_pos = 0;
+                for my $oh ($chart[$pos]->@*) {
+                    next unless defined $oh;
+                    $items_at_pos += scalar keys $oh->%*;
+                }
+                $_profile_data{total_items} += $items_at_pos;
+                if ($items_at_pos > ($_profile_data{max_items_at_pos} // 0)) {
+                    $_profile_data{max_items_at_pos} = $items_at_pos;
+                    $_profile_data{max_items_pos} = $pos;
+                }
+                $_profile_data{live_positions} = $pos - $oldest_live_pos + 1;
+                $_profile_data{last_pos} = $pos;
+                # Sample every 1000 positions
+                if ($pos % 1000 == 0 && $pos > 0) {
+                    my $rss = 0;
+                    if (open my $sf, '<', '/proc/self/status') {
+                        while (<$sf>) { $rss = $1 if /VmRSS:\s+(\d+)/ }
+                        close $sf;
+                    }
+                    warn sprintf("PROFILE pos=%d items_here=%d total=%d max=%d live_span=%d rss=%dkB\n",
+                        $pos, $items_at_pos, $_profile_data{total_items},
+                        $_profile_data{max_items_at_pos}, $_profile_data{live_positions}, $rss);
+                }
             }
         }
 
