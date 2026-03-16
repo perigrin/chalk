@@ -205,6 +205,12 @@ class Chalk::Bootstrap::Earley {
         # GC tracking
         my $oldest_live_pos = 0;
 
+        # Epoch GC: callback for statement-boundary sweeping
+        my @pending_sweeps;
+        my $on_epoch_commit = sub ($origin, $end) {
+            push @pending_sweeps, [$origin, $end];
+        };
+
         # Process each chart position
         for my $pos (0 .. $n) {
             $_gc_current_pos = $pos;
@@ -252,7 +258,7 @@ class Chalk::Bootstrap::Earley {
 
                 if ($self->_is_complete($item, $alt_idx)) {
                     # Apply on_complete for completed rule before propagating
-                    my $completed_value = $semiring->on_complete($item, $alt_idx, $pos);
+                    my $completed_value = $semiring->on_complete($item, $alt_idx, $pos, $on_epoch_commit);
                     $item = { %$item, value => $completed_value };
                     # Update the chart entry with the action-applied value
                     $chart[$pos][$core_id]{$origin} = [$item, $alt_idx];
@@ -266,7 +272,7 @@ class Chalk::Bootstrap::Earley {
                     # keyword-as-Identifier) must not poison parent items
                     # via multiply — the valid parse path will supply
                     # the correct value independently.
-                    next if $semiring->is_zero($completed_value);
+                    next if !defined($completed_value) || $semiring->is_zero($completed_value);
                     # Complete
                     $self->_complete($item, $alt_idx, $pos, \@chart, \@agenda);
                 } else {
@@ -387,6 +393,51 @@ class Chalk::Bootstrap::Earley {
                     }
                 }
                 $oldest_live_pos = $safe_floor if $safe_floor > $oldest_live_pos;
+            }
+
+            # Epoch GC: drain pending sweeps after position is fully processed
+            if (@pending_sweeps) {
+                for my $sweep (@pending_sweeps) {
+                    my ($sweep_origin, $sweep_end) = $sweep->@*;
+                    # Phase 1: null values for epoch-internal items.
+                    # Skip the origin position — it has parent rule items
+                    # (Program, StatementList) that span beyond this epoch.
+                    for my $sp ($sweep_origin + 1 .. $sweep_end - 1) {
+                        next if $sp >= $pos;  # don't sweep current position
+                        my $slot = $chart[$sp];
+                        next unless defined $slot && $slot->@*;
+                        for my $oh ($slot->@*) {
+                            next unless defined $oh;
+                            for my $ok (keys $oh->%*) {
+                                next unless $ok >= $sweep_origin;
+                                $oh->{$ok}->[0]->{value} = undef
+                                    if defined $oh->{$ok}->[0]->{value};
+                            }
+                        }
+                    }
+                    # Phase 2: compact positions where all values are null
+                    for my $sp ($sweep_origin + 1 .. $sweep_end - 1) {
+                        next if $sp >= $pos;
+                        my $slot = $chart[$sp];
+                        next unless defined $slot && $slot->@*;
+                        my $all_null = true;
+                        SLOT_CHECK: for my $oh ($slot->@*) {
+                            next unless defined $oh;
+                            for my $entry (values $oh->%*) {
+                                if (defined $entry->[0]->{value}) {
+                                    $all_null = false;
+                                    last SLOT_CHECK;
+                                }
+                            }
+                        }
+                        if ($all_null) {
+                            $chart[$sp] = [];
+                            delete $_scan_cache{$sp};
+                            $_gc_stats{positions_freed}++;
+                        }
+                    }
+                }
+                @pending_sweeps = ();
             }
 
             # Profiling: track chart size and live positions per position

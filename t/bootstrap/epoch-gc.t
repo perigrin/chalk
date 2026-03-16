@@ -14,6 +14,15 @@ use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 
+# Set up grammar once for all tests that need a real parse
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $raw_ir = perl_pipeline();
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $bnf_target->generate($raw_ir);
+eval "$generated; 1" or die "Grammar eval failed: $@";
+no strict 'refs';
+my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
+
 # --- Component A: on_complete accepts callback parameter ---
 
 # Test 1: on_complete with callback doesn't crash (Boolean)
@@ -44,15 +53,6 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
     my $cb = sub ($origin, $end) {
         $callback_args = [$origin, $end];
     };
-
-    # Set up grammar for a real parse
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    my $raw_ir = perl_pipeline();
-    my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
-    my $generated = $bnf_target->generate($raw_ir);
-    eval "$generated; 1" or die "Grammar eval failed: $@";
-    no strict 'refs';
-    my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $parser = build_perl_ir_parser($grammar, start => 'Program');
@@ -129,6 +129,25 @@ use Chalk::Bootstrap::Semiring::SemanticAction;
     $sa->on_complete($item, 0, 5, $cb);
 
     is(scalar @epochs, 0, 'on_epoch_commit does NOT fire for Expression completion');
+}
+
+# --- Component C: Earley sweep queue wires callback and frees positions ---
+
+# Test 9: gc_freed > 0 after multi-statement parse
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $parser = build_perl_ir_parser($grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
+    # Parse 5 statements — should trigger epoch sweeps
+    my $source = "my \$a = 1;\nmy \$b = 2;\nmy \$c = 3;\nmy \$d = 4;\nmy \$e = 5;\n";
+    my $result = $parser->parse_value($source);
+    ok(defined $result, '5-statement parse succeeds');
+
+    my $gc = $parser->gc_stats();
+    my $freed = $gc->{positions_freed} // 0;
+    cmp_ok($freed, '>', 0, "gc_freed > 0 after multi-statement parse (got $freed)");
 }
 
 done_testing();
