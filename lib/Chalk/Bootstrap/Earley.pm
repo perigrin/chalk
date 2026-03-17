@@ -485,6 +485,11 @@ class Chalk::Bootstrap::Earley {
                     # Phase 1: null values for epoch-internal items.
                     # Skip the origin position — it has parent rule items
                     # (Program, StatementList) that span beyond this epoch.
+                    # Also preserve items whose origin equals sweep_origin:
+                    # these are boundary items (e.g. IfStatement waiting for
+                    # ElsifChain?) that may still be needed by completions
+                    # arriving after this sweep. Only sweep items whose
+                    # origin is strictly inside the epoch.
                     for my $sp ($sweep_origin + 1 .. $sweep_end - 1) {
                         next if $sp >= $pos;  # don't sweep current position
                         my $slot = $chart[$sp];
@@ -492,7 +497,7 @@ class Chalk::Bootstrap::Earley {
                         for my $oh ($slot->@*) {
                             next unless defined $oh;
                             for my $ok (keys $oh->%*) {
-                                next unless $ok >= $sweep_origin;
+                                next unless $ok > $sweep_origin;
                                 $oh->{$ok}->[0]->{value} = undef
                                     if defined $oh->{$ok}->[0]->{value};
                             }
