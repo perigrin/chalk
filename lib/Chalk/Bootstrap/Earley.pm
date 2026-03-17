@@ -947,6 +947,10 @@ class Chalk::Bootstrap::Earley {
                 next unless defined $entry;
                 my ($waiting_item, $waiting_alt_idx) = $entry->@*;
 
+                # Skip items whose value was nulled by epoch GC — the item's
+                # results were already propagated before the sweep.
+                next unless defined $waiting_item->{value};
+
                 # Advance the waiting item
                 my $new_value = $semiring->multiply($waiting_item->{value}, $completed_item->{value});
 
