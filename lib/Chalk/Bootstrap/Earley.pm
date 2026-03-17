@@ -504,12 +504,13 @@ class Chalk::Bootstrap::Earley {
                         my $slot = $chart[$sp];
                         next unless defined $slot && $slot->@*;
                         my $all_null = true;
-                        SLOT_CHECK: for my $oh ($slot->@*) {
+                        for my $oh ($slot->@*) {
+                            last unless $all_null;
                             next unless defined $oh;
                             for my $entry (values $oh->%*) {
                                 if (defined $entry->[0]->{value}) {
                                     $all_null = false;
-                                    last SLOT_CHECK;
+                                    last;
                                 }
                             }
                         }
