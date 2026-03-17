@@ -613,7 +613,7 @@ class Chalk::Bootstrap::Earley {
                 if ($pos % 1000 == 0 && $pos > 0) {
                     my $rss = 0;
                     if (open my $sf, '<', '/proc/self/status') {
-                        while (<$sf>) { $rss = $1 if /VmRSS:\s+(\d+)/ }
+                        while (defined(my $line = readline($sf))) { $rss = $1 if $line =~ /VmRSS:\s+(\d+)/ }
                         close $sf;
                     }
                     warn sprintf("PROFILE pos=%d items_here=%d total=%d max=%d live_span=%d rss=%dkB\n",
