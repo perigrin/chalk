@@ -526,71 +526,49 @@ class Chalk::Bootstrap::Earley {
 
             # Aycock safe-set GC: if this position is a safe set, free
             # all chart positions between the previous safe set and this one.
-            # Only positions strictly interior to the window are freed;
-            # the safe-set boundary positions themselves are kept alive.
-            #
-            # Safety guard: find the minimum origin referenced by any item
-            # at the current position. Only positions strictly below this
-            # minimum (but within the window) can be freed. This prevents
-            # freeing positions that active items (at pos) reference as origins,
-            # which would cause _complete to fail silently when looking up
-            # chart[origin] for those items.
+            # The safe-set properties (Aycock Ch6) guarantee that all items
+            # originating inside the window have already completed and their
+            # results have been propagated to the boundary positions. No
+            # future _complete call will need to look up chart[origin] for
+            # an origin inside the freed window.
             if ($self->_is_safe_set(\@chart, $pos)) {
                 if ($last_safe_pos >= 0 && $pos > $last_safe_pos + 1) {
-                    # Find the minimum origin referenced by any OPEN item
-                    # across ALL chart positions in the candidate window
-                    # (last_safe_pos+1 .. pos). This includes items at the
-                    # current position (pos) AND at intermediate positions —
-                    # any open item referencing an origin within the window
-                    # will need that origin position to be live when it
-                    # eventually completes and _complete looks up chart[origin].
-                    #
-                    # Final items have already fired _complete and no longer
-                    # need their origin positions. Only OPEN items require
-                    # their origin to remain live.
-                    my $min_window_origin = $pos;
-                    for my $check_pos ($last_safe_pos + 1 .. $pos) {
-                        next unless defined $chart[$check_pos] && $chart[$check_pos]->@*;
-                        for my $cid (0 .. $#{ $chart[$check_pos] }) {
-                            my $oh = $chart[$check_pos][$cid];
-                            next unless defined $oh;
-                            for my $org (keys $oh->%*) {
-                                next unless $org > $last_safe_pos && $org < $pos;
-                                next unless $org < $min_window_origin;
-                                my $entry = $oh->{$org};
-                                next unless defined $entry;
-                                my ($it, $ai) = $entry->@*;
-                                # Skip final items — they've already used their origin
-                                next if $self->_is_complete($it, $ai);
-                                $min_window_origin = $org;
+                    # Verify no open item at pos has an origin inside
+                    # the candidate window. If one does, freeing that
+                    # origin position would break _complete lookups.
+                    my $safe_to_free = true;
+                    for my $oh ($chart[$pos]->@*) {
+                        last unless $safe_to_free;
+                        next unless defined $oh;
+                        for my $org (keys $oh->%*) {
+                            next unless $org > $last_safe_pos && $org < $pos;
+                            my $entry = $oh->{$org};
+                            next unless defined $entry;
+                            my ($it, $ai) = $entry->@*;
+                            unless ($self->_is_complete($it, $ai)) {
+                                $safe_to_free = false;
+                                last;
                             }
                         }
                     }
-                    # Only free positions strictly below min_window_origin.
-                    # This preserves positions that items at pos reference
-                    # as their origins (needed by _complete lookups).
-                    my $free_end = $min_window_origin - 1;
-                    for my $sp ($last_safe_pos + 1 .. $free_end) {
-                        if (defined $chart[$sp] && $chart[$sp]->@*) {
-                            $chart[$sp] = [];
-                            delete $_scan_cache{$sp};
-                            $_gc_stats{positions_freed}++;
-                        }
-                        # Clean up completed_at entries at freed positions
-                        for my $rule_name (keys %completed_at) {
-                            for my $origin (keys $completed_at{$rule_name}->%*) {
-                                delete $completed_at{$rule_name}{$origin}{$sp};
+                    if ($safe_to_free) {
+                        for my $sp ($last_safe_pos + 1 .. $pos - 1) {
+                            if (defined $chart[$sp] && $chart[$sp]->@*) {
+                                $chart[$sp] = [];
+                                delete $_scan_cache{$sp};
+                                $_gc_stats{positions_freed}++;
                             }
-                            delete $completed_at{$rule_name}{$sp};
+                            # Clean up completed_at entries at freed positions
+                            for my $rule_name (keys %completed_at) {
+                                for my $origin (keys $completed_at{$rule_name}->%*) {
+                                    delete $completed_at{$rule_name}{$origin}{$sp};
+                                }
+                                delete $completed_at{$rule_name}{$sp};
+                            }
                         }
+                        $oldest_live_pos = $last_safe_pos
+                            if $last_safe_pos > $oldest_live_pos;
                     }
-                    if ($ENV{EARLEY_SAFE_DEBUG}) {
-                        warn sprintf("SAFE_SET_WINDOW pos=%d last_safe=%d min_window_origin=%d free_end=%d freed=%d\n",
-                            $pos, $last_safe_pos, $min_window_origin, $free_end,
-                            $free_end >= $last_safe_pos + 1 ? $free_end - $last_safe_pos : 0);
-                    }
-                    $oldest_live_pos = $last_safe_pos
-                        if $last_safe_pos > $oldest_live_pos;
                 }
                 $last_safe_pos = $pos;
                 $_gc_stats{safe_sets_found}++;
