@@ -46,11 +46,6 @@ class Chalk::Bootstrap::Earley {
     # Whether the semiring supports Leo optimization (cached at construction)
     field $_leo_enabled;
 
-    # Minimum origin across all items placed in the chart this parse.
-    # Updated O(1) per insert in _chart_set; used as a conservative lower
-    # bound for the GC safe floor (chart[$origin] is read by _complete).
-    field $_chart_origin_min;
-
     # Minimum Leo item origin position
     # (tracked incrementally to avoid O(n) scan at every GC step)
     field $_leo_origin_min;
@@ -66,15 +61,6 @@ class Chalk::Bootstrap::Earley {
     # GC statistics for the most recent parse
     field %_gc_stats;
 
-    # Per-position minimum origin for safe GC decisions
-    field @_gc_min_origin_at;
-
-    # Current position being processed (for GC tracking in _chart_set)
-    field $_gc_current_pos;
-
-    # Minimum origin across items at positions > $_gc_current_pos
-    # Updated by _chart_set when items are placed at future positions
-    field $_gc_future_min;
 
     ADJUST {
         $rule_table = {};
@@ -255,17 +241,6 @@ class Chalk::Bootstrap::Earley {
 
     method _chart_set($chart, $pos, $core_id, $origin, $entry) {
         ($chart->[$pos][$core_id] //= {})->{$origin} = $entry;
-        # Track minimum origin per position for GC
-        $_gc_min_origin_at[$pos] = $origin
-            if !defined $_gc_min_origin_at[$pos] || $origin < $_gc_min_origin_at[$pos];
-        # Track global minimum origin across all chart positions (O(1) per insert)
-        $_chart_origin_min = $origin
-            if !defined $_chart_origin_min || $origin < $_chart_origin_min;
-        # Track minimum origin across future positions (items placed by scan)
-        if (defined $_gc_current_pos && $pos > $_gc_current_pos) {
-            $_gc_future_min = $origin
-                if !defined $_gc_future_min || $origin < $_gc_future_min;
-        }
     }
 
     # Earley item: {rule, alt_idx, core_id, dot, origin, value}
@@ -329,14 +304,10 @@ class Chalk::Bootstrap::Earley {
         %completed_at = ();
         %leo_items = ();
         %_scan_cache = ();
-        $_chart_origin_min = undef;
         $_leo_origin_min = undef;
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
         $_last_active_pos = 0;
         $_diag_expected = {};
-        @_gc_min_origin_at = ();
-        $_gc_current_pos = undef;
-        $_gc_future_min = undef;
 
         # Find the start rule (first rule in grammar)
         my $start_rule = $grammar->[0];
@@ -346,7 +317,6 @@ class Chalk::Bootstrap::Earley {
             my $item = $self->_make_item($start_rule, $alt_idx, 0, 0, $semiring->one());
             my $_ci = $item->{core_id};
             ($chart[0][$_ci] //= {})->{0} = [$item, $alt_idx];
-            $_gc_min_origin_at[0] = 0 if !defined $_gc_min_origin_at[0];
         }
 
         # GC tracking
@@ -361,9 +331,6 @@ class Chalk::Bootstrap::Earley {
 
         # Process each chart position
         for my $pos (0 .. $n) {
-            $_gc_current_pos = $pos;
-            $_gc_future_min = undef;  # Reset for this position
-
             # Build agenda from all entries at this position
             my @agenda;
             for my $origin_hash ($chart[$pos]->@*) {
@@ -461,8 +428,6 @@ class Chalk::Bootstrap::Earley {
                                     }
                                 } else {
                                     ($chart[$pos][$skip_core] //= {})->{$origin} = [$skip_item, $alt_idx];
-                                    $_gc_min_origin_at[$pos] = $origin
-                                        if !defined $_gc_min_origin_at[$pos] || $origin < $_gc_min_origin_at[$pos];
                                     push @agenda, [$skip_item, $alt_idx];
                                 }
                             }
@@ -511,34 +476,6 @@ class Chalk::Bootstrap::Earley {
                         }
                     }
                 }
-            }
-
-            # Safe-set chart GC: determine the safe floor. _complete reads
-            # chart[$origin] to find waiting items via _waiting_core_ids, so
-            # any chart position that is an origin for items at a later position
-            # must remain live until those items are processed.
-            # $_chart_origin_min is maintained O(1) per insert in _chart_set.
-            {
-                my $safe_floor = $pos;
-                # Protect positions referenced as origins by live chart items
-                $safe_floor = $_chart_origin_min
-                    if defined $_chart_origin_min && $_chart_origin_min < $safe_floor;
-                # Also protect Leo item origin positions
-                $safe_floor = $_leo_origin_min
-                    if defined $_leo_origin_min && $_leo_origin_min < $safe_floor;
-                # Also check future items placed by scanning
-                if (defined $_gc_future_min && $_gc_future_min < $safe_floor) {
-                    $safe_floor = $_gc_future_min;
-                }
-                for my $gc_pos ($oldest_live_pos .. $safe_floor - 1) {
-                    next if $gc_pos >= $pos;
-                    if ($chart[$gc_pos]->@*) {
-                        $_gc_stats{positions_freed}++;
-                        $chart[$gc_pos] = [];
-                        delete $_scan_cache{$gc_pos};
-                    }
-                }
-                $oldest_live_pos = $safe_floor if $safe_floor > $oldest_live_pos;
             }
 
             # Epoch GC: drain pending sweeps after position is fully processed

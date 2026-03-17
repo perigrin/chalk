@@ -111,8 +111,7 @@ SKIP: {
     my %earley_field_names = map { $_ => 1 }
         qw(grammar semiring rule_table core_index lr0_dfa
            _waiting_core_ids completed_at leo_items _leo_enabled
-           _chart_origin_min _leo_origin_min _scan_cache regex_cache
-           _gc_stats _gc_min_origin_at _gc_current_pos _gc_future_min);
+           _leo_origin_min _scan_cache regex_cache _gc_stats);
 
     my @earley_fallbacks;
     while ($ecode =~ /hv_fetch\(hash,\s*"([^"]+)"/g) {
