@@ -692,7 +692,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
             push $h->@*, "        }";
             push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
-            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos";
+            # Pass on_epoch_commit to each component's on_complete so
+            # SemanticAction can fire epoch boundary callbacks.
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, on_epoch_commit";
             my $call = $self->_emit_component_call($slug, 'on_complete', $sr, $args, $has_impl);
             push $h->@*, "        _r = $call;";
             push $h->@*, "        SvREFCNT_dec(_ci_ref);";
