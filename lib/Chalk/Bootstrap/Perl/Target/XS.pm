@@ -692,7 +692,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
             push $h->@*, "        }";
             push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
-            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos";
+            # Pass on_epoch_commit to each component's on_complete so
+            # SemanticAction can fire epoch boundary callbacks.
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, on_epoch_commit";
             my $call = $self->_emit_component_call($slug, 'on_complete', $sr, $args, $has_impl);
             push $h->@*, "        _r = $call;";
             push $h->@*, "        SvREFCNT_dec(_ci_ref);";
@@ -3271,6 +3273,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $val = $node->value() // '';
                 if ($val =~ /^\$([\w]+)$/) {
                     my $bare = $1;
+                    # Skip capture variables ($1, $2, ...) — they use
+                    # get_sv() at reference time, not PREINIT locals,
+                    # and digits-only names are invalid C identifiers.
+                    next if $bare =~ /^\d+$/;
                     next if defined $field_map && exists $field_map->{$bare};
                     # Skip method parameters — they use bare C names, not _sv locals
                     next if $declared_vars->{"param:$bare"};
@@ -3278,7 +3284,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     next if %_class_scope_vars && exists $_class_scope_vars{$bare};
                     $declared_vars->{$bare} = true;
                 }
-            } elsif ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+            } elsif ($node isa Chalk::Bootstrap::IR::Node) {
+                # Recurse into all IR node inputs (Constructor, If, Loop,
+                # etc.) so variables in while-conditions and other nested
+                # positions are collected for PREINIT declaration.
                 push @queue, grep { defined $_ && ref($_) } $node->inputs()->@*;
             }
 
@@ -5326,10 +5335,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $c_keyword = $jump_keyword eq 'last' ? 'break' : 'continue';
         # Inside scoped loops (ENTER/SAVETMPS per iteration), must
         # FREETMPS/LEAVE before continue/break to avoid leaking the scope.
+        my $sv_cond = _sv_true_wrap($cond_expr);
         if ($_loop_depth) {
-            return "if (SvTRUE($cond_expr)) { FREETMPS; LEAVE; $c_keyword; }";
+            return "if ($sv_cond) { FREETMPS; LEAVE; $c_keyword; }";
         }
-        return "if (SvTRUE($cond_expr)) $c_keyword;";
+        return "if ($sv_cond) $c_keyword;";
+    }
+
+    # Wrap a C expression in SvTRUE(), casting to (SV*) when the
+    # expression produces AV* or HV* (e.g. from postfix deref ->@*).
+    # SvTRUE requires SV* — passing AV*/HV* directly is a C type error.
+    my sub _sv_true_wrap($expr) {
+        if ($expr =~ /^\(AV\*\)/ || $expr =~ /^\(HV\*\)/) {
+            return "SvTRUE((SV*)$expr)";
+        }
+        return "SvTRUE($expr)";
     }
 
     # Emit C if/else from an If CFG node with true/false Proj branches.
@@ -5344,7 +5364,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
 
         my @lines;
-        push @lines, "$prefix (SvTRUE($cond_expr)) {";
+        push @lines, "$prefix (" . _sv_true_wrap($cond_expr) . ") {";
         for my $idx (0 .. $true_stmts->@* - 1) {
             my $stmt = $true_stmts->[$idx];
             my $is_last_in_then = ($idx == $true_stmts->@* - 1);
@@ -5418,7 +5438,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         my @lines;
         push @lines, "SV *$phi_var;";
-        push @lines, "if (SvTRUE($cond_expr)) {";
+        push @lines, "if (" . _sv_true_wrap($cond_expr) . ") {";
         push @lines, "    $phi_var = sv_2mortal($val_a_expr);";
         push @lines, "} else {";
         push @lines, "    $phi_var = sv_2mortal($val_b_expr);";
@@ -5507,7 +5527,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     push @lines, "while ((${var_name}_sv = av_shift($av_expr)) != &PL_sv_undef) {";
                 } else {
                     my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
-                    push @lines, "while (SvTRUE($cond_expr)) {";
+                    push @lines, "while (" . _sv_true_wrap($cond_expr) . ") {";
                 }
             # Detect while (@array): array variable in boolean context
             # should check element count, not SvTRUE (which is always true
@@ -5518,7 +5538,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 push @lines, "while (av_len((AV*)SvRV($cond_expr)) >= 0) {";
             } else {
                 my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
-                push @lines, "while (SvTRUE($cond_expr)) {";
+                push @lines, "while (" . _sv_true_wrap($cond_expr) . ") {";
             }
 
             # Scope boundary frees mortal SVs per iteration instead of per-function
