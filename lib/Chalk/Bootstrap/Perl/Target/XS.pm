@@ -3277,6 +3277,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     # get_sv() at reference time, not PREINIT locals,
                     # and digits-only names are invalid C identifiers.
                     next if $bare =~ /^\d+$/;
+                    # Skip built-in hash variables (%ENV, %SIG, %INC) —
+                    # they use get_hv() at subscript time, not PREINIT locals.
+                    next if $bare =~ /\A(?:ENV|SIG|INC)\z/;
                     next if defined $field_map && exists $field_map->{$bare};
                     # Skip method parameters — they use bare C names, not _sv locals
                     next if $declared_vars->{"param:$bare"};
