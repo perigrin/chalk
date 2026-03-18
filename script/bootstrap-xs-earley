@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: One-time bootstrap: parse Earley.pm → IR → XS, build, install to .build/xs/.
-# ABOUTME: After this, use the XS Earley for fast parsing of any source file.
+# ABOUTME: One-time bootstrap: parse Earley + semirings → IR → multi-class XS.
+# ABOUTME: Builds a single XS module with all parser components for fast parsing.
 use 5.42.0;
 use utf8;
 
@@ -10,68 +10,88 @@ use File::Basename qw(dirname);
 use lib 'lib';
 use lib 't/bootstrap/lib';
 
-use TestPipeline qw(perl_pipeline build_perl_ir_parser);
-use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Bootstrap::BNF::Target::Perl;
+use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
 use Chalk::Bootstrap::Perl::Target::XS;
+use Chalk::Bootstrap::Perl::Target::ClassRegistry;
 
 my $build_dir = '.build/xs';
 my $module_name = 'Chalk::Bootstrap::Earley::XS';
 
+my $total_t0 = time();
+
 # === Phase 1: Grammar pipeline ===
 my $t0 = time();
 print "Phase 1: Building grammar pipeline...\n";
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $raw_ir = perl_pipeline();
-die "perl_pipeline returned undef" unless defined $raw_ir;
+my $grammar = setup_xs_grammar('Chalk::Grammar::Perl::XSBootstrap');
+printf "Phase 1: %.1fs\n\n", time() - $t0;
 
-my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
-my $generated = $bnf_target->generate($raw_ir);
-$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSBootstrap/g;
-eval $generated;
-die "Grammar eval failed: $@" if $@;
+# === Phase 2: Parse all source files to IR ===
+# Order matters: FilterComposite uses the other semirings, Earley uses all.
+my @source_files = (
+    ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
+    ['Chalk::Bootstrap::Semiring::Precedence',      'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
+    ['Chalk::Bootstrap::Semiring::Structural',      'lib/Chalk/Bootstrap/Semiring/Structural.pm'],
+    ['Chalk::Bootstrap::Semiring::TypeInference',    'lib/Chalk/Bootstrap/Semiring/TypeInference.pm'],
+    ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm'],
+    ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm'],
+    ['Chalk::Bootstrap::Earley',                     'lib/Chalk/Bootstrap/Earley.pm'],
+);
 
-my $grammar = Chalk::Grammar::Perl::XSBootstrap::grammar();
-die "Grammar not defined" unless defined $grammar;
-printf "Phase 1: %.1fs\n", time() - $t0;
-
-# === Phase 2: Parse Earley.pm to IR ===
+my @entries;
 $t0 = time();
-print "Phase 2: Parsing Earley.pm to IR (this takes ~17 minutes)...\n";
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+print "Phase 2: Parsing source files to IR...\n";
+for my $spec (@source_files) {
+    my ($class_name, $file) = $spec->@*;
+    my $short = $file =~ s{.*/}{}r;
+    my $file_t0 = time();
+    my ($ir, $sa, $ctx, $cfg_snapshot) = parse_file_ir($grammar, $file);
+    die "Failed to parse $file" unless defined $ir;
+    printf "  %s: %.1fs\n", $short, time() - $file_t0;
 
-open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Earley.pm' or die $!;
-local $/;
-my $source = readline($fh);
-close $fh;
+    # Determine uses (dependencies for composite dispatch)
+    my @uses;
+    if ($class_name eq 'Chalk::Bootstrap::Semiring::FilterComposite') {
+        @uses = map { $_->[0] } @source_files[0..4];  # All 5 semirings
+    }
 
-my $parser = build_perl_ir_parser($grammar, start => 'Program');
-my $semiring = $parser->semiring();
-$semiring->reset_cache();
+    push @entries, {
+        class_name  => $class_name,
+        ir          => $ir,
+        sa          => $sa,
+        ctx         => $ctx,
+        cfg_snapshot => $cfg_snapshot,
+        uses        => \@uses,
+    };
+}
+printf "Phase 2 total: %.1fs\n\n", time() - $t0;
 
-my $result = $parser->parse_value($source);
-die "Parse failed" unless defined $result;
-
-my $sa = $semiring->semirings()->[4];
-my $sem_ctx = $result->[4];
-die "No semantic context" unless defined $sem_ctx;
-my $ir = $sem_ctx->extract();
-die "No IR" unless defined $ir;
-printf "Phase 2: %.1fs\n", time() - $t0;
-
-# === Phase 3: Generate XS ===
+# === Phase 3: Build ClassRegistry and generate multi-class XS ===
 $t0 = time();
-print "Phase 3: Generating XS code...\n";
-my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => $module_name);
-my $dist = $xs->generate_distribution_with_cfg($ir, $sa, $sem_ctx);
-die "XS generation failed" unless ref($dist) eq 'HASH';
-printf "Phase 3: %.1fs\n", time() - $t0;
+print "Phase 3: Generating multi-class XS...\n";
+
+my $reg = Chalk::Bootstrap::Perl::Target::ClassRegistry->new();
+for my $entry (@entries) {
+    $reg->register($entry->{class_name}, {
+        ir   => $entry->{ir},
+        sa   => $entry->{sa},
+        ctx  => $entry->{ctx},
+        uses => $entry->{uses},
+    });
+}
+
+my $xs = Chalk::Bootstrap::Perl::Target::XS->new(
+    module_name    => $module_name,
+    class_registry => $reg,
+);
+
+my $dist = eval { $xs->generate_distribution_multi_class(\@entries) };
+die "XS generation failed: $@" unless ref($dist) eq 'HASH';
+printf "Phase 3: %.1fs\n\n", time() - $t0;
 
 # === Phase 4: Write and build ===
 $t0 = time();
 print "Phase 4: Writing and compiling XS...\n";
 
-# Clean and recreate build dir
 remove_tree($build_dir) if -d $build_dir;
 make_path($build_dir);
 
@@ -90,9 +110,11 @@ system(qq{cd "$build_dir" && "$^X" Build.PL 2>&1}) == 0
 system(qq{cd "$build_dir" && PERL5LIB="$libs" "$^X" Build 2>&1}) == 0
     or die "Build failed";
 
-printf "Phase 4: %.1fs\n", time() - $t0;
+printf "Phase 4: %.1fs\n\n", time() - $t0;
 
 # === Done ===
-print "\nXS Earley built successfully in $build_dir/\n";
-print "Load with: use lib '.build/xs/blib/lib', '.build/xs/blib/arch';\n";
-print "           require Chalk::Bootstrap::Earley::XS;\n";
+my $total = time() - $total_t0;
+printf "Bootstrap complete in %.0fs (%.1f minutes)\n", $total, $total / 60;
+print "Load with:\n";
+print "  use lib '.build/xs/blib/lib', '.build/xs/blib/arch';\n";
+print "  require $module_name;\n";
