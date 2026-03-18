@@ -5327,6 +5327,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     }
 
     # Emit C continue/break from an If CFG node with loop_jump marker.
+    # Wrap a C expression in SvTRUE(), casting to (SV*) when the
+    # expression produces AV* or HV* (e.g. from postfix deref ->@*).
+    # SvTRUE requires SV* — passing AV*/HV* directly is a C type error.
+    my sub _sv_true_wrap($expr) {
+        if ($expr =~ /^\(AV\*\)/ || $expr =~ /^\(HV\*\)/) {
+            return "SvTRUE((SV*)$expr)";
+        }
+        return "SvTRUE($expr)";
+    }
+
     # The If node's condition is already the correct test (negated for unless).
     # 'next' maps to C 'continue', 'last' maps to C 'break'.
     method _emit_xs_loop_jump($jump_keyword, $if_node, $declared_vars) {
@@ -5340,16 +5350,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "if ($sv_cond) { FREETMPS; LEAVE; $c_keyword; }";
         }
         return "if ($sv_cond) $c_keyword;";
-    }
-
-    # Wrap a C expression in SvTRUE(), casting to (SV*) when the
-    # expression produces AV* or HV* (e.g. from postfix deref ->@*).
-    # SvTRUE requires SV* — passing AV*/HV* directly is a C type error.
-    my sub _sv_true_wrap($expr) {
-        if ($expr =~ /^\(AV\*\)/ || $expr =~ /^\(HV\*\)/) {
-            return "SvTRUE((SV*)$expr)";
-        }
-        return "SvTRUE($expr)";
     }
 
     # Emit C if/else from an If CFG node with true/false Proj branches.
