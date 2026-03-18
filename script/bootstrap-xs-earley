@@ -1,0 +1,98 @@
+#!/usr/bin/env perl
+# ABOUTME: One-time bootstrap: parse Earley.pm → IR → XS, build, install to .build/xs/.
+# ABOUTME: After this, use the XS Earley for fast parsing of any source file.
+use 5.42.0;
+use utf8;
+
+use File::Path qw(make_path remove_tree);
+use File::Basename qw(dirname);
+
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use Chalk::Bootstrap::IR::NodeFactory;
+use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::Bootstrap::Perl::Target::XS;
+
+my $build_dir = '.build/xs';
+my $module_name = 'Chalk::Bootstrap::Earley::XS';
+
+# === Phase 1: Grammar pipeline ===
+my $t0 = time();
+print "Phase 1: Building grammar pipeline...\n";
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $raw_ir = perl_pipeline();
+die "perl_pipeline returned undef" unless defined $raw_ir;
+
+my $bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my $generated = $bnf_target->generate($raw_ir);
+$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::XSBootstrap/g;
+eval $generated;
+die "Grammar eval failed: $@" if $@;
+
+my $grammar = Chalk::Grammar::Perl::XSBootstrap::grammar();
+die "Grammar not defined" unless defined $grammar;
+printf "Phase 1: %.1fs\n", time() - $t0;
+
+# === Phase 2: Parse Earley.pm to IR ===
+$t0 = time();
+print "Phase 2: Parsing Earley.pm to IR (this takes ~17 minutes)...\n";
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+open my $fh, '<:utf8', 'lib/Chalk/Bootstrap/Earley.pm' or die $!;
+local $/;
+my $source = readline($fh);
+close $fh;
+
+my $parser = build_perl_ir_parser($grammar, start => 'Program');
+my $semiring = $parser->semiring();
+$semiring->reset_cache();
+
+my $result = $parser->parse_value($source);
+die "Parse failed" unless defined $result;
+
+my $sa = $semiring->semirings()->[4];
+my $sem_ctx = $result->[4];
+die "No semantic context" unless defined $sem_ctx;
+my $ir = $sem_ctx->extract();
+die "No IR" unless defined $ir;
+printf "Phase 2: %.1fs\n", time() - $t0;
+
+# === Phase 3: Generate XS ===
+$t0 = time();
+print "Phase 3: Generating XS code...\n";
+my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => $module_name);
+my $dist = $xs->generate_distribution_with_cfg($ir, $sa, $sem_ctx);
+die "XS generation failed" unless ref($dist) eq 'HASH';
+printf "Phase 3: %.1fs\n", time() - $t0;
+
+# === Phase 4: Write and build ===
+$t0 = time();
+print "Phase 4: Writing and compiling XS...\n";
+
+# Clean and recreate build dir
+remove_tree($build_dir) if -d $build_dir;
+make_path($build_dir);
+
+for my $path (sort keys $dist->%*) {
+    my $full_path = "$build_dir/$path";
+    my $dir = dirname($full_path);
+    make_path($dir) unless -d $dir;
+    open(my $wfh, '>:encoding(UTF-8)', $full_path) or die "Cannot write $full_path: $!";
+    print $wfh $dist->{$path};
+    close $wfh;
+}
+
+my $libs = join(':', 'lib', $ENV{PERL5LIB} // '');
+system(qq{cd "$build_dir" && "$^X" Build.PL 2>&1}) == 0
+    or die "Build.PL failed";
+system(qq{cd "$build_dir" && PERL5LIB="$libs" "$^X" Build 2>&1}) == 0
+    or die "Build failed";
+
+printf "Phase 4: %.1fs\n", time() - $t0;
+
+# === Done ===
+print "\nXS Earley built successfully in $build_dir/\n";
+print "Load with: use lib '.build/xs/blib/lib', '.build/xs/blib/arch';\n";
+print "           require Chalk::Bootstrap::Earley::XS;\n";
