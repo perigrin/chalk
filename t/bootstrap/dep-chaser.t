@@ -56,37 +56,81 @@ subtest 'module_to_path' => sub {
     is($path2, undef, 'non-Chalk module returns undef');
 };
 
-# === Test 3: resolve_deps on a real file (Earley.pm) ===
-# This is the integration test — actually parse Earley.pm and chase deps.
+# === Test 3: resolve_deps from Earley.pm (single root) ===
 subtest 'resolve_deps from Earley.pm' => sub {
-    plan skip_all => 'slow integration test — set RUN_SLOW=1'
+    plan skip_all => 'slow integration test, set RUN_SLOW=1'
         unless $ENV{RUN_SLOW};
 
     my @deps = Chalk::Bootstrap::DepChaser::resolve_deps(
         'lib/Chalk/Bootstrap/Earley.pm',
     );
 
-    # Earley.pm must depend on at least the semirings
-    ok(scalar @deps > 5, 'found more than 5 transitive deps');
-
-    # Specific known deps
+    # Earley.pm uses Terminal, CoreItemIndex, LR0DFA directly
     my %dep_set = map { $_ => 1 } @deps;
-    ok($dep_set{'lib/Chalk/Bootstrap/Semiring/Boolean.pm'},
-        'Boolean.pm in transitive deps');
-    ok($dep_set{'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm'},
-        'FilterComposite.pm in transitive deps');
-    ok($dep_set{'lib/Chalk/Bootstrap/Semiring/TypeInferenceActions.pm'},
-        'TypeInferenceActions.pm in transitive deps');
-    ok($dep_set{'lib/Chalk/Bootstrap/Context.pm'},
-        'Context.pm in transitive deps');
+    ok($dep_set{'lib/Chalk/Bootstrap/Terminal.pm'},
+        'Terminal.pm in direct deps');
+    ok($dep_set{'lib/Chalk/Bootstrap/CoreItemIndex.pm'},
+        'CoreItemIndex.pm in direct deps');
+    ok($dep_set{'lib/Chalk/Bootstrap/LR0DFA.pm'},
+        'LR0DFA.pm in direct deps');
 
     # Should not include Earley.pm itself
     ok(!$dep_set{'lib/Chalk/Bootstrap/Earley.pm'},
         'root file not in deps list');
 
-    # Print for visibility
-    diag "Resolved " . scalar(@deps) . " transitive deps from Earley.pm:";
+    diag "Resolved " . scalar(@deps) . " deps from Earley.pm:";
     diag "  $_" for sort @deps;
+};
+
+# === Test 4: resolve_closure from full bootstrap seed set ===
+subtest 'resolve_closure for bootstrap' => sub {
+    plan skip_all => 'slow integration test, set RUN_SLOW=1'
+        unless $ENV{RUN_SLOW};
+
+    my @seeds = (
+        'lib/Chalk/Bootstrap/Earley.pm',
+        'lib/Chalk/Bootstrap/Semiring/Boolean.pm',
+        'lib/Chalk/Bootstrap/Semiring/Precedence.pm',
+        'lib/Chalk/Bootstrap/Semiring/Structural.pm',
+        'lib/Chalk/Bootstrap/Semiring/TypeInference.pm',
+        'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm',
+        'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',
+    );
+
+    my @all = Chalk::Bootstrap::DepChaser::resolve_closure(\@seeds);
+
+    my %file_set = map { $_ => 1 } @all;
+
+    # All seeds must be in result
+    for my $seed (@seeds) {
+        ok($file_set{$seed}, "$seed in closure");
+    }
+
+    # Transitive deps discovered via use declarations
+    ok($file_set{'lib/Chalk/Bootstrap/Context.pm'},
+        'Context.pm discovered transitively (via TypeInference, SemanticAction)');
+    ok($file_set{'lib/Chalk/Bootstrap/Scope.pm'},
+        'Scope.pm discovered transitively (via SemanticAction)');
+    ok($file_set{'lib/Chalk/Bootstrap/IR/NodeFactory.pm'},
+        'IR::NodeFactory discovered transitively (via SemanticAction)');
+    ok($file_set{'lib/Chalk/Bootstrap/Terminal.pm'},
+        'Terminal.pm discovered transitively (via Earley)');
+    ok($file_set{'lib/Chalk/Bootstrap/CoreItemIndex.pm'},
+        'CoreItemIndex.pm discovered transitively (via Earley)');
+    ok($file_set{'lib/Chalk/Bootstrap/LR0DFA.pm'},
+        'LR0DFA.pm discovered transitively (via Earley)');
+    ok($file_set{'lib/Chalk/Bootstrap/Semiring/TypeInferenceActions.pm'},
+        'TypeInferenceActions.pm discovered transitively (via TypeInference)');
+    ok($file_set{'lib/Chalk/Grammar/Perl/KeywordTable.pm'},
+        'KeywordTable.pm discovered transitively (via TypeInference)');
+    ok($file_set{'lib/Chalk/Grammar/Perl/TypeLibrary.pm'},
+        'TypeLibrary.pm discovered transitively (via TypeInferenceActions)');
+
+    diag "Full closure (" . scalar(@all) . " files):";
+    my $idx = 0;
+    for my $file (@all) {
+        diag sprintf("  %2d. %s", ++$idx, $file);
+    }
 };
 
 done_testing;
