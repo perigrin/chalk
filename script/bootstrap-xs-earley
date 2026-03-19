@@ -54,8 +54,9 @@ for my $spec (@source_files) {
     my ($ir, $sa, $ctx, $cfg_snapshot) = parse_file_ir($grammar, $file);
     die "Failed to parse $file" unless defined $ir;
 
-    # Generate per-class XS distribution
-    my $module_name = "${class_name}::XS";
+    # Generate per-class XS distribution.
+    # Module name matches the class name so the XS class replaces the pure-Perl one.
+    my $module_name = $class_name;
     my $xs = Chalk::Bootstrap::Perl::Target::XS->new(
         module_name => $module_name,
     );
