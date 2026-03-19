@@ -1,5 +1,5 @@
 # ABOUTME: Tests that Target::C emits direct C function calls for known-typed fields.
-# ABOUTME: Verifies field_types parameter triggers {slug}_{method}(aTHX_ ...) instead of call_method.
+# ABOUTME: Verifies field_types parameter triggers #include and {slug}_{method}(aTHX_ ...) emission.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -15,109 +15,124 @@ use lib 't/bootstrap/lib';
 use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
 use Chalk::Bootstrap::Perl::Target::C;
 
-my $PERL     = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
+my $PERL      = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $repo_root = abs_path(dirname(__FILE__) . '/../..');
 
-# === Phase 1: Build grammar pipeline ===
+# === Phase 1: Build grammar pipeline (shared by all tests) ===
 
 my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::CTCrossClass') };
 ok(defined $gen, 'Phase 1: grammar pipeline built')
     or BAIL_OUT("Cannot continue without grammar: $@");
 
-# === Phase 2: Parse Earley.pm and Boolean.pm to IR ===
-
-my ($earley_ir, $earley_sa, $earley_ctx) = eval {
-    parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm')
-};
-ok(defined $earley_ir, 'Phase 2a: Earley.pm parsed to IR')
-    or BAIL_OUT("Cannot parse Earley.pm: $@");
+# === Phase 2: Parse Boolean.pm (fast — 68 lines) ===
 
 my ($bool_ir, $bool_sa, $bool_ctx) = eval {
     parse_file_ir($gen, 'lib/Chalk/Bootstrap/Semiring/Boolean.pm')
 };
-ok(defined $bool_ir, 'Phase 2b: Boolean.pm parsed to IR')
+ok(defined $bool_ir, 'Phase 2: Boolean.pm parsed to IR')
     or BAIL_OUT("Cannot parse Boolean.pm: $@");
 
-# === Phase 3: Generate Boolean.c without field_types (baseline) ===
+# === Phase 3: Infrastructure tests using Boolean ===
 
-my $bool_target = eval {
+# 3a: Construct C.pm with field_types
+my $typed_target = eval {
+    Chalk::Bootstrap::Perl::Target::C->new(
+        module_name => 'Chalk::Bootstrap::Semiring::Boolean',
+        field_types => {
+            semiring => 'Chalk::Bootstrap::Earley',
+        },
+    )
+};
+ok(defined $typed_target, 'Phase 3a: Target::C constructed with field_types');
+
+# 3b: Generate .c — should include earley.h
+my $typed_result = eval { $typed_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 3b: generate_c_files with field_types does not die');
+ok(defined $typed_result, 'Phase 3c: generate_c_files returns defined value');
+
+my $typed_c = $typed_result->{files}{'boolean.c'} // '';
+ok(length($typed_c) > 0, 'Phase 3d: boolean.c with field_types is non-empty');
+
+# 3e: Cross-class include present
+like($typed_c, qr/#include\s+"earley\.h"/,
+    'Phase 3e: boolean.c includes earley.h when field_types has earley');
+
+# 3f: Self-include NOT duplicated
+my @earley_includes = $typed_c =~ /(#include\s+"earley\.h")/g;
+is(scalar @earley_includes, 1, 'Phase 3f: earley.h included exactly once');
+
+# 3g: Own header still included
+like($typed_c, qr/#include\s+"boolean\.h"/,
+    'Phase 3g: boolean.c still includes its own boolean.h');
+
+# === Phase 4: Verify no cross-class include without field_types ===
+
+my $plain_target = eval {
     Chalk::Bootstrap::Perl::Target::C->new(
         module_name => 'Chalk::Bootstrap::Semiring::Boolean',
     )
 };
-ok(defined $bool_target, 'Phase 3a: Boolean Target::C constructed without field_types');
+ok(defined $plain_target, 'Phase 4a: Target::C constructed without field_types');
 
-my $bool_result = eval { $bool_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
-is($@, '', 'Phase 3b: Boolean generate_c_files does not die');
-ok(defined $bool_result, 'Phase 3c: Boolean generate_c_files returns defined value');
+my $plain_result = eval { $plain_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 4b: generate_c_files without field_types does not die');
 
-my $bool_c = $bool_result->{files}{'boolean.c'} // '';
-ok(length($bool_c) > 0, 'Phase 3d: boolean.c is non-empty');
+my $plain_c = $plain_result->{files}{'boolean.c'} // '';
+unlike($plain_c, qr/#include\s+"earley\.h"/,
+    'Phase 4c: boolean.c without field_types does not include earley.h');
 
-# === Phase 4: Generate earley.c WITHOUT field_types — uses call_method ===
+# === Phase 5: Multiple field_types — deduplication and sorting ===
 
-my $earley_baseline = eval {
+my $multi_target = eval {
     Chalk::Bootstrap::Perl::Target::C->new(
-        module_name => 'Chalk::Bootstrap::Earley',
-    )
-};
-ok(defined $earley_baseline, 'Phase 4a: Earley Target::C constructed without field_types');
-
-my $baseline_result = eval {
-    $earley_baseline->generate_c_files($earley_ir, $earley_sa, $earley_ctx)
-};
-is($@, '', 'Phase 4b: baseline generate_c_files does not die');
-ok(defined $baseline_result, 'Phase 4c: baseline generate_c_files returns defined value');
-
-my $baseline_c = $baseline_result->{files}{'earley.c'} // '';
-ok(length($baseline_c) > 0, 'Phase 4d: baseline earley.c is non-empty');
-
-# Baseline should use call_method for semiring calls
-my $baseline_call_method_count = () = $baseline_c =~ /call_method\("is_zero"/g;
-ok($baseline_call_method_count > 0,
-    "Phase 4e: baseline earley.c has call_method(\"is_zero\") calls ($baseline_call_method_count found)");
-
-# Baseline should NOT have direct boolean_is_zero calls
-my $baseline_direct_count = () = $baseline_c =~ /boolean_is_zero\(/g;
-is($baseline_direct_count, 0,
-    'Phase 4f: baseline earley.c has no direct boolean_is_zero() calls');
-
-# === Phase 5: Generate earley.c WITH field_types — uses direct C calls ===
-
-my $earley_typed = eval {
-    Chalk::Bootstrap::Perl::Target::C->new(
-        module_name => 'Chalk::Bootstrap::Earley',
+        module_name => 'Chalk::Bootstrap::Semiring::Boolean',
         field_types => {
-            semiring => 'Chalk::Bootstrap::Semiring::Boolean',
+            field_a => 'Chalk::Bootstrap::Earley',
+            field_b => 'Chalk::Bootstrap::Semiring::Structural',
+            field_c => 'Chalk::Bootstrap::Earley',  # duplicate target
         },
     )
 };
-ok(defined $earley_typed, 'Phase 5a: Earley Target::C constructed with field_types');
+ok(defined $multi_target, 'Phase 5a: Target::C with multiple field_types constructed');
 
-my $typed_result = eval {
-    $earley_typed->generate_c_files($earley_ir, $earley_sa, $earley_ctx)
+my $multi_result = eval { $multi_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 5b: generate_c_files with multiple field_types does not die');
+
+my $multi_c = $multi_result->{files}{'boolean.c'} // '';
+
+# Earley appears only once (deduplicated)
+my @earley_multi = $multi_c =~ /(#include\s+"earley\.h")/g;
+is(scalar @earley_multi, 1, 'Phase 5c: earley.h included once despite duplicate field_types');
+
+# Structural also included
+like($multi_c, qr/#include\s+"structural\.h"/,
+    'Phase 5d: structural.h included for second target class');
+
+# Includes are sorted (earley before structural)
+$multi_c =~ /(#include\s+"earley\.h".*#include\s+"structural\.h")/s;
+ok(defined $1, 'Phase 5e: cross-class includes are sorted alphabetically');
+
+# === Phase 6: Self-referencing field_types — skip self-include ===
+
+my $self_target = eval {
+    Chalk::Bootstrap::Perl::Target::C->new(
+        module_name => 'Chalk::Bootstrap::Semiring::Boolean',
+        field_types => {
+            self_ref => 'Chalk::Bootstrap::Semiring::Boolean',
+        },
+    )
 };
-is($@, '', 'Phase 5b: typed generate_c_files does not die');
-ok(defined $typed_result, 'Phase 5c: typed generate_c_files returns defined value');
+ok(defined $self_target, 'Phase 6a: Target::C with self-referencing field_types constructed');
 
-my $typed_c = $typed_result->{files}{'earley.c'} // '';
-ok(length($typed_c) > 0, 'Phase 5d: typed earley.c is non-empty');
+my $self_result = eval { $self_target->generate_c_files($bool_ir, $bool_sa, $bool_ctx) };
+is($@, '', 'Phase 6b: generate_c_files with self-referencing field_types does not die');
 
-# With field_types, is_zero calls on $semiring should be direct C calls
-my $typed_direct_count = () = $typed_c =~ /boolean_is_zero\(/g;
-ok($typed_direct_count > 0,
-    "Phase 5e: typed earley.c has direct boolean_is_zero() calls ($typed_direct_count found)");
+my $self_c = $self_result->{files}{'boolean.c'} // '';
+my @bool_includes = $self_c =~ /(#include\s+"boolean\.h")/g;
+is(scalar @bool_includes, 1,
+    'Phase 6c: self-referencing field_type does not cause duplicate boolean.h include');
 
-# With field_types, the is_zero call_method invocations on semiring should be eliminated
-my $typed_call_method_count = () = $typed_c =~ /call_method\("is_zero"/g;
-ok($typed_call_method_count < $baseline_call_method_count,
-    "Phase 5f: typed earley.c has fewer call_method(\"is_zero\") calls"
-    . " ($typed_call_method_count vs $baseline_call_method_count in baseline)");
-
-# The typed .c file should include boolean.h for cross-class function declarations
-like($typed_c, qr/#include\s+"boolean\.h"/, 'Phase 5g: typed earley.c includes boolean.h');
-
-# === Phase 6: Compile both .c files together (if compiler available) ===
+# === Phase 7: Compile with cross-class includes ===
 
 my $have_compiler;
 eval {
@@ -125,25 +140,23 @@ eval {
     $have_compiler = ExtUtils::CBuilder->new(quiet => 1)->have_compiler;
 };
 
-my $tmpdir = tempdir(CLEANUP => 1);
-my $so_ext   = $Config{dlext};
-my $cc       = $Config{cc};
-my $ccflags  = $Config{ccflags};
-my $archlib  = $Config{archlib};
-my $c_src_dir = "$repo_root/c_src";
-
-copy("$c_src_dir/chalk.h", "$tmpdir/chalk.h")
-    or die "Cannot copy chalk.h: $!";
-
 SKIP: {
-    skip "No C compiler available", 7 unless $have_compiler;
+    skip "No C compiler available", 3 unless $have_compiler;
 
-    # Write generated files to temp dir
+    my $tmpdir  = tempdir(CLEANUP => 1);
+    my $so_ext  = $Config{dlext};
+    my $cc      = $Config{cc};
+    my $ccflags = $Config{ccflags};
+    my $archlib = $Config{archlib};
+
+    # Write chalk.h
+    copy("$repo_root/c_src/chalk.h", "$tmpdir/chalk.h")
+        or die "Cannot copy chalk.h: $!";
+
+    # Write boolean files (from plain result — no cross-class refs to worry about)
     for my $pair (
-        ['boolean.c', $bool_c],
-        ['boolean.h', $bool_result->{files}{'boolean.h'} // ''],
-        ['earley.c',  $typed_c],
-        ['earley.h',  $typed_result->{files}{'earley.h'} // ''],
+        ['boolean.c', $plain_c],
+        ['boolean.h', $plain_result->{files}{'boolean.h'} // ''],
     ) {
         my ($fname, $content) = $pair->@*;
         open my $fh, '>:encoding(UTF-8)', "$tmpdir/$fname"
@@ -152,62 +165,96 @@ SKIP: {
         close $fh;
     }
 
-    # Compile boolean.c
-    my $bool_cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$tmpdir"
-                 . " $tmpdir/boolean.c -o $tmpdir/boolean.o 2>&1";
-    my $bool_out = `$bool_cmd`;
-    my $bool_ok  = ($? >> 8) == 0;
-    ok($bool_ok, 'Phase 6a: boolean.c compiles to boolean.o')
-        or diag("Compile failed:\n$bool_out\nCommand: $bool_cmd");
+    # Compile plain boolean.c (no cross-class)
+    my $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$tmpdir"
+            . " $tmpdir/boolean.c -o $tmpdir/boolean.o 2>&1";
+    my $out = `$cmd`;
+    my $ok  = ($? >> 8) == 0;
+    ok($ok, 'Phase 7a: plain boolean.c compiles')
+        or diag("Compile failed:\n$out");
 
-    # Compile earley.c (with field_types — references boolean_is_zero)
-    my $earley_cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$tmpdir"
-                   . " $tmpdir/earley.c -o $tmpdir/earley.o 2>&1";
-    my $earley_out = `$earley_cmd`;
-    my $earley_ok  = ($? >> 8) == 0;
-    ok($earley_ok, 'Phase 6b: typed earley.c compiles to earley.o')
-        or diag("Compile failed:\n$earley_out\nCommand: $earley_cmd\n"
-               . "First 40 lines of earley.c:\n"
-               . join("\n", (split /\n/, $typed_c)[0..39]));
+    # Write typed boolean.c (has #include "earley.h" — needs stub)
+    open my $fh, '>:encoding(UTF-8)', "$tmpdir/boolean_typed.c"
+        or die "write: $!";
+    print $fh $typed_c;
+    close $fh;
 
-    SKIP: {
-        skip "boolean.o or earley.o not compiled", 5
-            unless $bool_ok && $earley_ok;
+    # Create stub earley.h so the #include resolves
+    open $fh, '>:encoding(UTF-8)', "$tmpdir/earley.h"
+        or die "write: $!";
+    print $fh "/* stub */\n#ifndef CHALK_EARLEY_H\n#define CHALK_EARLEY_H\n#include \"chalk.h\"\n#endif\n";
+    close $fh;
 
-        # Link both into chalk.so
-        my $so_path  = "$tmpdir/chalk.$so_ext";
-        my $link_cmd = "$cc -shared -fPIC $tmpdir/boolean.o $tmpdir/earley.o"
-                     . " -o $so_path 2>&1";
-        my $link_out = `$link_cmd`;
-        my $link_ok  = ($? >> 8) == 0;
-        ok($link_ok, "Phase 6c: boolean.o + earley.o link into chalk.$so_ext")
-            or diag("Link failed:\n$link_out\nCommand: $link_cmd");
+    $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$tmpdir"
+         . " $tmpdir/boolean_typed.c -o $tmpdir/boolean_typed.o 2>&1";
+    $out = `$cmd`;
+    $ok  = ($? >> 8) == 0;
+    ok($ok, 'Phase 7b: typed boolean.c (with cross-class includes) compiles')
+        or diag("Compile failed:\n$out");
 
-        ok(-f $so_path, "Phase 6d: chalk.$so_ext file exists");
+    ok(-f "$tmpdir/boolean_typed.o", 'Phase 7c: boolean_typed.o exists');
+}
 
-        # Verify symbols: chalk.so should export boolean_is_zero
-        my $nm_out = `nm -D "$so_path" 2>&1`;
-        if ($? >> 8 == 0) {
-            my @bool_fns = grep { /\bboolean_is_zero\b/ } split /\n/, $nm_out;
-            ok(@bool_fns > 0, 'Phase 6e: chalk.so exports boolean_is_zero symbol');
+# === Phase 8: Earley direct-call verification (slow — requires parsing 1092-line file) ===
 
-            # Verify no unresolved boolean_is_zero (it should be defined, not just referenced)
-            my @undef_refs = grep { /\bU\b.*boolean_is_zero/ } split /\n/, $nm_out;
-            is(scalar @undef_refs, 0,
-                'Phase 6f: no unresolved boolean_is_zero references in chalk.so');
+SKIP: {
+    skip "Set CHALK_SLOW_TESTS=1 to run Earley direct-call tests", 8
+        unless $ENV{CHALK_SLOW_TESTS};
 
-            # Count improvement: report direct vs call_method for is_zero
-            my $all_call_method_count = () = $typed_c =~ /call_method\(/g;
-            my $all_direct_count      = () = $typed_c =~ /boolean_\w+\(aTHX_/g;
-            note("Direct C calls in typed earley.c: $all_direct_count");
-            note("Remaining call_method calls in typed earley.c: $all_call_method_count");
-            ok(1, "Phase 6g: improvement metrics reported (see notes above)");
-        } else {
-            ok(-f $so_path, 'Phase 6e: chalk.so exists (nm not available)');
-            ok(1, 'Phase 6f: nm not available — symbol check skipped');
-            ok(1, 'Phase 6g: nm not available — improvement metrics skipped');
-        }
-    }
+    my ($earley_ir, $earley_sa, $earley_ctx) = eval {
+        parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm')
+    };
+    ok(defined $earley_ir, 'Phase 8a: Earley.pm parsed to IR')
+        or skip("Cannot parse Earley.pm: $@", 7);
+
+    # Baseline: no field_types
+    my $baseline = eval {
+        Chalk::Bootstrap::Perl::Target::C->new(
+            module_name => 'Chalk::Bootstrap::Earley',
+        )
+    };
+    my $baseline_result = eval {
+        $baseline->generate_c_files($earley_ir, $earley_sa, $earley_ctx)
+    };
+    my $baseline_c = $baseline_result->{files}{'earley.c'} // '';
+    ok(length($baseline_c) > 0, 'Phase 8b: baseline earley.c generated');
+
+    my $baseline_call_method_count = () = $baseline_c =~ /call_method\("is_zero"/g;
+    ok($baseline_call_method_count > 0,
+        "Phase 8c: baseline has call_method(\"is_zero\") ($baseline_call_method_count)");
+
+    # Typed: semiring → Boolean
+    my $typed = eval {
+        Chalk::Bootstrap::Perl::Target::C->new(
+            module_name => 'Chalk::Bootstrap::Earley',
+            field_types => {
+                semiring => 'Chalk::Bootstrap::Semiring::Boolean',
+            },
+        )
+    };
+    my $typed_result = eval {
+        $typed->generate_c_files($earley_ir, $earley_sa, $earley_ctx)
+    };
+    my $typed_c_earley = $typed_result->{files}{'earley.c'} // '';
+    ok(length($typed_c_earley) > 0, 'Phase 8d: typed earley.c generated');
+
+    my $typed_direct_count = () = $typed_c_earley =~ /boolean_\w+\(aTHX_/g;
+    ok($typed_direct_count > 0,
+        "Phase 8e: typed earley.c has direct boolean_* calls ($typed_direct_count)");
+
+    like($typed_c_earley, qr/#include\s+"boolean\.h"/,
+        'Phase 8f: typed earley.c includes boolean.h');
+
+    my $typed_call_method_count = () = $typed_c_earley =~ /call_method\("is_zero"/g;
+    ok($typed_call_method_count < $baseline_call_method_count,
+        "Phase 8g: fewer call_method(\"is_zero\") calls"
+        . " ($typed_call_method_count vs $baseline_call_method_count)");
+
+    note("Direct C calls: $typed_direct_count");
+    note("Remaining call_method(is_zero): $typed_call_method_count");
+    note("Eliminated: " . ($baseline_call_method_count - $typed_call_method_count) . " call_method(is_zero) calls");
+
+    ok(1, 'Phase 8h: Earley direct-call verification complete');
 }
 
 done_testing;

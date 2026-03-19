@@ -1640,6 +1640,7 @@ class Chalk::Bootstrap::Perl::Target::C {
                 my @stmts;
                 push @stmts, @pre_eval;
                 push @stmts, "SV *_mcr = SvREFCNT_inc(${c_func_name}(aTHX_ ${args_str}))";
+                push @stmts, '_mcr';
                 return '({ ' . join('; ', @stmts) . '; })';
             }
         }
