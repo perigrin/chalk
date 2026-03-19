@@ -88,7 +88,7 @@ printf "Phase 2 total: %.1fs\n\n", time() - $t0;
 $t0 = time();
 print "Phase 3: Generating C files via Target::C...\n";
 
-my @generated;  # [ slug, c_text, h_text ] per class
+my @generated;  # hashref per class: slug, c_text, h_text, xs_text, skipped_methods
 
 for my $info (@parsed) {
     my $class_name = $info->{class_name};
@@ -109,10 +109,21 @@ for my $info (@parsed) {
     };
     die "generate_c_files failed for $class_name: $@\n" if $@ || !defined $result;
 
+    # Generate .xs wrapper from the same IR and exported function list
+    my $xs_text = eval {
+        $target->generate_xs_wrapper(
+            $info->{ir},
+            $result->{exported_functions},
+            $result->{anon_sub_registrations},
+        )
+    };
+    die "generate_xs_wrapper failed for $class_name: $@\n" if $@ || !defined $xs_text;
+
     push @generated, {
-        slug   => $slug,
-        c_text => $result->{files}{"${slug}.c"},
-        h_text => $result->{files}{"${slug}.h"},
+        slug            => $slug,
+        c_text          => $result->{files}{"${slug}.c"},
+        h_text          => $result->{files}{"${slug}.h"},
+        xs_text         => $xs_text,
         skipped_methods => $result->{skipped_methods} // [],
     };
 
@@ -126,7 +137,7 @@ for my $info (@parsed) {
 }
 printf "Phase 3 total: %.1fs\n\n", time() - $t0;
 
-# === Phase 4: Write generated files + copy chalk.h and .xs wrappers ===
+# === Phase 4: Write generated files + chalk.h ===
 $t0 = time();
 print "Phase 4: Writing files to build directory...\n";
 
@@ -138,17 +149,8 @@ copy("$c_src/chalk.h", "$build_dir/chalk.h")
     or die "Cannot copy chalk.h: $!\n";
 print "  chalk.h copied\n";
 
-# Copy hand-crafted .xs wrappers (only Boolean.xs exists right now)
+# Write generated .c, .h, and .xs files
 my @xs_files;
-for my $xs (sort glob("$c_src/*.xs")) {
-    my $base = basename($xs);
-    copy($xs, "$build_dir/$base")
-        or die "Cannot copy $xs: $!\n";
-    push @xs_files, $base;
-    print "  $base copied\n";
-}
-
-# Write generated .c and .h files
 for my $g (@generated) {
     my $slug = $g->{slug};
 
@@ -162,7 +164,20 @@ for my $g (@generated) {
     print $hfh $g->{h_text};
     close $hfh;
 
-    printf "  %s.c + %s.h written\n", $slug, $slug;
+    # Derive the capitalised XS filename from the last component of the module name.
+    # e.g. "Chalk::Bootstrap::Semiring::Boolean" => "Boolean.xs"
+    my ($last_component) = $slug =~ /^(.)/;
+    my $xs_base = $slug;
+    $xs_base =~ s/^([a-z])/uc($1)/e;  # capitalise first letter
+    $xs_base .= '.xs';
+
+    open my $xfh, '>:encoding(UTF-8)', "$build_dir/$xs_base"
+        or die "Cannot write $build_dir/$xs_base: $!\n";
+    print $xfh $g->{xs_text};
+    close $xfh;
+
+    push @xs_files, $xs_base;
+    printf "  %s.c + %s.h + %s written\n", $slug, $slug, $xs_base;
 }
 printf "Phase 4 total: %.1fs\n\n", time() - $t0;
 
