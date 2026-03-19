@@ -4,7 +4,7 @@
 
 **Goal:** Prove the chalk.so + thin XS wrapper architecture end-to-end by compiling Boolean to a `.c` file, linking it into `chalk.so`, exposing it via a thin `.xs` wrapper, and loading it from Perl.
 
-**Architecture:** Extract the IR-to-C emission logic from `Target/XS.pm` into a new `Target/C.pm` module. C.pm emits `boolean.c` + `boolean.h` from Boolean's IR. A new thin-wrapper emitter produces `Boolean.xs` with just XSUBs and BOOT. A build script compiles `chalk.so` from the `.c` file, then compiles the `.xs` wrapper separately. `Chalk::Runtime` loads `chalk.so` with `RTLD_GLOBAL`; the per-class PM stub loads `Boolean.so` against it.
+**Architecture:** Hand-craft `boolean.c` + `boolean.h` + `Boolean.xs` to validate the build pipeline end-to-end before building the automated C emitter. A build script compiles `chalk.so` from the `.c` file, then compiles the `.xs` wrapper separately. `Chalk::Runtime` loads `chalk.so` with `RTLD_GLOBAL`; the per-class `.so` resolves C symbols against it. The C emitter (`Target/C.pm`) that auto-generates these files from IR is the follow-up plan after this pipeline is validated.
 
 **Tech Stack:** Perl 5.42.0, C (gcc/cc), xsubpp, DynaLoader, Perl class C API (ObjectFIELDS, class_setup_stash)
 
@@ -25,17 +25,15 @@
 
 | File | Responsibility |
 |------|---------------|
-| `lib/Chalk/Bootstrap/Perl/Target/C.pm` | C emitter: IR → `.c` + `.h` files. Extracts ~35 `_emit_xs_*` methods from XS.pm, renames to `_emit_c_*`. |
+| `c_src/chalk.h` | Shared C header: Perl API includes, `CHALK_FIELD` macro |
+| `c_src/boolean.c` | Hand-crafted C implementation of Boolean semiring |
+| `c_src/boolean.h` | Function prototypes for boolean.c |
+| `c_src/Boolean.xs` | Thin XSUB wrapper + BOOT block for Boolean |
 | `lib/Chalk/Bootstrap/Runtime.pm` | Loads `chalk.so` with `RTLD_GLOBAL`. Thin module — just DynaLoader calls. |
-| `script/build-chalk-so` | Build orchestrator: parses classes → emits C/H/XS → compiles `chalk.so` → compiles per-class `.so` |
-| `t/bootstrap/c-target-boolean.t` | Tests C.pm emitting `boolean.c` + `boolean.h` from Boolean IR |
+| `script/build-chalk-so` | Build orchestrator: compiles `.c` into `chalk.so`, `.xs` into per-class `.so` |
 | `t/bootstrap/c-build-pipeline.t` | End-to-end: compile chalk.so, load Boolean, call methods from Perl |
-
-### Modified Files
-
-| File | Change |
-|------|--------|
-| `lib/Chalk/Bootstrap/Perl/Target/XS.pm` | Add `generate_thin_xs_distribution()` method for thin wrapper + BOOT (no `_impl_` helpers) |
+| `t/bootstrap/c-runtime-loader.t` | Tests Chalk::Bootstrap::Runtime loading chalk.so |
+| `t/bootstrap/c-boolean-integration.t` | C-backed Boolean with Earley parser integration |
 
 ---
 
@@ -148,20 +146,24 @@ is($? >> 8, 0, 'boolean.o links into chalk.so') or diag("Link failed: $out\nComm
 
 ok(-f "$tmpdir/chalk.$so_ext", 'chalk.so exists');
 
-# Load chalk.so via DynaLoader and verify it has our symbols
-my $load_test = qq{
-    use 5.42.0;
-    require DynaLoader;
-    my \$libref = DynaLoader::dl_load_file("$tmpdir/chalk.$so_ext", 0x01);
-    if (\$libref) {
-        print "LOADED\\n";
-        my \$sym = DynaLoader::dl_find_symbol(\$libref, "boolean_is_zero");
-        print defined \$sym ? "SYMBOL_FOUND\\n" : "SYMBOL_MISSING\\n";
-    } else {
-        print "LOAD_FAILED: " . DynaLoader::dl_error() . "\\n";
-    }
-};
-$out = `$perl -e '$load_test' 2>&1`;
+# Load chalk.so via DynaLoader and verify it has our symbols.
+# Write test to a file to avoid shell quoting issues.
+my $load_script = "$tmpdir/load_test.pl";
+open my $lfh, '>', $load_script or die "Cannot write $load_script: $!";
+print $lfh <<"END_SCRIPT";
+use 5.42.0;
+require DynaLoader;
+my \$libref = DynaLoader::dl_load_file("$tmpdir/chalk.$so_ext", 0x01);
+if (\$libref) {
+    print "LOADED\\n";
+    my \$sym = DynaLoader::dl_find_symbol(\$libref, "boolean_is_zero");
+    print defined \$sym ? "SYMBOL_FOUND\\n" : "SYMBOL_MISSING\\n";
+} else {
+    print "LOAD_FAILED: " . DynaLoader::dl_error() . "\\n";
+}
+END_SCRIPT
+close $lfh;
+$out = `$perl $load_script 2>&1`;
 like($out, qr/LOADED/, 'chalk.so loads via DynaLoader');
 like($out, qr/SYMBOL_FOUND/, 'boolean_is_zero symbol found in chalk.so');
 
@@ -209,14 +211,17 @@ matching `lib/Chalk/Bootstrap/Semiring/Boolean.pm`:
 #include "boolean.h"
 
 /* File-scope static: the unique ZERO reference (an empty AV).
-   Initialized lazily on first call to boolean_zero(). */
+   Initialized lazily on first call to boolean_zero().
+   NOTE: This is a process-global static. On threaded perls with multiple
+   interpreters, this would need MY_CXT for per-interpreter storage.
+   Acceptable for this single-interpreter proof of concept. */
 static SV *_boolean_ZERO = NULL;
 
 static SV * _get_zero(pTHX) {
     if (!_boolean_ZERO) {
         AV *av = newAV();
         _boolean_ZERO = newRV_noinc((SV*)av);
-        SvREADONLY_on(_boolean_ZERO);  /* prevent modification */
+        /* No SvREADONLY — matches Perl Boolean.pm behavior where $ZERO = [] is mutable */
     }
     return _boolean_ZERO;
 }
@@ -345,49 +350,53 @@ $out = `$cmd`;
 is($? >> 8, 0, 'Boolean.o links into Boolean.so') or diag("Link failed: $out");
 
 # === Test 5: Load chalk.so + Boolean.so and call methods ===
+# Write test to a file to avoid shell quoting issues.
 
-my $method_test = qq{
-    use 5.42.0;
-    use utf8;
-    require DynaLoader;
+my $method_script = "$tmpdir/method_test.pl";
+open my $mfh, '>', $method_script or die "Cannot write $method_script: $!";
+print $mfh <<"END_SCRIPT";
+use 5.42.0;
+use utf8;
+require DynaLoader;
 
-    # Load chalk.so with RTLD_GLOBAL
-    my \$chalk = DynaLoader::dl_load_file("$tmpdir/chalk.$so_ext", 0x01)
-        or die "chalk.so: " . DynaLoader::dl_error();
+# Load chalk.so with RTLD_GLOBAL
+my \$chalk = DynaLoader::dl_load_file("$tmpdir/chalk.$so_ext", 0x01)
+    or die "chalk.so: " . DynaLoader::dl_error();
 
-    # Load Boolean.so
-    my \$bool_so = "$tmpdir/auto/Chalk/Bootstrap/Semiring/Boolean/Boolean.$so_ext";
-    my \$libref = DynaLoader::dl_load_file(\$bool_so, 0)
-        or die "Boolean.so: " . DynaLoader::dl_error();
+# Load Boolean.so
+my \$bool_so = "$tmpdir/auto/Chalk/Bootstrap/Semiring/Boolean/Boolean.$so_ext";
+my \$libref = DynaLoader::dl_load_file(\$bool_so, 0)
+    or die "Boolean.so: " . DynaLoader::dl_error();
 
-    # Bootstrap the XS module
-    my \$boot = DynaLoader::dl_find_symbol(\$libref, "boot_Chalk__Bootstrap__Semiring__Boolean")
-        or die "boot symbol: " . DynaLoader::dl_error();
-    DynaLoader::dl_install_xsub(
-        "Chalk::Bootstrap::Semiring::Boolean::_bootstrap", \$boot, \$bool_so);
-    Chalk::Bootstrap::Semiring::Boolean->_bootstrap();
+# Bootstrap the XS module
+my \$boot = DynaLoader::dl_find_symbol(\$libref, "boot_Chalk__Bootstrap__Semiring__Boolean")
+    or die "boot symbol: " . DynaLoader::dl_error();
+DynaLoader::dl_install_xsub(
+    "Chalk::Bootstrap::Semiring::Boolean::_bootstrap", \$boot, \$bool_so);
+Chalk::Bootstrap::Semiring::Boolean->_bootstrap();
 
-    # Test: create instance and call methods
-    my \$b = Chalk::Bootstrap::Semiring::Boolean->new();
-    my \$zero = \$b->zero();
-    my \$one = \$b->one();
+# Test: create instance and call methods
+my \$b = Chalk::Bootstrap::Semiring::Boolean->new();
+my \$zero = \$b->zero();
+my \$one = \$b->one();
 
-    # is_zero on zero value → true
-    die "is_zero(zero) should be true" unless \$b->is_zero(\$zero);
-    # is_zero on one value → false
-    die "is_zero(one) should be false" if \$b->is_zero(\$one);
-    # add(zero, zero) → zero
-    die "add(z,z) should be zero" unless \$b->is_zero(\$b->add(\$zero, \$zero));
-    # add(zero, one) → non-zero
-    die "add(z,o) should be non-zero" if \$b->is_zero(\$b->add(\$zero, \$one));
-    # multiply(one, one) → non-zero
-    die "mul(o,o) should be non-zero" if \$b->is_zero(\$b->multiply(\$one, \$one));
-    # multiply(zero, one) → zero
-    die "mul(z,o) should be zero" unless \$b->is_zero(\$b->multiply(\$zero, \$one));
+# is_zero on zero value -> true
+die "is_zero(zero) should be true" unless \$b->is_zero(\$zero);
+# is_zero on one value -> false
+die "is_zero(one) should be false" if \$b->is_zero(\$one);
+# add(zero, zero) -> zero
+die "add(z,z) should be zero" unless \$b->is_zero(\$b->add(\$zero, \$zero));
+# add(zero, one) -> non-zero
+die "add(z,o) should be non-zero" if \$b->is_zero(\$b->add(\$zero, \$one));
+# multiply(one, one) -> non-zero
+die "mul(o,o) should be non-zero" if \$b->is_zero(\$b->multiply(\$one, \$one));
+# multiply(zero, one) -> zero
+die "mul(z,o) should be zero" unless \$b->is_zero(\$b->multiply(\$zero, \$one));
 
-    print "ALL_METHODS_OK\\n";
-};
-$out = `$perl -e '$method_test' 2>&1`;
+print "ALL_METHODS_OK\\n";
+END_SCRIPT
+close $mfh;
+$out = `$perl $method_script 2>&1`;
 like($out, qr/ALL_METHODS_OK/, 'Boolean methods work through chalk.so + thin XS wrapper')
     or diag("Method test output: $out");
 ```
@@ -608,6 +617,7 @@ use utf8;
 
 package Chalk::Bootstrap::Runtime;
 require DynaLoader;
+require Config;
 
 my $_loaded = false;
 
@@ -774,34 +784,49 @@ CHALK_SO_PATH=.build/chalk-so/chalk.so perl -Ilib -I.build/chalk-so t/bootstrap/
 ```
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Ensure .build/ is in .gitignore**
+
+Check if `.build/` is already in `.gitignore`. If not, add it:
+```bash
+grep -q '^\.build/' .gitignore 2>/dev/null || echo '.build/' >> .gitignore
+```
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add script/build-chalk-so
+git add script/build-chalk-so .gitignore
 git commit -m "feat: build-chalk-so script compiles C + XS into chalk.so + per-class .so"
 ```
 
 ---
 
-## Task 6: Integration test — Boolean via chalk.so replaces pure Perl
+## Task 6: Integration test — C-backed Boolean with Earley parser
 
-The ultimate validation: load the C-backed Boolean semiring and use it with the
-Earley parser to recognize the same grammars the pure Perl version handles.
+The ultimate validation: load the C-backed Boolean semiring (without loading
+the pure Perl version first — you cannot call `class_setup_stash` on an
+already-registered class stash) and use it with the Earley parser to recognize
+a grammar.
+
+**IMPORTANT:** Do NOT `require Chalk::Bootstrap::Semiring::Boolean` (the pure
+Perl version) before loading the C-backed one. Double class registration on the
+same stash will segfault (documented in MEMORY.md under "XS BOOT Block").
 
 **Files:**
 - Create: `t/bootstrap/c-boolean-integration.t`
 
 - [ ] **Step 1: Write the integration test**
 
-Create `t/bootstrap/c-boolean-integration.t`:
+Create `t/bootstrap/c-boolean-integration.t`. This test runs in a subprocess
+to ensure a clean Perl interpreter with no prior class registrations:
 
 ```perl
 # ABOUTME: Integration test: C-backed Boolean semiring via chalk.so + Earley parser.
-# ABOUTME: Validates behavioral equivalence between C and pure Perl Boolean.
+# ABOUTME: Validates behavioral equivalence and Earley parser compatibility.
 use 5.42.0;
 use utf8;
 use Test::More;
 use Config;
+use File::Temp qw(tempdir);
 
 # Skip unless chalk.so is built
 my $so_ext = $Config{dlext};
@@ -809,69 +834,121 @@ my $chalk_so = ".build/chalk-so/chalk.$so_ext";
 plan skip_all => "chalk.so not built (run script/build-chalk-so first)"
     unless -f $chalk_so;
 
-$ENV{CHALK_SO_PATH} = $chalk_so;
+my $perl = $^X;
+my $tmpdir = tempdir(CLEANUP => 1);
 
-# Add the built .so directory to @INC for auto/ lookup
-use lib '.build/chalk-so';
+# === Part 1: Behavioral equivalence (subprocess — clean interpreter) ===
 
-# Load pure Perl Boolean first for comparison
-require Chalk::Bootstrap::Semiring::Boolean;
-my $pp_bool = Chalk::Bootstrap::Semiring::Boolean->new();
-
-# Now load C-backed Boolean (this replaces the pure Perl class)
-require Chalk::Bootstrap::Runtime;
-ok(Chalk::Bootstrap::Runtime->loaded(), 'chalk.so loaded');
-
-# Load the XS wrapper
+my $equiv_script = "$tmpdir/equiv_test.pl";
+open my $fh, '>', $equiv_script or die "Cannot write $equiv_script: $!";
+print $fh <<"END_SCRIPT";
+use 5.42.0;
+use utf8;
 require DynaLoader;
-my $bool_so = ".build/chalk-so/auto/Chalk/Bootstrap/Semiring/Boolean/Boolean.$so_ext";
-my $libref = DynaLoader::dl_load_file($bool_so, 0)
-    or die "Cannot load Boolean.so: " . DynaLoader::dl_error();
-my $boot = DynaLoader::dl_find_symbol($libref, "boot_Chalk__Bootstrap__Semiring__Boolean")
-    or die "Cannot find boot symbol: " . DynaLoader::dl_error();
+
+# Load chalk.so with RTLD_GLOBAL
+my \$chalk = DynaLoader::dl_load_file("$chalk_so", 0x01)
+    or die "chalk.so: " . DynaLoader::dl_error();
+
+# Load Boolean.so
+my \$bool_so = ".build/chalk-so/auto/Chalk/Bootstrap/Semiring/Boolean/Boolean.$so_ext";
+my \$libref = DynaLoader::dl_load_file(\$bool_so, 0)
+    or die "Boolean.so: " . DynaLoader::dl_error();
+my \$boot = DynaLoader::dl_find_symbol(\$libref, "boot_Chalk__Bootstrap__Semiring__Boolean")
+    or die "boot symbol: " . DynaLoader::dl_error();
 DynaLoader::dl_install_xsub(
-    "Chalk::Bootstrap::Semiring::Boolean::_bootstrap", $boot, $bool_so);
+    "Chalk::Bootstrap::Semiring::Boolean::_bootstrap", \$boot, \$bool_so);
 Chalk::Bootstrap::Semiring::Boolean->_bootstrap();
 
-my $c_bool = Chalk::Bootstrap::Semiring::Boolean->new();
-isa_ok($c_bool, 'Chalk::Bootstrap::Semiring::Boolean');
+my \$b = Chalk::Bootstrap::Semiring::Boolean->new();
+my \$z = \$b->zero();
+my \$o = \$b->one();
 
-# === Behavioral equivalence tests ===
+# Core semiring operations
+die "is_zero(z) fail" unless \$b->is_zero(\$z);
+die "is_zero(o) fail" if \$b->is_zero(\$o);
+die "is_zero(42) fail" if \$b->is_zero(42);
+die "add(z,z) fail" unless \$b->is_zero(\$b->add(\$z, \$z));
+die "add(z,o) fail" if \$b->is_zero(\$b->add(\$z, \$o));
+die "add(o,z) fail" if \$b->is_zero(\$b->add(\$o, \$z));
+die "add(o,o) fail" if \$b->is_zero(\$b->add(\$o, \$o));
+die "mul(z,z) fail" unless \$b->is_zero(\$b->multiply(\$z, \$z));
+die "mul(z,o) fail" unless \$b->is_zero(\$b->multiply(\$z, \$o));
+die "mul(o,z) fail" unless \$b->is_zero(\$b->multiply(\$o, \$z));
+die "mul(o,o) fail" if \$b->is_zero(\$b->multiply(\$o, \$o));
+die "on_scan fail" if \$b->is_zero(\$b->on_scan({value => \$o}, 0, 0, 'x'));
+die "on_scan zero fail" unless \$b->is_zero(\$b->on_scan({value => \$z}, 0, 0, 'x'));
+die "should_scan fail" unless \$b->should_scan({}, 0, 0, 'x', sub { 0 });
+die "supports_leo fail" unless \$b->supports_leo();
 
-my $z = $c_bool->zero();
-my $o = $c_bool->one();
+print "EQUIV_OK\\n";
+END_SCRIPT
+close $fh;
 
-# is_zero
-ok($c_bool->is_zero($z), 'C: is_zero(zero) is true');
-ok(!$c_bool->is_zero($o), 'C: is_zero(one) is false');
-ok(!$c_bool->is_zero(42), 'C: is_zero(non-ref) is false');
+my $out = `$perl -Ilib $equiv_script 2>&1`;
+like($out, qr/EQUIV_OK/, 'C Boolean: all semiring operations match pure Perl')
+    or diag("Equivalence test output: $out");
 
-# add (Boolean OR)
-ok($c_bool->is_zero($c_bool->add($z, $z)), 'C: add(z,z) = zero');
-ok(!$c_bool->is_zero($c_bool->add($z, $o)), 'C: add(z,o) = non-zero');
-ok(!$c_bool->is_zero($c_bool->add($o, $z)), 'C: add(o,z) = non-zero');
-ok(!$c_bool->is_zero($c_bool->add($o, $o)), 'C: add(o,o) = non-zero');
+# === Part 2: Earley parser integration (subprocess — clean interpreter) ===
 
-# multiply (Boolean AND)
-ok($c_bool->is_zero($c_bool->multiply($z, $z)), 'C: mul(z,z) = zero');
-ok($c_bool->is_zero($c_bool->multiply($z, $o)), 'C: mul(z,o) = zero');
-ok($c_bool->is_zero($c_bool->multiply($o, $z)), 'C: mul(o,z) = zero');
-ok(!$c_bool->is_zero($c_bool->multiply($o, $o)), 'C: mul(o,o) = non-zero');
+my $earley_script = "$tmpdir/earley_test.pl";
+open $fh, '>', $earley_script or die "Cannot write $earley_script: $!";
+print $fh <<"END_SCRIPT";
+use 5.42.0;
+use utf8;
+use lib 'lib';
+require DynaLoader;
 
-# on_scan
-my $item = { value => $o };
-my $scan_result = $c_bool->on_scan($item, 0, 0, 'test');
-ok(!$c_bool->is_zero($scan_result), 'C: on_scan with non-zero value = non-zero');
+# Load C-backed Boolean BEFORE any pure Perl semiring
+my \$chalk = DynaLoader::dl_load_file("$chalk_so", 0x01)
+    or die "chalk.so: " . DynaLoader::dl_error();
+my \$bool_so = ".build/chalk-so/auto/Chalk/Bootstrap/Semiring/Boolean/Boolean.$so_ext";
+my \$libref = DynaLoader::dl_load_file(\$bool_so, 0)
+    or die "Boolean.so: " . DynaLoader::dl_error();
+my \$boot = DynaLoader::dl_find_symbol(\$libref, "boot_Chalk__Bootstrap__Semiring__Boolean")
+    or die "boot symbol: " . DynaLoader::dl_error();
+DynaLoader::dl_install_xsub(
+    "Chalk::Bootstrap::Semiring::Boolean::_bootstrap", \$boot, \$bool_so);
+Chalk::Bootstrap::Semiring::Boolean->_bootstrap();
 
-$item = { value => $z };
-$scan_result = $c_bool->on_scan($item, 0, 0, 'test');
-ok($c_bool->is_zero($scan_result), 'C: on_scan with zero value = zero');
+# Now load Earley (pure Perl) and use C-backed Boolean as the semiring
+require Chalk::Bootstrap::Earley;
+require Chalk::Grammar::BNF;
 
-# should_scan (always true for Boolean)
-ok($c_bool->should_scan({}, 0, 0, 'test', sub { false }), 'C: should_scan = true');
+# Simple test grammar: S -> 'a'
+my \$grammar = Chalk::Grammar::BNF->new(
+    rules => [
+        Chalk::Grammar::Rule->new(
+            name => 'S',
+            alternatives => [
+                [Chalk::Grammar::Symbol->new(type => 'terminal', value => 'a')],
+            ],
+        ),
+    ],
+    start => 'S',
+);
 
-# supports_leo
-ok($c_bool->supports_leo(), 'C: supports_leo = true');
+my \$bool = Chalk::Bootstrap::Semiring::Boolean->new();
+my \$parser = Chalk::Bootstrap::Earley->new(
+    grammar => \$grammar,
+    semiring => \$bool,
+);
+
+# Parse "a" — should succeed
+my \$result = \$parser->recognize("a");
+die "recognize('a') should succeed" unless \$result;
+
+# Parse "b" — should fail
+\$result = \$parser->recognize("b");
+die "recognize('b') should fail" if \$result;
+
+print "EARLEY_OK\\n";
+END_SCRIPT
+close $fh;
+
+$out = `$perl -Ilib $earley_script 2>&1`;
+like($out, qr/EARLEY_OK/, 'C Boolean + Earley parser: recognizes simple grammar')
+    or diag("Earley test output: $out");
 
 done_testing;
 ```
@@ -893,7 +970,7 @@ Expected: All tests PASS
 
 ```bash
 git add t/bootstrap/c-boolean-integration.t
-git commit -m "test: integration test validates C Boolean via chalk.so matches pure Perl"
+git commit -m "test: C Boolean integration with Earley parser via chalk.so"
 ```
 
 ---
