@@ -152,6 +152,8 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+# No :isa — C.pm has a different API (generate_c_files, not generate).
+# It is standalone, not a subclass of Target.
 class Chalk::Bootstrap::Perl::Target::C {
     field $module_name :param :reader;
     field $field_map;
@@ -163,18 +165,39 @@ class Chalk::Bootstrap::Perl::Target::C {
     field $_regex_counter = 0;
     field $_regex_statics;
     field %_class_scope_vars;
-    field %_class_subs;
+    field %_class_subs;  # populated by _scan_class_methods as a side effect
     field %_use_constants;
     field @_anon_sub_helpers;
     field $_anon_sub_counter = 0;
     field $_current_slug = '';
     field @_exported_functions;  # accumulated during emission
     field @_skipped_methods;
-    field @_anon_sub_registrations;
+    field @_anon_sub_registrations;  # populated by _emit_c_anon_sub_expr (empty for Boolean)
+    field $_sa;   # SemanticAction — stored for emit_from_cfg_state
+    field $_ctx;  # Context — stored for emit_from_cfg_state
+
+    # _xs_c_type_for must be a lexical sub at class scope (not inside a method)
+    # so all copied methods can reference it.
+    my sub _xs_c_type_for($ti_type) {
+        return 'void' if !defined $ti_type || $ti_type eq 'Void';
+        return 'SV *';
+    }
 
     # ... methods ...
 }
 ```
+
+**Note on `$_sa` and `$_ctx` fields:** `emit_from_cfg_state` (called from
+`_emit_c_stmt` via the CFG dispatch path) needs access to `$sa` and `$ctx`.
+In XS.pm these are passed into `generate_distribution_with_cfg` and threaded
+through `_build_cfg_lookup`. C.pm stores them as fields, set at the start of
+`generate_c_files`, so `emit_from_cfg_state` can access them without
+changing every method signature in the call chain.
+
+**Note on `%_class_subs`:** `_scan_class_methods` populates `%_class_subs` as
+a side effect (XS.pm line ~2514). `_analyze_class` is not purely read-only —
+it calls `_scan_class_methods` which mutates `%_class_subs`. This is inherited
+behavior from XS.pm.
 
 At this stage, `generate_c_files` returns a result with empty `.c` and `.h`
 content — just enough structure to make the test's structural assertions pass.
@@ -304,7 +327,20 @@ Expected: `syntax OK`
 If there are compilation errors, fix them (likely missed renames or missing
 method references).
 
-- [ ] **Step 7: Commit**
+**Rename policy:** `_emit_xs_*` methods are renamed to `_emit_c_*`. The
+`_fixup_xs_*` methods keep their names (they fixup XS-generated patterns
+that persist in the C output — the name documents their origin).
+`_xs_c_type_for` keeps its name (it's already a C-type mapper).
+
+- [ ] **Step 7: Checkpoint test — generate_c_files produces non-empty output**
+
+Run: `perl -Ilib t/bootstrap/c-target-boolean.t`
+Expected: Structural tests PASS (module loads, result has .c and .h keys).
+Content assertions may fail (functions might not have correct names yet) —
+but the file should have SOME content. This validates the 50-method copy
+didn't break the basic emission pipeline.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add lib/Chalk/Bootstrap/Perl/Target/C.pm
@@ -443,11 +479,30 @@ method generate_c_files($ir, $sa, $ctx) {
 
 **IMPORTANT:** This is pseudocode showing the structure. The actual implementation
 needs to handle:
-- The method body extraction from `_emit_c_method` returns `{helper => [...], xsub => [...]}`
-  — C.pm only uses `helper`, ignores `xsub`
-- Function naming: replace `_impl_{slug}_{name}` with `{slug}_{name}` and make non-static
-- Same-class `$self->method()` calls: emit `{slug}_{method}(aTHX_ self, ...)` not
-  `_impl_{slug}_{method}(aTHX_ self, ...)`
+
+- **`_emit_c_method` return types:** XS.pm's `_emit_xs_method` has four return
+  paths: (1) bare arrayref for simple constant/die/empty bodies (XS-only output),
+  (2) `{helper => [...], xsub => [...]}` for simple helpers, (3) result from
+  `_emit_xs_complex_method` with `{helper, xsub, returns}`. C.pm must normalize
+  ALL paths to return `{helper => [...]}` (no XSUB output). Rewrite the simple
+  return paths in `_emit_c_method` to produce `{helper => [...]}` format instead
+  of bare arrayrefs. For simple constant returns (Tier A/B), emit a one-line
+  non-static function body instead of an XS CODE block.
+
+- **Function naming:** replace `_impl_{slug}_{name}` with `{slug}_{name}` and
+  make non-static (remove `static` keyword)
+
+- **Same-class `$self->method()` calls:** emit `{slug}_{method}(aTHX_ self, ...)`
+  not `_impl_{slug}_{method}(aTHX_ self, ...)`
+
+- **`$_sa`/`$_ctx` storage:** At the start of `generate_c_files`, store `$sa`
+  and `$ctx` in `$_sa` and `$_ctx` fields so `emit_from_cfg_state` can access
+  them without changing every method signature.
+
+- **Exported function tracking:** Rather than reconstructing parameter strings
+  in `generate_c_files`, have `_emit_c_complex_method` and `_emit_c_method`
+  push to `@_exported_functions` directly when they produce a non-static function.
+  This avoids fragile duplicate parameter extraction.
 
 - [ ] **Step 2: Modify _emit_c_method_call_expr for direct C calls**
 
@@ -568,13 +623,33 @@ SKIP: {
     $out = `$cmd`;
     is($? >> 8, 0, 'Boolean.so links') or diag("Link: $out");
 
-    # Behavioral test in subprocess
-    # ... (same pattern as c-boolean-integration.t Part 1)
-    # Load chalk.so + Boolean.so, test all semiring operations
-    # Print GENERATED_EQUIV_OK on success
+    # === Verify generated code quality ===
+    unlike($result->{files}{'boolean.c'}, qr/_impl_/, 'no _impl_ prefix in generated .c');
+    unlike($result->{files}{'boolean.c'}, qr/\bstatic\b[^*]*\bboolean_\w+\(/, 'exported functions are not static');
+    like($result->{files}{'boolean.c'}, qr/\bboolean_is_zero\b/, 'uses direct call naming');
 
-    # ... write test script to tempfile, run via subprocess ...
+    # === Behavioral test in subprocess ===
+    # Same pattern as c-boolean-integration.t — load chalk.so with RTLD_GLOBAL,
+    # then load Boolean.so which resolves symbols against it.
+    # NOTE: The linking here does NOT require explicit -lchalk. Symbols are
+    # resolved at load time via RTLD_GLOBAL on chalk.so, same as the
+    # hand-crafted pipeline in c-build-pipeline.t.
+
+    # Write behavioral test script to tempfile, run via $perl subprocess.
+    # Test all semiring operations: zero, one, is_zero, add, multiply,
+    # on_scan, on_complete, should_scan, supports_leo.
+    # Print GENERATED_EQUIV_OK on success.
+
+    # ... (follow exact pattern from c-boolean-integration.t Part 1,
+    #      using $tmpdir paths for the generated .so files) ...
     # like($out, qr/GENERATED_EQUIV_OK/, 'generated Boolean passes behavioral tests');
+
+    # === Determinism: generate twice, compare ===
+    my $result2 = $c->generate_c_files($ir, $sa, $ctx);
+    is($result2->{files}{'boolean.c'}, $result->{files}{'boolean.c'},
+       'generate_c_files is deterministic (.c)');
+    is($result2->{files}{'boolean.h'}, $result->{files}{'boolean.h'},
+       'generate_c_files is deterministic (.h)');
 }
 ```
 
@@ -630,7 +705,16 @@ Expected: All 23 tests PASS
 Run: `perl -Ilib t/bootstrap/earley-boolean.t`
 Expected: All tests PASS (pure Perl path unchanged)
 
-- [ ] **Step 4: Commit any fixes if needed**
+- [ ] **Step 4: Run the full bootstrap test suite**
+
+Since XS.pm is unchanged (copy, not move), all existing XS tests should pass:
+```bash
+perl -Ilib t/bootstrap/*.t 2>&1 | grep -E '^(ok|not ok|#|1\.\.)' | grep 'not ok' || echo "ALL PASS"
+```
+Expected: No `not ok` lines. If any XS tests fail, investigate — C.pm should
+not affect XS.pm in any way.
+
+- [ ] **Step 5: Commit any fixes if needed**
 
 ---
 
