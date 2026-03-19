@@ -683,7 +683,7 @@ class Chalk::Bootstrap::Perl::Target::C {
                     push @_exported_functions, {
                         name        => $func_name,
                         return_type => 'SV *',
-                        params      => join(', ', map { my $p = $_; $p =~ s/^SV \*/pTHX_ /; $p } @c_params),
+                        params      => 'pTHX_ ' . join(', ', @c_params),
                     };
                     return { helper => \@helper };
                 }
@@ -710,7 +710,7 @@ class Chalk::Bootstrap::Perl::Target::C {
                 push @_exported_functions, {
                     name        => $func_name,
                     return_type => 'void',
-                    params      => join(', ', map { my $p = $_; $p =~ s/^SV \*/pTHX_ /; $p } @c_params),
+                    params      => 'pTHX_ ' . join(', ', @c_params),
                 };
                 return { helper => \@helper };
             }
@@ -855,11 +855,12 @@ class Chalk::Bootstrap::Perl::Target::C {
         }
         push @helper, '}';
 
-        # Track exported function for .h generation
+        # Track exported function for .h generation.
+        # The .h prototype needs pTHX_ as the first parameter for threaded perls.
         push @_exported_functions, {
             name        => $func_name,
             return_type => $c_ret_type,
-            params      => join(', ', @xs_params),
+            params      => 'pTHX_ ' . join(', ', @xs_params),
         };
 
         return { helper => \@helper, returns => $has_return };
@@ -3429,6 +3430,42 @@ class Chalk::Bootstrap::Perl::Target::C {
         return "NULL /* unsupported */";
     }
 
+    # Emit a C initializer expression for a class-scope variable declaration.
+    # $init_node is the RHS of the `my $var = ...` declaration.
+    # $sigil is $, @, or %.
+    # Returns a C expression string, or undef if the init cannot be represented.
+    method _emit_c_init_expr($init_node, $sigil) {
+        return undef unless defined $init_node;
+        return undef unless $init_node isa Chalk::Bootstrap::IR::Node::Constructor;
+        my $class = $init_node->class();
+
+        # my $scalar = [] — empty array reference
+        if ($class eq 'ArrayRefExpr') {
+            my $elems = $init_node->inputs()->[0];
+            if (!defined $elems || (ref($elems) eq 'ARRAY' && $elems->@* == 0)) {
+                return 'newRV_noinc((SV*)newAV())';
+            }
+        }
+        # my $scalar = {} — empty hash reference
+        if ($class eq 'HashRefExpr') {
+            my $elems = $init_node->inputs()->[0];
+            if (!defined $elems || (ref($elems) eq 'ARRAY' && $elems->@* == 0)) {
+                return 'newRV_noinc((SV*)newHV())';
+            }
+        }
+        # my $scalar = literal constant
+        if ($init_node isa Chalk::Bootstrap::IR::Node::Constant) {
+            my $val = $init_node->value();
+            return '&PL_sv_undef' if $val eq 'undef';
+            return '&PL_sv_yes'   if $val eq '1' || $val eq 'true';
+            return '&PL_sv_no'    if $val eq '0' || $val eq 'false' || $val eq '';
+            if ($val =~ /\A-?\d+\z/) { return "newSViv($val)"; }
+            my $esc = $self->_escape_c_string($val);
+            return "newSVpvs(\"$esc\")";
+        }
+        return undef;
+    }
+
     # Generate C source and header files from a Perl IR tree.
     # Stores $sa and $ctx for use by emission methods that need cfg_state.
     # Returns hashref: { files => { "slug.c" => ..., "slug.h" => ... },
@@ -3536,6 +3573,20 @@ class Chalk::Bootstrap::Perl::Target::C {
         push @c_lines, "#include \"${slug}.h\"";
         push @c_lines, '';
 
+        # Emit class-scope static variable declarations (e.g., my $ZERO = []).
+        # These are process-global statics, initialised lazily or via a BOOT-like init.
+        if (keys %_class_scope_vars) {
+            push @c_lines, "/* File-scope statics (class-scope lexicals) */";
+            for my $var (sort keys %_class_scope_vars) {
+                my $info = $_class_scope_vars{$var};
+                my $c_type = $info->{sigil} eq '%' ? 'HV *'
+                           : $info->{sigil} eq '@' ? 'AV *'
+                           :                         'SV *';
+                push @c_lines, "static ${c_type}$info->{static_name} = NULL;";
+            }
+            push @c_lines, '';
+        }
+
         # Emit regex statics (if any)
         if ($_regex_statics && $_regex_statics->@*) {
             for my $rx ($_regex_statics->@*) {
@@ -3554,6 +3605,42 @@ class Chalk::Bootstrap::Perl::Target::C {
             push @c_lines, @_anon_sub_helpers;
             push @c_lines, '';
         }
+
+        # Emit init_statics function to initialize class-scope vars.
+        # Called from BOOT block of the generated .xs wrapper.
+        # Uses a static guard to ensure one-time initialization (thread-unsafe,
+        # but acceptable for single-interpreter proof of concept).
+        my @init_lines;
+        my $init_fn = "${slug}_init_statics";
+        push @init_lines, "void ${init_fn}(pTHX) {";
+        push @init_lines, "    static int _initialized = 0;";
+        push @init_lines, "    if (_initialized) return;";
+        push @init_lines, "    _initialized = 1;";
+        if (defined $class_decl && keys %_class_scope_vars) {
+            my $body = $class_decl->inputs()->[2];
+            for my $item ($body->@*) {
+                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+                next unless $item->class() eq 'VarDecl';
+                my $raw = $item->inputs()->[0]->value();
+                my $var = $raw;
+                $var =~ s/^[\$\@\%]//;
+                next unless exists $_class_scope_vars{$var};
+                my $info = $_class_scope_vars{$var};
+                my $sname = $info->{static_name};
+                my $init_node = $item->inputs()->[1];
+                my $init_expr = $self->_emit_c_init_expr($init_node, $info->{sigil});
+                push @init_lines, "    $sname = $init_expr;" if defined $init_expr;
+            }
+        }
+        push @init_lines, "}";
+        push @c_lines, "/* One-time static initializer — called from BOOT */";
+        push @c_lines, @init_lines;
+        push @c_lines, '';
+        push @_exported_functions, {
+            name        => $init_fn,
+            return_type => 'void',
+            params      => 'pTHX',
+        };
 
         # Emit exported functions
         if (@func_lines) {
