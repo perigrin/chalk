@@ -346,7 +346,7 @@ class Chalk::Bootstrap::Perl::Target::C {
     # Detect stale-value merge corruption in a method's output:
     # method body has call_method (real work) but RETVAL is a bare string.
     method _is_stale_merge($xs_output) {
-        my $has_dispatch = $xs_output =~ /(?:call_method|_impl_)\(/;
+        my $has_dispatch = $xs_output =~ /(?:call_method|${_current_slug}_\w+)\(/;
         my $has_bare_str = $xs_output =~ /(?:RETVAL|retval) = newSVpvs\("/;
         if ($ENV{DEBUG_STALE_MERGE} && $has_bare_str) {
             warn "STALE_MERGE_CHECK: dispatch=$has_dispatch bare_str=$has_bare_str\n";
@@ -626,13 +626,15 @@ class Chalk::Bootstrap::Perl::Target::C {
         return true;
     }
 
-    # Emit a single XSUB for a MethodDecl
+    # Emit a C function for a MethodDecl.
+    # Always returns { helper => [...] } where helper lines form a complete C function.
+    # Exported methods are non-static: "SV * {slug}_{name}(pTHX_ ...)".
     method _emit_c_method($method_decl) {
         my $name   = $method_decl->inputs()->[0]->value();
         my $params = $method_decl->inputs()->[1];
         my $body   = $method_decl->inputs()->[2];
 
-        my @lines;
+        my $func_name = "${_current_slug}_${name}";
 
         if (scalar $body->@* == 1) {
             my $body_item = $body->[0];
@@ -648,8 +650,7 @@ class Chalk::Bootstrap::Perl::Target::C {
 
                 if ($value isa Chalk::Bootstrap::IR::Node::Constructor
                         && $value->class() eq 'InterpolatedString') {
-                    push @lines, $self->_emit_c_interp_return($name, $value)->@*;
-                    return \@lines;
+                    return $self->_emit_c_interp_return($name, $value);
                 } elsif ($value isa Chalk::Bootstrap::IR::Node::Constant
                          && ($value->const_type() // '') ne 'variable'
                          && $value->value() !~ /^[\$\@\%]/) {
@@ -657,40 +658,34 @@ class Chalk::Bootstrap::Perl::Target::C {
                     my $c_expr = "newSVpvs(\"$str\")";
                     my $raw = $value->value();
                     if ($raw eq '1' || $raw eq 'true') {
-                        $c_expr = 'SvREFCNT_inc(&PL_sv_yes)';
+                        $c_expr = '&PL_sv_yes';
                     } elsif ($raw eq '0' || $raw eq 'false' || $raw eq '') {
-                        $c_expr = 'SvREFCNT_inc(&PL_sv_no)';
+                        $c_expr = '&PL_sv_no';
                     } elsif ($raw eq 'undef') {
-                        $c_expr = 'SvREFCNT_inc(&PL_sv_undef)';
+                        $c_expr = '&PL_sv_undef';
                     } elsif ($raw =~ /\A-?\d+\z/) {
                         $c_expr = "newSViv($raw)";
                     }
-                    my @helper_params = ('SV *self');
-                    my @xsub_params = ('SV *self');
+                    my @c_params = ('SV *self');
                     for my $p ($params->@*) {
                         my $pname = $p->value();
                         $pname =~ s/^\$//;
-                        push @helper_params, "SV *$pname";
-                        push @xsub_params, "SV *$pname";
+                        push @c_params, "SV *$pname";
                     }
                     my @helper;
-                    push @helper, "static SV *_impl_${_current_slug}_${name}(pTHX_ " . join(', ', @helper_params) . ") {";
+                    push @helper, "SV * ${func_name}(pTHX_ " . join(', ', @c_params) . ") {";
+                    for my $p (@c_params) {
+                        push @helper, "    PERL_UNUSED_ARG(${\($p =~ s/^SV \*//r)});"
+                            unless $p =~ /^SV \*self$/;
+                    }
                     push @helper, "    return $c_expr;";
                     push @helper, "}";
-                    my $xsub_call_args = join(', ', 'aTHX_ self', map { my $p = $_; $p =~ s/^SV \*//; $p } @xsub_params[1..$#xsub_params]);
-                    my @xsub;
-                    push @xsub, 'SV *';
-                    if (@xsub_params > 1) {
-                        push @xsub, "${name}(" . join(', ', map { my $p = $_; $p =~ s/^SV \*//; $p } @xsub_params) . ')';
-                    } else {
-                        push @xsub, "${name}(self, ...)";
-                    }
-                    push @xsub, "    $_" for @xsub_params;
-                    push @xsub, '  CODE:';
-                    push @xsub, "    RETVAL = _impl_${_current_slug}_${name}($xsub_call_args);";
-                    push @xsub, '  OUTPUT:';
-                    push @xsub, '    RETVAL';
-                    return { helper => \@helper, xsub => \@xsub };
+                    push @_exported_functions, {
+                        name        => $func_name,
+                        return_type => 'SV *',
+                        params      => join(', ', map { my $p = $_; $p =~ s/^SV \*/pTHX_ /; $p } @c_params),
+                    };
+                    return { helper => \@helper };
                 }
             }
 
@@ -701,31 +696,38 @@ class Chalk::Bootstrap::Perl::Target::C {
                     $msg = $self->_escape_c_string($args->[0]->value());
                 }
 
-                my @xs_params = ('SV *self');
+                my @c_params = ('SV *self');
                 for my $p ($params->@*) {
                     my $pname = $p->value();
                     $pname =~ s/^\$//;
-                    push @xs_params, "SV *$pname";
+                    push @c_params, "SV *$pname";
                 }
 
-                push @lines, 'void';
-                push @lines, "${name}(" . join(', ', @xs_params) . ")";
-                for my $p (@xs_params) {
-                    push @lines, "    $p";
-                }
-                push @lines, '  CODE:';
-                push @lines, "    croak(\"%s\", \"$msg\");";
-                return \@lines;
+                my @helper;
+                push @helper, "void ${func_name}(pTHX_ " . join(', ', @c_params) . ") {";
+                push @helper, "    croak(\"%s\", \"$msg\");";
+                push @helper, "}";
+                push @_exported_functions, {
+                    name        => $func_name,
+                    return_type => 'void',
+                    params      => join(', ', map { my $p = $_; $p =~ s/^SV \*/pTHX_ /; $p } @c_params),
+                };
+                return { helper => \@helper };
             }
         }
 
         if ($body->@* == 0) {
-            push @lines, 'void';
-            push @lines, "${name}(self)";
-            push @lines, '    SV *self';
-            push @lines, '  CODE:';
-            push @lines, '    /* empty */';
-            return \@lines;
+            my @helper;
+            push @helper, "void ${func_name}(pTHX_ SV *self) {";
+            push @helper, "    PERL_UNUSED_ARG(self);";
+            push @helper, "    /* empty */";
+            push @helper, "}";
+            push @_exported_functions, {
+                name        => $func_name,
+                return_type => 'void',
+                params      => 'pTHX_ SV *self',
+            };
+            return { helper => \@helper };
         }
 
         my $return_type_node = $method_decl->inputs()->[3];
@@ -819,10 +821,15 @@ class Chalk::Bootstrap::Perl::Target::C {
         $_return_context = $prev_return_context;
 
         my @helper;
-        my $helper_name = "_impl_${_current_slug}_${name}";
-        push @helper, "static SV * $helper_name(pTHX_ " . join(', ', @xs_params) . ") {";
+        # Exported C function: no "static", no "_impl_" prefix.
+        # Called from Boolean.xs via the function pointer or direct call.
+        my $func_name = "${_current_slug}_${name}";
+        my $c_ret_type = $has_return ? _xs_c_type_for($ir_return_type) : 'void';
+        push @helper, "$c_ret_type ${func_name}(pTHX_ " . join(', ', @xs_params) . ") {";
 
-        push @helper, '    SV *retval = NULL;';
+        if ($has_return) {
+            push @helper, '    SV *retval = NULL;';
+        }
         for my $var (sort keys %declared_vars) {
             next if $var eq 'hash';
             next if $var =~ /^param:/;
@@ -843,45 +850,19 @@ class Chalk::Bootstrap::Perl::Target::C {
         }
         if ($has_return) {
             push @helper, '    return retval;';
-        } else {
+        } elsif ($c_ret_type ne 'void') {
             push @helper, '    return &PL_sv_undef;';
         }
         push @helper, '}';
 
-        my @xsub;
-        if ($has_return) {
-            push @xsub, _xs_c_type_for($ir_return_type);
-        } else {
-            push @xsub, 'void';
-        }
-        my @bare_params = map { /^SV \*(.*)/ ? $1 : $_ } @xs_params;
-        my @non_self_params = @bare_params[1..$#bare_params];
-        if (@non_self_params > 1) {
-            push @xsub, "${name}(self, ...)";
-            push @xsub, "    SV *self";
-            push @xsub, '  PREINIT:';
-            for my $idx (0 .. $#non_self_params) {
-                my $p = $non_self_params[$idx];
-                my $stack_idx = $idx + 1;
-                push @xsub, "    SV *$p = items > $stack_idx ? ST($stack_idx) : &PL_sv_undef;";
-            }
-        } else {
-            push @xsub, "${name}(" . join(', ', @bare_params) . ")";
-            for my $p (@xs_params) {
-                push @xsub, "    $p";
-            }
-        }
-        push @xsub, '  CODE:';
-        my $call_args = join(', ', 'aTHX_ self', @non_self_params);
-        if ($has_return) {
-            push @xsub, "    RETVAL = $helper_name($call_args);";
-            push @xsub, '  OUTPUT:';
-            push @xsub, '    RETVAL';
-        } else {
-            push @xsub, "    $helper_name($call_args);";
-        }
+        # Track exported function for .h generation
+        push @_exported_functions, {
+            name        => $func_name,
+            return_type => $c_ret_type,
+            params      => join(', ', @xs_params),
+        };
 
-        return { helper => \@helper, xsub => \@xsub, returns => $has_return };
+        return { helper => \@helper, returns => $has_return };
     }
 
     # Emit a class-scope sub declaration as a static C helper function.
@@ -953,7 +934,8 @@ class Chalk::Bootstrap::Perl::Target::C {
         $_return_context = $prev_return_context;
 
         my @helper;
-        my $helper_name = "_impl_${_current_slug}_${name}";
+        # Class-scope subs are static helpers — not exported, not in the .h file.
+        my $helper_name = "${_current_slug}_${name}";
         my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
         push @helper, "static SV * $helper_name($param_str) {";
 
@@ -2637,8 +2619,8 @@ class Chalk::Bootstrap::Perl::Target::C {
             }
 
             if ($_class_subs{$name}{compiled}) {
-                # Direct C call to compiled helper
-                my $helper_name = "_impl_${_current_slug}_${name}";
+                # Direct C call to compiled helper (static, slug-namespaced)
+                my $helper_name = "${_current_slug}_${name}";
                 # Pad missing args with &PL_sv_undef for default params
                 my $expected = $_class_subs{$name}{params} // [];
                 while (scalar @c_args < scalar $expected->@*) {
@@ -3237,17 +3219,14 @@ class Chalk::Bootstrap::Perl::Target::C {
         return join("\n", @lines);
     }
 
-    # Emit an XS XSUB that returns an InterpolatedString via C string concatenation.
+    # Emit a C function that returns an InterpolatedString via string concatenation.
     # Variables are read from ObjectFIELDS for field access.
+    # Returns { helper => [...] } like all other _emit_c_method paths.
     method _emit_c_interp_return($method_name, $interp_node) {
         my $parts = $interp_node->inputs()->[0];
-        my @lines;
+        my $func_name = "${_current_slug}_${method_name}";
 
-        push @lines, 'SV *';
-        push @lines, "${method_name}(self)";
-        push @lines, '    SV *self';
-        push @lines, '  CODE:';
-
+        my @body;
         # Build the result SV by concatenation
         my $first = true;
         for my $part ($parts->@*) {
@@ -3264,26 +3243,36 @@ class Chalk::Bootstrap::Perl::Target::C {
                     $src = "get_sv(\"${module_name}::$escaped\", GV_ADD)";
                 }
                 if ($first) {
-                    push @lines, "    RETVAL = newSVsv($src);";
+                    push @body, "    SV *retval = newSVsv($src);";
                     $first = false;
                 } else {
-                    push @lines, "    sv_catsv(RETVAL, $src);";
+                    push @body, "    sv_catsv(retval, $src);";
                 }
             } else {
                 my $lit = $self->_escape_c_string($part->value());
                 if ($first) {
-                    push @lines, "    RETVAL = newSVpvs(\"$lit\");";
+                    push @body, "    SV *retval = newSVpvs(\"$lit\");";
                     $first = false;
                 } else {
-                    push @lines, "    sv_catpvs(RETVAL, \"$lit\");";
+                    push @body, "    sv_catpvs(retval, \"$lit\");";
                 }
             }
         }
+        push @body, "    return retval;";
 
-        push @lines, '  OUTPUT:';
-        push @lines, '    RETVAL';
+        my @helper;
+        push @helper, "SV * ${func_name}(pTHX_ SV *self) {";
+        push @helper, "    PERL_UNUSED_ARG(self);" unless grep { /ObjectFIELDS/ } @body;
+        push @helper, @body;
+        push @helper, "}";
 
-        return \@lines;
+        push @_exported_functions, {
+            name        => $func_name,
+            return_type => 'SV *',
+            params      => 'pTHX_ SV *self',
+        };
+
+        return { helper => \@helper };
     }
 
     # Emit C try/catch using JMPENV_PUSH/POP (setjmp/longjmp).
@@ -3450,23 +3439,165 @@ class Chalk::Bootstrap::Perl::Target::C {
         $_sa  = $sa;
         $_ctx = $ctx;
 
-        %_cfg_lookup = ();
+        # Reset per-generation state
+        @_exported_functions    = ();
+        @_skipped_methods       = ();
+        @_anon_sub_registrations = ();
+        @_anon_sub_helpers      = ();
+        $_anon_sub_counter      = 0;
+        $_regex_statics         = [];
+        $_regex_counter         = 0;
+        %_cfg_lookup            = ();
+
         if (defined $sa) {
             $self->_build_cfg_lookup($sa, $ctx);
         }
 
         $self->_analyze_class($ir);
 
-        my $slug = $_current_slug;
+        my $slug     = $_current_slug;
+        my $class_decl = $self->_find_class_decl($ir);
+
+        my @static_lines;   # static file-scope variables and helpers
+        my @func_lines;     # exported C functions (methods)
+
+        if (defined $class_decl) {
+            my $body = $class_decl->inputs()->[2];
+
+            # Emit class-scope subs (static helpers) before methods
+            for my $item ($body->@*) {
+                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+
+                # Handle mis-parented SubDecl inside VarDecl
+                if ($item->class() eq 'VarDecl') {
+                    my $init = $item->inputs()->[1];
+                    if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $init->class() eq 'SubDecl') {
+                        my $sname  = $init->inputs()->[0]->value();
+                        my $sparams = $init->inputs()->[1];
+                        my $sbody   = $init->inputs()->[2];
+                        my @param_nodes;
+                        for my $p ($sparams->@*) { push @param_nodes, $p; }
+                        my $result = eval { $self->_emit_c_sub($sname, \@param_nodes, $sbody) };
+                        if (defined $result && ref $result eq 'HASH') {
+                            push @static_lines, $result->{helper}->@*;
+                            push @static_lines, '';
+                            $_class_subs{$sname}{compiled} = true;
+                        } else {
+                            $_class_subs{$sname}{compiled} = false;
+                        }
+                    }
+                    next;
+                }
+
+                next unless $item->class() eq 'SubDecl';
+                my $sname   = $item->inputs()->[0]->value();
+                my $sparams = $item->inputs()->[1];
+                my $sbody   = $item->inputs()->[2];
+                my @param_nodes;
+                for my $p ($sparams->@*) { push @param_nodes, $p; }
+                my $result = eval { $self->_emit_c_sub($sname, \@param_nodes, $sbody) };
+                if (defined $result && ref $result eq 'HASH') {
+                    push @static_lines, $result->{helper}->@*;
+                    push @static_lines, '';
+                    $_class_subs{$sname}{compiled} = true;
+                } else {
+                    $_class_subs{$sname}{compiled} = false;
+                }
+            }
+
+            # Emit MethodDecl items as exported C functions
+            for my $item ($body->@*) {
+                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+                next unless $item->class() eq 'MethodDecl';
+
+                my $mname = $item->inputs()->[0]->value();
+                my $result = eval { $self->_emit_c_method($item) };
+                if (!defined $result || $@) {
+                    push @_skipped_methods, $mname;
+                    next;
+                }
+                if (ref $result eq 'HASH' && defined $result->{helper}) {
+                    push @func_lines, $result->{helper}->@*;
+                    push @func_lines, '';
+                } else {
+                    # Unexpected return type — skip
+                    push @_skipped_methods, $mname;
+                }
+            }
+        }
+
+        # Assemble the .c file
+        my $class_full = $module_name;
+        my @c_lines;
+        push @c_lines, "/* ABOUTME: C implementation of $class_full (generated by Target::C). */";
+        push @c_lines, "/* ABOUTME: Auto-generated from Perl source — do not edit. */";
+        push @c_lines, "#include \"chalk.h\"";
+        push @c_lines, "#include \"${slug}.h\"";
+        push @c_lines, '';
+
+        # Emit regex statics (if any)
+        if ($_regex_statics && $_regex_statics->@*) {
+            for my $rx ($_regex_statics->@*) {
+                push @c_lines, "static REGEXP *$rx->{var} = NULL;";
+            }
+            push @c_lines, '';
+        }
+
+        # Emit static helpers (subs + anon subs)
+        if (@static_lines) {
+            push @c_lines, "/* Static helpers */";
+            push @c_lines, @static_lines;
+        }
+
+        if (@_anon_sub_helpers) {
+            push @c_lines, @_anon_sub_helpers;
+            push @c_lines, '';
+        }
+
+        # Emit exported functions
+        if (@func_lines) {
+            push @c_lines, "/* Exported functions */";
+            push @c_lines, @func_lines;
+        }
+
+        my $c_text = join("\n", @c_lines);
+        # Remove trailing blank lines and ensure single newline at end
+        $c_text =~ s/\n{3,}/\n\n/g;
+        $c_text .= "\n" unless $c_text =~ /\n$/;
+
+        # Assemble the .h file from @_exported_functions
+        my $guard = "CHALK_\U${slug}\E_H";
+        my @h_lines;
+        push @h_lines, "/* ABOUTME: Function prototypes for $class_full (generated). */";
+        push @h_lines, "/* ABOUTME: Included by other .c files for cross-class calls. */";
+        push @h_lines, "#ifndef ${guard}";
+        push @h_lines, "#define ${guard}";
+        push @h_lines, "#include \"chalk.h\"";
+        push @h_lines, '';
+        for my $fn (sort { $a->{name} cmp $b->{name} } @_exported_functions) {
+            my $ret   = $fn->{return_type};
+            my $fname = $fn->{name};
+            my $parms = $fn->{params};
+            # Normalise params: ensure pTHX_ prefix for first param
+            unless ($parms =~ /^pTHX/) {
+                $parms = "pTHX_ $parms";
+            }
+            push @h_lines, "$ret ${fname}($parms);";
+        }
+        push @h_lines, '';
+        push @h_lines, "#endif /* ${guard} */";
+
+        my $h_text = join("\n", @h_lines) . "\n";
 
         return {
             files => {
-                "${slug}.c" => '',
-                "${slug}.h" => '',
+                "${slug}.c" => $c_text,
+                "${slug}.h" => $h_text,
             },
-            exported_functions   => [],
-            skipped_methods      => [],
-            anon_sub_registrations => [],
+            exported_functions    => [@_exported_functions],
+            skipped_methods       => [@_skipped_methods],
+            anon_sub_registrations => [@_anon_sub_registrations],
         };
     }
 }

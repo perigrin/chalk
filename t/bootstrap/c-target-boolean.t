@@ -1,5 +1,5 @@
-# ABOUTME: Tests for Target::C skeleton using Boolean.pm as the input IR.
-# ABOUTME: Verifies generate_c_files returns the correct structure; content tests are TODO until emission is implemented.
+# ABOUTME: Tests for Target::C emission pipeline using Boolean.pm as the input IR.
+# ABOUTME: Verifies generate_c_files structure and that emitted C code contains all expected functions.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -60,22 +60,28 @@ is(ref($result->{anon_sub_registrations}), 'ARRAY', '"anon_sub_registrations" is
 ok(exists $result->{files}{'boolean.c'}, '"files" has "boolean.c" key');
 ok(exists $result->{files}{'boolean.h'}, '"files" has "boolean.h" key');
 
-# === Phase 6: Verify content (TODO until emission is implemented) ===
+# === Phase 6: Verify content ===
 
-TODO: {
-    local $TODO = 'C code emission not yet implemented';
+my $c_src = $result->{files}{'boolean.c'};
+ok(length($c_src) > 0, 'boolean.c is non-empty');
+like($c_src, qr/boolean_is_zero/, 'boolean.c contains boolean_is_zero function');
+like($c_src, qr/boolean_zero/,    'boolean.c contains boolean_zero function');
+like($c_src, qr/boolean_one/,     'boolean.c contains boolean_one function');
+like($c_src, qr/boolean_multiply/, 'boolean.c contains boolean_multiply function');
+like($c_src, qr/boolean_add/,     'boolean.c contains boolean_add function');
+unlike($c_src, qr/_impl_/, 'boolean.c has no _impl_ prefix');
+unlike($c_src, qr/\bstatic\b[^*]*\bboolean_\w+\s*\(/, 'exported functions are not static');
 
-    my $c_src = $result->{files}{'boolean.c'};
-    ok(length($c_src) > 0, 'boolean.c is non-empty');
-    like($c_src, qr/boolean_is_zero/, 'boolean.c contains boolean_is_zero function');
-    like($c_src, qr/boolean_zero/,    'boolean.c contains boolean_zero function');
-    like($c_src, qr/boolean_one/,     'boolean.c contains boolean_one function');
-    like($c_src, qr/boolean_multiply/, 'boolean.c contains boolean_multiply function');
-    like($c_src, qr/boolean_add/,     'boolean.c contains boolean_add function');
+my $h_src = $result->{files}{'boolean.h'};
+ok(length($h_src) > 0, 'boolean.h is non-empty');
+like($h_src, qr/boolean_is_zero/, 'boolean.h declares boolean_is_zero');
+like($h_src, qr/#ifndef CHALK_BOOLEAN_H/, 'boolean.h has include guard');
 
-    my $h_src = $result->{files}{'boolean.h'};
-    ok(length($h_src) > 0, 'boolean.h is non-empty');
-    like($h_src, qr/boolean_is_zero/, 'boolean.h declares boolean_is_zero');
-}
+# === Phase 7: Determinism check ===
+
+my $result2 = eval { $target->generate_c_files($ir, $sa, $ctx) };
+is($@, '', 'second generate_c_files call does not die');
+is($result2->{files}{'boolean.c'}, $result->{files}{'boolean.c'}, 'deterministic .c output');
+is($result2->{files}{'boolean.h'}, $result->{files}{'boolean.h'}, 'deterministic .h output');
 
 done_testing;
