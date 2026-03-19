@@ -39,6 +39,9 @@ my @source_files = (
     ['Chalk::Bootstrap::Semiring::Structural',       'lib/Chalk/Bootstrap/Semiring/Structural.pm'],
     ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm'],
     ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm'],
+    ['Chalk::Bootstrap::Semiring::Precedence',       'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
+    ['Chalk::Bootstrap::Semiring::TypeInference',    'lib/Chalk/Bootstrap/Semiring/TypeInference.pm'],
+    ['Chalk::Bootstrap::Earley',                     'lib/Chalk/Bootstrap/Earley.pm'],
 );
 
 my $total_t0 = time();
