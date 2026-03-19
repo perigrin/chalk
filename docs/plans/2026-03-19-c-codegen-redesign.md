@@ -84,3 +84,33 @@ Earley.xs  ─┼─→ thin XSUB wrappers linking against chalk.so
 - `_impl_` helpers become the primary output, not a side effect of XSUB generation
 - Cross-class calls become direct C calls instead of `call_method`/`call_pv`
 - Build pipeline: parse → IR → C + H + XS → compile → link → chalk.so
+
+## Research: Prior Art
+
+Someone has done this before, even if not as a compilation target. Look at:
+
+- **Class::XSAccessor** — C implementation of accessor methods, thin XS exposure
+- **DBD::SQLite** — wraps sqlite3.c (a large C library) with XS glue for Perl API
+- **Moose::XS** (abandoned but instructive) — attempted to compile Moose internals to C
+- **ExtUtils::MakeMaker / Module::Build** — how they handle multi-file C + XS builds
+  (the `c_source` and `extra_compiler_flags` options)
+- **Inline::C** — how it manages C compilation units alongside XS
+- **PyPy's RPython → C pipeline** — translates a restricted Python subset to C,
+  links into a single shared library, exposes API via separate layer
+- **Cython** — compiles Python-like code to C, generates thin Python wrapper layer
+- **Perl core itself** — `pp.c`, `sv.c`, etc. are plain C; `universal.c` + `.xs` files
+  expose the Perl API. The pattern we want is exactly how Perl's own internals work.
+
+The key question for research: how do these projects handle the boundary between
+"C implementation using Perl's SV*/AV*/HV* types" and "XS wrapper that registers
+methods with Perl's class system"? That's our exact problem.
+
+## Per-Class XS Status (current, pre-redesign)
+
+From the 2026-03-19 per-class bootstrap run:
+- **Compile OK:** Boolean, Structural, SemanticAction, FilterComposite (4/7)
+- **Fail:** Earley, Precedence, TypeInference — regex statics (`_rx_N`) and anon
+  sub CVs (`_cv__anon_N`) not emitted in per-class scope (they were module-level
+  in multi-class but per-class `generate_distribution_with_cfg` doesn't emit them)
+- These static variable scoping issues will be addressed naturally in the C redesign
+  since each `.c` file will have its own file-scope statics
