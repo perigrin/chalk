@@ -78,8 +78,10 @@ emission (C.pm's concern) with BOOT registration (XS.pm's concern).
    semantic actions and context (same as XS.pm's existing method)
 2. **`_analyze_class($ir)`** — walk the IR's ClassDecl node to populate
    `$field_map`, `$_class_methods`, `%_class_scope_vars`, `%_class_subs`,
-   `%_use_constants`. This replaces XS.pm's `_emit_class_sections` for
-   the analysis-only portion (no XS output).
+   `%_use_constants`. This is the read-only analysis portion of XS.pm's
+   `_emit_class_sections`. It does NOT attempt compilation, emit XSUBs,
+   classify methods as simple/complex, or make eval_pv fallback decisions.
+   It only extracts structural information from the IR.
 3. **Emit class-scope statics** — regex statics, anon sub helpers,
    class-level `my` variables with lazy initializers
 4. **Emit methods** — for each method, call `_emit_c_complex_method` to
@@ -144,6 +146,21 @@ generated C text. They are fragile but necessary for Earley-class
 compilation. They move to C.pm as-is for now; replacing them with
 IR-level fixes is future work.
 
+### Implicit moves: methods called exclusively by Groups 1-5
+
+All methods called exclusively by the moving groups also move to C.pm.
+This includes but is not limited to:
+
+`_find_class_decl`, `_field_sigil_for_expr`, `_is_complex_method`,
+`_has_early_return`, `_wrap_retval`, `_find_exists_delete_in_chain`,
+`_escape_c_string`, `_ir_default_to_perl`, `_xs_c_type_for` (lexical sub),
+`emit_from_cfg_state`, `_needs_eval_fallback`, `_calls_uncompiled_my_subs`,
+`_uses_class_scope_vars`, `_is_stale_merge`, `_repair_stale_merge`
+
+The implementer should trace call dependencies from Groups 1-5 and move
+any method that is only called by moving methods. Methods shared between
+moving and staying code should be duplicated or extracted to a shared base.
+
 ### Group 6: Stays in XS.pm
 
 `_emit_xs_preamble`, `_emit_xs_boot_block`,
@@ -156,9 +173,13 @@ output (MODULE/PACKAGE sections, XSUB wrappers). C.pm has its own
 
 ### Key behavioral changes in C.pm
 
-1. Cross-class method calls emit `classname_method(aTHX_ ...)` (direct
-   C function calls) instead of `call_method(...)`. This eliminates the
-   Perl/C bridge overhead that motivated the entire redesign.
+1. All method calls become direct C function calls. Same-class
+   `$self->method()` calls emit `{slug}_{method}(aTHX_ self, ...)`.
+   Cross-class calls emit `{target_slug}_{method}(aTHX_ ...)`. Neither
+   uses `call_method(...)`. The Boolean proof of concept exercises
+   same-class calls (e.g., `$self->is_zero(...)` in `multiply()` becomes
+   `boolean_is_zero(aTHX_ self, ...)`). This eliminates the Perl/C
+   bridge overhead that motivated the entire redesign.
 
 2. CV cache logic (`$_cv_cache`, `$_param_fields`) is NOT extracted.
    Same-class calls become direct `{slug}_{method}(aTHX_ self, ...)`
@@ -259,12 +280,27 @@ pattern as the hand-crafted `_boolean_ZERO` + `_get_zero()`.
 my $c_emitter = Chalk::Bootstrap::Perl::Target::C->new(
     module_name => $module_name,
 );
-my $c_files = $c_emitter->generate_c_files($ir, $sa, $ctx);
-# $c_files->{'boolean.c'} has the implementation
-# $c_files->{'boolean.h'} has the prototypes
+my $result = $c_emitter->generate_c_files($ir, $sa, $ctx);
 
-# XS.pm then generates Boolean.xs using its own BOOT/XSUB emitters,
-# referencing the function names from the .h file
+# Access generated files
+my $c_code = $result->{files}{'boolean.c'};
+my $h_code = $result->{files}{'boolean.h'};
+
+# Use exported_functions to generate matching XSUB wrappers
+for my $func ($result->{exported_functions}->@*) {
+    # $func->{name}, $func->{return_type}, $func->{params}
+    # → emit thin XSUB that calls $func->{name}(aTHX_ ...)
+}
+
+# Handle methods that couldn't compile to C
+for my $skipped ($result->{skipped_methods}->@*) {
+    # → keep as pure Perl, or emit eval_pv fallback
+}
+
+# Register anon subs in BOOT block
+for my $reg ($result->{anon_sub_registrations}->@*) {
+    # → emit $reg->{fwd_decl} and newXS_flags in BOOT
+}
 ```
 
 ## Testing Strategy
