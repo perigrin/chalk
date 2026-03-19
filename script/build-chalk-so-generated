@@ -1,0 +1,242 @@
+#!/usr/bin/env perl
+# ABOUTME: Build orchestrator that generates C files via Target::C from parsed IR.
+# ABOUTME: Parses each semiring class to IR, generates .c/.h, compiles into chalk.so.
+use 5.42.0;
+use utf8;
+use Config;
+use File::Path qw(make_path remove_tree);
+use File::Basename qw(dirname basename);
+use File::Copy qw(copy);
+use Getopt::Long qw(GetOptions);
+use Cwd qw(abs_path);
+
+my $build_dir = '.build/chalk-so-gen';
+GetOptions('build-dir=s' => \$build_dir) or die "Usage: $0 [--build-dir DIR]\n";
+
+# Resolve paths relative to the script location (repo root).
+my $repo_root = abs_path(dirname(__FILE__) . '/..');
+my $c_src     = "$repo_root/c_src";
+
+# Add lib paths before loading project modules.
+use lib 'lib';
+use lib 't/bootstrap/lib';
+
+use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
+use Chalk::Bootstrap::Perl::Target::C;
+
+my $cc      = $Config{cc};
+my $ccflags = $Config{ccflags};
+my $archlib = $Config{archlib};
+my $so_ext  = $Config{so_ext} // $Config{dlext};
+my $perl    = $^X;
+my $xsubpp  = "$Config{privlibexp}/ExtUtils/xsubpp";
+my $typemap  = "$Config{privlibexp}/ExtUtils/typemap";
+
+# Classes to compile, in dependency order.
+# Only Boolean has a hand-crafted .xs wrapper; the others get C-only compilation.
+my @source_files = (
+    ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
+    ['Chalk::Bootstrap::Semiring::Structural',       'lib/Chalk/Bootstrap/Semiring/Structural.pm'],
+    ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm'],
+    ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm'],
+);
+
+my $total_t0 = time();
+
+# === Phase 1: Grammar pipeline ===
+my $t0 = time();
+print "Phase 1: Building grammar pipeline...\n";
+my $grammar = setup_xs_grammar('Chalk::Grammar::Perl::BuiltSO');
+printf "Phase 1: %.1fs\n\n", time() - $t0;
+
+# === Phase 2: Parse each source file to IR ===
+$t0 = time();
+print "Phase 2: Parsing source files to IR...\n";
+
+my @parsed;  # [ module_name, slug, ir, sa, ctx ] per class
+
+for my $spec (@source_files) {
+    my ($class_name, $file) = $spec->@*;
+    my $slug = lc(($class_name =~ /(?:.*::)?(\w+)$/)[0]);
+    my $short = $file =~ s{.*/}{}r;
+    my $file_t0 = time();
+
+    my ($ir, $sa, $ctx, $cfg_snapshot) = parse_file_ir($grammar, $file);
+    unless (defined $ir) {
+        die "Failed to parse $file\n";
+    }
+
+    push @parsed, {
+        class_name    => $class_name,
+        slug          => $slug,
+        ir            => $ir,
+        sa            => $sa,
+        ctx           => $ctx,
+        cfg_snapshot  => $cfg_snapshot,
+    };
+    printf "  %s: %.1fs\n", $short, time() - $file_t0;
+}
+printf "Phase 2 total: %.1fs\n\n", time() - $t0;
+
+# === Phase 3: Generate C files via Target::C ===
+$t0 = time();
+print "Phase 3: Generating C files via Target::C...\n";
+
+my @generated;  # [ slug, c_text, h_text ] per class
+
+for my $info (@parsed) {
+    my $class_name = $info->{class_name};
+    my $slug       = $info->{slug};
+
+    my $target = Chalk::Bootstrap::Perl::Target::C->new(
+        module_name => $class_name,
+    );
+
+    my $result = eval {
+        $target->generate_c_files(
+            $info->{ir},
+            $info->{sa},
+            $info->{ctx},
+        )
+    };
+    die "generate_c_files failed for $class_name: $@\n" if $@ || !defined $result;
+
+    push @generated, {
+        slug   => $slug,
+        c_text => $result->{files}{"${slug}.c"},
+        h_text => $result->{files}{"${slug}.h"},
+        skipped_methods => $result->{skipped_methods} // [],
+    };
+
+    my $skipped = $result->{skipped_methods} // [];
+    if (@$skipped) {
+        printf "  %s: %d methods skipped (%s)\n",
+            $slug, scalar(@$skipped), join(', ', @$skipped);
+    } else {
+        printf "  %s: OK\n", $slug;
+    }
+}
+printf "Phase 3 total: %.1fs\n\n", time() - $t0;
+
+# === Phase 4: Write generated files + copy chalk.h and .xs wrappers ===
+$t0 = time();
+print "Phase 4: Writing files to build directory...\n";
+
+remove_tree($build_dir) if -d $build_dir;
+make_path("$build_dir/obj");
+
+# Copy chalk.h (shared header required by all generated .c files)
+copy("$c_src/chalk.h", "$build_dir/chalk.h")
+    or die "Cannot copy chalk.h: $!\n";
+print "  chalk.h copied\n";
+
+# Copy hand-crafted .xs wrappers (only Boolean.xs exists right now)
+my @xs_files;
+for my $xs (sort glob("$c_src/*.xs")) {
+    my $base = basename($xs);
+    copy($xs, "$build_dir/$base")
+        or die "Cannot copy $xs: $!\n";
+    push @xs_files, $base;
+    print "  $base copied\n";
+}
+
+# Write generated .c and .h files
+for my $g (@generated) {
+    my $slug = $g->{slug};
+
+    open my $cfh, '>:encoding(UTF-8)', "$build_dir/${slug}.c"
+        or die "Cannot write $build_dir/${slug}.c: $!\n";
+    print $cfh $g->{c_text};
+    close $cfh;
+
+    open my $hfh, '>:encoding(UTF-8)', "$build_dir/${slug}.h"
+        or die "Cannot write $build_dir/${slug}.h: $!\n";
+    print $hfh $g->{h_text};
+    close $hfh;
+
+    printf "  %s.c + %s.h written\n", $slug, $slug;
+}
+printf "Phase 4 total: %.1fs\n\n", time() - $t0;
+
+# === Phase 5: Compile all .c files into .o ===
+$t0 = time();
+print "Phase 5: Compiling C files...\n";
+
+my @o_files;
+for my $g (@generated) {
+    my $slug   = $g->{slug};
+    my $c_file = "$build_dir/${slug}.c";
+    my $o_file = "$build_dir/obj/${slug}.o";
+
+    # Include build_dir so generated headers (.h) are found during compilation.
+    my $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$build_dir $c_file -o $o_file 2>&1";
+    my $out = `$cmd`;
+    if ($? >> 8 != 0) {
+        die "Compile failed for ${slug}.c:\n$out\nCommand: $cmd\n";
+    }
+    push @o_files, $o_file;
+    say "  ${slug}.c -> ${slug}.o";
+}
+printf "Phase 5 total: %.1fs\n\n", time() - $t0;
+
+# === Phase 6: Link all .o files into chalk.so ===
+$t0 = time();
+print "Phase 6: Linking chalk.so...\n";
+
+my $chalk_so = "$build_dir/chalk.$so_ext";
+my $o_list   = join(' ', @o_files);
+my $cmd      = "$cc -shared -fPIC $o_list -o $chalk_so 2>&1";
+my $out      = `$cmd`;
+die "Link failed:\n$out\nCommand: $cmd\n" if $? >> 8 != 0;
+say "  chalk.$so_ext built";
+printf "Phase 6 total: %.1fs\n\n", time() - $t0;
+
+# === Phase 7: Compile each .xs wrapper into a per-class .so ===
+$t0 = time();
+print "Phase 7: Compiling XS wrappers...\n";
+
+for my $xs_base (@xs_files) {
+    my $xs_file = "$build_dir/$xs_base";
+    my $base    = basename($xs_base, '.xs');
+
+    # Determine the package name from MODULE line in the .xs file.
+    open my $fh, '<', $xs_file or die "Cannot read $xs_file: $!";
+    my $pkg;
+    while (<$fh>) {
+        if (/^MODULE\s*=\s*(\S+)/) { $pkg = $1; last; }
+    }
+    close $fh;
+    die "No MODULE line found in $xs_file\n" unless $pkg;
+
+    # Build output path matching Perl's auto/ convention.
+    my $pkg_path = $pkg =~ s{::}{/}gr;
+    my $out_dir  = "$build_dir/auto/$pkg_path";
+    make_path($out_dir);
+
+    # xsubpp: .xs -> .c
+    my $xs_c = "$build_dir/${base}_xs.c";
+    $cmd = "$perl $xsubpp -typemap $typemap $xs_file > $xs_c 2>&1";
+    $out = `$cmd`;
+    die "xsubpp failed for $xs_file:\n$out\n" if $? >> 8 != 0;
+
+    # .c -> .o
+    my $xs_o = "$build_dir/obj/${base}_xs.o";
+    $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$build_dir $xs_c -o $xs_o 2>&1";
+    $out = `$cmd`;
+    die "Compile failed for $xs_c:\n$out\n" if $? >> 8 != 0;
+
+    # .o -> .so (link against chalk.so for C symbol resolution)
+    my $xs_so = "$out_dir/${base}.$so_ext";
+    $cmd = "$cc -shared -fPIC $xs_o $chalk_so -o $xs_so 2>&1";
+    $out = `$cmd`;
+    die "Link failed for $xs_o:\n$out\n" if $? >> 8 != 0;
+
+    say "  $xs_base -> $xs_so";
+}
+printf "Phase 7 total: %.1fs\n\n", time() - $t0;
+
+# === Done ===
+my $total = time() - $total_t0;
+printf "Build complete in %.0fs (%.1f minutes)\n", $total, $total / 60;
+say "chalk.so: $chalk_so";
+say "Set CHALK_SO_PATH=$chalk_so to use.";
