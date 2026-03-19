@@ -1,0 +1,100 @@
+#!/usr/bin/env perl
+# ABOUTME: Build orchestrator for chalk.so shared C library + per-class XS wrappers.
+# ABOUTME: Compiles .c files into chalk.so, then each .xs wrapper into its own .so.
+use 5.42.0;
+use utf8;
+use Config;
+use File::Path qw(make_path);
+use File::Basename qw(dirname basename);
+use Getopt::Long qw(GetOptions);
+
+# Default build directory; can be overridden via --build-dir
+my $build_dir = '.build/chalk-so';
+GetOptions('build-dir=s' => \$build_dir) or die "Usage: $0 [--build-dir DIR]\n";
+
+my $c_src     = do {
+    use Cwd qw(abs_path);
+    abs_path(dirname(__FILE__) . '/../c_src');
+};
+
+my $cc      = $Config{cc};
+my $ccflags = $Config{ccflags};
+my $archlib = $Config{archlib};
+my $so_ext  = $Config{dlext};
+my $perl    = $^X;
+my $xsubpp  = "$Config{privlibexp}/ExtUtils/xsubpp";
+my $typemap  = "$Config{privlibexp}/ExtUtils/typemap";
+
+# Phase 1: Compile all .c files to .o
+print "Phase 1: Compiling C files...\n";
+make_path("$build_dir/obj");
+
+my @c_files = sort glob("$c_src/*.c");
+my @o_files;
+
+for my $c_file (@c_files) {
+    my $base   = basename($c_file, '.c');
+    my $o_file = "$build_dir/obj/$base.o";
+    my $cmd    = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src $c_file -o $o_file 2>&1";
+    my $out    = `$cmd`;
+    if ($? >> 8 != 0) {
+        die "Compile failed for $c_file:\n$out\nCommand: $cmd\n";
+    }
+    push @o_files, $o_file;
+    say "  $base.c -> $base.o";
+}
+
+# Phase 2: Link all .o files into chalk.so
+print "Phase 2: Linking chalk.so...\n";
+my $chalk_so = "$build_dir/chalk.$so_ext";
+my $o_list   = join(' ', @o_files);
+my $cmd      = "$cc -shared -fPIC $o_list -o $chalk_so 2>&1";
+my $out      = `$cmd`;
+die "Link failed:\n$out\nCommand: $cmd\n" if $? >> 8 != 0;
+say "  chalk.$so_ext built";
+
+# Phase 3: Compile each .xs wrapper into a per-class .so
+print "Phase 3: Compiling XS wrappers...\n";
+my @xs_files = sort glob("$c_src/*.xs");
+
+for my $xs_file (@xs_files) {
+    my $base = basename($xs_file, '.xs');
+
+    # Determine the package name from MODULE line in .xs
+    open my $fh, '<', $xs_file or die "Cannot read $xs_file: $!";
+    my $pkg;
+    while (<$fh>) {
+        if (/^MODULE\s*=\s*(\S+)/) { $pkg = $1; last; }
+    }
+    close $fh;
+    die "No MODULE line found in $xs_file\n" unless $pkg;
+
+    # Build output path matching Perl's auto/ convention
+    my $pkg_path = $pkg =~ s{::}{/}gr;
+    my $out_dir  = "$build_dir/auto/$pkg_path";
+    make_path($out_dir);
+
+    # xsubpp: .xs -> .c
+    my $xs_c = "$build_dir/$base.c";
+    $cmd = "$perl $xsubpp -typemap $typemap $xs_file > $xs_c 2>&1";
+    $out = `$cmd`;
+    die "xsubpp failed for $xs_file:\n$out\n" if $? >> 8 != 0;
+
+    # .c -> .o
+    my $xs_o = "$build_dir/obj/${base}_xs.o";
+    $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$c_src $xs_c -o $xs_o 2>&1";
+    $out = `$cmd`;
+    die "Compile failed for $xs_c:\n$out\n" if $? >> 8 != 0;
+
+    # .o -> .so (link against chalk.so for C symbol resolution)
+    my $xs_so = "$out_dir/$base.$so_ext";
+    $cmd = "$cc -shared -fPIC $xs_o $chalk_so -o $xs_so 2>&1";
+    $out = `$cmd`;
+    die "Link failed for $xs_o:\n$out\n" if $? >> 8 != 0;
+
+    say "  $base.xs -> $xs_so";
+}
+
+say "\nBuild complete.";
+say "chalk.so: $chalk_so";
+say "Set CHALK_SO_PATH=$chalk_so to use.";
