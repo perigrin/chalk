@@ -33,15 +33,17 @@ my $xsubpp  = "$Config{privlibexp}/ExtUtils/xsubpp";
 my $typemap  = "$Config{privlibexp}/ExtUtils/typemap";
 
 # Classes to compile, in dependency order.
-# Only Boolean has a hand-crafted .xs wrapper; the others get C-only compilation.
+# field_types maps :param fields to their known class for direct C calls.
 my @source_files = (
-    ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
-    ['Chalk::Bootstrap::Semiring::Structural',       'lib/Chalk/Bootstrap/Semiring/Structural.pm'],
-    ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm'],
-    ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm'],
-    ['Chalk::Bootstrap::Semiring::Precedence',       'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
-    ['Chalk::Bootstrap::Semiring::TypeInference',    'lib/Chalk/Bootstrap/Semiring/TypeInference.pm'],
-    ['Chalk::Bootstrap::Earley',                     'lib/Chalk/Bootstrap/Earley.pm'],
+    ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm',         {}],
+    ['Chalk::Bootstrap::Semiring::Structural',       'lib/Chalk/Bootstrap/Semiring/Structural.pm',       {}],
+    ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm',   {}],
+    ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',  {}],
+    ['Chalk::Bootstrap::Semiring::Precedence',       'lib/Chalk/Bootstrap/Semiring/Precedence.pm',       {}],
+    ['Chalk::Bootstrap::Semiring::TypeInference',    'lib/Chalk/Bootstrap/Semiring/TypeInference.pm',    {}],
+    ['Chalk::Bootstrap::Earley',                     'lib/Chalk/Bootstrap/Earley.pm',                    {
+        semiring => 'Chalk::Bootstrap::Semiring::FilterComposite',
+    }],
 );
 
 my $total_t0 = time();
@@ -59,7 +61,7 @@ print "Phase 2: Parsing source files to IR...\n";
 my @parsed;  # [ module_name, slug, ir, sa, ctx ] per class
 
 for my $spec (@source_files) {
-    my ($class_name, $file) = $spec->@*;
+    my ($class_name, $file, $ft) = $spec->@*;
     my $slug = lc(($class_name =~ /(?:.*::)?(\w+)$/)[0]);
     my $short = $file =~ s{.*/}{}r;
     my $file_t0 = time();
@@ -76,6 +78,7 @@ for my $spec (@source_files) {
         sa            => $sa,
         ctx           => $ctx,
         cfg_snapshot  => $cfg_snapshot,
+        field_types   => $ft // {},
     };
     printf "  %s: %.1fs\n", $short, time() - $file_t0;
 }
@@ -91,8 +94,10 @@ for my $info (@parsed) {
     my $class_name = $info->{class_name};
     my $slug       = $info->{slug};
 
+    my $ft = $info->{field_types} // {};
     my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => $class_name,
+        ($ft->%* ? (field_types => $ft) : ()),
     );
 
     my $result = eval {
