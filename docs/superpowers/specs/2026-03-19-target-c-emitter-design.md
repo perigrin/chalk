@@ -49,6 +49,10 @@ my $result = $c->generate_c_files($ir, $sa, $ctx);
 #     ...
 #   ],
 #   skipped_methods => ['method_that_needs_eval_pv', ...],
+#   anon_sub_registrations => [
+#     { name => 'Package::_anon_0', cv_var => '_cv__anon_0', fwd_decl => 'static XS(XS_anon_0);' },
+#     ...
+#   ],
 # }
 ```
 
@@ -58,6 +62,13 @@ to XS.pm for generating matching XSUB wrappers.
 
 `skipped_methods` lists methods that could not be fully translated to C.
 The caller decides how to handle them (pure Perl fallback, eval_pv, etc.).
+
+`anon_sub_registrations` is a list of `{ name, cv_var, fwd_decl }` for
+anonymous sub CVs that need BOOT-block registration via `newXS`. C.pm
+emits the static C function bodies into the `.c` file. XS.pm uses
+`anon_sub_registrations` to emit the forward declarations and
+`newXS_flags` calls in its BOOT block. This bridges the anon-sub
+emission (C.pm's concern) with BOOT registration (XS.pm's concern).
 
 ## Internal Pipeline
 
@@ -106,23 +117,27 @@ fully translated to C, `generate_c_files` omits it from the `.c` output
 and returns a list of skipped methods. The caller (XS.pm or build script)
 decides whether to handle them as pure Perl.
 
-### Group 4: Control flow emitters (~4 methods) → C.pm
+### Group 4: Control flow emitters (~4 methods + 1 helper) → C.pm
 
 `emit_cfg_if`, `emit_cfg_phi_if`, `emit_cfg_loop`,
-`emit_cfg_try_catch`
+`emit_cfg_try_catch`, `_sv_true_wrap`
 
 These emit C `if/else`, value-producing if, `for/while/foreach`, and
 try-catch patterns. Called from `_emit_c_stmt` when `%_cfg_lookup` has
-an entry for the current IR node.
+an entry for the current IR node. `_sv_true_wrap` is a lexical sub
+used by all four cfg emitters.
 
 ### Group 5: Helper/analysis methods → C.pm
 
-`_body_contains_return`, `_is_bare_return_expr`,
-`_is_unambiguous_value_expr`, `_is_single_stmt_return_expr`,
-`_collect_var_decls`, `_collect_all_var_refs`,
-`_build_field_index_map`, `_scan_class_methods`,
+`_body_contains_return`, `_body_contains_bare_return`,
+`_is_bare_return_expr`, `_is_unambiguous_value_expr`,
+`_is_single_stmt_return_expr`, `_collect_var_decls`,
+`_collect_all_var_refs`, `_build_field_index_map`,
+`_scan_class_methods`, `_scan_field_method_calls`,
 `_build_cfg_lookup`, `_class_slug`,
-`_fixup_xs_list_destructuring`, `_fixup_ternary_assignment`
+`_build_exists_delete_native`,
+`_fixup_xs_list_destructuring`, `_fixup_ternary_assignment`,
+`_fixup_filtercomposite_add_destructuring`
 
 The `_fixup_*` methods are regex-based post-processors that rewrite
 generated C text. They are fragile but necessary for Earley-class
