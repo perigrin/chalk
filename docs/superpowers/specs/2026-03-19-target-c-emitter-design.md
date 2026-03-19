@@ -38,12 +38,43 @@ IR (from parser)
 my $c = Chalk::Bootstrap::Perl::Target::C->new(
     module_name => 'Chalk::Bootstrap::Semiring::Boolean',
 );
-my $files = $c->generate_c_files($ir, $sa, $ctx);
+my $result = $c->generate_c_files($ir, $sa, $ctx);
 # Returns: {
-#   'boolean.c' => '...',
-#   'boolean.h' => '...',
+#   files => {
+#     'boolean.c' => '...',
+#     'boolean.h' => '...',
+#   },
+#   exported_functions => [
+#     { name => 'boolean_is_zero', return_type => 'SV *', params => 'pTHX_ SV *self, SV *value' },
+#     ...
+#   ],
+#   skipped_methods => ['method_that_needs_eval_pv', ...],
 # }
 ```
+
+`exported_functions` is accumulated during emission (not parsed from
+generated text) and used to produce the `.h` file. It is also available
+to XS.pm for generating matching XSUB wrappers.
+
+`skipped_methods` lists methods that could not be fully translated to C.
+The caller decides how to handle them (pure Perl fallback, eval_pv, etc.).
+
+## Internal Pipeline
+
+`generate_c_files($ir, $sa, $ctx)` runs this sequence internally:
+
+1. **`_build_cfg_lookup($sa, $ctx)`** — populate `%_cfg_lookup` from
+   semantic actions and context (same as XS.pm's existing method)
+2. **`_analyze_class($ir)`** — walk the IR's ClassDecl node to populate
+   `$field_map`, `$_class_methods`, `%_class_scope_vars`, `%_class_subs`,
+   `%_use_constants`. This replaces XS.pm's `_emit_class_sections` for
+   the analysis-only portion (no XS output).
+3. **Emit class-scope statics** — regex statics, anon sub helpers,
+   class-level `my` variables with lazy initializers
+4. **Emit methods** — for each method, call `_emit_c_complex_method` to
+   produce the function body. Track exported function signatures.
+5. **Assemble `.c` file** — preamble + statics + helpers + functions
+6. **Assemble `.h` file** — from accumulated `exported_functions`
 
 ## Method Extraction
 
@@ -65,25 +96,65 @@ my $files = $c->generate_c_files($ir, $sa, $ctx);
 `_emit_c_die_call`, `_emit_c_compound_assign_stmt`,
 `_emit_c_loop_jump`, `_emit_c_interp_return`
 
-### Group 3: Function-level emitters (~4 methods) → C.pm
+### Group 3: Function-level emitters (~3 methods) → C.pm
 
-`_emit_c_complex_method`, `_emit_c_sub`, `_emit_c_method`,
-`_emit_c_eval_fallback`
+`_emit_c_complex_method`, `_emit_c_sub`, `_emit_c_method`
 
-### Group 4: Stays in XS.pm
+Note: `_emit_xs_eval_fallback` does NOT move to C.pm. The parent spec
+says "no eval_pv fallback within compiled code." If a method cannot be
+fully translated to C, `generate_c_files` omits it from the `.c` output
+and returns a list of skipped methods. The caller (XS.pm or build script)
+decides whether to handle them as pure Perl.
+
+### Group 4: Control flow emitters (~4 methods) → C.pm
+
+`emit_cfg_if`, `emit_cfg_phi_if`, `emit_cfg_loop`,
+`emit_cfg_try_catch`
+
+These emit C `if/else`, value-producing if, `for/while/foreach`, and
+try-catch patterns. Called from `_emit_c_stmt` when `%_cfg_lookup` has
+an entry for the current IR node.
+
+### Group 5: Helper/analysis methods → C.pm
+
+`_body_contains_return`, `_is_bare_return_expr`,
+`_is_unambiguous_value_expr`, `_is_single_stmt_return_expr`,
+`_collect_var_decls`, `_collect_all_var_refs`,
+`_build_field_index_map`, `_scan_class_methods`,
+`_build_cfg_lookup`, `_class_slug`,
+`_fixup_xs_list_destructuring`, `_fixup_ternary_assignment`
+
+The `_fixup_*` methods are regex-based post-processors that rewrite
+generated C text. They are fragile but necessary for Earley-class
+compilation. They move to C.pm as-is for now; replacing them with
+IR-level fixes is future work.
+
+### Group 6: Stays in XS.pm
 
 `_emit_xs_preamble`, `_emit_xs_boot_block`,
-`_emit_xs_boot_block_inner`, `_emit_class_sections`
+`_emit_xs_boot_block_inner`, `_emit_class_sections`,
+`_emit_xs_eval_fallback`
 
-XS.pm calls C.pm for method body emission where it currently calls
-its own `_emit_xs_complex_method`.
+`_emit_class_sections` stays because it orchestrates the XS-specific
+output (MODULE/PACKAGE sections, XSUB wrappers). C.pm has its own
+`_analyze_class` method for IR analysis (see Internal Pipeline below).
 
-### Key behavioral change in C.pm
+### Key behavioral changes in C.pm
 
-Cross-class method calls emit `classname_method(aTHX_ ...)` (direct C
-function calls) instead of `call_method(...)` or the speculative
-inline/CV cache patterns from XS.pm. This eliminates the Perl/C bridge
-overhead that motivated the entire redesign.
+1. Cross-class method calls emit `classname_method(aTHX_ ...)` (direct
+   C function calls) instead of `call_method(...)`. This eliminates the
+   Perl/C bridge overhead that motivated the entire redesign.
+
+2. CV cache logic (`$_cv_cache`, `$_param_fields`) is NOT extracted.
+   Same-class calls become direct `{slug}_{method}(aTHX_ self, ...)`
+   calls. Cross-class calls become `{target_slug}_{method}(aTHX_ ...)`
+   calls. No caching needed — all calls are direct C function calls.
+
+3. Cross-class call resolution depends on type information to map an
+   invocant to a target slug. For Phase 1 (Boolean has no cross-class
+   calls), this is not needed. For Phase 4 (Earley calling Boolean),
+   the mechanism is the existing `$_composite_field_types` or
+   `:param` field type annotations.
 
 ## State Fields
 
@@ -128,7 +199,10 @@ overhead that motivated the entire redesign.
 static SV *_rx_{slug}_0 = NULL;
 static SV *_{slug}_ZERO = NULL;
 
-/* Static helpers (my sub, anon subs — not exported) */
+/* Static helpers (my sub, anon subs — not exported).
+   File-scoped statics don't need slug prefix since they can't collide
+   across .c files, but we use _{slug}_ prefix for consistency with
+   the exported naming convention. */
 static SV * _{slug}_helper(pTHX_ ...) { ... }
 
 /* Exported functions (one per method) */
@@ -152,8 +226,10 @@ SV * {slug}_add(pTHX_ SV *self, SV *a, SV *b);
 #endif
 ```
 
-The `.h` is generated mechanically: for each non-static function emitted
-in the `.c`, extract the signature and append a semicolon.
+The `.h` is generated from the `exported_functions` list accumulated
+during `.c` emission — not by parsing the generated C text. Each entry
+has return type, function name, and parameter list, which are formatted
+as a prototype line with a trailing semicolon.
 
 ### Class-scope variables
 
