@@ -1,4 +1,4 @@
-# ABOUTME: Tests Target::C emission for 4 semiring classes: Boolean, Structural, SemanticAction, FilterComposite.
+# ABOUTME: Tests Target::C emission for all 7 semiring/parser classes.
 # ABOUTME: Verifies each class generates compilable C, then links all .o files into a single chalk.so.
 use 5.42.0;
 use utf8;
@@ -15,12 +15,15 @@ use lib 't/bootstrap/lib';
 use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
 use Chalk::Bootstrap::Perl::Target::C;
 
-# The four classes to compile, in dependency order (Boolean first).
+# All 7 classes to compile, in dependency order (Boolean first, Earley last).
 my @classes = (
     ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
     ['Chalk::Bootstrap::Semiring::Structural',      'lib/Chalk/Bootstrap/Semiring/Structural.pm'],
     ['Chalk::Bootstrap::Semiring::SemanticAction',  'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm'],
     ['Chalk::Bootstrap::Semiring::FilterComposite', 'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm'],
+    ['Chalk::Bootstrap::Semiring::Precedence',      'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
+    ['Chalk::Bootstrap::Semiring::TypeInference',   'lib/Chalk/Bootstrap/Semiring/TypeInference.pm'],
+    ['Chalk::Bootstrap::Earley',                    'lib/Chalk/Bootstrap/Earley.pm'],
 );
 
 # === Phase 1: Set up grammar pipeline ===
