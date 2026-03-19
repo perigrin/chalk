@@ -249,6 +249,12 @@ Reference files in main Chalk (read-only):
 5. **Non-deterministic codegen**: Sort all hash keys, use stable naming schemes
 6. **Mutation**: Context/IR nodes are immutable - always return new objects
 7. **Premature optimization**: Focus on correctness first
+8. **DO NOT use multi-class XS compilation**: The `generate_distribution_multi_class` approach
+   was explicitly abandoned. Multi-class XS bundles all classes into one .so but `_run_parse`
+   still falls back to `eval_pv`, making it no faster than pure Perl. The correct approach is
+   **per-class XS compilation** with **semiring intrinsics** to inline hot-path operations
+   (e.g., `is_zero()`) and reduce Perl/C bridge crossings. See `xs_bootstrap_approach.md` in
+   the memory directory for the full rationale.
 
 ## Working with This Codebase
 
