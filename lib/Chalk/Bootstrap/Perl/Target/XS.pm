@@ -1323,6 +1323,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (keys %_class_scope_vars) {
             push @lines, '';
             push @lines, '        /* Initialize class-scope static variables */';
+            # Declare __sv (topic variable) if any init expression uses map/for
+            my $needs_topic = false;
+            for my $var (sort keys %_class_scope_vars) {
+                my $info = $_class_scope_vars{$var};
+                if (defined $info->{init}) {
+                    my $test_expr = eval { $self->_emit_xs_expr($info->{init}, {}) };
+                    if (defined $test_expr && $test_expr =~ /__sv/) {
+                        $needs_topic = true;
+                        last;
+                    }
+                }
+            }
+            if ($needs_topic) {
+                push @lines, '        SV *__sv = NULL;';
+            }
             for my $var (sort keys %_class_scope_vars) {
                 my $info = $_class_scope_vars{$var};
                 my $sname = $info->{static_name};
@@ -1807,7 +1822,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     my @param_names;
                     for my $p ($sparams->@*) {
                         my $pname = $p->value();
-                        $pname =~ s/^\$//;
+                        $pname =~ s/^[\$\@\%]//;
                         push @param_names, $pname;
                     }
                     my $impl_name = "_impl_${_current_slug}_${sname}";
@@ -2480,7 +2495,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my @param_names;
             for my $p ($params->@*) {
                 my $pname = $p->value();
-                $pname =~ s/^\$//;
+                $pname =~ s/^[\$\@\%]//;
                 push @param_names, $pname;
             }
 
@@ -2808,7 +2823,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @xs_params = ('SV *self');
         for my $p ($params->@*) {
             my $pname = $p->value();
-            $pname =~ s/^\$//;
+            $pname =~ s/^[\$\@\%]//;
             push @xs_params, "SV *$pname";
             $declared_vars{"param:$pname"} = true;
         }
@@ -2849,18 +2864,26 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $final_line = pop @parts;
                 # Replace the multi-line entry with the leading lines
                 $code[-1] = join("\n", @parts);
-                # Wrap the final line as retval
+                # Wrap the final line as retval (skip void operations like sv_setsv)
                 if ($final_line =~ s/;\s*$//) {
-                    my $wrapped = $self->_wrap_retval($final_line);
-                    push @code, "retval = $wrapped;";
+                    if ($final_line =~ /^sv_setsv\b/) {
+                        push @code, "$final_line;";
+                    } else {
+                        my $wrapped = $self->_wrap_retval($final_line);
+                        push @code, "retval = $wrapped;";
+                    }
                 } else {
                     push @code, $final_line;
                 }
             } else {
                 # Strip trailing semicolon from bare expression statement
                 if ($last_code =~ s/;\s*$//) {
-                    my $wrapped = $self->_wrap_retval($last_code);
-                    $code[-1] = "retval = $wrapped;";
+                    if ($last_code =~ /^sv_setsv\b/) {
+                        $code[-1] = "$last_code;";
+                    } else {
+                        my $wrapped = $self->_wrap_retval($last_code);
+                        $code[-1] = "retval = $wrapped;";
+                    }
                 }
             }
         }
@@ -2984,7 +3007,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             } else {
                 $pname = "$p";
             }
-            $pname =~ s/^\$//;
+            $pname =~ s/^[\$\@\%]//;
             push @xs_params, "SV *$pname";
             $declared_vars{"param:$pname"} = true;
         }
@@ -3006,10 +3029,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (!$last_is_return && @code) {
             my $last_code = $code[-1];
             if ($last_code =~ s/;\s*$//) {
-                my $wrapped = $self->_wrap_retval($last_code);
-                $code[-1] = "retval = $wrapped;";
-                # We assigned to retval, so ensure the function returns it
-                $has_return = true;
+                if ($last_code =~ /^sv_setsv\b/) {
+                    # sv_setsv returns void — keep as statement, not retval
+                    $code[-1] = "$last_code;";
+                } else {
+                    my $wrapped = $self->_wrap_retval($last_code);
+                    $code[-1] = "retval = $wrapped;";
+                    # We assigned to retval, so ensure the function returns it
+                    $has_return = true;
+                }
             }
         }
 
@@ -5306,6 +5334,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return $val_expr if $val_expr =~ /^&PL_sv_/;       # &PL_sv_yes, &PL_sv_no, etc.
         # call_method results already have SvREFCNT_inc from the call pattern
         return $val_expr if $val_expr =~ /SvREFCNT_inc/;
+        # sv_setsv returns void — can't be wrapped as a return value
+        return $val_expr if $val_expr =~ /^sv_setsv\b/;
         return "SvREFCNT_inc($val_expr)";
     }
 
