@@ -2055,10 +2055,13 @@ class Chalk::Bootstrap::Perl::Target::C {
             push @_anon_sub_helpers, '}';
             push @_anon_sub_helpers, '';
 
-            # Register in anon_sub_registrations for BOOT block generation
+            # Register in anon_sub_registrations for BOOT block generation.
+            # cv_var is the static SV* name used in method bodies; it is declared
+            # at file scope alongside regex statics and initialized in init_statics.
             push @_anon_sub_registrations, {
                 name   => "::${fn_name}",
                 c_name => "XS_${fn_name}",
+                cv_var => $cv_var,
             };
 
             return $cv_var;
@@ -3595,6 +3598,16 @@ class Chalk::Bootstrap::Perl::Target::C {
             push @c_lines, '';
         }
 
+        # Emit anon sub CV statics (one per compiled anon sub).
+        # Each cv_var is assigned in init_statics via newXS.
+        if (@_anon_sub_registrations) {
+            for my $reg (@_anon_sub_registrations) {
+                next unless defined $reg->{cv_var};
+                push @c_lines, "static SV *$reg->{cv_var} = NULL;";
+            }
+            push @c_lines, '';
+        }
+
         # Emit static helpers (subs + anon subs)
         if (@static_lines) {
             push @c_lines, "/* Static helpers */";
@@ -3631,6 +3644,17 @@ class Chalk::Bootstrap::Perl::Target::C {
                 my $init_expr = $self->_emit_c_init_expr($init_node, $info->{sigil});
                 push @init_lines, "    $sname = $init_expr;" if defined $init_expr;
             }
+        }
+        # Initialize anon sub CV statics via newXS.
+        # Each registered anon sub gets its XSUB registered under a synthetic package
+        # name so call_sv can dispatch to it; the resulting CV is cached in the static.
+        for my $reg (@_anon_sub_registrations) {
+            next unless defined $reg->{cv_var};
+            my $pname = $reg->{name};   # e.g. "::_anon_earley_0"
+            my $cname = $reg->{c_name}; # e.g. "XS__anon_earley_0"
+            my $cvvar = $reg->{cv_var}; # e.g. "_cv__anon_earley_0"
+            push @init_lines,
+                "    $cvvar = (SV*)newXS(\"$pname\", $cname, __FILE__);";
         }
         push @init_lines, "}";
         push @c_lines, "/* One-time static initializer — called from BOOT */";
