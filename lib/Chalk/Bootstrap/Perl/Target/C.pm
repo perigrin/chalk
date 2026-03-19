@@ -26,6 +26,8 @@ class Chalk::Bootstrap::Perl::Target::C {
     field $_sa;                    # stored SemanticAction for emit_from_cfg_state access
     field $_ctx;                   # stored Context for emit_from_cfg_state access
     field $_param_fields;          # hashref: field_name => 1 for :param fields (type varies per instance)
+    field $field_types :param = {};  # hashref: field_name => class_name for known-typed fields
+    field $_field_type_slugs;        # hashref: field_name => C slug, derived from field_types
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -38,6 +40,13 @@ class Chalk::Bootstrap::Perl::Target::C {
     method _class_slug($class_name) {
         my ($last) = $class_name =~ /(?:.*::)?(\w+)$/;
         return lc($last // $class_name);
+    }
+
+    # Convert an arbitrary class name to its C slug.
+    # Delegates to _class_slug — extracted as a separate method for clarity
+    # when converting field_types entries (which name other classes).
+    method _class_slug_for($class_name) {
+        return $self->_class_slug($class_name);
     }
 
     # Map a TypeInference return type to a C type for C output.
@@ -1606,6 +1615,33 @@ class Chalk::Bootstrap::Perl::Target::C {
             my $tmp = '_mci';
             push @pre_eval, "SV *$tmp = $invocant_expr";
             $invocant_expr = $tmp;
+        }
+
+        # Direct cross-class call optimization: when the invocant is a known-typed
+        # field, emit {target_slug}_{method}(aTHX_ {invocant}, {args...}) instead
+        # of the generic call_method dSP/PUSHMARK/POPs sequence.
+        # This requires field_types to declare the target class for the field.
+        if ($_field_type_slugs && keys $_field_type_slugs->%*) {
+            # Identify when the invocant node is a plain variable referencing a typed field.
+            # The invocant_node is a Constant with the field name as its value.
+            my $field_name;
+            if (defined $invocant_node
+                    && $invocant_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                my $raw = $invocant_node->value();
+                # Strip leading sigil if present (e.g., "$semiring" → "semiring")
+                (my $bare = $raw) =~ s/^[\$\@\%]//;
+                $field_name = $bare if exists $_field_type_slugs->{$bare};
+            }
+            if (defined $field_name) {
+                my $target_slug  = $_field_type_slugs->{$field_name};
+                my $c_func_name  = "${target_slug}_${method_name}";
+                my @call_args    = ($invocant_expr, @arg_exprs);
+                my $args_str     = join(', ', @call_args);
+                my @stmts;
+                push @stmts, @pre_eval;
+                push @stmts, "SV *_mcr = SvREFCNT_inc(${c_func_name}(aTHX_ ${args_str}))";
+                return '({ ' . join('; ', @stmts) . '; })';
+            }
         }
 
         # NOTE: XS-only dispatch paths ($_cv_cache, $_composite_field_types,
@@ -3489,6 +3525,17 @@ class Chalk::Bootstrap::Perl::Target::C {
         $_regex_counter         = 0;
         %_cfg_lookup            = ();
 
+        # Precompute field_name => C slug mapping for known-typed fields.
+        # Used by _emit_c_method_call_expr to detect cross-class direct calls.
+        {
+            my %slugs;
+            for my $fname (sort keys $field_types->%*) {
+                my $target_class = $field_types->{$fname};
+                $slugs{$fname} = $self->_class_slug_for($target_class);
+            }
+            $_field_type_slugs = \%slugs;
+        }
+
         if (defined $sa) {
             $self->_build_cfg_lookup($sa, $ctx);
         }
@@ -3574,6 +3621,15 @@ class Chalk::Bootstrap::Perl::Target::C {
         push @c_lines, "/* ABOUTME: Auto-generated from Perl source — do not edit. */";
         push @c_lines, "#include \"chalk.h\"";
         push @c_lines, "#include \"${slug}.h\"";
+        # Include headers for cross-class direct calls when field_types is provided.
+        if ($_field_type_slugs && keys $_field_type_slugs->%*) {
+            my %seen_slugs;
+            for my $target_slug (sort values $_field_type_slugs->%*) {
+                next if $seen_slugs{$target_slug}++;
+                next if $target_slug eq $slug;  # skip self-include
+                push @c_lines, "#include \"${target_slug}.h\"";
+            }
+        }
         push @c_lines, '';
 
         # Emit class-scope static variable declarations (e.g., my $ZERO = []).
