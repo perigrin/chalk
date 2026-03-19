@@ -21,7 +21,9 @@ static SV * _get_zero(pTHX) {
 
 SV * boolean_zero(pTHX_ SV *self) {
     PERL_UNUSED_ARG(self);
-    return _get_zero(aTHX);
+    /* Return with incremented refcount: XS RETVAL path calls sv_2mortal
+       which would free the value otherwise. */
+    return SvREFCNT_inc(_get_zero(aTHX));
 }
 
 SV * boolean_one(pTHX_ SV *self) {
@@ -40,8 +42,8 @@ SV * boolean_is_zero(pTHX_ SV *self, SV *value) {
 
 SV * boolean_multiply(pTHX_ SV *self, SV *left, SV *right) {
     /* Sequence: if either is zero, result is zero */
-    if (SvTRUE(boolean_is_zero(aTHX_ self, left))) return _get_zero(aTHX);
-    if (SvTRUE(boolean_is_zero(aTHX_ self, right))) return _get_zero(aTHX);
+    if (SvTRUE(boolean_is_zero(aTHX_ self, left))) return SvREFCNT_inc(_get_zero(aTHX));
+    if (SvTRUE(boolean_is_zero(aTHX_ self, right))) return SvREFCNT_inc(_get_zero(aTHX));
     return &PL_sv_yes;
 }
 
@@ -49,7 +51,7 @@ SV * boolean_add(pTHX_ SV *self, SV *left, SV *right) {
     /* Alternative: if either is non-zero, result is non-zero */
     if (!SvTRUE(boolean_is_zero(aTHX_ self, left))) return &PL_sv_yes;
     if (!SvTRUE(boolean_is_zero(aTHX_ self, right))) return &PL_sv_yes;
-    return _get_zero(aTHX);
+    return SvREFCNT_inc(_get_zero(aTHX));
 }
 
 SV * boolean_on_scan(pTHX_ SV *self, SV *item, SV *alt_idx, SV *pos, SV *matched_text) {
@@ -68,10 +70,10 @@ SV * boolean_on_complete(pTHX_ SV *self, SV *item, SV *alt_idx, SV *pos, SV *on_
     PERL_UNUSED_ARG(alt_idx);
     PERL_UNUSED_ARG(pos);
     PERL_UNUSED_ARG(on_epoch_commit);
-    /* Return item->{value} unchanged */
+    /* Return item->{value} unchanged; SvREFCNT_inc because XS path calls sv_2mortal */
     HV *item_hv = (HV*)SvRV(item);
     SV **val_ptr = hv_fetchs(item_hv, "value", 0);
-    return val_ptr ? *val_ptr : &PL_sv_undef;
+    return val_ptr ? SvREFCNT_inc(*val_ptr) : &PL_sv_undef;
 }
 
 SV * boolean_should_scan(pTHX_ SV *self, SV *item, SV *alt_idx, SV *pos, SV *matched_text, SV *is_predicted) {
