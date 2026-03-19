@@ -26,14 +26,24 @@ my $grammar = setup_xs_grammar('Chalk::Grammar::Perl::XSBootstrap');
 printf "Phase 1: %.1fs\n\n", time() - $t0;
 
 # === Phase 2: Parse all source files to IR ===
-# Order matters: FilterComposite uses the other semirings, Earley uses all.
+# Topological order: deps before dependents. Derived from DepChaser::resolve_closure
+# with seed set [Earley + 6 semirings]. To regenerate:
+#   RUN_SLOW=1 perl -Ilib -It/bootstrap/lib t/bootstrap/dep-chaser.t
 my @source_files = (
-    ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
-    ['Chalk::Bootstrap::Semiring::Precedence',      'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
-    ['Chalk::Bootstrap::Semiring::Structural',      'lib/Chalk/Bootstrap/Semiring/Structural.pm'],
+    # Leaf deps (no Chalk dependencies)
+    ['Chalk::Bootstrap::Context',                    'lib/Chalk/Bootstrap/Context.pm'],
+    ['Chalk::Bootstrap::CoreItemIndex',              'lib/Chalk/Bootstrap/CoreItemIndex.pm'],
+    ['Chalk::Bootstrap::IR::Node::Phi',              'lib/Chalk/Bootstrap/IR/Node/Phi.pm'],
+    ['Chalk::Bootstrap::Terminal',                   'lib/Chalk/Bootstrap/Terminal.pm'],
+    # Semirings (some depend on Context, Scope, etc.)
+    ['Chalk::Bootstrap::Semiring::Boolean',          'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
+    ['Chalk::Bootstrap::Semiring::Precedence',       'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
+    ['Chalk::Bootstrap::Semiring::Structural',       'lib/Chalk/Bootstrap/Semiring/Structural.pm'],
+    ['Chalk::Bootstrap::Semiring::TypeInferenceActions', 'lib/Chalk/Bootstrap/Semiring/TypeInferenceActions.pm'],
     ['Chalk::Bootstrap::Semiring::TypeInference',    'lib/Chalk/Bootstrap/Semiring/TypeInference.pm'],
     ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm'],
     ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm'],
+    # Earley parser (depends on Terminal, CoreItemIndex, LR0DFA)
     ['Chalk::Bootstrap::Earley',                     'lib/Chalk/Bootstrap/Earley.pm'],
 );
 
@@ -51,7 +61,14 @@ for my $spec (@source_files) {
     # Determine uses (dependencies for composite dispatch)
     my @uses;
     if ($class_name eq 'Chalk::Bootstrap::Semiring::FilterComposite') {
-        @uses = map { $_->[0] } @source_files[0..4];  # All 5 semirings
+        # FilterComposite wraps the 5 component semirings
+        @uses = qw(
+            Chalk::Bootstrap::Semiring::Boolean
+            Chalk::Bootstrap::Semiring::Precedence
+            Chalk::Bootstrap::Semiring::TypeInference
+            Chalk::Bootstrap::Semiring::Structural
+            Chalk::Bootstrap::Semiring::SemanticAction
+        );
     }
 
     push @entries, {
