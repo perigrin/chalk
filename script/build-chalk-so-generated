@@ -120,6 +120,7 @@ for my $info (@parsed) {
     die "generate_xs_wrapper failed for $class_name: $@\n" if $@ || !defined $xs_text;
 
     push @generated, {
+        class_name      => $class_name,
         slug            => $slug,
         c_text          => $result->{files}{"${slug}.c"},
         h_text          => $result->{files}{"${slug}.h"},
@@ -164,12 +165,11 @@ for my $g (@generated) {
     print $hfh $g->{h_text};
     close $hfh;
 
-    # Derive the capitalised XS filename from the last component of the module name.
-    # e.g. "Chalk::Bootstrap::Semiring::Boolean" => "Boolean.xs"
-    my ($last_component) = $slug =~ /^(.)/;
-    my $xs_base = $slug;
-    $xs_base =~ s/^([a-z])/uc($1)/e;  # capitalise first letter
-    $xs_base .= '.xs';
+    # Derive the XS filename from the last component of the class name.
+    # e.g. "Chalk::Bootstrap::Semiring::FilterComposite" => "FilterComposite.xs"
+    my $class_name_for_xs = $g->{class_name};
+    my ($xs_base_name) = $class_name_for_xs =~ /(\w+)$/;
+    my $xs_base = "${xs_base_name}.xs";
 
     open my $xfh, '>:encoding(UTF-8)', "$build_dir/$xs_base"
         or die "Cannot write $build_dir/$xs_base: $!\n";
