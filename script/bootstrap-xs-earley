@@ -35,6 +35,14 @@ my @source_files = (
     ['Chalk::Bootstrap::CoreItemIndex',              'lib/Chalk/Bootstrap/CoreItemIndex.pm'],
     ['Chalk::Bootstrap::IR::Node::Phi',              'lib/Chalk/Bootstrap/IR/Node/Phi.pm'],
     ['Chalk::Bootstrap::Terminal',                   'lib/Chalk/Bootstrap/Terminal.pm'],
+    ['Chalk::Bootstrap::IR::NodeFactory',            'lib/Chalk/Bootstrap/IR/NodeFactory.pm'],
+    ['Chalk::Bootstrap::LR0DFA',                     'lib/Chalk/Bootstrap/LR0DFA.pm'],
+    # Scope depends on Phi
+    ['Chalk::Bootstrap::Scope',                      'lib/Chalk/Bootstrap/Scope.pm'],
+    # Grammar utility classes (called via call_pv from semirings)
+    ['Chalk::Grammar::Perl::KeywordTable',           'lib/Chalk/Grammar/Perl/KeywordTable.pm'],
+    ['Chalk::Grammar::Perl::TypeLibrary',            'lib/Chalk/Grammar/Perl/TypeLibrary.pm'],
+    ['Chalk::Grammar::Perl::PrecedenceTable',        'lib/Chalk/Grammar/Perl/PrecedenceTable.pm'],
     # Semirings (some depend on Context, Scope, etc.)
     ['Chalk::Bootstrap::Semiring::Boolean',          'lib/Chalk/Bootstrap/Semiring/Boolean.pm'],
     ['Chalk::Bootstrap::Semiring::Precedence',       'lib/Chalk/Bootstrap/Semiring/Precedence.pm'],
