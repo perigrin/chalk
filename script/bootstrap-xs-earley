@@ -33,7 +33,8 @@ my @source_files = (
     # Leaf deps (no Chalk dependencies)
     ['Chalk::Bootstrap::Context',                    'lib/Chalk/Bootstrap/Context.pm'],
     ['Chalk::Bootstrap::CoreItemIndex',              'lib/Chalk/Bootstrap/CoreItemIndex.pm'],
-    ['Chalk::Bootstrap::IR::Node::Phi',              'lib/Chalk/Bootstrap/IR/Node/Phi.pm'],
+    # Phi excluded: Scope.pm loads it as pure-Perl, and double class_setup_stash segfaults
+    # ['Chalk::Bootstrap::IR::Node::Phi',              'lib/Chalk/Bootstrap/IR/Node/Phi.pm'],
     ['Chalk::Bootstrap::Terminal',                   'lib/Chalk/Bootstrap/Terminal.pm'],
     ['Chalk::Bootstrap::LR0DFA',                     'lib/Chalk/Bootstrap/LR0DFA.pm'],
     # NodeFactory and Scope excluded: cross-class _impl_ calls can't handle
