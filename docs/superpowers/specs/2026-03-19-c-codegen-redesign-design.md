@@ -18,11 +18,11 @@ function calls.
 ## Architecture
 
 ```
-boolean.c  → boolean.o  ─┐
-earley.c   → earley.o   ─┤
-scope.c    → scope.o    ─┼─→ link → chalk.so  (loaded with RTLD_GLOBAL)
-context.c  → context.o  ─┤
-...                      ─┘
+boolean.c       → boolean.o       ─┐
+earley.c        → earley.o        ─┤
+structural.c    → structural.o    ─┼─→ link → chalk.so  (loaded with RTLD_GLOBAL)
+filtercomposite.c → filtercomposite.o ─┤
+...                                ─┘
 
 Boolean.xs  → Boolean.so  ─┐
 Earley.xs   → Earley.so   ─┼─→ thin XSUB wrappers (link against chalk.so symbols)
@@ -55,18 +55,16 @@ Common header included by every `.c` file:
 
 #include "EXTERN.h"
 #include "perl.h"
+/* XSUB.h is required even in .c files: on threaded perls it redefines
+   aTHX to PERL_GET_THX, which is needed for the pTHX_/aTHX_ macros
+   used in every function signature. */
 #include "XSUB.h"
 
 /* Field access macro — wraps ObjectFIELDS for readability */
 #define CHALK_FIELD(self, idx) ObjectFIELDS(SvRV(self))[idx]
 
-/* Forward declarations for Perl 5.42 class C API */
-extern void Perl_class_setup_stash(pTHX_ HV *stash);
-extern void Perl_class_prepare_initfield_parse(pTHX);
-extern void Perl_class_set_field_defop(pTHX_ PADNAME *pn, OPCODE type, OP *defop);
-extern void Perl_class_apply_field_attributes(pTHX_ PADNAME *pn, OP *attrdata);
-extern void Perl_class_apply_attributes(pTHX_ HV *stash, OP *attrdata);
-extern void Perl_class_add_ADJUST(pTHX_ HV *stash, CV *cv);
+/* Perl 5.42 class C API is declared in proto.h (included via perl.h).
+   No additional forward declarations needed here. */
 
 #endif
 ```
@@ -168,10 +166,16 @@ Key points:
 New module that emits `.c` and `.h` files from IR.
 
 **What moves from XS.pm to C.pm:**
-- `_emit_xs_expr` → `_emit_c_expr` (already emits C, not XS)
-- `_emit_xs_if_stmt`, `_emit_xs_for_stmt`, etc. → `_emit_c_*`
-- `_emit_xs_complex_method` body emission → `_emit_c_function`
-- `_emit_xs_method_call_expr` cross-class dispatch → simplified to direct `classname_method()` calls
+
+All `_emit_xs_*` methods that emit C code for expressions, statements, and
+method bodies move to C.pm and are renamed to `_emit_c_*`. This includes ~40
+methods covering the full IR-to-C translation: expression emitters
+(`_emit_c_expr`, `_emit_c_const_expr`, `_emit_c_binary_expr`,
+`_emit_c_subscript_expr`, `_emit_c_method_call_expr`, etc.), statement emitters
+(`_emit_c_if_stmt`, `_emit_c_for_stmt`, `_emit_c_return_stmt`, etc.), and the
+top-level function emitter (`_emit_c_function`, extracted from
+`_emit_xs_complex_method`'s body emission). Cross-class method calls simplify
+to direct `classname_method(aTHX_ ...)` calls.
 
 **What stays in XS.pm:**
 - XSUB wrapper generation (thin, mechanical)
@@ -192,21 +196,25 @@ New module that emits `.c` and `.h` files from IR.
 ### Compilation
 
 ```bash
+# Compilation flags MUST match how Perl was built (struct packing, ABI, etc.)
+PERL_CFLAGS=$(perl -MConfig -e 'print "$Config{ccflags} -I$Config{archlib}/CORE"')
+
 # 1. Compile C files into chalk.so
-cc -shared -fPIC -I$(perl -MConfig -e 'print $Config{archlib}')/CORE \
-    boolean.c earley.c scope.c ... \
+cc -shared -fPIC $PERL_CFLAGS \
+    boolean.c earley.c structural.c ... \
     -o chalk.so
 
 # 2. For each class, compile XS wrapper
 xsubpp Boolean.xs > Boolean.c
-cc -shared -fPIC -I$(perl -MConfig -e 'print $Config{archlib}')/CORE \
+cc -shared -fPIC $PERL_CFLAGS \
     Boolean.c -o Boolean.so
 # No explicit -lchalk needed — symbols resolved at runtime via RTLD_GLOBAL
 ```
 
 ### Runtime Loading
 
-`Chalk::Runtime` loads chalk.so first:
+`Chalk::Runtime` loads chalk.so first. chalk.so lives in
+`auto/Chalk/Runtime/` under `@INC`, following standard XS module conventions:
 
 ```perl
 package Chalk::Runtime;
@@ -214,8 +222,18 @@ use 5.42.0;
 use utf8;
 require DynaLoader;
 
-my $so = _find_so('chalk');
-my $flags = DynaLoader::dl_load_flags() | 0x01;  # RTLD_GLOBAL
+# Search @INC for chalk.so (same pattern as current PM stubs)
+my $so;
+for my $inc (@INC) {
+    my $try = "$inc/auto/Chalk/Runtime/chalk.so";
+    if (-f $try) { $so = $try; last; }
+}
+die "Cannot find chalk.so in \@INC" unless $so;
+
+# RTLD_GLOBAL makes C symbols visible to subsequently loaded .so files.
+# 0x01 is RTLD_GLOBAL on Linux. For portability, use POSIX::RTLD_GLOBAL
+# if available, or DynaLoader::dl_load_flags() | 0x01 as a Linux default.
+my $flags = 0x01;  # RTLD_GLOBAL (Linux)
 my $libref = DynaLoader::dl_load_file($so, $flags)
     or die "Cannot load chalk.so: " . DynaLoader::dl_error();
 ```
@@ -228,16 +246,27 @@ use 5.42.0;
 use utf8;
 require Chalk::Runtime;  # ensures chalk.so loaded first
 
-my $so = _find_so('Boolean');
-my $libref = DynaLoader::dl_load_file($so, 0) or die ...;
-# ... bootstrap as current pm stubs do ...
+# Search @INC for Boolean.so (same pattern)
+my $so;
+for my $inc (@INC) {
+    my $try = "$inc/auto/Chalk/Bootstrap/Semiring/Boolean/Boolean.so";
+    if (-f $try) { $so = $try; last; }
+}
+die "Cannot find Boolean.so in \@INC" unless $so;
+
+my $libref = DynaLoader::dl_load_file($so, 0)
+    or die "Cannot load Boolean.so: " . DynaLoader::dl_error();
+my $boot = DynaLoader::dl_find_symbol($libref, "boot_Chalk__Bootstrap__Semiring__Boolean")
+    or die "Cannot find boot symbol: " . DynaLoader::dl_error();
+DynaLoader::dl_install_xsub("Chalk::Bootstrap::Semiring::Boolean::_bootstrap", $boot, $so);
+Chalk::Bootstrap::Semiring::Boolean->_bootstrap();
 ```
 
 ### Development Workflow
 
 Changed `boolean.c`? Rebuild:
 ```bash
-cc -shared -fPIC ... boolean.c earley.c ... -o chalk.so
+cc -shared -fPIC $PERL_CFLAGS boolean.c earley.c ... -o chalk.so
 # Only changed .c recompiles; all .o relink
 ```
 
@@ -248,6 +277,22 @@ xsubpp Boolean.xs > Boolean.c && cc ... Boolean.c -o Boolean.so
 
 Build orchestration lives in the bootstrap script (evolved from
 `script/bootstrap-xs-earley`), not Module::Build.
+
+### Error Handling
+
+- **chalk.so load failure**: Fatal with descriptive `die` message. If chalk.so
+  cannot be found in `@INC` or `dl_load_file` fails (missing symbols, ABI
+  mismatch), the error propagates immediately.
+- **Load ordering**: Enforced by `require Chalk::Runtime` in every per-class PM
+  stub. Loading a per-class `.so` before chalk.so would cause unresolved
+  symbols; the require chain prevents this.
+- **Circular C dependencies**: Not a problem — all `.c` files are linked into
+  one `chalk.so`, so mutual references between classes (e.g., `earley.c` calls
+  `boolean_is_zero()` and `boolean.c` calls `earley_something()`) resolve at
+  link time.
+- **Partial compilation**: If a class cannot compile to C, it stays as pure
+  Perl. The PM stub auto-require mechanism ensures pure Perl dependencies are
+  loaded. No eval_pv fallback within compiled code.
 
 ## Migration Path
 
@@ -274,16 +319,40 @@ Add Earley, Precedence, TypeInference — the 3 that currently fail per-class XS
 due to regex static scoping. Each `.c` file has its own file-scope statics, so
 the scoping issue resolves naturally.
 
-### Phase 4: Direct Cross-Class Calls
+### Phase 4: Direct Cross-Class Calls (Boolean-Only Benchmark)
 
 Now that Earley and Boolean are both in `chalk.so`, change `earley.c` to call
-`boolean_is_zero()` directly instead of `call_method("is_zero", ...)`. This is
-where the performance win happens.
+`boolean_is_zero()` directly instead of `call_method("is_zero", ...)`.
 
-### Phase 5: Vtable Dispatch (When Needed)
+This phase targets the **Boolean-only parsing path** used in benchmarks like
+`earley-boolean.t`. Since we know the semiring type is Boolean at compile time,
+we can hardcode direct calls. This proves the performance thesis: eliminating
+`call_method` overhead in the hot loop delivers a measurable speedup.
+
+The full production use case (FilterComposite wrapping 5 semirings) requires
+polymorphic dispatch, which is Phase 5.
+
+### Phase 5: Vtable Dispatch (Production Hot Path)
 
 When FilterComposite needs to dispatch polymorphically across semirings in C,
-add the vtable mechanism. Deferred until measured data shows it matters.
+add a vtable mechanism. Each semiring class registers a struct of function
+pointers at init time:
+
+```c
+typedef struct {
+    SV * (*is_zero)(pTHX_ SV *self, SV *value);
+    SV * (*add)(pTHX_ SV *self, SV *a, SV *b);
+    SV * (*multiply)(pTHX_ SV *self, SV *a, SV *b);
+} chalk_semiring_vtable;
+```
+
+Earley extracts the vtable once at construction, then calls `vt->is_zero(...)`
+in the hot loop — one pointer indirection + indirect function call, no Perl
+bridge crossing. This is the same pattern as C++ vtables and Perl's internal
+GvCV method cache.
+
+Deferred until Phase 4 benchmarks confirm the architecture works and measured
+data shows FilterComposite dispatch is the next bottleneck.
 
 ### What Stays Working Throughout
 
