@@ -7,10 +7,6 @@ use experimental 'class';
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
 
 class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
-    field $module_name :param :reader;
-    field $_regex_counter = 0; # monotonic counter for unique regex static variable names
-    field $_regex_statics;     # arrayref of { var, pat } for lazy-compiled REGEXP* statics
-    field %_use_constants;     # constant_name => numeric_value from `use constant { ... }` declarations
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
     field $_anon_sub_counter = 0;  # monotonic counter for unique anonymous sub names
     field @_exported_functions;    # list of exported C function names
@@ -18,11 +14,6 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     field @_anon_sub_registrations; # list of { name => ..., c_name => ... } for anon sub registration
     field $field_types :param = {};  # hashref: field_name => class_name for known-typed fields
     field $_field_type_slugs;        # hashref: field_name => C slug, derived from field_types
-
-    ADJUST {
-        die "Invalid module name: $module_name"
-            unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
-    }
     method _class_slug_for($class_name) {
         return $self->_class_slug($class_name);
     }
@@ -70,7 +61,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # Extract `use constant { NAME => value, ... }` declarations.
         # Constants are inlined as numeric literals in the generated C,
         # since C doesn't have Perl's constant sub mechanism.
-        %_use_constants = ();
+        $self->_reset_use_constants();
         for my $item ($body->@*) {
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             next unless $item->class() eq 'UseDecl';
@@ -92,7 +83,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my $vv = $val_node->value();
                 # Only inline numeric constant values
                 if ($vv =~ /^-?[0-9]+$/) {
-                    $_use_constants{$kv} = $vv;
+                    $self->_set_use_constant($kv, $vv);
                 }
             }
         }
@@ -535,7 +526,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                     my $idx = $self->_get_field_map()->{$inner};
                     $inner_expr = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
-                    $inner_expr = "get_sv(\"${module_name}::$inner\", GV_ADD)";
+                    $inner_expr = "get_sv(\"${\$self->module_name()}::$inner\", GV_ADD)";
                 }
                 return "sv_2mortal(newSViv(av_len((AV*)SvRV($inner_expr))))";
             }
@@ -574,7 +565,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             }
             # Package global or unknown variable — use get_sv for package lookup
             my $escaped = $self->_escape_c_string($var);
-            return "get_sv(\"${module_name}::$escaped\", GV_ADD)";
+            return "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
         }
 
         # Numeric values — sv_2mortal prevents leaks when used as sub-expressions
@@ -632,8 +623,8 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # Resolve `use constant` names to their numeric values.
         # Without this, constants like STRUCT_IS_LIST become string literals
         # in the generated C, producing "isn't numeric" warnings and wrong results.
-        if (%_use_constants && exists $_use_constants{$val}) {
-            return "sv_2mortal(newSViv($_use_constants{$val}))";
+        if (%{$self->_get_use_constants()} && exists $self->_get_use_constants()->{$val}) {
+            return "sv_2mortal(newSViv(${\$self->_get_use_constants()->{$val}}))";
         }
 
         # String literal — sv_2mortal prevents leaks when used as sub-expressions
@@ -677,7 +668,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                     $src = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "get_sv(\"${module_name}::$escaped\", GV_ADD)";
+                    $src = "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
                 }
                 if ($first) {
                     push @stmts, "SV *_r = newSVsv($src)";
@@ -1246,8 +1237,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
 
         # Build a unique static variable name for the compiled regex
-        $_regex_counter //= 0;
-        my $rx_var = "_rx_" . $_regex_counter++;
+        my $rx_var = "_rx_" . $self->_inc_regex_counter();
 
         # Wrap flags as inline modifiers: pattern -> (?flags:pattern)
         my $full_pat = length($flags) ? "(?$flags:$raw_pat)" : $raw_pat;
@@ -1256,11 +1246,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $c_pat = $self->_escape_c_string($full_pat);
 
         # Store regex patterns to declare as statics at top of generated file
-        $_regex_statics //= [];
-        push $_regex_statics->@*, {
-            var   => $rx_var,
-            pat   => $c_pat,
-        };
+        $self->_push_regex_static({ var => $rx_var, pat => $c_pat });
 
         my $tgt;
         if (defined $target) {
@@ -2107,7 +2093,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 } else {
                     # Fallback for non-field variables
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "get_sv(\"${module_name}::$escaped\", GV_ADD)";
+                    $src = "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
                 }
                 if ($first) {
                     push @body, "    SV *retval = newSVsv($src);";
@@ -2238,8 +2224,8 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         @_anon_sub_registrations = ();
         @_anon_sub_helpers      = ();
         $_anon_sub_counter      = 0;
-        $_regex_statics         = [];
-        $_regex_counter         = 0;
+        $self->_reset_regex_statics();
+        $self->_reset_regex_counter();
         $self->_reset_cfg_lookup();
 
         # Precompute field_name => C slug mapping for known-typed fields.
@@ -2332,7 +2318,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
 
         # Assemble the .c file
-        my $class_full = $module_name;
+        my $class_full = $self->module_name();
         my @c_lines;
         push @c_lines, "/* ABOUTME: C implementation of $class_full (generated by Target::C). */";
         push @c_lines, "/* ABOUTME: Auto-generated from Perl source — do not edit. */";
@@ -2364,8 +2350,8 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
 
         # Emit regex statics (if any)
-        if ($_regex_statics && $_regex_statics->@*) {
-            for my $rx ($_regex_statics->@*) {
+        if ($self->_get_regex_statics() && $self->_get_regex_statics()->@*) {
+            for my $rx ($self->_get_regex_statics()->@*) {
                 push @c_lines, "static REGEXP *$rx->{var} = NULL;";
             }
             push @c_lines, '';
@@ -2494,13 +2480,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # emits one thin XSUB per exported function (delegating to the C impl),
     # handles _ADJUST as a void XSUB if present, and calls init_statics in BOOT.
     method generate_xs_wrapper($ir, $exported_functions, $anon_sub_registrations) {
-        my $slug      = $self->_class_slug($module_name);
+        my $slug      = $self->_class_slug($self->module_name());
         my $class_decl = $self->_find_class_decl($ir);
 
         my @lines;
 
         # Preamble
-        push @lines, "/* ABOUTME: Thin XS wrapper for $module_name (generated by Target::C). */";
+        push @lines, "/* ABOUTME: Thin XS wrapper for ${\$self->module_name()} (generated by Target::C). */";
         push @lines, "/* ABOUTME: XSUBs delegate to ${slug}_*() functions in chalk.so. */";
         push @lines, '#include "EXTERN.h"';
         push @lines, '#include "perl.h"';
@@ -2536,8 +2522,8 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
 
         # MODULE line
-        my $escaped_module = $self->_escape_c_string($module_name);
-        push @lines, "MODULE = $module_name  PACKAGE = $module_name";
+        my $escaped_module = $self->_escape_c_string($self->module_name());
+        push @lines, "MODULE = ${\$self->module_name()}  PACKAGE = ${\$self->module_name()}";
         push @lines, '';
         push @lines, 'PROTOTYPES: DISABLE';
         push @lines, '';

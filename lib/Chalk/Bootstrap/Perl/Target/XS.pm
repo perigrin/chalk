@@ -5,47 +5,20 @@ use utf8;
 use experimental 'class';
 
 use bytes ();
-use Chalk::Bootstrap::Target;
+use Chalk::Bootstrap::Perl::Target::EmitHelpers;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
-class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
-    field $module_name :param :reader;
-    field $field_map;  # hashref: field name => index (set during _emit_xs)
-    field $field_sigils;  # hashref: field name => sigil ($, @, %) (set during _emit_xs)
-    field %_cfg_lookup;  # IR node refaddr → cfg_state entry, built by generate_with_cfg
-    field $_return_context = false;  # true when emitting a method body that returns a value
-    field $_loop_depth = 0;  # nesting depth inside loops (suppresses bare-return detection)
-    field $_class_methods;  # hashref: name => { returns => bool, params => \@param_names }
+class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
     field $_cv_cache;  # hashref: "fieldname_methodname" => { field_name, field_idx, method_name }
-    field $_param_fields;  # hashref: field_name => 1 for :param fields (type varies per instance)
     field $_semiring_intrinsics :param(semiring_intrinsics) = undef;  # hashref: field_name => { components => [...] }
     field $_class_registry :param(class_registry) = undef;  # ClassRegistry for multi-class compilation
-    field $_current_slug = '';  # class-derived identifier prefix for multi-class collision avoidance
     field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
     field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
-    field $_regex_counter = 0;  # monotonic counter for unique regex static variable names
-    field $_regex_statics;  # arrayref of { var, pat } for lazy-compiled REGEXP* statics
-    field %_class_scope_vars;  # var_name => { sigil, init, static_name } for class-level lexicals
-    field %_class_subs;  # sub_name => { params => [...], is_sub => 1 } for class-scope sub declarations
-    field %_use_constants;  # constant_name => numeric_value from `use constant { ... }` declarations
     field @_anon_sub_fwd_decls;  # forward declarations for anonymous sub CV statics
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
     field @_anon_sub_boot;  # BOOT lines to register anonymous sub CVs via newXS
     field $_anon_sub_counter = 0;  # monotonic counter for unique anonymous sub names
-
-    ADJUST {
-        die "Invalid module name: $module_name"
-            unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
-    }
-
-    # Derive a short lowercase slug from a class name for identifier namespacing.
-    # Takes the last component of a qualified name and lowercases it.
-    # e.g., "Chalk::Bootstrap::Earley" → "earley", "SlugTest" → "slugtest"
-    method _class_slug($class_name) {
-        my ($last) = $class_name =~ /(?:.*::)?(\w+)$/;
-        return lc($last // $class_name);
-    }
 
     # Map a TypeInference return type to a C type for XS output.
     # Conservative: all non-void types emit SV*. Extension point for
@@ -55,7 +28,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return 'SV *';
     }
 
-    method set_return_context($val) { $_return_context = $val; }
+    method set_return_context($val) { $self->_set_return_context($val); }
 
     method generate($ir) {
         die "generate() requires a Constructor:Program IR node"
@@ -84,16 +57,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             && $ir isa Chalk::Bootstrap::IR::Node::Constructor
             && $ir->class() eq 'Program';
 
-        %_cfg_lookup = ();
+        $self->_reset_cfg_lookup();
         $self->_build_cfg_lookup($sa, $ctx);
         my $code = $self->_emit_xs($ir);
-        %_cfg_lookup = ();
+        $self->_reset_cfg_lookup();
         return $code;
     }
 
     # Generate distribution with cfg_state-aware dispatch.
     method generate_distribution_with_cfg($ir, $sa, $ctx) {
-        %_cfg_lookup = ();
+        $self->_reset_cfg_lookup();
         $self->_build_cfg_lookup($sa, $ctx);
 
         my $xs_path = $self->_module_path_prefix() . '.xs';
@@ -104,7 +77,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             'Build.PL' => $self->_emit_build_pl(),
         };
 
-        %_cfg_lookup = ();
+        $self->_reset_cfg_lookup();
         return $result;
     }
 
@@ -114,7 +87,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # (needed because SemanticAction's %_cfg_state is shared and gets wiped by reset_cache).
     method generate_distribution_multi_class($entries) {
         # Build cfg_lookup for all entries
-        %_cfg_lookup = ();
+        $self->_reset_cfg_lookup();
         for my $entry ($entries->@*) {
             $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx}, $entry->{cfg_snapshot});
         }
@@ -133,123 +106,27 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             'Build.PL' => $self->_emit_build_pl(),
         };
 
-        %_cfg_lookup = ();
+        $self->_reset_cfg_lookup();
         return $result;
-    }
-
-    # First-found wins: parent rules that wire body expressions take priority.
-    # $cfg_snapshot is an optional hashref mapping Context refaddr to cfg_state,
-    # pre-built at parse time. When provided, it is used instead of $sa->cfg_state()
-    # which may have been wiped by subsequent parses (shared class-scope lexical).
-    method _build_cfg_lookup($sa, $ctx, $cfg_snapshot = undef) {
-        my @stack = ($ctx);
-        while (@stack) {
-            my $node = pop @stack;
-            my $state = defined $cfg_snapshot
-                ? $cfg_snapshot->{refaddr($node)}
-                : $sa->cfg_state($node);
-            if (defined $state && (defined $state->{if_node} || defined $state->{loop} || defined $state->{try_node})) {
-                my $ir_node = $node->extract();
-                if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}) {
-                    $_cfg_lookup{refaddr($ir_node)} = $state;
-                }
-                # For try/catch, also register by try_node refaddr. The Context
-                # extract() may return undef or ARRAY (stale-value merge), but
-                # the TryCatchStmt Constructor in state->{try_node} is what
-                # appears as VarDecl init in the IR tree.
-                if (defined $state->{try_node} && ref($state->{try_node})
-                        && !exists $_cfg_lookup{refaddr($state->{try_node})}) {
-                    $_cfg_lookup{refaddr($state->{try_node})} = $state;
-                }
-            }
-            push @stack, reverse $node->children()->@*;
-        }
-        return;
     }
 
     # Convert module name to file path prefix
     method _module_path_prefix() {
-        my $path = $module_name;
+        my $path = $self->module_name();
         $path =~ s{::}{/}g;
         return "lib/$path";
-    }
-
-    # Extract ClassDecl from Program IR
-    method _find_class_decl($ir) {
-        my $stmts = $ir->inputs()->[0];
-        for my $stmt ($stmts->@*) {
-            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'ClassDecl') {
-                return $stmt;
-            }
-        }
-        return undef;
-    }
-
-    # Build field index map from ClassDecl IR.
-    # Returns hashref mapping field name (without sigil) to integer index.
-    # Fields are numbered in declaration order starting from 0.
-    method _build_field_index_map($class_decl) {
-        my $body = $class_decl->inputs()->[2];
-        my %field_map;
-        my %sigils;
-        my %params;
-        my $index = 0;
-
-        for my $item ($body->@*) {
-            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'FieldDecl') {
-                my $name_node = $item->inputs()->[0];
-                my $field_name = $name_node->value();
-                my ($sigil) = $field_name =~ /^([\$\@\%])/;
-                $field_name =~ s/^[\$\@\%]//;  # Strip sigil
-                $field_map{$field_name} = $index++;
-                $sigils{$field_name} = $sigil // '$';
-                # Detect :param attribute — these fields vary per instance
-                my $attrs = $item->inputs()->[1];
-                if (ref($attrs) eq 'ARRAY') {
-                    for my $attr ($attrs->@*) {
-                        my $attr_name = $attr->inputs()->[0]->value();
-                        if ($attr_name eq 'param') {
-                            $params{$field_name} = 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        $field_sigils = \%sigils;
-        $_param_fields = \%params;
-        return \%field_map;
-    }
-
-    # Check if a C expression targets a typed (hash/array) class field.
-    # Returns the sigil (%, @) if so, undef otherwise.
-    # Used to skip SvRV dereference on field %hash / field @array accesses —
-    # ObjectFIELDS slots for typed fields ARE the HV*/AV* directly.
-    method _field_sigil_for_expr($expr) {
-        if ($expr =~ /^ObjectFIELDS\(SvRV\(self\)\)\[(\d+)\]$/) {
-            my $idx = $1;
-            return unless defined $field_sigils;
-            for my $name (keys $field_sigils->%*) {
-                if (defined $field_map && $field_map->{$name} == $idx) {
-                    my $sig = $field_sigils->{$name};
-                    return $sig if $sig eq '%' || $sig eq '@';
-                }
-            }
-        }
-        return;
     }
 
     # Emit a static C function that inlines FilterComposite is_zero logic.
     # Takes a semiring_intrinsics component spec and generates short-circuit
     # checks for each component position. Returns arrayref of C source lines.
     method _emit_inline_is_zero($field_name, $spec) {
+        my $slug = $self->_get_current_slug();
         my $components = $spec->{components};
-        my $field_idx = $field_map->{$field_name};
+        my $field_idx = $self->_get_field_map()->{$field_name};
         my @lines;
 
-        push @lines, "static int _inline_${_current_slug}_is_zero(pTHX_ SV *semiring_field, SV *value) {";
+        push @lines, "static int _inline_${slug}_is_zero(pTHX_ SV *semiring_field, SV *value) {";
         push @lines, '    if (!value) return 1;';
         # Non-reference values can't be FilterComposite tuples.
         # Fall back to method dispatch for non-tuple semiring values
@@ -323,7 +200,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # or undef if the method is not a composite dispatch candidate.
     method _try_composite_method_override($mname, $method_item) {
         return unless defined $_composite_field_types && keys $_composite_field_types->%*;
-        return unless defined $_class_methods && exists $_class_methods->{$mname};
+        return unless defined $self->_get_class_methods() && exists $self->_get_class_methods()->{$mname};
 
         # Methods eligible for composite dispatch unrolling
         my %composite_methods = map { $_ => 1 }
@@ -331,7 +208,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                _filter_compare on_skip_optional zero one);
         return unless exists $composite_methods{$mname};
 
-        my $meta = $_class_methods->{$mname};
+        my $meta = $self->_get_class_methods()->{$mname};
         my @params = $meta->{params}->@*;
 
         # Find the composite field (semirings arrayref)
@@ -340,11 +217,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             $composite_field = $fname;
             last;
         }
-        return unless defined $composite_field && defined $field_map
-            && exists $field_map->{$composite_field};
+        return unless defined $composite_field && defined $self->_get_field_map()
+            && exists $self->_get_field_map()->{$composite_field};
 
         my $component_slugs = $_composite_field_types->{$composite_field};
-        my $field_idx = $field_map->{$composite_field};
+        my $field_idx = $self->_get_field_map()->{$composite_field};
 
         # Check which components have _impl_ for this method.
         # Methods that ALL components have compiled can use _impl_ directly.
@@ -375,6 +252,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Generate XSUB wrapper for a composite method override.
     method _emit_composite_xsub($mname, $params) {
+        my $slug = $self->_get_current_slug();
         my @xsub;
         if ($params->@*) {
             push @xsub, 'SV *';
@@ -388,7 +266,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
         push @xsub, 'CODE:';
         my $call_args = join(', ', 'aTHX_ self', $params->@*);
-        push @xsub, "    RETVAL = _impl_${_current_slug}_${mname}($call_args);";
+        push @xsub, "    RETVAL = _impl_${slug}_${mname}($call_args);";
         push @xsub, 'OUTPUT:';
         push @xsub, '    RETVAL';
         push @xsub, '';
@@ -437,13 +315,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Generate the static helper function for a composite method.
     method _emit_composite_helper($mname, $params, $component_slugs, $field_idx, $has_impl) {
+        my $slug = $self->_get_current_slug();
         my @fwd_params = ('SV *self');
         push @fwd_params, "SV *$_" for $params->@*;
         my $sig = join(', ', @fwd_params);
 
         my $n_components = scalar $component_slugs->@*;
         my @h;
-        push @h, "static SV * _impl_${_current_slug}_${mname}(pTHX_ $sig) {";
+        push @h, "static SV * _impl_${slug}_${mname}(pTHX_ $sig) {";
         push @h, "    AV *_sr = (AV*)SvRV(ObjectFIELDS(SvRV(self))[$field_idx]);";
         # Guard: component count must match compiled dispatch.
         # A FilterComposite with fewer components (e.g., 2-element BNF pipeline
@@ -559,10 +438,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # multiply: build result tuple, then annihilator check
     method _emit_composite_multiply($h, $slugs, $has_impl) {
+        my $class_slug = $self->_get_current_slug();
         # Guard: non-tuple values fall back to zero (should never happen,
         # but prevents segfault from SvRV on non-reference)
-        push $h->@*, "    if (!SvROK(left) || SvTYPE(SvRV(left)) != SVt_PVAV) return _impl_${_current_slug}_zero(aTHX_ self);";
-        push $h->@*, "    if (!SvROK(right) || SvTYPE(SvRV(right)) != SVt_PVAV) return _impl_${_current_slug}_zero(aTHX_ self);";
+        push $h->@*, "    if (!SvROK(left) || SvTYPE(SvRV(left)) != SVt_PVAV) return _impl_${class_slug}_zero(aTHX_ self);";
+        push $h->@*, "    if (!SvROK(right) || SvTYPE(SvRV(right)) != SVt_PVAV) return _impl_${class_slug}_zero(aTHX_ self);";
         push $h->@*, "    AV *_result = newAV();";
         push $h->@*, "    SV *_mr;";
         # Build result tuple
@@ -585,7 +465,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, $ri", $has_impl);
             push $h->@*, "    if (SvTRUE($iz_call)) {";
             push $h->@*, "        SvREFCNT_dec((SV*)_result);";
-            push $h->@*, "        return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "        return _impl_${class_slug}_zero(aTHX_ self);";
             push $h->@*, "    }";
         }
         push $h->@*, "    return newRV_noinc((SV*)_result);";
@@ -623,6 +503,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # on_scan: build result tuple with component item slicing, zero check per component
     method _emit_composite_on_scan($h, $params, $slugs, $has_impl) {
+        my $class_slug = $self->_get_current_slug();
         push $h->@*, "    AV *_result = newAV();";
         push $h->@*, "    SV *_r;";
         for my $i (0 .. $slugs->$#*) {
@@ -651,7 +532,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
             push $h->@*, "        if (SvTRUE($iz_call)) {";
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
-            push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "            return _impl_${class_slug}_zero(aTHX_ self);";
             push $h->@*, "        }";
             push $h->@*, "        av_push(_result, _r);";
             push $h->@*, "    }";
@@ -661,6 +542,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # on_complete: like on_scan but threads TI result to SA via set_type_context
     method _emit_composite_on_complete($h, $params, $slugs, $has_impl) {
+        my $class_slug = $self->_get_current_slug();
         push $h->@*, "    AV *_result = newAV();";
         push $h->@*, "    SV *_r;";
         push $h->@*, "    SV *_ti_result = NULL;";
@@ -704,7 +586,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
             push $h->@*, "        if (SvTRUE($iz_call)) {";
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
-            push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "            return _impl_${class_slug}_zero(aTHX_ self);";
             push $h->@*, "        }";
             push $h->@*, "        av_push(_result, _r);";
             # Capture TI result at index 2
@@ -719,6 +601,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # on_skip_optional: like on_scan but uses on_skip_optional where available,
     # falls back to multiply(value, one()) for components without it
     method _emit_composite_on_skip_optional($h, $params, $slugs, $has_impl) {
+        my $class_slug = $self->_get_current_slug();
         push $h->@*, "    AV *_result = newAV();";
         push $h->@*, "    SV *_r;";
         for my $i (0 .. $slugs->$#*) {
@@ -762,7 +645,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", \%core_impl_iz);
             push $h->@*, "        if (SvTRUE($iz_call)) {";
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
-            push $h->@*, "            return _impl_${_current_slug}_zero(aTHX_ self);";
+            push $h->@*, "            return _impl_${class_slug}_zero(aTHX_ self);";
             push $h->@*, "        }";
             push $h->@*, "        av_push(_result, _r);";
             push $h->@*, "    }";
@@ -772,6 +655,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # add: zero checks, _filter_compare, verdict logic, post-merge hook
     method _emit_composite_add($h, $slugs, $has_impl) {
+        my $slug = $self->_get_current_slug();
         # Guard: non-tuple values fall back to method dispatch
         push $h->@*, "    if (!SvROK(left) || SvTYPE(SvRV(left)) != SVt_PVAV) return right;";
         push $h->@*, "    if (!SvROK(right) || SvTYPE(SvRV(right)) != SVt_PVAV) return left;";
@@ -787,7 +671,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             push $h->@*, "    if (SvTRUE($iz_right)) return left;";
         }
         # Call _filter_compare
-        push $h->@*, "    SV *_verdict = _impl_${_current_slug}__filter_compare(aTHX_ self, left, right);";
+        push $h->@*, "    SV *_verdict = _impl_${slug}__filter_compare(aTHX_ self, left, right);";
         push $h->@*, '    SV *_winner, *_loser;';
         push $h->@*, '    STRLEN _vl; const char *_vp = SvPV(_verdict, _vl);';
         push $h->@*, '    if (_vl == 11 && memEQ(_vp, "right_loses", 11)) {';
@@ -873,7 +757,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # replacing the scope field. The IR can't handle hash spread ($base->%*)
     # or for loops over hash keys, so emit the HV iteration directly in C.
     method _emit_native_copy_cfg_with_scope() {
-        my $slug = $_current_slug;
+        my $slug = $self->_get_current_slug();
         my $fn = "_impl_${slug}__copy_cfg_with_scope";
         my @helper;
         push @helper, "static SV * ${fn}(pTHX_ SV *base, SV *new_scope) {";
@@ -900,7 +784,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # The IR loses coderef-call arguments ($method_ref->($obj, $ctx)), so
     # this emits the call_sv + argument pushing directly, bypassing IR.
     method _emit_native_dispatch_action() {
-        my $slug = $_current_slug;
+        my $slug = $self->_get_current_slug();
         my $fn = "_impl_${slug}__dispatch_action";
         my @helper;
         push @helper, "static SV * ${fn}(pTHX_ SV *actions_obj, SV *method_ref, SV *ctx) {";
@@ -942,7 +826,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Emit native C for set_cfg_state: store cfg_state for a Context.
     # eval_pv can't access class-scope %_cfg_state, so emit direct HV store.
     method _emit_native_set_cfg_state() {
-        my $slug = $_current_slug;
+        my $slug = $self->_get_current_slug();
         my $fn = "_impl_${slug}_set_cfg_state";
         my $csv = "_csv_${slug}__cfg_state";
         my @helper;
@@ -969,7 +853,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Emit native C for update_cfg: set pending cfg state update.
     # eval_pv can't access class-scope $_pending_cfg_update.
     method _emit_native_update_cfg() {
-        my $slug = $_current_slug;
+        my $slug = $self->_get_current_slug();
         my $fn = "_impl_${slug}_update_cfg";
         my $csv = "_csv_${slug}__pending_cfg_update";
         my @helper;
@@ -996,7 +880,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # 2. %_cfg_state class-scope lexical inaccessible from eval_pv
     # 3. Method body gets truncated (complex conditionals lost)
     method _emit_native_on_merge() {
-        my $slug = $_current_slug;
+        my $slug = $self->_get_current_slug();
         my $fn = "_impl_${slug}_on_merge";
         my $csv_cfg = "_csv_${slug}__cfg_state";
         my $can_merge_fn = "_impl_${slug}__can_merge_cfg";
@@ -1106,7 +990,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '{';
 
         # Get stash and save PL_curstash
-        my $escaped_module = $self->_escape_c_string($module_name);
+        my $escaped_module = $self->_escape_c_string($self->module_name());
         push @lines, "    HV *stash = gv_stashpv(\"$escaped_module\", GV_ADD);";
         push @lines, '    HV *old_stash = PL_curstash;';
         push @lines, '    PL_curstash = stash;';
@@ -1320,13 +1204,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Initialize static class-scope variables.
         # These live outside the class setup block because they must be
         # initialized even when the class already exists from Perl source.
-        if (keys %_class_scope_vars) {
+        if (keys %{$self->_get_class_scope_vars()}) {
             push @lines, '';
             push @lines, '        /* Initialize class-scope static variables */';
             # Declare __sv (topic variable) if any init expression uses map/for
             my $needs_topic = false;
-            for my $var (sort keys %_class_scope_vars) {
-                my $info = $_class_scope_vars{$var};
+            for my $var (sort keys %{$self->_get_class_scope_vars()}) {
+                my $info = $self->_get_class_scope_vars()->{$var};
                 if (defined $info->{init}) {
                     my $test_expr = eval { $self->_emit_xs_expr($info->{init}, {}) };
                     if (defined $test_expr && $test_expr =~ /__sv/) {
@@ -1338,8 +1222,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             if ($needs_topic) {
                 push @lines, '        SV *__sv = NULL;';
             }
-            for my $var (sort keys %_class_scope_vars) {
-                my $info = $_class_scope_vars{$var};
+            for my $var (sort keys %{$self->_get_class_scope_vars()}) {
+                my $info = $self->_get_class_scope_vars()->{$var};
                 my $sname = $info->{static_name};
                 push @lines, "        if (!$sname) {";
                 if (defined $info->{init}) {
@@ -1429,60 +1313,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return @lines;
     }
 
-    # Escape a string for C double-quoted literal
-    method _escape_c_string($str) {
-        $str =~ s/\\/\\\\/g;
-        $str =~ s/"/\\"/g;
-        $str =~ s/\n/\\n/g;
-        $str =~ s/\t/\\t/g;
-        $str =~ s/\r/\\r/g;
-        $str =~ s/\0/\\0/g;
-        $str =~ s/([^\x20-\x7E])/sprintf("\\x%02x", ord($1))/ge;
-        return $str;
-    }
-
-    # Check if a method's XS output contains unsupported constructs
-    # that require eval_pv fallback instead of XSUB emission.
-    method _needs_eval_fallback($xs_output) {
-        # Explicit unsupported markers
-        return true if $xs_output =~ /NULL \/\* unsupported[^*]*\*\//;
-        return true if $xs_output =~ /\/\* unknown node \*\//;
-
-        # C keywords used as identifiers (e.g., SvREFCNT_inc(return))
-        return true if $xs_output =~ /\b(?:return|break|continue|switch|case|default|goto)\s*[);,]/
-            && $xs_output =~ /SvREFCNT_inc\((?:return|break|continue)\)/;
-
-        return false;
-    }
-
-    # Detect methods that call uncompiled my sub (lexical subs).
-    # Lexical subs are not in the package namespace, so neither call_pv
-    # nor eval_pv can reach them. Methods calling them must keep their
-    # original Perl implementation where the lexical sub is visible.
-    method _calls_uncompiled_my_subs($xs_output) {
-        return false unless keys %_class_subs;
-        for my $sname (keys %_class_subs) {
-            next if $_class_subs{$sname}{compiled};
-            my $scope = $_class_subs{$sname}{scope} // 'package';
-            # Package/our subs are in the stash — call_pv works fine
-            next if $scope eq 'package' || $scope eq 'our';
-            # Lexical sub called via call_pv — won't work at runtime
-            if ($xs_output =~ /call_pv\([^)]*\Q${sname}\E/) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    # Class-scope variables are now compiled as static C variables.
-    # This method is retained for backwards compatibility but always returns
-    # false — methods referencing class-scope vars can now compile to XS.
-    method _uses_class_scope_vars($xs_output) {
-        return false;
-    }
-
     # Detect stale-value merge corruption in a method's XS output:
-    # method body has call_method (real work) but RETVAL is a bare string.
+    # method body has call_method or _impl_ call (real work) but RETVAL is a bare string.
+    # Uses _impl_ pattern (XS-specific) in addition to call_method.
     method _is_stale_merge($xs_output) {
         my $has_dispatch = $xs_output =~ /(?:call_method|_impl_)\(/;
         my $has_bare_str = $xs_output =~ /(?:RETVAL|retval) = newSVpvs\("/;
@@ -1494,64 +1327,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
         return ($has_dispatch && $has_bare_str);
-    }
-
-    # Repair stale-value merge corruption in XS method output.
-    # The IR hashref constructor was corrupted into a bare string constant.
-    # We reconstruct the hashref from the method's parameters and local vars.
-    method _repair_stale_merge($xs_lines, $method_decl) {
-        my $params = $method_decl->inputs()->[1];
-        my $body   = $method_decl->inputs()->[2];
-
-        # Collect parameter names (these become hashref keys)
-        my @keys;
-        for my $p ($params->@*) {
-            my $pname = $p->value();
-            $pname =~ s/^\$//;
-            push @keys, $pname;
-        }
-
-        # Collect locally declared variable names from VarDecl nodes
-        for my $item ($body->@*) {
-            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'VarDecl') {
-                my $var = $item->inputs()->[0]->value();
-                $var =~ s/^\$//;
-                push @keys, $var unless grep { $_ eq $var } @keys;
-            }
-        }
-
-        # Build hashref construction in C: hv_stores for each key
-        my @hv_lines;
-        push @hv_lines, '{ HV *_rhv = newHV();';
-        for my $key (@keys) {
-            # Resolve the C expression for this variable
-            my $c_var;
-            if ($field_map && exists $field_map->{$key}) {
-                $c_var = "ObjectFIELDS(SvRV(self))[$field_map->{$key}]";
-            } else {
-                $c_var = "${key}_sv";
-                # Method params don't have _sv suffix
-                $c_var = $key if grep { $_ eq $key } map { my $n = $_->value(); $n =~ s/^\$//; $n } $params->@*;
-            }
-            my $escaped_key = $self->_escape_c_string($key);
-            push @hv_lines, "hv_stores(_rhv, \"$escaped_key\", SvREFCNT_inc($c_var));";
-        }
-        # Detect whether we're repairing a helper (retval) or XSUB (RETVAL)
-        my $joined = join("\n", $xs_lines->@*);
-        my $var_name = ($joined =~ /retval = newSVpvs\("/) ? 'retval' : 'RETVAL';
-        push @hv_lines, "$var_name = newRV_noinc((SV*)_rhv); }";
-        my $hashref_code = join(' ', @hv_lines);
-
-        # Replace the broken RETVAL/retval line in the output
-        my @fixed;
-        for my $line ($xs_lines->@*) {
-            if ($line =~ /(?:RETVAL|retval) = newSVpvs\("/) {
-                $line =~ s/(?:RETVAL|retval) = newSVpvs\("[^"]*"\)/$hashref_code/;
-            }
-            push @fixed, $line;
-        }
-        return \@fixed;
     }
 
     # Emit eval_pv fallback for a method that can't be compiled to XS.
@@ -1593,7 +1368,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $body_code = join('; ', @body_lines);
 
         # Wrap as sub in module namespace
-        my $perl_code = "sub ${module_name}::${name} { my ($param_list) = \@_; $body_code }";
+        my $mn = $self->module_name();
+        my $perl_code = "sub ${mn}::${name} { my ($param_list) = \@_; $body_code }";
         my $escaped = $self->_escape_c_string($perl_code);
 
         return "    eval_pv(\"$escaped\", TRUE);";
@@ -1602,20 +1378,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Extract per-class XS code sections for assembly into single or multi-class .xs files.
     # Returns hashref: { fwd_decls => [...], helpers => [...], xsubs => [...],
     #   boot_lines => [...], class_decl => $node, field_map => $map }
-    # Sets $_current_slug, $field_map, $_class_methods, $_cv_cache as side effects.
+    # Sets $self->_get_current_slug(), $self->_get_field_map(), $self->_get_class_methods(), $_cv_cache as side effects.
     method _emit_class_sections($ir) {
         my $class_decl = $self->_find_class_decl($ir);
         return unless defined $class_decl;
 
         # Set the current class slug for identifier namespacing
         my $class_name = $class_decl->inputs()->[0]->value();
-        $_current_slug = $self->_class_slug($class_name);
+        $self->_set_current_slug($self->_class_slug($class_name));
+        my $slug = $self->_get_current_slug();
 
         # Build field map once and store it for use throughout code generation
-        $field_map = $self->_build_field_index_map($class_decl);
+        $self->_set_field_map($self->_build_field_index_map($class_decl));
 
-        # Pre-scan methods to build $_class_methods for direct call optimization
-        $_class_methods = $self->_scan_class_methods($class_decl);
+        # Pre-scan methods to build $self->_get_class_methods() for direct call optimization
+        $self->_set_class_methods($self->_scan_class_methods($class_decl));
 
         # Pre-scan for field-invocant method calls to build CV cache.
         # Filter out :param fields — their object types vary per instance,
@@ -1626,7 +1403,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         $_cv_cache = {};
         for my $key (sort keys $raw_cv_cache->%*) {
             my $field_name = $raw_cv_cache->{$key}{field_name};
-            next if $_param_fields && $_param_fields->{$field_name};
+            next if $self->_get_param_fields() && $self->_get_param_fields()->{$field_name};
             $_cv_cache->{$key} = $raw_cv_cache->{$key};
         }
 
@@ -1675,7 +1452,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Collect class-scope variable metadata from ALL VarDecl items in class body.
         # These are compiled as static C variables, initialized in BOOT, and
         # referenced directly by _impl_ helpers instead of falling to eval_pv.
-        %_class_scope_vars = ();
+        $self->_reset_class_scope_vars();
         for my $item ($body->@*) {
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             if ($item->class() eq 'VarDecl') {
@@ -1689,11 +1466,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $init->class() eq 'SubDecl';
                 # Skip VarDecl for variables that are fields (ADJUST assigns them,
                 # but they're already handled by the field map)
-                next if defined $field_map && exists $field_map->{$var};
-                $_class_scope_vars{$var} = {
+                next if defined $self->_get_field_map() && exists $self->_get_field_map()->{$var};
+                $self->_get_class_scope_vars()->{$var} = {
                     sigil       => $sigil,
                     init        => $init,
-                    static_name => "_csv_${_current_slug}_${var}",
+                    static_name => "_csv_${slug}_${var}",
                 };
             }
         }
@@ -1701,7 +1478,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Extract `use constant { NAME => value, ... }` declarations.
         # Constants are inlined as numeric literals in the generated C,
         # since C doesn't have Perl's constant sub mechanism.
-        %_use_constants = ();
+        $self->_reset_use_constants();
         for my $item ($body->@*) {
             next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             next unless $item->class() eq 'UseDecl';
@@ -1723,7 +1500,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $vv = $val_node->value();
                 # Only inline numeric constant values
                 if ($vv =~ /^-?[0-9]+$/) {
-                    $_use_constants{$kv} = $vv;
+                    $self->_get_use_constants()->{$kv} = $vv;
                 }
             }
         }
@@ -1735,14 +1512,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     && $_->class() eq 'VarDecl') {
                 my $v = $_->inputs()->[0]->value();
                 $v =~ s/^[\$\@\%]//;
-                !exists $_class_scope_vars{$v};
+                !exists $self->_get_class_scope_vars()->{$v};
             } else {
                 true;
             }
         } @adjust_stmts;
 
         # Pass 1b: try to compile class-scope subs BEFORE method emission.
-        # Subs that compile successfully stay in %_class_subs so method bodies
+        # Subs that compile successfully stay in %{$self->_get_class_subs()} so method bodies
         # can emit _impl_ direct calls. Failed subs are removed so methods
         # fall back to call_pv with the fully-qualified name.
         for my $sub_item (@sub_items) {
@@ -1761,7 +1538,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $method = $native_emitter->{$sname};
                 my $native = $self->$method();
                 if (defined $native) {
-                    $_class_subs{$sname}{compiled} = true;
+                    $self->_get_class_subs()->{$sname}{compiled} = true;
                     push @helper_lines, $native->{helper}->@*;
                     push @helper_lines, '';
                     if ($native->{xsub}) {
@@ -1781,8 +1558,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             try {
                 $result = $self->_emit_xs_sub($sname, \@param_nodes, $sbody);
             } catch ($e) {
-                delete $_class_methods->{$sname};
-                $_class_subs{$sname}{compiled} = false;
+                $self->_delete_class_method($sname);
+                $self->_get_class_subs()->{$sname}{compiled} = false;
                 next;
             }
 
@@ -1798,7 +1575,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # regex API (pregcomp/pregexec) rather than eval_pv.
                 my $helper_text = join("\n", $result->{helper}->@*);
                 if ($helper_text =~ m{/\* (?:unknown node|unsupported op)}) {
-                    $_class_subs{$sname}{compiled} = false;
+                    $self->_get_class_subs()->{$sname}{compiled} = false;
                     next;
                 }
                 # Subs that reference $self but don't have $self as a parameter
@@ -1807,16 +1584,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # close over $self from the enclosing class.
                 if ($helper_text =~ /\bself\b/
                         && !grep { $_->value() =~ /^\$?self$/ } $sparams->@*) {
-                    $_class_subs{$sname}{compiled} = false;
+                    $self->_get_class_subs()->{$sname}{compiled} = false;
                     next;
                 }
-                $_class_subs{$sname}{compiled} = true;
+                $self->_get_class_subs()->{$sname}{compiled} = true;
                 push @helper_lines, $result->{helper}->@*;
                 push @helper_lines, '';
 
                 # Package/our subs get XSUB wrappers so Perl code can call them.
                 # Lexical subs (my/state) are only callable via direct C calls.
-                my $sub_scope = $_class_subs{$sname}{scope} // 'package';
+                my $sub_scope = $self->_get_class_subs()->{$sname}{scope} // 'package';
                 if ($sub_scope eq 'package' || $sub_scope eq 'our') {
                     my @xsub;
                     my @param_names;
@@ -1825,7 +1602,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         $pname =~ s/^[\$\@\%]//;
                         push @param_names, $pname;
                     }
-                    my $impl_name = "_impl_${_current_slug}_${sname}";
+                    my $impl_name = "_impl_${slug}_${sname}";
                     my $call_args;
                     if (@param_names) {
                         $call_args = 'aTHX_ ' . join(', ', map { "${_}_sv" } @param_names);
@@ -1855,22 +1632,22 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Save method metadata for forward declaration generation after Pass 2
         # (we defer this so we can filter out methods that fall to eval_pv fallback)
         my %pre_fwd_methods;
-        for my $mname (sort keys $_class_methods->%*) {
-            $pre_fwd_methods{$mname} = $_class_methods->{$mname};
+        for my $mname (sort keys $self->_get_class_methods()->%*) {
+            $pre_fwd_methods{$mname} = $self->_get_class_methods()->{$mname};
         }
 
         # Emit static CV cache declarations for field-invocant method calls
         if ($_cv_cache && keys $_cv_cache->%*) {
             push @fwd_decl_lines, '';
             for my $key (sort keys $_cv_cache->%*) {
-                push @fwd_decl_lines, "static CV *_cv_${_current_slug}_${key} = NULL;";
+                push @fwd_decl_lines, "static CV *_cv_${slug}_${key} = NULL;";
             }
         }
 
         # Emit inline semiring intrinsics (e.g., _inline_is_zero)
         if (defined $_semiring_intrinsics) {
             for my $fname (sort keys $_semiring_intrinsics->%*) {
-                if (defined $field_map && exists $field_map->{$fname}) {
+                if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$fname}) {
                     my $spec = $_semiring_intrinsics->{$fname};
                     if (defined $spec->{components}) {
                         push @helper_lines, $self->_emit_inline_is_zero($fname, $spec)->@*;
@@ -1883,20 +1660,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Emit _impl_ helpers for :reader fields so cross-class dispatch can
         # call them directly without Perl method dispatch overhead.
         # Readers are auto-generated by seal_stash but lack _impl_ helpers.
-        if (defined $field_map) {
-            for my $fname (sort keys $field_map->%*) {
-                next unless $_class_methods && $_class_methods->{$fname}
-                    && $_class_methods->{$fname}{is_reader};
-                my $fidx = $field_map->{$fname};
-                push @fwd_decl_lines, "static SV *_impl_${_current_slug}_${fname}(pTHX_ SV *self);";
-                push @helper_lines, "static SV *_impl_${_current_slug}_${fname}(pTHX_ SV *self) {";
+        if (defined $self->_get_field_map()) {
+            for my $fname (sort keys $self->_get_field_map()->%*) {
+                next unless $self->_get_class_methods() && $self->_get_class_methods()->{$fname}
+                    && $self->_get_class_methods()->{$fname}{is_reader};
+                my $fidx = $self->_get_field_map()->{$fname};
+                push @fwd_decl_lines, "static SV *_impl_${slug}_${fname}(pTHX_ SV *self);";
+                push @helper_lines, "static SV *_impl_${slug}_${fname}(pTHX_ SV *self) {";
                 push @helper_lines, "    return SvREFCNT_inc(ObjectFIELDS(SvRV(self))[$fidx]);";
                 push @helper_lines, "}";
                 push @helper_lines, '';
             }
         }
 
-        # Pass 2: emit all methods (with $_class_methods finalized)
+        # Pass 2: emit all methods (with $self->_get_class_methods() finalized)
         # skip_method_names: methods that call uncompiled my subs — neither
         # XSUB nor eval_pv can reach lexical subs, so the original Perl
         # method must stay in place. Tracked as fallbacks for cross-class
@@ -1933,14 +1710,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 if (defined $native) {
                     # Emit forward declaration with correct return type
                     my $ret_type = $native->{is_void} ? 'void' : 'SV *';
-                    my $meta = $_class_methods->{$mname};
+                    my $meta = $self->_get_class_methods()->{$mname};
                     my @fwd_params = ('SV *self');
                     if ($meta) {
                         for my $pname ($meta->{params}->@*) {
                             push @fwd_params, "SV *$pname";
                         }
                     }
-                    push @fwd_decl_lines, "static $ret_type _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+                    push @fwd_decl_lines, "static $ret_type _impl_${slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
                     push @helper_lines, $native->{helper}->@*;
                     push @helper_lines, '';
                     if ($native->{xsub}) {
@@ -1957,8 +1734,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             } catch ($e) {
                 # Method compilation failed (unsupported IR node types etc.)
                 # Fall back to eval_pv
-                warn "DEBUG: ${_current_slug}::${mname} compile failed: $e" if $ENV{DEBUG_XS_COMPILE};
-                delete $_class_methods->{$mname};
+                warn "DEBUG: ::${mname} compile failed: $e" if $ENV{DEBUG_XS_COMPILE};
+                $self->_delete_class_method($mname);
                 push @fallback_methods, $item;
                 next;
             }
@@ -1969,16 +1746,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     # Method calls a lexical sub that can't be compiled.
                     # Neither XSUB nor eval_pv can reach it — keep
                     # the original Perl method in place.
-                    delete $_class_methods->{$mname};
+                    $self->_delete_class_method($mname);
                     $skip_method_names{$mname} = 1;
                 } elsif ($self->_needs_eval_fallback($helper_output)) {
-                    delete $_class_methods->{$mname};
+                    $self->_delete_class_method($mname);
                     push @fallback_methods, $item;
                 } elsif ($self->_uses_class_scope_vars($helper_output)) {
                     # Method references class-level lexicals (e.g., my $ZERO = []).
                     # The XS emitter creates uninitialized local copies instead of
                     # sharing the class-scope value. Fall back to Perl.
-                    delete $_class_methods->{$mname};
+                    $self->_delete_class_method($mname);
                     push @fallback_methods, $item;
                 } elsif ($self->_is_stale_merge($helper_output)) {
                     my $fixed = $self->_repair_stale_merge($result->{helper}, $item);
@@ -1996,12 +1773,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $method_lines = $result;
                 my $xs_output = join("\n", $method_lines->@*);
                 if ($self->_calls_uncompiled_my_subs($xs_output)) {
-                    delete $_class_methods->{$mname};
+                    $self->_delete_class_method($mname);
                     $skip_method_names{$mname} = 1;
                 } elsif ($self->_needs_eval_fallback($xs_output)) {
                     push @fallback_methods, $item;
                 } elsif ($self->_uses_class_scope_vars($xs_output)) {
-                    delete $_class_methods->{$mname};
+                    $self->_delete_class_method($mname);
                     push @fallback_methods, $item;
                 } elsif ($self->_is_stale_merge($xs_output)) {
                     my $fixed = $self->_repair_stale_merge($method_lines, $item);
@@ -2037,12 +1814,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my %fallback_names;
         for my $fb_item (@fallback_methods) {
             my $fb_name = $fb_item->inputs()->[0]->value();
-            $_fallback_method_slugs{"$_current_slug:$fb_name"} = 1;
+            $_fallback_method_slugs{"$self->_get_current_slug():$fb_name"} = 1;
             $fallback_names{$fb_name} = 1;
         }
         # Skipped methods (call uncompiled my subs) also need fallback slug tracking
         for my $sname (keys %skip_method_names) {
-            $_fallback_method_slugs{"$_current_slug:$sname"} = 1;
+            $_fallback_method_slugs{"$self->_get_current_slug():$sname"} = 1;
             $fallback_names{$sname} = 1;
         }
 
@@ -2054,33 +1831,33 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Skip methods with native emitters — they emit their own fwd decls
             next if exists $native_method_emitters{$mname};
             # Skip subs — they get their own forward decls (with different param lists)
-            next if exists $_class_subs{$mname};
+            next if exists $self->_get_class_subs()->{$mname};
             my $meta = $pre_fwd_methods{$mname};
             my @fwd_params = ('SV *self');
             for my $pname ($meta->{params}->@*) {
                 push @fwd_params, "SV *$pname";
             }
-            push @method_fwd_decls, "static SV * _impl_${_current_slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
+            push @method_fwd_decls, "static SV * _impl_${slug}_${mname}(pTHX_ " . join(', ', @fwd_params) . ");";
         }
         # Forward declarations for compiled class-scope subs (no $self parameter)
-        for my $sname (sort keys %_class_subs) {
-            my $meta = $_class_subs{$sname};
+        for my $sname (sort keys %{$self->_get_class_subs()}) {
+            my $meta = $self->_get_class_subs()->{$sname};
             next unless $meta->{compiled};
             my @fwd_params;
             for my $pname ($meta->{params}->@*) {
                 push @fwd_params, "SV *$pname";
             }
             my $param_str = @fwd_params ? 'pTHX_ ' . join(', ', @fwd_params) : 'pTHX';
-            push @method_fwd_decls, "static SV * _impl_${_current_slug}_${sname}($param_str);";
+            push @method_fwd_decls, "static SV * _impl_${slug}_${sname}($param_str);";
         }
         unshift @fwd_decl_lines, @method_fwd_decls;
 
         # Emit static declarations for class-scope variables
-        if (keys %_class_scope_vars) {
+        if (keys %{$self->_get_class_scope_vars()}) {
             my @csv_decls;
-            push @csv_decls, "/* Class-scope variables for $_current_slug */";
-            for my $var (sort keys %_class_scope_vars) {
-                my $info = $_class_scope_vars{$var};
+            push @csv_decls, "/* Class-scope variables for $self->_get_current_slug() */";
+            for my $var (sort keys %{$self->_get_class_scope_vars()}) {
+                my $info = $self->_get_class_scope_vars()->{$var};
                 my $c_type = $info->{sigil} eq '%' ? 'HV *'
                            : $info->{sigil} eq '@' ? 'AV *'
                            :                         'SV *';
@@ -2089,7 +1866,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             unshift @fwd_decl_lines, @csv_decls, '';
         }
 
-        $_class_methods = undef;
+        $self->_set_class_methods(undef);
 
         return {
             fwd_decls        => \@fwd_decl_lines,
@@ -2097,9 +1874,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             xsubs            => \@xsub_lines,
             fallback_methods => \@fallback_methods,
             class_decl       => $class_decl,
-            field_map        => $field_map,
+            field_map        => $self->_get_field_map(),
             has_adjust       => $has_adjust,
-            class_scope_vars => { %_class_scope_vars },
+            class_scope_vars => { %{$self->_get_class_scope_vars()} },
         };
     }
 
@@ -2133,7 +1910,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
             push @lines, $sections->{helpers}->@*;
 
-            push @lines, "MODULE = $module_name  PACKAGE = $module_name";
+            push @lines, "MODULE = " . $self->module_name() . "  PACKAGE = " . $self->module_name();
             push @lines, '';
             push @lines, $sections->{xsubs}->@*;
 
@@ -2142,7 +1919,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 $sections->{fallback_methods}, $sections->{has_adjust},
             )->@*;
         } else {
-            push @lines, "MODULE = $module_name  PACKAGE = $module_name";
+            push @lines, "MODULE = " . $self->module_name() . "  PACKAGE = " . $self->module_name();
             push @lines, '';
         }
 
@@ -2159,8 +1936,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @all_sections;
 
         # Reset regex statics and anon sub state for this compilation unit
-        $_regex_statics = [];
-        $_regex_counter = 0;
+        $self->_reset_regex_statics();
+        $self->_reset_regex_counter();
         @_anon_sub_fwd_decls = ();
         @_anon_sub_helpers = ();
         @_anon_sub_boot = ();
@@ -2200,7 +1977,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my @fwd_lines;
         my @helper_lines;
         for my $entry ($entries->@*) {
-            %_cfg_lookup = ();
+            $self->_reset_cfg_lookup();
             $self->_build_cfg_lookup($entry->{sa}, $entry->{ctx}, $entry->{cfg_snapshot});
 
             my $sections = $self->_emit_class_sections($entry->{ir});
@@ -2222,8 +1999,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, @fwd_lines;
 
         # Emit static REGEXP* declarations for lazy-compiled regex patterns
-        if ($_regex_statics && $_regex_statics->@*) {
-            for my $rx ($_regex_statics->@*) {
+        if ($self->_get_regex_statics() && $self->_get_regex_statics()->@*) {
+            for my $rx ($self->_get_regex_statics()->@*) {
                 push @lines, "static REGEXP *$rx->{var} = NULL;";
             }
             push @lines, '';
@@ -2261,7 +2038,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Phase 2: emit MODULE/PACKAGE sections with XSUBs
         for my $entry (@all_sections) {
             my $pkg = $entry->{class_name};
-            push @lines, "MODULE = $module_name  PACKAGE = $pkg";
+            push @lines, "MODULE = " . $self->module_name() . "  PACKAGE = $pkg";
             push @lines, '';
             push @lines, $entry->{sections}{xsubs}->@*;
         }
@@ -2279,7 +2056,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         for my $e (@all_sections) {
             my $s = $e->{sections};
             # Restore per-class class-scope vars for BOOT initialization
-            %_class_scope_vars = $s->{class_scope_vars}->%*;
+            %{$self->_get_class_scope_vars()} = $s->{class_scope_vars}->%*;
             my $boot_inner = $self->_emit_xs_boot_block_inner(
                 $s->{class_decl}, $s->{field_map},
                 $s->{fallback_methods}, $s->{has_adjust},
@@ -2292,7 +2069,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
         push @lines, '}';
 
-        %_cfg_lookup = ();
+        $self->_reset_cfg_lookup();
         %_multi_class_methods = ();
         $_composite_field_types = undef;
 
@@ -2301,355 +2078,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return $xs_text;
     }
 
-    # Fix list destructuring patterns in generated XS code.
-    # The IR loses the second (and subsequent) variables in list assignments
-    # like: my ($core_id, $skip_symbols) = $pred_entry->@*
-    # The XS code only extracts element 0. This method injects element 1
-    # extraction where needed, and replaces package global references with
-    # the extracted local variable.
-    method _fixup_xs_list_destructuring($xs_text) {
-        # The IR loses second variables in list assignments like:
-        #   my ($a, $b) = $arr->@*
-        # The XS only extracts element 0. Inject element 1 extraction.
-
-        # Fix: ($core_id, $skip_symbols) = $pred_entry->@* in _predict
-        if ($xs_text =~ /core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(pred_entry_sv\), 0, 0\)\)/) {
-            $xs_text =~ s{(core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(pred_entry_sv\), 0, 0\)\);)}
-                {$1\n            SV *skip_symbols_sv = (*av_fetch((AV*)SvRV(pred_entry_sv), 1, 0));}s;
-            $xs_text =~ s{get_sv\("[^"]*::skip_symbols", GV_ADD\)}{skip_symbols_sv}g;
-        }
-
-        # Fix: ($w_core_id, $w_origin) = $wref->@* in _complete
-        $xs_text =~ s{(w_core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(wref_sv\), 0, 0\)\);)}
-            {$1\n            w_origin_sv = (*av_fetch((AV*)SvRV(wref_sv), 1, 0));}sg;
-
-        # Fix: ($waiting_item, $waiting_alt_idx) = $entry->@* in _complete
-        # This pattern: waiting_item_sv = av_fetch(entry_sv, 0, 0)
-        # followed by use of waiting_alt_idx_sv which is never assigned
-        $xs_text =~ s{(waiting_item_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
-            {$1\n            waiting_alt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg;
-
-        # Fix: ($c_core_id, $c_origin) = $cref->@* in _advance_from_completed
-        $xs_text =~ s{(c_core_id_sv = \(\*av_fetch\(\(AV\*\)SvRV\(cref_sv\), 0, 0\)\);)}
-            {$1\n            c_origin_sv = (*av_fetch((AV*)SvRV(cref_sv), 1, 0));}sg;
-
-        # Fix: ($citem, $calt_idx) = $entry->@* in _advance_from_completed
-        # This uses citem_sv not waiting_item_sv, so match specifically
-        $xs_text =~ s{(citem_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
-            {$1\n            SV *calt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg;
-
-        # Fix: skip_value = can(...) ? on_skip_optional(...) : multiply(...)
-        # The IR conflates the can() check with the value assignment, storing
-        # the can() coderef in skip_value_sv instead of the branch result.
-        # Rewrite so skip_value_sv gets the ternary result, not the can() result.
-        $xs_text = $self->_fixup_ternary_assignment($xs_text, 'skip_value_sv');
-        $xs_text = $self->_fixup_ternary_assignment($xs_text, 'skip_is_zero_sv');
-
-        # Fix: ($winner, $loser) = ($left, $right) in FilterComposite::add
-        # The IR loses list destructuring assignments — each branch emits a bare
-        # sv_2mortal(newSVpvs("=")) instead of actual variable assignments.
-        # The three branches correspond to:
-        #   right_loses: winner=left, loser=right
-        #   left_loses:  winner=right, loser=left
-        #   else:        winner=left, loser=right (tie-break)
-        $xs_text = $self->_fixup_filtercomposite_add_destructuring($xs_text);
-
-        return $xs_text;
-    }
-
-    # Fix ternary patterns where var is assigned in the condition but the
-    # branch results are discarded. Pattern:
-    #   (SvTRUE(({ VAR = COND; VAR; })) ? BRANCH_A : BRANCH_B);
-    # Should be:
-    #   VAR = (SvTRUE(({ SV *_tmp = COND; _tmp; })) ? BRANCH_A : BRANCH_B);
-    method _fixup_ternary_assignment($xs_text, $var_name) {
-        my $pattern = qr/\(SvTRUE\(\(\{\s*\Q$var_name\E\s*=\s*/;
-        while ($xs_text =~ /($pattern)/g) {
-            my $match_len = length($1);
-            my $start = pos($xs_text) - $match_len;
-            # Find the full ternary by balancing parens from start
-            my $pos = $start;
-            my $depth = 0;
-            my $len = length($xs_text);
-            my $end = $pos;
-            while ($pos < $len) {
-                my $ch = substr($xs_text, $pos, 1);
-                if ($ch eq '(') { $depth++; }
-                elsif ($ch eq ')') {
-                    $depth--;
-                    if ($depth == 0) { $end = $pos; last; }
-                }
-                $pos++;
-            }
-            # Include trailing semicolon
-            $end++ if $end < $len && substr($xs_text, $end + 1, 1) eq ';';
-
-            my $full = substr($xs_text, $start, $end - $start + 1);
-            last unless $full =~ /\?\s*\(\{/;
-
-            # Find "; VAR; })) ?" by searching for the VAR; })) pattern
-            my $marker = "; $var_name; })) ?";
-            my $marker_pos = index($full, $marker);
-            last unless $marker_pos >= 0;
-
-            # Everything between "= " and "; VAR;" is the condition value
-            my $prefix = "(SvTRUE(({ $var_name = ";
-            my $cond_start = length($prefix);
-            my $cond_val = substr($full, $cond_start, $marker_pos - $cond_start);
-
-            # Everything after "; VAR; })) ? " is the ternary branches
-            my $rest_start = $marker_pos + length($marker);
-            my $rest = substr($full, $rest_start);
-            $rest =~ s/^\s+//;
-            # Remove trailing ");" or ")"
-            $rest =~ s/\);?$//;
-
-            # Split rest into true and false branches at top-level ':'
-            my $bp = 0;
-            my $colon_pos;
-            for my $i (0 .. length($rest) - 1) {
-                my $c = substr($rest, $i, 1);
-                if ($c eq '(') { $bp++; }
-                elsif ($c eq ')') { $bp--; }
-                elsif ($c eq ':' && $bp == 0) { $colon_pos = $i; last; }
-            }
-            last unless defined $colon_pos;
-
-            my $true_br  = substr($rest, 0, $colon_pos);
-            my $false_br = substr($rest, $colon_pos + 1);
-            $true_br  =~ s/^\s+|\s+$//g;
-            $false_br =~ s/^\s+|\s+$//g;
-            my $replacement = "$var_name = (SvTRUE(({ SV *_tmp = $cond_val; _tmp; })) ? $true_br : $false_br);";
-            substr($xs_text, $start, $end - $start + 1, $replacement);
-            next;
-        }
-        return $xs_text;
-    }
-
-    # Fix list destructuring in FilterComposite::add where
-    # ($winner, $loser) = ($left, $right) gets compiled as bare "=" strings.
-    # Replaces the broken branches with actual variable assignments.
-    method _fixup_filtercomposite_add_destructuring($xs_text) {
-        # Pattern: winner_sv = &PL_sv_undef; followed by if/else branches
-        # containing bare sv_2mortal(newSVpvs("=")) instead of assignments.
-        # Match the three branches by verdict string and replace with proper assignments.
-
-        # right_loses: winner=left, loser=right
-        $xs_text =~ s{
-            (if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("right_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
-            \s* sv_2mortal\(newSVpvs\("="\)\);
-            \s* \}
-        }{$1 \{\n        winner_sv = left; loser_sv = right;\n    \}}sx;
-
-        # left_loses: winner=right, loser=left
-        $xs_text =~ s{
-            (else \s+ if \s* \(SvTRUE\(\(sv_eq\(verdict_sv, \s* sv_2mortal\(newSVpvs\("left_loses"\)\)\) \s* \? \s* &PL_sv_yes \s* : \s* &PL_sv_no\)\)\)) \s* \{
-            \s* sv_2mortal\(newSVpvs\("="\)\);
-            \s* \}
-        }{$1 \{\n        winner_sv = right; loser_sv = left;\n    \}}sx;
-
-        # else (tie-break): winner=left, loser=right
-        $xs_text =~ s{
-            (else) \s* \{
-            \s* sv_2mortal\(newSVpvs\("="\)\);
-            \s* \}
-            (\s* \{)
-        }{$1 \{\n        winner_sv = left; loser_sv = right;\n    \}$2}sx;
-
-        return $xs_text;
-    }
-
-    # Pre-scan class body to build method metadata for direct call optimization.
-    # Returns hashref: { name => { returns => bool, params => \@param_names } }
-    # Return detection is conservative: defaults to true (returning) when uncertain.
-    # The actual return type is patched in later during emission.
-    method _scan_class_methods($class_decl) {
-        my $body = $class_decl->inputs()->[2];
-        my %methods;
-
-        # Collect all MethodDecl and SubDecl nodes from the class body.
-        # SubDecl may be mis-parented as VarDecl initializer due to parser
-        # ambiguity (e.g., `my %_cache; sub _intern(...)` parsed as one unit).
-        # Recurse one level into VarDecl initializers to find these.
-        my @items_to_scan;
-        for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            push @items_to_scan, $item;
-            # Check VarDecl initializer for mis-parented SubDecl
-            if ($item->class() eq 'VarDecl') {
-                my $init = $item->inputs()->[1];
-                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $init->class() eq 'SubDecl') {
-                    push @items_to_scan, $init;
-                }
-            }
-        }
-
-        for my $item (@items_to_scan) {
-            my $class = $item->class();
-            next unless $class eq 'MethodDecl' || $class eq 'SubDecl';
-
-            my $name   = $item->inputs()->[0]->value();
-            my $params = $item->inputs()->[1];
-
-            my @param_names;
-            for my $p ($params->@*) {
-                my $pname = $p->value();
-                $pname =~ s/^[\$\@\%]//;
-                push @param_names, $pname;
-            }
-
-            my $entry = {
-                returns => true,
-                params  => \@param_names,
-            };
-
-            # Track subs separately so the emitter knows they lack $self
-            if ($class eq 'SubDecl') {
-                $entry->{is_sub} = true;
-                $entry->{class_name} = $class_decl->inputs()->[0]->value();
-                # SubDecl inputs: [name, params, body, scope]
-                my $scope_node = $item->inputs()->[3];
-                $entry->{scope} = defined $scope_node ? $scope_node->value() : 'package';
-                $_class_subs{$name} = $entry;
-            }
-
-            $methods{$name} = $entry;
-        }
-
-        # Scan FieldDecl nodes for :reader attributes — these auto-generate
-        # accessor methods that can be called via _impl_ direct dispatch.
-        for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
-                && $item->class() eq 'FieldDecl';
-            my $attrs = $item->inputs()->[1];
-            next unless ref($attrs) eq 'ARRAY';
-            my $has_reader = false;
-            for my $attr ($attrs->@*) {
-                if ($attr->inputs()->[0]->value() eq 'reader') {
-                    $has_reader = true;
-                    last;
-                }
-            }
-            if ($has_reader) {
-                my $fname = $item->inputs()->[0]->value();
-                $fname =~ s/^[\$\@\%]//;  # Strip sigil
-                $methods{$fname} //= {
-                    returns    => true,
-                    params     => [],
-                    is_reader  => true,
-                };
-            }
-        }
-
-        return \%methods;
-    }
-
-    # Scan IR tree for MethodCallExpr nodes where invocant is a field variable.
-    # Returns hashref of "fieldname_methodname" => { field_name, field_idx, method_name }.
-    # These calls can use cached CVs instead of call_method for faster dispatch.
-    method _scan_field_method_calls($class_decl) {
-        my %cache;
-        my $body = $class_decl->inputs()->[2];
-
-        my $walk;
-        $walk = sub ($node) {
-            return unless defined $node;
-
-            if ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $node->class() eq 'MethodCallExpr') {
-                my $invocant_node = $node->inputs()->[0];
-                my $method_const  = $node->inputs()->[1];
-
-                # Check if invocant is a field variable
-                if (defined $invocant_node
-                        && $invocant_node isa Chalk::Bootstrap::IR::Node::Constant
-                        && defined $field_map) {
-                    my $val = $invocant_node->value();
-                    my $ct  = $invocant_node->const_type();
-                    if (($ct eq 'variable' || $val =~ /^[\$\@\%]/) && $val =~ /^[\$\@\%](.+)/) {
-                        my $var = $1;
-                        if (exists $field_map->{$var}) {
-                            my $method_name = $method_const->value();
-                            # Skip 'can' — used for feature detection, not hot-path dispatch
-                            if ($method_name ne 'can') {
-                                my $key = "${var}_${method_name}";
-                                $cache{$key} //= {
-                                    field_name => $var,
-                                    field_idx  => $field_map->{$var},
-                                    method_name => $method_name,
-                                };
-                            }
-                        }
-                    }
-                }
-            }
-
-            # Recurse into inputs
-            if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-                for my $input ($node->inputs()->@*) {
-                    if (ref($input) eq 'ARRAY') {
-                        $walk->($_) for $input->@*;
-                    } else {
-                        $walk->($input);
-                    }
-                }
-            }
-        };
-
-        for my $item ($body->@*) {
-            $walk->($item);
-        }
-
-        return \%cache;
-    }
-
-    # Check if a MethodDecl will be emitted as a complex method (with helper).
-    # Returns true for complex methods, false for simple Tier A/B patterns.
-    method _is_complex_method($method_decl) {
-        my $body = $method_decl->inputs()->[2];
-
-        # Empty body is simple
-        return false if $body->@* == 0;
-
-        # Multi-statement body is complex
-        return true if $body->@* > 1;
-
-        # Single-statement body: check if it matches Tier A/B patterns
-        my $body_item = $body->[0];
-        my $returns_value = (defined $body_item
-            && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $body_item->class() eq 'ReturnStmt');
-        my $dies = (defined $body_item
-            && $body_item isa Chalk::Bootstrap::IR::Node::Constructor
-            && $body_item->class() eq 'DieCall');
-
-        if ($returns_value) {
-            my $value = $body_item->inputs()->[0];
-            # InterpolatedString return — simple
-            if ($value isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $value->class() eq 'InterpolatedString') {
-                return false;
-            }
-            # Constant return — simple
-            if ($value isa Chalk::Bootstrap::IR::Node::Constant
-                    && ($value->const_type() // '') ne 'variable'
-                    && $value->value() !~ /^[\$\@\%]/) {
-                return false;
-            }
-            # Non-trivial return — complex
-            return true;
-        }
-
-        # Die with constant message — simple
-        return false if $dies;
-
-        # Other single-statement bodies — complex
-        return true;
-    }
 
     # Emit a single XSUB for a MethodDecl
     method _emit_xs_method($method_decl) {
+        my $slug   = $self->_get_current_slug();
         my $name   = $method_decl->inputs()->[0]->value();
         my $params = $method_decl->inputs()->[1];
         my $body   = $method_decl->inputs()->[2];
@@ -2701,7 +2133,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                         push @xsub_params, "SV *$pname";
                     }
                     my @helper;
-                    push @helper, "static SV *_impl_${_current_slug}_${name}(pTHX_ " . join(', ', @helper_params) . ") {";
+                    push @helper, "static SV *_impl_${slug}_${name}(pTHX_ " . join(', ', @helper_params) . ") {";
                     push @helper, "    return $c_expr;";
                     push @helper, "}";
                     my $xsub_call_args = join(', ', 'aTHX_ self', map { my $p = $_; $p =~ s/^SV \*//; $p } @xsub_params[1..$#xsub_params]);
@@ -2714,7 +2146,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     }
                     push @xsub, "    $_" for @xsub_params;
                     push @xsub, '  CODE:';
-                    push @xsub, "    RETVAL = _impl_${_current_slug}_${name}($xsub_call_args);";
+                    push @xsub, "    RETVAL = _impl_${slug}_${name}($xsub_call_args);";
                     push @xsub, '  OUTPUT:';
                     push @xsub, '    RETVAL';
                     return { helper => \@helper, xsub => \@xsub };
@@ -2770,6 +2202,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # $ir_return_type: rich type from TypeInference (Int, Str, Bool, etc.),
     # 'Void' for void methods, or undef to fall back to heuristic detection.
     method _emit_xs_complex_method($name, $params, $body, $ir_return_type = undef) {
+        my $slug = $self->_get_current_slug();
         my @code;
 
         # Determine if the method returns a value.
@@ -2840,8 +2273,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # Set return context so nested emit_cfg_if can reconstruct stripped
         # ReturnStmt nodes as RETVAL assignments (stale-merge workaround)
-        my $prev_return_context = $_return_context;
-        $_return_context = $has_return;
+        my $prev_return_context = $self->_get_return_context();
+        $self->_set_return_context($has_return);
 
         # Emit each body item as C code, marking the last statement
         for my $idx (0 .. $body->@* - 1) {
@@ -2889,14 +2322,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         # Restore previous return context
-        $_return_context = $prev_return_context;
+        $self->_set_return_context($prev_return_context);
 
         # Build the static helper function.
         # Helpers always return SV* so callers can use them uniformly as
         # expressions. Void methods return &PL_sv_undef. The XSUB wrapper
         # preserves the original void/SV* distinction for Perl callers.
         my @helper;
-        my $helper_name = "_impl_${_current_slug}_${name}";
+        my $helper_name = "_impl_${slug}_${name}";
         push @helper, "static SV * $helper_name(pTHX_ " . join(', ', @xs_params) . ") {";
 
         # Local variable declarations (were PREINIT in XSUB)
@@ -2973,6 +2406,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # Unlike methods, subs have no implicit $self parameter.
     # Returns hashref { helper => [...] } (no xsub — subs are internal only).
     method _emit_xs_sub($name, $params, $body) {
+        my $slug = $self->_get_current_slug();
         my @code;
 
         my $last_item = $body->[-1];
@@ -3017,8 +2451,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         my $has_early_return = $self->_has_early_return($body);
 
-        my $prev_return_context = $_return_context;
-        $_return_context = $has_return;
+        my $prev_return_context = $self->_get_return_context();
+        $self->_set_return_context($has_return);
 
         for my $idx (0 .. $body->@* - 1) {
             my $is_last = ($idx == $body->@* - 1);
@@ -3041,11 +2475,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        $_return_context = $prev_return_context;
+        $self->_set_return_context($prev_return_context);
 
         # Build the static helper function (no XSUB wrapper — internal only)
         my @helper;
-        my $helper_name = "_impl_${_current_slug}_${name}";
+        my $helper_name = "_impl_${slug}_${name}";
         my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
         push @helper, "static SV * $helper_name($param_str) {";
 
@@ -3078,269 +2512,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return { helper => \@helper };
     }
 
-    # Check if a body contains early returns (ReturnStmt inside if body)
-    method _has_early_return($nodes) {
-        for my $item ($nodes->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node;
-            # Check CFG If nodes via cfg_lookup
-            if (%_cfg_lookup && ref($item)) {
-                my $state = $_cfg_lookup{refaddr($item)};
-                if (defined $state && defined $state->{if_node}) {
-                    my $then = $state->{then_stmts};
-                    return true if $self->_body_contains_return($then);
-                    # Stale-merge can strip ReturnStmt leaving bare expressions
-                    return true if $self->_body_contains_bare_return($then);
-                    my $else = $state->{else_stmts};
-                    return true if defined($else) && ref($else) eq 'ARRAY'
-                        && $self->_body_contains_return($else);
-                    return true if defined($else) && ref($else) eq 'ARRAY'
-                        && $self->_body_contains_bare_return($else);
-                }
-                # Recurse into loop body_stmts
-                if (defined $state && defined $state->{loop}) {
-                    my $loop_body = $state->{body_stmts};
-                    return true if defined($loop_body) && ref($loop_body) eq 'ARRAY'
-                        && $self->_has_early_return($loop_body);
-                }
-            }
-        }
-        return false;
-    }
-
-    # Check if a body array contains any ReturnStmt
-    method _body_contains_return($body) {
-        return false unless ref($body) eq 'ARRAY';
-        for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node;
-            # Check CFG If nodes and Loop bodies via cfg_lookup
-            if (%_cfg_lookup && ref($item)) {
-                my $state = $_cfg_lookup{refaddr($item)};
-                if (defined $state && defined $state->{if_node}) {
-                    my $then = $state->{then_stmts};
-                    return true if $self->_body_contains_return($then);
-                    my $else = $state->{else_stmts};
-                    return true if defined($else) && $self->_body_contains_return($else);
-                }
-                # Recurse into loop body_stmts
-                if (defined $state && defined $state->{loop}) {
-                    my $loop_body = $state->{body_stmts};
-                    return true if defined($loop_body) && ref($loop_body) eq 'ARRAY'
-                        && $self->_body_contains_return($loop_body);
-                }
-            }
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            return true if $item->class() eq 'ReturnStmt';
-        }
-        return false;
-    }
-
-    # Check if a body array's last item is a bare return expression (stale-merge)
-    method _body_contains_bare_return($body) {
-        return false unless ref($body) eq 'ARRAY' && $body->@*;
-        my $last = $body->[-1];
-        return $self->_is_bare_return_expr($last);
-    }
-
-    # Detect if an IR node is a bare expression that was likely a return value
-    # stripped by the Earley stale-value merge. Used in emit_cfg_if to
-    # reconstruct RETVAL assignment when in return context.
-    method _is_bare_return_expr($node) {
-        return false unless defined $node;
-        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
-        my $class = $node->class();
-        # Void statement types are never bare return expressions
-        my %void = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign ReturnStmt
-                                        BuiltinCall BinaryExpr);
-        return false if $void{$class};
-        # SubscriptExpr and MethodCallExpr are common return-value patterns
-        return true if $class eq 'SubscriptExpr';
-        return true if $class eq 'MethodCallExpr';
-        return true if $class eq 'TernaryExpr';
-        return false;
-    }
-
-    # Detect if an IR node is unambiguously a value expression (never a
-    # side-effect). TernaryExpr always produces a value; comparison and
-    # logical BinaryExprs produce values. MethodCallExpr and SubscriptExpr
-    # are ambiguous (could be side-effects).
-    method _is_unambiguous_value_expr($node) {
-        return false unless defined $node;
-        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
-        my $class = $node->class();
-        return true if $class eq 'TernaryExpr';
-        # BinaryExpr with a comparison or logical operator produces a value
-        if ($class eq 'BinaryExpr') {
-            my $inputs = $node->inputs();
-            if (defined $inputs && $inputs->@* >= 1) {
-                my $op_node = $inputs->[0];
-                if ($op_node isa Chalk::Bootstrap::IR::Node::Constant) {
-                    my $op = $op_node->value();
-                    my %value_ops = map { $_ => 1 } qw(
-                        >= <= > < == != <=> eq ne lt gt le ge cmp
-                        && || // and or
-                    );
-                    return true if $value_ops{$op};
-                }
-            }
-        }
-        return false;
-    }
-
-    # Detect if a single-statement method body's expression is a return
-    # value whose ReturnStmt was stripped by stale-merge. For single-body
-    # methods (not ADJUST), expression-type nodes are return values unless
-    # they are clearly void (VarDecl, DieCall, CompoundAssign).
-    method _is_single_stmt_return_expr($node) {
-        return false unless defined $node;
-        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
-        my $class = $node->class();
-        my %void_classes = map { $_ => 1 } qw(
-            VarDecl DieCall CompoundAssign
-        );
-        return false if $void_classes{$class};
-        return true;
-    }
-
-    # Recursively collect VarDecl and iterator names from IR nodes at any
-    # nesting depth, so PREINIT has all needed declarations. Handles both
-    # legacy Constructor types and CFG nodes via cfg_lookup.
-    method _collect_var_decls($nodes, $declared_vars) {
-        for my $item ($nodes->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node;
-
-            # Check if this is a CFG node with associated cfg_state
-            if (%_cfg_lookup && ref($item)) {
-                my $state = $_cfg_lookup{refaddr($item)};
-                if (defined $state) {
-                    if (defined $state->{if_node}) {
-                        # Recurse into if/else bodies
-                        my $then = $state->{then_stmts};
-                        $self->_collect_var_decls($then, $declared_vars) if ref($then) eq 'ARRAY';
-                        my $else = $state->{else_stmts};
-                        $self->_collect_var_decls($else, $declared_vars) if defined($else) && ref($else) eq 'ARRAY';
-                    }
-                    if (defined $state->{loop}) {
-                        # Iterator variable
-                        my $iter = $state->{iterator};
-                        if (defined $iter && $iter isa Chalk::Bootstrap::IR::Node::Constant) {
-                            my $iter_name = $iter->value();
-                            $iter_name =~ s/^[\$\@\%]//;
-                            $declared_vars->{$iter_name} = true;
-                        }
-                        # Recurse into loop body
-                        my $body = $state->{body_stmts};
-                        $self->_collect_var_decls($body, $declared_vars) if ref($body) eq 'ARRAY';
-                    }
-                    if (defined $state->{try_node}) {
-                        # Recurse into try and catch bodies
-                        my $try = $state->{try_stmts};
-                        $self->_collect_var_decls($try, $declared_vars) if ref($try) eq 'ARRAY';
-                        my $catch = $state->{catch_stmts};
-                        $self->_collect_var_decls($catch, $declared_vars) if ref($catch) eq 'ARRAY';
-                        # Register catch variable
-                        my $catch_var = $state->{catch_var};
-                        if (defined $catch_var) {
-                            my $cv = $catch_var;
-                            $cv =~ s/^[\$\@\%]//;
-                            $declared_vars->{$cv} = true;
-                        }
-                    }
-                    next;
-                }
-            }
-
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            my $class = $item->class();
-
-            if ($class eq 'VarDecl') {
-                my $var = $item->inputs()->[0]->value();
-                $var =~ s/^[\$\@\%]//;
-                # Skip field variables — they use ObjectFIELDS, not PREINIT locals
-                next if defined $field_map && exists $field_map->{$var};
-                # Skip class-scope variables — they use static C vars, not PREINIT locals
-                next if %_class_scope_vars && exists $_class_scope_vars{$var};
-                $declared_vars->{$var} = true;
-                # Recurse into chained VarDecl init to collect inner variables
-                my $init = $item->inputs()->[1];
-                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $init->class() eq 'VarDecl') {
-                    $self->_collect_var_decls([$init], $declared_vars);
-                }
-                # VarDecl with TryCatchStmt init: recurse into try/catch bodies
-                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $init->class() eq 'TryCatchStmt') {
-                    my $state = $_cfg_lookup{refaddr($init)};
-                    if (defined $state) {
-                        my $try = $state->{try_stmts};
-                        $self->_collect_var_decls($try, $declared_vars) if ref($try) eq 'ARRAY';
-                        my $catch = $state->{catch_stmts};
-                        $self->_collect_var_decls($catch, $declared_vars) if ref($catch) eq 'ARRAY';
-                        my $catch_var = $state->{catch_var};
-                        if (defined $catch_var) {
-                            my $cv = $catch_var;
-                            $cv =~ s/^[\$\@\%]//;
-                            $declared_vars->{$cv} = true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    # Walk the IR tree to find all variable references (Constant nodes whose
-    # value looks like $var, @var, %var) and register them in declared_vars.
-    # This catches variables from list destructuring and other patterns where
-    # the IR doesn't produce explicit VarDecl nodes for all variables.
-    method _collect_all_var_refs($nodes, $declared_vars) {
-        my @queue = grep { defined $_ } $nodes->@*;
-        my %visited;
-        while (my $node = shift @queue) {
-            next unless ref($node);
-            my $addr = refaddr($node);
-            next if $visited{$addr}++;
-
-            if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
-                my $val = $node->value() // '';
-                if ($val =~ /^\$([\w]+)$/) {
-                    my $bare = $1;
-                    # Skip capture variables ($1, $2, ...) — they use
-                    # get_sv() at reference time, not PREINIT locals,
-                    # and digits-only names are invalid C identifiers.
-                    next if $bare =~ /^\d+$/;
-                    # Skip built-in hash variables (%ENV, %SIG, %INC) —
-                    # they use get_hv() at subscript time, not PREINIT locals.
-                    next if $bare =~ /\A(?:ENV|SIG|INC)\z/;
-                    next if defined $field_map && exists $field_map->{$bare};
-                    # Skip method parameters — they use bare C names, not _sv locals
-                    next if $declared_vars->{"param:$bare"};
-                    # Skip class-scope variables — they use static C vars
-                    next if %_class_scope_vars && exists $_class_scope_vars{$bare};
-                    $declared_vars->{$bare} = true;
-                }
-            } elsif ($node isa Chalk::Bootstrap::IR::Node) {
-                # Recurse into all IR node inputs (Constructor, If, Loop,
-                # etc.) so variables in while-conditions and other nested
-                # positions are collected for PREINIT declaration.
-                push @queue, grep { defined $_ && ref($_) } $node->inputs()->@*;
-            }
-
-            # Recurse into cfg_state bodies
-            if (%_cfg_lookup) {
-                my $state = $_cfg_lookup{$addr};
-                if (defined $state) {
-                    for my $key (qw(body_stmts then_stmts else_stmts try_stmts catch_stmts)) {
-                        my $stmts = $state->{$key};
-                        push @queue, grep { defined $_ } $stmts->@* if ref($stmts) eq 'ARRAY';
-                    }
-                }
-            }
-
-            # Recurse into ARRAY refs (arg lists)
-            if (ref($node) eq 'ARRAY') {
-                push @queue, grep { defined $_ && ref($_) } $node->@*;
-            }
-        }
-    }
 
     # Emit a single IR node as a C statement line.
     # $is_last indicates whether this is the final statement in the method body.
@@ -3348,8 +2519,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return undef unless defined $node;
 
         # Check cfg_state lookup for control flow dispatch
-        if (%_cfg_lookup && ref($node)) {
-            my $state = $_cfg_lookup{refaddr($node)};
+        if (%{$self->_get_cfg_lookup()} && ref($node)) {
+            my $state = $self->_get_cfg_lookup()->{refaddr($node)};
             if (defined $state) {
                 if (defined $state->{if_node}) {
                     # loop_jump: emit 'if (!cond) continue;' instead of block
@@ -3409,8 +2580,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $val = $node->value() // '';
             # Inside scoped loops (ENTER/SAVETMPS per iteration), must
             # FREETMPS/LEAVE before continue/break to avoid leaking the scope.
-            if ($val eq 'next')   { return $_loop_depth ? "{ FREETMPS; LEAVE; continue; }" : "continue;"; }
-            if ($val eq 'last')   { return $_loop_depth ? "{ FREETMPS; LEAVE; break; }" : "break;"; }
+            if ($val eq 'next')   { return $self->_get_loop_depth() ? "{ FREETMPS; LEAVE; continue; }" : "continue;"; }
+            if ($val eq 'last')   { return $self->_get_loop_depth() ? "{ FREETMPS; LEAVE; break; }" : "break;"; }
             if ($val eq 'return') { return "return;"; }
             return $self->_emit_xs_expr($node, $declared_vars) . ";";
         }
@@ -3420,6 +2591,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit a C expression for an IR node
     method _emit_xs_expr($node, $declared_vars) {
+        my $slug = $self->_get_current_slug();
         return 'NULL' unless defined $node;
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
@@ -3483,11 +2655,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $inner_expr = "${inner}_sv";
                 } elsif ($declared_vars && $declared_vars->{"param:$inner"}) {
                     $inner_expr = $inner;
-                } elsif ($field_map && exists $field_map->{$inner}) {
-                    my $idx = $field_map->{$inner};
+                } elsif ($self->_get_field_map() && exists $self->_get_field_map()->{$inner}) {
+                    my $idx = $self->_get_field_map()->{$inner};
                     $inner_expr = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
-                    $inner_expr = "get_sv(\"${module_name}::$inner\", GV_ADD)";
+                    $inner_expr = "get_sv(\"${\$self->module_name()}::$inner\", GV_ADD)";
                 }
                 return "sv_2mortal(newSViv(av_len((AV*)SvRV($inner_expr))))";
             }
@@ -3503,8 +2675,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Class-scope static variable — check before declared_vars because
             # _collect_var_decls may create a local SV* for VarDecl in the
             # method body, but the actual shared value lives in the static.
-            if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-                my $info = $_class_scope_vars{$var};
+            if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
+                my $info = $self->_get_class_scope_vars()->{$var};
                 # Hash/array statics: return a mortal reference so SvRV()
                 # in SubscriptExpr handler correctly unwraps to HV*/AV*.
                 if ($info->{sigil} eq '%' || $info->{sigil} eq '@') {
@@ -3520,13 +2692,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 return $var;
             }
             # Field access: use ObjectFIELDS indexed access if this is a field
-            if ($field_map && exists $field_map->{$var}) {
-                my $idx = $field_map->{$var};
+            if ($self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
+                my $idx = $self->_get_field_map()->{$var};
                 return "ObjectFIELDS(SvRV(self))[$idx]";
             }
             # Package global or unknown variable — use get_sv for package lookup
             my $escaped = $self->_escape_c_string($var);
-            return "get_sv(\"${module_name}::$escaped\", GV_ADD)";
+            return "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
         }
 
         # Numeric values — sv_2mortal prevents leaks when used as sub-expressions
@@ -3556,15 +2728,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $escaped_lit = $self->_escape_c_string($lit);
                 push @parts, "sv_catpvs(_qr, \"$escaped_lit\")" if length $lit;
                 # Resolve the variable to its C expression
-                if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-                    my $info = $_class_scope_vars{$var};
+                if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
+                    my $info = $self->_get_class_scope_vars()->{$var};
                     push @parts, "sv_catsv(_qr, (SV*)$info->{static_name})";
                 } elsif ($declared_vars && $declared_vars->{$var}) {
                     push @parts, "sv_catsv(_qr, ${var}_sv)";
                 } elsif ($declared_vars && $declared_vars->{"param:$var"}) {
                     push @parts, "sv_catsv(_qr, $var)";
-                } elsif ($field_map && exists $field_map->{$var}) {
-                    my $idx = $field_map->{$var};
+                } elsif ($self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
+                    my $idx = $self->_get_field_map()->{$var};
                     push @parts, "sv_catsv(_qr, ObjectFIELDS(SvRV(self))[$idx])";
                 }
             }
@@ -3584,8 +2756,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Resolve `use constant` names to their numeric values.
         # Without this, constants like STRUCT_IS_LIST become string literals
         # in the generated C, producing "isn't numeric" warnings and wrong results.
-        if (%_use_constants && exists $_use_constants{$val}) {
-            return "sv_2mortal(newSViv($_use_constants{$val}))";
+        if (%{$self->_get_use_constants()} && exists $self->_get_use_constants()->{$val}) {
+            return "sv_2mortal(newSViv($self->_get_use_constants()->{$val}))";
         }
 
         # String literal — sv_2mortal prevents leaks when used as sub-expressions
@@ -3615,8 +2787,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 # globals set by _emit_xs_regex_match wrapper
                 if ($var =~ /^\d+$/) {
                     $src = "get_sv(\"::_c$var\", GV_ADD)";
-                } elsif (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-                    my $info = $_class_scope_vars{$var};
+                } elsif (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
+                    my $info = $self->_get_class_scope_vars()->{$var};
                     $src = ($info->{sigil} eq '%' || $info->{sigil} eq '@')
                         ? "(SV*)$info->{static_name}"
                         : $info->{static_name};
@@ -3624,12 +2796,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
                 } elsif ($declared_vars && $declared_vars->{"param:$var"}) {
                     $src = "$var ? $var : &PL_sv_undef";
-                } elsif ($field_map && exists $field_map->{$var}) {
-                    my $idx = $field_map->{$var};
+                } elsif ($self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
+                    my $idx = $self->_get_field_map()->{$var};
                     $src = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "get_sv(\"${module_name}::$escaped\", GV_ADD)";
+                    $src = "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
                 }
                 if ($first) {
                     push @stmts, "SV *_r = newSVsv($src)";
@@ -3760,6 +2932,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # temp variables before any XPUSHs — nested dSP reads PL_stack_sp which
     # would clobber the outer stack entries if evaluated inline.
     method _emit_xs_method_call_expr($node, $declared_vars) {
+        my $slug = $self->_get_current_slug();
         my $invocant_node = $node->inputs()->[0];
         my $method_name   = $node->inputs()->[1]->value();
         my $args          = $node->inputs()->[2];
@@ -3812,10 +2985,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # of going through Perl's method dispatch protocol.
         # All helpers return SV* (void methods return &PL_sv_undef), so the
         # call always produces a usable SV* value.
-        if ($invocant_expr eq 'self' && defined $_class_methods
-                && defined $_class_methods->{$method_name}) {
+        if ($invocant_expr eq 'self' && defined $self->_get_class_methods()
+                && defined $self->_get_class_methods()->{$method_name}) {
             my @call_args = ('aTHX_ self', @arg_exprs);
-            my $call = "_impl_${_current_slug}_${method_name}(" . join(', ', @call_args) . ")";
+            my $call = "_impl_${slug}_${method_name}(" . join(', ', @call_args) . ")";
             if (@pre_eval) {
                 my @stmts = (@pre_eval, $call);
                 return '({ ' . join('; ', @stmts) . '; })';
@@ -3870,15 +3043,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             my $val = $invocant_node->value();
             if ($val =~ /^[\$\@\%](.+)/) {
                 my $var = $1;
-                if (defined $field_map && exists $field_map->{$var}
+                if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}
                         && exists $_semiring_intrinsics->{$var}) {
-                    my $fidx = $field_map->{$var};
+                    my $fidx = $self->_get_field_map()->{$var};
                     # The semiring field stores the FilterComposite; its _semirings
                     # arrayref is passed to _inline_is_zero for lazy Boolean zero init.
                     # We pass the field's _semirings (obtained via method call once,
                     # but the inline function caches it).
                     my $arg = $arg_exprs[0] // 'NULL';
-                    my $intrinsic = "_inline_${_current_slug}_is_zero(aTHX_ ObjectFIELDS(SvRV(self))[$fidx], $arg)";
+                    my $intrinsic = "_inline_${slug}_is_zero(aTHX_ ObjectFIELDS(SvRV(self))[$fidx], $arg)";
                     # Wrap in GCC statement expression so _fixup_ternary_assignment
                     # can detect and rewrite ternary patterns that assign the result.
                     my $expr = "({ SV *_izr = ($intrinsic ? &PL_sv_yes : &PL_sv_no); _izr; })";
@@ -3921,16 +3094,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # This is a monomorphic inline cache — one pointer comparison per call.
         if ($invocant_expr ne 'self' && defined $invocant_node
                 && $invocant_node isa Chalk::Bootstrap::IR::Node::Constant
-                && defined $_param_fields) {
+                && defined $self->_get_param_fields()) {
             my $val = $invocant_node->value();
             if ($val =~ /^[\$\@\%](.+)/) {
                 my $var = $1;
-                if (exists $_param_fields->{$var} && defined $field_map && exists $field_map->{$var}) {
+                if (exists $self->_get_param_fields()->{$var} && defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
                     # Find which compiled classes define this method (excluding self).
                     # Prioritize the class from the `uses` registration for this field.
                     my @candidates;
                     for my $slug (sort keys %_multi_class_methods) {
-                        next if $slug eq $_current_slug;
+                        next if $slug eq $self->_get_current_slug();
                         if (exists $_multi_class_methods{$slug}{$method_name}
                                 && !exists $_fallback_method_slugs{"$slug:$method_name"}) {
                             push @candidates, $slug;
@@ -3947,7 +3120,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                                 my $reg = $_class_registry->resolve($cname);
                                 next unless defined $reg && defined $reg->{uses};
                                 my $cslug = $self->_class_slug($cname);
-                                next unless $cslug eq $_current_slug;
+                                next unless $cslug eq $self->_get_current_slug();
                                 for my $dep ($reg->{uses}->@*) {
                                     my $dep_slug = $self->_class_slug($dep);
                                     if (grep { $_ eq $dep_slug } @candidates) {
@@ -4009,7 +3182,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         if (defined $cv_cache_key) {
             # Lazy-resolve CV on first call, then use call_sv for dispatch
             my $field_idx = $_cv_cache->{$cv_cache_key}{field_idx};
-            my $cv_var = "_cv_${_current_slug}_${cv_cache_key}";
+            my $cv_var = "_cv_${slug}_${cv_cache_key}";
             push @stmts, "if (!${cv_var}) { GV *_gv = gv_fetchmethod_autoload(SvSTASH(SvRV(ObjectFIELDS(SvRV(self))[$field_idx])), \"$escaped_name\", TRUE); if (_gv) ${cv_var} = GvCV(_gv); }";
             push @stmts, 'dSP';
             push @stmts, 'ENTER; SAVETMPS';
@@ -4041,30 +3214,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         return '({ ' . join('; ', @stmts) . '; })';
-    }
-
-    # Walk a SubscriptExpr chain to find a BuiltinCall(exists/delete) at the root.
-    # Returns the BuiltinCall node if found, undef otherwise.
-    method _find_exists_delete_in_chain($node) {
-        my $cur = $node;
-        while (defined $cur && $cur isa Chalk::Bootstrap::IR::Node::Constructor) {
-            if ($cur->class() eq 'BuiltinCall') {
-                my $name = $cur->inputs()->[0]->value() // '';
-                return $cur if $name eq 'exists' || $name eq 'delete';
-                return;
-            }
-            if ($cur->class() eq 'SubscriptExpr') {
-                $cur = $cur->inputs()->[0];
-                next;
-            }
-            # Unwrap ReturnStmt/DieCall wrappers (stale-value merge artifacts)
-            if ($cur->class() eq 'ReturnStmt' || $cur->class() eq 'DieCall') {
-                $cur = $cur->inputs()->[0];
-                next;
-            }
-            return;
-        }
-        return;
     }
 
     # Build native C code for exists/delete with subscript chain.
@@ -4350,8 +3499,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                     $src_expr = $src_var;
                 } elsif (exists $declared_vars->{$src_var}) {
                     $src_expr = "${src_var}_sv";
-                } elsif (defined $field_map && exists $field_map->{$src_var}) {
-                    $src_expr = "ObjectFIELDS(SvRV(self))[$field_map->{$src_var}]";
+                } elsif (defined $self->_get_field_map() && exists $self->_get_field_map()->{$src_var}) {
+                    $src_expr = "ObjectFIELDS(SvRV(self))[$self->_get_field_map()->{$src_var}]";
                 } else {
                     $src_expr = "${src_var}_sv";
                 }
@@ -4390,11 +3539,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     # is created via newXS in the BOOT block so call_sv can dispatch to it.
     # The CV is cached in a static SV* for zero-overhead repeated use.
     method _emit_xs_anon_sub_expr($node, $declared_vars) {
+        my $slug = $self->_get_current_slug();
         my $params_node = $node->inputs()->[0];
         my $body_items  = $node->inputs()->[1] // [];
 
         my $idx = $_anon_sub_counter++;
-        my $fn_name = "_anon_${_current_slug}_${idx}";
+        my $fn_name = "_anon_${slug}_${idx}";
         my $cv_var  = "_cv_${fn_name}";
 
         # Build parameter list for the static function
@@ -4511,8 +3661,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         # Build a unique static variable name for the compiled regex
-        $_regex_counter //= 0;
-        my $rx_var = "_rx_" . $_regex_counter++;
+        
+        my $rx_var = "_rx_" . $self->_inc_regex_counter();
 
         # Wrap flags as inline modifiers: pattern → (?flags:pattern)
         my $full_pat = length($flags) ? "(?$flags:$raw_pat)" : $raw_pat;
@@ -4521,11 +3671,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         my $c_pat = $self->_escape_c_string($full_pat);
 
         # Store regex patterns to declare as statics at top of generated file
-        $_regex_statics //= [];
-        push $_regex_statics->@*, {
+        
+        $self->_push_regex_static({
             var   => $rx_var,
             pat   => $c_pat,
-        };
+        });
 
         my $tgt;
         if (defined $target) {
@@ -4559,6 +3709,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Emit builtin call as C expression
     method _emit_xs_builtin_call($node, $declared_vars) {
+        my $slug = $self->_get_current_slug();
         my $name = $node->inputs()->[0]->value();
         my $args = $node->inputs()->[1];
 
@@ -5026,17 +4177,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Check if this is a call to a known class-scope sub.
         # Compiled subs get direct _impl_ C calls.
         # Uncompiled subs get call_pv with the FQ package name (not eval_pv).
-        if (%_class_subs && exists $_class_subs{$name}) {
+        if (%{$self->_get_class_subs()} && exists $self->_get_class_subs()->{$name}) {
             my @c_args;
             for my $arg ($args->@*) {
                 push @c_args, $self->_emit_xs_expr($arg, $declared_vars);
             }
 
-            if ($_class_subs{$name}{compiled}) {
+            if ($self->_get_class_subs()->{$name}{compiled}) {
                 # Direct C call to compiled helper
-                my $helper_name = "_impl_${_current_slug}_${name}";
+                my $helper_name = "_impl_${slug}_${name}";
                 # Pad missing args with &PL_sv_undef for default params
-                my $expected = $_class_subs{$name}{params} // [];
+                my $expected = $self->_get_class_subs()->{$name}{params} // [];
                 while (scalar @c_args < scalar $expected->@*) {
                     push @c_args, '&PL_sv_undef';
                 }
@@ -5050,7 +4201,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             } else {
                 # Uncompiled sub — use call_pv with fully-qualified name.
                 # The sub exists in the Perl namespace, just can't be compiled to C.
-                my $class_name = $_class_subs{$name}{class_name} // '';
+                my $class_name = $self->_get_class_subs()->{$name}{class_name} // '';
                 my $fq_name = $class_name ? "${class_name}::${name}" : $name;
                 my $escaped_name = $self->_escape_c_string($fq_name);
                 my @stmts;
@@ -5139,8 +4290,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
         # Field variables use ObjectFIELDS accessor with sv_setsv,
         # locals use direct C pointer assignment
-        if (defined $field_map && exists $field_map->{$var}) {
-            my $idx = $field_map->{$var};
+        if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
+            my $idx = $self->_get_field_map()->{$var};
             my $accessor = "ObjectFIELDS(SvRV(self))[$idx]";
             if (defined $init) {
                 my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
@@ -5152,8 +4303,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Class-scope variables in expression context: evaluate init (if any)
         # and return the static. Statement-level resets (hv_clear etc.) are
         # handled by _emit_xs_var_decl.
-        if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-            my $info = $_class_scope_vars{$var};
+        if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
+            my $info = $self->_get_class_scope_vars()->{$var};
             if (defined $init) {
                 my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
                 return "({ $init_expr; $info->{static_name}; })";
@@ -5196,9 +4347,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Fall through to emit this variable with its sigil default
             $init = undef;
             my $this_stmt;
-            if (defined $field_map && exists $field_map->{$var}) {
-                my $idx = $field_map->{$var};
-                my $fs = $field_sigils ? ($field_sigils->{$var} // '$') : '$';
+            if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
+                my $idx = $self->_get_field_map()->{$var};
+                my $fs = $self->_get_field_sigils() ? ($self->_get_field_sigils()->{$var} // '$') : '$';
                 if ($fs eq '%') {
                     $this_stmt = "hv_clear((HV*)ObjectFIELDS(SvRV(self))[$idx]);";
                 } elsif ($fs eq '@') {
@@ -5206,8 +4357,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 } else {
                     $this_stmt = "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
                 }
-            } elsif (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-                my $csv_info = $_class_scope_vars{$var};
+            } elsif (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
+                my $csv_info = $self->_get_class_scope_vars()->{$var};
                 my $csv_sname = $csv_info->{static_name};
                 if ($csv_info->{sigil} eq '%') {
                     $this_stmt = "({ hv_clear($csv_sname); (SV*)$csv_sname; });";
@@ -5226,9 +4377,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # In ADJUST bodies, VarDecl for field names emits an ObjectFIELDS write.
         # Hash/array fields (field %h, field @a) are typed containers in Perl 5.42 —
         # reset with hv_clear/av_clear, not sv_setsv with a new ref.
-        if (defined $field_map && exists $field_map->{$var}) {
-            my $idx = $field_map->{$var};
-            my $fs = $field_sigils ? ($field_sigils->{$var} // '$') : '$';
+        if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
+            my $idx = $self->_get_field_map()->{$var};
+            my $fs = $self->_get_field_sigils() ? ($self->_get_field_sigils()->{$var} // '$') : '$';
             if (defined $init) {
                 my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
                 return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $init_expr);";
@@ -5246,8 +4397,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # operation on the static (e.g. hv_clear for %hash = ()).
         # Uses statement-expression form so the result is usable as a
         # return value when this is the last statement in a method body.
-        if (%_class_scope_vars && exists $_class_scope_vars{$var}) {
-            my $info = $_class_scope_vars{$var};
+        if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
+            my $info = $self->_get_class_scope_vars()->{$var};
             my $sname = $info->{static_name};
             if (defined $init) {
                 my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
@@ -5320,23 +4471,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             return "RETVAL = $retval;";
         }
         # Inside scoped loops, unwind ENTER/SAVETMPS scopes before goto
-        my $unwind = "FREETMPS; LEAVE; " x $_loop_depth;
+        my $unwind = "FREETMPS; LEAVE; " x $self->_get_loop_depth();
         return "${unwind}RETVAL = $retval; goto xsreturn;";
-    }
-
-    # Wrap a value expression for RETVAL assignment with SvREFCNT_inc
-    # when the value is a borrowed reference (from hv_fetch/av_fetch).
-    # Skip for newly-created values (newSV*, newRV*, &PL_sv_*) where
-    # the refcount is already correct for mortalisation.
-    method _wrap_retval($val_expr) {
-        # Newly-created SVs already have correct refcount
-        return $val_expr if $val_expr =~ /^new[A-Z]/;      # newSViv, newRV_noinc, etc.
-        return $val_expr if $val_expr =~ /^&PL_sv_/;       # &PL_sv_yes, &PL_sv_no, etc.
-        # call_method results already have SvREFCNT_inc from the call pattern
-        return $val_expr if $val_expr =~ /SvREFCNT_inc/;
-        # sv_setsv returns void — can't be wrapped as a return value
-        return $val_expr if $val_expr =~ /^sv_setsv\b/;
-        return "SvREFCNT_inc($val_expr)";
     }
 
     # Emit DieCall as croak
@@ -5381,7 +4517,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # Inside scoped loops (ENTER/SAVETMPS per iteration), must
         # FREETMPS/LEAVE before continue/break to avoid leaking the scope.
         my $sv_cond = _sv_true_wrap($cond_expr);
-        if ($_loop_depth) {
+        if ($self->_get_loop_depth()) {
             return "if ($sv_cond) { FREETMPS; LEAVE; $c_keyword; }";
         }
         return "if ($sv_cond) $c_keyword;";
@@ -5409,17 +4545,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Inside loops, MethodCallExpr at tail is likely a void side-effect
             # (e.g., _complete()), not a return value. Only allow unambiguous
             # value expressions (SubscriptExpr, TernaryExpr) inside loops.
-            my $is_loop_safe_return = !$_loop_depth
+            my $is_loop_safe_return = !$self->_get_loop_depth()
                 || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                     && ($stmt->class() eq 'SubscriptExpr'
                         || $stmt->class() eq 'TernaryExpr'));
-            if ($_return_context && $is_loop_safe_return && $is_last_in_then
+            if ($self->_get_return_context() && $is_loop_safe_return && $is_last_in_then
                     && $self->_is_bare_return_expr($stmt)) {
                 my $val_expr = $self->_emit_xs_expr($stmt, $declared_vars);
                 $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
                 my $wrapped = $self->_wrap_retval($val_expr);
                 # Inside scoped loops, unwind ENTER/SAVETMPS scopes before goto
-                my $unwind = "FREETMPS; LEAVE; " x $_loop_depth;
+                my $unwind = "FREETMPS; LEAVE; " x $self->_get_loop_depth();
                 push @lines, "    ${unwind}RETVAL = $wrapped; goto xsreturn;";
                 next;
             }
@@ -5430,8 +4566,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
             # Detect elsif: single If CFG node in else branch
             if (scalar $false_stmts->@* == 1
                     && ref($false_stmts->[0])
-                    && %_cfg_lookup) {
-                my $elsif_state = $_cfg_lookup{refaddr($false_stmts->[0])};
+                    && %{$self->_get_cfg_lookup()}) {
+                my $elsif_state = $self->_get_cfg_lookup()->{refaddr($false_stmts->[0])};
                 if (defined $elsif_state && defined $elsif_state->{if_node}) {
                     my $elsif_code = $self->emit_cfg_if(
                         $elsif_state->{if_node},
@@ -5529,12 +4665,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             # Scope boundary frees mortal SVs per iteration instead of per-function
             push @lines, "        ENTER; SAVETMPS;";
-            $_loop_depth++;
+            $self->_inc_loop_depth();
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "        $code" if defined $code;
             }
-            $_loop_depth--;
+            $self->_dec_loop_depth();
             push @lines, "        FREETMPS; LEAVE;";
             push @lines, "    }";
             # No explicit SvREFCNT_dec needed — sv_2mortal handles cleanup
@@ -5578,12 +4714,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
 
             # Scope boundary frees mortal SVs per iteration instead of per-function
             push @lines, "    ENTER; SAVETMPS;";
-            $_loop_depth++;
+            $self->_inc_loop_depth();
             for my $stmt ($body_stmts->@*) {
                 my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
             }
-            $_loop_depth--;
+            $self->_dec_loop_depth();
             push @lines, "    FREETMPS; LEAVE;";
             # Inject chart re-read for while-shift loops that destructure entries.
             # The IR loses list destructuring: my ($item, $alt_idx) = $entry->@*
@@ -5652,13 +4788,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
                 my $var = $part->value();
                 $var =~ s/^\$//;
                 my $src;
-                if ($field_map && exists $field_map->{$var}) {
-                    my $idx = $field_map->{$var};
+                if ($self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
+                    my $idx = $self->_get_field_map()->{$var};
                     $src = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
                     # Fallback for non-field variables (shouldn't happen in simple cases)
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "get_sv(\"${module_name}::$escaped\", GV_ADD)";
+                    $src = "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
                 }
                 if ($first) {
                     push @lines, "    RETVAL = newSVsv($src);";
@@ -5714,42 +4850,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         return join("\n", @lines);
     }
 
-    # Convert an IR default value node to a Perl literal string for PM stub
-    method _ir_default_to_perl($node) {
-        return undef unless defined $node;
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            my $class = $node->class();
-            if ($class eq 'ArrayRefExpr') {
-                my $elements = $node->inputs()->[0];
-                return '[]' if !$elements->@*;
-            }
-            if ($class eq 'HashRefExpr') {
-                my $pairs = $node->inputs()->[0];
-                return '{}' if !$pairs->@*;
-            }
-        }
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
-            my $val = $node->value();
-            # undef is already Perl's default — skip
-            return undef if $val eq 'undef';
-            # Numeric literal
-            return $val if $val =~ /^-?[0-9]+(?:\.[0-9]+)?$/;
-            # String literal
-            return "'$val'";
-        }
-
-        return undef;
-    }
-
     # Emit the .pm stub using dl_* API for XS loading
     method _emit_pm_stub($ir) {
         my @lines;
         push @lines, "# Generated by Chalk::Bootstrap compiler";
         push @lines, 'use 5.42.0;';
         push @lines, 'use utf8;';
-        push @lines, "package $module_name;";
+        push @lines, "package " . $self->module_name() . ";";
         push @lines, 'use strict;';
         push @lines, 'use warnings;';
         push @lines, 'require DynaLoader;';
@@ -5759,13 +4866,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         # which conflicts with feature class sealed stashes
 
         # Compute .so path: auto/Foo/Bar/Baz/Baz.so for Foo::Bar::Baz
-        my $dir_path = $module_name;
+        my $dir_path = $self->module_name();
         $dir_path =~ s/::/\//g;
-        my $filename = $module_name;
+        my $filename = $self->module_name();
         $filename =~ s/^.*:://;  # Get last component
         my $so_rel_path = "auto/$dir_path/$filename.so";
 
-        my $boot_name = $module_name;
+        my $boot_name = $self->module_name();
         $boot_name =~ s/::/double_underscore_temp/g;
         $boot_name =~ s/double_underscore_temp/__/g;
 
@@ -5782,8 +4889,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    or die "dl_load_file: " . DynaLoader::dl_error();';
         push @lines, "my \$boot = DynaLoader::dl_find_symbol(\$libref, 'boot_${boot_name}')";
         push @lines, '    or die "dl_find_symbol: " . DynaLoader::dl_error();';
-        push @lines, "DynaLoader::dl_install_xsub('${module_name}::_bootstrap', \$boot, \$so);";
-        push @lines, "${module_name}->_bootstrap();";
+        push @lines, "DynaLoader::dl_install_xsub('" . $self->module_name() . "::_bootstrap', \$boot, \$so);";
+        push @lines, $self->module_name() . "->_bootstrap();";
         push @lines, '';
         push @lines, '1;';
 
@@ -5820,7 +4927,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, "# Generated by Chalk::Bootstrap compiler";
         push @lines, 'use 5.42.0;';
         push @lines, 'use utf8;';
-        push @lines, "package $module_name;";
+        push @lines, "package " . $self->module_name() . ";";
         push @lines, 'use strict;';
         push @lines, 'use warnings;';
         push @lines, 'require DynaLoader;';
@@ -5836,13 +4943,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         }
 
         # .so loading (same as _emit_pm_stub)
-        my $dir_path = $module_name;
+        my $dir_path = $self->module_name();
         $dir_path =~ s/::/\//g;
-        my $filename = $module_name;
+        my $filename = $self->module_name();
         $filename =~ s/^.*:://;
         my $so_rel_path = "auto/$dir_path/$filename.so";
 
-        my $boot_name = $module_name;
+        my $boot_name = $self->module_name();
         $boot_name =~ s/::/double_underscore_temp/g;
         $boot_name =~ s/double_underscore_temp/__/g;
 
@@ -5859,8 +4966,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
         push @lines, '    or die "dl_load_file: " . DynaLoader::dl_error();';
         push @lines, "my \$boot = DynaLoader::dl_find_symbol(\$libref, 'boot_${boot_name}')";
         push @lines, '    or die "dl_find_symbol: " . DynaLoader::dl_error();';
-        push @lines, "DynaLoader::dl_install_xsub('${module_name}::_bootstrap', \$boot, \$so);";
-        push @lines, "${module_name}->_bootstrap();";
+        push @lines, "DynaLoader::dl_install_xsub('" . $self->module_name() . "::_bootstrap', \$boot, \$so);";
+        push @lines, $self->module_name() . "->_bootstrap();";
         push @lines, '';
         push @lines, '1;';
 
@@ -5871,10 +4978,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Target) {
     method _emit_build_pl() {
         my $xs_path = $self->_module_path_prefix() . '.xs';
         my $lib_path = $self->_module_path_prefix();
+        my $mn = $self->module_name();
         return qq[use Module::Build;
 
 Module::Build->new(
-    module_name    => '$module_name',
+    module_name    => '$mn',
     dist_version   => '0.01',
     dist_abstract  => 'Generated by Chalk::Bootstrap compiler',
     needs_compiler => 1,

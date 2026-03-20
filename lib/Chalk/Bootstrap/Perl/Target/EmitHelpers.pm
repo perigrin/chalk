@@ -4,7 +4,10 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-class Chalk::Bootstrap::Perl::Target::EmitHelpers {
+use Chalk::Bootstrap::Target;
+
+class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target) {
+    field $module_name :param :reader;  # module being compiled (e.g., "Chalk::Bootstrap::Earley")
     field $field_map;          # hashref: field name => index (set during analysis)
     field $field_sigils;       # hashref: field name => sigil ($, @, %) (set during analysis)
     field %_cfg_lookup;        # IR node refaddr => cfg_state entry, built by generate_*
@@ -17,22 +20,32 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers {
     field $_param_fields;      # hashref: field_name => 1 for :param fields (type varies per instance)
     field $_sa;                # stored SemanticAction for emit_from_cfg_state access
     field $_ctx;               # stored Context for emit_from_cfg_state access
+    field $_regex_counter = 0; # monotonic counter for unique regex static variable names
+    field $_regex_statics;     # arrayref of { var, pat } for lazy-compiled REGEXP* statics
+    field %_use_constants;     # constant_name => numeric_value from `use constant { ... }` declarations
+
+    ADJUST {
+        die "Invalid module name: $module_name"
+            unless $module_name =~ /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/;
+    }
 
     # Accessor methods for shared state fields.
-    # C.pm's subclass methods use these to read and write fields that
-    # the shared helper methods (defined here) need during code generation.
-    # Getters allow C-specific emit methods to read state set by helpers.
-    # Setters allow C.pm's _analyze_class and generate_c_files to initialize state.
+    # Subclass methods use these to read and write fields that the shared helper
+    # methods (defined here) need during code generation.
     method _get_field_map()           { return $field_map; }
     method _set_field_map($val)       { $field_map = $val; }
     method _get_current_slug()        { return $_current_slug; }
     method _set_current_slug($val)    { $_current_slug = $val; }
+    method _get_class_methods()       { return $_class_methods; }
     method _set_class_methods($val)   { $_class_methods = $val; }
+    method _delete_class_method($name) { delete $_class_methods->{$name}; }
+    method _set_class_method($name, $val) { $_class_methods->{$name} = $val; }
     method _get_class_scope_vars()    { return \%_class_scope_vars; }
     method _reset_class_scope_vars()  { %_class_scope_vars = (); }
     method _set_class_scope_var($key, $val) { $_class_scope_vars{$key} = $val; }
     method _get_class_subs()          { return \%_class_subs; }
     method _reset_class_subs()        { %_class_subs = (); }
+    method _set_class_sub($name, $val) { $_class_subs{$name} = $val; }
     method _set_class_sub_compiled($name, $val) { $_class_subs{$name}{compiled} = $val; }
     method _get_cfg_lookup()          { return \%_cfg_lookup; }
     method _reset_cfg_lookup()        { %_cfg_lookup = (); }
@@ -41,8 +54,21 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers {
     method _get_return_context()      { return $_return_context; }
     method _set_return_context($val)  { $_return_context = $val; }
     method _get_loop_depth()          { return $_loop_depth; }
+    method _inc_loop_depth()          { $_loop_depth++; }
+    method _dec_loop_depth()          { $_loop_depth--; }
     method _get_field_sigils()        { return $field_sigils; }
+    method _set_field_sigils($val)    { $field_sigils = $val; }
     method _get_param_fields()        { return $_param_fields; }
+    method _set_param_fields($val)    { $_param_fields = $val; }
+    method _get_regex_counter()       { return $_regex_counter; }
+    method _inc_regex_counter()       { return $_regex_counter++; }
+    method _reset_regex_counter()     { $_regex_counter = 0; }
+    method _get_regex_statics()       { return $_regex_statics; }
+    method _reset_regex_statics()     { $_regex_statics = []; }
+    method _push_regex_static($entry) { $_regex_statics //= []; push $_regex_statics->@*, $entry; }
+    method _get_use_constants()       { return \%_use_constants; }
+    method _reset_use_constants()     { %_use_constants = (); }
+    method _set_use_constant($name, $val) { $_use_constants{$name} = $val; }
 
     # Derive a short lowercase slug from a class name for identifier namespacing.
     # Takes the last component of a qualified name and lowercases it.
