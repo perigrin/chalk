@@ -115,7 +115,7 @@ if (defined $class_decl) {
         next unless $is_fallback{$name};
 
         # Try to emit with cfg_lookup available
-        my $method_lines = eval { $xs_target->_emit_xs_method($item) };
+        my $method_lines = eval { $xs_target->_emit_method($item) };
         if ($@) {
             diag "  $name: EMIT ERROR: $@";
             next;

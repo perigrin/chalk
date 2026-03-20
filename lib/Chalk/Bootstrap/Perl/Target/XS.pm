@@ -1212,7 +1212,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             for my $var (sort keys %{$self->_get_class_scope_vars()}) {
                 my $info = $self->_get_class_scope_vars()->{$var};
                 if (defined $info->{init}) {
-                    my $test_expr = eval { $self->_emit_xs_expr($info->{init}, {}) };
+                    my $test_expr = eval { $self->_emit_expr($info->{init}, {}) };
                     if (defined $test_expr && $test_expr =~ /__sv/) {
                         $needs_topic = true;
                         last;
@@ -1228,7 +1228,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 push @lines, "        if (!$sname) {";
                 if (defined $info->{init}) {
                     # Has an initializer — emit the C expression
-                    my $init_expr = eval { $self->_emit_xs_expr($info->{init}, {}) };
+                    my $init_expr = eval { $self->_emit_expr($info->{init}, {}) };
                     if (defined $init_expr
                             && !$self->_needs_eval_fallback($init_expr)
                             && $init_expr !~ /get_sv\(/) {
@@ -1423,7 +1423,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                     && $item->class() eq 'MethodDecl') {
                 push @method_items, $item;
                 my $mname = $item->inputs()->[0]->value();
-                # All methods (simple or complex) compile via _emit_xs_method
+                # All methods (simple or complex) compile via _emit_method
                 # and get _impl_ helpers — no need to exclude any from dispatch.
             } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && $item->class() eq 'SubDecl') {
@@ -1556,7 +1556,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
             my $result;
             try {
-                $result = $self->_emit_xs_sub($sname, \@param_nodes, $sbody);
+                $result = $self->_emit_sub($sname, \@param_nodes, $sbody);
             } catch ($e) {
                 $self->_delete_class_method($sname);
                 $self->_get_class_subs()->{$sname}{compiled} = false;
@@ -1730,7 +1730,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
             my $result;
             try {
-                $result = $self->_emit_xs_method($item);
+                $result = $self->_emit_method($item);
             } catch ($e) {
                 # Method compilation failed (unsupported IR node types etc.)
                 # Fall back to eval_pv
@@ -1794,7 +1794,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # Emit ADJUST as native void XSUB if class has ADJUST statements
         my $has_adjust = false;
         if (@adjust_stmts) {
-            my $result = eval { $self->_emit_xs_complex_method('_ADJUST', [], \@adjust_stmts) };
+            my $result = eval { $self->_emit_complex_method('_ADJUST', [], \@adjust_stmts) };
             if (ref($result) eq 'HASH') {
                 my $helper_output = join("\n", $result->{helper}->@*);
                 if (!$self->_needs_eval_fallback($helper_output)) {
@@ -2080,7 +2080,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
 
     # Emit a single XSUB for a MethodDecl
-    method _emit_xs_method($method_decl) {
+    method _emit_method($method_decl) {
         my $slug   = $self->_get_current_slug();
         my $name   = $method_decl->inputs()->[0]->value();
         my $params = $method_decl->inputs()->[1];
@@ -2103,7 +2103,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
                 if ($value isa Chalk::Bootstrap::IR::Node::Constructor
                         && $value->class() eq 'InterpolatedString') {
-                    push @lines, $self->_emit_xs_interp_return($name, $value)->@*;
+                    push @lines, $self->_emit_interp_return($name, $value)->@*;
                     return \@lines;
                 } elsif ($value isa Chalk::Bootstrap::IR::Node::Constant
                          && ($value->const_type() // '') ne 'variable'
@@ -2192,7 +2192,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # Pass return_type from IR to complex method emitter
         my $return_type_node = $method_decl->inputs()->[3];
         my $return_type = $return_type_node ? $return_type_node->value() : undef;
-        return $self->_emit_xs_complex_method($name, $params, $body, $return_type);
+        return $self->_emit_complex_method($name, $params, $body, $return_type);
     }
 
     # Emit a multi-statement method body as an XSUB using Perl API calls.
@@ -2201,7 +2201,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     # (regex, backticks, complex interpolation).
     # $ir_return_type: rich type from TypeInference (Int, Str, Bool, etc.),
     # 'Void' for void methods, or undef to fall back to heuristic detection.
-    method _emit_xs_complex_method($name, $params, $body, $ir_return_type = undef) {
+    method _emit_complex_method($name, $params, $body, $ir_return_type = undef) {
         my $slug = $self->_get_current_slug();
         my @code;
 
@@ -2252,7 +2252,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         my %declared_vars;
 
         # Track method parameters as declared vars before body emission,
-        # so _emit_xs_const_expr can resolve them as C parameters
+        # so _emit_const_expr can resolve them as C parameters
         my @xs_params = ('SV *self');
         for my $p ($params->@*) {
             my $pname = $p->value();
@@ -2279,7 +2279,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # Emit each body item as C code, marking the last statement
         for my $idx (0 .. $body->@* - 1) {
             my $is_last = ($idx == $body->@* - 1);
-            my $stmt = $self->_emit_xs_stmt($body->[$idx], \%declared_vars, $is_last);
+            my $stmt = $self->_emit_stmt($body->[$idx], \%declared_vars, $is_last);
             push @code, $stmt if defined $stmt;
         }
 
@@ -2405,7 +2405,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     # Emit a class-scope sub declaration as a static C helper function.
     # Unlike methods, subs have no implicit $self parameter.
     # Returns hashref { helper => [...] } (no xsub — subs are internal only).
-    method _emit_xs_sub($name, $params, $body) {
+    method _emit_sub($name, $params, $body) {
         my $slug = $self->_get_current_slug();
         my @code;
 
@@ -2456,7 +2456,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
         for my $idx (0 .. $body->@* - 1) {
             my $is_last = ($idx == $body->@* - 1);
-            my $stmt = $self->_emit_xs_stmt($body->[$idx], \%declared_vars, $is_last);
+            my $stmt = $self->_emit_stmt($body->[$idx], \%declared_vars, $is_last);
             push @code, $stmt if defined $stmt;
         }
 
@@ -2515,423 +2515,19 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
     # Emit a single IR node as a C statement line.
     # $is_last indicates whether this is the final statement in the method body.
-    method _emit_xs_stmt($node, $declared_vars, $is_last = true) {
-        return undef unless defined $node;
-
-        # Check cfg_state lookup for control flow dispatch
-        if (%{$self->_get_cfg_lookup()} && ref($node)) {
-            my $state = $self->_get_cfg_lookup()->{refaddr($node)};
-            if (defined $state) {
-                if (defined $state->{if_node}) {
-                    # loop_jump: emit 'if (!cond) continue;' instead of block
-                    if (defined $state->{loop_jump}) {
-                        return $self->_emit_xs_loop_jump(
-                            $state->{loop_jump},
-                            $state->{if_node},
-                            $declared_vars,
-                        );
-                    }
-                    return $self->emit_cfg_if(
-                        $state->{if_node},
-                        $state->{true_proj},
-                        $state->{false_proj},
-                        $declared_vars,
-                        $state->{then_stmts} // [],
-                        $state->{else_stmts} // [],
-                    );
-                }
-                if (defined $state->{loop}) {
-                    return $self->emit_cfg_loop(
-                        $state->{loop},
-                        $state->{loop_if},
-                        $state->{body_proj},
-                        $state->{exit_proj},
-                        $declared_vars,
-                        $state->{body_stmts} // [],
-                        $state->{iterator},
-                        $state->{list},
-                    );
-                }
-                if (defined $state->{try_node}) {
-                    return $self->emit_cfg_try_catch(
-                        $state->{try_stmts}   // [],
-                        $state->{catch_var},
-                        $state->{catch_stmts} // [],
-                        $declared_vars,
-                    );
-                }
-            }
-        }
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            my $class = $node->class();
-
-            if ($class eq 'VarDecl')         { return $self->_emit_xs_var_decl($node, $declared_vars); }
-            if ($class eq 'ReturnStmt')      { return $self->_emit_xs_return_stmt($node, $declared_vars, $is_last); }
-            if ($class eq 'DieCall')         { return $self->_emit_xs_die_call($node, $declared_vars); }
-            if ($class eq 'CompoundAssign')  { return $self->_emit_xs_compound_assign_stmt($node, $declared_vars); }
-
-            # Expression types used as statements (side effects)
-            return $self->_emit_xs_expr($node, $declared_vars) . ";";
-        }
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
-            # Loop control keywords: next→continue, last→break, return→return in C
-            my $val = $node->value() // '';
-            # Inside scoped loops (ENTER/SAVETMPS per iteration), must
-            # FREETMPS/LEAVE before continue/break to avoid leaking the scope.
-            if ($val eq 'next')   { return $self->_get_loop_depth() ? "{ FREETMPS; LEAVE; continue; }" : "continue;"; }
-            if ($val eq 'last')   { return $self->_get_loop_depth() ? "{ FREETMPS; LEAVE; break; }" : "break;"; }
-            if ($val eq 'return') { return "return;"; }
-            return $self->_emit_xs_expr($node, $declared_vars) . ";";
-        }
-
-        return "/* unknown node */";
-    }
-
     # Emit a C expression for an IR node
-    method _emit_xs_expr($node, $declared_vars) {
-        my $slug = $self->_get_current_slug();
-        return 'NULL' unless defined $node;
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
-            return $self->_emit_xs_const_expr($node, $declared_vars);
-        }
-
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            my $class = $node->class();
-
-            if ($class eq 'InterpolatedString') { return $self->_emit_xs_interp_expr($node, $declared_vars); }
-            if ($class eq 'BinaryExpr')         { return $self->_emit_xs_binary_expr($node, $declared_vars); }
-            if ($class eq 'UnaryExpr')          { return $self->_emit_xs_unary_expr($node, $declared_vars); }
-            if ($class eq 'MethodCallExpr')     { return $self->_emit_xs_method_call_expr($node, $declared_vars); }
-            if ($class eq 'SubscriptExpr')      { return $self->_emit_xs_subscript_expr($node, $declared_vars); }
-            if ($class eq 'PostfixDerefExpr')   { return $self->_emit_xs_postfix_deref_expr($node, $declared_vars); }
-            if ($class eq 'TernaryExpr')        { return $self->_emit_xs_ternary_expr($node, $declared_vars); }
-            if ($class eq 'HashRefExpr')        { return $self->_emit_xs_hash_ref_expr($node, $declared_vars); }
-            if ($class eq 'ArrayRefExpr')       { return $self->_emit_xs_array_ref_expr($node, $declared_vars); }
-            if ($class eq 'AnonSubExpr')        { return $self->_emit_xs_anon_sub_expr($node, $declared_vars); }
-            if ($class eq 'RegexMatch')         { return $self->_emit_xs_regex_match($node, $declared_vars); }
-            if ($class eq 'RegexSubst')         { return $self->_emit_xs_regex_subst($node, $declared_vars); }
-            if ($class eq 'BuiltinCall')        { return $self->_emit_xs_builtin_call($node, $declared_vars); }
-            if ($class eq 'BacktickExpr')       { return $self->_emit_xs_backtick_expr($node, $declared_vars); }
-            if ($class eq 'CompoundAssign')     { return $self->_emit_xs_compound_assign_expr($node, $declared_vars); }
-            if ($class eq 'VarDecl')            { return $self->_emit_xs_var_decl_expr($node, $declared_vars); }
-
-            # ReturnStmt used as expression: stale-value merge artifact from Earley parser.
-            # Unwrap and emit the inner value as an expression.
-            if ($class eq 'ReturnStmt') {
-                my $inner = $node->inputs()->[0];
-                return $self->_emit_xs_expr($inner, $declared_vars);
-            }
-
-            # DieCall used as expression: stale-value merge artifact.
-            # Emit croak in a statement expression — croak never returns.
-            if ($class eq 'DieCall') {
-                my $croak = $self->_emit_xs_die_call($node, $declared_vars);
-                return "({ $croak &PL_sv_undef; })";
-            }
-        }
-
-        return "NULL /* unsupported */";
-    }
-
     # Emit a Constant IR node as a C expression
-    method _emit_xs_const_expr($node, $declared_vars) {
-        my $val = $node->value();
-        my $ct  = $node->const_type();
-
-        # Variable reference — look up from hash or local C var
-        if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
-            my $var = $val;
-            $var =~ s/^[\$\@\%]//;
-            # $#$arrayref — last index of array referenced by scalar
-            # IR value: $#$item_types → after sigil strip: #$item_types
-            # Also handles $#array → after sigil strip: #array
-            if ($var =~ /^#\$?(.+)/) {
-                my $inner = $1;
-                my $inner_expr;
-                if ($declared_vars && $declared_vars->{$inner}) {
-                    $inner_expr = "${inner}_sv";
-                } elsif ($declared_vars && $declared_vars->{"param:$inner"}) {
-                    $inner_expr = $inner;
-                } elsif ($self->_get_field_map() && exists $self->_get_field_map()->{$inner}) {
-                    my $idx = $self->_get_field_map()->{$inner};
-                    $inner_expr = "ObjectFIELDS(SvRV(self))[$idx]";
-                } else {
-                    $inner_expr = "get_sv(\"${\$self->module_name()}::$inner\", GV_ADD)";
-                }
-                return "sv_2mortal(newSViv(av_len((AV*)SvRV($inner_expr))))";
-            }
-            # $self is the XS method receiver — use the C parameter directly
-            if ($var eq 'self') {
-                return 'self';
-            }
-            # Regex capture variables ($1, $2, ...) — fetch from package
-            # globals set by _emit_xs_regex_match wrapper
-            if ($var =~ /^\d+$/) {
-                return "get_sv(\"::_c$var\", GV_ADD)";
-            }
-            # Class-scope static variable — check before declared_vars because
-            # _collect_var_decls may create a local SV* for VarDecl in the
-            # method body, but the actual shared value lives in the static.
-            if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
-                my $info = $self->_get_class_scope_vars()->{$var};
-                # Hash/array statics: return a mortal reference so SvRV()
-                # in SubscriptExpr handler correctly unwraps to HV*/AV*.
-                if ($info->{sigil} eq '%' || $info->{sigil} eq '@') {
-                    return "sv_2mortal(newRV_inc((SV*)$info->{static_name}))";
-                }
-                return $info->{static_name};
-            }
-            if ($declared_vars && $declared_vars->{$var}) {
-                return "${var}_sv";
-            }
-            # Method parameters are bare C variables (no _sv suffix)
-            if ($declared_vars && $declared_vars->{"param:$var"}) {
-                return $var;
-            }
-            # Field access: use ObjectFIELDS indexed access if this is a field
-            if ($self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
-                my $idx = $self->_get_field_map()->{$var};
-                return "ObjectFIELDS(SvRV(self))[$idx]";
-            }
-            # Package global or unknown variable — use get_sv for package lookup
-            my $escaped = $self->_escape_c_string($var);
-            return "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
-        }
-
-        # Numeric values — sv_2mortal prevents leaks when used as sub-expressions
-        if ($val =~ /^-?[0-9]+$/) {
-            return "sv_2mortal(newSViv($val))";
-        }
-        if ($val =~ /^-?[0-9]+\.[0-9]+$/) {
-            return "sv_2mortal(newSVnv($val))";
-        }
-
-        # Boolean/special
-        if ($val eq 'true')  { return '&PL_sv_yes'; }
-        if ($val eq 'false') { return '&PL_sv_no'; }
-        if ($val eq 'undef') { return '&PL_sv_undef'; }
-
-        # qr// with interpolated variables — the C preprocessor doesn't do
-        # Perl-style interpolation, so newSVpvs("qr/$var/") would produce
-        # the literal string. Use eval_pv to compile at runtime instead.
-        # Terminal::match accepts plain pattern strings, so strip qr//.
-        if ($val =~ m{^qr/(.*)/\w*$}s) {
-            my $body = $1;
-            # Extract variable names from the pattern body
-            my @parts;
-            my $rest = $body;
-            while ($rest =~ /\G(.*?)\$(\w+)/gcs) {
-                my ($lit, $var) = ($1, $2);
-                my $escaped_lit = $self->_escape_c_string($lit);
-                push @parts, "sv_catpvs(_qr, \"$escaped_lit\")" if length $lit;
-                # Resolve the variable to its C expression
-                if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
-                    my $info = $self->_get_class_scope_vars()->{$var};
-                    push @parts, "sv_catsv(_qr, (SV*)$info->{static_name})";
-                } elsif ($declared_vars && $declared_vars->{$var}) {
-                    push @parts, "sv_catsv(_qr, ${var}_sv)";
-                } elsif ($declared_vars && $declared_vars->{"param:$var"}) {
-                    push @parts, "sv_catsv(_qr, $var)";
-                } elsif ($self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
-                    my $idx = $self->_get_field_map()->{$var};
-                    push @parts, "sv_catsv(_qr, ObjectFIELDS(SvRV(self))[$idx])";
-                }
-            }
-            # Remaining literal after last variable
-            my $tail = substr($body, pos($rest) // 0);
-            if (length $tail) {
-                my $escaped_tail = $self->_escape_c_string($tail);
-                push @parts, "sv_catpvs(_qr, \"$escaped_tail\")";
-            }
-
-            if (@parts) {
-                my $cat_ops = join('; ', @parts);
-                return '({ SV *_qr = sv_2mortal(newSVpvs("")); ' . $cat_ops . '; _qr; })';
-            }
-        }
-
-        # Resolve `use constant` names to their numeric values.
-        # Without this, constants like STRUCT_IS_LIST become string literals
-        # in the generated C, producing "isn't numeric" warnings and wrong results.
-        if (%{$self->_get_use_constants()} && exists $self->_get_use_constants()->{$val}) {
-            return "sv_2mortal(newSViv($self->_get_use_constants()->{$val}))";
-        }
-
-        # String literal — sv_2mortal prevents leaks when used as sub-expressions
-        my $escaped = $self->_escape_c_string($val);
-        return "sv_2mortal(newSVpvs(\"$escaped\"))";
-    }
-
     # Emit an InterpolatedString as a C expression building an SV via
     # sv_catpvs/sv_catsv. Variables are resolved from the declared_vars
     # (local C vars) or ObjectFIELDS (field access).
-    method _emit_xs_interp_expr($node, $declared_vars) {
-        my $parts = $node->inputs()->[0];
-        return '&PL_sv_undef' unless $parts->@*;
-
-        # Build a series of newSVpvs + sv_cat* operations.
-        # Since C can't do this in a single expression, we use a GCC
-        # statement expression ({...}) to keep it as an expression.
-        my @stmts;
-        my $first = true;
-
-        for my $part ($parts->@*) {
-            if ($part->const_type() eq 'variable') {
-                my $var = $part->value();
-                $var =~ s/^\$//;
-                my $src;
-                # Regex capture variables ($1, $2, ...) — fetch from package
-                # globals set by _emit_xs_regex_match wrapper
-                if ($var =~ /^\d+$/) {
-                    $src = "get_sv(\"::_c$var\", GV_ADD)";
-                } elsif (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
-                    my $info = $self->_get_class_scope_vars()->{$var};
-                    $src = ($info->{sigil} eq '%' || $info->{sigil} eq '@')
-                        ? "(SV*)$info->{static_name}"
-                        : $info->{static_name};
-                } elsif ($declared_vars && $declared_vars->{$var}) {
-                    $src = "${var}_sv ? ${var}_sv : &PL_sv_undef";
-                } elsif ($declared_vars && $declared_vars->{"param:$var"}) {
-                    $src = "$var ? $var : &PL_sv_undef";
-                } elsif ($self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
-                    my $idx = $self->_get_field_map()->{$var};
-                    $src = "ObjectFIELDS(SvRV(self))[$idx]";
-                } else {
-                    my $escaped = $self->_escape_c_string($var);
-                    $src = "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
-                }
-                if ($first) {
-                    push @stmts, "SV *_r = newSVsv($src)";
-                    $first = false;
-                } else {
-                    push @stmts, "sv_catsv(_r, $src)";
-                }
-            } else {
-                my $lit = $self->_escape_c_string($part->value());
-                if ($first) {
-                    push @stmts, "SV *_r = newSVpvs(\"$lit\")";
-                    $first = false;
-                } else {
-                    push @stmts, "sv_catpvs(_r, \"$lit\")";
-                }
-            }
-        }
-
-        push @stmts, '_r';
-        return '({ ' . join('; ', @stmts) . '; })';
-    }
-
     # Emit binary expression as C code using Perl API
-    method _emit_xs_binary_expr($node, $declared_vars) {
-        my $op    = $node->inputs()->[0]->value();
-        my $left  = $self->_emit_xs_expr($node->inputs()->[1], $declared_vars);
-        my $right = $self->_emit_xs_expr($node->inputs()->[2], $declared_vars);
-
-        # String comparison ops
-        if ($op eq 'eq') { return "(sv_eq($left, $right) ? &PL_sv_yes : &PL_sv_no)"; }
-        if ($op eq 'ne') { return "(!sv_eq($left, $right) ? &PL_sv_yes : &PL_sv_no)"; }
-        if ($op eq '.') {
-            return "({ SV *_c = sv_2mortal(newSVsv($left)); sv_catsv(_c, $right); _c; })";
-        }
-        # Short-circuit — evaluate $left once into temp to avoid double evaluation.
-        # Cast non-SV* results (AV*/HV* from postfix deref) back to SV* so the
-        # ternary always returns a uniform pointer type for the C compiler.
-        my $sv_right = ($right =~ /^\((?:AV|HV)\*\)/) ? "(SV*)$right" : $right;
-        my $sv_left  = ($left  =~ /^\((?:AV|HV)\*\)/) ? "(SV*)$left"  : $left;
-        if ($op eq '&&' || $op eq 'and') { return "({ SV *_l = $sv_left; SvTRUE(_l) ? $sv_right : _l; })"; }
-        if ($op eq '||' || $op eq 'or')  { return "({ SV *_l = $sv_left; SvTRUE(_l) ? _l : $sv_right; })"; }
-        if ($op eq '//')                  { return "({ SV *_l = $sv_left; SvOK(_l) ? _l : $sv_right; })"; }
-
-        # Numeric ops — sv_2mortal prevents leaks when used as sub-expressions
-        if ($op eq '+')  { return "sv_2mortal(newSVnv(SvNV($left) + SvNV($right)))"; }
-        if ($op eq '-')  { return "sv_2mortal(newSVnv(SvNV($left) - SvNV($right)))"; }
-        if ($op eq '*')  { return "sv_2mortal(newSVnv(SvNV($left) * SvNV($right)))"; }
-        if ($op eq '/')  { return "sv_2mortal(newSVnv(SvNV($left) / SvNV($right)))"; }
-        if ($op eq '%')  { return "sv_2mortal(newSViv(SvIV($left) % SvIV($right)))"; }
-        # Integer bitwise ops — used by Structural semiring for flag manipulation
-        if ($op eq '|')  { return "sv_2mortal(newSViv(SvIV($left) | SvIV($right)))"; }
-        if ($op eq '&')  { return "sv_2mortal(newSViv(SvIV($left) & SvIV($right)))"; }
-        # String repetition — 'str' x $n
-        if ($op eq 'x') {
-            return "({ SV *_xs = $left; SV *_xn = $right; "
-                . "STRLEN _xlen; const char *_xp = SvPV(_xs, _xlen); "
-                . "IV _xc = SvIV(_xn); SV *_xr; "
-                . "if (_xc < 1 || _xlen == 0) { _xr = sv_2mortal(newSVpvs(\"\")); } "
-                . "else { _xr = sv_2mortal(newSV(_xlen * _xc + 1)); SvPOK_on(_xr); "
-                . "repeatcpy(SvPVX(_xr), _xp, _xlen, _xc); "
-                . "SvCUR_set(_xr, _xlen * _xc); *SvEND(_xr) = '\\0'; } _xr; })";
-        }
-        # Numeric comparison: use integer comparison when both operands are
-        # IV/UV to avoid precision loss. SvNV on a 64-bit UV (e.g., from
-        # refaddr/PTR2UV) can lose low bits since double has only 52-bit
-        # mantissa, causing identity comparisons to fail.
-        if ($op eq '==' || $op eq '!=' || $op eq '<' || $op eq '>'
-                || $op eq '<=' || $op eq '>=') {
-            my $c_op = $op;
-            my $cmp = "(SvIOK($left) && SvIOK($right)"
-                . " ? (SvUOK($left) || SvUOK($right)"
-                .   " ? SvUV($left) $c_op SvUV($right)"
-                .   " : SvIV($left) $c_op SvIV($right))"
-                . " : SvNV($left) $c_op SvNV($right))";
-            return "($cmp ? &PL_sv_yes : &PL_sv_no)";
-        }
-
-        # isa — check if left derives from the class named in right
-        if ($op eq 'isa') {
-            return "(sv_derived_from_sv($left, $right, 0) ? &PL_sv_yes : &PL_sv_no)";
-        }
-
-        # Range operator — construct an AV from integer start to end.
-        # Guard against arrayrefs: stale-value merge in the IR can replace
-        # `$obj->method()->@* - 1` with just `$obj->method()` which returns
-        # an arrayref. SvIV on a reference gives a pointer address (huge),
-        # causing infinite for loops. Use av_len(SvRV(x)) for references.
-        if ($op eq '..') {
-            return "({ AV *_av = newAV(); "
-                . "SV *_rs = $left; SV *_re = $right; "
-                . "SSize_t _s = SvROK(_rs) ? av_len((AV*)SvRV(_rs)) : SvIV(_rs); "
-                . "SSize_t _e = SvROK(_re) ? av_len((AV*)SvRV(_re)) : SvIV(_re); "
-                . "SSize_t _j; "
-                . "for (_j = _s; _j <= _e; _j++) av_push(_av, newSViv(_j)); "
-                . "newRV_noinc((SV*)_av); })";
-        }
-
-        # Assignment — sv_setsv returns void, wrap in GCC stmt expr
-        if ($op eq '=') { return "({ sv_setsv($left, $right); $left; })"; }
-
-        # Regex binding — set $_ to target, then eval_pv
-        if ($op eq '=~') {
-            my $escaped = $self->_escape_c_string("\$_ =~ $right");
-            return "({ sv_setsv(DEFSV, $left); eval_pv(\"$escaped\", TRUE); })";
-        }
-
-        # Fallback
-        return "NULL /* unsupported op: $op */";
-    }
-
     # Emit unary expression
-    method _emit_xs_unary_expr($node, $declared_vars) {
-        my $op      = $node->inputs()->[0]->value();
-        my $operand = $self->_emit_xs_expr($node->inputs()->[1], $declared_vars);
-
-        if ($op eq '!')   { return "(SvTRUE($operand) ? &PL_sv_no : &PL_sv_yes)"; }
-        if ($op eq 'not') { return "(SvTRUE($operand) ? &PL_sv_no : &PL_sv_yes)"; }
-        if ($op eq '-')   { return "sv_2mortal(newSVnv(-SvNV($operand)))"; }
-        if ($op eq '\\')  { return "newRV_inc($operand)"; }
-        if ($op eq '$#')  { return "sv_2mortal(newSViv(av_len((AV*)SvRV($operand))))"; }
-
-        return "NULL /* unsupported unary: $op */";
-    }
-
     # Emit method call using dSP/PUSHMARK/call_method/SPAGAIN stack protocol.
     # Uses GCC statement expression to return the method's scalar result.
     # Arguments containing nested method calls (dSP) are pre-evaluated into
     # temp variables before any XPUSHs — nested dSP reads PL_stack_sp which
     # would clobber the outer stack entries if evaluated inline.
-    method _emit_xs_method_call_expr($node, $declared_vars) {
+    method _emit_method_call_expr($node, $declared_vars) {
         my $slug = $self->_get_current_slug();
         my $invocant_node = $node->inputs()->[0];
         my $method_name   = $node->inputs()->[1]->value();
@@ -2947,9 +2543,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                     && $invocant_node->class() eq 'PostfixDerefExpr') {
                 # Unwrap any PostfixDerefExpr sigil ($, $#, @, %) — call_method
                 # needs the blessed object reference, not a dereferenced value.
-                $invocant_expr = $self->_emit_xs_expr($invocant_node->inputs()->[0], $declared_vars);
+                $invocant_expr = $self->_emit_expr($invocant_node->inputs()->[0], $declared_vars);
             } else {
-                $invocant_expr = $self->_emit_xs_expr($invocant_node, $declared_vars);
+                $invocant_expr = $self->_emit_expr($invocant_node, $declared_vars);
             }
         } else {
             $invocant_expr = 'self';
@@ -2964,7 +2560,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         my @pre_eval;
         my @arg_exprs;
         for my $arg ($args->@*) {
-            my $arg_expr = $self->_emit_xs_expr($arg, $declared_vars);
+            my $arg_expr = $self->_emit_expr($arg, $declared_vars);
             if ($arg_expr =~ /\bdSP\b/) {
                 my $tmp = '_mca' . scalar(@pre_eval);
                 push @pre_eval, "SV *$tmp = $arg_expr";
@@ -3250,7 +2846,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # @subscripts is outermost-first; reverse to get innermost-first
         @subscripts = reverse @subscripts;
 
-        my $base = $self->_emit_xs_expr($base_node, $declared_vars);
+        my $base = $self->_emit_expr($base_node, $declared_vars);
 
         if ($builtin_name eq 'exists') {
             # Build chain: intermediate subscripts use av_fetch/hv_fetch,
@@ -3260,7 +2856,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             my $expr = $base;
             for my $i (0 .. $#subscripts) {
                 my ($idx_node, $sty) = $subscripts[$i]->@*;
-                my $idx = $self->_emit_xs_expr($idx_node, $declared_vars);
+                my $idx = $self->_emit_expr($idx_node, $declared_vars);
                 my $is_last = ($i == $#subscripts);
                 my $field_sig = $self->_field_sigil_for_expr($expr);
 
@@ -3293,7 +2889,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             my $expr = $base;
             for my $i (0 .. $#subscripts) {
                 my ($idx_node, $sty) = $subscripts[$i]->@*;
-                my $idx = $self->_emit_xs_expr($idx_node, $declared_vars);
+                my $idx = $self->_emit_expr($idx_node, $declared_vars);
                 my $is_last = ($i == $#subscripts);
                 my $field_sig = $self->_field_sigil_for_expr($expr);
 
@@ -3322,223 +2918,15 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     }
 
     # Emit subscript access (hash or array)
-    method _emit_xs_subscript_expr($node, $declared_vars) {
-        my $target = $node->inputs()->[0];
-        my $index  = $node->inputs()->[1];
-        my $style  = $node->inputs()->[2]->value();
-
-        # Handle exists/delete with misparented subscript chain:
-        # IR produces SubscriptExpr(BuiltinCall(exists, [$var]), $key) or
-        # SubscriptExpr(ReturnStmt(BuiltinCall(exists, [$var])), $key)
-        # Collect the full subscript chain and emit native C exists/delete.
-        {
-            my $builtin = $self->_find_exists_delete_in_chain($node);
-            if (defined $builtin) {
-                my $native = $self->_build_exists_delete_native($node, $declared_vars);
-                return $native if defined $native;
-            }
-        }
-
-        # Handle stale-merge parse artifact: return [EXPR] is parsed as
-        # SubscriptExpr("return", EXPR, "array") instead of ReturnStmt([EXPR]).
-        # The inner EXPR (e.g., map builtin) already produces the array content,
-        # so emit it directly — the map handler wraps results in newRV_noinc(AV*).
-        if ($style eq 'array'
-                && defined $target
-                && $target isa Chalk::Bootstrap::IR::Node::Constant
-                && $target->value() eq 'return') {
-            return $self->_emit_xs_expr($index, $declared_vars);
-        }
-
-        # Coderef call: $f->($arg1, $arg2) — emit call_sv with arguments.
-        if ($style eq 'call') {
-            my $tgt = defined $target
-                ? $self->_emit_xs_expr($target, $declared_vars)
-                : 'self';
-            my @push_stmts;
-            if (ref($index) eq 'ARRAY') {
-                for my $arg ($index->@*) {
-                    my $arg_expr = $self->_emit_xs_expr($arg, $declared_vars);
-                    push @push_stmts, "XPUSHs($arg_expr)";
-                }
-            } elsif (defined $index) {
-                my $arg_expr = $self->_emit_xs_expr($index, $declared_vars);
-                push @push_stmts, "XPUSHs($arg_expr)";
-            }
-            my $pushes = join('; ', @push_stmts);
-            $pushes = " $pushes; " if $pushes;
-            return "({ dSP; ENTER; SAVETMPS; PUSHMARK(SP);${pushes}PUTBACK; "
-                 . "call_sv($tgt, G_SCALAR); SPAGAIN; SV *_cr = SvREFCNT_inc(POPs); "
-                 . "PUTBACK; FREETMPS; LEAVE; _cr; })";
-        }
-
-        # Fallback for undef index (legacy IR from before "call" style was added)
-        if (!defined $index) {
-            my $tgt = defined $target
-                ? $self->_emit_xs_expr($target, $declared_vars)
-                : 'self';
-            return "({ dSP; ENTER; SAVETMPS; PUSHMARK(SP); PUTBACK; "
-                 . "call_sv($tgt, G_SCALAR); SPAGAIN; SV *_cr = SvREFCNT_inc(POPs); "
-                 . "PUTBACK; FREETMPS; LEAVE; _cr; })";
-        }
-
-        my $tgt = defined $target
-            ? $self->_emit_xs_expr($target, $declared_vars)
-            : 'self';
-
-        # Built-in Perl hash variables (%ENV, %SIG, %INC) are compiled by
-        # _emit_xs_const_expr as get_sv (scalar lookup), but subscript access
-        # needs get_hv (hash lookup). Detect and fix: wrap get_hv result in a
-        # reference so the SvRV dereference below works correctly.
-        if ($style eq 'hash' && defined $target) {
-            my $is_const = $target isa Chalk::Bootstrap::IR::Node::Constant;
-            if ($is_const) {
-                my $var_name = $target->value();
-                if ($var_name =~ /\A(ENV|SIG|INC)\z/) {
-                    $tgt = "sv_2mortal(newRV_inc((SV*)get_hv(\"$1\", 0)))";
-                }
-            }
-            # Also check if tgt string contains get_sv for a known hash var
-            if ($tgt =~ /get_sv\("[^"]*::(ENV|SIG|INC)"/) {
-                $tgt = "sv_2mortal(newRV_inc((SV*)get_hv(\"$1\", 0)))";
-            }
-        }
-
-        # For typed class fields (field %hash, field @array), the ObjectFIELDS
-        # slot IS the HV*/AV* directly — skip SvRV dereference.
-        my $field_sig = $self->_field_sigil_for_expr($tgt);
-
-        if ($style eq 'array') {
-            my $idx = $self->_emit_xs_expr($index, $declared_vars);
-            my $av = (defined $field_sig && $field_sig eq '@')
-                ? "(AV*)$tgt" : "(AV*)SvRV($tgt)";
-            # av_fetch with lval=1 auto-vivifies missing slots (returns writable
-            # SV* for new indices). This matches Perl semantics and is safe for
-            # both read and write (assignment target) contexts.
-            return "(*av_fetch($av, SvIV($idx), 1))";
-        }
-        # Hash access — use lval=1 so hv_fetch creates missing keys (avoids NULL deref
-        # when used as assignment target). Compute key once via SvPV to avoid
-        # double-evaluation of side effects in key expressions.
-        #
-        # Auto-vivification: when the target is itself a hash subscript result
-        # (nested hash like $hash{k1}{k2}), the intermediate hv_fetch(lval=1)
-        # may create an undef entry. SvRV(undef) returns NULL, causing segfault.
-        # Detect this case and emit an auto-vivification guard.
-        my $needs_autoviv = (!defined $field_sig || $field_sig ne '%')
-            && $tgt =~ /hv_fetch/;
-        my $hv;
-        if (defined $field_sig && $field_sig eq '%') {
-            $hv = "(HV*)$tgt";
-        } elsif ($needs_autoviv) {
-            $hv = "({ SV *_av_tgt = $tgt; "
-                . "if (!SvROK(_av_tgt)) sv_setsv(_av_tgt, newRV_noinc((SV*)newHV())); "
-                . "(HV*)SvRV(_av_tgt); })";
-        } else {
-            $hv = "(HV*)SvRV($tgt)";
-        }
-        my $key = $self->_emit_xs_expr($index, $declared_vars);
-        # SvPV atomically stringifies and returns both pointer and length.
-        # SvPV_nolen + SvCUR is unsafe: SvCUR on a pure IV reads garbage memory.
-        return "({ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); (*hv_fetch($hv, _hkp, _hkl, 1)); })";
-    }
-
     # Emit postfix deref (->@*, ->%*, ->$*)
-    method _emit_xs_postfix_deref_expr($node, $declared_vars) {
-        my $target = $node->inputs()->[0];
-        my $sigil  = $node->inputs()->[1]->value();
-
-        my $tgt = defined $target
-            ? $self->_emit_xs_expr($target, $declared_vars)
-            : 'self';
-
-        # For typed class fields (field %hash, field @array), the ObjectFIELDS
-        # slot IS the HV*/AV* directly — skip SvRV dereference.
-        my $field_sig = $self->_field_sigil_for_expr($tgt);
-
-        # Check if this deref is used in AV/HV context (push, foreach, etc.)
-        # vs SV context (variable assignment). Callers that need AV*/HV*
-        # explicitly check for the cast prefix and handle it.
-        if ($sigil eq '@') {
-            return (defined $field_sig && $field_sig eq '@')
-                ? "(AV*)$tgt" : "(AV*)SvRV($tgt)";
-        }
-        if ($sigil eq '%') {
-            return (defined $field_sig && $field_sig eq '%')
-                ? "(HV*)$tgt" : "(HV*)SvRV($tgt)";
-        }
-        return "SvRV($tgt)";
-    }
-
     # Emit ternary expression
-    method _emit_xs_ternary_expr($node, $declared_vars) {
-        my $cond  = $self->_emit_xs_expr($node->inputs()->[0], $declared_vars);
-        my $true  = $self->_emit_xs_expr($node->inputs()->[1], $declared_vars);
-        my $false = $self->_emit_xs_expr($node->inputs()->[2], $declared_vars);
-
-        return "(SvTRUE($cond) ? $true : $false)";
-    }
-
     # Emit hash ref constructor
-    method _emit_xs_hash_ref_expr($node, $declared_vars) {
-        my $pairs = $node->inputs()->[0];
-        if (!$pairs->@*) {
-            return "newRV_noinc((SV*)newHV())";
-        }
-        # Populate hash with key/value pairs via hv_store
-        my @stores;
-        for (my $i = 0; $i < $pairs->@*; $i += 2) {
-            my $key_node = $pairs->[$i];
-            # Detect hash spread: %$var as a key means copy all entries from var
-            if ($key_node isa Chalk::Bootstrap::IR::Node::Constant
-                    && defined $key_node->value()
-                    && $key_node->value() =~ /^%\$(\w+)$/) {
-                my $src_var = $1;
-                my $src_expr;
-                if (exists $declared_vars->{"param:$src_var"}) {
-                    $src_expr = $src_var;
-                } elsif (exists $declared_vars->{$src_var}) {
-                    $src_expr = "${src_var}_sv";
-                } elsif (defined $self->_get_field_map() && exists $self->_get_field_map()->{$src_var}) {
-                    $src_expr = "ObjectFIELDS(SvRV(self))[$self->_get_field_map()->{$src_var}]";
-                } else {
-                    $src_expr = "${src_var}_sv";
-                }
-                push @stores, "{ HV *_src = (HV*)SvRV($src_expr); hv_iterinit(_src); HE *_he; while ((_he = hv_iternext(_src))) { STRLEN _kl; char *_kp = HePV(_he, _kl); hv_store(_hv, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0); } }";
-                # Spread occupies 1 slot (not a key-value pair). Compensate for
-                # the for-loop's $i += 2 so the next iteration lands on the
-                # correct key-value pair.
-                $i--;
-                next;
-            }
-            my $key = $self->_emit_xs_expr($key_node, $declared_vars);
-            my $val = $self->_emit_xs_expr($pairs->[$i + 1], $declared_vars);
-            # SvPV atomically stringifies: SvPV_nolen + SvCUR is unsafe on pure IVs
-            push @stores, "{ SV *_hk = $key; STRLEN _hkl; char *_hkp = SvPV(_hk, _hkl); hv_store(_hv, _hkp, _hkl, SvREFCNT_inc($val), 0); }";
-        }
-        return "({ HV *_hv = newHV(); " . join("; ", @stores) . "; newRV_noinc((SV*)_hv); })";
-    }
-
     # Emit array ref constructor
-    method _emit_xs_array_ref_expr($node, $declared_vars) {
-        my $elements = $node->inputs()->[0];
-        if (!$elements->@*) {
-            return "newRV_noinc((SV*)newAV())";
-        }
-        # Populate array with elements via av_push
-        my @pushes;
-        for my $elem ($elements->@*) {
-            my $val = $self->_emit_xs_expr($elem, $declared_vars);
-            push @pushes, "av_push(_av, SvREFCNT_inc($val))";
-        }
-        return "({ AV *_av = newAV(); " . join("; ", @pushes) . "; newRV_noinc((SV*)_av); })";
-    }
-
     # Compile anonymous sub as a static C function with a CV wrapper.
     # The body is compiled to native C just like regular methods. A CV
     # is created via newXS in the BOOT block so call_sv can dispatch to it.
     # The CV is cached in a static SV* for zero-overhead repeated use.
-    method _emit_xs_anon_sub_expr($node, $declared_vars) {
+    method _emit_anon_sub_expr($node, $declared_vars) {
         my $slug = $self->_get_current_slug();
         my $params_node = $node->inputs()->[0];
         my $body_items  = $node->inputs()->[1] // [];
@@ -3567,7 +2955,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         for my $stmt ($body_items->@*) {
             my $c;
             try {
-                $c = $self->_emit_xs_expr($stmt, \%anon_vars);
+                $c = $self->_emit_expr($stmt, \%anon_vars);
             } catch ($e) {
                 $compile_ok = false;
                 last;
@@ -3636,92 +3024,22 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     # Compiles the regex once into a static REGEXP* and reuses it.
     # None of the regex patterns used in this codebase have capture groups,
     # so captures are not extracted (the capture-saving boilerplate was dead code).
-    method _emit_xs_regex_match($node, $declared_vars) {
-        my $target  = $node->inputs()->[0];
-        my $pattern = $node->inputs()->[1]->value();
-
-        # Extract the raw regex and flags from the pattern (e.g., /foo/i, m{bar}x)
-        my ($raw_pat, $flags);
-        if ($pattern =~ m{^m\{(.*)\}([msixpodualngcer]*)$}s) {
-            ($raw_pat, $flags) = ($1, $2);
-        } elsif ($pattern =~ m{^/(.*)/([msixpodualngcer]*)$}s) {
-            ($raw_pat, $flags) = ($1, $2);
-        }
-
-        if (!defined $raw_pat) {
-            # Unrecognized pattern format — fall back to eval_pv
-            my $match_perl = '$_ =~ ' . $pattern
-                . ' and do { $::_c1=$1; $::_c2=$2; $::_c3=$3; 1 }';
-            my $escaped = $self->_escape_c_string($match_perl);
-            if (defined $target) {
-                my $tgt = $self->_emit_xs_expr($target, $declared_vars);
-                return "({ sv_setsv(DEFSV, $tgt); eval_pv(\"$escaped\", TRUE); })";
-            }
-            return "eval_pv(\"$escaped\", TRUE)";
-        }
-
-        # Build a unique static variable name for the compiled regex
-        
-        my $rx_var = "_rx_" . $self->_inc_regex_counter();
-
-        # Wrap flags as inline modifiers: pattern → (?flags:pattern)
-        my $full_pat = length($flags) ? "(?$flags:$raw_pat)" : $raw_pat;
-
-        # Escape the pattern for C string literal
-        my $c_pat = $self->_escape_c_string($full_pat);
-
-        # Store regex patterns to declare as statics at top of generated file
-        
-        $self->_push_regex_static({
-            var   => $rx_var,
-            pat   => $c_pat,
-        });
-
-        my $tgt;
-        if (defined $target) {
-            $tgt = $self->_emit_xs_expr($target, $declared_vars);
-        }
-
-        # Emit pregexec call with lazy compilation.
-        # Pattern SV is freed after pregcomp since pregcomp copies it internally.
-        my $tgt_expr = defined $tgt ? $tgt : 'DEFSV';
-        return "({ "
-            . "if (!$rx_var) { SV *_pat_sv = newSVpvs(\"$c_pat\"); $rx_var = pregcomp(_pat_sv, 0); SvREFCNT_dec(_pat_sv); } "
-            . "STRLEN _rxl; char *_rxs = SvPV($tgt_expr, _rxl); "
-            . "(pregexec($rx_var, _rxs, _rxs + _rxl, _rxs, 0, $tgt_expr, 1)) "
-            . "? &PL_sv_yes : &PL_sv_no; })";
-    }
-
     # Emit regex substitution via eval_pv, setting $_ to target first
-    method _emit_xs_regex_subst($node, $declared_vars) {
-        my $target      = $node->inputs()->[0];
-        my $pattern     = $node->inputs()->[1]->value();
-        my $replacement = $node->inputs()->[2]->value();
-        my $flags       = $node->inputs()->[3]->value();
-
-        my $escaped = $self->_escape_c_string("\$_ =~ s/$pattern/$replacement/$flags");
-        if (defined $target) {
-            my $tgt = $self->_emit_xs_expr($target, $declared_vars);
-            return "({ sv_setsv(DEFSV, $tgt); eval_pv(\"$escaped\", TRUE); sv_setsv($tgt, DEFSV); $tgt; })";
-        }
-        return "eval_pv(\"$escaped\", TRUE)";
-    }
-
     # Emit builtin call as C expression
-    method _emit_xs_builtin_call($node, $declared_vars) {
+    method _emit_builtin_call($node, $declared_vars) {
         my $slug = $self->_get_current_slug();
         my $name = $node->inputs()->[0]->value();
         my $args = $node->inputs()->[1];
 
         # defined() — check SvOK
         if ($name eq 'defined' && $args->@* == 1) {
-            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arg = $self->_emit_expr($args->[0], $declared_vars);
             return "(SvOK($arg) ? &PL_sv_yes : &PL_sv_no)";
         }
 
         # ref() — check SvROK
         if ($name eq 'ref' && $args->@* == 1) {
-            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arg = $self->_emit_expr($args->[0], $declared_vars);
             return "(SvROK($arg) ? sv_2mortal(newSVpv(sv_reftype(SvRV($arg), TRUE), 0)) : sv_2mortal(newSVpvs(\"\")))";
         }
 
@@ -3729,20 +3047,20 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # Guard with SvROK check: Perl's refaddr() returns undef for non-refs.
         # Without this, SvRV on a non-reference (e.g. true/false) segfaults.
         if ($name eq 'refaddr' && $args->@* == 1) {
-            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arg = $self->_emit_expr($args->[0], $declared_vars);
             return "(SvROK($arg) ? sv_2mortal(newSVuv(PTR2UV(SvRV($arg)))) : &PL_sv_undef)";
         }
 
         # scalar() — for arrays, return count
         if ($name eq 'scalar' && $args->@* == 1) {
-            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arg = $self->_emit_expr($args->[0], $declared_vars);
             return "sv_2mortal(newSViv(av_len((AV*)$arg) + 1))";
         }
 
         # push — av_push wrapped in statement expression (av_push returns void)
         if ($name eq 'push' && $args->@* >= 2) {
             my $arr_node = $args->[0];
-            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
+            my $arr = $self->_emit_expr($arr_node, $declared_vars);
             # PostfixDerefExpr ->@* already returns (AV*)SvRV(...), no need to double-deref
             my $av_expr;
             if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
@@ -3760,7 +3078,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 my $val_name = $val_name_node->value() // '';
                 if ($val_name eq 'values') {
                     my $val_args = $val_node->inputs()->[1];
-                    my $hash_expr = $self->_emit_xs_expr($val_args->[0], $declared_vars);
+                    my $hash_expr = $self->_emit_expr($val_args->[0], $declared_vars);
                     my $hv_expr;
                     if ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
                             && $val_args->[0]->class() eq 'PostfixDerefExpr') {
@@ -3777,7 +3095,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 # push @arr, reverse @src — iterate source backwards, push each element
                 if ($val_name eq 'reverse') {
                     my $val_args = $val_node->inputs()->[1];
-                    my $src_expr = $self->_emit_xs_expr($val_args->[0], $declared_vars);
+                    my $src_expr = $self->_emit_expr($val_args->[0], $declared_vars);
                     my $src_av;
                     if ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
                             && $val_args->[0]->class() eq 'PostfixDerefExpr') {
@@ -3791,14 +3109,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                         . "$arr; })";
                 }
             }
-            my $val = $self->_emit_xs_expr($val_node, $declared_vars);
+            my $val = $self->_emit_expr($val_node, $declared_vars);
             return "({ av_push($av_expr, SvREFCNT_inc($val)); $arr; })";
         }
 
         # sprintf — native C via Perl_sv_setpvf
         if ($name eq 'sprintf' && $args->@* >= 1) {
-            my $fmt = $self->_emit_xs_expr($args->[0], $declared_vars);
-            my @c_args = map { $self->_emit_xs_expr($_, $declared_vars) } $args->@[1 .. $#$args];
+            my $fmt = $self->_emit_expr($args->[0], $declared_vars);
+            my @c_args = map { $self->_emit_expr($_, $declared_vars) } $args->@[1 .. $#$args];
             my $args_str = join(', ', $fmt, map { "SvPV_nolen($_)" } @c_args);
             return "({ SV *_sv = sv_2mortal(newSVpvs(\"\")); Perl_sv_setpvf(aTHX_ _sv, SvPV_nolen($fmt)" .
                 (@c_args ? ", " . join(", ", map { "SvPV_nolen($_)" } @c_args) : "") .
@@ -3807,10 +3125,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
         # join — native C via sv_catsv
         if ($name eq 'join' && $args->@* >= 2) {
-            my $sep = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $sep = $self->_emit_expr($args->[0], $declared_vars);
             if ($args->@* == 2) {
                 # join($sep, @array) — iterate over arrayref
-                my $arr = $self->_emit_xs_expr($args->[1], $declared_vars);
+                my $arr = $self->_emit_expr($args->[1], $declared_vars);
                 return "({ SV *_result = sv_2mortal(newSVpvs(\"\")); " .
                     "AV *_items = (AV*)SvRV($arr); " .
                     "I32 _len = av_len(_items); " .
@@ -3821,7 +3139,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                     "} _result; })";
             } else {
                 # join($sep, $a, $b, ...) — concatenate scalar args directly
-                my @c_args = map { $self->_emit_xs_expr($_, $declared_vars) } $args->@[1 .. $args->$#*];
+                my @c_args = map { $self->_emit_expr($_, $declared_vars) } $args->@[1 .. $args->$#*];
                 my $code = "({ SV *_result = sv_2mortal(newSVsv($c_args[0])); ";
                 for my $i (1 .. $#c_args) {
                     $code .= "sv_catsv(_result, $sep); sv_catsv(_result, $c_args[$i]); ";
@@ -3833,7 +3151,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
         # warn — native Perl_warn with string argument
         if ($name eq 'warn' && $args->@* >= 1) {
-            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arg = $self->_emit_expr($args->[0], $declared_vars);
             return "({ Perl_warn(aTHX_ \"%s\", SvPV_nolen($arg)); &PL_sv_undef; })";
         }
 
@@ -3848,14 +3166,14 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
         # length($str) — character length via sv_len_utf8 (handles UTF-8 strings)
         if ($name eq 'length' && $args->@* == 1) {
-            my $arg = $self->_emit_xs_expr($args->[0], $declared_vars);
+            my $arg = $self->_emit_expr($args->[0], $declared_vars);
             return "sv_2mortal(newSViv(sv_len_utf8($arg)))";
         }
 
         # shift(@arr) — native array shift via av_shift
         if ($name eq 'shift' && $args->@* == 1) {
             my $arr_node = $args->[0];
-            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
+            my $arr = $self->_emit_expr($arr_node, $declared_vars);
             my $av_expr;
             if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $arr_node->class() eq 'PostfixDerefExpr') {
@@ -3869,7 +3187,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # pop(@arr) — native array pop via av_pop
         if ($name eq 'pop' && $args->@* == 1) {
             my $arr_node = $args->[0];
-            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
+            my $arr = $self->_emit_expr($arr_node, $declared_vars);
             my $av_expr;
             if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $arr_node->class() eq 'PostfixDerefExpr') {
@@ -3883,7 +3201,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # reverse(@arr) — reverse an array into a new AV
         if ($name eq 'reverse' && $args->@* == 1) {
             my $arr_node = $args->[0];
-            my $arr = $self->_emit_xs_expr($arr_node, $declared_vars);
+            my $arr = $self->_emit_expr($arr_node, $declared_vars);
             my $av_expr;
             if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $arr_node->class() eq 'PostfixDerefExpr') {
@@ -3900,10 +3218,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
         # keys(%hash) — scalar context returns count, list context returns AV of keys.
         # Standalone keys() returns count via HvUSEDKEYS. When used as argument
-        # to sort/map/grep, the caller invokes _emit_xs_keys_list directly.
+        # to sort/map/grep, the caller invokes _emit_keys_list directly.
         if ($name eq 'keys' && $args->@* == 1) {
             my $hash_node = $args->[0];
-            my $hash = $self->_emit_xs_expr($hash_node, $declared_vars);
+            my $hash = $self->_emit_expr($hash_node, $declared_vars);
             my $hv_expr;
             if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $hash_node->class() eq 'PostfixDerefExpr') {
@@ -3922,9 +3240,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             if ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $list_node->class() eq 'BuiltinCall'
                     && $list_node->inputs()->[0]->value() eq 'keys') {
-                $list_expr = $self->_emit_xs_keys_list($list_node->inputs()->[1]->[0], $declared_vars);
+                $list_expr = $self->_emit_keys_list($list_node->inputs()->[1]->[0], $declared_vars);
             } else {
-                $list_expr = $self->_emit_xs_expr($list_node, $declared_vars);
+                $list_expr = $self->_emit_expr($list_node, $declared_vars);
             }
             my $av_init = ($list_expr =~ /^\(AV\*\)/)
                 ? "AV *_ssrc = $list_expr; "
@@ -3947,7 +3265,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # values(%hash) — native hash value iteration via hv_iternext
         if ($name eq 'values' && $args->@* == 1) {
             my $hash_node = $args->[0];
-            my $hash = $self->_emit_xs_expr($hash_node, $declared_vars);
+            my $hash = $self->_emit_expr($hash_node, $declared_vars);
             my $hv_expr;
             if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $hash_node->class() eq 'PostfixDerefExpr') {
@@ -4000,10 +3318,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                             && $stmt->class() eq 'VarDecl') {
                         my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
                         $map_vars{$vname} = 1;
-                        my $init = $self->_emit_xs_expr($stmt->inputs()->[1], \%map_vars);
+                        my $init = $self->_emit_expr($stmt->inputs()->[1], \%map_vars);
                         push @block_stmts, "SV *${vname}_sv = $init";
                     } else {
-                        push @block_stmts, $self->_emit_xs_expr($stmt, \%map_vars);
+                        push @block_stmts, $self->_emit_expr($stmt, \%map_vars);
                     }
                 }
                 $block_body = '({ ' . join('; ', @block_stmts) . '; })';
@@ -4022,21 +3340,21 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                                 && $stmt->class() eq 'VarDecl') {
                             my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
                             $map_vars{$vname} = 1;
-                            my $init = $self->_emit_xs_expr($stmt->inputs()->[1], \%map_vars);
+                            my $init = $self->_emit_expr($stmt->inputs()->[1], \%map_vars);
                             push @block_stmts, "SV *${vname}_sv = $init";
                         } else {
-                            push @block_stmts, $self->_emit_xs_expr($stmt, \%map_vars);
+                            push @block_stmts, $self->_emit_expr($stmt, \%map_vars);
                         }
                     }
                     $block_body = '({ ' . join('; ', @block_stmts) . '; })';
                 } elsif ($body->@*) {
-                    $block_body = $self->_emit_xs_expr($body->[-1], $declared_vars);
+                    $block_body = $self->_emit_expr($body->[-1], $declared_vars);
                 }
             } elsif (defined $block_node) {
                 # Bare expression block: bind $_ (topic) to current element
                 $needs_topic_binding = true;
                 my $topic_vars = { ($declared_vars ? $declared_vars->%* : ()), '_' => 1 };
-                $block_body = $self->_emit_xs_expr($block_node, $topic_vars);
+                $block_body = $self->_emit_expr($block_node, $topic_vars);
             }
             $block_body //= 'newRV_noinc((SV*)newHV())';
 
@@ -4059,8 +3377,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                     && defined $list_node->inputs()->[0]
                     && $list_node->inputs()->[0] isa Chalk::Bootstrap::IR::Node::Constant
                     && $list_node->inputs()->[0]->value() eq '..') {
-                my $range_left  = $self->_emit_xs_expr($list_node->inputs()->[1], $declared_vars);
-                my $range_right = $self->_emit_xs_expr($list_node->inputs()->[2], $declared_vars);
+                my $range_left  = $self->_emit_expr($list_node->inputs()->[1], $declared_vars);
+                my $range_right = $self->_emit_expr($list_node->inputs()->[2], $declared_vars);
                 return "({ AV *_mav = newAV(); "
                     . "SV *_mrs = $range_left; SV *_mre = $range_right; "
                     . "SSize_t _ms = SvROK(_mrs) ? av_len((AV*)SvRV(_mrs)) : SvIV(_mrs); "
@@ -4072,7 +3390,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             }
 
             # Generic: iterate over AV
-            my $list_expr = $self->_emit_xs_expr($list_node, $declared_vars);
+            my $list_expr = $self->_emit_expr($list_node, $declared_vars);
             # PostfixDerefExpr with '@' already returns (AV*)SvRV(...) —
             # don't double-dereference.
             my $av_init = ($list_expr =~ /^\(AV\*\)/)
@@ -4091,8 +3409,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             my $sub_node = $args->[0];
             if ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $sub_node->class() eq 'SubscriptExpr') {
-                my $target = $self->_emit_xs_expr($sub_node->inputs()->[0], $declared_vars);
-                my $key = $self->_emit_xs_expr($sub_node->inputs()->[1], $declared_vars);
+                my $target = $self->_emit_expr($sub_node->inputs()->[0], $declared_vars);
+                my $key = $self->_emit_expr($sub_node->inputs()->[1], $declared_vars);
                 my $field_sig = $self->_field_sigil_for_expr($target);
                 my $hv = (defined $field_sig && $field_sig eq '%')
                     ? "(HV*)$target" : "(HV*)SvRV($target)";
@@ -4105,8 +3423,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             my $sub_node = $args->[0];
             if ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
                     && $sub_node->class() eq 'SubscriptExpr') {
-                my $target = $self->_emit_xs_expr($sub_node->inputs()->[0], $declared_vars);
-                my $key = $self->_emit_xs_expr($sub_node->inputs()->[1], $declared_vars);
+                my $target = $self->_emit_expr($sub_node->inputs()->[0], $declared_vars);
+                my $key = $self->_emit_expr($sub_node->inputs()->[1], $declared_vars);
                 my $field_sig = $self->_field_sigil_for_expr($target);
                 my $hv = (defined $field_sig && $field_sig eq '%')
                     ? "(HV*)$target" : "(HV*)SvRV($target)";
@@ -4122,8 +3440,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 my $tmpl = $tmpl_node->value() // '';
                 $tmpl =~ s/^['"]|['"]$//g;
                 if ($tmpl eq 'NN' && $args->@* == 3) {
-                    my $a = $self->_emit_xs_expr($args->[1], $declared_vars);
-                    my $b = $self->_emit_xs_expr($args->[2], $declared_vars);
+                    my $a = $self->_emit_expr($args->[1], $declared_vars);
+                    my $b = $self->_emit_expr($args->[2], $declared_vars);
                     return "({ U32 _pa = htonl((U32)SvUV($a)); U32 _pb = htonl((U32)SvUV($b)); "
                         . "SV *_pk = sv_2mortal(newSVpvn(\"\", 0)); "
                         . "sv_catpvn(_pk, (char*)&_pa, sizeof(U32)); "
@@ -4137,10 +3455,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # For UTF-8 strings, byte offsets differ from character offsets.
         # Use sv_pos_u2b to convert character offset/length to byte offset/length.
         if ($name eq 'substr' && $args->@* >= 2) {
-            my $str = $self->_emit_xs_expr($args->[0], $declared_vars);
-            my $off = $self->_emit_xs_expr($args->[1], $declared_vars);
+            my $str = $self->_emit_expr($args->[0], $declared_vars);
+            my $off = $self->_emit_expr($args->[1], $declared_vars);
             if ($args->@* >= 3) {
-                my $len = $self->_emit_xs_expr($args->[2], $declared_vars);
+                my $len = $self->_emit_expr($args->[2], $declared_vars);
                 return "({ SV *_s = $str; SSize_t _o = SvIV($off); SSize_t _n = SvIV($len); "
                     . "STRLEN _sl; char *_sp = SvPV(_s, _sl); "
                     . "I32 _bo = (I32)_o; I32 _bn = (I32)_n; "
@@ -4159,7 +3477,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # Qualified function call (e.g., Chalk::Bootstrap::Terminal::match) —
         # use call_pv with C-local args on the stack instead of eval_pv
         if ($name =~ /::/) {
-            my @arg_exprs = map { $self->_emit_xs_expr($_, $declared_vars) } $args->@*;
+            my @arg_exprs = map { $self->_emit_expr($_, $declared_vars) } $args->@*;
             my $escaped_name = $self->_escape_c_string($name);
             my @stmts = ('dSP', 'ENTER', 'SAVETMPS', 'PUSHMARK(SP)');
             for my $arg (@arg_exprs) {
@@ -4180,7 +3498,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         if (%{$self->_get_class_subs()} && exists $self->_get_class_subs()->{$name}) {
             my @c_args;
             for my $arg ($args->@*) {
-                push @c_args, $self->_emit_xs_expr($arg, $declared_vars);
+                push @c_args, $self->_emit_expr($arg, $declared_vars);
             }
 
             if ($self->_get_class_subs()->{$name}{compiled}) {
@@ -4231,225 +3549,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
     # Emit keys() in list context — returns AV ref of all hash keys.
     # Used when keys is argument to sort/map/grep (not standalone scalar context).
-    method _emit_xs_keys_list($hash_node, $declared_vars) {
-        my $hash = $self->_emit_xs_expr($hash_node, $declared_vars);
-        my $hv_expr;
-        if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $hash_node->class() eq 'PostfixDerefExpr') {
-            $hv_expr = $hash;
-        } else {
-            $hv_expr = "(HV*)SvRV($hash)";
-        }
-        return "({ HV *_khv = $hv_expr; HE *_khe; I32 _klen = HvUSEDKEYS(_khv); "
-            . "AV *_kav = newAV(); av_extend(_kav, _klen - 1); "
-            . "hv_iterinit(_khv); "
-            . "while ((_khe = hv_iternext(_khv))) { "
-            .   "av_push(_kav, newSVhek(HeKEY_hek(_khe))); "
-            . "} "
-            . "newRV_noinc((SV*)_kav); })";
-    }
-
     # Emit backtick expression via eval_pv with actual command from IR
-    method _emit_xs_backtick_expr($node, $declared_vars) {
-        my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $cmd = $perl_target->_emit_expr($node->inputs()->[0]);
-        my $escaped = $self->_escape_c_string("`$cmd`");
-        return "eval_pv(\"$escaped\", TRUE)";
-    }
-
     # CompoundAssign as expression (e.g., $str .= "foo")
-    method _emit_xs_compound_assign_expr($node, $declared_vars) {
-        my $op     = $node->inputs()->[0]->value();
-        my $target = $node->inputs()->[1];
-        my $value  = $node->inputs()->[2];
-
-        my $tgt = $self->_emit_xs_expr($target, $declared_vars);
-        my $val = $self->_emit_xs_expr($value, $declared_vars);
-
-        if ($op eq '.=') {
-            return "sv_catsv($tgt, $val)";
-        }
-        if ($op eq '+=') {
-            return "sv_setiv($tgt, SvIV($tgt) + SvIV($val))";
-        }
-        if ($op eq '-=') {
-            return "sv_setiv($tgt, SvIV($tgt) - SvIV($val))";
-        }
-        if ($op eq '//=') {
-            return "({ if (!SvOK($tgt)) sv_setsv($tgt, $val); $tgt; })";
-        }
-
-        return "/* $op not supported */";
-    }
-
     # VarDecl as expression (my $x = ...)
-    method _emit_xs_var_decl_expr($node, $declared_vars) {
-        my $var  = $node->inputs()->[0]->value();
-        $var =~ s/^[\$\@\%]//;
-        my $init = $node->inputs()->[1];
-
-        # Field variables use ObjectFIELDS accessor with sv_setsv,
-        # locals use direct C pointer assignment
-        if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
-            my $idx = $self->_get_field_map()->{$var};
-            my $accessor = "ObjectFIELDS(SvRV(self))[$idx]";
-            if (defined $init) {
-                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
-                return "({ sv_setsv($accessor, $init_expr); $accessor; })";
-            }
-            return "({ sv_setsv($accessor, &PL_sv_undef); $accessor; })";
-        }
-
-        # Class-scope variables in expression context: evaluate init (if any)
-        # and return the static. Statement-level resets (hv_clear etc.) are
-        # handled by _emit_xs_var_decl.
-        if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
-            my $info = $self->_get_class_scope_vars()->{$var};
-            if (defined $init) {
-                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
-                return "({ $init_expr; $info->{static_name}; })";
-            }
-            return $info->{static_name};
-        }
-
-        my $c_var = "${var}_sv";
-        if (defined $init) {
-            my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
-            return "({ $c_var = $init_expr; $c_var; })";
-        }
-        return "({ $c_var = &PL_sv_undef; $c_var; })";
-    }
-
     # Emit VarDecl as C statement (SV assignment)
-    method _emit_xs_var_decl($node, $declared_vars) {
-        my $raw_var = $node->inputs()->[0]->value();
-        my ($sigil) = $raw_var =~ /^([\$\@\%])/;
-        my $var = $raw_var;
-        $var =~ s/^[\$\@\%]//;
-        my $init = $node->inputs()->[1];
-
-        # Default value for uninitialized variables depends on sigil:
-        # %hash → empty hashref, @array → empty arrayref, $scalar → undef
-        my $default_val = '&PL_sv_undef';
-        if (defined $sigil && $sigil eq '%') {
-            $default_val = 'newRV_noinc((SV*)newHV())';
-        } elsif (defined $sigil && $sigil eq '@') {
-            $default_val = 'newRV_noinc((SV*)newAV())';
-        }
-
-        # Chained VarDecl: %hash_a = %hash_b = () is an IR artifact where
-        # consecutive hash/array resets are merged into a linked list of VarDecl
-        # nodes. Split into separate statements: emit inner first, then outer
-        # with its sigil-appropriate default.
-        if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                && $init->class() eq 'VarDecl') {
-            my $inner_stmt = $self->_emit_xs_var_decl($init, $declared_vars);
-            # Fall through to emit this variable with its sigil default
-            $init = undef;
-            my $this_stmt;
-            if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
-                my $idx = $self->_get_field_map()->{$var};
-                my $fs = $self->_get_field_sigils() ? ($self->_get_field_sigils()->{$var} // '$') : '$';
-                if ($fs eq '%') {
-                    $this_stmt = "hv_clear((HV*)ObjectFIELDS(SvRV(self))[$idx]);";
-                } elsif ($fs eq '@') {
-                    $this_stmt = "av_clear((AV*)ObjectFIELDS(SvRV(self))[$idx]);";
-                } else {
-                    $this_stmt = "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
-                }
-            } elsif (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
-                my $csv_info = $self->_get_class_scope_vars()->{$var};
-                my $csv_sname = $csv_info->{static_name};
-                if ($csv_info->{sigil} eq '%') {
-                    $this_stmt = "({ hv_clear($csv_sname); (SV*)$csv_sname; });";
-                } elsif ($csv_info->{sigil} eq '@') {
-                    $this_stmt = "({ av_clear($csv_sname); (SV*)$csv_sname; });";
-                } else {
-                    $this_stmt = "({ sv_setsv($csv_sname, $default_val); $csv_sname; });";
-                }
-            } else {
-                $this_stmt = "${var}_sv = $default_val;";
-            }
-            return "$inner_stmt\n$this_stmt";
-        }
-
-        # Field variables are stored in ObjectFIELDS, not local C variables.
-        # In ADJUST bodies, VarDecl for field names emits an ObjectFIELDS write.
-        # Hash/array fields (field %h, field @a) are typed containers in Perl 5.42 —
-        # reset with hv_clear/av_clear, not sv_setsv with a new ref.
-        if (defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
-            my $idx = $self->_get_field_map()->{$var};
-            my $fs = $self->_get_field_sigils() ? ($self->_get_field_sigils()->{$var} // '$') : '$';
-            if (defined $init) {
-                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
-                return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $init_expr);";
-            }
-            if ($fs eq '%') {
-                return "hv_clear((HV*)ObjectFIELDS(SvRV(self))[$idx]);";
-            }
-            if ($fs eq '@') {
-                return "av_clear((AV*)ObjectFIELDS(SvRV(self))[$idx]);";
-            }
-            return "sv_setsv(ObjectFIELDS(SvRV(self))[$idx], $default_val);";
-        }
-
-        # Class-scope variables: method-body VarDecl emits the real
-        # operation on the static (e.g. hv_clear for %hash = ()).
-        # Uses statement-expression form so the result is usable as a
-        # return value when this is the last statement in a method body.
-        if (%{$self->_get_class_scope_vars()} && exists $self->_get_class_scope_vars()->{$var}) {
-            my $info = $self->_get_class_scope_vars()->{$var};
-            my $sname = $info->{static_name};
-            if (defined $init) {
-                my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
-                return "({ sv_setsv($sname, $init_expr); (SV*)$sname; });";
-            }
-            # No init = reset to empty: %hash = () or @array = () or $scalar = undef
-            if ($info->{sigil} eq '%') {
-                return "({ hv_clear($sname); (SV*)$sname; });";
-            } elsif ($info->{sigil} eq '@') {
-                return "({ av_clear($sname); (SV*)$sname; });";
-            } else {
-                return "({ sv_setsv($sname, &PL_sv_undef); $sname; });";
-            }
-        }
-
-        if (defined $init) {
-            # TryCatchStmt as VarDecl init is a stale-value merge artifact.
-            # The variable is declared with undef, then assigned inside the
-            # try block. Split into: declare var, then emit try/catch statement.
-            if ($init isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $init->class() eq 'TryCatchStmt') {
-                my $try_stmt = $self->_emit_xs_stmt($init, $declared_vars);
-                return "${var}_sv = $default_val;\n$try_stmt";
-            }
-            my $init_expr = $self->_emit_xs_expr($init, $declared_vars);
-            # PostfixDerefExpr ->@* returns (AV*)SvRV(...). In list context
-            # (my ($x) = $ref->@*), the scalar LHS gets element [0], not the
-            # AV* itself. Detect this and emit av_fetch for proper indexing.
-            if ($init_expr =~ /^\(AV\*\)SvRV\((.+)\)$/) {
-                my $rv_expr = $1;
-                return "${var}_sv = (*av_fetch((AV*)SvRV($rv_expr), 0, 0));";
-            }
-            # PostfixDerefExpr ->%* returns (HV*) casts.
-            # VarDecl targets are SV*, so cast to avoid type mismatch.
-            if ($init_expr =~ /^\(HV\*\)/) {
-                $init_expr = "(SV*)$init_expr";
-            }
-            # Array variable declared with a scalar init (e.g., my @stack = ($self)):
-            # wrap the scalar in a fresh AV ref. Without this, the variable aliases
-            # the init SV directly, and av_push/av_pop on it corrupt the original.
-            # Skip if the init already produces an array ref (newRV, newAV patterns).
-            if (defined $sigil && $sigil eq '@'
-                    && $init_expr !~ /newRV_noinc/
-                    && $init_expr !~ /newAV\(\)/) {
-                $init_expr = "({ AV *_av = newAV(); av_push(_av, SvREFCNT_inc($init_expr)); newRV_noinc((SV*)_av); })";
-            }
-            return "${var}_sv = $init_expr;";
-        }
-        return "${var}_sv = $default_val;";
-    }
-
     # Emit ReturnStmt as RETVAL assignment.
     # Non-final returns jump to xsreturn: label before OUTPUT section.
     # Strips sv_2mortal() from the value expression since XS's OUTPUT
@@ -4462,41 +3565,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     # 1, so the mortalisation correctly consumes it. SvREFCNT_inc on these
     # would leak. To handle both cases, we skip SvREFCNT_inc for values
     # that are clearly newly-created (start with 'new' or '&PL_sv_').
-    method _emit_xs_return_stmt($node, $declared_vars, $is_last = true) {
-        my $value = $node->inputs()->[0];
-        my $val_expr = $self->_emit_xs_expr($value, $declared_vars);
-        $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
-        my $retval = $self->_wrap_retval($val_expr);
-        if ($is_last) {
-            return "RETVAL = $retval;";
-        }
-        # Inside scoped loops, unwind ENTER/SAVETMPS scopes before goto
-        my $unwind = "FREETMPS; LEAVE; " x $self->_get_loop_depth();
-        return "${unwind}RETVAL = $retval; goto xsreturn;";
-    }
-
     # Emit DieCall as croak
-    method _emit_xs_die_call($node, $declared_vars = undef) {
-        my $args = $node->inputs()->[0];
-        my $msg = '';
-        if (ref($args) eq 'ARRAY' && $args->@*) {
-            my $first = $args->[0];
-            if ($first isa Chalk::Bootstrap::IR::Node::Constant) {
-                $msg = $self->_escape_c_string($first->value());
-            } elsif (defined $declared_vars) {
-                # Non-constant arg (e.g. string interpolation): emit as expression
-                my $expr = $self->_emit_xs_expr($first, $declared_vars);
-                return "croak(\"%s\", SvPV_nolen($expr));";
-            }
-        }
-        return "croak(\"%s\", \"$msg\");";
-    }
-
     # Emit CompoundAssign as statement
-    method _emit_xs_compound_assign_stmt($node, $declared_vars) {
-        return $self->_emit_xs_compound_assign_expr($node, $declared_vars) . ";";
-    }
-
     # Emit C continue/break from an If CFG node with loop_jump marker.
     # Wrap a C expression in SvTRUE(), casting to (SV*) when the
     # expression produces AV* or HV* (e.g. from postfix deref ->@*).
@@ -4510,19 +3580,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
     # The If node's condition is already the correct test (negated for unless).
     # 'next' maps to C 'continue', 'last' maps to C 'break'.
-    method _emit_xs_loop_jump($jump_keyword, $if_node, $declared_vars) {
-        my $cond = $if_node->inputs()->[1];
-        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
-        my $c_keyword = $jump_keyword eq 'last' ? 'break' : 'continue';
-        # Inside scoped loops (ENTER/SAVETMPS per iteration), must
-        # FREETMPS/LEAVE before continue/break to avoid leaking the scope.
-        my $sv_cond = _sv_true_wrap($cond_expr);
-        if ($self->_get_loop_depth()) {
-            return "if ($sv_cond) { FREETMPS; LEAVE; $c_keyword; }";
-        }
-        return "if ($sv_cond) $c_keyword;";
-    }
-
     # Emit C if/else from an If CFG node with true/false Proj branches.
     # The If node's condition is emitted as a SvTRUE test. Body statements
     # for each branch are provided by the caller as arrayrefs.
@@ -4532,7 +3589,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                        $true_stmts = [], $false_stmts = [],
                        $prefix = 'if') {
         my $cond = $if_node->inputs()->[1];  # condition input
-        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+        my $cond_expr = $self->_emit_expr($cond, $declared_vars);
 
         my @lines;
         push @lines, "$prefix (" . _sv_true_wrap($cond_expr) . ") {";
@@ -4551,7 +3608,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                         || $stmt->class() eq 'TernaryExpr'));
             if ($self->_get_return_context() && $is_loop_safe_return && $is_last_in_then
                     && $self->_is_bare_return_expr($stmt)) {
-                my $val_expr = $self->_emit_xs_expr($stmt, $declared_vars);
+                my $val_expr = $self->_emit_expr($stmt, $declared_vars);
                 $val_expr =~ s/^sv_2mortal\((.+)\)$/$1/;
                 my $wrapped = $self->_wrap_retval($val_expr);
                 # Inside scoped loops, unwind ENTER/SAVETMPS scopes before goto
@@ -4559,7 +3616,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 push @lines, "    ${unwind}RETVAL = $wrapped; goto xsreturn;";
                 next;
             }
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+            my $code = $self->_emit_stmt($stmt, $declared_vars, false);
             push @lines, "    $code" if defined $code;
         }
         if ($false_stmts->@*) {
@@ -4584,7 +3641,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             }
             push @lines, "} else {";
             for my $stmt ($false_stmts->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+                my $code = $self->_emit_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
             }
         }
@@ -4597,12 +3654,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     # assigned in each branch.
     method emit_cfg_phi_if($if_node, $phi, $declared_vars) {
         my $cond = $if_node->inputs()->[1];
-        my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+        my $cond_expr = $self->_emit_expr($cond, $declared_vars);
 
         my $region = $phi->inputs()->[0];
         my $values = $phi->inputs()->[1];  # arrayref of [val_a, val_b]
-        my $val_a_expr = $self->_emit_xs_expr($values->[0], $declared_vars);
-        my $val_b_expr = $self->_emit_xs_expr($values->[1], $declared_vars);
+        my $val_a_expr = $self->_emit_expr($values->[0], $declared_vars);
+        my $val_b_expr = $self->_emit_expr($values->[1], $declared_vars);
 
         # Generate a unique variable name from the Phi node ID
         my $phi_var = '_phi_' . $phi->id();
@@ -4635,7 +3692,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 push @lines, "{";
                 push @lines, "    AV *_tmp_av = (AV*)sv_2mortal((SV*)newAV());";
                 for my $item ($list->@*) {
-                    my $val = $self->_emit_xs_expr($item, $declared_vars);
+                    my $val = $self->_emit_expr($item, $declared_vars);
                     push @lines, "    av_push(_tmp_av, SvREFCNT_inc($val));";
                 }
                 push @lines, "    SSize_t _len = av_len(_tmp_av) + 1;";
@@ -4645,7 +3702,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 push @lines, "        SV *${iter_name}_sv = (_elem && *_elem) ? *_elem : &PL_sv_undef;";
             } else {
                 # Variable list: iterate existing AV
-                my $list_expr = $self->_emit_xs_expr($list, $declared_vars);
+                my $list_expr = $self->_emit_expr($list, $declared_vars);
                 push @lines, "{";
                 # PostfixDerefExpr ->@* already returns (AV*)SvRV(...),
                 # so skip the SV* intermediate to avoid type mismatch.
@@ -4667,7 +3724,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             push @lines, "        ENTER; SAVETMPS;";
             $self->_inc_loop_depth();
             for my $stmt ($body_stmts->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+                my $code = $self->_emit_stmt($stmt, $declared_vars, false);
                 push @lines, "        $code" if defined $code;
             }
             $self->_dec_loop_depth();
@@ -4692,12 +3749,12 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                         && $init->inputs()->[0]->value() eq 'shift') {
                     my $shift_args = $init->inputs()->[1];
                     my $arr_arg = (ref($shift_args) eq 'ARRAY') ? $shift_args->[0] : $shift_args;
-                    my $arr_expr = $self->_emit_xs_expr($arr_arg, $declared_vars);
+                    my $arr_expr = $self->_emit_expr($arr_arg, $declared_vars);
                     my $av_expr = ($arr_expr =~ /^\(AV\*\)/) ? $arr_expr : "(AV*)SvRV($arr_expr)";
                     $declared_vars->{$var_name} = true;
                     push @lines, "while ((${var_name}_sv = av_shift($av_expr)) != &PL_sv_undef) {";
                 } else {
-                    my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+                    my $cond_expr = $self->_emit_expr($cond, $declared_vars);
                     push @lines, "while (" . _sv_true_wrap($cond_expr) . ") {";
                 }
             # Detect while (@array): array variable in boolean context
@@ -4705,10 +3762,10 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             # for a reference). Emit av_len >= 0 for proper empty-array check.
             } elsif ($cond isa Chalk::Bootstrap::IR::Node::Constant
                     && $cond->value() =~ /^\@/) {
-                my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+                my $cond_expr = $self->_emit_expr($cond, $declared_vars);
                 push @lines, "while (av_len((AV*)SvRV($cond_expr)) >= 0) {";
             } else {
-                my $cond_expr = $self->_emit_xs_expr($cond, $declared_vars);
+                my $cond_expr = $self->_emit_expr($cond, $declared_vars);
                 push @lines, "while (" . _sv_true_wrap($cond_expr) . ") {";
             }
 
@@ -4716,7 +3773,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             push @lines, "    ENTER; SAVETMPS;";
             $self->_inc_loop_depth();
             for my $stmt ($body_stmts->@*) {
-                my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+                my $code = $self->_emit_stmt($stmt, $declared_vars, false);
                 push @lines, "    $code" if defined $code;
             }
             $self->_dec_loop_depth();
@@ -4772,7 +3829,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
     # Emit an XSUB that returns an InterpolatedString via C string concatenation.
     # Variables are read from ObjectFIELDS for field access.
-    method _emit_xs_interp_return($method_name, $interp_node) {
+    method _emit_interp_return($method_name, $interp_node) {
         my $parts = $interp_node->inputs()->[0];
         my @lines;
 
@@ -4830,7 +3887,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         push @lines, "    JMPENV_PUSH(ret);";
         push @lines, "    if (ret == 0) {";
         for my $stmt ($try_stmts->@*) {
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+            my $code = $self->_emit_stmt($stmt, $declared_vars, false);
             push @lines, "        $code" if defined $code;
         }
         push @lines, "        JMPENV_POP;";
@@ -4842,7 +3899,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         $var_name =~ s/^\$//;
         push @lines, "        SV *${var_name} = ERRSV;";
         for my $stmt ($catch_stmts->@*) {
-            my $code = $self->_emit_xs_stmt($stmt, $declared_vars, false);
+            my $code = $self->_emit_stmt($stmt, $declared_vars, false);
             push @lines, "        $code" if defined $code;
         }
         push @lines, "    }";

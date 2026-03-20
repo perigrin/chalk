@@ -86,7 +86,7 @@ use Chalk::Bootstrap::Perl::Target::XS;
     like($code, qr/ERRSV/, 'catch variable bound to ERRSV');
 }
 
-# --- Test 5: _emit_xs_stmt dispatches try_node from cfg_lookup ---
+# --- Test 5: _emit_stmt dispatches try_node from cfg_lookup ---
 {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();

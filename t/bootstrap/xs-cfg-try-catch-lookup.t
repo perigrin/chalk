@@ -54,8 +54,8 @@ for my $item ($body->@*) {
 ok(defined $complete_method, '_complete method found') or BAIL_OUT('No _complete method');
 
 # Emit _complete with cfg_lookup populated
-my $result = eval { $xs->_emit_xs_method($complete_method) };
-ok(defined $result, '_emit_xs_method succeeds') or BAIL_OUT("Emit failed: $@");
+my $result = eval { $xs->_emit_method($complete_method) };
+ok(defined $result, '_emit_method succeeds') or BAIL_OUT("Emit failed: $@");
 
 # Complex methods now return {helper, xsub} hashref; combine both for assertions
 my $xs_output;

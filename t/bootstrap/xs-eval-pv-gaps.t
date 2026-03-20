@@ -36,7 +36,7 @@ sub extract_method_vars {
 }
 
 # Build a minimal IR to test emitter methods.
-# We construct IR nodes directly and call _emit_xs_expr on them.
+# We construct IR nodes directly and call _emit_expr on them.
 
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $nf = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -69,7 +69,7 @@ my sub ctor($class, %args) {
         body   => [$return_stmt],
     );
 
-    my $code = $xs->_emit_xs_expr($anon, {});
+    my $code = $xs->_emit_expr($anon, {});
     like($code, qr/eval_pv/, 'AnonSubExpr: uses eval_pv');
     unlike($code, qr/sub\s*\{\s*\}/, 'AnonSubExpr: not an empty sub placeholder');
     like($code, qr/\$x.*\$y/s, 'AnonSubExpr: contains param names');
@@ -82,7 +82,7 @@ my sub ctor($class, %args) {
     my $cmd = const_node('ls -la');
     my $bt = ctor('BacktickExpr', command => $cmd);
 
-    my $code = $xs->_emit_xs_expr($bt, {});
+    my $code = $xs->_emit_expr($bt, {});
     like($code, qr/eval_pv/, 'BacktickExpr: uses eval_pv');
     like($code, qr/ls -la/, 'BacktickExpr: contains actual command');
     unlike($code, qr/TODO/, 'BacktickExpr: no TODO comment');
@@ -99,7 +99,7 @@ my sub ctor($class, %args) {
         args => [$fmt, $arg1, $arg2],
     );
 
-    my $code = $xs->_emit_xs_expr($call, {});
+    my $code = $xs->_emit_expr($call, {});
     like($code, qr/sv_setpvf|Perl_sv_setpvf/, 'sprintf: uses native sv_setpvf');
     unlike($code, qr/eval_pv\("sprintf\(\)"/, 'sprintf: not a placeholder eval_pv');
 }
@@ -114,7 +114,7 @@ my sub ctor($class, %args) {
         args => [$sep, $arr],
     );
 
-    my $code = $xs->_emit_xs_expr($call, { 'items' => 'AV' });
+    my $code = $xs->_emit_expr($call, { 'items' => 'AV' });
     like($code, qr/sv_catsv/, 'join: uses sv_catsv');
     unlike($code, qr/eval_pv\("join\(\)"/, 'join: not a placeholder eval_pv');
 }
@@ -129,7 +129,7 @@ my sub ctor($class, %args) {
         args => [$pat, $str],
     );
 
-    my $code = $xs->_emit_xs_expr($call, {});
+    my $code = $xs->_emit_expr($call, {});
     like($code, qr/eval_pv/, 'split: uses eval_pv');
     like($code, qr/split/, 'split: contains split call');
     like($code, qr/\\s\+/, 'split: contains actual pattern');
@@ -147,7 +147,7 @@ my sub ctor($class, %args) {
         pairs => [$key1, $val1, $key2, $val2],
     );
 
-    my $code = $xs->_emit_xs_expr($hash, {});
+    my $code = $xs->_emit_expr($hash, {});
     like($code, qr/hv_store/, 'HashRefExpr: non-empty uses hv_store');
     unlike($code, qr/elements dropped/, 'HashRefExpr: no "elements dropped" comment');
 }
@@ -156,7 +156,7 @@ my sub ctor($class, %args) {
 
 {
     my $hash = ctor('HashRefExpr', pairs => []);
-    my $code = $xs->_emit_xs_expr($hash, {});
+    my $code = $xs->_emit_expr($hash, {});
     like($code, qr/newRV_noinc.*newHV/, 'HashRefExpr: empty still uses newHV');
 }
 
@@ -170,7 +170,7 @@ my sub ctor($class, %args) {
         elements => [$elem1, $elem2, $elem3],
     );
 
-    my $code = $xs->_emit_xs_expr($arr, {});
+    my $code = $xs->_emit_expr($arr, {});
     like($code, qr/av_push/, 'ArrayRefExpr: non-empty uses av_push');
     unlike($code, qr/elements dropped/, 'ArrayRefExpr: no "elements dropped" comment');
 }
@@ -179,7 +179,7 @@ my sub ctor($class, %args) {
 
 {
     my $arr = ctor('ArrayRefExpr', elements => []);
-    my $code = $xs->_emit_xs_expr($arr, {});
+    my $code = $xs->_emit_expr($arr, {});
     like($code, qr/newRV_noinc.*newAV/, 'ArrayRefExpr: empty still uses newAV');
 }
 
@@ -192,7 +192,7 @@ my sub ctor($class, %args) {
         value  => const_node('"default"'),
     );
 
-    my $code = $xs->_emit_xs_expr($assign, {});
+    my $code = $xs->_emit_expr($assign, {});
     unlike($code, qr{not supported}, '//=: not "not supported"');
     like($code, qr/SvOK/, '//=: checks definedness with SvOK');
 }
@@ -206,14 +206,14 @@ my sub ctor($class, %args) {
     );
 
     # When emitted as an expression, push must return a value (not void av_push)
-    my $code = $xs->_emit_xs_expr($push_call, {});
+    my $code = $xs->_emit_expr($push_call, {});
     like($code, qr/av_push/, 'push expr: uses av_push');
     # Must be wrapped in statement expression so it has a value
     like($code, qr/\(\{.*av_push.*\}\)/, 'push expr: wrapped in statement expression');
     unlike($code, qr/^\s*av_push\(/, 'push expr: not bare av_push (void)');
 
     # When emitted as a statement, push should work as a simple void call
-    my $stmt = $xs->_emit_xs_stmt($push_call, {});
+    my $stmt = $xs->_emit_stmt($push_call, {});
     like($stmt, qr/av_push/, 'push stmt: uses av_push');
 }
 
@@ -224,7 +224,7 @@ my sub ctor($class, %args) {
     my $num = const_node('42', 'integer');
     my $return_node = ctor('ReturnStmt', inputs => [$num]);
 
-    my $return_code = $xs->_emit_xs_return_stmt($return_node, {});
+    my $return_code = $xs->_emit_return_stmt($return_node, {});
     like($return_code, qr/RETVAL/, 'return stmt: assigns to RETVAL');
     unlike($return_code, qr/sv_2mortal/, 'return stmt: no sv_2mortal (OUTPUT section handles it)');
 }
@@ -315,7 +315,7 @@ my sub var_node($name) {
         const_node('length'),
         [var_node('$input')],
     ]);
-    my $code = $xs->_emit_xs_expr($builtin, { input => true });
+    my $code = $xs->_emit_expr($builtin, { input => true });
     TODO: {
         local $TODO = 'length emitter uses sv_len_utf8 for Unicode correctness, not SvCUR';
         like($code, qr/SvCUR/, 'length: emits SvCUR for native string length');
@@ -329,7 +329,7 @@ my sub var_node($name) {
         const_node('shift'),
         [var_node('@agenda')],
     ]);
-    my $code = $xs->_emit_xs_expr($builtin, { agenda => true });
+    my $code = $xs->_emit_expr($builtin, { agenda => true });
     like($code, qr/av_shift/, 'shift: emits av_shift for native array shift');
     unlike($code, qr/eval_pv\("shift\(\)"/, 'shift: no broken eval_pv stub');
 }
@@ -344,7 +344,7 @@ my sub var_node($name) {
         const_node('keys'),
         [$deref],
     ]);
-    my $code = $xs->_emit_xs_expr($builtin, { hash => true });
+    my $code = $xs->_emit_expr($builtin, { hash => true });
     like($code, qr/HvUSEDKEYS/, 'keys: emits HvUSEDKEYS for native hash key count');
     unlike($code, qr/eval_pv\("keys\(\)"/, 'keys: no broken eval_pv stub');
 }
@@ -359,7 +359,7 @@ my sub var_node($name) {
         const_node('values'),
         [$deref],
     ]);
-    my $code = $xs->_emit_xs_expr($builtin, { hash => true });
+    my $code = $xs->_emit_expr($builtin, { hash => true });
     like($code, qr/hv_iternext/, 'values: emits hv_iternext loop');
     unlike($code, qr/eval_pv\("values\(\)"/, 'values: no broken eval_pv stub');
 }
@@ -374,7 +374,7 @@ my sub var_node($name) {
         const_node('delete'),
         [$subscript],
     ]);
-    my $code = $xs->_emit_xs_expr($builtin, { cache => true, pos => true });
+    my $code = $xs->_emit_expr($builtin, { cache => true, pos => true });
     like($code, qr/hv_delete/, 'delete: emits hv_delete for hash entry removal');
     unlike($code, qr/eval_pv\("delete\(\)"/, 'delete: no broken eval_pv stub');
 }
@@ -385,7 +385,7 @@ my sub var_node($name) {
         name => const_node('pack'),
         args => [const_node("'NN'"), var_node('$core_id'), var_node('$origin')],
     );
-    my $code = $xs->_emit_xs_expr($builtin, { core_id => true, origin => true });
+    my $code = $xs->_emit_expr($builtin, { core_id => true, origin => true });
     like($code, qr/htonl/, 'pack NN: uses htonl for big-endian');
     unlike($code, qr/eval_pv/, 'pack NN: no eval_pv');
 }
@@ -401,7 +401,7 @@ my sub var_node($name) {
         name => const_node('exists'),
         args => [$subscript],
     );
-    my $code = $xs->_emit_xs_expr($builtin, { chart => true, pos => true });
+    my $code = $xs->_emit_expr($builtin, { chart => true, pos => true });
     like($code, qr/hv_exists_ent/, 'exists: uses hv_exists_ent');
     unlike($code, qr/eval_pv/, 'exists: no eval_pv');
 }
@@ -412,7 +412,7 @@ my sub var_node($name) {
         name => const_node('substr'),
         args => [var_node('$input'), var_node('$pos'), var_node('$len')],
     );
-    my $code = $xs->_emit_xs_expr($builtin, { input => true, pos => true, len => true });
+    my $code = $xs->_emit_expr($builtin, { input => true, pos => true, len => true });
     like($code, qr/SvPV/, 'substr: uses SvPV for native C');
     unlike($code, qr/eval_pv/, 'substr: no eval_pv');
 }
@@ -423,7 +423,7 @@ my sub var_node($name) {
         name => const_node('unpack'),
         args => [const_node("'NN'"), var_node('$data')],
     );
-    my $code = $xs->_emit_xs_expr($builtin, { data => true });
+    my $code = $xs->_emit_expr($builtin, { data => true });
     like($code, qr/eval_pv/, 'unpack fallback: uses eval_pv');
     like($code, qr/unpack\(/, 'unpack fallback: preserves function name');
     unlike($code, qr/eval_pv\("unpack\(\)"/, 'unpack fallback: not an empty stub');
@@ -441,7 +441,7 @@ my sub var_node($name) {
         args        => [],
     );
 
-    my $code = $xs->_emit_xs_expr($method_call, { start_rule => true });
+    my $code = $xs->_emit_expr($method_call, { start_rule => true });
     like($code, qr/call_method\("expressions"/, 'method call: calls expressions');
     like($code, qr/XPUSHs\(start_rule_sv\)/, 'method call: pushes object directly, not SvRV');
     unlike($code, qr/XPUSHs\(SvRV\(start_rule_sv\)\)/, 'method call: no SvRV on invocant');
@@ -463,7 +463,7 @@ my sub var_node($name) {
         args        => [],
     );
 
-    my $code = $xs->_emit_xs_expr($method_call, { rule => true });
+    my $code = $xs->_emit_expr($method_call, { rule => true });
     like($code, qr/call_method\("name"/, 'deref method call: calls name');
     unlike($code, qr/XPUSHs\(SvRV\(/, 'deref method call: no SvRV wrapping invocant');
 }
@@ -485,7 +485,7 @@ my sub var_node($name) {
         name => const_node('map'),
         args => [$block, $range],
     );
-    my $code = $xs->_emit_xs_expr($map_call, { n => true });
+    my $code = $xs->_emit_expr($map_call, { n => true });
     # Should not reference $n as a Perl variable in eval_pv
     unlike($code, qr/eval_pv\("map\(/, 'map init: not a broken eval_pv with C vars');
 }
@@ -500,9 +500,9 @@ my sub var_node($name) {
         variable    => const_node('%waiting_for'),
         initializer => undef,
     );
-    # Simulate field_map context by calling _emit_xs_var_decl with a field map
+    # Simulate field_map context by calling _emit_var_decl with a field map
     # that maps waiting_for to field index 5
-    my $code = $xs->_emit_xs_var_decl($var_decl, { waiting_for => true });
+    my $code = $xs->_emit_var_decl($var_decl, { waiting_for => true });
     # For % variables, default should be empty hashref, not undef
     unlike($code, qr/PL_sv_undef/, 'hash field reset: not undef');
     like($code, qr/newHV/, 'hash field reset: creates empty hash');
@@ -514,7 +514,7 @@ my sub var_node($name) {
         variable    => const_node('@_gc_min_origin_at'),
         initializer => undef,
     );
-    my $code = $xs->_emit_xs_var_decl($var_decl, { _gc_min_origin_at => true });
+    my $code = $xs->_emit_var_decl($var_decl, { _gc_min_origin_at => true });
     unlike($code, qr/PL_sv_undef/, 'array field reset: not undef');
     like($code, qr/newAV/, 'array field reset: creates empty array');
 }
@@ -525,7 +525,7 @@ my sub var_node($name) {
         variable    => const_node('%processed'),
         initializer => undef,
     );
-    my $code = $xs->_emit_xs_var_decl($var_decl, {});
+    my $code = $xs->_emit_var_decl($var_decl, {});
     unlike($code, qr/PL_sv_undef/, 'local hash var: not undef');
     like($code, qr/newHV/, 'local hash var: creates empty hash');
 }
@@ -536,7 +536,7 @@ my sub var_node($name) {
         variable    => const_node('@agenda'),
         initializer => undef,
     );
-    my $code = $xs->_emit_xs_var_decl($var_decl, {});
+    my $code = $xs->_emit_var_decl($var_decl, {});
     unlike($code, qr/PL_sv_undef/, 'local array var: not undef');
     like($code, qr/newAV/, 'local array var: creates empty array');
 }
@@ -627,7 +627,7 @@ my sub var_node($name) {
     );
     my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::HashSpread');
     my $declared = { item => 1, completed_value => 1 };
-    my $xs_code = $xs->_emit_xs_hash_ref_expr($hash_node, $declared);
+    my $xs_code = $xs->_emit_hash_ref_expr($hash_node, $declared);
 
     unlike($xs_code, qr/SvREFCNT_inc\(NULL\)/,
         'hash spread: no SvREFCNT_inc(NULL) — value should not be NULL');

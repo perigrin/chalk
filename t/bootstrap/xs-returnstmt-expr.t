@@ -52,7 +52,7 @@ my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
     module_name => 'Test::ReturnExpr',
 );
 
-my $result = $xs_target->_emit_xs_method($method);
+my $result = $xs_target->_emit_method($method);
 # Complex methods now return {helper, xsub} hashref; combine both for assertions
 my $xs_output;
 if (ref($result) eq 'HASH') {

@@ -285,14 +285,14 @@ use Chalk::Bootstrap::Perl::Target::XS;
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::LoopJump');
 
-    # Simulate cfg_state with loop_jump by calling _emit_xs_loop_jump
-    my $code = $target->_emit_xs_loop_jump('next', $if_node, {});
+    # Simulate cfg_state with loop_jump by calling _emit_loop_jump
+    my $code = $target->_emit_loop_jump('next', $if_node, {});
     ok(defined $code, 'XS loop_jump next produces code');
     like($code, qr/continue/, 'XS loop_jump next emits continue');
     like($code, qr/SvTRUE/, 'XS loop_jump next tests condition with SvTRUE');
 
     # Verify 'last' maps to C 'break'
-    my $code_last = $target->_emit_xs_loop_jump('last', $if_node, {});
+    my $code_last = $target->_emit_loop_jump('last', $if_node, {});
     ok(defined $code_last, 'XS loop_jump last produces code');
     like($code_last, qr/break/, 'XS loop_jump last emits break');
     unlike($code_last, qr/continue/, 'XS loop_jump last does NOT emit continue');
@@ -316,7 +316,7 @@ use Chalk::Bootstrap::Perl::Target::XS;
     );
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::AvGuard');
-    my $code = $target->_emit_xs_expr($subscript, {});
+    my $code = $target->_emit_expr($subscript, {});
     ok(defined $code, 'array subscript emits code');
     # Must use lval=1 to auto-vivify missing slots (safe for assignment targets)
     like($code, qr/av_fetch\([^,]+,[^,]+,\s*1\)/, 'array subscript uses lval=1 for auto-vivification');
@@ -333,7 +333,7 @@ use Chalk::Bootstrap::Perl::Target::XS;
     my $return_node = $factory->make('Constant', const_type => 'string', value => 'return');
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::BareReturn');
-    my $stmt = $target->_emit_xs_stmt($return_node, {}, false);
+    my $stmt = $target->_emit_stmt($return_node, {}, false);
     ok(defined $stmt, 'bare return constant emits a statement');
     like($stmt, qr/\breturn\b/, 'bare return emits C return keyword');
     unlike($stmt, qr/newSVpvs.*return/, 'bare return does NOT emit string literal "return"');
@@ -356,7 +356,7 @@ use Chalk::Bootstrap::Perl::Target::XS;
     );
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::VarDeclExpr');
-    my $code = $target->_emit_xs_var_decl_expr($var_decl, {});
+    my $code = $target->_emit_var_decl_expr($var_decl, {});
     ok(defined $code, 'VarDecl expr emits code');
     like($code, qr/leo_sv\s*=/, 'VarDecl expr assigns to C variable');
     like($code, qr/some_expr_sv/, 'VarDecl expr includes init expression');
@@ -380,7 +380,7 @@ use Chalk::Bootstrap::Perl::Target::XS;
     );
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::HashSvPV');
-    my $code = $target->_emit_xs_subscript_expr($subscript, { item => 1, core_id => 1 });
+    my $code = $target->_emit_subscript_expr($subscript, { item => 1, core_id => 1 });
     ok(defined $code, 'hash subscript with variable key emits code');
     # Must NOT use SvCUR(core_id_sv) separately — crashes on pure IV SVs
     unlike($code, qr/SvCUR\(core_id_sv\)/, 'hash subscript does not use separate SvCUR');
@@ -414,7 +414,7 @@ use Chalk::Bootstrap::Perl::Target::XS;
     );
 
     my $target = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::PushValues');
-    my $code = $target->_emit_xs_expr($push_call, { agenda => 1, core_hash => 1 });
+    my $code = $target->_emit_expr($push_call, { agenda => 1, core_hash => 1 });
     ok(defined $code, 'push with values emits code');
     # Must NOT wrap values in an extra AV — should iterate and push directly
     unlike($code, qr/newRV_noinc.*_vav/, 'push+values does not create wrapper AV ref');
