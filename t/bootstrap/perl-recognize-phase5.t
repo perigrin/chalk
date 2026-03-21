@@ -192,8 +192,6 @@ SKIP: {
         'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'Embedded C code and heredocs exceed grammar capacity',
         'lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm' => 'Large file (2249 lines) exceeds parse timeout',
         'lib/Chalk/Bootstrap/Perl/Target/C.pm'     => 'Large file (1818 lines) exceeds parse timeout',
-        'lib/Chalk/Bootstrap/DepChaser.pm'         => 'Uses package+Exporter pattern not supported by class grammar',
-        'lib/Chalk/Bootstrap/Runtime.pm'           => 'Uses package+require+DynaLoader pattern not supported by class grammar',
     );
 
     for my $file (sort @pm_files) {
