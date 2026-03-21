@@ -165,7 +165,7 @@ SKIP: {
         'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm' => 'Lexical subs produce introcv/clonecv ops we do not emit',
         'lib/Chalk/Bootstrap/Semiring/Structural.pm'   => 'Extra negate op from my $ZERO = -1 initializer vs constant folding',
         # Parse failures — remaining ambiguities
-        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'Linear but ~90ms/line constant factor: 2595 lines exceeds 120s timeout',
+        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'Linear but ~90ms/line constant factor: 4126 lines exceeds 120s timeout',
     );
 
     # Emit TAP for a single file result
