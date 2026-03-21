@@ -1908,16 +1908,44 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 push @lines, $sections->{fwd_decls}->@*;
                 push @lines, '';
             }
+
+            # Emit static REGEXP* declarations for lazy-compiled regex patterns
+            if ($self->_get_regex_statics() && $self->_get_regex_statics()->@*) {
+                for my $rx ($self->_get_regex_statics()->@*) {
+                    push @lines, "static REGEXP *$rx->{var} = NULL;";
+                }
+                push @lines, '';
+            }
+
+            # Emit forward declarations for anonymous sub CV statics
+            if (@_anon_sub_fwd_decls) {
+                push @lines, @_anon_sub_fwd_decls;
+                push @lines, '';
+            }
+
             push @lines, $sections->{helpers}->@*;
+
+            # Emit anonymous sub static helpers accumulated during method compilation
+            if (@_anon_sub_helpers) {
+                push @lines, '';
+                push @lines, @_anon_sub_helpers;
+            }
 
             push @lines, "MODULE = " . $self->module_name() . "  PACKAGE = " . $self->module_name();
             push @lines, '';
             push @lines, $sections->{xsubs}->@*;
 
-            push @lines, $self->_emit_xs_boot_block(
+            my $boot = $self->_emit_xs_boot_block(
                 $sections->{class_decl}, $sections->{field_map},
                 $sections->{fallback_methods}, $sections->{has_adjust},
-            )->@*;
+            );
+            # Insert anon sub CV registrations before the closing brace of BOOT
+            if (@_anon_sub_boot) {
+                # Find the closing '}' and insert before it
+                my $close_idx = $boot->$#*;
+                splice $boot->@*, $close_idx, 0, @_anon_sub_boot;
+            }
+            push @lines, $boot->@*;
         } else {
             push @lines, "MODULE = " . $self->module_name() . "  PACKAGE = " . $self->module_name();
             push @lines, '';
