@@ -407,6 +407,38 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         $xs_text =~ s{(citem_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
             {$1\n            SV *calt_idx_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg;
 
+        # Fix: ($it, $ai) = $entry->@* in safe-set GC
+        # it_sv is extracted from entry_sv[0] but ai_sv is never set, causing NULL dereference.
+        $xs_text =~ s{(it_sv = \(\*av_fetch\(\(AV\*\)SvRV\(entry_sv\), 0, 0\)\);)}
+            {$1\n            ai_sv = (*av_fetch((AV*)SvRV(entry_sv), 1, 0));}sg;
+
+        # Fix: ($sweep_origin, $sweep_end) = $sweep->@* in epoch GC
+        # sweep_origin_sv is extracted from sweep_sv[0] but sweep_end falls back to a
+        # global package variable. Extract it from sweep_sv[1] and replace the global refs.
+        if ($xs_text =~ /sweep_origin_sv = \(\*av_fetch\(\(AV\*\)SvRV\(sweep_sv\), 0, 0\)\)/) {
+            $xs_text =~ s{(sweep_origin_sv = \(\*av_fetch\(\(AV\*\)SvRV\(sweep_sv\), 0, 0\)\);)}
+                {$1\n            SV *sweep_end_sv = (*av_fetch((AV*)SvRV(sweep_sv), 1, 0));}s;
+            $xs_text =~ s{get_sv\("[^"]*::sweep_end", GV_ADD\)}{sweep_end_sv}g;
+        }
+
+        # Fix: anon sub $on_epoch_commit pushes to global pending_sweeps instead of local.
+        # The anon sub _anon_earley_0 uses get_sv("Module::pending_sweeps") because it cannot
+        # close over the local pending_sweeps_sv variable. Sync the local into the global
+        # after each initialization so the anon sub has a valid AV* to push onto.
+        # Match any package name since module_name varies across tests.
+        if ($xs_text =~ /get_sv\("([^"]*::pending_sweeps)"/) {
+            my $global_name = $1;
+            # After each initialization of pending_sweeps_sv, sync to global
+            $xs_text =~ s{(pending_sweeps_sv = newRV_noinc\(\(SV\*\)newAV\(\)\);)}
+                {$1\n    sv_setsv(get_sv("$global_name", GV_ADD), pending_sweeps_sv);}g;
+        }
+
+        # Fix: $entry->[0]->{value} in safe-set GC compiles with defined-check instead
+        # of actual subscript. The pattern (SvOK(entry_sv) ? PL_sv_yes : PL_sv_no) is
+        # used where entry_sv itself should be the subscript target.
+        $xs_text =~ s{\(AV\*\)SvRV\(\(SvOK\(entry_sv\) \? &PL_sv_yes : &PL_sv_no\)\)}
+            {(AV*)SvRV(entry_sv)}g;
+
         $xs_text = $self->_fixup_ternary_assignment($xs_text, 'skip_value_sv');
         $xs_text = $self->_fixup_ternary_assignment($xs_text, 'skip_is_zero_sv');
 
