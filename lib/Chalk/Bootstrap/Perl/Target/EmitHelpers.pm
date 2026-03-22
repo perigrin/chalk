@@ -1031,8 +1031,16 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $cond = $if_node->inputs()->[1];  # condition input
         my $cond_expr = $self->_emit_expr($cond, $declared_vars);
 
+        # Array variable in boolean context: check element count, not SvTRUE.
+        # SvTRUE on an array reference is always true; av_len >= 0 matches
+        # Perl's if (@array) semantics.
         my @lines;
-        push @lines, "$prefix (" . $self->_sv_true_wrap($cond_expr) . ") {";
+        if ($cond isa Chalk::Bootstrap::IR::Node::Constant
+                && $cond->value() =~ /^\@/) {
+            push @lines, "$prefix (av_len((AV*)SvRV($cond_expr)) >= 0) {";
+        } else {
+            push @lines, "$prefix (" . $self->_sv_true_wrap($cond_expr) . ") {";
+        }
         for my $idx (0 .. $true_stmts->@* - 1) {
             my $stmt = $true_stmts->[$idx];
             my $is_last_in_then = ($idx == $true_stmts->@* - 1);
