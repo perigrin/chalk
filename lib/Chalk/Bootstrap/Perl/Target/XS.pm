@@ -14,6 +14,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     field $_class_registry :param(class_registry) = undef;  # ClassRegistry for multi-class compilation
     field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
+    field %_multi_class_field_maps;  # class_slug => { field_name => field_index } for cross-class ObjectFIELDS inlining
     field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
     field @_anon_sub_fwd_decls;  # forward declarations for anonymous sub CV statics
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -1971,9 +1972,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         @_anon_sub_boot = ();
         $_anon_sub_counter = 0;
 
-        # Pre-pass: collect method metadata from all classes for cross-class dispatch.
-        # Also populate composite_field_types for classes with composite_components.
+        # Pre-pass: collect method metadata and field maps from all classes for
+        # cross-class dispatch. Also populate composite_field_types for classes
+        # with composite_components.
         %_multi_class_methods = ();
+        %_multi_class_field_maps = ();
         %_fallback_method_slugs = ();
         $_composite_field_types = undef;
 
@@ -1984,6 +1987,9 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             next unless defined $class_decl;
             my $methods = $self->_scan_class_methods($class_decl);
             $_multi_class_methods{$slug} = $methods if defined $methods;
+            # Collect field index map for cross-class ObjectFIELDS reader inlining
+            my $fmap = $self->_build_field_index_map($class_decl);
+            $_multi_class_field_maps{$slug} = $fmap if defined $fmap && keys $fmap->%*;
         }
 
         # Build composite field type mappings from registry metadata
@@ -2099,6 +2105,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
         $self->_reset_cfg_lookup();
         %_multi_class_methods = ();
+        %_multi_class_field_maps = ();
         $_composite_field_types = undef;
 
         my $xs_text = join("\n", @lines) . "\n";
@@ -2712,6 +2719,55 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             }
         }
 
+        # Cross-class reader inlining: when a method is a :reader accessor on
+        # compiled class(es) and we know the field index, emit direct ObjectFIELDS
+        # access instead of call_method. Eliminates the ENTER/SAVETMPS/call_method
+        # /FREETMPS/LEAVE overhead that triggers spurious "uninitialized value in
+        # subroutine entry" warnings with Perl 5.42 feature class readers inside
+        # deeply nested scope contexts.
+        if ($invocant_expr ne 'self' && keys %_multi_class_field_maps) {
+            my @reader_slugs;
+            for my $slug (sort keys %_multi_class_methods) {
+                next unless exists $_multi_class_methods{$slug}{$method_name};
+                next unless $_multi_class_methods{$slug}{$method_name}{is_reader};
+                next unless exists $_multi_class_field_maps{$slug};
+                next unless exists $_multi_class_field_maps{$slug}{$method_name};
+                push @reader_slugs, $slug;
+            }
+            if (@reader_slugs == 1) {
+                # Unique reader — safe to inline without stash check
+                my $fidx = $_multi_class_field_maps{$reader_slugs[0]}{$method_name};
+                my $expr = "ObjectFIELDS(SvRV($invocant_expr))[$fidx]";
+                if (@pre_eval) {
+                    my @stmts = (@pre_eval, $expr);
+                    return '({ ' . join('; ', @stmts) . '; })';
+                }
+                return $expr;
+            } elsif (@reader_slugs >= 2) {
+                # Multiple classes define this reader — emit stash-check chain
+                # with ObjectFIELDS for each, avoiding call_method entirely
+                my @branches;
+                for my $slug (@reader_slugs) {
+                    my $fidx = $_multi_class_field_maps{$slug}{$method_name};
+                    my $stash_var = "_stash_${slug}";
+                    push @branches, "(SvSTASH(SvRV(_inv)) == $stash_var) ? ObjectFIELDS(SvRV(_inv))[$fidx]";
+                }
+                # Final fallback: _impl_ call on first candidate (all are readers,
+                # so ObjectFIELDS is safe if stash matched — this branch handles
+                # unknown types that didn't match any stash)
+                my $fallback_slug = $reader_slugs[0];
+                my $fallback_fidx = $_multi_class_field_maps{$fallback_slug}{$method_name};
+                push @branches, "ObjectFIELDS(SvRV(_inv))[$fallback_fidx]";
+                my $chain = join("\n                    : ", @branches);
+                my $expr = "({ SV *_inv = $invocant_expr; $chain; })";
+                if (@pre_eval) {
+                    my @stmts = (@pre_eval, $expr);
+                    return '({ ' . join('; ', @stmts) . '; })';
+                }
+                return $expr;
+            }
+        }
+
         # Speculative inline for :param fields: when the invocant is a :param
         # field and we know the primary type from the class registry, emit a
         # stash check + direct _impl_ call. Falls back to call_method on mismatch.
@@ -2759,15 +2815,27 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                         my $impl_call = "_impl_${target_slug}_${method_name}(" . join(', ', @call_args) . ")";
                         my $stash_var = "_stash_${target_slug}";
 
-                        # Build call_method fallback as statement expression
-                        my @cm_parts;
-                        push @cm_parts, "dSP; ENTER; SAVETMPS; PUSHMARK(SP)";
-                        push @cm_parts, "XPUSHs($invocant_expr)";
-                        push @cm_parts, "XPUSHs($_)" for @arg_exprs;
-                        push @cm_parts, "PUTBACK; call_method(\"$escaped_name\", G_SCALAR)";
-                        push @cm_parts, "SPAGAIN; SV *_mcr = SvREFCNT_inc(POPs); PUTBACK";
-                        push @cm_parts, "FREETMPS; LEAVE; _mcr";
-                        my $cm_expr = '({ ' . join('; ', @cm_parts) . '; })';
+                        # Build fallback expression: prefer ObjectFIELDS for readers
+                        # to avoid call_method warnings in nested scopes
+                        my $cm_expr;
+                        if (exists $_multi_class_methods{$target_slug}{$method_name}
+                                && $_multi_class_methods{$target_slug}{$method_name}{is_reader}
+                                && exists $_multi_class_field_maps{$target_slug}
+                                && exists $_multi_class_field_maps{$target_slug}{$method_name}) {
+                            # Reader fallback: ObjectFIELDS on invocant (safe since
+                            # all candidates are readers — field index from target)
+                            my $fidx = $_multi_class_field_maps{$target_slug}{$method_name};
+                            $cm_expr = "ObjectFIELDS(SvRV($invocant_expr))[$fidx]";
+                        } else {
+                            my @cm_parts;
+                            push @cm_parts, "dSP; ENTER; SAVETMPS; PUSHMARK(SP)";
+                            push @cm_parts, "XPUSHs($invocant_expr)";
+                            push @cm_parts, "XPUSHs($_)" for @arg_exprs;
+                            push @cm_parts, "PUTBACK; call_method(\"$escaped_name\", G_SCALAR)";
+                            push @cm_parts, "SPAGAIN; SV *_mcr = SvREFCNT_inc(POPs); PUTBACK";
+                            push @cm_parts, "FREETMPS; LEAVE; _mcr";
+                            $cm_expr = '({ ' . join('; ', @cm_parts) . '; })';
+                        }
 
                         my $expr = "({ SV *_inv = $invocant_expr; "
                             . "(SvROK(_inv) && SvOBJECT(SvRV(_inv)) && SvSTASH(SvRV(_inv)) == $stash_var) "
