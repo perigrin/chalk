@@ -12,9 +12,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     field $_cv_cache;  # hashref: "fieldname_methodname" => { field_name, field_idx, method_name }
     field $_semiring_intrinsics :param(semiring_intrinsics) = undef;  # hashref: field_name => { components => [...] }
     field $_class_registry :param(class_registry) = undef;  # ClassRegistry for multi-class compilation
+    field $_external_readers :param(external_readers) = undef;  # hashref: full_class_name => { method_name => field_index } for uncompiled classes
     field $_composite_field_types;  # hashref: field_name => [component_class_slug, ...] for dispatch unrolling
     field %_multi_class_methods;  # class_slug => { method_name => { params => [...] } } across all compiled classes
     field %_multi_class_field_maps;  # class_slug => { field_name => field_index } for cross-class ObjectFIELDS inlining
+    field %_external_reader_slugs;  # class_slug => 1 for classes with external reader metadata only (no _impl_ helpers)
     field %_fallback_method_slugs;  # "slug:method" => 1 for methods that fell to eval_pv fallback
     field @_anon_sub_fwd_decls;  # forward declarations for anonymous sub CV statics
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -1977,6 +1979,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # with composite_components.
         %_multi_class_methods = ();
         %_multi_class_field_maps = ();
+        %_external_reader_slugs = ();
         %_fallback_method_slugs = ();
         $_composite_field_types = undef;
 
@@ -1990,6 +1993,24 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             # Collect field index map for cross-class ObjectFIELDS reader inlining
             my $fmap = $self->_build_field_index_map($class_decl);
             $_multi_class_field_maps{$slug} = $fmap if defined $fmap && keys $fmap->%*;
+        }
+
+        # Merge external reader metadata for classes not in the compilation bundle.
+        # These are classes like Symbol and Rule whose objects are passed into the
+        # compiled code but aren't compiled themselves. Keys are full class names,
+        # values are { method_name => field_index } hashrefs.
+        if (defined $_external_readers) {
+            for my $class_name (sort keys $_external_readers->%*) {
+                my $slug = $self->_class_slug($class_name);
+                my $readers = $_external_readers->{$class_name};
+                $_multi_class_field_maps{$slug} //= {};
+                $_multi_class_methods{$slug} //= {};
+                $_external_reader_slugs{$slug} = 1;
+                for my $method_name (sort keys $readers->%*) {
+                    $_multi_class_field_maps{$slug}{$method_name} = $readers->{$method_name};
+                    $_multi_class_methods{$slug}{$method_name} = { is_reader => true };
+                }
+            }
         }
 
         # Build composite field type mappings from registry metadata
@@ -2087,6 +2108,16 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             my $slug = $self->_class_slug($entry->{class_name});
             push @lines, "    _stash_${slug} = gv_stashpv(\"$entry->{class_name}\", GV_ADD);";
         }
+        # Initialize stash pointers for external reader classes (not in compilation
+        # bundle but referenced via ObjectFIELDS inlining in stash-check chains)
+        if (defined $_external_readers) {
+            my %entry_slugs = map { $self->_class_slug($_->{class_name}) => 1 } $entries->@*;
+            for my $class_name (sort keys $_external_readers->%*) {
+                my $slug = $self->_class_slug($class_name);
+                next if exists $entry_slugs{$slug};
+                push @lines, "    _stash_${slug} = gv_stashpv(\"$class_name\", GV_ADD);";
+            }
+        }
         for my $e (@all_sections) {
             my $s = $e->{sections};
             # Restore per-class class-scope vars for BOOT initialization
@@ -2106,6 +2137,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         $self->_reset_cfg_lookup();
         %_multi_class_methods = ();
         %_multi_class_field_maps = ();
+        %_external_reader_slugs = ();
         $_composite_field_types = undef;
 
         my $xs_text = join("\n", @lines) . "\n";
@@ -2699,9 +2731,11 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
         # method, emit a direct _impl_ call regardless of invocant type.
         # Safe for reader methods (children, position, rule, etc.) that are
         # unique to a single class like Context.
+        # Skips external-reader-only slugs — they have metadata but no _impl_ helpers.
         if ($invocant_expr ne 'self') {
             my @matching_slugs;
             for my $slug (sort keys %_multi_class_methods) {
+                next if exists $_external_reader_slugs{$slug};
                 if (exists $_multi_class_methods{$slug}{$method_name}
                         && !exists $_fallback_method_slugs{"$slug:$method_name"}) {
                     push @matching_slugs, $slug;
@@ -2779,11 +2813,13 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             if ($val =~ /^[\$\@\%](.+)/) {
                 my $var = $1;
                 if (exists $self->_get_param_fields()->{$var} && defined $self->_get_field_map() && exists $self->_get_field_map()->{$var}) {
-                    # Find which compiled classes define this method (excluding self).
+                    # Find which compiled classes define this method (excluding self
+                    # and external-reader-only slugs which lack _impl_ helpers).
                     # Prioritize the class from the `uses` registration for this field.
                     my @candidates;
                     for my $slug (sort keys %_multi_class_methods) {
                         next if $slug eq $self->_get_current_slug();
+                        next if exists $_external_reader_slugs{$slug};
                         if (exists $_multi_class_methods{$slug}{$method_name}
                                 && !exists $_fallback_method_slugs{"$slug:$method_name"}) {
                             push @candidates, $slug;

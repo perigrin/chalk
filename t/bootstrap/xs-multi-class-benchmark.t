@@ -434,6 +434,14 @@ my $multi_xs = Chalk::Bootstrap::Perl::Target::XS->new(
             ],
         },
     },
+    # Reader metadata for classes not in the compilation bundle.
+    # Enables ObjectFIELDS inlining instead of call_method for :reader
+    # accessors, avoiding "uninitialized value in subroutine entry" warnings
+    # with Perl 5.42 feature class readers in deeply nested scopes.
+    external_readers => {
+        'Chalk::Grammar::Symbol' => { type => 0, value => 1, quantifier => 2 },
+        'Chalk::Grammar::Rule'   => { name => 0, expressions => 1 },
+    },
 );
 
 my @entries = map {
