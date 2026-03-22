@@ -2144,9 +2144,26 @@ class Chalk::Bootstrap::Perl::Actions {
         return _push_deref_inward($factory, $target, $sigil_node);
     }
 
-    # §16 PostfixIncDec — not in Tier A
+    # §16 PostfixIncDec ::= Expression _ /\+\+/ | Expression _ /--/
+    # Emit as CompoundAssign(+=, target, 1) or CompoundAssign(-=, target, 1).
     method PostfixIncDec($ctx) {
-        return undef;
+        my @leaves = _collect_ir_leaves($ctx);
+        my $target;
+        for my $leaf (@leaves) {
+            my $focus = $leaf->extract();
+            if (defined $focus && $focus isa Chalk::Bootstrap::IR::Node) {
+                $target //= $focus;
+            }
+        }
+        return undef unless defined $target;
+        my $scanned = $ctx->scanned_text() // '';
+        my $op_str = ($scanned =~ /--/) ? '-=' : '+=';
+        return $factory->make('Constructor',
+            'class'  => 'CompoundAssign',
+            op     => $factory->make('Constant', value => $op_str, const_type => 'string'),
+            target => $target,
+            value  => $factory->make('Constant', value => '1', const_type => 'number'),
+        );
     }
 
     # §17 TernaryExpression ::= Expression _ /\?/ _ Expression _ /:/ _ Expression

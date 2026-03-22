@@ -3034,7 +3034,8 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             # Forward-declare the CV cache and register in BOOT
             push @_anon_sub_fwd_decls, "static SV *${cv_var} = NULL;";
 
-            push @_anon_sub_boot, "    ${cv_var} = (SV*)newXS(\"::${fn_name}\", XS_${fn_name}, __FILE__);";
+            # Wrap in RV so it behaves as a coderef when passed to Perl methods
+            push @_anon_sub_boot, "    ${cv_var} = newRV_noinc((SV*)newXS(\"::${fn_name}\", XS_${fn_name}, __FILE__));";
             push @_anon_sub_boot, "    SvREFCNT_inc(${cv_var});";
 
             return $cv_var;
@@ -3730,7 +3731,17 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 push @lines, "        SV *${iter_name}_sv = (_elem && *_elem) ? *_elem : &PL_sv_undef;";
             } else {
                 # Variable list: iterate existing AV
-                my $list_expr = $self->_emit_expr($list, $declared_vars);
+                # Detect keys(%hash) — emit as list (AV of key strings) not scalar (count).
+                # keys() in _emit_xs_builtin_call returns HvUSEDKEYS (integer),
+                # but for-loop iteration needs an AV ref of actual key strings.
+                my $list_expr;
+                if ($list isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $list->class() eq 'BuiltinCall'
+                        && $list->inputs()->[0]->value() eq 'keys') {
+                    $list_expr = $self->_emit_keys_list($list->inputs()->[1]->[0], $declared_vars);
+                } else {
+                    $list_expr = $self->_emit_expr($list, $declared_vars);
+                }
                 push @lines, "{";
                 # PostfixDerefExpr ->@* already returns (AV*)SvRV(...),
                 # so skip the SV* intermediate to avoid type mismatch.
