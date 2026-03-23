@@ -14,6 +14,8 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     field @_anon_sub_registrations; # list of { name => ..., c_name => ... } for anon sub registration
     field $field_types :param = {};  # hashref: field_name => class_name for known-typed fields
     field $_field_type_slugs;        # hashref: field_name => C slug, derived from field_types
+    field $compiled_class_metadata :param = {};  # hashref: class_name => { slug, readers, methods }
+    field $_method_dispatch;  # hashref: method_name => { type => 'reader'|'method', ... }
     method _class_slug_for($class_name) {
         return $self->_class_slug($class_name);
     }
@@ -534,6 +536,32 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 push @stmts, @pre_eval;
                 push @stmts, "SV *_mcr = SvREFCNT_inc(${c_func_name}(aTHX_ ${args_str}))";
                 push @stmts, '_mcr';
+                return '({ ' . join('; ', @stmts) . '; })';
+            }
+        }
+
+        # Type-aware dispatch: when compiled_class_metadata maps method names to
+        # known classes, dispatch based on whether it's a :reader (ObjectFIELDS)
+        # or an explicit method (direct C call).
+        if ($_method_dispatch && exists $_method_dispatch->{$method_name}) {
+            my $info = $_method_dispatch->{$method_name};
+            if ($info->{type} eq 'reader') {
+                # :reader accessor — direct field access via ObjectFIELDS
+                my $idx = $info->{field_idx};
+                my @stmts;
+                push @stmts, @pre_eval;
+                push @stmts, "ObjectFIELDS(SvRV($invocant_expr))[$idx]";
+                return '({ ' . join('; ', @stmts) . '; })';
+            }
+            elsif ($info->{type} eq 'method') {
+                # Explicit method — direct C call (no SvREFCNT_inc, returns owned SV)
+                my $slug = $info->{slug};
+                my $c_func_name = "${slug}_${method_name}";
+                my @call_args = ($invocant_expr, @arg_exprs);
+                my $args_str = join(', ', @call_args);
+                my @stmts;
+                push @stmts, @pre_eval;
+                push @stmts, "${c_func_name}(aTHX_ ${args_str})";
                 return '({ ' . join('; ', @stmts) . '; })';
             }
         }
@@ -1339,6 +1367,40 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 $slugs{$fname} = $self->_class_slug_for($target_class);
             }
             $_field_type_slugs = \%slugs;
+        }
+
+        # Build method dispatch table from compiled_class_metadata.
+        # For each method name that is unambiguous across all compiled classes,
+        # map it to either a reader (ObjectFIELDS access) or a direct C call.
+        if (keys $compiled_class_metadata->%*) {
+            my %method_owners;  # method_name => [{ class_meta, type }]
+            for my $class_name (sort keys $compiled_class_metadata->%*) {
+                my $meta = $compiled_class_metadata->{$class_name};
+                my $readers = $meta->{readers} // {};
+                for my $rdr (sort keys $readers->%*) {
+                    push $method_owners{$rdr}->@*, {
+                        type      => 'reader',
+                        slug      => $meta->{slug},
+                        field_idx => $readers->{$rdr},
+                    };
+                }
+                my $methods = $meta->{methods} // {};
+                for my $meth (sort keys $methods->%*) {
+                    push $method_owners{$meth}->@*, {
+                        type => 'method',
+                        slug => $meta->{slug},
+                    };
+                }
+            }
+            my %dispatch;
+            for my $mname (sort keys %method_owners) {
+                my @owners = $method_owners{$mname}->@*;
+                # Only use dispatch for unambiguous methods (single owner)
+                if (scalar @owners == 1) {
+                    $dispatch{$mname} = $owners[0];
+                }
+            }
+            $_method_dispatch = \%dispatch;
         }
 
         if (defined $sa) {

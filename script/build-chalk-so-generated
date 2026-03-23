@@ -150,6 +150,140 @@ for my $info (@parsed) {
 }
 printf "Phase 3 total: %.1fs\n\n", time() - $t0;
 
+# === Phase 3b: Re-generate Earley with compiled_class_metadata ===
+# Earley calls methods on Symbol/Rule objects. With compiled_class_metadata,
+# type-aware dispatch replaces call_method with direct ObjectFIELDS access
+# (:reader fields) or direct C calls (explicit methods).
+{
+    my $t0b = time();
+    print "Phase 3b: Re-generating Earley with type-aware dispatch...\n";
+
+    # Collect metadata from all non-Earley classes with exported functions
+    my %class_metadata;
+    for my $gen_info (@generated) {
+        my $cn = $gen_info->{class_name};
+        next if $cn eq 'Chalk::Bootstrap::Earley';  # not a dependency of itself
+
+        # Find the parsed info to get the IR for field introspection
+        my ($parsed_info) = grep { $_->{class_name} eq $cn } @parsed;
+        next unless $parsed_info;
+
+        # Extract :reader fields and explicit methods from the IR
+        my $ir = $parsed_info->{ir};
+        my $class_decl = $ir;
+        if ($class_decl isa Chalk::Bootstrap::IR::Node::Constructor
+                && $class_decl->class() eq 'Program') {
+            ($class_decl) = grep {
+                $_ isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $_->class() eq 'ClassDeclaration'
+            } $class_decl->inputs()->@*;
+        }
+        next unless defined $class_decl;
+
+        my %readers;
+        my %methods;
+        my $field_idx = 0;
+
+        for my $child ($class_decl->inputs()->@*) {
+            next unless $child isa Chalk::Bootstrap::IR::Node::Constructor;
+            if ($child->class() eq 'FieldDeclaration') {
+                my $attrs = {};
+                my $fname;
+                for my $fc ($child->inputs()->@*) {
+                    next unless $fc isa Chalk::Bootstrap::IR::Node::Constant;
+                    my $v = $fc->value();
+                    if ($v =~ /^\$(\w+)$/) {
+                        $fname = $1;
+                    }
+                    elsif ($v eq ':reader') {
+                        $attrs->{reader} = 1;
+                    }
+                }
+                if (defined $fname && $attrs->{reader}) {
+                    $readers{$fname} = $field_idx;
+                }
+                $field_idx++;
+            }
+            elsif ($child->class() eq 'MethodDeclaration') {
+                my ($name_node) = grep {
+                    $_ isa Chalk::Bootstrap::IR::Node::Constant
+                } $child->inputs()->@*;
+                if ($name_node) {
+                    $methods{$name_node->value()} = 1;
+                }
+            }
+        }
+
+        next unless keys %readers || keys %methods;
+
+        $class_metadata{$cn} = {
+            slug    => $gen_info->{slug},
+            readers => \%readers,
+            methods => \%methods,
+        };
+    }
+
+    if (keys %class_metadata) {
+        # Find the Earley entry and re-generate
+        my ($earley_parsed) = grep { $_->{class_name} eq 'Chalk::Bootstrap::Earley' } @parsed;
+        my ($earley_gen_idx) = grep { $generated[$_]{class_name} eq 'Chalk::Bootstrap::Earley' } 0..$#generated;
+
+        if ($earley_parsed && defined $earley_gen_idx) {
+            my $ft = $earley_parsed->{field_types} // {};
+            my $target = Chalk::Bootstrap::Perl::Target::C->new(
+                module_name             => 'Chalk::Bootstrap::Earley',
+                ($ft->%* ? (field_types => $ft) : ()),
+                compiled_class_metadata => \%class_metadata,
+            );
+
+            my $result = eval {
+                $target->generate_c_files(
+                    $earley_parsed->{ir},
+                    $earley_parsed->{sa},
+                    $earley_parsed->{ctx},
+                )
+            };
+            die "Phase 3b re-generate failed: $@\n" if $@ || !defined $result;
+
+            my $xs_text = eval {
+                $target->generate_xs_wrapper(
+                    $earley_parsed->{ir},
+                    $result->{exported_functions},
+                    $result->{anon_sub_registrations},
+                )
+            };
+            die "Phase 3b XS wrapper failed: $@\n" if $@ || !defined $xs_text;
+
+            my $slug = $generated[$earley_gen_idx]{slug};
+            $generated[$earley_gen_idx] = {
+                class_name      => 'Chalk::Bootstrap::Earley',
+                slug            => $slug,
+                c_text          => $result->{files}{"${slug}.c"},
+                h_text          => $result->{files}{"${slug}.h"},
+                xs_text         => $xs_text,
+                skipped_methods => $result->{skipped_methods} // [],
+            };
+
+            # Report metadata and results
+            for my $cn (sort keys %class_metadata) {
+                my $m = $class_metadata{$cn};
+                printf "  %s: %d readers, %d methods\n",
+                    $m->{slug}, scalar keys $m->{readers}->%*, scalar keys $m->{methods}->%*;
+            }
+
+            my $skipped = $result->{skipped_methods} // [];
+            if (@$skipped) {
+                printf "  earley (re-gen): %d methods skipped (%s)\n",
+                    scalar(@$skipped), join(', ', @$skipped);
+            } else {
+                print "  earley (re-gen): OK\n";
+            }
+        }
+    }
+
+    printf "Phase 3b total: %.1fs\n\n", time() - $t0b;
+}
+
 # === Phase 4: Write generated files + chalk.h ===
 $t0 = time();
 print "Phase 4: Writing files to build directory...\n";
