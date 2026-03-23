@@ -66,7 +66,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         chr     => { min_arity => 1, arg_types => ['Int'],                       return_type => 'Str' },
         ord     => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
         join    => { min_arity => 2, arg_types => ['Str', 'Any'],                return_type => 'Str' },
-        split   => { min_arity => 1, arg_types => ['Scalar', 'Str', 'Num'],      return_type => 'List' },
+        split   => { min_arity => 1, arg_types => ['Regex', 'Str', 'Num'],       return_type => 'List' },
         sprintf => { min_arity => 1, arg_types => ['Str', 'Any'],                return_type => 'Str' },
         substr  => { min_arity => 2, arg_types => ['Str', 'Num', 'Num'],         return_type => 'Str' },
 

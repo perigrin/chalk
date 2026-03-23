@@ -588,8 +588,8 @@ SKIP: {
             'logical or has or op');
     }
 
-    # Note: // (defined-or) is omitted because it's ambiguous with empty regex
-    # literal //. The RegexLiteral parse wins without Precedence semiring.
+    # Note: // (defined-or) tested below in full-pipeline section where
+    # Precedence semiring disambiguates from empty regex literal //.
 
     # --- Ternary expression (structural only — branching) ---
     {
@@ -906,14 +906,14 @@ SKIP: {
             'binary subtraction has subtract op');
     }
 
-    # Defined-or: TypeInference rejects empty regex // at scan time
+    # Defined-or: Earley explores both regex and BinaryOp paths for //
     {
         my $tree = parse_concise('my $a = 0; my $b = 1; my $c = $a // $b;');
         ok(defined $tree && (grep { $_->name() eq 'dor' } $tree->ops()->@*),
             'defined-or has dor op');
     }
 
-    # Compound //=: TypeInference rejects empty regex // at scan time
+    # Compound //=: defined-or assignment
     {
         my $tree = parse_concise('my $a = 0; $a //= 1;');
         ok(defined $tree && (grep { $_->name() eq 'dor' } $tree->ops()->@*),

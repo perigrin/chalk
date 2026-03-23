@@ -179,28 +179,36 @@ my sub make_item($rule_name, $value) {
 }
 
 # ========================================================================
-# on_scan: empty regex // rejection
+# on_scan: empty regex // acceptance (disambiguation via Earley ambiguity)
 # ========================================================================
 
-# Empty regex // scanned as RegexLiteral → zero (this is defined-or operator)
+# Empty regex // scanned as RegexLiteral → accepted as Regex type.
+# Disambiguation between // (regex) and // (defined-or) happens via
+# Earley ambiguity + CallExpression arg-type validation, not at scan time.
 {
     my $item = make_item('RegexLiteral', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '//');
-    ok($ti->is_zero($result), 'scanning "//" as RegexLiteral returns zero');
+    ok(!$ti->is_zero($result), 'scanning "//" as RegexLiteral is non-zero');
+    is(get_tags($result)->{type}, 'Regex',
+        'scanning "//" as RegexLiteral tags type => Regex');
 }
 
-# Empty regex with flags → also zero
+# Empty regex with flags → also accepted
 {
     my $item = make_item('RegexLiteral', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '//i');
-    ok($ti->is_zero($result), 'scanning "//i" as RegexLiteral returns zero');
+    ok(!$ti->is_zero($result), 'scanning "//i" as RegexLiteral is non-zero');
+    is(get_tags($result)->{type}, 'Regex',
+        'scanning "//i" as RegexLiteral tags type => Regex');
 }
 
-# Empty regex //msixpodualngcer → zero (all flags)
+# Empty regex //msixpodualngcer → accepted (all flags)
 {
     my $item = make_item('RegexLiteral', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '//msixpodualngcer');
-    ok($ti->is_zero($result), 'scanning "//msixpodualngcer" as RegexLiteral returns zero');
+    ok(!$ti->is_zero($result), 'scanning "//msixpodualngcer" as RegexLiteral is non-zero');
+    is(get_tags($result)->{type}, 'Regex',
+        'scanning "//msixpodualngcer" as RegexLiteral tags type => Regex');
 }
 
 # Real regex with pattern → NOT zero (accepted)
@@ -217,18 +225,22 @@ my sub make_item($rule_name, $value) {
     ok(!$ti->is_zero($result), 'scanning "/pattern/gi" as RegexLiteral is NOT zero');
 }
 
-# Empty m// → zero (still an empty regex, just the m-form)
+# Empty m// → accepted (Earley explores both regex and defined-or paths)
 {
     my $item = make_item('RegexLiteral', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'm//');
-    ok($ti->is_zero($result), 'scanning "m//" as RegexLiteral returns zero');
+    ok(!$ti->is_zero($result), 'scanning "m//" as RegexLiteral is non-zero');
+    is(get_tags($result)->{type}, 'Regex',
+        'scanning "m//" as RegexLiteral tags type => Regex');
 }
 
-# m// with flags → zero
+# m// with flags → accepted
 {
     my $item = make_item('RegexLiteral', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, 'm//i');
-    ok($ti->is_zero($result), 'scanning "m//i" as RegexLiteral returns zero');
+    ok(!$ti->is_zero($result), 'scanning "m//i" as RegexLiteral is non-zero');
+    is(get_tags($result)->{type}, 'Regex',
+        'scanning "m//i" as RegexLiteral tags type => Regex');
 }
 
 # m/pattern/ → NOT zero (real regex)
@@ -1100,11 +1112,13 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'RegexLiteral "/pattern/" tags type => Regex');
 }
 
-# RegexLiteral (empty, still rejected) → zero
+# RegexLiteral (empty, now accepted) → Regex type
 {
     my $item = make_item('RegexLiteral', $ti->one());
     my $result = $ti->on_scan($item, 0, 0, '//');
-    ok($ti->is_zero($result), 'RegexLiteral "//" still rejected');
+    ok(!$ti->is_zero($result), 'RegexLiteral "//" accepted');
+    is(get_tags($result)->{type}, 'Regex',
+        'RegexLiteral "//" tags type => Regex');
 }
 
 # Literal: undef → type => 'Undef'

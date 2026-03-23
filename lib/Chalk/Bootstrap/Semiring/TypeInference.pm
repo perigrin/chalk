@@ -283,14 +283,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
 
         my $rule_name = $item->{rule}->name();
 
-        # Reject empty regex // and m// — these are the defined-or operator, not a regex
-        if ($rule_name eq 'RegexLiteral'
-            && $matched_text =~ m{^(?:m)?//[msixpodualngcer]*$})
-        {
-            return undef;
-        }
-
-        # Non-empty RegexLiteral → type => 'Regex'
+        # RegexLiteral → type => 'Regex' (including empty // which is
+        # ambiguous with defined-or; Earley explores both paths and
+        # disambiguation happens via CallExpression arg-type validation)
         if ($rule_name eq 'RegexLiteral') {
             return $self->multiply($existing, $_scan_regex);
         }
