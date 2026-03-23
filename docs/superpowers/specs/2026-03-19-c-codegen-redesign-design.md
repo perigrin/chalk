@@ -275,8 +275,7 @@ Changed `Boolean.xs`? Rebuild just:
 xsubpp Boolean.xs > Boolean.c && cc ... Boolean.c -o Boolean.so
 ```
 
-Build orchestration lives in the bootstrap script (evolved from
-`script/bootstrap-xs-earley`), not Module::Build.
+Build orchestration lives in `script/build-chalk-so-generated`, not Module::Build.
 
 ### Error Handling
 

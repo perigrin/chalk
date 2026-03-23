@@ -62,7 +62,8 @@ Earley.xs  ─┼─→ thin XSUB wrappers linking against chalk.so
 - Module::Build or ExtUtils::MakeMaker for the final XS compilation
 - Need to compile all `.c` files, then link with the XS-generated `.c` files
 - Single `chalk.so` output containing everything
-- How does this interact with the existing `script/bootstrap-xs-earley`?
+- The previous per-class XS approach (`script/bootstrap-xs-earley`) has been removed;
+  `script/build-chalk-so-generated` is the current build pipeline.
 
 ### Incremental Strategy
 - Can we do this incrementally? e.g., start with just Earley + Boolean in C,
