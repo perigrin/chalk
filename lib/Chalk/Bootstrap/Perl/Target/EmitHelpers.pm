@@ -2014,13 +2014,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $val = $self->_emit_expr($value, $declared_vars);
 
         if ($op eq '.=') {
-            return "sv_catsv($tgt, $val)";
+            return "({ sv_catsv($tgt, $val); $tgt; })";
         }
         if ($op eq '+=') {
-            return "sv_setiv($tgt, SvIV($tgt) + SvIV($val))";
+            return "({ sv_setiv($tgt, SvIV($tgt) + SvIV($val)); $tgt; })";
         }
         if ($op eq '-=') {
-            return "sv_setiv($tgt, SvIV($tgt) - SvIV($val))";
+            return "({ sv_setiv($tgt, SvIV($tgt) - SvIV($val)); $tgt; })";
         }
         if ($op eq '//=') {
             return "({ if (!SvOK($tgt)) sv_setsv($tgt, $val); $tgt; })";
