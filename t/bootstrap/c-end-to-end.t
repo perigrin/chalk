@@ -1,5 +1,5 @@
 # ABOUTME: End-to-end integration test for the chalk.so C codegen pipeline.
-# ABOUTME: Loads all 7 C-backed classes in a subprocess and runs a real Earley parse.
+# ABOUTME: Loads all 11 C-backed classes in a subprocess and runs a real Earley parse.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -16,14 +16,21 @@ my $build_dir = "$repo_root/.build/chalk-so-gen";
 my $chalk_so  = "$build_dir/chalk.$so_ext";
 my $perl      = $^X;
 
-# All 7 classes that should be in chalk.so
+# All 11 classes that should be in chalk.so
 my @classes = (
-    { pkg => 'Chalk::Bootstrap::Semiring::Boolean',         slug => 'boolean' },
+    # Data model classes
+    { pkg => 'Chalk::Grammar::Symbol',                       slug => 'symbol' },
+    { pkg => 'Chalk::Grammar::Rule',                         slug => 'rule' },
+    { pkg => 'Chalk::Bootstrap::CoreItemIndex',              slug => 'coreitemindex' },
+    { pkg => 'Chalk::Bootstrap::LR0DFA',                     slug => 'lr0dfa' },
+    # Semiring classes
+    { pkg => 'Chalk::Bootstrap::Semiring::Boolean',          slug => 'boolean' },
     { pkg => 'Chalk::Bootstrap::Semiring::Structural',       slug => 'structural' },
     { pkg => 'Chalk::Bootstrap::Semiring::SemanticAction',   slug => 'semanticaction' },
     { pkg => 'Chalk::Bootstrap::Semiring::FilterComposite',  slug => 'filtercomposite' },
     { pkg => 'Chalk::Bootstrap::Semiring::Precedence',       slug => 'precedence' },
     { pkg => 'Chalk::Bootstrap::Semiring::TypeInference',    slug => 'typeinference' },
+    # Parser
     { pkg => 'Chalk::Bootstrap::Earley',                     slug => 'earley' },
 );
 
@@ -113,7 +120,7 @@ my $chalk_load  = "require DynaLoader; "
     . "or die 'chalk.so: ' . DynaLoader::dl_error();";
 
 # =========================================================================
-# Part 1: Load all 7 C-backed classes and verify instantiation
+# Part 1: Load all 11 C-backed classes and verify instantiation
 # =========================================================================
 
 my ($out1, $exit1) = run_subprocess(<<"END_SCRIPT");
@@ -125,6 +132,10 @@ $lib_project
 $chalk_load
 
 # Load all C-backed classes in dependency order
+require Chalk::Grammar::Symbol;
+require Chalk::Grammar::Rule;
+require Chalk::Bootstrap::CoreItemIndex;
+require Chalk::Bootstrap::LR0DFA;
 require Chalk::Bootstrap::Semiring::Boolean;
 require Chalk::Bootstrap::Semiring::Structural;
 require Chalk::Bootstrap::Semiring::SemanticAction;
@@ -148,13 +159,13 @@ print 'LOAD_ALL_OK';
 print "\\n";
 END_SCRIPT
 
-is($exit1, 0, 'Part 1: subprocess loads all 7 classes without error')
+is($exit1, 0, 'Part 1: subprocess loads all 11 classes without error')
     or diag("Part 1 output:\n$out1");
 
 like($out1, qr/BOOL_OK/,      'Part 1: Boolean instantiated');
 like($out1, qr/BOOL_ZERO_OK/, 'Part 1: Boolean zero works');
 like($out1, qr/BOOL_ONE_OK/,  'Part 1: Boolean one works');
-like($out1, qr/LOAD_ALL_OK/,  'Part 1: all 7 classes loaded successfully');
+like($out1, qr/LOAD_ALL_OK/,  'Part 1: all 11 classes loaded successfully');
 
 # =========================================================================
 # Part 2: Parse with C-backed Boolean + pure-Perl Earley
@@ -301,7 +312,7 @@ like($out3, qr/FC_PARSE_OK/,   'Part 3: FilterComposite parse complete');
 
 # =========================================================================
 # Part 4: Full Perl grammar pipeline — parse a real .pm file
-# Uses C-backed semirings (all 7 classes) + full 65-rule Perl grammar.
+# Uses C-backed semirings (all 11 classes) + full 65-rule Perl grammar.
 # This is the production path: BNF → grammar → desugar → FilterComposite → parse
 # =========================================================================
 
@@ -321,7 +332,11 @@ $lib_project
 $lib_test
 $chalk_load
 
-# Load all 7 C-backed classes
+# Load all 11 C-backed classes
+require Chalk::Grammar::Symbol;
+require Chalk::Grammar::Rule;
+require Chalk::Bootstrap::CoreItemIndex;
+require Chalk::Bootstrap::LR0DFA;
 require Chalk::Bootstrap::Semiring::Boolean;
 require Chalk::Bootstrap::Semiring::Structural;
 require Chalk::Bootstrap::Semiring::SemanticAction;

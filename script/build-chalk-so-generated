@@ -33,16 +33,28 @@ my $xsubpp  = "$Config{privlibexp}/ExtUtils/xsubpp";
 my $typemap  = "$Config{privlibexp}/ExtUtils/typemap";
 
 # Classes to compile, in dependency order.
+# Data model classes first (Symbol, Rule, CoreItemIndex, LR0DFA) since Earley depends on them.
 # field_types maps :param fields to their known class for direct C calls.
 my @source_files = (
-    ['Chalk::Bootstrap::Semiring::Boolean',         'lib/Chalk/Bootstrap/Semiring/Boolean.pm',         {}],
-    ['Chalk::Bootstrap::Semiring::Structural',       'lib/Chalk/Bootstrap/Semiring/Structural.pm',       {}],
-    ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm',   {}],
-    ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',  {}],
-    ['Chalk::Bootstrap::Semiring::Precedence',       'lib/Chalk/Bootstrap/Semiring/Precedence.pm',       {}],
-    ['Chalk::Bootstrap::Semiring::TypeInference',    'lib/Chalk/Bootstrap/Semiring/TypeInference.pm',    {}],
-    ['Chalk::Bootstrap::Earley',                     'lib/Chalk/Bootstrap/Earley.pm',                    {
-        semiring => 'Chalk::Bootstrap::Semiring::FilterComposite',
+    # Data model classes
+    ['Chalk::Grammar::Symbol',                       'lib/Chalk/Grammar/Symbol.pm',                       {}],
+    ['Chalk::Grammar::Rule',                         'lib/Chalk/Grammar/Rule.pm',                         {}],
+    ['Chalk::Bootstrap::CoreItemIndex',              'lib/Chalk/Bootstrap/CoreItemIndex.pm',              {}],
+    ['Chalk::Bootstrap::LR0DFA',                     'lib/Chalk/Bootstrap/LR0DFA.pm',                    {
+        core_index => 'Chalk::Bootstrap::CoreItemIndex',
+    }],
+    # Semiring classes
+    ['Chalk::Bootstrap::Semiring::Boolean',          'lib/Chalk/Bootstrap/Semiring/Boolean.pm',           {}],
+    ['Chalk::Bootstrap::Semiring::Structural',       'lib/Chalk/Bootstrap/Semiring/Structural.pm',        {}],
+    ['Chalk::Bootstrap::Semiring::SemanticAction',   'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm',    {}],
+    ['Chalk::Bootstrap::Semiring::FilterComposite',  'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm',   {}],
+    ['Chalk::Bootstrap::Semiring::Precedence',       'lib/Chalk/Bootstrap/Semiring/Precedence.pm',        {}],
+    ['Chalk::Bootstrap::Semiring::TypeInference',    'lib/Chalk/Bootstrap/Semiring/TypeInference.pm',     {}],
+    # Parser (depends on semirings + data model)
+    ['Chalk::Bootstrap::Earley',                     'lib/Chalk/Bootstrap/Earley.pm',                     {
+        semiring   => 'Chalk::Bootstrap::Semiring::FilterComposite',
+        core_index => 'Chalk::Bootstrap::CoreItemIndex',
+        lr0_dfa    => 'Chalk::Bootstrap::LR0DFA',
     }],
 );
 
