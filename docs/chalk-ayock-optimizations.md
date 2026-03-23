@@ -30,6 +30,62 @@
 #   "CURRENT"  = what Chalk does now
 #   "AYCOCK"   = what changes with the optimization
 #   "SEMIRING" = how it interacts with composite semirings
+#
+# ============================================================================
+# IMPLEMENTATION STATUS
+# ============================================================================
+#
+#   ┌─────────────────────────────────┬────────────┬──────────────────────────┐
+#   │ Optimization                    │ Status     │ Location                 │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ CoreItemIndex                   │ DONE       │ Earley.pm (field         │
+#   │ (integer IDs for rule+dot)      │            │ $core_index)             │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ LR(0) DFA prediction clustering │ DONE       │ LR0DFA.pm               │
+#   │ (epsilon-closure, nullable set, │            │ Earley.pm _predict()     │
+#   │  dot-advance past ?-quantified) │            │ uses prediction_items_   │
+#   │                                 │            │ for() at line 782        │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Safe-set GC                     │ DONE       │ Earley.pm _is_safe_set() │
+#   │ (locally unambiguous sets)      │            │                          │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Epoch GC                        │ DONE       │ Earley.pm                │
+#   │ (statement-boundary sweeping    │            │ on_epoch_commit callback │
+#   │  via StatementItem completions) │            │ + @pending_sweeps        │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Leo optimization                │ DONE       │ Earley.pm                │
+#   │ (right-recursive shortcutting)  │            │ _complete Leo path       │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Scan result cache               │ DONE       │ Earley.pm $_scan_cache   │
+#   │ (per-position regex memoization)│            │ in _scan() at line 824   │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Terminal clustering             │ NOT DONE   │ (pseudocode below)       │
+#   │ (group terminals by DFA state,  │            │                          │
+#   │  match once per unique pattern) │            │                          │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Lazy semiring init              │ NOT DONE   │ (pseudocode below)       │
+#   │ (defer init until item is used) │            │                          │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Bitmap set membership           │ NOT DONE   │ (pseudocode below)       │
+#   │ (vec() bitmaps instead of hash) │            │                          │
+#   ├─────────────────────────────────┼────────────┼──────────────────────────┤
+#   │ Earley set compression          │ NOT DONE   │ (pseudocode below)       │
+#   │ (dead state pruning)            │            │                          │
+#   └─────────────────────────────────┴────────────┴──────────────────────────┘
+#
+# The scan result cache (not in Aycock's dissertation) partially mitigates
+# the lack of terminal clustering — regex matching is memoized per
+# (position, pattern) pair. However, without terminal clustering the
+# parser still iterates all items waiting for a terminal and calls
+# should_scan/on_scan per item, even when items share the same pattern.
+#
+# The LR0DFA implementation uses a simpler approach than the full NFA→DFA
+# subset construction described in the pseudocode below. It computes
+# prediction closures (epsilon-closure per nonterminal) and nullable
+# sets via fixed-point iteration, without constructing explicit DFA
+# states or transitions. This gives the prediction clustering benefit
+# without the full DFA machinery.
+#
 # ============================================================================
 
 use 5.42.0;
@@ -859,35 +915,27 @@ class Chalk::AycockParser {
 #   - Nullable handling (Aycock-Horspool, already present)
 #   - Scannerless parsing (terminals are regexes)
 #
-# CHANGES:
-#   ┌─────────────────────────┬──────────────────────────────────────┐
-#   │ Current                 │ With Aycock                         │
-#   ├─────────────────────────┼──────────────────────────────────────┤
-#   │ EarleyItem objects      │ (core_id, start_pos) integer tuples │
-#   │ String key membership   │ Bitmap vec() membership             │
-#   │ Hash-based chart        │ Positional arrays + bitmaps         │
-#   │ N items per prediction  │ 1 DFA state per prediction          │
-#   │ Eager semiring init     │ Lazy init (deferred until needed)   │
-#   │ Retain full chart       │ GC safe positions (90%+ savings)    │
-#   │ Always run add()        │ Fast-path skip for unambiguous      │
-#   │ Per-item terminal match │ Per-state terminal clustering       │
-#   │ No dead item pruning    │ Earley set compression              │
-#   └─────────────────────────┴──────────────────────────────────────┘
+# CHANGES (DONE = implemented, TODO = pseudocode only):
+#   ┌─────────────────────────┬──────────────────────────────────────┬────────┐
+#   │ Before                  │ With Aycock                         │ Status │
+#   ├─────────────────────────┼──────────────────────────────────────┼────────┤
+#   │ EarleyItem objects      │ (core_id, start_pos) integer tuples │ DONE   │
+#   │ N items per prediction  │ 1 DFA closure per prediction        │ DONE   │
+#   │ Retain full chart       │ GC safe + epoch-boundary positions  │ DONE   │
+#   │ No right-recursion opt  │ Leo items for det. right-recursion  │ DONE   │
+#   │ Per-item regex match    │ Scan result cache per (pos, pattern)│ DONE   │
+#   │ String key membership   │ Bitmap vec() membership             │ TODO   │
+#   │ Hash-based chart        │ Positional arrays + bitmaps         │ TODO   │
+#   │ Eager semiring init     │ Lazy init (deferred until needed)   │ TODO   │
+#   │ Per-item terminal match │ Per-state terminal clustering       │ TODO   │
+#   │ No dead item pruning    │ Earley set compression              │ TODO   │
+#   └─────────────────────────┴──────────────────────────────────────┴────────┘
 #
-# EXPECTED IMPACT ON 960-RULE CHALK GRAMMAR:
-#   - Object allocation: ~80% reduction (no EarleyItem objects)
-#   - Prediction cost: ~90% reduction (DFA state clustering)
-#   - Memory usage: ~90% reduction for long inputs (safe-set GC)
-#   - Disambiguation overhead: ~70% reduction (fast-path skip)
-#   - Terminal matching: ~50% reduction (state-based batching)
-#
-# IMPLEMENTATION ORDER (by bang-for-buck):
-#   1. CoreItemIndex + bitmap membership (low risk, immediate wins)
-#   2. Safe-set chart GC (high memory impact, moderate complexity)
-#   3. LR0DFA construction + predict_via_dfa (big refactor, big payoff)
-#   4. Terminal clustering (needs DFA, moderate benefit for scannerless)
-#   5. Lazy semiring init (needs profiling to validate savings > overhead)
-#   6. Earley set compression (easy addition once DFA exists)
+# REMAINING IMPLEMENTATION ORDER (by expected bang-for-buck):
+#   1. Terminal clustering (DFA exists, reduces should_scan/on_scan calls)
+#   2. Lazy semiring init (needs profiling to validate savings > overhead)
+#   3. Bitmap membership (replace hash lookups with vec() bit checks)
+#   4. Earley set compression (dead state pruning, easy addition)
 #
 # SELF-HOSTING INTERACTION:
 #   When Chalk compiles itself, the LR(0) DFA is built from Chalk's own
