@@ -498,8 +498,13 @@ class Chalk::Bootstrap::Earley {
                             next unless defined $oh;
                             for my $ok (keys $oh->%*) {
                                 next unless $ok > $sweep_origin;
-                                $oh->{$ok}->[0]->{value} = undef
-                                    if defined $oh->{$ok}->[0]->{value};
+                                my $entry = $oh->{$ok};
+                                next unless defined $entry->[0]->{value};
+                                # Only null completed items — incomplete items
+                                # may still be needed by future completions
+                                # (e.g. ElsifChain waiting for recursive child)
+                                next unless $self->_is_complete($entry->[0], $entry->[1]);
+                                $entry->[0]->{value} = undef;
                             }
                         }
                     }
