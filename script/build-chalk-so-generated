@@ -168,45 +168,65 @@ printf "Phase 3 total: %.1fs\n\n", time() - $t0;
         my ($parsed_info) = grep { $_->{class_name} eq $cn } @parsed;
         next unless $parsed_info;
 
-        # Extract :reader fields and explicit methods from the IR
+        # Extract :reader fields and explicit methods from the IR.
+        # IR structure: Program → ARRAY[items] → ClassDecl → [name, isa, ARRAY[body]]
+        # Body items: FieldDecl → [name, ARRAY[_Attribute...], default]
+        #             MethodDecl → [name, ...]
         my $ir = $parsed_info->{ir};
-        my $class_decl = $ir;
-        if ($class_decl isa Chalk::Bootstrap::IR::Node::Constructor
-                && $class_decl->class() eq 'Program') {
-            ($class_decl) = grep {
-                $_ isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $_->class() eq 'ClassDeclaration'
-            } $class_decl->inputs()->@*;
-        }
+
+        # Navigate: Program.inputs[0] is an ARRAY of top-level items
+        my $top_items = $ir->inputs()->[0];
+        next unless ref($top_items) eq 'ARRAY';
+
+        my ($class_decl) = grep {
+            (ref($_) && $_ isa Chalk::Bootstrap::IR::Node::Constructor
+                && $_->class() eq 'ClassDecl')
+        } $top_items->@*;
         next unless defined $class_decl;
+
+        # ClassDecl.inputs: [Constant(name), isa_or_undef, ARRAY[body_items]]
+        my $body_items = $class_decl->inputs()->[2];
+        next unless ref($body_items) eq 'ARRAY';
 
         my %readers;
         my %methods;
         my $field_idx = 0;
 
-        for my $child ($class_decl->inputs()->@*) {
-            next unless $child isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($child->class() eq 'FieldDeclaration') {
-                my $attrs = {};
+        for my $child ($body_items->@*) {
+            next unless ref($child) && $child isa Chalk::Bootstrap::IR::Node::Constructor;
+            if ($child->class() eq 'FieldDecl') {
                 my $fname;
+                my $has_reader = false;
                 for my $fc ($child->inputs()->@*) {
-                    next unless $fc isa Chalk::Bootstrap::IR::Node::Constant;
-                    my $v = $fc->value();
-                    if ($v =~ /^\$(\w+)$/) {
-                        $fname = $1;
+                    next unless defined $fc;
+                    if ($fc isa Chalk::Bootstrap::IR::Node::Constant) {
+                        my $v = $fc->value();
+                        if (defined $v && $v =~ /^\$(\w+)$/) {
+                            $fname = $1;
+                        }
                     }
-                    elsif ($v eq ':reader') {
-                        $attrs->{reader} = 1;
+                    elsif (ref($fc) eq 'ARRAY') {
+                        # Array of _Attribute nodes
+                        for my $attr ($fc->@*) {
+                            next unless ref($attr) && $attr isa Chalk::Bootstrap::IR::Node::Constructor;
+                            next unless $attr->class() eq '_Attribute';
+                            my ($attr_name) = grep {
+                                ref($_) && $_ isa Chalk::Bootstrap::IR::Node::Constant
+                            } $attr->inputs()->@*;
+                            if ($attr_name && ($attr_name->value() // '') eq 'reader') {
+                                $has_reader = true;
+                            }
+                        }
                     }
                 }
-                if (defined $fname && $attrs->{reader}) {
+                if (defined $fname && $has_reader) {
                     $readers{$fname} = $field_idx;
                 }
                 $field_idx++;
             }
-            elsif ($child->class() eq 'MethodDeclaration') {
+            elsif ($child->class() eq 'MethodDecl') {
                 my ($name_node) = grep {
-                    $_ isa Chalk::Bootstrap::IR::Node::Constant
+                    ref($_) && $_ isa Chalk::Bootstrap::IR::Node::Constant
                 } $child->inputs()->@*;
                 if ($name_node) {
                     $methods{$name_node->value()} = 1;
