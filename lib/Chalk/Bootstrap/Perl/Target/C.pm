@@ -493,6 +493,23 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             $invocant_expr = $tmp;
         }
 
+        # Self-call optimization: when invocant is self and method exists in this
+        # class, call the C function directly instead of Perl method dispatch.
+        # All exported C functions return SV* — no SvREFCNT_inc needed because
+        # direct C calls return owned SVs (unlike call_method/POPs which returns
+        # a mortal needing refcount bump).
+        if ($invocant_expr eq 'self' && defined $self->_get_class_methods()
+                && exists $self->_get_class_methods()->{$method_name}) {
+            my $slug = $self->_get_current_slug();
+            my $c_func_name = "${slug}_${method_name}";
+            my @call_args = ('self', @arg_exprs);
+            my $args_str = join(', ', @call_args);
+            my @stmts;
+            push @stmts, @pre_eval;
+            push @stmts, "${c_func_name}(aTHX_ ${args_str})";
+            return '({ ' . join('; ', @stmts) . '; })';
+        }
+
         # Direct cross-class call optimization: when the invocant is a known-typed
         # field, emit {target_slug}_{method}(aTHX_ {invocant}, {args...}) instead
         # of the generic call_method dSP/PUSHMARK/POPs sequence.
