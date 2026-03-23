@@ -299,4 +299,129 @@ like($out3, qr/FC_ACCEPT_APA/, 'Part 3: FilterComposite accepts "a+a"');
 like($out3, qr/FC_REJECT_B/,   'Part 3: FilterComposite rejects "b"');
 like($out3, qr/FC_PARSE_OK/,   'Part 3: FilterComposite parse complete');
 
+# =========================================================================
+# Part 4: Full Perl grammar pipeline — parse a real .pm file
+# Uses C-backed semirings (all 7 classes) + full 65-rule Perl grammar.
+# This is the production path: BNF → grammar → desugar → FilterComposite → parse
+# =========================================================================
+
+my $lib_test = "use lib '$repo_root/t/bootstrap/lib';";
+
+# Target: Boolean.pm (68 lines) — small but real Perl with class syntax
+my $target_file = "$repo_root/lib/Chalk/Bootstrap/Semiring/Boolean.pm";
+
+my ($out4, $exit4) = run_subprocess(<<"END_SCRIPT");
+use 5.42.0;
+use utf8;
+use Time::HiRes qw(time);
+\$| = 1;
+$lib_arch
+$lib_pm
+$lib_project
+$lib_test
+$chalk_load
+
+# Load all 7 C-backed classes
+require Chalk::Bootstrap::Semiring::Boolean;
+require Chalk::Bootstrap::Semiring::Structural;
+require Chalk::Bootstrap::Semiring::SemanticAction;
+require Chalk::Bootstrap::Semiring::Precedence;
+require Chalk::Bootstrap::Semiring::TypeInference;
+require Chalk::Bootstrap::Semiring::FilterComposite;
+require Chalk::Bootstrap::Earley;
+
+say "LOADED_OK";
+
+# Build grammar from BNF pipeline
+my \$t0 = time();
+require TestPipeline;
+my \$raw_ir = TestPipeline::perl_pipeline();
+die "perl_pipeline returned undef" unless defined \$raw_ir;
+
+require Chalk::Bootstrap::BNF::Target::Perl;
+my \$bnf_target = Chalk::Bootstrap::BNF::Target::Perl->new();
+my \$generated = \$bnf_target->generate(\$raw_ir);
+\$generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::CEndToEnd/g;
+eval "\$generated; 1" or die "Grammar eval: \$\@";
+no strict 'refs';
+my \$gen_grammar = "Chalk::Grammar::Perl::CEndToEnd::grammar"->();
+use strict 'refs';
+printf "GRAMMAR_OK %.1fs %d\\n", time() - \$t0, scalar \@\$gen_grammar;
+
+# Reorder (Program first) and desugar
+my \@ordered;
+my \@rest;
+for my \$rule (\@\$gen_grammar) {
+    if (\$rule->name() eq 'Program') { unshift \@ordered, \$rule }
+    else { push \@rest, \$rule }
+}
+push \@ordered, \@rest;
+
+require Chalk::Bootstrap::Desugar;
+my \$desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\\\@ordered);
+
+# Build parser with C-backed semirings
+\$t0 = time();
+require Chalk::Grammar::Perl::PrecedenceTable;
+require Chalk::Grammar::Perl::KeywordTable;
+require Chalk::Grammar::Perl::TypeLibrary;
+require Chalk::Bootstrap::Perl::Actions;
+
+my \$fc = Chalk::Bootstrap::Semiring::FilterComposite->new(
+    semirings => [
+        Chalk::Bootstrap::Semiring::Boolean->new(),
+        Chalk::Bootstrap::Semiring::Precedence->new(
+            lookup => \\&Chalk::Grammar::Perl::PrecedenceTable::lookup,
+        ),
+        Chalk::Bootstrap::Semiring::TypeInference->new(
+            keyword_check  => \\&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+            builtin_lookup => \\&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
+        ),
+        Chalk::Bootstrap::Semiring::Structural->new(),
+        Chalk::Bootstrap::Semiring::SemanticAction->new(
+            actions => Chalk::Bootstrap::Perl::Actions->new(),
+        ),
+    ],
+);
+
+my \$parser = Chalk::Bootstrap::Earley->new(
+    grammar  => \$desugared,
+    semiring => \$fc,
+);
+printf "PARSER_OK %.1fs\\n", time() - \$t0;
+
+# Parse the target file
+my \$target = '$target_file';
+open my \$fh, '<:utf8', \$target or die "Cannot read \$target: \$!";
+local \$/;
+my \$source = <\$fh>;
+close \$fh;
+my \$lines = (\$source =~ tr/\\n//) + 1;
+printf "PARSING %d %d\\n", \$lines, length(\$source);
+
+\$t0 = time();
+my \$result = \$parser->parse_value(\$source);
+my \$elapsed = time() - \$t0;
+
+if (defined \$result) {
+    printf "PARSE_OK %.1f %.0f\\n", \$elapsed, \$lines / \$elapsed;
+} else {
+    printf "PARSE_FAILED %.1f\\n", \$elapsed;
+}
+END_SCRIPT
+
+is($exit4, 0, 'Part 4: Full grammar pipeline subprocess exits cleanly')
+    or diag("Part 4 output:\n$out4");
+
+like($out4, qr/LOADED_OK/,   'Part 4: all C-backed classes loaded');
+like($out4, qr/GRAMMAR_OK/,  'Part 4: Perl grammar built from BNF');
+like($out4, qr/PARSER_OK/,   'Part 4: FilterComposite parser constructed');
+like($out4, qr/PARSE_OK/,    'Part 4: Boolean.pm parsed successfully')
+    or diag("Part 4 full output:\n$out4");
+
+# Extract timing from Part 4 output
+if ($out4 =~ /PARSE_OK (\S+) (\S+)/) {
+    diag("Part 4 performance: ${1}s, $2 lines/sec");
+}
+
 done_testing;
