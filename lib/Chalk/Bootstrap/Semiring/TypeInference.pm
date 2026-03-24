@@ -73,19 +73,19 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # $value but replacing the focus. Hash-consed by focus content and children
     # refaddrs to ensure identical derivations share the same refaddr
     # (required by FilterComposite identity comparison).
+    # Position-independent: position is bookkeeping, not semantics.
     method _extend_ctx_with_focus($value, $focus, $rule_name) {
         return undef unless defined $focus;
-        my $extended = Chalk::Bootstrap::Context->new(
+        my $focus_key = $self->_tag_key($focus);
+        my $children_key = join(":", map { refaddr($_) } $value->children()->@*);
+        my $key = "ext:$rule_name:$focus_key:$children_key";
+        return ($_ctx_cache{$key} //= Chalk::Bootstrap::Context->new(
             focus       => $focus,
             children    => $value->children(),
             position    => $value->position(),
             rule        => $value->rule(),
             annotations => $value->annotations(),
-        );
-        my $focus_key = $self->_tag_key($focus);
-        my $children_key = join(":", map { refaddr($_) } $extended->children()->@*);
-        my $key = "ext:$rule_name:" . $extended->position() . ":$focus_key:$children_key";
-        return ($_ctx_cache{$key} //= $extended);
+        ));
     }
 
     # Tree-walkers for CallExpression on_complete.
