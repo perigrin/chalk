@@ -225,4 +225,247 @@ sub ctor($class, %inputs) {
         'identical key sets unified to one schema');
 }
 
+# === Test: Escape analysis — hash returned from public method is NOT promoted ===
+# A public method (not starting with _) that returns a hash variable means
+# uncompiled code could call it and see the hash.
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $var = const_node('variable', '$result');
+    my $empty = ctor('HashRefExpr', pairs => []);
+    my $decl = ctor('VarDecl',
+        variable    => $var,
+        initializer => $empty,
+    );
+
+    my $sub = ctor('SubscriptExpr',
+        target => $var,
+        index  => const_node('string', 'status'),
+        style  => const_node('enum', 'hash'),
+    );
+    my $assign = ctor('BinaryExpr',
+        op    => const_node('string', '='),
+        left  => $sub,
+        right => const_node('string', 'ok'),
+    );
+
+    my $return_stmt = ctor('ReturnStmt', value => $var);
+
+    # Public method (no _ prefix)
+    my $method = ctor('MethodDecl',
+        name        => const_node('string', 'get_result'),
+        params      => [],
+        body        => [$decl, $assign, $return_stmt],
+        return_type => undef,
+    );
+
+    my $class_decl = ctor('ClassDecl',
+        name   => const_node('string', 'TestEscape'),
+        parent => undef,
+        body   => [$method],
+    );
+
+    my $program = ctor('Program', statements => [$class_decl]);
+
+    my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
+    my $schemas = $analyzer->analyze([
+        {
+            class_name => 'TestEscape',
+            ir         => $program,
+        }
+    ]);
+
+    is(scalar keys $schemas->%*, 0,
+        'hash returned from public method is NOT promoted (escape analysis)');
+}
+
+# === Test: Escape analysis — hash returned from private method IS promoted ===
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $var = const_node('variable', '$item');
+    my $empty = ctor('HashRefExpr', pairs => []);
+    my $decl = ctor('VarDecl',
+        variable    => $var,
+        initializer => $empty,
+    );
+
+    my $sub = ctor('SubscriptExpr',
+        target => $var,
+        index  => const_node('string', 'x'),
+        style  => const_node('enum', 'hash'),
+    );
+    my $assign = ctor('BinaryExpr',
+        op    => const_node('string', '='),
+        left  => $sub,
+        right => const_node('integer', '1'),
+    );
+
+    my $return_stmt = ctor('ReturnStmt', value => $var);
+
+    # Private method (_ prefix) — all callers are compiled
+    my $method = ctor('MethodDecl',
+        name        => const_node('string', '_make_item'),
+        params      => [],
+        body        => [$decl, $assign, $return_stmt],
+        return_type => undef,
+    );
+
+    my $class_decl = ctor('ClassDecl',
+        name   => const_node('string', 'TestPrivate'),
+        parent => undef,
+        body   => [$method],
+    );
+
+    my $program = ctor('Program', statements => [$class_decl]);
+
+    my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
+    my $schemas = $analyzer->analyze([
+        {
+            class_name => 'TestPrivate',
+            ir         => $program,
+        }
+    ]);
+
+    is(scalar keys $schemas->%*, 1,
+        'hash returned from private method IS promoted');
+}
+
+# === Test: C type inference — fields used in integer context get IV ===
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $item_var = const_node('variable', '$item');
+    my $empty = ctor('HashRefExpr', pairs => []);
+    my $decl = ctor('VarDecl',
+        variable    => $item_var,
+        initializer => $empty,
+    );
+
+    # $item->{count} = 0  (integer literal)
+    my $count_sub = ctor('SubscriptExpr',
+        target => $item_var,
+        index  => const_node('string', 'count'),
+        style  => const_node('enum', 'hash'),
+    );
+    my $assign_count = ctor('BinaryExpr',
+        op    => const_node('string', '='),
+        left  => $count_sub,
+        right => const_node('integer', '0'),
+    );
+
+    # $item->{count} + 1 (arithmetic usage)
+    my $count_read = ctor('SubscriptExpr',
+        target => $item_var,
+        index  => const_node('string', 'count'),
+        style  => const_node('enum', 'hash'),
+    );
+    my $arith = ctor('BinaryExpr',
+        op    => const_node('string', '+'),
+        left  => $count_read,
+        right => const_node('integer', '1'),
+    );
+
+    # $item->{name} = $name  (variable — SV* by default)
+    my $name_sub = ctor('SubscriptExpr',
+        target => $item_var,
+        index  => const_node('string', 'name'),
+        style  => const_node('enum', 'hash'),
+    );
+    my $assign_name = ctor('BinaryExpr',
+        op    => const_node('string', '='),
+        left  => $name_sub,
+        right => const_node('variable', '$name'),
+    );
+
+    my $method = ctor('MethodDecl',
+        name        => const_node('string', '_process'),
+        params      => [],
+        body        => [$decl, $assign_count, $arith, $assign_name],
+        return_type => undef,
+    );
+
+    my $class_decl = ctor('ClassDecl',
+        name   => const_node('string', 'TestTypes'),
+        parent => undef,
+        body   => [$method],
+    );
+
+    my $program = ctor('Program', statements => [$class_decl]);
+
+    my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
+    my $schemas = $analyzer->analyze([
+        {
+            class_name => 'TestTypes',
+            ir         => $program,
+        }
+    ]);
+
+    my @schema_names = sort keys $schemas->%*;
+    is(scalar @schema_names, 1, 'one schema detected');
+
+    my $schema = $schemas->{$schema_names[0]};
+    my %field_types = map { $_->{name} => $_->{c_type} } $schema->{fields}->@*;
+
+    is($field_types{count}, 'IV', 'count field inferred as IV (integer usage)');
+    is($field_types{name}, 'SV *', 'name field remains SV* (variable usage)');
+}
+
+# === Test: Escape analysis — hash passed to call_method on unknown class NOT promoted ===
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+
+    my $var = const_node('variable', '$data');
+    my $empty = ctor('HashRefExpr', pairs => []);
+    my $decl = ctor('VarDecl',
+        variable    => $var,
+        initializer => $empty,
+    );
+
+    my $sub = ctor('SubscriptExpr',
+        target => $var,
+        index  => const_node('string', 'key'),
+        style  => const_node('enum', 'hash'),
+    );
+    my $assign = ctor('BinaryExpr',
+        op    => const_node('string', '='),
+        left  => $sub,
+        right => const_node('integer', '1'),
+    );
+
+    # Pass hash to a method call on an unknown object: $obj->process($data)
+    my $method_call = ctor('MethodCallExpr',
+        invocant    => const_node('variable', '$obj'),
+        method_name => const_node('string', 'process'),
+        args        => [$var],
+    );
+
+    my $method = ctor('MethodDecl',
+        name        => const_node('string', '_internal'),
+        params      => [],
+        body        => [$decl, $assign, $method_call],
+        return_type => undef,
+    );
+
+    my $class_decl = ctor('ClassDecl',
+        name   => const_node('string', 'TestCallEscape'),
+        parent => undef,
+        body   => [$method],
+    );
+
+    my $program = ctor('Program', statements => [$class_decl]);
+
+    # Compile only TestCallEscape — $obj could be uncompiled
+    my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
+    my $schemas = $analyzer->analyze([
+        {
+            class_name => 'TestCallEscape',
+            ir         => $program,
+        }
+    ]);
+
+    is(scalar keys $schemas->%*, 0,
+        'hash passed as arg to method call on unknown object is NOT promoted');
+}
+
 done_testing;

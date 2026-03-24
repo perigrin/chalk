@@ -8,12 +8,26 @@ use Chalk::Bootstrap::IR::NodeFactory;
 
 class Chalk::Bootstrap::Optimizer::StructPromotion {
 
+    # Set of compiled class names — used by escape analysis
+    field $compiled_classes = {};
+
+    # Per-field usage tracking for C type inference
+    # var_key => { field_name => { integer_ctx => bool } }
+    field $field_usage = {};
+
     # Analyze all parsed classes and detect promotable hash schemas.
     # Input: arrayref of { class_name, ir } hashes (one per compiled class).
     # Output: hashref of { schema_name => { fields => [...], constructor_sites => [...], access_sites => [...] } }
     method analyze($parsed_classes) {
         my %var_schemas;     # "$class::$method::$var" => { keys => {}, non_promotable => bool }
-        my %schema_registry; # sorted_key_string => { name => ..., fields => [...], ... }
+
+        # Build compiled-class set for escape analysis
+        $compiled_classes = {};
+        for my $info ($parsed_classes->@*) {
+            $compiled_classes->{$info->{class_name}} = true;
+        }
+
+        $field_usage = {};
 
         for my $info ($parsed_classes->@*) {
             my $class_name = $info->{class_name};
@@ -33,8 +47,11 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 my $method_body = $item->inputs()->[2];
                 next unless defined $method_body && ref($method_body) eq 'ARRAY';
 
+                my $is_public = ($method_name !~ /^_/);
+
                 $self->_analyze_method_body(
-                    $class_name, $method_name, $method_body, \%var_schemas,
+                    $class_name, $method_name, $method_body,
+                    \%var_schemas, $is_public,
                 );
             }
         }
@@ -61,11 +78,21 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             # Generate schema name from key hash
             my $schema_name = "struct_${schema_counter}_t";
 
+            # Infer C types from field usage across all variables in this schema
             my @fields;
+            my $var_keys = $key_set_groups{$key_string};
             for my $fname (@field_names) {
+                my $is_iv = false;
+                for my $vk ($var_keys->@*) {
+                    if (exists $field_usage->{$vk}
+                        && exists $field_usage->{$vk}{$fname}
+                        && $field_usage->{$vk}{$fname}{integer_ctx}) {
+                        $is_iv = true;
+                    }
+                }
                 push @fields, {
                     name   => $fname,
-                    c_type => 'SV *',  # default, refined by type inference later
+                    c_type => $is_iv ? 'IV' : 'SV *',
                 };
             }
 
@@ -73,7 +100,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 fields            => \@fields,
                 constructor_sites => [],
                 access_sites      => [],
-                source_vars       => $key_set_groups{$key_string},
+                source_vars       => $var_keys,
             };
         }
 
@@ -81,12 +108,19 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     }
 
     # Walk a method body and detect hash construction + key accumulation patterns.
-    method _analyze_method_body($class_name, $method_name, $body, $var_schemas) {
+    method _analyze_method_body($class_name, $method_name, $body, $var_schemas, $is_public) {
         my $var_prefix = "${class_name}::${method_name}";
 
         for my $stmt ($body->@*) {
             next unless defined $stmt;
             $self->_walk_stmt($var_prefix, $stmt, $var_schemas);
+        }
+
+        # Escape analysis: check for hash variables returned from public methods
+        # or passed as arguments to method calls on potentially uncompiled objects.
+        for my $stmt ($body->@*) {
+            next unless defined $stmt;
+            $self->_check_escapes($var_prefix, $stmt, $var_schemas, $is_public);
         }
     }
 
@@ -139,11 +173,26 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             my $left    = $node->inputs()->[1];
             my $right   = $node->inputs()->[2];
 
-            if (defined $op_node
-                && $op_node isa Chalk::Bootstrap::IR::Node::Constant
-                && $op_node->value() eq '=') {
+            if (defined $op_node && $op_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                my $op_val = $op_node->value();
 
-                $self->_check_subscript_access($var_prefix, $left, $var_schemas);
+                if ($op_val eq '=') {
+                    $self->_check_subscript_access($var_prefix, $left, $var_schemas);
+
+                    # Type inference: if RHS is integer constant, mark field as integer
+                    if (defined $left
+                        && $left isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $left->class() eq 'SubscriptExpr') {
+                        $self->_infer_field_type($var_prefix, $left, $right, $var_schemas);
+                    }
+                }
+
+                # Arithmetic operators mark both operands as integer context
+                my %arith_ops = map { $_ => 1 } qw(+ - * / % < > <= >= == != <=>);
+                if (exists $arith_ops{$op_val}) {
+                    $self->_mark_integer_context($var_prefix, $left, $var_schemas);
+                    $self->_mark_integer_context($var_prefix, $right, $var_schemas);
+                }
             }
 
             # Walk both sides for nested patterns
@@ -207,6 +256,132 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             # Dynamic key — mark non-promotable
             $var_schemas->{$var_key}{non_promotable} = true;
         }
+    }
+
+    # Escape analysis: check if hash variables escape to uncompiled code.
+    # A hash escapes if:
+    #   1. Returned from a public method (callable by uncompiled code)
+    #   2. Passed as an argument to a method call on an object that may not be compiled
+    method _check_escapes($var_prefix, $node, $var_schemas, $is_public) {
+        return unless defined $node;
+        return unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+
+        my $class = $node->class();
+
+        # ReturnStmt in a public method — hash escapes
+        if ($class eq 'ReturnStmt' && $is_public) {
+            my $value = $node->inputs()->[0];
+            if (defined $value
+                && $value isa Chalk::Bootstrap::IR::Node::Constant
+                && $value->const_type() eq 'variable') {
+                my $var_key = "${var_prefix}::${\$value->value()}";
+                if (exists $var_schemas->{$var_key}) {
+                    $var_schemas->{$var_key}{non_promotable} = true;
+                }
+            }
+            return;
+        }
+
+        # MethodCallExpr — check if any hash variable is passed as an argument.
+        # If the invocant is $self, the call stays in compiled code (same class).
+        # Otherwise, conservatively assume the target might be uncompiled.
+        if ($class eq 'MethodCallExpr') {
+            my $invocant = $node->inputs()->[0];
+            my $is_self  = (defined $invocant
+                && $invocant isa Chalk::Bootstrap::IR::Node::Constant
+                && $invocant->const_type() eq 'variable'
+                && $invocant->value() eq '$self');
+
+            unless ($is_self) {
+                my $args = $node->inputs()->[2];
+                if (defined $args && ref($args) eq 'ARRAY') {
+                    for my $arg ($args->@*) {
+                        if (defined $arg
+                            && $arg isa Chalk::Bootstrap::IR::Node::Constant
+                            && $arg->const_type() eq 'variable') {
+                            my $var_key = "${var_prefix}::${\$arg->value()}";
+                            if (exists $var_schemas->{$var_key}) {
+                                $var_schemas->{$var_key}{non_promotable} = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        # Walk children recursively
+        my $inputs = $node->inputs();
+        for my $input ($inputs->@*) {
+            next unless defined $input;
+            if (ref($input) eq 'ARRAY') {
+                for my $child ($input->@*) {
+                    $self->_check_escapes($var_prefix, $child, $var_schemas, $is_public);
+                }
+            } else {
+                $self->_check_escapes($var_prefix, $input, $var_schemas, $is_public);
+            }
+        }
+    }
+
+    # Type inference: infer C type for a field from its assigned value.
+    method _infer_field_type($var_prefix, $subscript_node, $rhs, $var_schemas) {
+        my $target = $subscript_node->inputs()->[0];
+        my $index  = $subscript_node->inputs()->[1];
+        my $style  = $subscript_node->inputs()->[2];
+
+        return unless defined $style
+            && $style isa Chalk::Bootstrap::IR::Node::Constant
+            && $style->value() eq 'hash';
+
+        return unless defined $target
+            && $target isa Chalk::Bootstrap::IR::Node::Constant
+            && $target->const_type() eq 'variable';
+
+        return unless defined $index
+            && $index isa Chalk::Bootstrap::IR::Node::Constant
+            && $index->const_type() eq 'string';
+
+        my $var_key    = "${var_prefix}::${\$target->value()}";
+        my $field_name = $index->value();
+
+        return unless exists $var_schemas->{$var_key};
+
+        # If RHS is an integer constant, mark field as integer context
+        if (defined $rhs
+            && $rhs isa Chalk::Bootstrap::IR::Node::Constant
+            && $rhs->const_type() eq 'integer') {
+            $field_usage->{$var_key}{$field_name}{integer_ctx} = true;
+        }
+    }
+
+    # Mark a SubscriptExpr node's field as used in integer context (arithmetic).
+    method _mark_integer_context($var_prefix, $node, $var_schemas) {
+        return unless defined $node;
+        return unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return unless $node->class() eq 'SubscriptExpr';
+
+        my $target = $node->inputs()->[0];
+        my $index  = $node->inputs()->[1];
+        my $style  = $node->inputs()->[2];
+
+        return unless defined $style
+            && $style isa Chalk::Bootstrap::IR::Node::Constant
+            && $style->value() eq 'hash';
+
+        return unless defined $target
+            && $target isa Chalk::Bootstrap::IR::Node::Constant
+            && $target->const_type() eq 'variable';
+
+        return unless defined $index
+            && $index isa Chalk::Bootstrap::IR::Node::Constant
+            && $index->const_type() eq 'string';
+
+        my $var_key    = "${var_prefix}::${\$target->value()}";
+        my $field_name = $index->value();
+
+        return unless exists $var_schemas->{$var_key};
+
+        $field_usage->{$var_key}{$field_name}{integer_ctx} = true;
     }
 
     # Find the ClassDecl node in the IR tree.
