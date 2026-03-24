@@ -23,6 +23,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     field $_regex_counter = 0; # monotonic counter for unique regex static variable names
     field $_regex_statics;     # arrayref of { var, pat } for lazy-compiled REGEXP* statics
     field %_use_constants;     # constant_name => numeric_value from `use constant { ... }` declarations
+    field $_struct_schemas = {}; # schema_name => { fields => [{ name, c_type }] } for struct promotion
 
     ADJUST {
         die "Invalid module name: $module_name"
@@ -69,6 +70,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _get_use_constants()       { return \%_use_constants; }
     method _reset_use_constants()     { %_use_constants = (); }
     method _set_use_constant($name, $val) { $_use_constants{$name} = $val; }
+    method set_struct_schemas($val)  { $_struct_schemas = $val; }
+    method _get_struct_schemas()     { return $_struct_schemas; }
 
     # Derive a short lowercase slug from a class name for identifier namespacing.
     # Takes the last component of a qualified name and lowercases it.
@@ -2267,6 +2270,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             if ($class eq 'BacktickExpr')       { return $self->_emit_backtick_expr($node, $declared_vars); }
             if ($class eq 'CompoundAssign')     { return $self->_emit_compound_assign_expr($node, $declared_vars); }
             if ($class eq 'VarDecl')            { return $self->_emit_var_decl_expr($node, $declared_vars); }
+            if ($class eq 'StructRef')          { return $self->_emit_struct_ref_expr($node, $declared_vars); }
+            if ($class eq 'FieldAccess')        { return $self->_emit_field_access_expr($node, $declared_vars); }
 
             # ReturnStmt used as expression: stale-value merge artifact from Earley parser.
             # Unwrap and emit the inner value as an expression.
@@ -2284,6 +2289,105 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         return "NULL /* unsupported */";
+    }
+
+    # Emit C code for StructRef: allocate SV with struct bytes, write fields.
+    method _emit_struct_ref_expr($node, $declared_vars) {
+        my $schema_name = $node->inputs()->[0]->value();
+        my $field_vals  = $node->inputs()->[1];
+
+        my $schema = $_struct_schemas->{$schema_name};
+        unless (defined $schema) {
+            return "NULL /* unknown schema $schema_name */";
+        }
+
+        my @fields = $schema->{fields}->@*;
+        my @lines;
+        push @lines, "SV *_struct_sv = newSV(sizeof($schema_name))";
+        push @lines, "SvPOK_on(_struct_sv)";
+        push @lines, "SvCUR_set(_struct_sv, sizeof($schema_name))";
+        push @lines, "$schema_name *_sp = ($schema_name *)SvPVX(_struct_sv)";
+
+        for my $i (0 .. $#fields) {
+            my $fname  = $fields[$i]{name};
+            my $c_type = $fields[$i]{c_type};
+            my $val_node = (defined $field_vals && $i < scalar($field_vals->@*))
+                ? $field_vals->[$i]
+                : undef;
+            my $val_expr = defined $val_node
+                ? $self->_emit_expr($val_node, $declared_vars)
+                : ($c_type eq 'IV' ? '0' : 'NULL');
+
+            if ($c_type eq 'IV') {
+                # IV field: extract integer from SV
+                push @lines, "_sp->$fname = SvIV($val_expr)";
+            } else {
+                # SV* field: store pointer directly
+                push @lines, "_sp->$fname = $val_expr";
+            }
+        }
+
+        return "({ " . join("; ", @lines) . "; _struct_sv; })";
+    }
+
+    # Emit C code for FieldAccess: cast SvPVX to struct pointer, access field.
+    method _emit_field_access_expr($node, $declared_vars) {
+        my $schema_name = $node->inputs()->[0]->value();
+        my $field_name  = $node->inputs()->[1]->value();
+        my $target      = $node->inputs()->[2];
+
+        my $tgt = defined $target
+            ? $self->_emit_expr($target, $declared_vars)
+            : 'self';
+
+        my $schema = $_struct_schemas->{$schema_name};
+        my $c_type = 'SV *';  # default
+        if (defined $schema) {
+            for my $f ($schema->{fields}->@*) {
+                if ($f->{name} eq $field_name) {
+                    $c_type = $f->{c_type};
+                    last;
+                }
+            }
+        }
+
+        my $access = "(($schema_name *)SvPVX($tgt))->$field_name";
+
+        if ($c_type eq 'IV') {
+            # IV field: wrap in newSViv for SV* context
+            return "newSViv($access)";
+        }
+
+        return $access;
+    }
+
+    # Public wrappers for testing emit methods directly.
+    method emit_struct_ref($node, $declared_vars) {
+        return $self->_emit_struct_ref_expr($node, $declared_vars);
+    }
+
+    method emit_field_access($node, $declared_vars) {
+        return $self->_emit_field_access_expr($node, $declared_vars);
+    }
+
+    # Generate C typedef declarations for all struct schemas.
+    method generate_typedefs() {
+        return '' unless keys $_struct_schemas->%*;
+
+        my @typedefs;
+        for my $sname (sort keys $_struct_schemas->%*) {
+            my @fields = $_struct_schemas->{$sname}{fields}->@*;
+            my @field_lines;
+            for my $f (@fields) {
+                my $pad = ($f->{c_type} eq 'IV') ? '   ' : '';
+                push @field_lines, "    $f->{c_type}$pad $f->{name};";
+            }
+            push @typedefs, "typedef struct {\n"
+                . join("\n", @field_lines) . "\n"
+                . "} $sname;";
+        }
+
+        return join("\n\n", @typedefs) . "\n";
     }
 
 }
