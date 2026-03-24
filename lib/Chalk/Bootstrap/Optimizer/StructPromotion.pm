@@ -439,6 +439,20 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 next;
             }
 
+            # Check if any promoted var belongs to this class
+            my $class_has_promoted = false;
+            for my $vk (sort keys %var_to_schema) {
+                if ($vk =~ /^\Q$class_name\E::/) {
+                    $class_has_promoted = true;
+                    last;
+                }
+            }
+
+            unless ($class_has_promoted) {
+                push @result, { $info->%* };
+                next;
+            }
+
             my @new_body;
             for my $item ($body->@*) {
                 unless ($item isa Chalk::Bootstrap::IR::Node::Constructor
@@ -452,23 +466,42 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 my $method_body = $item->inputs()->[2];
                 my $var_prefix  = "${class_name}::${method_name}";
 
-                if (defined $method_body && ref($method_body) eq 'ARRAY') {
-                    my $new_method_body = $self->_rewrite_method_body(
-                        $factory, $var_prefix, $method_body,
-                        \%var_to_schema, \%schema_fields,
-                    );
-
-                    my $new_method = $factory->make('Constructor',
-                        class       => $item->class(),
-                        name        => $item->inputs()->[0],
-                        params      => $params,
-                        body        => $new_method_body,
-                        return_type => $item->inputs()->[3],
-                    );
-                    push @new_body, $new_method;
-                } else {
-                    push @new_body, $item;
+                # Only rewrite methods that contain promoted variables
+                my $method_has_promoted = false;
+                for my $vk (sort keys %var_to_schema) {
+                    if ($vk =~ /^\Q$var_prefix\E::/) {
+                        $method_has_promoted = true;
+                        last;
+                    }
                 }
+
+                unless ($method_has_promoted && defined $method_body
+                    && ref($method_body) eq 'ARRAY') {
+                    push @new_body, $item;
+                    next;
+                }
+
+                my $new_method_body = $self->_rewrite_method_body(
+                    $factory, $var_prefix, $method_body,
+                    \%var_to_schema, \%schema_fields,
+                );
+
+                # MethodDecl has return_type as 4th input, SubDecl has scope
+                my %extra;
+                if ($item->class() eq 'MethodDecl') {
+                    $extra{return_type} = $item->inputs()->[3];
+                } elsif ($item->class() eq 'SubDecl') {
+                    $extra{scope} = $item->inputs()->[3];
+                }
+
+                my $new_method = $factory->make('Constructor',
+                    class  => $item->class(),
+                    name   => $item->inputs()->[0],
+                    params => $params,
+                    body   => $new_method_body,
+                    %extra,
+                );
+                push @new_body, $new_method;
             }
 
             # Rebuild ClassDecl with new body
