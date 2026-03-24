@@ -246,27 +246,14 @@ class Chalk::Bootstrap::Earley {
         ($chart->[$pos][$core_id] //= {})->{$origin} = $value;
     }
 
-    # Get the symbol after the dot for a core item
+    # Get the symbol after the dot for a core item (O(1) precomputed lookup)
     method _symbol_after_dot_for($core_id) {
-        my $rule_name = $core_index->rule_name_for($core_id);
-        my $alt_idx   = $core_index->alt_idx_for($core_id);
-        my $dot       = $core_index->dot_for($core_id);
-        my $rule      = $rule_table->{$rule_name};
-        my $alt       = $rule->expressions()->[$alt_idx];
-
-        return if $dot >= scalar $alt->@*;
-        return $alt->[$dot];
+        return $core_index->symbol_after($core_id);
     }
 
-    # Check if a core item is complete (dot at end)
+    # Check if a core item is complete (O(1) precomputed lookup)
     method _is_complete_id($core_id) {
-        my $rule_name = $core_index->rule_name_for($core_id);
-        my $alt_idx   = $core_index->alt_idx_for($core_id);
-        my $dot       = $core_index->dot_for($core_id);
-        my $rule      = $rule_table->{$rule_name};
-        my $alt       = $rule->expressions()->[$alt_idx];
-
-        return $dot >= scalar $alt->@*;
+        return $core_index->is_complete($core_id);
     }
 
     # Internal parse implementation that returns raw semiring value or undef
@@ -277,6 +264,13 @@ class Chalk::Bootstrap::Earley {
         # Values are stored directly — no item hashref wrappers.
         # core_id encodes (rule_name, alt_idx, dot); CoreItemIndex provides O(1) lookups.
         my @chart = map { [] } (0 .. $n);
+
+        # Cache CoreItemIndex arrays for hot-loop direct indexing
+        # (avoids per-element method dispatch overhead)
+        my $ci_completions   = $core_index->completions();
+        my $ci_symbols_after = $core_index->symbols_after();
+        my $ci_rule_names    = $core_index->rule_names();
+        my $ci_alt_idxs      = $core_index->alt_idxs();
 
         # Reset secondary indexes for this parse
         %completed_at = ();
@@ -343,10 +337,10 @@ class Chalk::Bootstrap::Earley {
                 # this entry was pushed to the agenda)
                 my $value = $chart[$pos][$core_id]{$origin};
 
-                if ($self->_is_complete_id($core_id)) {
+                if ($ci_completions->[$core_id]) {
                     # Apply on_complete for completed rule before propagating
-                    my $rule_name = $core_index->rule_name_for($core_id);
-                    my $alt_idx = $core_index->alt_idx_for($core_id);
+                    my $rule_name = $ci_rule_names->[$core_id];
+                    my $alt_idx = $ci_alt_idxs->[$core_id];
                     my $completed_value = $semiring->on_complete(
                         $value, $rule_name,
                         $alt_idx, $pos, $origin, $on_epoch_commit
@@ -365,9 +359,9 @@ class Chalk::Bootstrap::Earley {
                     # Complete
                     $self->_complete($core_id, $origin, $completed_value, $pos, \@chart, \@agenda);
                 } else {
-                    my $symbol = $self->_symbol_after_dot_for($core_id);
-                    my $rule_name = $core_index->rule_name_for($core_id);
-                    my $alt_idx = $core_index->alt_idx_for($core_id);
+                    my $symbol = $ci_symbols_after->[$core_id];
+                    my $rule_name = $ci_rule_names->[$core_id];
+                    my $alt_idx = $ci_alt_idxs->[$core_id];
 
                     if ($symbol->is_reference()) {
                         my $w_rule = $symbol->value();

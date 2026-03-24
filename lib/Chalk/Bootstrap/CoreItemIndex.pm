@@ -11,6 +11,8 @@ class Chalk::Bootstrap::CoreItemIndex {
     field @id_to_alt_idx;     # integer => alt index integer (O(1) accessor)
     field @id_to_dot;         # integer => dot position integer (O(1) accessor)
     field @id_to_rule;        # integer => Rule object (populated by build_from_grammar)
+    field @id_is_complete;    # integer => boolean (precomputed: dot >= length of alt)
+    field @id_symbol_after;   # integer => Symbol object or undef (precomputed)
     field %advance_map;       # core_id => core_id for dot+1
     field $count :reader = 0;
 
@@ -48,6 +50,16 @@ class Chalk::Bootstrap::CoreItemIndex {
     method alt_idx_for($id)   { return $id_to_alt_idx[$id]   }
     method dot_for($id)       { return $id_to_dot[$id]        }
     method rule_for($id)      { return $id_to_rule[$id]       }
+    method is_complete($id)   { return $id_is_complete[$id]   }
+    method symbol_after($id)  { return $id_symbol_after[$id]  }
+
+    # Bulk accessors returning arrayrefs for hot-loop direct indexing.
+    # Avoids per-element method dispatch overhead in the Earley inner loop.
+    method rule_names()       { return \@id_to_rule_name      }
+    method alt_idxs()         { return \@id_to_alt_idx        }
+    method dots()             { return \@id_to_dot            }
+    method completions()      { return \@id_is_complete       }
+    method symbols_after()    { return \@id_symbol_after      }
 
     # Get the ID for the same item but with dot+1
     method advance($id) {
@@ -64,17 +76,21 @@ class Chalk::Bootstrap::CoreItemIndex {
     }
 
     # Build the index from a grammar (arrayref of Rule objects).
-    # Also populates @id_to_rule so that rule_for($id) returns the Rule object.
+    # Also populates @id_to_rule, @id_is_complete, and @id_symbol_after
+    # so that rule_for($id), is_complete($id), and symbol_after($id) are O(1).
     method build_from_grammar($grammar) {
         for my $rule ($grammar->@*) {
             my $name = $rule->name();
             my $expressions = $rule->expressions();
             for my $alt_idx (0 .. $expressions->$#*) {
                 my $alt = $expressions->[$alt_idx];
+                my $alt_len = scalar $alt->@*;
                 # Register dot positions 0 through length of alternative
-                for my $dot (0 .. scalar $alt->@*) {
+                for my $dot (0 .. $alt_len) {
                     my $id = $self->register($name, $alt_idx, $dot);
                     $id_to_rule[$id] = $rule;
+                    $id_is_complete[$id] = ($dot >= $alt_len) ? true : false;
+                    $id_symbol_after[$id] = ($dot < $alt_len) ? $alt->[$dot] : undef;
                 }
             }
         }
