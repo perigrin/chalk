@@ -79,6 +79,9 @@ class Chalk::Bootstrap::Earley {
     # Set registry: (core_set_id, distance_vector_hash) pairs (parse-lifetime)
     field %_set_registry;
 
+    # Scan statistics for terminal clustering
+    field %_scan_stats;
+
 
     ADJUST {
         $rule_table = {};
@@ -144,6 +147,7 @@ class Chalk::Bootstrap::Earley {
         @_pos_core_set = ();
         %_dist_stats = ();
         %_set_registry = ();
+        %_scan_stats = ();
     }
 
     # Clear all caches including grammar-lifetime data.
@@ -260,6 +264,25 @@ class Chalk::Bootstrap::Earley {
             terminal_map   => \%terminal_map,
             completion_map => \%completion_map,
         };
+    }
+
+    # Pre-scan all terminal patterns from a core set's terminal_map at $pos.
+    # Populates %_scan_cache so individual _scan calls get immediate hits.
+    # This is terminal clustering: try each distinct pattern once per position
+    # instead of discovering patterns item-by-item.
+    method _cluster_scan($pos, $input, $cs_id) {
+        my $table = $_dfa_tables{$cs_id};
+        return unless defined $table;
+        my $tmap = $table->{terminal_map};
+        return unless defined $tmap;
+
+        for my $pattern_str (keys $tmap->%*) {
+            next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pattern_str};
+            my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
+            my $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+            $_scan_cache{$pos}{$pattern_str} = $end_pos;
+            $_scan_stats{clustered_scans}++;
+        }
     }
 
     # Detailed parse profiling — enabled by setting $ENV{EARLEY_PROFILE}
@@ -406,9 +429,10 @@ class Chalk::Bootstrap::Earley {
     # Report the chart origin dimension type (for testing)
     method chart_origin_type() { return 'ARRAY'; }
 
-    # Accessors for distance stats and set registry (fields declared at top)
+    # Accessors for distance stats, set registry, and scan stats (fields at top)
     method distance_stats() { return \%_dist_stats; }
     method set_registry() { return \%_set_registry; }
+    method scan_stats() { return \%_scan_stats; }
 
     # Get the symbol after the dot for a core item (O(1) precomputed lookup)
     method _symbol_after_dot_for($core_id) {
@@ -444,6 +468,7 @@ class Chalk::Bootstrap::Earley {
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
         %_dist_stats = (max_distance => 0);
         %_set_registry = ();
+        %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
         $_last_active_pos = 0;
         $_diag_expected = {};
         @_pos_core_set = ();
@@ -486,6 +511,27 @@ class Chalk::Bootstrap::Earley {
             if (@agenda) {
                 $_last_active_pos = $pos;
             }
+
+            # Terminal clustering: pre-scan all terminal patterns expected by
+            # items at this position. Populates the scan cache so individual
+            # _scan calls get immediate cache hits.
+            if ($pos < $n) {
+                my %seen_patterns;
+                for my $core_id (0 .. $chart[$pos]->$#*) {
+                    next unless defined $chart[$pos][$core_id];
+                    my $sym = $ci_symbols_after->[$core_id];
+                    next unless defined $sym;
+                    next if $sym->is_reference();
+                    my $pstr = $sym->value();
+                    next if $seen_patterns{$pstr};
+                    $seen_patterns{$pstr} = true;
+                    next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
+                    my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
+                    $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+                    $_scan_stats{clustered_scans}++;
+                }
+            }
+
             my @processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
 
@@ -962,15 +1008,19 @@ class Chalk::Bootstrap::Earley {
     method _scan($core_id, $origin, $value, $symbol, $pos, $input, $chart, $n, $agenda = undef, $predicted_at = undef) {
         my $pattern_str = $symbol->value();
 
-        # Check scan result cache before attempting regex match
+        # Check scan result cache before attempting regex match.
+        # Terminal clustering pre-populates this cache via _cluster_scan,
+        # so most lookups here are cache hits.
         my $end_pos;
         if (exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pattern_str}) {
             $end_pos = $_scan_cache{$pos}{$pattern_str};
+            $_scan_stats{cache_hits}++;
         } else {
             my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
             $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
             $_scan_cache{$pos}{$pattern_str} = $end_pos;
         }
+        $_scan_stats{total_matches}++;
 
         return unless defined $end_pos;
 
