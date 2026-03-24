@@ -73,6 +73,12 @@ class Chalk::Bootstrap::Earley {
     # Core set id per chart position (parse-lifetime)
     field @_pos_core_set;
 
+    # Distance statistics for the most recent parse (parse-lifetime)
+    field %_dist_stats;
+
+    # Set registry: (core_set_id, distance_vector_hash) pairs (parse-lifetime)
+    field %_set_registry;
+
 
     ADJUST {
         $rule_table = {};
@@ -136,6 +142,8 @@ class Chalk::Bootstrap::Earley {
         $_last_active_pos = 0;
         $_diag_expected = {};
         @_pos_core_set = ();
+        %_dist_stats = ();
+        %_set_registry = ();
     }
 
     # Clear all caches including grammar-lifetime data.
@@ -156,7 +164,12 @@ class Chalk::Bootstrap::Earley {
         for my $core_id (0 .. $slot->$#*) {
             my $oh = $slot->[$core_id];
             next unless defined $oh;
-            next unless keys $oh->%*;
+            # Check if any defined values exist in the array
+            my $has_values = false;
+            for my $v ($oh->@*) {
+                if (defined $v) { $has_values = true; last; }
+            }
+            next unless $has_values;
             push @active, $core_id;
         }
         # @active is already sorted (iterated in order)
@@ -182,6 +195,35 @@ class Chalk::Bootstrap::Earley {
         $self->_build_dfa_tables($cs_id, \@active);
 
         return $cs_id;
+    }
+
+    # Build distance vector for a chart position and register in set registry.
+    # Called after core set discovery. Tracks max distance for stats.
+    method _register_distance_vector($chart, $pos, $cs_id) {
+        my $slot = $chart->[$pos];
+        my @dist_pairs;
+
+        for my $core_id (0 .. $slot->$#*) {
+            my $oh = $slot->[$core_id];
+            next unless defined $oh;
+            for my $rd (0 .. $oh->$#*) {
+                next unless defined $oh->[$rd];
+                push @dist_pairs, "$core_id:$rd";
+                # Track max distance
+                if (!defined $_dist_stats{max_distance} || $rd > $_dist_stats{max_distance}) {
+                    $_dist_stats{max_distance} = $rd;
+                }
+            }
+        }
+
+        my $dist_hash = join(";", sort @dist_pairs);
+        my $set_key = "$cs_id:$dist_hash";
+        $_set_registry{$set_key} //= {
+            core_set_id => $cs_id,
+            dist_hash   => $dist_hash,
+            count       => 0,
+        };
+        $_set_registry{$set_key}{count}++;
     }
 
     # Build DFA state tables for a core set: terminal_map and completion_map.
@@ -267,7 +309,8 @@ class Chalk::Bootstrap::Earley {
             my $rule = $rule_table->{$rule_name};
             my $rhs = $rule->expressions()->[$alt_idx];
 
-            for my $origin (keys $oh->%*) {
+            for my $rd (0 .. $oh->$#*) {
+                next unless defined $oh->[$rd];
                 # Property 3: reject empty-rule completions
                 return false if scalar($rhs->@*) == 0;
 
@@ -333,7 +376,9 @@ class Chalk::Bootstrap::Earley {
             my $min_origin = $pos;
             for my $oh ($chart[$pos]->@*) {
                 next unless defined $oh;
-                for my $o (keys $oh->%*) {
+                for my $rd (0 .. $oh->$#*) {
+                    next unless defined $oh->[$rd];
+                    my $o = $pos - $rd;
                     $min_origin = $o if $o < $min_origin;
                 }
             }
@@ -342,20 +387,28 @@ class Chalk::Bootstrap::Earley {
         return \%origin_at_pos;
     }
 
-    # Chart access helpers. Chart structure: $chart[$pos][$core_id]{$origin} = $value
+    # Chart access helpers. Chart structure: $chart[$pos][$core_id][$rel_dist] = $value
+    # Origin dimension uses relative distances: rel_dist = pos - origin.
     # Values are stored directly — no item hashref wrappers.
     method _chart_has($chart, $pos, $core_id, $origin) {
         my $oh = $chart->[$pos][$core_id];
-        return defined $oh && exists $oh->{$origin};
+        return defined $oh && defined $oh->[$pos - $origin];
     }
 
     method _chart_get($chart, $pos, $core_id, $origin) {
-        return $chart->[$pos][$core_id]{$origin};
+        return $chart->[$pos][$core_id][$pos - $origin];
     }
 
     method _chart_set($chart, $pos, $core_id, $origin, $value) {
-        ($chart->[$pos][$core_id] //= {})->{$origin} = $value;
+        ($chart->[$pos][$core_id] //= [])->[$pos - $origin] = $value;
     }
+
+    # Report the chart origin dimension type (for testing)
+    method chart_origin_type() { return 'ARRAY'; }
+
+    # Accessors for distance stats and set registry (fields declared at top)
+    method distance_stats() { return \%_dist_stats; }
+    method set_registry() { return \%_set_registry; }
 
     # Get the symbol after the dot for a core item (O(1) precomputed lookup)
     method _symbol_after_dot_for($core_id) {
@@ -389,6 +442,8 @@ class Chalk::Bootstrap::Earley {
         %_scan_cache = ();
         $_leo_origin_min = undef;
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
+        %_dist_stats = (max_distance => 0);
+        %_set_registry = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
         @_pos_core_set = ();
@@ -397,9 +452,10 @@ class Chalk::Bootstrap::Earley {
         my $start_rule = $grammar->[0];
 
         # Initialize chart[0] with start rule items (one per alternative)
+        # rel_dist = 0 - 0 = 0 (origin and pos are both 0)
         for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
             my $core_id = $core_index->id_for($start_rule->name(), $alt_idx, 0);
-            ($chart[0][$core_id] //= {})->{0} = $semiring->one();
+            ($chart[0][$core_id] //= [])->[0] = $semiring->one();
         }
 
         # GC tracking
@@ -416,12 +472,14 @@ class Chalk::Bootstrap::Earley {
         for my $pos (0 .. $n) {
             # Build agenda from all entries at this position.
             # Agenda carries [$core_id, $origin] pairs; values are in the chart.
+            # Chart uses relative distances: rel_dist = pos - origin.
             my @agenda;
             for my $core_id (0 .. $chart[$pos]->$#*) {
                 my $oh = $chart[$pos][$core_id];
                 next unless defined $oh;
-                for my $origin (keys $oh->%*) {
-                    push @agenda, [$core_id, $origin];
+                for my $rel_dist (0 .. $oh->$#*) {
+                    next unless defined $oh->[$rel_dist];
+                    push @agenda, [$core_id, $pos - $rel_dist];
                 }
             }
             # Track furthest position with active items for diagnostics
@@ -447,7 +505,7 @@ class Chalk::Bootstrap::Earley {
 
                 # Read value from chart (may have been updated by a merge since
                 # this entry was pushed to the agenda)
-                my $value = $chart[$pos][$core_id]{$origin};
+                my $value = $chart[$pos][$core_id][$pos - $origin];
 
                 if ($ci_completions->[$core_id]) {
                     # Apply on_complete for completed rule before propagating
@@ -458,7 +516,7 @@ class Chalk::Bootstrap::Earley {
                         $alt_idx, $pos, $origin, $on_epoch_commit
                     );
                     # Update the chart entry with the action-applied value
-                    $chart[$pos][$core_id]{$origin} = $completed_value;
+                    $chart[$pos][$core_id][$pos - $origin] = $completed_value;
                     # Index this completed item for _advance_from_completed lookups
                     $completed_at{$rule_name}{$origin}{$pos} //= [];
                     push $completed_at{$rule_name}{$origin}{$pos}->@*, [$core_id, $origin];
@@ -492,22 +550,23 @@ class Chalk::Bootstrap::Earley {
                             my $skip_is_zero = defined $skip_value ? $semiring->is_zero($skip_value) : true;
                             if (defined $skip_value && !$skip_is_zero) {
                                 my $skip_core = $core_index->advance($core_id);
+                                my $skip_rd = $pos - $origin;
                                 my $skip_oh = $chart[$pos][$skip_core];
-                                if (defined $skip_oh && exists $skip_oh->{$origin}) {
-                                    my $existing_val = $skip_oh->{$origin};
+                                if (defined $skip_oh && defined $skip_oh->[$skip_rd]) {
+                                    my $existing_val = $skip_oh->[$skip_rd];
                                     my $merged = $semiring->add(
                                         $existing_val, $skip_value
                                     );
                                     my $merged_is_zero = $semiring->is_zero($merged);
                                     if (!$merged_is_zero) {
-                                        $chart[$pos][$skip_core]{$origin} = $merged;
+                                        $chart[$pos][$skip_core][$skip_rd] = $merged;
                                         my $sp_slot = $processed[$skip_core];
                                         my $sp_done = defined $sp_slot && $sp_slot->[$origin];
                                         push @agenda, [$skip_core, $origin]
                                             unless $sp_done;
                                     }
                                 } else {
-                                    ($chart[$pos][$skip_core] //= {})->{$origin} = $skip_value;
+                                    ($chart[$pos][$skip_core] //= [])->[$skip_rd] = $skip_value;
                                     push @agenda, [$skip_core, $origin];
                                 }
                             }
@@ -539,11 +598,8 @@ class Chalk::Bootstrap::Earley {
                 $_diag_expected = {};
                 for my $core_id (0 .. $chart[$pos]->$#*) {
                     my $oh = $chart[$pos][$core_id];
-                    next unless defined $oh;
+                    next unless defined $oh && $oh->@*;
                     next if $self->_is_complete_id($core_id);
-                    # Only need to check once per core_id (symbol is the same
-                    # regardless of origin), but we need at least one origin
-                    next unless keys $oh->%*;
                     my $sym = $self->_symbol_after_dot_for($core_id);
                     if (defined $sym && !$sym->is_reference()) {
                         $_diag_expected->{$sym->value()} = 1;
@@ -567,18 +623,20 @@ class Chalk::Bootstrap::Earley {
                         next if $sp >= $pos;  # don't sweep current position
                         my $slot = $chart[$sp];
                         next unless defined $slot && $slot->@*;
+                        # max_rd: items with origin > sweep_origin have
+                        # rel_dist < sp - sweep_origin
+                        my $max_rd = $sp - $sweep_origin;
                         for my $cid (0 .. $slot->$#*) {
                             my $oh = $slot->[$cid];
                             next unless defined $oh;
                             next unless $self->_is_complete_id($cid);
-                            for my $ok (keys $oh->%*) {
-                                next unless $ok > $sweep_origin;
-                                my $val = $oh->{$ok};
-                                next unless defined $val;
+                            for my $rd (0 .. $oh->$#*) {
+                                next unless $rd < $max_rd;
+                                next unless defined $oh->[$rd];
                                 # Only null completed items — incomplete items
                                 # may still be needed by future completions
                                 # (e.g. ElsifChain waiting for recursive child)
-                                $oh->{$ok} = undef;
+                                $oh->[$rd] = undef;
                             }
                         }
                     }
@@ -591,7 +649,7 @@ class Chalk::Bootstrap::Earley {
                         for my $oh ($slot->@*) {
                             last unless $all_null;
                             next unless defined $oh;
-                            for my $val (values $oh->%*) {
+                            for my $val ($oh->@*) {
                                 if (defined $val) {
                                     $all_null = false;
                                     last;
@@ -625,10 +683,13 @@ class Chalk::Bootstrap::Earley {
                         last unless $safe_to_free;
                         my $oh = $chart[$pos][$cid];
                         next unless defined $oh;
-                        for my $org (keys $oh->%*) {
-                            next unless $org > $last_safe_pos && $org < $pos;
-                            my $val = $oh->{$org};
-                            next unless defined $val;
+                        # Check if any origin is in (last_safe_pos, pos)
+                        # rel_dist = pos - origin, so origin in that range
+                        # means rel_dist in (0, pos - last_safe_pos)
+                        my $min_rd = 1;  # origin < pos → rd > 0
+                        my $max_rd = $pos - $last_safe_pos;  # origin > last_safe_pos
+                        for my $rd ($min_rd .. $max_rd - 1) {
+                            next unless defined $oh->[$rd];
                             unless ($self->_is_complete_id($cid)) {
                                 $safe_to_free = false;
                                 last;
@@ -666,7 +727,9 @@ class Chalk::Bootstrap::Earley {
                     next unless defined $chart[$q] && $chart[$q]->@*;
                     for my $oh ($chart[$q]->@*) {
                         next unless defined $oh;
-                        for my $o (keys $oh->%*) {
+                        for my $rd (0 .. $oh->$#*) {
+                            next unless defined $oh->[$rd];
+                            my $o = $q - $rd;
                             if ($o < $true_min) {
                                 $true_min = $o;
                                 $min_at_q = $q;
@@ -684,7 +747,8 @@ class Chalk::Bootstrap::Earley {
             # built lazily on first encounter. Only discover if the position
             # has active items (after GC may have cleared it).
             if (defined $chart[$pos] && $chart[$pos]->@*) {
-                $self->_discover_core_set(\@chart, $pos);
+                my $cs_id = $self->_discover_core_set(\@chart, $pos);
+                $self->_register_distance_vector(\@chart, $pos, $cs_id);
             }
 
             # Profiling: track chart size and live positions per position
@@ -692,7 +756,7 @@ class Chalk::Bootstrap::Earley {
                 my $items_at_pos = 0;
                 for my $oh ($chart[$pos]->@*) {
                     next unless defined $oh;
-                    $items_at_pos += scalar keys $oh->%*;
+                    $items_at_pos += scalar grep { defined } $oh->@*;
                 }
                 $_profile_data{total_items} += $items_at_pos;
                 if ($items_at_pos > ($_profile_data{max_items_at_pos} // 0)) {
@@ -721,8 +785,8 @@ class Chalk::Bootstrap::Earley {
             my $core_id = $core_index->id_for($start_rule->name(), $alt_idx, $end_dot);
 
             my $end_oh = $chart[$n][$core_id];
-            if (defined $end_oh && exists $end_oh->{0}) {
-                return $end_oh->{0};
+            if (defined $end_oh && defined $end_oh->[$n]) {
+                return $end_oh->[$n];
             }
         }
 
@@ -1019,7 +1083,10 @@ class Chalk::Bootstrap::Earley {
             my $oh = $chart->[$origin][$w_core_id];
             next unless defined $oh;
 
-            for my $w_origin (keys $oh->%*) {
+            for my $w_rd (0 .. $oh->$#*) {
+                next unless defined $oh->[$w_rd];
+                my $w_origin = $origin - $w_rd;
+
                 # Skip the waiting item already handled by Leo resolution above.
                 # Uses explicit if-block because postfix `next if ... &&` miscompiles
                 # in XS codegen (garbled eval_pv fallback).
@@ -1028,7 +1095,7 @@ class Chalk::Bootstrap::Earley {
                         && $w_origin  == $leo_resolved_origin;
                 }
 
-                my $waiting_value = $oh->{$w_origin};
+                my $waiting_value = $oh->[$w_rd];
                 # Skip items whose value was nulled by epoch GC — the item's
                 # results were already propagated before the sweep.
                 next unless defined $waiting_value;
