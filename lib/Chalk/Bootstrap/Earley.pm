@@ -141,32 +141,36 @@ class Chalk::Bootstrap::Earley {
     # last_consumed=`B`, which conflicts with the base-case `A -> B .`
     # whose last_symbol is also `B`.
     method _is_safe_set($chart, $pos) {
-        my @final_items;
+        my $final_count = 0;
         my %final_last_symbols;
 
         # Pass 1: collect final items and their last symbols
-        for my $oh ($chart->[$pos]->@*) {
+        my $slot = $chart->[$pos];
+        for my $core_id (0 .. $slot->$#*) {
+            my $oh = $slot->[$core_id];
             next unless defined $oh;
-            for my $entry (values $oh->%*) {
-                my $item    = $entry->[0];
-                my $alt_idx = $entry->[1];
-                next unless $self->_is_complete($item, $alt_idx);
+            next unless $self->_is_complete_id($core_id);
 
-                my $rhs = $item->{rule}->expressions()->[$alt_idx];
+            my $alt_idx = $core_index->alt_idx_for($core_id);
+            my $rule_name = $core_index->rule_name_for($core_id);
+            my $rule = $rule_table->{$rule_name};
+            my $rhs = $rule->expressions()->[$alt_idx];
+
+            for my $origin (keys $oh->%*) {
                 # Property 3: reject empty-rule completions
                 return false if scalar($rhs->@*) == 0;
 
-                push @final_items, $item;
+                $final_count++;
                 $final_last_symbols{$rhs->[-1]->value()} = 1 if $rhs->@*;
             }
         }
 
         # Property 1: must have at least one final item
-        return false unless @final_items;
+        return false unless $final_count;
 
         if ($ENV{EARLEY_SAFE_DEBUG}) {
             warn sprintf("SAFE_SET_TRACE pos=%d final_count=%d last_syms=%s\n",
-                $pos, scalar @final_items, join(',', sort keys %final_last_symbols));
+                $pos, $final_count, join(',', sort keys %final_last_symbols));
         }
 
         # Pass 2: check Property 2 — no non-final item at this position is
@@ -184,28 +188,26 @@ class Chalk::Bootstrap::Earley {
         # for grammars with zero-matching terminals (like /(?:\s|#[^\n]*)*/)
         # because predicted items at dot=0 are skipped, missing cases where
         # a newly predicted rule expects the same symbol a final rule matched.
-        for my $oh ($chart->[$pos]->@*) {
+        for my $core_id (0 .. $slot->$#*) {
+            my $oh = $slot->[$core_id];
             next unless defined $oh;
-            for my $entry (values $oh->%*) {
-                my $item    = $entry->[0];
-                my $alt_idx = $entry->[1];
-                next if $self->_is_complete($item, $alt_idx);
+            next if $self->_is_complete_id($core_id);
 
-                my $sym = $self->_symbol_after_dot($item, $alt_idx);
-                next unless defined $sym;
+            my $sym = $self->_symbol_after_dot_for($core_id);
+            next unless defined $sym;
 
-                if (exists $final_last_symbols{$sym->value()}) {
-                    if ($ENV{EARLEY_SAFE_DEBUG}) {
-                        warn sprintf("SAFE_SET_TRACE pos=%d Property2_fail rule=%s dot=%d sym_after_dot=%s\n",
-                            $pos, $item->{rule}->name(), $item->{dot}, $sym->value());
-                    }
-                    return false;
+            if (exists $final_last_symbols{$sym->value()}) {
+                if ($ENV{EARLEY_SAFE_DEBUG}) {
+                    warn sprintf("SAFE_SET_TRACE pos=%d Property2_fail rule=%s dot=%d sym_after_dot=%s\n",
+                        $pos, $core_index->rule_name_for($core_id),
+                        $core_index->dot_for($core_id), $sym->value());
                 }
+                return false;
             }
         }
 
         if ($ENV{EARLEY_SAFE_DEBUG}) {
-            warn sprintf("SAFE_SET pos=%d finals=%d\n", $pos, scalar @final_items);
+            warn sprintf("SAFE_SET pos=%d finals=%d\n", $pos, $final_count);
         }
         return true;
     }
@@ -229,7 +231,8 @@ class Chalk::Bootstrap::Earley {
         return \%origin_at_pos;
     }
 
-    # Chart access helpers. Chart structure: $chart[$pos][$core_id]{$origin} = [$item, $alt_idx]
+    # Chart access helpers. Chart structure: $chart[$pos][$core_id]{$origin} = $value
+    # Values are stored directly — no item hashref wrappers.
     method _chart_has($chart, $pos, $core_id, $origin) {
         my $oh = $chart->[$pos][$core_id];
         return defined $oh && exists $oh->{$origin};
@@ -239,56 +242,29 @@ class Chalk::Bootstrap::Earley {
         return $chart->[$pos][$core_id]{$origin};
     }
 
-    method _chart_set($chart, $pos, $core_id, $origin, $entry) {
-        ($chart->[$pos][$core_id] //= {})->{$origin} = $entry;
+    method _chart_set($chart, $pos, $core_id, $origin, $value) {
+        ($chart->[$pos][$core_id] //= {})->{$origin} = $value;
     }
 
-    # Earley item: {rule, alt_idx, core_id, dot, origin, value}
-    # Uses individual hash assignments instead of hashref literal to avoid
-    # stale-value merge corruption in XS codegen (same pattern as _advance_item).
-    method _make_item($rule, $alt_idx, $dot, $origin, $value) {
-        my $core_id = $core_index->id_for($rule->name(), $alt_idx, $dot);
-        my $item = {};
-        $item->{rule}    = $rule;
-        $item->{alt_idx} = $alt_idx;
-        $item->{core_id} = $core_id;
-        $item->{dot}     = $dot;
-        $item->{origin}  = $origin;
-        $item->{value}   = $value;
-        return $item;
-    }
+    # Get the symbol after the dot for a core item
+    method _symbol_after_dot_for($core_id) {
+        my $rule_name = $core_index->rule_name_for($core_id);
+        my $alt_idx   = $core_index->alt_idx_for($core_id);
+        my $dot       = $core_index->dot_for($core_id);
+        my $rule      = $rule_table->{$rule_name};
+        my $alt       = $rule->expressions()->[$alt_idx];
 
-    # Advance an existing item by one dot position using cached integer mapping.
-    # Avoids the string-join + hash lookup of id_for() by using advance().
-    # Uses individual hash assignments instead of hashref literal to avoid
-    # stale-value merge corruption in XS codegen.
-    method _advance_item($item, $value) {
-        my $new_core_id = $core_index->advance($item->{core_id});
-        my $new_item = {};
-        $new_item->{rule}    = $item->{rule};
-        $new_item->{alt_idx} = $item->{alt_idx};
-        $new_item->{core_id} = $new_core_id;
-        $new_item->{dot}     = $item->{dot} + 1;
-        $new_item->{origin}  = $item->{origin};
-        $new_item->{value}   = $value;
-        return $new_item;
-    }
-
-    # Get the symbol after the dot in an item
-    method _symbol_after_dot($item, $alt_index) {
-        my $rule = $item->{rule};
-        my $dot = $item->{dot};
-        my $alt = $rule->expressions()->[$alt_index];
-
-        return undef if $dot >= scalar $alt->@*;
+        return if $dot >= scalar $alt->@*;
         return $alt->[$dot];
     }
 
-    # Check if item is complete (dot at end)
-    method _is_complete($item, $alt_index) {
-        my $rule = $item->{rule};
-        my $dot = $item->{dot};
-        my $alt = $rule->expressions()->[$alt_index];
+    # Check if a core item is complete (dot at end)
+    method _is_complete_id($core_id) {
+        my $rule_name = $core_index->rule_name_for($core_id);
+        my $alt_idx   = $core_index->alt_idx_for($core_id);
+        my $dot       = $core_index->dot_for($core_id);
+        my $rule      = $rule_table->{$rule_name};
+        my $alt       = $rule->expressions()->[$alt_idx];
 
         return $dot >= scalar $alt->@*;
     }
@@ -297,7 +273,9 @@ class Chalk::Bootstrap::Earley {
     method _run_parse($input) {
         my $n = length($input);
 
-        # Chart: array of arrays, where each entry is [$core_id]{$origin} => [$item, $alt_idx]
+        # Chart: $chart[$pos][$core_id]{$origin} = $value
+        # Values are stored directly — no item hashref wrappers.
+        # core_id encodes (rule_name, alt_idx, dot); CoreItemIndex provides O(1) lookups.
         my @chart = map { [] } (0 .. $n);
 
         # Reset secondary indexes for this parse
@@ -314,9 +292,8 @@ class Chalk::Bootstrap::Earley {
 
         # Initialize chart[0] with start rule items (one per alternative)
         for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
-            my $item = $self->_make_item($start_rule, $alt_idx, 0, 0, $semiring->one());
-            my $_ci = $item->{core_id};
-            ($chart[0][$_ci] //= {})->{0} = [$item, $alt_idx];
+            my $core_id = $core_index->id_for($start_rule->name(), $alt_idx, 0);
+            ($chart[0][$core_id] //= {})->{0} = $semiring->one();
         }
 
         # GC tracking
@@ -331,11 +308,15 @@ class Chalk::Bootstrap::Earley {
 
         # Process each chart position
         for my $pos (0 .. $n) {
-            # Build agenda from all entries at this position
+            # Build agenda from all entries at this position.
+            # Agenda carries [$core_id, $origin] pairs; values are in the chart.
             my @agenda;
-            for my $origin_hash ($chart[$pos]->@*) {
-                next unless defined $origin_hash;
-                push @agenda, values $origin_hash->%*;
+            for my $core_id (0 .. $chart[$pos]->$#*) {
+                my $oh = $chart[$pos][$core_id];
+                next unless defined $oh;
+                for my $origin (keys $oh->%*) {
+                    push @agenda, [$core_id, $origin];
+                }
             }
             # Track furthest position with active items for diagnostics
             if (@agenda) {
@@ -345,9 +326,7 @@ class Chalk::Bootstrap::Earley {
             my %predicted_at;  # Track which rules have been predicted at this pos
 
             while (my $entry = shift @agenda) {
-                my ($item, $alt_idx) = $entry->@*;
-                my $core_id = $item->{core_id};
-                my $origin = $item->{origin};
+                my ($core_id, $origin) = $entry->@*;
 
                 # Skip if already processed (2D array avoids pack + hash lookup)
                 # Uses explicit if-block instead of postfix next-if for XS
@@ -360,31 +339,23 @@ class Chalk::Bootstrap::Earley {
                 $processed[$core_id] //= [];
                 $processed[$core_id][$origin] = true;
 
-                # Re-read from chart: the value may have been updated by a
-                # merge (via add() in _complete or _advance_from_completed)
-                # since this entry was pushed to the agenda. Using the chart
-                # value ensures we process the fully-merged value, not the
-                # stale pre-merge value from the agenda entry.
-                # Uses explicit indexing instead of list destructuring for
-                # XS codegen compatibility.
-                my $chart_entry = $chart[$pos][$core_id]{$origin};
-                $item = $chart_entry->[0];
-                $alt_idx = $chart_entry->[1];
+                # Read value from chart (may have been updated by a merge since
+                # this entry was pushed to the agenda)
+                my $value = $chart[$pos][$core_id]{$origin};
 
-                if ($self->_is_complete($item, $alt_idx)) {
+                if ($self->_is_complete_id($core_id)) {
                     # Apply on_complete for completed rule before propagating
+                    my $rule_name = $core_index->rule_name_for($core_id);
+                    my $alt_idx = $core_index->alt_idx_for($core_id);
                     my $completed_value = $semiring->on_complete(
-                        $item->{value}, $core_index->rule_name_for($core_id),
+                        $value, $rule_name,
                         $alt_idx, $pos, $origin, $on_epoch_commit
                     );
-                    $item = { %$item, value => $completed_value };
                     # Update the chart entry with the action-applied value
-                    $chart[$pos][$core_id]{$origin} = [$item, $alt_idx];
+                    $chart[$pos][$core_id]{$origin} = $completed_value;
                     # Index this completed item for _advance_from_completed lookups
-                    my $c_rule = $item->{rule}->name();
-                    my $c_origin = $item->{origin};
-                    $completed_at{$c_rule}{$c_origin}{$pos} //= [];
-                    push $completed_at{$c_rule}{$c_origin}{$pos}->@*, [$core_id, $origin];
+                    $completed_at{$rule_name}{$origin}{$pos} //= [];
+                    push $completed_at{$rule_name}{$origin}{$pos}->@*, [$core_id, $origin];
                     # Skip propagation of zero-valued completions. A zero
                     # from on_complete (e.g. TypeInference rejecting a
                     # keyword-as-Identifier) must not poison parent items
@@ -392,9 +363,11 @@ class Chalk::Bootstrap::Earley {
                     # the correct value independently.
                     next if !defined($completed_value) || $semiring->is_zero($completed_value);
                     # Complete
-                    $self->_complete($item, $alt_idx, $pos, \@chart, \@agenda);
+                    $self->_complete($core_id, $origin, $completed_value, $pos, \@chart, \@agenda);
                 } else {
-                    my $symbol = $self->_symbol_after_dot($item, $alt_idx);
+                    my $symbol = $self->_symbol_after_dot_for($core_id);
+                    my $rule_name = $core_index->rule_name_for($core_id);
+                    my $alt_idx = $core_index->alt_idx_for($core_id);
 
                     if ($symbol->is_reference()) {
                         my $w_rule = $symbol->value();
@@ -407,33 +380,29 @@ class Chalk::Bootstrap::Earley {
                         if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
                             my $skip_value = $semiring->can('on_skip_optional')
                                 ? $semiring->on_skip_optional(
-                                    $item->{value}, $core_index->rule_name_for($core_id),
+                                    $value, $rule_name,
                                     $alt_idx, $pos, $w_rule)
-                                : $semiring->multiply($item->{value}, $semiring->one());
+                                : $semiring->multiply($value, $semiring->one());
                             my $skip_is_zero = defined $skip_value ? $semiring->is_zero($skip_value) : true;
                             if (defined $skip_value && !$skip_is_zero) {
-                                my $skip_item = $self->_advance_item($item, $skip_value);
-                                my $skip_core = $skip_item->{core_id};
+                                my $skip_core = $core_index->advance($core_id);
                                 my $skip_oh = $chart[$pos][$skip_core];
                                 if (defined $skip_oh && exists $skip_oh->{$origin}) {
-                                    my $existing = $skip_oh->{$origin}->[0];
+                                    my $existing_val = $skip_oh->{$origin};
                                     my $merged = $semiring->add(
-                                        $existing->{value}, $skip_value
+                                        $existing_val, $skip_value
                                     );
                                     my $merged_is_zero = $semiring->is_zero($merged);
                                     if (!$merged_is_zero) {
-                                        my $merged_item = {
-                                            %$existing, value => $merged
-                                        };
-                                        $chart[$pos][$skip_core]{$origin} = [$merged_item, $alt_idx];
+                                        $chart[$pos][$skip_core]{$origin} = $merged;
                                         my $sp_slot = $processed[$skip_core];
                                         my $sp_done = defined $sp_slot && $sp_slot->[$origin];
-                                        push @agenda, [$merged_item, $alt_idx]
+                                        push @agenda, [$skip_core, $origin]
                                             unless $sp_done;
                                     }
                                 } else {
-                                    ($chart[$pos][$skip_core] //= {})->{$origin} = [$skip_item, $alt_idx];
-                                    push @agenda, [$skip_item, $alt_idx];
+                                    ($chart[$pos][$skip_core] //= {})->{$origin} = $skip_value;
+                                    push @agenda, [$skip_core, $origin];
                                 }
                             }
                         }
@@ -447,11 +416,11 @@ class Chalk::Bootstrap::Earley {
                         # couldn't advance this waiting item because it didn't
                         # exist yet. So we check for completed items now.
                         $self->_advance_from_completed(
-                            $item, $alt_idx, $symbol, $pos, \@chart, \@agenda
+                            $core_id, $origin, $value, $symbol, $pos, \@chart, \@agenda
                         );
                     } else {
                         # Scan (allow at end of input for zero-width matches)
-                        $self->_scan($item, $alt_idx, $symbol, $pos, $input, \@chart, $n, \@agenda, \%predicted_at);
+                        $self->_scan($core_id, $origin, $value, $symbol, $pos, $input, \@chart, $n, \@agenda, \%predicted_at);
                     }
                 }
             }
@@ -460,25 +429,18 @@ class Chalk::Bootstrap::Earley {
             # At this point all predictions have been added so the chart
             # contains items waiting for their next symbol — exactly the
             # set of tokens that would allow parsing to continue.
-            # Snapshot expected tokens after full agenda processing.
-            # At this point all predictions have been added so the chart
-            # contains items waiting for their next symbol — exactly the
-            # set of tokens that would allow parsing to continue.
             if ($pos == $_last_active_pos) {
                 $_diag_expected = {};
-                for my $origin_hash ($chart[$pos]->@*) {
-                    next unless defined $origin_hash;
-                    for my $entry (values $origin_hash->%*) {
-                        # Explicit indexing for XS codegen compatibility
-                        # (list destructuring $entry->@* segfaults in XS)
-                        my $diag_item = $entry->[0];
-                        my $diag_alt = $entry->[1];
-                        if (!$self->_is_complete($diag_item, $diag_alt)) {
-                            my $sym = $self->_symbol_after_dot($diag_item, $diag_alt);
-                            if (!$sym->is_reference()) {
-                                $_diag_expected->{$sym->value()} = 1;
-                            }
-                        }
+                for my $core_id (0 .. $chart[$pos]->$#*) {
+                    my $oh = $chart[$pos][$core_id];
+                    next unless defined $oh;
+                    next if $self->_is_complete_id($core_id);
+                    # Only need to check once per core_id (symbol is the same
+                    # regardless of origin), but we need at least one origin
+                    next unless keys $oh->%*;
+                    my $sym = $self->_symbol_after_dot_for($core_id);
+                    if (defined $sym && !$sym->is_reference()) {
+                        $_diag_expected->{$sym->value()} = 1;
                     }
                 }
             }
@@ -499,17 +461,18 @@ class Chalk::Bootstrap::Earley {
                         next if $sp >= $pos;  # don't sweep current position
                         my $slot = $chart[$sp];
                         next unless defined $slot && $slot->@*;
-                        for my $oh ($slot->@*) {
+                        for my $cid (0 .. $slot->$#*) {
+                            my $oh = $slot->[$cid];
                             next unless defined $oh;
+                            next unless $self->_is_complete_id($cid);
                             for my $ok (keys $oh->%*) {
                                 next unless $ok > $sweep_origin;
-                                my $entry = $oh->{$ok};
-                                next unless defined $entry->[0]->{value};
+                                my $val = $oh->{$ok};
+                                next unless defined $val;
                                 # Only null completed items — incomplete items
                                 # may still be needed by future completions
                                 # (e.g. ElsifChain waiting for recursive child)
-                                next unless $self->_is_complete($entry->[0], $entry->[1]);
-                                $entry->[0]->{value} = undef;
+                                $oh->{$ok} = undef;
                             }
                         }
                     }
@@ -522,8 +485,8 @@ class Chalk::Bootstrap::Earley {
                         for my $oh ($slot->@*) {
                             last unless $all_null;
                             next unless defined $oh;
-                            for my $entry (values $oh->%*) {
-                                if (defined $entry->[0]->{value}) {
+                            for my $val (values $oh->%*) {
+                                if (defined $val) {
                                     $all_null = false;
                                     last;
                                 }
@@ -552,15 +515,15 @@ class Chalk::Bootstrap::Earley {
                     # the candidate window. If one does, freeing that
                     # origin position would break _complete lookups.
                     my $safe_to_free = true;
-                    for my $oh ($chart[$pos]->@*) {
+                    for my $cid (0 .. $chart[$pos]->$#*) {
                         last unless $safe_to_free;
+                        my $oh = $chart[$pos][$cid];
                         next unless defined $oh;
                         for my $org (keys $oh->%*) {
                             next unless $org > $last_safe_pos && $org < $pos;
-                            my $entry = $oh->{$org};
-                            next unless defined $entry;
-                            my ($it, $ai) = $entry->@*;
-                            unless ($self->_is_complete($it, $ai)) {
+                            my $val = $oh->{$org};
+                            next unless defined $val;
+                            unless ($self->_is_complete_id($cid)) {
                                 $safe_to_free = false;
                                 last;
                             }
@@ -645,12 +608,11 @@ class Chalk::Bootstrap::Earley {
 
             my $end_oh = $chart[$n][$core_id];
             if (defined $end_oh && exists $end_oh->{0}) {
-                my $item = $end_oh->{0}->[0];
-                return $item->{value};
+                return $end_oh->{0};
             }
         }
 
-        return undef;
+        return;
     }
 
     # Parse input string, returns boolean indicating success
@@ -791,8 +753,6 @@ class Chalk::Bootstrap::Earley {
             my ($core_id, $skip_symbols) = $pred_entry->@*;
             unless ($self->_chart_has($chart, $pos, $core_id, $pos)) {
                 my $info = $core_index->item_for($core_id);
-                my $dot = $info->{dot};
-                my $rule = $rule_table->{$info->{rule_name}};
 
                 # Build initial value. For dot>0 items with skipped ? symbols,
                 # call on_skip_optional for each skipped symbol to create
@@ -813,15 +773,15 @@ class Chalk::Bootstrap::Earley {
                     next if !defined $value || $semiring->is_zero($value);
                 }
 
-                my $item = $self->_make_item($rule, $info->{alt_idx}, $dot, $pos, $value);
-                $self->_chart_set($chart, $pos, $core_id, $pos, [$item, $info->{alt_idx}]);
-                push $agenda->@*, [$item, $info->{alt_idx}];
+                $self->_chart_set($chart, $pos, $core_id, $pos, $value);
+                push $agenda->@*, [$core_id, $pos];
             }
         }
     }
 
-    # Scan: match terminal and advance to next position
-    method _scan($item, $alt_idx, $symbol, $pos, $input, $chart, $n, $agenda = undef, $predicted_at = undef) {
+    # Scan: match terminal and advance to next position.
+    # Takes core_id, origin, and value directly (no item hashref).
+    method _scan($core_id, $origin, $value, $symbol, $pos, $input, $chart, $n, $agenda = undef, $predicted_at = undef) {
         my $pattern_str = $symbol->value();
 
         # Check scan result cache before attempting regex match
@@ -847,36 +807,33 @@ class Chalk::Bootstrap::Earley {
         my $is_predicted = $predicted_at // {};
 
         # Ask semiring if scan should proceed
-        my $item_rule_name = $core_index->rule_name_for($item->{core_id});
-        return unless $semiring->should_scan($item->{value}, $item_rule_name, $alt_idx, $pos, $matched, $is_predicted);
+        my $rule_name = $core_index->rule_name_for($core_id);
+        my $alt_idx = $core_index->alt_idx_for($core_id);
+        return unless $semiring->should_scan($value, $rule_name, $alt_idx, $pos, $matched, $is_predicted);
 
         # Use on_scan to combine existing value with scan
-        my $new_value = $semiring->on_scan($item->{value}, $item_rule_name, $alt_idx, $pos, $matched);
+        my $new_value = $semiring->on_scan($value, $rule_name, $alt_idx, $pos, $matched);
 
         # on_scan returns the combined result; check for zero (semiring rejected)
         return if $semiring->is_zero($new_value);
 
         # Advance dot
-        my $new_item = $self->_advance_item($item, $new_value);
-
-        my $new_core_id = $new_item->{core_id};
-        my $origin = $new_item->{origin};
+        my $new_core_id = $core_index->advance($core_id);
 
         if ($self->_chart_has($chart, $end_pos, $new_core_id, $origin)) {
-            # Merge with existing item using semiring add (create new item, don't mutate)
-            my $existing = $self->_chart_get($chart, $end_pos, $new_core_id, $origin)->[0];
-            my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
-            my $merged_item = { %$existing, value => $merged_value };
-            $self->_chart_set($chart, $end_pos, $new_core_id, $origin, [$merged_item, $alt_idx]);
+            # Merge with existing value using semiring add
+            my $existing_val = $self->_chart_get($chart, $end_pos, $new_core_id, $origin);
+            my $merged_value = $semiring->add($existing_val, $new_value);
+            $self->_chart_set($chart, $end_pos, $new_core_id, $origin, $merged_value);
             # If zero-width match, add to current agenda for immediate processing
             if ($end_pos == $pos && $agenda) {
-                push $agenda->@*, [$merged_item, $alt_idx];
+                push $agenda->@*, [$new_core_id, $origin];
             }
         } else {
-            $self->_chart_set($chart, $end_pos, $new_core_id, $origin, [$new_item, $alt_idx]);
+            $self->_chart_set($chart, $end_pos, $new_core_id, $origin, $new_value);
             # If zero-width match, add to current agenda for immediate processing
             if ($end_pos == $pos && $agenda) {
-                push $agenda->@*, [$new_item, $alt_idx];
+                push $agenda->@*, [$new_core_id, $origin];
             }
         }
     }
@@ -888,9 +845,9 @@ class Chalk::Bootstrap::Earley {
     # Leo optimization: when a completion is deterministic (exactly one waiting
     # item, at penultimate position), create a Leo item that represents the
     # entire chain of completions in O(1) instead of O(n).
-    method _complete($completed_item, $completed_alt_idx, $pos, $chart, $agenda) {
-        my $rule_name = $completed_item->{rule}->name();
-        my $origin = $completed_item->{origin};
+    # Takes core_id, origin, and completed_value directly (no item hashref).
+    method _complete($completed_core_id, $origin, $completed_value, $pos, $chart, $agenda) {
+        my $rule_name = $core_index->rule_name_for($completed_core_id);
 
         # Leo resolution: check if a Leo item exists for this rule at origin.
         # Leo items are keyed by (rule_name, origin) where origin is where the
@@ -903,32 +860,29 @@ class Chalk::Bootstrap::Earley {
         my $leo_resolved_origin;
         if ($_leo_enabled
             && (my $leo = $leo_items{$rule_name}{$origin})) {
-            my $combined = $semiring->multiply($leo->{value}, $completed_item->{value});
+            my $combined = $semiring->multiply($leo->{value}, $completed_value);
             unless ($semiring->is_zero($combined)) {
-                my $top = $leo->{top_item};
-                my $top_alt = $leo->{top_alt};
-                my $new_item = $self->_advance_item($top, $combined);
-                my $new_core_id = $new_item->{core_id};
-                my $new_origin = $new_item->{origin};
+                my $top_core_id = $leo->{top_core_id};
+                my $top_origin  = $leo->{top_origin};
+                my $new_core_id = $core_index->advance($top_core_id);
 
-                if ($self->_chart_has($chart, $pos, $new_core_id, $new_origin)) {
-                    my $existing = $self->_chart_get($chart, $pos, $new_core_id, $new_origin)->[0];
+                if ($self->_chart_has($chart, $pos, $new_core_id, $top_origin)) {
+                    my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $top_origin);
                     my $merged_value;
                     try {
-                        $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+                        $merged_value = $semiring->add($existing_val, $combined);
                     } catch ($e) {
                         die "Ambiguity resolving Leo item for '$rule_name': $e";
                     }
-                    my $merged_item = { %$existing, value => $merged_value };
-                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $top_alt]);
+                    $self->_chart_set($chart, $pos, $new_core_id, $top_origin, $merged_value);
                 } else {
-                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $top_alt]);
-                    push $agenda->@*, [$new_item, $top_alt];
+                    $self->_chart_set($chart, $pos, $new_core_id, $top_origin, $combined);
+                    push $agenda->@*, [$new_core_id, $top_origin];
                 }
             }
             # Track which waiting item the Leo covered so we skip it below.
             # Use the immediate waiting item identity (wait_core_id/wait_origin),
-            # not top_item — after chain extension, top_item may be at a distant
+            # not top — after chain extension, top may be at a distant
             # origin that doesn't match the actual waiting item at this position.
             $leo_resolved_core_id = $leo->{wait_core_id};
             $leo_resolved_origin = $leo->{wait_origin};
@@ -943,7 +897,8 @@ class Chalk::Bootstrap::Earley {
 
         # Count non-zero waiting items and track the single candidate for Leo
         my $eligible_count = 0;
-        my $leo_candidate_entry;
+        my $leo_candidate_core_id;
+        my $leo_candidate_w_origin;
         my $leo_candidate_value;
 
         for my $w_core_id ($chart_waiting_ids->@*) {
@@ -959,49 +914,42 @@ class Chalk::Bootstrap::Earley {
                         && $w_origin  == $leo_resolved_origin;
                 }
 
-                my $entry = $oh->{$w_origin};
-                next unless defined $entry;
-                my ($waiting_item, $waiting_alt_idx) = $entry->@*;
-
+                my $waiting_value = $oh->{$w_origin};
                 # Skip items whose value was nulled by epoch GC — the item's
                 # results were already propagated before the sweep.
-                next unless defined $waiting_item->{value};
+                next unless defined $waiting_value;
 
                 # Advance the waiting item
-                my $new_value = $semiring->multiply($waiting_item->{value}, $completed_item->{value});
+                my $new_value = $semiring->multiply($waiting_value, $completed_value);
 
                 # Skip if multiply produced zero — don't propagate rejected
                 # completions (e.g. keyword-as-Identifier) to parent items
                 next if $semiring->is_zero($new_value);
 
-                my $new_item = $self->_advance_item($waiting_item, $new_value);
+                my $new_core_id = $core_index->advance($w_core_id);
 
-                my $new_core_id = $new_item->{core_id};
-                my $new_origin  = $new_item->{origin};
-
-                if ($self->_chart_has($chart, $pos, $new_core_id, $new_origin)) {
-                    # Merge with existing item using semiring add (create new item, don't mutate)
-                    my $existing = $self->_chart_get($chart, $pos, $new_core_id, $new_origin)->[0];
+                if ($self->_chart_has($chart, $pos, $new_core_id, $w_origin)) {
+                    # Merge with existing value using semiring add
+                    my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $w_origin);
                     my $merged_value;
                     try {
-                        $merged_value = $semiring->add($existing->{value}, $new_item->{value});
+                        $merged_value = $semiring->add($existing_val, $new_value);
                     } catch ($e) {
-                        my $rn     = $existing->{rule}->name();
-                        my $dot    = $existing->{dot};
-                        my $e_orig = $existing->{origin};
-                        die "Ambiguity in rule '$rn' (dot=$dot, origin=$e_orig, pos=$pos) "
+                        my $rn     = $core_index->rule_name_for($new_core_id);
+                        my $dot    = $core_index->dot_for($new_core_id);
+                        die "Ambiguity in rule '$rn' (dot=$dot, origin=$w_origin, pos=$pos) "
                             . "completing='$rule_name' (origin=$origin): $e";
                     }
-                    my $merged_item = { %$existing, value => $merged_value };
-                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $waiting_alt_idx]);
+                    $self->_chart_set($chart, $pos, $new_core_id, $w_origin, $merged_value);
                 } else {
-                    $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $waiting_alt_idx]);
-                    push $agenda->@*, [$new_item, $waiting_alt_idx];
+                    $self->_chart_set($chart, $pos, $new_core_id, $w_origin, $new_value);
+                    push $agenda->@*, [$new_core_id, $w_origin];
                 }
 
                 # Track Leo eligibility: count non-zero waiting items
                 $eligible_count++;
-                $leo_candidate_entry = $entry;
+                $leo_candidate_core_id = $w_core_id;
+                $leo_candidate_w_origin = $w_origin;
                 $leo_candidate_value = $new_value;
             }
         }
@@ -1012,27 +960,29 @@ class Chalk::Bootstrap::Earley {
         # create a Leo item keyed at the origin position.
         if ($eligible_count == 1 && !defined $leo_resolved_core_id
             && $_leo_enabled) {
-            my ($waiting_item, $waiting_alt_idx) = $leo_candidate_entry->@*;
-            my $advanced_dot = $waiting_item->{dot} + 1;
-            my $alt = $waiting_item->{rule}->expressions()->[$waiting_alt_idx];
+            my $w_dot = $core_index->dot_for($leo_candidate_core_id);
+            my $w_alt_idx = $core_index->alt_idx_for($leo_candidate_core_id);
+            my $w_rule_name = $core_index->rule_name_for($leo_candidate_core_id);
+            my $w_rule = $rule_table->{$w_rule_name};
+            my $alt = $w_rule->expressions()->[$w_alt_idx];
+            my $advanced_dot = $w_dot + 1;
 
             # Penultimate check: after advancing, the item would be complete
             if ($advanced_dot >= scalar $alt->@*) {
                 # Check if there's already a Leo item in the chain we can extend
-                my $w_rule_name = $waiting_item->{rule}->name();
-                my $top_item;
-                my $top_alt;
+                my $top_core_id;
+                my $top_origin;
                 my $chain_value;
 
-                if (my $parent_leo = $leo_items{$w_rule_name}{$waiting_item->{origin}}) {
+                if (my $parent_leo = $leo_items{$w_rule_name}{$leo_candidate_w_origin}) {
                     # Extend existing Leo chain: use the top of the parent chain
-                    $top_item = $parent_leo->{top_item};
-                    $top_alt = $parent_leo->{top_alt};
-                    $chain_value = $semiring->multiply($parent_leo->{value}, $completed_item->{value});
+                    $top_core_id = $parent_leo->{top_core_id};
+                    $top_origin  = $parent_leo->{top_origin};
+                    $chain_value = $semiring->multiply($parent_leo->{value}, $completed_value);
                 } else {
                     # Start new Leo chain
-                    $top_item = $waiting_item;
-                    $top_alt = $waiting_alt_idx;
+                    $top_core_id = $leo_candidate_core_id;
+                    $top_origin  = $leo_candidate_w_origin;
                     $chain_value = $leo_candidate_value;
                 }
 
@@ -1040,20 +990,19 @@ class Chalk::Bootstrap::Earley {
                 # Future completions of $rule_name with this origin will resolve
                 # the chain in O(1).
                 # wait_core_id/wait_origin track the immediate waiting item
-                # so _complete can skip it (distinct from top_item after chain extension).
+                # so _complete can skip it (distinct from top after chain extension).
                 $leo_items{$rule_name}{$origin} = {
                     leo          => true,
                     rule_name    => $rule_name,
-                    origin       => $top_item->{origin},
+                    top_origin   => $top_origin,
                     value        => $chain_value,
-                    top_item     => $top_item,
-                    top_alt      => $top_alt,
-                    wait_core_id => $waiting_item->{core_id},
-                    wait_origin  => $waiting_item->{origin},
+                    top_core_id  => $top_core_id,
+                    wait_core_id => $leo_candidate_core_id,
+                    wait_origin  => $leo_candidate_w_origin,
                 };
                 # Track minimum Leo origin for GC
-                $_leo_origin_min = $top_item->{origin}
-                    if !defined $_leo_origin_min || $top_item->{origin} < $_leo_origin_min;
+                $_leo_origin_min = $top_origin
+                    if !defined $_leo_origin_min || $top_origin < $_leo_origin_min;
             }
         }
     }
@@ -1064,7 +1013,8 @@ class Chalk::Bootstrap::Earley {
     # rule — the second prediction is suppressed but the earlier completion
     # never saw this waiting item, so we combine them here.
     # Uses %completed_at index for O(1) lookup instead of scanning the full chart.
-    method _advance_from_completed($item, $alt_idx, $symbol, $pos, $chart, $agenda) {
+    # Takes core_id, origin, and value directly (no item hashref).
+    method _advance_from_completed($waiting_core_id, $waiting_origin, $waiting_value, $symbol, $pos, $chart, $agenda) {
         my $rule_name = $symbol->value();
 
         # Look up completed items for this rule name with origin == pos at chart pos
@@ -1073,30 +1023,25 @@ class Chalk::Bootstrap::Earley {
 
         for my $cref ($completed_refs->@*) {
             my ($c_core_id, $c_origin) = $cref->@*;
-            my $entry = $self->_chart_get($chart, $pos, $c_core_id, $c_origin);
-            next unless defined $entry;
-            my ($citem, $calt_idx) = $entry->@*;
+            my $completed_val = $self->_chart_get($chart, $pos, $c_core_id, $c_origin);
+            next unless defined $completed_val;
 
             # Advance the waiting item past the completed reference
-            my $new_value = $semiring->multiply($item->{value}, $citem->{value});
+            my $new_value = $semiring->multiply($waiting_value, $completed_val);
 
             # Skip if multiply produced zero — don't propagate rejected
             # completions to parent items
             next if $semiring->is_zero($new_value);
 
-            my $new_item = $self->_advance_item($item, $new_value);
+            my $new_core_id = $core_index->advance($waiting_core_id);
 
-            my $new_core_id = $new_item->{core_id};
-            my $new_origin = $new_item->{origin};
-
-            if ($self->_chart_has($chart, $pos, $new_core_id, $new_origin)) {
-                my $existing = $self->_chart_get($chart, $pos, $new_core_id, $new_origin)->[0];
-                my $merged_value = $semiring->add($existing->{value}, $new_item->{value});
-                my $merged_item = { %$existing, value => $merged_value };
-                $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$merged_item, $alt_idx]);
+            if ($self->_chart_has($chart, $pos, $new_core_id, $waiting_origin)) {
+                my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $waiting_origin);
+                my $merged_value = $semiring->add($existing_val, $new_value);
+                $self->_chart_set($chart, $pos, $new_core_id, $waiting_origin, $merged_value);
             } else {
-                $self->_chart_set($chart, $pos, $new_core_id, $new_origin, [$new_item, $alt_idx]);
-                push $agenda->@*, [$new_item, $alt_idx];
+                $self->_chart_set($chart, $pos, $new_core_id, $waiting_origin, $new_value);
+                push $agenda->@*, [$new_core_id, $waiting_origin];
             }
         }
     }
