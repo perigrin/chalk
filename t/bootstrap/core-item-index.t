@@ -112,6 +112,8 @@ subtest 'rule_name_for, alt_idx_for, dot_for return correct values' => sub {
     is($index->rule_name_for($id_stmt), 'Stmt', 'rule_name_for correct for second item');
     is($index->alt_idx_for($id_stmt),   0,      'alt_idx_for correct for second item');
     is($index->dot_for($id_stmt),       0,      'dot_for correct for second item');
+
+    ok(!defined $index->rule_for($id_expr), 'rule_for returns undef without build_from_grammar');
 };
 
 # === Test 6: rule_for returns Rule object from build_from_grammar() ===
