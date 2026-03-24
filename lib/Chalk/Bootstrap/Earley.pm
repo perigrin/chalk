@@ -82,6 +82,13 @@ class Chalk::Bootstrap::Earley {
     # Scan statistics for terminal clustering
     field %_scan_stats;
 
+    # Prediction cache: core_set_id => [predicted rule names]
+    # Grammar-lifetime: same core set always produces the same predictions.
+    field %_prediction_cache;
+
+    # Set reuse statistics (parse-lifetime)
+    field %_reuse_stats;
+
 
     ADJUST {
         $rule_table = {};
@@ -148,6 +155,7 @@ class Chalk::Bootstrap::Earley {
         %_dist_stats = ();
         %_set_registry = ();
         %_scan_stats = ();
+        %_reuse_stats = ();
     }
 
     # Clear all caches including grammar-lifetime data.
@@ -157,6 +165,7 @@ class Chalk::Bootstrap::Earley {
         %_core_set_registry = ();
         $_core_set_next_id = 0;
         %_dfa_tables = ();
+        %_prediction_cache = ();
     }
 
     # Discover the core set for a chart position: collect active core_ids,
@@ -429,10 +438,12 @@ class Chalk::Bootstrap::Earley {
     # Report the chart origin dimension type (for testing)
     method chart_origin_type() { return 'ARRAY'; }
 
-    # Accessors for distance stats, set registry, and scan stats (fields at top)
+    # Accessors for distance stats, set registry, scan stats, prediction cache, reuse stats
     method distance_stats() { return \%_dist_stats; }
     method set_registry() { return \%_set_registry; }
     method scan_stats() { return \%_scan_stats; }
+    method prediction_cache() { return \%_prediction_cache; }
+    method reuse_stats() { return \%_reuse_stats; }
 
     # Get the symbol after the dot for a core item (O(1) precomputed lookup)
     method _symbol_after_dot_for($core_id) {
@@ -469,6 +480,7 @@ class Chalk::Bootstrap::Earley {
         %_dist_stats = (max_distance => 0);
         %_set_registry = ();
         %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
+        %_reuse_stats = (prediction_reuses => 0, prediction_computes => 0);
         $_last_active_pos = 0;
         $_diag_expected = {};
         @_pos_core_set = ();
@@ -534,6 +546,57 @@ class Chalk::Bootstrap::Earley {
 
             my @processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
+
+            # Set reuse: pre-predict all nonterminals expected by this core set.
+            # On first encounter, discover which nonterminals the core set expects
+            # and cache the list. On subsequent encounters, reuse the cached list.
+            if ($pos < $n && defined $chart[$pos] && $chart[$pos]->@*) {
+                # Compute preliminary core set hash from current entries
+                my @pre_active;
+                for my $cid (0 .. $chart[$pos]->$#*) {
+                    my $oh = $chart[$pos][$cid];
+                    if (defined $oh) {
+                        for my $v ($oh->@*) {
+                            if (defined $v) { push @pre_active, $cid; last; }
+                        }
+                    }
+                }
+                my $pre_hash = join(",", @pre_active);
+
+                if (exists $_prediction_cache{$pre_hash}) {
+                    # Reuse cached predictions
+                    my $cached_rules = $_prediction_cache{$pre_hash};
+                    for my $rule_name ($cached_rules->@*) {
+                        my $sym = Chalk::Grammar::Symbol->new(
+                            type  => 'reference',
+                            value => $rule_name,
+                        );
+                        $self->_predict($sym, $pos, \@chart, \@agenda, \%predicted_at);
+                    }
+                    $_reuse_stats{prediction_reuses}++;
+                } else {
+                    # First encounter: collect nonterminals for this core set
+                    my @expected_nonterminals;
+                    for my $cid (@pre_active) {
+                        next if $ci_completions->[$cid];
+                        my $sym = $ci_symbols_after->[$cid];
+                        next unless defined $sym && $sym->is_reference();
+                        my $rn = $sym->value();
+                        push @expected_nonterminals, $rn
+                            unless grep { $_ eq $rn } @expected_nonterminals;
+                    }
+                    $_prediction_cache{$pre_hash} = \@expected_nonterminals;
+
+                    for my $rule_name (@expected_nonterminals) {
+                        my $sym = Chalk::Grammar::Symbol->new(
+                            type  => 'reference',
+                            value => $rule_name,
+                        );
+                        $self->_predict($sym, $pos, \@chart, \@agenda, \%predicted_at);
+                    }
+                    $_reuse_stats{prediction_computes}++;
+                }
+            }
 
             while (my $entry = shift @agenda) {
                 my ($core_id, $origin) = $entry->@*;
