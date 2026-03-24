@@ -12,24 +12,8 @@ use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
-use Chalk::Grammar::Rule;
-use Chalk::Grammar::Symbol;
-
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
-
-# Helper: build a fake Earley-style item with a given value and rule name
-my sub make_item($value, $rule_name) {
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => $rule_name,
-        expressions => [[]],
-    );
-    return {
-        rule  => $rule,
-        dot   => 1,
-        value => $value,
-    };
-}
 
 # Helper: build a scan context for a variable name at position 0
 my sub make_scan_ctx($text) {
@@ -54,9 +38,8 @@ my sub make_scan_ctx($text) {
 
     # Scan context for $unbound — no cfg_state set
     my $ctx = make_scan_ctx('$unbound');
-    my $item = make_item($ctx, 'ScalarVariable');
 
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'ScalarVariable', 0, 0, 0);
     ok(defined $result, 'on_complete returns a result');
 
     my $node = $result->extract();
@@ -90,9 +73,7 @@ my sub make_scan_ctx($text) {
         scope   => $scope,
     });
 
-    my $item = make_item($ctx, 'ScalarVariable');
-
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'ScalarVariable', 0, 0, 0);
     ok(defined $result, 'on_complete returns a result for in-scope variable');
 
     my $node = $result->extract();
@@ -136,9 +117,8 @@ my sub make_scan_ctx($text) {
         scope   => $loop_scope,
     });
 
-    my $item = make_item($ctx, 'ScalarVariable');
 
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'ScalarVariable', 0, 0, 0);
     ok(defined $result, 'on_complete returns a result for sentinel variable');
 
     my $node = $result->extract();
@@ -183,9 +163,7 @@ my sub make_scan_ctx($text) {
         scope   => $scope,
     });
 
-    my $item = make_item($ctx, 'ArrayVariable');
-
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'ArrayVariable', 0, 0, 0);
     ok(defined $result, 'ArrayVariable on_complete returns result');
     my $node = $result->extract();
     is($node, $arr_node, 'ArrayVariable returns bound node from scope');
@@ -211,9 +189,7 @@ my sub make_scan_ctx($text) {
         scope   => $scope,
     });
 
-    my $item = make_item($ctx, 'HashVariable');
-
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'HashVariable', 0, 0, 0);
     ok(defined $result, 'HashVariable on_complete returns result');
     my $node = $result->extract();
     is($node, $hash_node, 'HashVariable returns bound node from scope');

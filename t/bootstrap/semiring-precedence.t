@@ -7,7 +7,6 @@ use Test::More;
 use lib 'lib';
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Bootstrap::Semiring::Precedence;
-use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 
 # ========================================================================
@@ -124,40 +123,23 @@ my $prec = Chalk::Bootstrap::Semiring::Precedence->new(
 # Precedence semiring: on_scan with operator detection
 # ========================================================================
 
-# Helper: build a mock item with rule and value
-my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => $rule_name,
-        expressions => [[]],
-    );
-    return {
-        rule   => $rule,
-        dot    => $dot,
-        origin => $origin,
-        value  => $value,
-    };
-}
-
 # Test 11: on_scan with non-operator text returns non-zero value
 {
-    my $item = make_item('Identifier', $prec->one());
-    my $result = $prec->on_scan($item, 0, 0, 'foo');
+    my $result = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'foo');
     ok(defined $result, 'on_scan with identifier returns defined value');
     ok(!$prec->is_zero($result), 'on_scan with identifier is not zero');
 }
 
 # Test 12: on_scan with operator text in BinaryOp rule tags the value
 {
-    my $item = make_item('BinaryOp', $prec->one());
-    my $result = $prec->on_scan($item, 0, 0, '+');
+    my $result = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
     ok(defined $result, 'on_scan with + in BinaryOp returns defined value');
     ok(!$prec->is_zero($result), 'on_scan with + in BinaryOp is not zero');
 }
 
 # Test 13: on_scan with zero item value returns undef (propagates zero)
 {
-    my $item = make_item('BinaryOp', $prec->zero());
-    my $result = $prec->on_scan($item, 0, 0, '+');
+    my $result = $prec->on_scan($prec->zero(), 'BinaryOp', 0, 0, '+');
     ok($prec->is_zero($result), 'on_scan with zero item value returns zero');
 }
 
@@ -167,8 +149,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 14: on_complete returns value unchanged for non-expression rules
 {
-    my $item = make_item('Identifier', $prec->one());
-    my $result = $prec->on_complete($item, 0, 5);
+    my $result = $prec->on_complete($prec->one(), 'Identifier', 0, 5, 0);
     ok(defined $result, 'on_complete for Identifier returns value');
     ok(!$prec->is_zero($result), 'on_complete for Identifier is not zero');
 }
@@ -176,10 +157,8 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 # Test 15: on_complete for BinaryOp marks the operator as passive
 {
     # Simulate scanning an operator then completing BinaryOp
-    my $item = make_item('BinaryOp', $prec->one());
-    my $scanned = $prec->on_scan($item, 0, 0, '+');
-    my $completed_item = make_item('BinaryOp', $scanned);
-    my $result = $prec->on_complete($completed_item, 0, 1);
+    my $scanned = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
+    my $result = $prec->on_complete($scanned, 'BinaryOp', 0, 1, 0);
     ok(defined $result, 'on_complete for BinaryOp returns value');
     ok(!$prec->is_zero($result), 'on_complete for BinaryOp is not zero');
 }
@@ -286,8 +265,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
     my $op_value = { valid => true, op => '+', level => 3, assoc => 'left' };
 
     # Wrap in ParenExpr — on_complete should clear operator info
-    my $paren_item = make_item('ParenExpr', $op_value);
-    my $paren_result = $prec->on_complete($paren_item, 0, 3);
+    my $paren_result = $prec->on_complete($op_value, 'ParenExpr', 0, 3, 0);
 
     # After ParenExpr, the value should be "clean" — no operator restriction
     # So multiplying with a higher-precedence parent (* level 2) should be valid
@@ -304,8 +282,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 22: UnaryExpression has higher precedence than BinaryExpression
 {
-    my $unary_item = make_item('UnaryExpression', $prec->one());
-    my $unary_result = $prec->on_complete($unary_item, 0, 2);
+    my $unary_result = $prec->on_complete($prec->one(), 'UnaryExpression', 0, 2, 0);
 
     # Binary context with + (level 3)
     my $binary_context = { valid => true, op => '+', level => 3, assoc => 'left' };
@@ -317,8 +294,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 23: AssignmentExpression has lower precedence than BinaryExpression
 {
-    my $assign_item = make_item('AssignmentExpression', $prec->one());
-    my $assign_result = $prec->on_complete($assign_item, 0, 5);
+    my $assign_result = $prec->on_complete($prec->one(), 'AssignmentExpression', 0, 5, 0);
 
     # Binary context with + (level 3)
     my $binary_context = { valid => true, op => '+', level => 3, assoc => 'left' };
@@ -371,8 +347,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 24: Scanning non-operator text in non-BinaryOp context is transparent
 {
-    my $item = make_item('Identifier', $prec->one());
-    my $result = $prec->on_scan($item, 0, 0, 'my_var');
+    my $result = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'my_var');
     ok(!$prec->is_zero($result), 'non-operator scan in non-BinaryOp is transparent');
 }
 
@@ -387,8 +362,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 30: AssignOp //= gets level 101, right-assoc, and is_operator via on_scan
 {
-    my $assign_item = make_item('AssignOp', $prec->one());
-    my $assign_scan = $prec->on_scan($assign_item, 0, 0, '//=');
+    my $assign_scan = $prec->on_scan($prec->one(), 'AssignOp', 0, 0, '//=');
     ok($assign_scan->{is_operator}, 'AssignOp //= sets is_operator');
     is($assign_scan->{level}, 101, 'AssignOp //= has level 101');
     is($assign_scan->{assoc}, 'right', 'AssignOp //= has right assoc');
@@ -396,8 +370,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 31: AssignOp = also gets is_operator
 {
-    my $assign_item = make_item('AssignOp', $prec->one());
-    my $assign_scan = $prec->on_scan($assign_item, 0, 0, '=');
+    my $assign_scan = $prec->on_scan($prec->one(), 'AssignOp', 0, 0, '=');
     ok($assign_scan->{is_operator}, 'AssignOp = sets is_operator');
     is($assign_scan->{level}, 101, 'AssignOp = has level 101');
     is($assign_scan->{assoc}, 'right', 'AssignOp = has right assoc');
@@ -409,8 +382,7 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 # The on_scan itself rejects this when $existing carries level=101.
 {
     my $left_assign = { valid => true, level => 101, assoc => 'right' };
-    my $assign_item = make_item('AssignOp', $left_assign);
-    my $result = $prec->on_scan($assign_item, 0, 0, '//=');
+    my $result = $prec->on_scan($left_assign, 'AssignOp', 0, 0, '//=');
     ok($prec->is_zero($result),
         'on_scan rejects AssignOp //= when left operand is AssignmentExpression (level=101)');
 }
@@ -493,28 +465,23 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 41: on_scan with same operator in BinaryOp yields same interned object
 {
-    my $item1 = make_item('BinaryOp', $prec->one());
-    my $item2 = make_item('BinaryOp', $prec->one());
-    my $r1 = $prec->on_scan($item1, 0, 0, '+');
-    my $r2 = $prec->on_scan($item2, 0, 0, '+');
+    my $r1 = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
+    my $r2 = $prec->on_scan($prec->one(), 'BinaryOp', 0, 0, '+');
     is(refaddr($r1), refaddr($r2),
         'on_scan with same operator returns same interned object');
 }
 
 # Test 42: on_scan zero propagation returns zero singleton
 {
-    my $item = make_item('BinaryOp', $prec->zero());
-    my $result = $prec->on_scan($item, 0, 0, '+');
+    my $result = $prec->on_scan($prec->zero(), 'BinaryOp', 0, 0, '+');
     is(refaddr($result), refaddr($prec->zero()),
         'on_scan with zero value returns zero singleton');
 }
 
 # Test 43: on_scan non-operator context returns interned one
 {
-    my $item1 = make_item('Identifier', $prec->one());
-    my $item2 = make_item('Identifier', $prec->one());
-    my $r1 = $prec->on_scan($item1, 0, 0, 'foo');
-    my $r2 = $prec->on_scan($item2, 0, 0, 'bar');
+    my $r1 = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'foo');
+    my $r2 = $prec->on_scan($prec->one(), 'Identifier', 0, 0, 'bar');
     is(refaddr($r1), refaddr($r2),
         'on_scan in non-operator context returns same interned object for same input value');
 }
@@ -526,10 +493,8 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 # Test 44: on_complete for ParenExpr always returns same (one) object
 {
     my $op_value = { valid => true, op => '+', level => 3, assoc => 'left' };
-    my $item1 = make_item('ParenExpr', $op_value);
-    my $item2 = make_item('ParenExpr', { valid => true, op => '-', level => 5, assoc => 'left' });
-    my $r1 = $prec->on_complete($item1, 0, 0);
-    my $r2 = $prec->on_complete($item2, 0, 0);
+    my $r1 = $prec->on_complete($op_value, 'ParenExpr', 0, 0, 0);
+    my $r2 = $prec->on_complete({ valid => true, op => '-', level => 5, assoc => 'left' }, 'ParenExpr', 0, 0, 0);
     is(refaddr($r1), refaddr($r2),
         'on_complete for ParenExpr always returns same reset (one) object');
     is(refaddr($r1), refaddr($prec->one()),
@@ -538,28 +503,23 @@ my sub make_item($rule_name, $value, $dot = 0, $origin = 0) {
 
 # Test 45: on_complete for PostfixExpression returns same interned object
 {
-    my $item1 = make_item('PostfixExpression', $prec->one());
-    my $item2 = make_item('PostfixExpression', $prec->one());
-    my $r1 = $prec->on_complete($item1, 0, 0);
-    my $r2 = $prec->on_complete($item2, 0, 0);
+    my $r1 = $prec->on_complete($prec->one(), 'PostfixExpression', 0, 0, 0);
+    my $r2 = $prec->on_complete($prec->one(), 'PostfixExpression', 0, 0, 0);
     is(refaddr($r1), refaddr($r2),
         'on_complete for PostfixExpression returns same interned object');
 }
 
 # Test 46: on_complete for Subscript (no high level) returns one singleton
 {
-    my $item = make_item('Subscript', $prec->one());
-    my $r = $prec->on_complete($item, 0, 0);
+    my $r = $prec->on_complete($prec->one(), 'Subscript', 0, 0, 0);
     is(refaddr($r), refaddr($prec->one()),
         'on_complete for Subscript with no high level returns one() singleton');
 }
 
 # Test 47: on_complete for generic rule returns one singleton
 {
-    my $item1 = make_item('SomeOtherRule', $prec->one());
-    my $item2 = make_item('AnotherRule', $prec->one());
-    my $r1 = $prec->on_complete($item1, 0, 0);
-    my $r2 = $prec->on_complete($item2, 0, 0);
+    my $r1 = $prec->on_complete($prec->one(), 'SomeOtherRule', 0, 0, 0);
+    my $r2 = $prec->on_complete($prec->one(), 'AnotherRule', 0, 0, 0);
     is(refaddr($r1), refaddr($r2),
         'on_complete for unrecognised rules returns same one() singleton');
     is(refaddr($r1), refaddr($prec->one()),

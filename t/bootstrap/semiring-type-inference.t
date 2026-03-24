@@ -161,22 +161,7 @@ my sub get_tags($val) {
 # on_scan: keyword detection
 # ========================================================================
 
-use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
-
-# Helper to make an item
-my sub make_item($rule_name, $value) {
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => $rule_name,
-        expressions => [[]],
-    );
-    return {
-        rule   => $rule,
-        dot    => 0,
-        origin => 0,
-        value  => $value,
-    };
-}
 
 # ========================================================================
 # on_scan: empty regex // acceptance (disambiguation via Earley ambiguity)
@@ -186,8 +171,7 @@ my sub make_item($rule_name, $value) {
 # Disambiguation between // (regex) and // (defined-or) happens via
 # Earley ambiguity + CallExpression arg-type validation, not at scan time.
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '//');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//');
     ok(!$ti->is_zero($result), 'scanning "//" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//" as RegexLiteral tags type => Regex');
@@ -195,8 +179,7 @@ my sub make_item($rule_name, $value) {
 
 # Empty regex with flags → also accepted
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '//i');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//i');
     ok(!$ti->is_zero($result), 'scanning "//i" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//i" as RegexLiteral tags type => Regex');
@@ -204,8 +187,7 @@ my sub make_item($rule_name, $value) {
 
 # Empty regex //msixpodualngcer → accepted (all flags)
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '//msixpodualngcer');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//msixpodualngcer');
     ok(!$ti->is_zero($result), 'scanning "//msixpodualngcer" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "//msixpodualngcer" as RegexLiteral tags type => Regex');
@@ -213,22 +195,19 @@ my sub make_item($rule_name, $value) {
 
 # Real regex with pattern → NOT zero (accepted)
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '/pattern/');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/');
     ok(!$ti->is_zero($result), 'scanning "/pattern/" as RegexLiteral is NOT zero');
 }
 
 # Real regex with flags → NOT zero (accepted)
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '/pattern/gi');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/gi');
     ok(!$ti->is_zero($result), 'scanning "/pattern/gi" as RegexLiteral is NOT zero');
 }
 
 # Empty m// → accepted (Earley explores both regex and defined-or paths)
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'm//');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm//');
     ok(!$ti->is_zero($result), 'scanning "m//" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "m//" as RegexLiteral tags type => Regex');
@@ -236,8 +215,7 @@ my sub make_item($rule_name, $value) {
 
 # m// with flags → accepted
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'm//i');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm//i');
     ok(!$ti->is_zero($result), 'scanning "m//i" as RegexLiteral is non-zero');
     is(get_tags($result)->{type}, 'Regex',
         'scanning "m//i" as RegexLiteral tags type => Regex');
@@ -245,15 +223,13 @@ my sub make_item($rule_name, $value) {
 
 # m/pattern/ → NOT zero (real regex)
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'm/pattern/');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, 'm/pattern/');
     ok(!$ti->is_zero($result), 'scanning "m/pattern/" as RegexLiteral is NOT zero');
 }
 
 # BinaryOp scanning // → NOT zero (TypeInference doesn't touch BinaryOp)
 {
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '//');
+    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '//');
     ok(!$ti->is_zero($result), 'scanning "//" as BinaryOp is NOT zero');
 }
 
@@ -297,8 +273,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # UnaryExpression completion WITHOUT tag → valid (standalone unary)
 {
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($ti->one(), 'UnaryExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'UnaryExpression completion without tag is valid');
 }
 
@@ -386,8 +361,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ScalarVariable scanned → type => 'Scalar'
 {
-    my $item = make_item('ScalarVariable', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '$x');
+    my $result = $ti->on_scan($ti->one(), 'ScalarVariable', 0, 0, '$x');
     ok(!$ti->is_zero($result), 'scanning $x as ScalarVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Scalar', 'scanning $x as ScalarVariable tags type => Scalar');
@@ -395,8 +369,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ArrayVariable scanned → type => 'Array'
 {
-    my $item = make_item('ArrayVariable', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '@arr');
+    my $result = $ti->on_scan($ti->one(), 'ArrayVariable', 0, 0, '@arr');
     ok(!$ti->is_zero($result), 'scanning @arr as ArrayVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Array', 'scanning @arr as ArrayVariable tags type => Array');
@@ -404,8 +377,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # HashVariable scanned → type => 'Hash'
 {
-    my $item = make_item('HashVariable', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '%h');
+    my $result = $ti->on_scan($ti->one(), 'HashVariable', 0, 0, '%h');
     ok(!$ti->is_zero($result), 'scanning %h as HashVariable is non-zero');
     my $tags = get_tags($result);
     is($tags->{type}, 'Hash', 'scanning %h as HashVariable tags type => Hash');
@@ -433,32 +405,28 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # PostfixDeref alt 0 (->@*) → type => 'Array'
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 0, 10, 0);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 0 completion is valid');
     is(get_tags($result)->{type}, 'Array', 'PostfixDeref alt 0 (->@*) tags type => Array');
 }
 
 # PostfixDeref alt 1 (->%*) → type => 'Hash'
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 1, 10, 0);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 1 completion is valid');
     is(get_tags($result)->{type}, 'Hash', 'PostfixDeref alt 1 (->%*) tags type => Hash');
 }
 
 # PostfixDeref alt 2 (->$*) → type => 'Scalar'
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 2, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 2, 10, 0);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 2 completion is valid');
     is(get_tags($result)->{type}, 'Scalar', 'PostfixDeref alt 2 (->$*) tags type => Scalar');
 }
 
 # PostfixDeref alt 3 (->$#*) → type => 'Scalar' (array count is scalar)
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 3, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 3, 10, 0);
     ok(!$ti->is_zero($result), 'PostfixDeref alt 3 completion is valid');
     is(get_tags($result)->{type}, 'Scalar', 'PostfixDeref alt 3 (->$#*) tags type => Scalar');
 }
@@ -467,16 +435,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 {
     my $scalar_val = make_ctx(type => 'Scalar');
-    my $item = make_item('Variable', $scalar_val);
-    my $result = $ti->on_complete($item, 0, 5);
+    my $result = $ti->on_complete($scalar_val, 'Variable', 0, 5, 0);
     ok(!$ti->is_zero($result), 'Variable completion with type => Scalar is valid');
     is(get_tags($result)->{type}, 'Scalar', 'Variable preserves type => Scalar from child');
 }
 
 {
     my $array_val = make_ctx(type => 'Array');
-    my $item = make_item('Variable', $array_val);
-    my $result = $ti->on_complete($item, 0, 5);
+    my $result = $ti->on_complete($array_val, 'Variable', 0, 5, 0);
     ok(!$ti->is_zero($result), 'Variable completion with type => Array is valid');
     is(get_tags($result)->{type}, 'Array', 'Variable preserves type => Array from child');
 }
@@ -485,16 +451,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 {
     my $typed = make_ctx(type => 'Array');
-    my $item = make_item('ParenExpr', $typed);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($typed, 'ParenExpr', 0, 10, 0);
     ok(!$ti->is_zero($result), 'ParenExpr with type => Array is valid');
     is(get_tags($result)->{type}, 'Array', 'ParenExpr preserves type => Array');
 }
 
 {
     my $typed = make_ctx(type => 'Scalar');
-    my $item = make_item('Block', $typed);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($typed, 'Block', 0, 10, 0);
     ok(!$ti->is_zero($result), 'Block with type => Scalar is valid');
     is(get_tags($result)->{type}, 'Scalar', 'Block preserves type => Scalar');
 }
@@ -507,8 +471,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'push' as QualifiedIdentifier → call_symbol = 'push'
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'push');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'push');
     ok(!$ti->is_zero($result), 'scanning "push" as QualifiedIdentifier is non-zero');
     is(get_tags($result)->{call_symbol}, 'push',
         'scanning "push" as QualifiedIdentifier tags call_symbol => push');
@@ -516,48 +479,42 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'unshift' as QualifiedIdentifier → call_symbol = 'unshift'
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'unshift');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'unshift');
     is(get_tags($result)->{call_symbol}, 'unshift',
         'scanning "unshift" tags call_symbol => unshift');
 }
 
 # Scanning 'pop' as QualifiedIdentifier → call_symbol = 'pop'
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'pop');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'pop');
     is(get_tags($result)->{call_symbol}, 'pop',
         'scanning "pop" tags call_symbol => pop');
 }
 
 # Scanning 'shift' as QualifiedIdentifier → call_symbol = 'shift'
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'shift');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'shift');
     is(get_tags($result)->{call_symbol}, 'shift',
         'scanning "shift" tags call_symbol => shift');
 }
 
 # Scanning 'splice' as QualifiedIdentifier → call_symbol = 'splice'
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'splice');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'splice');
     is(get_tags($result)->{call_symbol}, 'splice',
         'scanning "splice" tags call_symbol => splice');
 }
 
 # Scanning 'foo' → no call_symbol
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'foo');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'foo');
     ok(!get_tags($result)->{call_symbol},
         'scanning "foo" does NOT tag call_symbol');
 }
 
 # Qualified names (Foo::push) → no call_symbol
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'Foo::push');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'Foo::push');
     ok(!get_tags($result)->{call_symbol},
         'scanning "Foo::push" does NOT tag call_symbol');
 }
@@ -572,8 +529,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $qi_leaf  = make_ctx(call_symbol => 'push');
     my $el_leaf  = make_ctx(item_types  => ['Array', 'Scalar'], list_arity => 2);
     my $val = $ti->multiply($qi_leaf, $el_leaf);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result),
         'CallExpression: tree-walk finds call_symbol in child leaf → valid');
     is(get_tags($result)->{type}, 'Int',
@@ -586,8 +542,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $mid     = $ti->multiply($ti->one(), $qi_leaf);
     my $el_leaf = make_ctx(item_types  => ['Array', 'Scalar'], list_arity => 2);
     my $val = $ti->multiply($mid, $el_leaf);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result),
         'CallExpression: deep tree-walk finds call_symbol → valid');
 }
@@ -597,24 +552,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # CallExpression with call_symbol=push, item_types [Array, Scalar], arity 2 → valid
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar'], list_arity => 2);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: push with array,scalar item_types → valid');
 }
 
 # CallExpression with call_symbol=push, item_types [Scalar] → zero (kill)
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Scalar']);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'CallExpression: push with scalar-only item_types → zero (killed)');
 }
 
 # CallExpression with call_symbol=push and no item_types → valid (no per-position check)
 {
     my $val = make_ctx(call_symbol => 'push');
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'CallExpression: push with no item_types → zero (arity check fails)');
 }
 
@@ -623,16 +575,14 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $val = make_ctx(call_symbol => 'push',
                 item_types => ['Array', 'Scalar'], list_arity => 2);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: push with array+scalar item_types → valid');
 }
 
 # CallExpression without call_symbol → normal (no validation)
 {
     my $val = make_ctx(type => 'Scalar');
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: non-builtin with scalar → valid (no validation)');
 }
 
@@ -641,8 +591,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 0 (single Expression) → list_arity 1
 {
     my $val = make_ctx(type => 'Array');
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
     ok(!$ti->is_zero($result), 'ExpressionList alt 0: valid');
     is(get_tags($result)->{list_arity}, 1, 'ExpressionList alt 0: list_arity = 1');
 }
@@ -650,8 +599,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 1 (ExpressionList , Expression) → list_arity from child + 1
 {
     my $val = make_ctx(type => 'Array', list_arity => 1);
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 1, 10, 0);
     ok(!$ti->is_zero($result), 'ExpressionList alt 1: valid');
     is(get_tags($result)->{list_arity}, 2, 'ExpressionList alt 1: list_arity = 2');
 }
@@ -659,8 +607,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 2 (ExpressionList => Expression) → list_arity from child + 1
 {
     my $val = make_ctx(list_arity => 2);
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 2, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 2, 10, 0);
     ok(!$ti->is_zero($result), 'ExpressionList alt 2: valid');
     is(get_tags($result)->{list_arity}, 3, 'ExpressionList alt 2: list_arity = 3');
 }
@@ -668,8 +615,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 3 (trailing comma) → list_arity preserved
 {
     my $val = make_ctx(list_arity => 3);
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 3, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 3, 10, 0);
     ok(!$ti->is_zero($result), 'ExpressionList alt 3: valid');
     is(get_tags($result)->{list_arity}, 3, 'ExpressionList alt 3: list_arity preserved');
 }
@@ -693,40 +639,35 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # push with list_arity 1 (only @arr, no values) → rejected (min_arity 2)
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
     ok($ti->is_zero($result), 'CallExpression: push with list_arity 1 → rejected (min_arity 2)');
 }
 
 # push with list_arity 2 (@arr, $val) → accepted
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar'], list_arity => 2);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 2 → accepted');
 }
 
 # push with list_arity 3 (@arr, $val1, $val2) → accepted
 {
     my $val = make_ctx(call_symbol => 'push', item_types => ['Array', 'Scalar', 'Scalar'], list_arity => 3);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: push with list_arity 3 → accepted');
 }
 
 # pop with list_arity 1 (@arr) → accepted (min_arity 1)
 {
     my $val = make_ctx(call_symbol => 'pop', item_types => ['Array'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 1, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: pop with list_arity 1 → accepted');
 }
 
 # list_arity cleared at boundary rules (ParenExpr, Block, etc.)
 {
     my $val = make_ctx(list_arity => 3);
-    my $item = make_item('ParenExpr', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'ParenExpr', 0, 10, 0);
     ok(!get_tags($result)->{list_arity}, 'ParenExpr clears list_arity');
 }
 
@@ -736,8 +677,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Scanning 'keys' as QualifiedIdentifier → call_symbol = 'keys'
 {
-    my $item = make_item('QualifiedIdentifier', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'keys');
+    my $result = $ti->on_scan($ti->one(), 'QualifiedIdentifier', 0, 0, 'keys');
     is(get_tags($result)->{call_symbol}, 'keys',
         'scanning "keys" as QualifiedIdentifier tags call_symbol => keys');
 }
@@ -745,48 +685,42 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # CallExpression with call_symbol=keys, item_types [Hash] → valid
 {
     my $val = make_ctx(call_symbol => 'keys', item_types => ['Hash'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: keys with hash item_types → valid');
 }
 
 # CallExpression with call_symbol=keys, item_types [Scalar] → zero (kill)
 {
     my $val = make_ctx(call_symbol => 'keys', item_types => ['Scalar'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'CallExpression: keys with scalar item_types → zero (killed)');
 }
 
 # CallExpression with call_symbol=keys, item_types [Array] → zero (kill)
 {
     my $val = make_ctx(call_symbol => 'keys', item_types => ['Array'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'CallExpression: keys with array item_types → zero (killed)');
 }
 
 # CallExpression with call_symbol=keys, no item_types → rejected (arity check)
 {
     my $val = make_ctx(call_symbol => 'keys');
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: keys with no item_types → valid (no per-position check)');
 }
 
 # CallExpression with call_symbol=values, item_types [Hash] → valid
 {
     my $val = make_ctx(call_symbol => 'values', item_types => ['Hash'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: values with hash item_types → valid');
 }
 
 # CallExpression with call_symbol=each, item_types [Hash] → valid
 {
     my $val = make_ctx(call_symbol => 'each', item_types => ['Hash'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: each with hash item_types → valid');
 }
 
@@ -797,24 +731,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # CallExpression with call_symbol=defined, item_types [Scalar] → valid (Any accepts all)
 {
     my $val = make_ctx(call_symbol => 'defined', item_types => ['Scalar'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: defined with scalar item_types → valid');
 }
 
 # CallExpression with call_symbol=die, no item_types → valid (Any + min_arity 0)
 {
     my $val = make_ctx(call_symbol => 'die');
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: die with no args → valid');
 }
 
 # CallExpression with call_symbol=warn, item_types [Scalar] → valid
 {
     my $val = make_ctx(call_symbol => 'warn', item_types => ['Scalar'], list_arity => 1);
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'CallExpression: warn with scalar item_types → valid');
 }
 
@@ -1006,24 +937,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ScalarVariable → type => 'Scalar'
 {
-    my $item = make_item('ScalarVariable', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '$x');
+    my $result = $ti->on_scan($ti->one(), 'ScalarVariable', 0, 0, '$x');
     is(get_tags($result)->{type}, 'Scalar',
         'ScalarVariable scan tags type => Scalar');
 }
 
 # ArrayVariable → type => 'Array'
 {
-    my $item = make_item('ArrayVariable', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '@arr');
+    my $result = $ti->on_scan($ti->one(), 'ArrayVariable', 0, 0, '@arr');
     is(get_tags($result)->{type}, 'Array',
         'ArrayVariable scan tags type => Array');
 }
 
 # HashVariable → type => 'Hash'
 {
-    my $item = make_item('HashVariable', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '%h');
+    my $result = $ti->on_scan($ti->one(), 'HashVariable', 0, 0, '%h');
     is(get_tags($result)->{type}, 'Hash',
         'HashVariable scan tags type => Hash');
 }
@@ -1032,8 +960,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # NumericLiteral: integer → type => 'Int'
 {
-    my $item = make_item('NumericLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '42');
+    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '42');
     ok(!$ti->is_zero($result), 'NumericLiteral scan of "42" is non-zero');
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "42" tags type => Int');
@@ -1041,56 +968,49 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # NumericLiteral: hex integer → type => 'Int'
 {
-    my $item = make_item('NumericLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '0xFF');
+    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0xFF');
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0xFF" tags type => Int');
 }
 
 # NumericLiteral: binary integer → type => 'Int'
 {
-    my $item = make_item('NumericLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '0b1010');
+    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0b1010');
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0b1010" tags type => Int');
 }
 
 # NumericLiteral: octal integer → type => 'Int'
 {
-    my $item = make_item('NumericLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '0777');
+    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '0777');
     is(get_tags($result)->{type}, 'Int',
         'NumericLiteral "0777" tags type => Int');
 }
 
 # NumericLiteral: float → type => 'Num'
 {
-    my $item = make_item('NumericLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '3.14');
+    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '3.14');
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "3.14" tags type => Num');
 }
 
 # NumericLiteral: scientific notation → type => 'Num'
 {
-    my $item = make_item('NumericLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '1e10');
+    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '1e10');
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "1e10" tags type => Num');
 }
 
 # NumericLiteral: negative exponent → type => 'Num'
 {
-    my $item = make_item('NumericLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '2.5E-3');
+    my $result = $ti->on_scan($ti->one(), 'NumericLiteral', 0, 0, '2.5E-3');
     is(get_tags($result)->{type}, 'Num',
         'NumericLiteral "2.5E-3" tags type => Num');
 }
 
 # StringLiteral → type => 'Str'
 {
-    my $item = make_item('StringLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '"hello"');
+    my $result = $ti->on_scan($ti->one(), 'StringLiteral', 0, 0, '"hello"');
     ok(!$ti->is_zero($result), 'StringLiteral scan of "hello" is non-zero');
     is(get_tags($result)->{type}, 'Str',
         'StringLiteral tags type => Str');
@@ -1098,24 +1018,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # StringLiteral: single-quoted → type => 'Str'
 {
-    my $item = make_item('StringLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, "'hello'");
+    my $result = $ti->on_scan($ti->one(), 'StringLiteral', 0, 0, "'hello'");
     is(get_tags($result)->{type}, 'Str',
         'StringLiteral single-quoted tags type => Str');
 }
 
 # RegexLiteral (non-empty) → type => 'Regex'
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '/pattern/');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '/pattern/');
     is(get_tags($result)->{type}, 'Regex',
         'RegexLiteral "/pattern/" tags type => Regex');
 }
 
 # RegexLiteral (empty, now accepted) → Regex type
 {
-    my $item = make_item('RegexLiteral', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '//');
+    my $result = $ti->on_scan($ti->one(), 'RegexLiteral', 0, 0, '//');
     ok(!$ti->is_zero($result), 'RegexLiteral "//" accepted');
     is(get_tags($result)->{type}, 'Regex',
         'RegexLiteral "//" tags type => Regex');
@@ -1123,8 +1040,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Literal: undef → type => 'Undef'
 {
-    my $item = make_item('Literal', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'undef');
+    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'undef');
     ok(!$ti->is_zero($result), 'Literal "undef" scan is non-zero');
     is(get_tags($result)->{type}, 'Undef',
         'Literal "undef" tags type => Undef');
@@ -1132,24 +1048,21 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # Literal: true → type => 'Bool'
 {
-    my $item = make_item('Literal', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'true');
+    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'true');
     is(get_tags($result)->{type}, 'Bool',
         'Literal "true" tags type => Bool');
 }
 
 # Literal: false → type => 'Bool'
 {
-    my $item = make_item('Literal', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'false');
+    my $result = $ti->on_scan($ti->one(), 'Literal', 0, 0, 'false');
     is(get_tags($result)->{type}, 'Bool',
         'Literal "false" tags type => Bool');
 }
 
 # Atom: __SUB__ → type => 'CodeRef'
 {
-    my $item = make_item('Atom', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '__SUB__');
+    my $result = $ti->on_scan($ti->one(), 'Atom', 0, 0, '__SUB__');
     ok(!$ti->is_zero($result), 'Atom __SUB__ scan is non-zero');
     is(get_tags($result)->{type}, 'CodeRef',
         'Atom "__SUB__" tags type => CodeRef');
@@ -1176,74 +1089,64 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # BinaryOp scans capture op_text
 {
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '+');
+    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '+');
     ok(!$ti->is_zero($result), 'BinaryOp "+" scan is non-zero');
     is(get_tags($result)->{op_text}, '+',
         'BinaryOp "+" tags op_text => +');
 }
 
 {
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '==');
+    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '==');
     is(get_tags($result)->{op_text}, '==',
         'BinaryOp "==" tags op_text => ==');
 }
 
 {
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '.');
+    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '.');
     is(get_tags($result)->{op_text}, '.',
         'BinaryOp "." tags op_text => .');
 }
 
 {
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, 'eq');
+    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, 'eq');
     is(get_tags($result)->{op_text}, 'eq',
         'BinaryOp "eq" tags op_text => eq');
 }
 
 {
-    my $item = make_item('BinaryOp', $ti->one());
-    my $result = $ti->on_scan($item, 0, 0, '&&');
+    my $result = $ti->on_scan($ti->one(), 'BinaryOp', 0, 0, '&&');
     is(get_tags($result)->{op_text}, '&&',
         'BinaryOp "&&" tags op_text => &&');
 }
 
 # UnaryExpression operator scans capture op_text
 {
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 200, '!');
+    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 200, '!');
     is(get_tags($result)->{op_text}, '!',
         'UnaryExpression "!" tags op_text => !');
 }
 
 {
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 201, 'not');
+    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 201, 'not');
     is(get_tags($result)->{op_text}, 'not',
         'UnaryExpression "not" tags op_text => not');
 }
 
 {
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 202, '~');
+    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 202, '~');
     is(get_tags($result)->{op_text}, '~',
         'UnaryExpression "~" tags op_text => ~');
 }
 
 {
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 203, '\\');
+    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 203, '\\');
     is(get_tags($result)->{op_text}, '\\',
         'UnaryExpression "\\" tags op_text => \\');
 }
 
 # Standalone unary - gets op_text
 {
-    my $item = make_item('UnaryExpression', $ti->one());
-    my $result = $ti->on_scan($item, 0, 204, '-');
+    my $result = $ti->on_scan($ti->one(), 'UnaryExpression', 0, 204, '-');
     is(get_tags($result)->{op_text}, '-',
         'standalone UnaryExpression "-" tags op_text => -');
 }
@@ -1268,8 +1171,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # AnonymousSub → type => 'Code'
 {
-    my $item = make_item('AnonymousSub', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($ti->one(), 'AnonymousSub', 0, 10, 0);
     ok(!$ti->is_zero($result), 'AnonymousSub completion is valid');
     is(get_tags($result)->{type}, 'Code',
         'AnonymousSub tags type => Code');
@@ -1277,8 +1179,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # ArrayConstructor → type => 'ArrayRef'
 {
-    my $item = make_item('ArrayConstructor', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($ti->one(), 'ArrayConstructor', 0, 10, 0);
     ok(!$ti->is_zero($result), 'ArrayConstructor completion is valid');
     is(get_tags($result)->{type}, 'ArrayRef',
         'ArrayConstructor tags type => ArrayRef');
@@ -1286,8 +1187,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # HashConstructor → type => 'HashRef'
 {
-    my $item = make_item('HashConstructor', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($ti->one(), 'HashConstructor', 0, 10, 0);
     ok(!$ti->is_zero($result), 'HashConstructor completion is valid');
     is(get_tags($result)->{type}, 'HashRef',
         'HashConstructor tags type => HashRef');
@@ -1295,8 +1195,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # QwLiteral → type => 'List'
 {
-    my $item = make_item('QwLiteral', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($ti->one(), 'QwLiteral', 0, 10, 0);
     ok(!$ti->is_zero($result), 'QwLiteral completion is valid');
     is(get_tags($result)->{type}, 'List',
         'QwLiteral tags type => List');
@@ -1304,32 +1203,28 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 
 # PostfixDeref alt 0 (->@*) → type => 'Array'
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 0, 10, 0);
     is(get_tags($result)->{type}, 'Array',
         'PostfixDeref alt 0 (->@*) tags type => Array');
 }
 
 # PostfixDeref alt 1 (->%*) → type => 'Hash'
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 1, 10, 0);
     is(get_tags($result)->{type}, 'Hash',
         'PostfixDeref alt 1 (->%*) tags type => Hash');
 }
 
 # PostfixDeref alt 2 (->$*) → type => 'Scalar'
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 2, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 2, 10, 0);
     is(get_tags($result)->{type}, 'Scalar',
         'PostfixDeref alt 2 (->$*) tags type => Scalar');
 }
 
 # PostfixDeref alt 3 (->$#*) → type => 'Scalar'
 {
-    my $item = make_item('PostfixDeref', $ti->one());
-    my $result = $ti->on_complete($item, 3, 10);
+    my $result = $ti->on_complete($ti->one(), 'PostfixDeref', 3, 10, 0);
     is(get_tags($result)->{type}, 'Scalar',
         'PostfixDeref alt 3 (->$#*) tags type => Scalar');
 }
@@ -1341,8 +1236,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # BinaryExpression with op_text '+' → type => 'Num' (consumes op_text)
 {
     my $val = make_ctx(op_text => '+', type => 'Int');
-    my $item = make_item('BinaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'BinaryExpression "+" is valid');
     is(get_tags($result)->{type}, 'Num',
         'BinaryExpression "+" tags type => Num');
@@ -1353,8 +1247,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # BinaryExpression with op_text '==' → type => 'Bool'
 {
     my $val = make_ctx(op_text => '==');
-    my $item = make_item('BinaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, 'Bool',
         'BinaryExpression "==" tags type => Bool');
 }
@@ -1362,8 +1255,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # BinaryExpression with op_text '.' → type => 'Str'
 {
     my $val = make_ctx(op_text => '.');
-    my $item = make_item('BinaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, 'Str',
         'BinaryExpression "." tags type => Str');
 }
@@ -1371,8 +1263,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # BinaryExpression with op_text '&&' → type => 'Any'
 {
     my $val = make_ctx(op_text => '&&');
-    my $item = make_item('BinaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, undef,
         'BinaryExpression "&&" tags type => undef (Any means unknown)');
 }
@@ -1380,8 +1271,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # BinaryExpression with op_text '=~' → type => 'Bool'
 {
     my $val = make_ctx(op_text => '=~');
-    my $item = make_item('BinaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, 'Bool',
         'BinaryExpression "=~" tags type => Bool');
 }
@@ -1389,8 +1279,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # BinaryExpression with op_text '..' → type => 'List'
 {
     my $val = make_ctx(op_text => '..');
-    my $item = make_item('BinaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, 'List',
         'BinaryExpression ".." tags type => List');
 }
@@ -1398,8 +1287,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # BinaryExpression without op_text → type preserved from children
 {
     my $val = make_ctx(type => 'Int');
-    my $item = make_item('BinaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'BinaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, 'Int',
         'BinaryExpression without op_text preserves child type');
 }
@@ -1407,8 +1295,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # UnaryExpression with op_text '!' → type => 'Bool' (consumes op_text)
 {
     my $val = make_ctx(op_text => '!');
-    my $item = make_item('UnaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'UnaryExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'UnaryExpression "!" is valid');
     is(get_tags($result)->{type}, 'Bool',
         'UnaryExpression "!" tags type => Bool');
@@ -1419,8 +1306,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # UnaryExpression with op_text '-' (standalone, no ambiguous) → type => 'Num'
 {
     my $val = make_ctx(op_text => '-');
-    my $item = make_item('UnaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'UnaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, 'Num',
         'UnaryExpression "-" tags type => Num');
 }
@@ -1428,8 +1314,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # UnaryExpression with op_text '\\' → type => 'Ref'
 {
     my $val = make_ctx(op_text => '\\');
-    my $item = make_item('UnaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'UnaryExpression', 0, 10, 0);
     is(get_tags($result)->{type}, 'Ref',
         'UnaryExpression "\\" tags type => Ref');
 }
@@ -1437,8 +1322,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # PostfixIncDec → type => 'Num'
 {
     my $val = make_ctx(type => 'Scalar');
-    my $item = make_item('PostfixIncDec', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'PostfixIncDec', 0, 10, 0);
     ok(!$ti->is_zero($result), 'PostfixIncDec is valid');
     is(get_tags($result)->{type}, 'Num',
         'PostfixIncDec tags type => Num');
@@ -1447,8 +1331,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # Subscript (array []) → type => 'Scalar'
 {
     my $val = make_ctx(type => 'Array');
-    my $item = make_item('Subscript', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'Subscript', 0, 10, 0);
     ok(!$ti->is_zero($result), 'Subscript alt 0 is valid');
     is(get_tags($result)->{type}, 'Scalar',
         'Subscript alt 0 (array []) tags type => Scalar');
@@ -1457,8 +1340,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # Subscript (hash {}) → type => 'Scalar'
 {
     my $val = make_ctx(type => 'Hash');
-    my $item = make_item('Subscript', $val);
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($val, 'Subscript', 1, 10, 0);
     is(get_tags($result)->{type}, 'Scalar',
         'Subscript alt 1 (hash {}) tags type => Scalar');
 }
@@ -1466,8 +1348,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # Subscript (deref-call ->()) → type => undef
 {
     my $val = make_ctx(type => 'CodeRef');
-    my $item = make_item('Subscript', $val);
-    my $result = $ti->on_complete($item, 2, 10);
+    my $result = $ti->on_complete($val, 'Subscript', 2, 10, 0);
     is(get_tags($result)->{type}, undef,
         'Subscript alt 2 (->()) tags type => undef');
 }
@@ -1475,8 +1356,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # TernaryExpression → type => undef
 {
     my $val = make_ctx(type => 'Int');
-    my $item = make_item('TernaryExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'TernaryExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'TernaryExpression is valid');
     is(get_tags($result)->{type}, undef,
         'TernaryExpression tags type => undef');
@@ -1485,8 +1365,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # AssignmentExpression → type => undef
 {
     my $val = make_ctx(type => 'Scalar');
-    my $item = make_item('AssignmentExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'AssignmentExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'AssignmentExpression is valid');
     is(get_tags($result)->{type}, undef,
         'AssignmentExpression tags type => undef');
@@ -1495,8 +1374,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # MethodCall → type => undef
 {
     my $val = make_ctx(type => 'Object');
-    my $item = make_item('MethodCall', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'MethodCall', 0, 10, 0);
     ok(!$ti->is_zero($result), 'MethodCall is valid');
     is(get_tags($result)->{type}, undef,
         'MethodCall tags type => undef');
@@ -1510,8 +1388,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # → item_types => ['Array']
 {
     my $val = make_ctx(type => 'Array');
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
     ok(!$ti->is_zero($result), 'ExpressionList alt 0 with type: valid');
     my $rtags = get_tags($result);
     is_deeply($rtags->{item_types}, ['Array'],
@@ -1521,8 +1398,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 0 with type => 'Int'
 {
     my $val = make_ctx(type => 'Int');
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
     is_deeply(get_tags($result)->{item_types}, ['Int'],
         'ExpressionList alt 0: item_types => [Int]');
 }
@@ -1530,8 +1406,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # ExpressionList alt 0 with no type tag
 {
     my $val = make_ctx();
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 0, 10, 0);
     is_deeply(get_tags($result)->{item_types}, [undef],
         'ExpressionList alt 0 without type: item_types => [undef]');
 }
@@ -1553,8 +1428,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         rule     => undef,
     );
     my $combined = $ti->multiply($left, $right);
-    my $item = make_item('ExpressionList', $combined);
-    my $result = $ti->on_complete($item, 1, 10);
+    my $result = $ti->on_complete($combined, 'ExpressionList', 1, 10, 0);
     ok(!$ti->is_zero($result), 'ExpressionList alt 1 (comma): valid');
     is_deeply(get_tags($result)->{item_types}, ['Array', 'Scalar'],
         'ExpressionList alt 1: item_types => [Array, Scalar]');
@@ -1575,8 +1449,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         rule     => undef,
     );
     my $combined = $ti->multiply($left, $right);
-    my $item = make_item('ExpressionList', $combined);
-    my $result = $ti->on_complete($item, 2, 10);
+    my $result = $ti->on_complete($combined, 'ExpressionList', 2, 10, 0);
     is_deeply(get_tags($result)->{item_types}, ['Str', 'Int'],
         'ExpressionList alt 2 (fat-arrow): item_types => [Str, Int]');
 }
@@ -1589,8 +1462,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         position => 0,
         rule     => 'ExpressionList',
     );
-    my $item = make_item('ExpressionList', $val);
-    my $result = $ti->on_complete($item, 3, 10);
+    my $result = $ti->on_complete($val, 'ExpressionList', 3, 10, 0);
     is_deeply(get_tags($result)->{item_types}, ['Array', 'Scalar'],
         'ExpressionList alt 3 (trailing comma): item_types preserved');
 }
@@ -1606,8 +1478,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Array', 'Scalar'],
         list_arity  => 2,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'per-position: push(Array, Scalar) → valid');
     is(get_tags($result)->{type}, 'Int',
         'per-position: push return type => Int');
@@ -1620,8 +1491,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Scalar', 'Scalar'],
         list_arity  => 2,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'per-position: push(Scalar, Scalar) → rejected');
 }
 
@@ -1633,8 +1503,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Str', 'Array'],
         list_arity  => 2,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'per-position: join(Str, Array) → valid');
     is(get_tags($result)->{type}, 'Str',
         'per-position: join return type => Str');
@@ -1647,8 +1516,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Int'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'per-position: chr(Int) → valid');
     is(get_tags($result)->{type}, 'Str',
         'per-position: chr return type => Str');
@@ -1670,8 +1538,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Str'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'per-position: chr(Str) → rejected (Str is not Int)');
 }
 
@@ -1682,8 +1549,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => [undef, undef],
         list_arity  => 2,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'per-position: push(undef, undef) → valid (permissive)');
 }
 
@@ -1694,8 +1560,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Hash'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'per-position: keys(Hash) → valid');
     is(get_tags($result)->{type}, 'List',
         'per-position: keys return type => List');
@@ -1708,8 +1573,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Scalar'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'per-position: keys(Scalar) → rejected');
 }
 
@@ -1720,8 +1584,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Scalar'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'per-position: defined(Scalar) → valid');
     is(get_tags($result)->{type}, 'Bool',
         'per-position: defined return type => Bool');
@@ -1733,8 +1596,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types => ['Int', 'Str'],
         list_arity => 2,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'per-position: non-builtin with item_types → valid');
 }
 
@@ -1745,8 +1607,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Array'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result), 'per-position: push(Array) with arity 1 → rejected (min_arity 2)');
 }
 
@@ -1759,8 +1620,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Array'],
         list_arity  => 2,  # Block + 1 ExpressionList arg
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 2, 10);  # alt 2 = block-first with args
+    my $result = $ti->on_complete($val, 'CallExpression', 2, 10, 0);  # alt 2 = block-first with args
     ok(!$ti->is_zero($result), 'per-position: map(Block, Array) alt 2 → valid');
     my $focus = $result->extract();
     is($focus->{type}, 'List', 'per-position: map return type => List');
@@ -1773,8 +1633,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         call_symbol => 'map',
         # No list_arity or item_types — only a Block child
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 3, 10);  # alt 3 = block-only
+    my $result = $ti->on_complete($val, 'CallExpression', 3, 10, 0);  # alt 3 = block-only
     ok(!$ti->is_zero($result), 'per-position: map(Block) alt 3 → valid');
 }
 
@@ -1785,8 +1644,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types     => ['Scalar'],
         list_arity     => 2,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 2, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 2, 10, 0);
     ok($ti->is_zero($result), 'per-position: grep(Block, Scalar) alt 2 → rejected (Scalar is not List)');
 }
 
@@ -1797,10 +1655,8 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # on_complete hash-consing: same rule + same value → same refaddr
 {
     my $val = make_ctx(type => 'Str');
-    my $item1 = make_item('Atom', $val);
-    my $item2 = make_item('Atom', $val);
-    my $r1 = $ti->on_complete($item1, 0, 5);
-    my $r2 = $ti->on_complete($item2, 0, 5);
+    my $r1 = $ti->on_complete($val, 'Atom', 0, 5, 0);
+    my $r2 = $ti->on_complete($val, 'Atom', 0, 5, 0);
     ok(!$ti->is_zero($r1), 'on_complete Atom with Str is valid');
     ok(!$ti->is_zero($r2), 'on_complete Atom with Str (second call) is valid');
     is(refaddr($r1), refaddr($r2),
@@ -1810,10 +1666,9 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # Different alt_idx for PostfixDeref → different refaddrs
 {
     my $val = make_ctx();
-    my $item = make_item('PostfixDeref', $val);
-    my $r_array = $ti->on_complete($item, 0, 5);  # alt 0 = ->@* → Array
-    my $r_hash  = $ti->on_complete($item, 1, 5);  # alt 1 = ->%* → Hash
-    my $r_scalar = $ti->on_complete($item, 2, 5); # alt 2 = ->$* → Scalar
+    my $r_array = $ti->on_complete($val, 'PostfixDeref', 0, 5, 0);  # alt 0 = ->@* → Array
+    my $r_hash  = $ti->on_complete($val, 'PostfixDeref', 1, 5, 0); # alt 1 = ->%* → Hash
+    my $r_scalar = $ti->on_complete($val, 'PostfixDeref', 2, 5, 0); # alt 2 = ->$* → Scalar
     ok(!$ti->is_zero($r_array), 'PostfixDeref alt 0 is valid');
     ok(!$ti->is_zero($r_hash), 'PostfixDeref alt 1 is valid');
     ok(!$ti->is_zero($r_scalar), 'PostfixDeref alt 2 is valid');
@@ -1829,9 +1684,8 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 # Different alt_idx for Subscript → different refaddrs
 {
     my $val = make_ctx();
-    my $item = make_item('Subscript', $val);
-    my $r_arr = $ti->on_complete($item, 0, 5);  # alt 0 = [...] → Scalar
-    my $r_call = $ti->on_complete($item, 2, 5); # alt 2 = ->() → no type
+    my $r_arr = $ti->on_complete($val, 'Subscript', 0, 5, 0);  # alt 0 = [...] → Scalar
+    my $r_call = $ti->on_complete($val, 'Subscript', 2, 5, 0); # alt 2 = ->() → no type
     ok(!$ti->is_zero($r_arr), 'Subscript alt 0 is valid');
     ok(!$ti->is_zero($r_call), 'Subscript alt 2 is valid');
     is(get_tags($r_arr)->{type}, 'Scalar', 'Subscript alt 0 → Scalar');
@@ -1847,8 +1701,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     # Inner context has call_symbol (simulates QualifiedIdentifier scan)
     my $inner = make_ctx(call_symbol => 'push');
     # Wrap through ParenExpr on_complete (boundary rule clears call_symbol)
-    my $paren_item = make_item('ParenExpr', $inner);
-    my $boundary_result = $ti->on_complete($paren_item, 0, 5);
+    my $boundary_result = $ti->on_complete($inner, 'ParenExpr', 0, 5, 0);
     ok(!$ti->is_zero($boundary_result), 'ParenExpr wrapping call_symbol is valid');
     # The focused result from ParenExpr should NOT have call_symbol
     my $focus = $boundary_result->extract();
@@ -1856,8 +1709,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         'Boundary rule (ParenExpr) clears call_symbol from focused result');
 
     # Now use this as a CallExpression value — should NOT find call_symbol
-    my $call_item = make_item('CallExpression', $boundary_result);
-    my $call_result = $ti->on_complete($call_item, 0, 5);
+    my $call_result = $ti->on_complete($boundary_result, 'CallExpression', 0, 5, 0);
     ok(!$ti->is_zero($call_result), 'CallExpression with boundary-wrapped value is valid');
     # No call_symbol means no builtin validation → just returns valid
     my $call_focus = $call_result->extract();
@@ -1869,8 +1721,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
 {
     my $o1 = $ti->one();
     my $val = make_ctx(type => 'Int');
-    my $item = make_item('Expression', $val);
-    my $r1 = $ti->on_complete($item, 0, 5);
+    my $r1 = $ti->on_complete($val, 'Expression', 0, 5, 0);
 
     $ti->reset_cache();
 
@@ -1878,7 +1729,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     isnt(refaddr($o1), refaddr($o2),
         'reset_cache() clears one() singleton (different refaddr after reset)');
 
-    my $r2 = $ti->on_complete($item, 0, 5);
+    my $r2 = $ti->on_complete($val, 'Expression', 0, 5, 0);
     isnt(refaddr($r1), refaddr($r2),
         'reset_cache() clears _extend_ctx cache (different refaddr after reset)');
 }
@@ -1900,8 +1751,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $mid   = $ti->multiply($left, $ti->one());
     my $val   = $ti->multiply($mid, $el_leaf);
 
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result),
         'split-tree CallExpression: finds call_symbol and item_types through unfocused nodes');
     is(get_tags($result)->{type}, 'Int',
@@ -1917,8 +1767,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $right = $ti->multiply($el_leaf, $ti->one());
     my $val = $ti->multiply($left, $right);
 
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result),
         'split-tree CallExpression: push with arity 1 → rejected (min_arity 2)');
 }
@@ -1931,8 +1780,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $left = $ti->multiply($qi_leaf, $ti->one());
     my $val = $ti->multiply($left, $el_leaf);
 
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok($ti->is_zero($result),
         'split-tree CallExpression: keys(Scalar) → rejected through split tree');
 }
@@ -1948,8 +1796,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Int'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'return(Int) is valid');
     is(get_tags($result)->{type}, 'Int',
         'return(Int) propagates Int type from argument');
@@ -1962,8 +1809,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
         item_types  => ['Str'],
         list_arity  => 1,
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'return(Str) is valid');
     is(get_tags($result)->{type}, 'Str',
         'return(Str) propagates Str type from argument');
@@ -1974,8 +1820,7 @@ use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_concise_parse
     my $val = make_ctx(
         call_symbol => 'return',
     );
-    my $item = make_item('CallExpression', $val);
-    my $result = $ti->on_complete($item, 0, 10);
+    my $result = $ti->on_complete($val, 'CallExpression', 0, 10, 0);
     ok(!$ti->is_zero($result), 'bare return is valid');
     ok(!exists get_tags($result)->{type},
         'bare return has no type tag');

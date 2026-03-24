@@ -15,8 +15,6 @@ use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Grammar::Rule;
-use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Semiring::Structural;
 
 # Local aliases for fully-qualified structural constants
@@ -542,18 +540,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $sem_sr],
     );
 
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => 'QualifiedIdentifier',
-        expressions => [[]],
-    );
-    my $item = {
-        rule   => $rule,
-        dot    => 0,
-        origin => 0,
-        value  => $comp->one(),
-    };
-
-    my $result = $comp->on_scan($item, 0, 0, 'hello');
+    my $result = $comp->on_scan($comp->one(), 'QualifiedIdentifier', 0, 0, 'hello');
 
     isa_ok($result, 'ARRAY', 'on_scan returns array ref');
     is(scalar($result->@*), 2, 'on_scan returns 2-tuple');
@@ -593,18 +580,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         rule     => undef,
     );
 
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule   => $rule,
-        dot    => 0,
-        origin => 0,
-        value  => [$bool_sr->one(), $ctx],
-    };
-
-    my $result = $comp->on_complete($item, 0, 5);
+    my $result = $comp->on_complete([$bool_sr->one(), $ctx], 'TestRule', 0, 5, 0);
 
     isa_ok($result, 'ARRAY', 'on_complete returns array ref');
     is(scalar($result->@*), 2, 'on_complete returns 2-tuple');
@@ -629,18 +605,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $prec_sr, $sem_sr],
     );
 
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => 'BinaryOp',
-        expressions => [[]],
-    );
-    my $item = {
-        rule   => $rule,
-        dot    => 0,
-        origin => 0,
-        value  => $comp->one(),
-    };
-
-    my $result = $comp->on_scan($item, 0, 0, '+');
+    my $result = $comp->on_scan($comp->one(), 'BinaryOp', 0, 0, '+');
 
     isa_ok($result, 'ARRAY', '3-ary on_scan returns array ref');
     is(scalar($result->@*), 3, '3-ary on_scan returns 3-tuple');
@@ -728,18 +693,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $prec_sr, $type_sr, $sem_sr],
     );
 
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => 'QualifiedIdentifier',
-        expressions => [[]],
-    );
-    my $item = {
-        rule   => $rule,
-        dot    => 0,
-        origin => 0,
-        value  => $comp->one(),
-    };
-
-    my $result = $comp->on_scan($item, 0, 0, 'use');
+    my $result = $comp->on_scan($comp->one(), 'QualifiedIdentifier', 0, 0, 'use');
     is(scalar($result->@*), 4, '4-ary on_scan returns 4-tuple');
     ok(!$bool_sr->is_zero($result->[0]), 'bool ok for keyword scan');
     ok(!$prec_sr->is_zero($result->[1]), 'prec ok for keyword scan');
@@ -848,26 +802,13 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
         semirings => [$bool_sr, $prec_sr, $ti_sr, $struct_sr, $sa],
     );
 
-    # Build a minimal item for on_complete
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[
-            Chalk::Grammar::Symbol->new(type => 'terminal', value => '/test/'),
-        ]],
-    );
-
     my $ti_one = $ti_sr->one();
     my $sa_one = $sa->one();
 
-    my $item = {
-        rule   => $rule,
-        dot    => 1,
-        origin => 0,
-        value  => [$bool_sr->one(), $prec_sr->one(), $ti_one, $struct_sr->one(), $sa_one],
-    };
+    my $value = [$bool_sr->one(), $prec_sr->one(), $ti_one, $struct_sr->one(), $sa_one];
 
     # Run on_complete
-    my $result = $comp->on_complete($item, 0, 1);
+    my $result = $comp->on_complete($value, 'TestRule', 0, 1, 0);
 
     # SA is at index 4, TI is at index 2. The TI result should have been
     # passed to SA via set_type_context before SA's on_complete ran.

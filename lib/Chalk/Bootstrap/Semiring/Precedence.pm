@@ -240,13 +240,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return [$left];
     }
 
-    method on_scan($item, $alt_idx, $pos, $matched_text) {
-        my $existing = $item->{value};
+    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
+        my $existing = $value;
 
         # Propagate zero
         return $self->zero() if $self->is_zero($existing);
-
-        my $rule_name = $item->{rule}->name();
 
         # In BinaryOp or AssignOp context, look up operator and validate
         # the LEFT operand's precedence (accumulated in $existing).
@@ -321,11 +319,8 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return $self->multiply($existing, $self->one());
     }
 
-    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
-        my $value = $item->{value};
+    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
         return $self->zero() if $self->is_zero($value);
-
-        my $rule_name = $item->{rule}->name();
 
         # Parenthesized expressions reset precedence context
         if ($RESETS->{$rule_name}) {
@@ -400,7 +395,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
     # should_scan: gate for scan operation, called after regex match succeeds
     # Returns true to proceed with scan, false to skip it.
     # Default: always return true (no filtering).
-    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
         return true;
     }
 

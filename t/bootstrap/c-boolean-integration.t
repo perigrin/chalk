@@ -130,17 +130,16 @@ print !\$b->is_zero(\$a2) ? 'ADD_ZERO_ONE_OK\\n'   : 'ADD_ZERO_ONE_FAIL\\n';
 my \$a3 = \$b->add(\$one, \$zero);
 print !\$b->is_zero(\$a3) ? 'ADD_ONE_ZERO_OK\\n'   : 'ADD_ONE_ZERO_FAIL\\n';
 
-# on_scan: multiply(item->{value}, one)
-my \$item = { value => \$one };
-my \$scanned = \$b->on_scan(\$item, 0, 0, 'a');
+# on_scan: multiply(value, one)
+my \$scanned = \$b->on_scan(\$one, 'TestRule', 0, 0, 'a');
 print !\$b->is_zero(\$scanned) ? 'ON_SCAN_OK\\n'      : 'ON_SCAN_FAIL\\n';
 
-# on_complete: identity — returns item->{value} unchanged
-my \$completed = \$b->on_complete(\$item, 0, 0);
+# on_complete: identity — returns value unchanged
+my \$completed = \$b->on_complete(\$one, 'TestRule', 0, 0, 0);
 print !\$b->is_zero(\$completed) ? 'ON_COMPLETE_OK\\n' : 'ON_COMPLETE_FAIL\\n';
 
 # should_scan: always returns true for Boolean
-print \$b->should_scan(undef, 0, 0, '', {}) ? 'SHOULD_SCAN_OK\\n' : 'SHOULD_SCAN_FAIL\\n';
+print \$b->should_scan(\$one, 'TestRule', 0, 0, '', {}) ? 'SHOULD_SCAN_OK\\n' : 'SHOULD_SCAN_FAIL\\n';
 
 # supports_leo: Boolean supports Leo optimization
 print \$b->supports_leo() ? 'SUPPORTS_LEO_OK\\n' : 'SUPPORTS_LEO_FAIL\\n';

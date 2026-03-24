@@ -348,24 +348,9 @@ my $sr = Chalk::Bootstrap::Semiring::Structural->new();
 # Phase 2: on_scan (transparency)
 # ========================================================================
 
-# Mock item for on_scan/on_complete testing
-my sub mock_item($rule_name, $value) {
-    return {
-        rule  => bless({ _name => $rule_name }, 'MockRule'),
-        value => $value,
-    };
-}
-
-# Provide a name() method for MockRule
-{
-    package MockRule;
-    sub name { return $_[0]->{_name} }
-}
-
 {
     my $o = $sr->one();
-    my $item = mock_item('Identifier', $o);
-    my $r = $sr->on_scan($item, 0, 0, 'foo');
+    my $r = $sr->on_scan($o, 'Identifier', 0, 0, 'foo');
     ok(!$sr->is_zero($r), 'on_scan is transparent for Identifier');
     # one() = 0, on_scan returns 0 (valid, no tags)
     is($r, 0, 'on_scan of one() returns integer 0');
@@ -373,15 +358,13 @@ my sub mock_item($rule_name, $value) {
 
 {
     my $z = $sr->zero();
-    my $item = mock_item('Identifier', $z);
-    my $r = $sr->on_scan($item, 0, 0, 'foo');
+    my $r = $sr->on_scan($z, 'Identifier', 0, 0, 'foo');
     ok($sr->is_zero($r), 'on_scan propagates zero');
 }
 
 {
     my $block_val = STRUCT_IS_BLOCK;
-    my $item = mock_item('Block', $block_val);
-    my $r = $sr->on_scan($item, 0, 0, '{');
+    my $r = $sr->on_scan($block_val, 'Block', 0, 0, '{');
     ok($r & STRUCT_IS_BLOCK, 'on_scan preserves block tag through multiply');
 }
 
@@ -392,8 +375,7 @@ my sub mock_item($rule_name, $value) {
 # --- Block completion → is_block tag ---
 {
     my $o = $sr->one();
-    my $item = mock_item('Block', $o);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($o, 'Block', 0, 0, 0);
     ok(!$sr->is_zero($r), 'Block completion is valid');
     ok($r & STRUCT_IS_BLOCK,   'Block completion sets is_block tag');
     ok(!($r & STRUCT_IS_HASH), 'Block completion does not set is_hash');
@@ -402,8 +384,7 @@ my sub mock_item($rule_name, $value) {
 # --- HashConstructor completion → is_hash tag ---
 {
     my $o = $sr->one();
-    my $item = mock_item('HashConstructor', $o);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($o, 'HashConstructor', 0, 0, 0);
     ok(!$sr->is_zero($r), 'HashConstructor completion is valid');
     ok($r & STRUCT_IS_HASH,     'HashConstructor completion sets is_hash tag');
     ok(!($r & STRUCT_IS_BLOCK), 'HashConstructor completion does not set is_block');
@@ -415,8 +396,7 @@ my sub mock_item($rule_name, $value) {
 # via the "prefer is_call over non-call" rule.
 {
     my $call_val = STRUCT_IS_CALL;
-    my $item = mock_item('PostfixDeref', $call_val);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($call_val, 'PostfixDeref', 0, 0, 0);
     ok(!$sr->is_zero($r), 'PostfixDeref completion is valid');
     ok($r & STRUCT_IS_DEREF,   'PostfixDeref completion sets is_deref');
     ok(!($r & STRUCT_IS_CALL), 'PostfixDeref completion clears is_call from child');
@@ -424,8 +404,7 @@ my sub mock_item($rule_name, $value) {
 
 {
     my $plain = $sr->one();
-    my $item = mock_item('PostfixDeref', $plain);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($plain, 'PostfixDeref', 0, 0, 0);
     ok(!$sr->is_zero($r), 'PostfixDeref with plain value is valid');
     ok($r & STRUCT_IS_DEREF,   'PostfixDeref with plain value sets is_deref');
     ok(!($r & STRUCT_IS_CALL), 'PostfixDeref with plain value has no is_call');
@@ -437,28 +416,24 @@ my sub mock_item($rule_name, $value) {
     my $plain = $sr->one();
 
     # Alt 0: method call with parens
-    my $item0 = mock_item('MethodCall', $plain);
-    my $r0 = $sr->on_complete($item0, 0, 0);
+    my $r0 = $sr->on_complete($plain, 'MethodCall', 0, 0, 0);
     ok(!$sr->is_zero($r0), 'MethodCall alt 0 is valid');
     ok($r0 & STRUCT_IS_METHOD, 'MethodCall alt 0 sets is_method');
     ok($r0 & STRUCT_IS_CALL,   'MethodCall alt 0 (with parens) sets is_call');
 
     # Alt 1: bare method access (no parens)
-    my $item1 = mock_item('MethodCall', $plain);
-    my $r1 = $sr->on_complete($item1, 1, 0);
+    my $r1 = $sr->on_complete($plain, 'MethodCall', 1, 0, 0);
     ok(!$sr->is_zero($r1), 'MethodCall alt 1 is valid');
     ok($r1 & STRUCT_IS_METHOD,  'MethodCall alt 1 sets is_method');
     ok(!($r1 & STRUCT_IS_CALL), 'MethodCall alt 1 (bare) does not set is_call');
 
     # Alt 2: method call with parens (arrow variant)
-    my $item2 = mock_item('MethodCall', $plain);
-    my $r2 = $sr->on_complete($item2, 2, 0);
+    my $r2 = $sr->on_complete($plain, 'MethodCall', 2, 0, 0);
     ok($r2 & STRUCT_IS_METHOD, 'MethodCall alt 2 sets is_method');
     ok($r2 & STRUCT_IS_CALL,   'MethodCall alt 2 (with parens) sets is_call');
 
     # Alt 3: bare method access (arrow variant)
-    my $item3 = mock_item('MethodCall', $plain);
-    my $r3 = $sr->on_complete($item3, 3, 0);
+    my $r3 = $sr->on_complete($plain, 'MethodCall', 3, 0, 0);
     ok($r3 & STRUCT_IS_METHOD,  'MethodCall alt 3 sets is_method');
     ok(!($r3 & STRUCT_IS_CALL), 'MethodCall alt 3 (bare) does not set is_call');
 }
@@ -466,8 +441,7 @@ my sub mock_item($rule_name, $value) {
 # --- MethodCall inherits is_call from child ---
 {
     my $call_val = STRUCT_IS_CALL;
-    my $item = mock_item('MethodCall', $call_val);
-    my $r = $sr->on_complete($item, 1, 0);
+    my $r = $sr->on_complete($call_val, 'MethodCall', 1, 0, 0);
     ok($r & STRUCT_IS_METHOD, 'MethodCall with is_call child sets is_method');
     ok($r & STRUCT_IS_CALL,   'MethodCall inherits is_call from child even on bare alt');
 }
@@ -475,8 +449,7 @@ my sub mock_item($rule_name, $value) {
 # --- BinaryExpression completion → is_binop tag ---
 {
     my $call_val = STRUCT_IS_CALL;
-    my $item = mock_item('BinaryExpression', $call_val);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($call_val, 'BinaryExpression', 0, 0, 0);
     ok(!$sr->is_zero($r), 'BinaryExpression completion is valid');
     ok($r & STRUCT_IS_BINOP, 'BinaryExpression sets is_binop');
     ok($r & STRUCT_IS_CALL,  'BinaryExpression preserves is_call from child');
@@ -485,8 +458,7 @@ my sub mock_item($rule_name, $value) {
 # --- VariableDeclaration tags is_vardecl ---
 {
     my $plain = $sr->one();   # 0 = no tags
-    my $item = mock_item('VariableDeclaration', $plain);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($plain, 'VariableDeclaration', 0, 0, 0);
     ok($r & STRUCT_IS_VARDECL,  'VariableDeclaration sets is_vardecl');
     ok(!($r & STRUCT_IS_BLOCK), 'VariableDeclaration does not set is_block');
 }
@@ -494,8 +466,7 @@ my sub mock_item($rule_name, $value) {
 # --- CallExpression clears is_deref, is_method, and is_binop ---
 {
     my $tagged = STRUCT_IS_DEREF | STRUCT_IS_METHOD | STRUCT_IS_BINOP;
-    my $item = mock_item('CallExpression', $tagged);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($tagged, 'CallExpression', 0, 0, 0);
     ok($r & STRUCT_IS_CALL,     'CallExpression sets is_call');
     ok(!($r & STRUCT_IS_DEREF), 'CallExpression clears is_deref from child');
     ok(!($r & STRUCT_IS_METHOD),'CallExpression clears is_method from child');
@@ -507,31 +478,26 @@ my sub mock_item($rule_name, $value) {
 # ExpressionList:1 (comma-separated) gets is_list so add() prefers single Expression.
 {
     my $deref_val = STRUCT_IS_DEREF;
-    my $item0 = mock_item('ExpressionList', $deref_val);
-    my $r0 = $sr->on_complete($item0, 0, 0);
+    my $r0 = $sr->on_complete($deref_val, 'ExpressionList', 0, 0, 0);
     ok(!($r0 & STRUCT_IS_LIST), 'ExpressionList alt 0 (single) has no is_list');
     ok($r0 & STRUCT_IS_DEREF,   'ExpressionList alt 0 preserves is_deref');
 
-    my $item1 = mock_item('ExpressionList', $deref_val);
-    my $r1 = $sr->on_complete($item1, 1, 0);
+    my $r1 = $sr->on_complete($deref_val, 'ExpressionList', 1, 0, 0);
     ok($r1 & STRUCT_IS_LIST,  'ExpressionList alt 1 (comma) sets is_list');
     ok($r1 & STRUCT_IS_DEREF, 'ExpressionList alt 1 preserves is_deref');
 
-    my $item2 = mock_item('ExpressionList', STRUCT_IS_CALL);
-    my $r2 = $sr->on_complete($item2, 2, 0);
+    my $r2 = $sr->on_complete(STRUCT_IS_CALL, 'ExpressionList', 2, 0, 0);
     ok($r2 & STRUCT_IS_LIST, 'ExpressionList alt 2 (fat arrow) sets is_list');
     ok($r2 & STRUCT_IS_CALL, 'ExpressionList alt 2 preserves is_call');
 
-    my $item3 = mock_item('ExpressionList', $sr->one());  # 0 = no tags
-    my $r3 = $sr->on_complete($item3, 3, 0);
+    my $r3 = $sr->on_complete($sr->one(), 'ExpressionList', 3, 0, 0);
     ok($r3 & STRUCT_IS_LIST, 'ExpressionList alt 3 (trailing comma) sets is_list');
 }
 
 # --- CallExpression clears is_deref and is_method ---
 {
     my $deref_method = STRUCT_IS_DEREF | STRUCT_IS_METHOD;
-    my $item = mock_item('CallExpression', $deref_method);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($deref_method, 'CallExpression', 0, 0, 0);
     ok($r & STRUCT_IS_CALL,      'CallExpression sets is_call');
     ok(!($r & STRUCT_IS_DEREF),  'CallExpression clears is_deref from child');
     ok(!($r & STRUCT_IS_METHOD), 'CallExpression clears is_method from child');
@@ -540,8 +506,7 @@ my sub mock_item($rule_name, $value) {
 # --- Boundary rules clear tags ---
 for my $boundary_rule (qw(ParenExpr ArrayConstructor)) {
     my $tagged = STRUCT_IS_BLOCK | STRUCT_IS_HASH;
-    my $item = mock_item($boundary_rule, $tagged);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($tagged, $boundary_rule, 0, 0, 0);
     ok(!$sr->is_zero($r), "$boundary_rule completion is valid");
     ok(!($r & STRUCT_IS_BLOCK), "$boundary_rule clears is_block tag");
     ok(!($r & STRUCT_IS_HASH),  "$boundary_rule clears is_hash tag");
@@ -550,8 +515,7 @@ for my $boundary_rule (qw(ParenExpr ArrayConstructor)) {
 # --- Program/StatementList preserve is_block/is_hash for Block-vs-Hash disambiguation ---
 for my $preserve_rule (qw(Program StatementList)) {
     my $tagged = STRUCT_IS_BLOCK | STRUCT_IS_HASH;
-    my $item = mock_item($preserve_rule, $tagged);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($tagged, $preserve_rule, 0, 0, 0);
     ok(!$sr->is_zero($r), "$preserve_rule completion is valid");
     ok($r & STRUCT_IS_BLOCK,  "$preserve_rule preserves is_block tag");
     ok($r & STRUCT_IS_HASH,   "$preserve_rule preserves is_hash tag");
@@ -560,16 +524,14 @@ for my $preserve_rule (qw(Program StatementList)) {
 # --- Other rules pass through ---
 {
     my $block_val = STRUCT_IS_BLOCK;
-    my $item = mock_item('Expression', $block_val);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($block_val, 'Expression', 0, 0, 0);
     ok(!$sr->is_zero($r), 'Expression completion is valid');
     ok($r & STRUCT_IS_BLOCK, 'Expression passes through is_block tag');
 }
 
 {
     my $hash_val = STRUCT_IS_HASH;
-    my $item = mock_item('Atom', $hash_val);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($hash_val, 'Atom', 0, 0, 0);
     ok(!$sr->is_zero($r), 'Atom completion is valid');
     ok($r & STRUCT_IS_HASH, 'Atom passes through is_hash tag');
 }
@@ -577,8 +539,7 @@ for my $preserve_rule (qw(Program StatementList)) {
 # --- Zero propagation ---
 {
     my $z = $sr->zero();
-    my $item = mock_item('Block', $z);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($z, 'Block', 0, 0, 0);
     ok($sr->is_zero($r), 'on_complete propagates zero');
 }
 
@@ -586,26 +547,24 @@ for my $preserve_rule (qw(Program StatementList)) {
 # (bare statement alt was removed from grammar — all statements need semicolons)
 {
     my $o = $sr->one();
-    my $item = mock_item('StatementItem', $o);
 
     # alt_idx 0 = SimpleStatement ";"
-    my $r0 = $sr->on_complete($item, 0, 0);
+    my $r0 = $sr->on_complete($o, 'StatementItem', 0, 0, 0);
     ok(!$sr->is_zero($r0), 'StatementItem alt 0 (with semicolon) is valid');
 
     # alt_idx 1 = CompoundStatement
-    my $r1 = $sr->on_complete($item, 1, 0);
+    my $r1 = $sr->on_complete($o, 'StatementItem', 1, 0, 0);
     ok(!$sr->is_zero($r1), 'StatementItem alt 1 (compound) is valid');
 
     # alt_idx 2 = bare ";"
-    my $r2 = $sr->on_complete($item, 2, 0);
+    my $r2 = $sr->on_complete($o, 'StatementItem', 2, 0, 0);
     ok(!$sr->is_zero($r2), 'StatementItem alt 2 (bare semicolon) is valid');
 }
 
 # --- Block completion ---
 {
     my $o = $sr->one();
-    my $item = mock_item('Block', $o);
-    my $r = $sr->on_complete($item, 0, 0);
+    my $r = $sr->on_complete($o, 'Block', 0, 0, 0);
     ok(!$sr->is_zero($r), 'Block with content is valid');
     ok($r & STRUCT_IS_BLOCK, 'Block completion still sets is_block');
 }
@@ -613,9 +572,8 @@ for my $preserve_rule (qw(Program StatementList)) {
 # --- StatementList preserves block/hash tags for disambiguation ---
 {
     my $tagged = STRUCT_IS_BLOCK | STRUCT_IS_HASH;
-    my $item = mock_item('StatementList', $tagged);
 
-    my $r0 = $sr->on_complete($item, 0, 0);
+    my $r0 = $sr->on_complete($tagged, 'StatementList', 0, 0, 0);
     ok($r0 & STRUCT_IS_BLOCK, 'StatementList preserves is_block');
     ok($r0 & STRUCT_IS_HASH,  'StatementList preserves is_hash');
 }
@@ -623,11 +581,10 @@ for my $preserve_rule (qw(Program StatementList)) {
 # --- StatementList alts are valid ---
 {
     my $o = $sr->one();
-    my $item = mock_item('StatementList', $o);
-    my $r0 = $sr->on_complete($item, 0, 0);
+    my $r0 = $sr->on_complete($o, 'StatementList', 0, 0, 0);
     ok(!$sr->is_zero($r0), 'StatementList alt 0 is valid');
 
-    my $r1 = $sr->on_complete($item, 1, 0);
+    my $r1 = $sr->on_complete($o, 'StatementList', 1, 0, 0);
     ok(!$sr->is_zero($r1), 'StatementList alt 1 is valid');
 }
 

@@ -6,7 +6,6 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::Semiring::Boolean;
-use Chalk::Grammar::Rule;
 
 # Create a semiring instance
 my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
@@ -143,37 +142,25 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$sr->is_zero("false"), "string 'false' is not zero");
 }
 
-# Helper to build a mock item for on_scan/on_complete
-my sub make_bool_item($rule_name, $value) {
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => $rule_name,
-        expressions => [[]],
-    );
-    return { rule => $rule, dot => 0, origin => 0, value => $value };
-}
-
 # Test 11: on_scan returns non-zero value (ignores terminal text)
 {
     my $one = $sr->one();
-    my $item = make_bool_item('SomeRule', $one);
-    my $scan_val = $sr->on_scan($item, 0, 0, 'hello');
+    my $scan_val = $sr->on_scan($one, 'SomeRule', 0, 0, 'hello');
     ok(!$sr->is_zero($scan_val), "on_scan returns non-zero value");
 
     # on_scan with empty string also returns non-zero
-    my $scan_empty = $sr->on_scan($item, 0, 0, '');
+    my $scan_empty = $sr->on_scan($one, 'SomeRule', 0, 0, '');
     ok(!$sr->is_zero($scan_empty), "on_scan('') returns non-zero value");
 }
 
 # Test 12: on_complete returns value unchanged
 {
     my $one = $sr->one();
-    my $item = make_bool_item('SomeRule', $one);
-    my $result = $sr->on_complete($item, 0, 5);
+    my $result = $sr->on_complete($one, 'SomeRule', 0, 5, 0);
     ok(!$sr->is_zero($result), "on_complete returns non-zero for non-zero input");
 
     my $zero = $sr->zero();
-    my $item2 = make_bool_item('SomeRule', $zero);
-    my $result2 = $sr->on_complete($item2, 0, 5);
+    my $result2 = $sr->on_complete($zero, 'SomeRule', 0, 5, 0);
     ok($sr->is_zero($result2), "on_complete returns zero for zero input");
 }
 

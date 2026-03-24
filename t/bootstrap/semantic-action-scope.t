@@ -50,12 +50,8 @@ use Chalk::Bootstrap::IR::NodeFactory;
 
     # Build a minimal parse item
     my $one = $sa->one();
-    my $item = {
-        value => $one,
-        rule  => _mock_rule('TestRule'),
-    };
 
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($one, 'TestRule', 0, 0, 0);
     ok(defined $result, 'on_complete returns result');
 
     # Focus is the bare IR node (action returned it)
@@ -105,14 +101,3 @@ use Chalk::Bootstrap::IR::NodeFactory;
 }
 
 done_testing();
-
-# Mock rule object for tests
-sub _mock_rule {
-    my ($name) = @_;
-    return bless { name => $name }, 'MockRule::ScopeTest';
-}
-
-{
-    package MockRule::ScopeTest;
-    sub name { return $_[0]->{name} }
-}

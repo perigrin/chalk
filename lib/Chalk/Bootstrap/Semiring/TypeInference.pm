@@ -272,16 +272,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return [$self->multiply($left, $right)];
     }
 
-    method on_scan($item, $alt_idx, $pos, $matched_text) {
-        my $existing = $item->{value};
+    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
+        my $existing = $value;
 
         # Propagate zero
         return undef if !defined $existing;
 
         # Lazy-init pre-cached scan Contexts on first call
         $self->_init_scan_cache() if !defined $_scan_regex;
-
-        my $rule_name = $item->{rule}->name();
 
         # RegexLiteral → type => 'Regex' (including empty // which is
         # ambiguous with defined-or; Earley explores both paths and
@@ -364,11 +362,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return $self->multiply($existing, $self->one());
     }
 
-    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
-        my $value = $item->{value};
+    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
         return undef if !defined $value;
-
-        my $rule_name = $item->{rule}->name();
 
         # CallExpression: builtin signature validation.
         # Kept inline (not in TypeInferenceActions) because it needs
@@ -438,9 +433,7 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # should_scan: gate for scan operation, called after regex match succeeds
     # Returns true to proceed with scan, false to skip it.
     # Rejects keywords as QualifiedIdentifier when a keyword-consuming rule is predicted.
-    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
-        my $rule_name = $item->{rule}->name();
-
+    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
         # Only filter QualifiedIdentifier scans
         return true unless $rule_name eq 'QualifiedIdentifier';
 

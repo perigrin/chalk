@@ -12,24 +12,8 @@ use Chalk::Bootstrap::Scope;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Perl::Actions;
 use Chalk::Bootstrap::Context;
-use Chalk::Grammar::Rule;
-use Chalk::Grammar::Symbol;
-
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
-
-# Helper: build a fake Earley-style item with a given value context and rule name
-my sub make_item($value, $rule_name) {
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => $rule_name,
-        expressions => [[]],
-    );
-    return {
-        rule  => $rule,
-        dot   => 1,
-        value => $value,
-    };
-}
 
 # Helper: build a leaf Context wrapping an IR node (simulates a completed sub-rule)
 my sub make_leaf_ctx($node) {
@@ -86,8 +70,7 @@ my sub make_parent_ctx(@children) {
         scope   => $scope,
     });
 
-    my $item = make_item($ctx, 'AssignmentExpression');
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
     ok(defined $result, 'VarDecl assignment: on_complete returns a result');
 
     my $node = $result->extract();
@@ -137,8 +120,7 @@ my sub make_parent_ctx(@children) {
         scope   => $scope,
     });
 
-    my $item = make_item($ctx, 'AssignmentExpression');
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
     ok(defined $result, 'plain assignment: on_complete returns a result');
 
     my $node = $result->extract();
@@ -188,8 +170,7 @@ my sub make_parent_ctx(@children) {
         scope   => $scope,
     });
 
-    my $item = make_item($ctx, 'AssignmentExpression');
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
     ok(defined $result, 'compound assignment: on_complete returns a result');
 
     my $node = $result->extract();
@@ -230,8 +211,7 @@ my sub make_parent_ctx(@children) {
         make_leaf_ctx($rhs_node),
     );
 
-    my $item = make_item($ctx, 'AssignmentExpression');
-    my $result = $sa->on_complete($item, 0, 0);
+    my $result = $sa->on_complete($ctx, 'AssignmentExpression', 0, 0, 0);
     ok(defined $result, 'no-scope assignment: on_complete returns a result');
 
     my $node = $result->extract();

@@ -184,12 +184,11 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
 
     # Delegate on_scan to each component with its own slice of the value.
     # If any component returns zero, the whole tuple is zero.
-    method on_scan($item, $alt_idx, $pos, $matched_text) {
+    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
         my @results;
         for my $i (0 .. scalar($semirings->@*) - 1) {
             my $sr = $semirings->[$i];
-            my $component_item = { %$item, value => $item->{value}->[$i] };
-            my $r = $sr->on_scan($component_item, $alt_idx, $pos, $matched_text);
+            my $r = $sr->on_scan($value->[$i], $rule_name, $alt_idx, $pos, $matched_text);
             return $self->zero() if $sr->is_zero($r);
             push @results, $r;
         }
@@ -200,19 +199,18 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # If any component returns zero, the whole tuple is zero.
     # Threads TypeInference result (index 2) to SemanticAction (index 4)
     # via set_type_context so SA actions can read type annotations.
-    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
+    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
         my @results;
         my $ti_result;
         for my $i (0 .. scalar($semirings->@*) - 1) {
             my $sr = $semirings->[$i];
-            my $component_item = { %$item, value => $item->{value}->[$i] };
             # Thread TI result to SA: indices 2=TI, 4=SA match pipeline
             # construction order in TestPipeline/build_perl_concise_parser.
             if ($i == 4 && defined $ti_result
                     && $sr->can('set_type_context')) {
                 $sr->set_type_context($ti_result);
             }
-            my $r = $sr->on_complete($component_item, $alt_idx, $pos, $on_epoch_commit);
+            my $r = $sr->on_complete($value->[$i], $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit);
             return $self->zero() if $sr->is_zero($r);
             push @results, $r;
             # Capture TI result after it completes
@@ -224,16 +222,15 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # Delegate on_skip_optional to each component.
     # Semirings with on_skip_optional get the placeholder path;
     # others fall back to multiply(value, one()) which is identity.
-    method on_skip_optional($item, $alt_idx, $pos, $symbol_name) {
+    method on_skip_optional($value, $rule_name, $alt_idx, $pos, $symbol_name) {
         my @results;
         for my $i (0 .. scalar($semirings->@*) - 1) {
-            my $component_item = { %$item, value => $item->{value}->[$i] };
             my $sr = $semirings->[$i];
             my $r;
             if ($sr->can('on_skip_optional')) {
-                $r = $sr->on_skip_optional($component_item, $alt_idx, $pos, $symbol_name);
+                $r = $sr->on_skip_optional($value->[$i], $rule_name, $alt_idx, $pos, $symbol_name);
             } else {
-                $r = $sr->multiply($component_item->{value}, $sr->one());
+                $r = $sr->multiply($value->[$i], $sr->one());
             }
             return $self->zero() if $sr->is_zero($r);
             push @results, $r;
@@ -244,12 +241,11 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
     # should_scan: gate for scan operation, called after regex match succeeds.
     # First-false short-circuit: if ANY component returns false, return false.
     # This allows any semiring to veto a scan before on_scan is called.
-    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
         for my $i (0 .. scalar($semirings->@*) - 1) {
             my $sr = $semirings->[$i];
-            my $component_item = { %$item, value => $item->{value}->[$i] };
             return false unless $sr->should_scan(
-                $component_item, $alt_idx, $pos, $matched_text, $is_predicted
+                $value->[$i], $rule_name, $alt_idx, $pos, $matched_text, $is_predicted
             );
         }
         return true;

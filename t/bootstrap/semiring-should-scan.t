@@ -14,28 +14,16 @@ use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Grammar::Perl::PrecedenceTable;
 use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::Grammar::Perl::TypeLibrary;
-use Chalk::Grammar::Rule;
-
 # ========================================================================
 # Test 1: Boolean semiring has should_scan method
 # ========================================================================
 {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $bool_sr->one(),
-    };
 
     my $is_predicted = sub($rule_name) { return false };
 
     ok($bool_sr->can('should_scan'), 'Boolean has should_scan method');
-    my $result = $bool_sr->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $bool_sr->should_scan($bool_sr->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok($result, 'Boolean should_scan returns true by default');
 }
 
@@ -46,21 +34,11 @@ use Chalk::Grammar::Rule;
     my $prec_sr = Chalk::Bootstrap::Semiring::Precedence->new(
         lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup,
     );
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $prec_sr->one(),
-    };
 
     my $is_predicted = sub($rule_name) { return false };
 
     ok($prec_sr->can('should_scan'), 'Precedence has should_scan method');
-    my $result = $prec_sr->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $prec_sr->should_scan($prec_sr->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok($result, 'Precedence should_scan returns true by default');
 }
 
@@ -72,21 +50,11 @@ use Chalk::Grammar::Rule;
         keyword_check => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
         builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin,
     );
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $type_sr->one(),
-    };
 
     my $is_predicted = sub($rule_name) { return false };
 
     ok($type_sr->can('should_scan'), 'TypeInference has should_scan method');
-    my $result = $type_sr->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $type_sr->should_scan($type_sr->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok($result, 'TypeInference should_scan returns true by default');
 }
 
@@ -95,21 +63,11 @@ use Chalk::Grammar::Rule;
 # ========================================================================
 {
     my $struct_sr = Chalk::Bootstrap::Semiring::Structural->new();
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $struct_sr->one(),
-    };
 
     my $is_predicted = sub($rule_name) { return false };
 
     ok($struct_sr->can('should_scan'), 'Structural has should_scan method');
-    my $result = $struct_sr->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $struct_sr->should_scan($struct_sr->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok($result, 'Structural should_scan returns true by default');
 }
 
@@ -118,21 +76,11 @@ use Chalk::Grammar::Rule;
 # ========================================================================
 {
     my $sem_sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $sem_sr->one(),
-    };
 
     my $is_predicted = sub($rule_name) { return false };
 
     ok($sem_sr->can('should_scan'), 'SemanticAction has should_scan method');
-    my $result = $sem_sr->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $sem_sr->should_scan($sem_sr->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok($result, 'SemanticAction should_scan returns true by default');
 }
 
@@ -155,21 +103,10 @@ use Chalk::Grammar::Rule;
         semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
     );
 
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $comp->one(),
-    };
-
     my $is_predicted = sub($rule_name) { return false };
 
     ok($comp->can('should_scan'), 'FilterComposite has should_scan method');
-    my $result = $comp->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $comp->should_scan($comp->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok($result, 'FilterComposite should_scan returns true when all components return true');
 }
 
@@ -188,9 +125,9 @@ use Chalk::Grammar::Rule;
             method is_zero($value) { return $value == 0; }
             method multiply($left, $right) { return $left && $right ? 1 : 0; }
             method add($left, $right) { return $left || $right ? 1 : 0; }
-            method on_scan($item, $alt_idx, $pos, $matched_text) { return 1; }
-            method on_complete($item, $alt_idx, $pos) { return 1; }
-            method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+            method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) { return 1; }
+            method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) { return 1; }
+            method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
                 return false;  # Always reject
             }
         }
@@ -204,20 +141,9 @@ use Chalk::Grammar::Rule;
         semirings => [$bool_sr, $false_sr, $sem_sr],
     );
 
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $comp->one(),
-    };
-
     my $is_predicted = sub($rule_name) { return false };
 
-    my $result = $comp->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $comp->should_scan($comp->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok(!$result, 'FilterComposite should_scan returns false when any component returns false');
 }
 
@@ -238,9 +164,9 @@ use Chalk::Grammar::Rule;
             method is_zero($value) { return $value == 0; }
             method multiply($left, $right) { return $left && $right ? 1 : 0; }
             method add($left, $right) { return $left || $right ? 1 : 0; }
-            method on_scan($item, $alt_idx, $pos, $matched_text) { return 1; }
-            method on_complete($item, $alt_idx, $pos) { return 1; }
-            method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+            method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) { return 1; }
+            method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) { return 1; }
+            method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
                 $called = true;
                 return true;
             }
@@ -257,9 +183,9 @@ use Chalk::Grammar::Rule;
             method is_zero($value) { return $value == 0; }
             method multiply($left, $right) { return $left && $right ? 1 : 0; }
             method add($left, $right) { return $left || $right ? 1 : 0; }
-            method on_scan($item, $alt_idx, $pos, $matched_text) { return 1; }
-            method on_complete($item, $alt_idx, $pos) { return 1; }
-            method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+            method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) { return 1; }
+            method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) { return 1; }
+            method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
                 return false;
             }
         }
@@ -272,20 +198,9 @@ use Chalk::Grammar::Rule;
         semirings => [$false_sr, $tracking_sr],
     );
 
-    my $rule = Chalk::Grammar::Rule->new(
-        name => 'TestRule',
-        expressions => [[]],
-    );
-    my $item = {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $comp->one(),
-    };
-
     my $is_predicted = sub($rule_name) { return false };
 
-    my $result = $comp->should_scan($item, 0, 0, 'text', $is_predicted);
+    my $result = $comp->should_scan($comp->one(), 'TestRule', 0, 0, 'text', $is_predicted);
     ok(!$result, 'FilterComposite should_scan returns false');
     ok(!$tracking_sr->called(), 'FilterComposite short-circuits - second semiring not called');
 }
@@ -293,20 +208,6 @@ use Chalk::Grammar::Rule;
 # ========================================================================
 # Test 9-16: TypeInference keyword rejection via should_scan
 # ========================================================================
-
-# Helper to make an Earley item for testing
-sub make_item($rule_name, $value) {
-    my $rule = Chalk::Grammar::Rule->new(
-        name => $rule_name,
-        expressions => [[]],
-    );
-    return {
-        rule => $rule,
-        dot => 0,
-        origin => 0,
-        value => $value,
-    };
-}
 
 # Test 9: should_scan rejects 'class' when ClassDeclaration is predicted
 {
@@ -318,9 +219,8 @@ sub make_item($rule_name, $value) {
     my $is_predicted = sub($rule_name) {
         $rule_name eq 'ClassDeclaration' || $rule_name eq 'ClassBlock'
     };
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
-    ok(!$type_sr->should_scan($item, 0, 0, 'class', $is_predicted),
+    ok(!$type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'class', $is_predicted),
         'should_scan rejects class when ClassDeclaration is predicted');
 }
 
@@ -332,9 +232,8 @@ sub make_item($rule_name, $value) {
     );
 
     my $is_predicted = sub($rule_name) { false };  # nothing predicted
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
-    ok($type_sr->should_scan($item, 0, 0, 'class', $is_predicted),
+    ok($type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'class', $is_predicted),
         'should_scan admits class when ClassDeclaration NOT predicted (fat-arrow)');
 }
 
@@ -346,9 +245,8 @@ sub make_item($rule_name, $value) {
     );
 
     my $is_predicted = sub($rule_name) { true };  # everything predicted
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
-    ok($type_sr->should_scan($item, 0, 0, 'foo', $is_predicted),
+    ok($type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'foo', $is_predicted),
         'should_scan admits non-keyword foo');
 }
 
@@ -360,9 +258,8 @@ sub make_item($rule_name, $value) {
     );
 
     my $is_predicted = sub($rule_name) { true };
-    my $item = make_item('BinaryOp', $type_sr->one());
 
-    ok($type_sr->should_scan($item, 0, 0, 'class', $is_predicted),
+    ok($type_sr->should_scan($type_sr->one(), 'BinaryOp', 0, 0, 'class', $is_predicted),
         'should_scan admits class for BinaryOp rule');
 }
 
@@ -374,11 +271,10 @@ sub make_item($rule_name, $value) {
     );
 
     my $is_predicted = sub($rule_name) { $rule_name eq 'ConditionalStatement' };
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
     TODO: {
         local $TODO = 'if keyword rejection needs ConditionalStatement added to KEYWORD_RULES';
-        ok(!$type_sr->should_scan($item, 0, 0, 'if', $is_predicted),
+        ok(!$type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'if', $is_predicted),
             'should_scan rejects if when ConditionalStatement is predicted');
     }
 }
@@ -391,9 +287,8 @@ sub make_item($rule_name, $value) {
     );
 
     my $is_predicted = sub($rule_name) { false };
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
-    ok($type_sr->should_scan($item, 0, 0, 'if', $is_predicted),
+    ok($type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'if', $is_predicted),
         'should_scan admits if when ConditionalStatement NOT predicted');
 }
 
@@ -407,9 +302,8 @@ sub make_item($rule_name, $value) {
     my $is_predicted = sub($rule_name) {
         $rule_name eq 'SubroutineDefinition' || $rule_name eq 'SubroutineDeclaration'
     };
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
-    ok(!$type_sr->should_scan($item, 0, 0, 'sub', $is_predicted),
+    ok(!$type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'sub', $is_predicted),
         'should_scan rejects sub when SubroutineDefinition is predicted');
 }
 
@@ -423,9 +317,8 @@ sub make_item($rule_name, $value) {
     my $is_predicted = sub($rule_name) {
         $rule_name eq 'VariableDeclaration' || $rule_name eq 'ForeachLoop'
     };
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
-    ok(!$type_sr->should_scan($item, 0, 0, 'my', $is_predicted),
+    ok(!$type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'my', $is_predicted),
         'should_scan rejects my when VariableDeclaration is predicted');
 }
 
@@ -439,10 +332,9 @@ sub make_item($rule_name, $value) {
     my $is_predicted = sub($rule_name) {
         $rule_name eq 'ClassDeclaration' || $rule_name eq 'ClassBlock'
     };
-    my $item = make_item('QualifiedIdentifier', $type_sr->one());
 
     # Qualified identifiers with :: should always be admitted
-    ok($type_sr->should_scan($item, 0, 0, 'Foo::class', $is_predicted),
+    ok($type_sr->should_scan($type_sr->one(), 'QualifiedIdentifier', 0, 0, 'Foo::class', $is_predicted),
         'should_scan admits Foo::class even when ClassDeclaration is predicted');
 }
 

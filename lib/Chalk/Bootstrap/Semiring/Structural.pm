@@ -209,21 +209,16 @@ class Chalk::Bootstrap::Semiring::Structural {
         return $left | $right;
     }
 
-    method on_scan($item, $alt_idx, $pos, $matched_text) {
-        my $existing = $item->{value};
-
+    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
         # Propagate zero
-        return $ZERO if $existing == $ZERO;
-
-        # Transparent pass-through
-        return $existing;
-    }
-
-    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
-        my $value = $item->{value};
         return $ZERO if $value == $ZERO;
 
-        my $rule_name = $item->{rule}->name();
+        # Transparent pass-through
+        return $value;
+    }
+
+    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
+        return $ZERO if $value == $ZERO;
 
         # Tag Block completions. Preserve is_hash from inner content so that
         # add() can prefer a pure-Block interpretation over one where a
@@ -368,7 +363,7 @@ class Chalk::Bootstrap::Semiring::Structural {
     # should_scan: gate for scan operation, called after regex match succeeds
     # Returns true to proceed with scan, false to skip it.
     # Default: always return true (no filtering).
-    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
         return true;
     }
 }

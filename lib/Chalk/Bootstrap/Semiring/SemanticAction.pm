@@ -227,20 +227,18 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # on_scan: create a hash-consed Context for the matched text and multiply
     # with existing value
-    method on_scan($item, $alt_idx, $pos, $matched_text) {
+    method on_scan($value, $rule_name, $alt_idx, $pos, $matched_text) {
         my $scan_ctx = _scan_ctx($matched_text, $pos);
-        return $self->multiply($item->{value}, $scan_ctx);
+        return $self->multiply($value, $scan_ctx);
     }
 
     # on_complete: apply semantic action for a completed rule.
     # Looks up action by rule_name via can(), applies via extend, sets rule field.
     # Not hash-consed: semantic actions may have side effects and the result
     # focus depends on the actions object, so caching by input refaddr is unsafe.
-    method on_complete($item, $alt_idx, $pos, $on_epoch_commit = undef) {
-        my $value = $item->{value};
+    method on_complete($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit = undef) {
         return undef if !defined $value;
 
-        my $rule_name = $item->{rule}->name();
         my $has_method = false;
         if ($actions) {
             $has_method = defined $actions->can($rule_name);
@@ -289,7 +287,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
         # StatementItem wraps individual statements — its completion means
         # the statement's internal parse positions can be swept.
         if (defined $on_epoch_commit && $rule_name eq 'StatementItem') {
-            $on_epoch_commit->($item->{origin}, $pos);
+            $on_epoch_commit->($origin, $pos);
         }
 
         # Clear current_instance and type_context after on_complete to prevent stale access
@@ -355,8 +353,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
 
     # on_skip_optional: create a placeholder Context for a skipped X? symbol.
     # Preserves positional child indexing for actions that access children by position.
-    method on_skip_optional($item, $alt_idx, $pos, $symbol_name) {
-        my $value = $item->{value};
+    method on_skip_optional($value, $rule_name, $alt_idx, $pos, $symbol_name) {
         return undef if !defined $value;
         # Create a placeholder Context representing "X was absent"
         my $placeholder = Chalk::Bootstrap::Context->new(
@@ -374,7 +371,7 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # should_scan: gate for scan operation, called after regex match succeeds
     # Returns true to proceed with scan, false to skip it.
     # Default: always return true (no filtering).
-    method should_scan($item, $alt_idx, $pos, $matched_text, $is_predicted) {
+    method should_scan($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted) {
         return true;
     }
 }

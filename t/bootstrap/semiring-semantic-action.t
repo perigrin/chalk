@@ -8,8 +8,6 @@ use lib 'lib';
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::IR::NodeFactory;
-use Chalk::Grammar::Rule;
-
 # Reset factory for clean test environment
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
@@ -153,20 +151,10 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
     is(refaddr($result2->[0]), refaddr($ctx), 'add(ctx, zero) arrayref contains ctx');
 }
 
-# Helper to build a mock item for on_scan/on_complete
-my sub make_sem_item($rule_name, $value) {
-    my $rule = Chalk::Grammar::Rule->new(
-        name        => $rule_name,
-        expressions => [[]],
-    );
-    return { rule => $rule, dot => 0, origin => 0, value => $value };
-}
-
 # Test 7: on_scan returns Context with matched text as focus
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $item = make_sem_item('SomeRule', $sr->one());
-    my $scan_val = $sr->on_scan($item, 0, 0, 'hello');
+    my $scan_val = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, 'hello');
 
     isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'on_scan returns Context');
     # on_scan multiplies one() with scan context, so focus is undef (parent node)
@@ -177,8 +165,7 @@ my sub make_sem_item($rule_name, $value) {
 # Test 8: on_scan with empty string
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $item = make_sem_item('SomeRule', $sr->one());
-    my $scan_val = $sr->on_scan($item, 0, 0, '');
+    my $scan_val = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, '');
 
     isa_ok($scan_val, 'Chalk::Bootstrap::Context', 'on_scan("") returns Context');
     ok(defined $scan_val, 'on_scan("") produces defined result');
@@ -208,8 +195,7 @@ my sub make_sem_item($rule_name, $value) {
         rule     => undef,
     );
 
-    my $item = make_sem_item('TestRule', $ctx);
-    my $result = $sr->on_complete($item, 0, 5);
+    my $result = $sr->on_complete($ctx, 'TestRule', 0, 5, 0);
 
     isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns Context');
     is($result->extract(), 'HELLO', 'on_complete applies action to compute new focus');
@@ -227,8 +213,7 @@ my sub make_sem_item($rule_name, $value) {
         rule     => undef,
     );
 
-    my $item = make_sem_item('UnknownRule', $ctx);
-    my $result = $sr->on_complete($item, 0, 5);
+    my $result = $sr->on_complete($ctx, 'UnknownRule', 0, 5, 0);
 
     isa_ok($result, 'Chalk::Bootstrap::Context', 'on_complete returns Context for unknown rule');
     is($result->rule(), 'UnknownRule', 'on_complete sets rule even without action');
@@ -238,8 +223,7 @@ my sub make_sem_item($rule_name, $value) {
 # Test 11: on_complete with undef value (zero) returns undef
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
-    my $item = make_sem_item('TestRule', undef);
-    my $result = $sr->on_complete($item, 0, 5);
+    my $result = $sr->on_complete(undef, 'TestRule', 0, 5, 0);
 
     ok(!defined $result, 'on_complete with undef value returns undef');
 }
@@ -260,11 +244,8 @@ my sub make_sem_item($rule_name, $value) {
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $item_a = make_sem_item('SomeRule', $sr->one());
-    my $item_b = make_sem_item('SomeRule', $sr->one());
-
-    my $scan_a = $sr->on_scan($item_a, 0, 3, 'foo');
-    my $scan_b = $sr->on_scan($item_b, 0, 3, 'foo');
+    my $scan_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'foo');
+    my $scan_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'foo');
 
     is(refaddr($scan_a), refaddr($scan_b),
         'on_scan with same text+pos produces same refaddr (hash-consed)');
@@ -274,11 +255,8 @@ my sub make_sem_item($rule_name, $value) {
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $item_a = make_sem_item('SomeRule', $sr->one());
-    my $item_b = make_sem_item('SomeRule', $sr->one());
-
-    my $scan_a = $sr->on_scan($item_a, 0, 3, 'foo');
-    my $scan_b = $sr->on_scan($item_b, 0, 3, 'bar');
+    my $scan_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'foo');
+    my $scan_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 3, 'bar');
 
     isnt(refaddr($scan_a), refaddr($scan_b),
         'on_scan with different text produces different refaddr');
@@ -289,9 +267,8 @@ my sub make_sem_item($rule_name, $value) {
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $item = make_sem_item('SomeRule', $sr->one());
-    my $ctx_a = $sr->on_scan($item, 0, 0, 'left');
-    my $ctx_b = $sr->on_scan($item, 0, 5, 'right');
+    my $ctx_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, 'left');
+    my $ctx_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 5, 'right');
 
     my $mul1 = $sr->multiply($ctx_a, $ctx_b);
     my $mul2 = $sr->multiply($ctx_a, $ctx_b);
@@ -304,10 +281,9 @@ my sub make_sem_item($rule_name, $value) {
 {
     my $sr = Chalk::Bootstrap::Semiring::SemanticAction->new();
 
-    my $item = make_sem_item('SomeRule', $sr->one());
-    my $ctx_a = $sr->on_scan($item, 0, 0, 'left');
-    my $ctx_b = $sr->on_scan($item, 0, 5, 'right');
-    my $ctx_c = $sr->on_scan($item, 0, 10, 'other');
+    my $ctx_a = $sr->on_scan($sr->one(), 'SomeRule', 0, 0, 'left');
+    my $ctx_b = $sr->on_scan($sr->one(), 'SomeRule', 0, 5, 'right');
+    my $ctx_c = $sr->on_scan($sr->one(), 'SomeRule', 0, 10, 'other');
 
     my $mul1 = $sr->multiply($ctx_a, $ctx_b);
     my $mul2 = $sr->multiply($ctx_a, $ctx_c);
@@ -330,11 +306,8 @@ my sub make_sem_item($rule_name, $value) {
         rule     => undef,
     );
 
-    my $item_a = make_sem_item('SomeRule', $ctx);
-    my $item_b = make_sem_item('SomeRule', $ctx);
-
-    my $result_a = $sr->on_complete($item_a, 0, 5);
-    my $result_b = $sr->on_complete($item_b, 0, 5);
+    my $result_a = $sr->on_complete($ctx, 'SomeRule', 0, 5, 0);
+    my $result_b = $sr->on_complete($ctx, 'SomeRule', 0, 5, 0);
 
     isa_ok($result_a, 'Chalk::Bootstrap::Context',
         'on_complete returns Context');

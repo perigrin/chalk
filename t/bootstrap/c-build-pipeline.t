@@ -170,7 +170,7 @@ print \$b->is_zero(\$r1) ? "MULTIPLY_CORRECT\\n"   : "MULTIPLY_WRONG\\n";
 my \$r2 = \$b->add(\$zero, \$one);
 print !\$b->is_zero(\$r2) ? "ADD_CORRECT\\n"       : "ADD_WRONG\\n";
 
-print \$b->should_scan(undef, 0, 0, "", {}) ? "SHOULD_SCAN_OK\\n" : "SHOULD_SCAN_FAIL\\n";
+print \$b->should_scan(\$one, 'TestRule', 0, 0, "", {}) ? "SHOULD_SCAN_OK\\n" : "SHOULD_SCAN_FAIL\\n";
 print \$b->supports_leo() ? "SUPPORTS_LEO_OK\\n" : "SUPPORTS_LEO_FAIL\\n";
 print "ALL_METHODS_OK\\n";
 END_SCRIPT

@@ -13,6 +13,7 @@ use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::SemanticAction;
+use Chalk::Bootstrap::Context;
 
 # Set up grammar once for all tests that need a real parse
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -28,23 +29,17 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
 # Test 1: on_complete with callback doesn't crash (Boolean)
 {
     my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $item = { rule => bless({}, 'FakeRule'), value => true, origin => 0 };
-    # Provide a fake rule with name() method
-    no warnings 'once';
-    local *FakeRule::name = sub { 'TestRule' };
-    local *FakeRule::expressions = sub { [[]] };
     my $callback_fired = false;
     my $cb = sub ($origin, $end) { $callback_fired = true };
-    my $result = eval { $bool->on_complete($item, 0, 10, $cb) };
-    is($@, '', 'Boolean on_complete accepts 4th callback parameter without error');
+    my $result = eval { $bool->on_complete(true, 'TestRule', 0, 10, 0, $cb) };
+    is($@, '', 'Boolean on_complete accepts on_epoch_commit callback without error');
 }
 
-# Test 2: on_complete without callback still works (backward compat)
+# Test 2: on_complete without callback still works (optional parameter)
 {
     my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
-    my $item = { rule => bless({}, 'FakeRule'), value => true, origin => 0 };
-    my $result = eval { $bool->on_complete($item, 0, 10) };
-    is($@, '', 'Boolean on_complete still works with 3 params');
+    my $result = eval { $bool->on_complete(true, 'TestRule', 0, 10, 0) };
+    is($@, '', 'Boolean on_complete works without on_epoch_commit callback');
 }
 
 # Test 3: FilterComposite passes callback through to components
@@ -79,22 +74,15 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
         push @epochs, [$origin, $end];
     };
 
-    # Simulate a completed StatementItem — the rule that wraps individual
-    # statements in the grammar
-    my $fake_rule = bless({}, 'FakeStatementRule');
-    no warnings 'redefine';
-    local *FakeStatementRule::name = sub { 'StatementItem' };
-    local *FakeStatementRule::expressions = sub { [[]] };
-
-    # Create a Context as the item value (SemanticAction expects this)
+    # Create a Context as the value (SemanticAction expects this)
     my $ctx = Chalk::Bootstrap::Context->new(
         focus    => { class => 'VarDecl', inputs => [] },
         children => [],
         position => 0,
     );
 
-    my $item = { rule => $fake_rule, value => $ctx, origin => 5 };
-    $sa->on_complete($item, 0, 20, $cb);
+    # Simulate a completed StatementItem at origin=5, pos=20
+    $sa->on_complete($ctx, 'StatementItem', 0, 20, 5, $cb);
 
     ok(scalar @epochs > 0, 'on_epoch_commit fires for StatementItem completion');
     if (@epochs) {
@@ -114,19 +102,13 @@ my $grammar = "Chalk::Grammar::BNF::Generated"->can('grammar')->();
         push @epochs, [$origin, $end];
     };
 
-    my $fake_rule = bless({}, 'FakeExprRule');
-    no warnings 'redefine';
-    local *FakeExprRule::name = sub { 'Expression' };
-    local *FakeExprRule::expressions = sub { [[]] };
-
     my $ctx = Chalk::Bootstrap::Context->new(
         focus    => { class => 'NumericLiteral', value => '42' },
         children => [],
         position => 0,
     );
 
-    my $item = { rule => $fake_rule, value => $ctx, origin => 0 };
-    $sa->on_complete($item, 0, 5, $cb);
+    $sa->on_complete($ctx, 'Expression', 0, 5, 0, $cb);
 
     is(scalar @epochs, 0, 'on_epoch_commit does NOT fire for Expression completion');
 }

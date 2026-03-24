@@ -373,7 +373,10 @@ class Chalk::Bootstrap::Earley {
 
                 if ($self->_is_complete($item, $alt_idx)) {
                     # Apply on_complete for completed rule before propagating
-                    my $completed_value = $semiring->on_complete($item, $alt_idx, $pos, $on_epoch_commit);
+                    my $completed_value = $semiring->on_complete(
+                        $item->{value}, $core_index->rule_name_for($core_id),
+                        $alt_idx, $pos, $origin, $on_epoch_commit
+                    );
                     $item = { %$item, value => $completed_value };
                     # Update the chart entry with the action-applied value
                     $chart[$pos][$core_id]{$origin} = [$item, $alt_idx];
@@ -403,7 +406,9 @@ class Chalk::Bootstrap::Earley {
                         # optionals where the dot reaches B? during parsing.
                         if ($symbol->is_quantified() && $symbol->quantifier() eq '?') {
                             my $skip_value = $semiring->can('on_skip_optional')
-                                ? $semiring->on_skip_optional($item, $alt_idx, $pos, $w_rule)
+                                ? $semiring->on_skip_optional(
+                                    $item->{value}, $core_index->rule_name_for($core_id),
+                                    $alt_idx, $pos, $w_rule)
                                 : $semiring->multiply($item->{value}, $semiring->one());
                             my $skip_is_zero = defined $skip_value ? $semiring->is_zero($skip_value) : true;
                             if (defined $skip_value && !$skip_is_zero) {
@@ -796,9 +801,9 @@ class Chalk::Bootstrap::Earley {
                 if ($skip_symbols && $skip_symbols->@*) {
                     for my $sym_name ($skip_symbols->@*) {
                         if ($semiring->can('on_skip_optional')) {
-                            my $synth = { value => $value, rule => $rule };
                             $value = $semiring->on_skip_optional(
-                                $synth, $info->{alt_idx}, $pos, $sym_name
+                                $value, $info->{rule_name},
+                                $info->{alt_idx}, $pos, $sym_name
                             );
                             last if !defined $value || $semiring->is_zero($value);
                         } else {
@@ -842,10 +847,11 @@ class Chalk::Bootstrap::Earley {
         my $is_predicted = $predicted_at // {};
 
         # Ask semiring if scan should proceed
-        return unless $semiring->should_scan($item, $alt_idx, $pos, $matched, $is_predicted);
+        my $item_rule_name = $core_index->rule_name_for($item->{core_id});
+        return unless $semiring->should_scan($item->{value}, $item_rule_name, $alt_idx, $pos, $matched, $is_predicted);
 
         # Use on_scan to combine existing value with scan
-        my $new_value = $semiring->on_scan($item, $alt_idx, $pos, $matched);
+        my $new_value = $semiring->on_scan($item->{value}, $item_rule_name, $alt_idx, $pos, $matched);
 
         # on_scan returns the combined result; check for zero (semiring rejected)
         return if $semiring->is_zero($new_value);
