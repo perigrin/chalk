@@ -71,6 +71,8 @@ class Chalk::Bootstrap::IR::NodeFactory {
         'Constructor:BuiltinCall'     => ['name', 'args'],
         'Constructor:BacktickExpr'    => ['command'],
         'Constructor:TryCatchStmt'    => ['try_body', 'catch_var', 'catch_body'],
+        'Constructor:StructRef'       => ['schema', 'fields'],
+        'Constructor:FieldAccess'     => ['schema', 'field_name', 'target'],
     );
 
     # Get singleton instance
