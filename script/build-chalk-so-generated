@@ -281,6 +281,11 @@ printf "Phase 3 total: %.1fs\n\n", time() - $t0;
                 compiled_class_metadata => \%class_metadata,
             );
 
+            # Pass struct schemas so typedef and struct emission works
+            if (keys $struct_schemas->%*) {
+                $target->set_struct_schemas($struct_schemas);
+            }
+
             my $result = eval {
                 $target->generate_c_files(
                     $earley_parsed->{ir},
