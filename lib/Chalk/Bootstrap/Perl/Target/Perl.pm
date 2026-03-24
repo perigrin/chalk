@@ -11,6 +11,19 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Lookup from IR node refaddr → cfg_state entry, built by generate_with_cfg
     field %_cfg_lookup;
 
+    # Struct schemas for StructRef/FieldAccess lowering (schema_name → { fields => [...] })
+    field $_struct_schemas = {};
+
+    # Set struct schemas for StructRef/FieldAccess lowering.
+    method set_struct_schemas($schemas) {
+        $_struct_schemas = $schemas;
+    }
+
+    # Public wrapper for _emit_expr (used by tests and external callers).
+    method emit_expr($node) {
+        return $self->_emit_expr($node);
+    }
+
     method generate($ir) {
         die "generate() requires a Constructor:Program IR node"
             unless defined($ir)
@@ -362,6 +375,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'BacktickExpr')       { return $self->_emit_backtick_expr($node); }
             if ($class eq 'CompoundAssign')     { return $self->_emit_compound_assign($node); }
             if ($class eq 'VarDecl')            { return $self->_emit_var_decl_expr($node); }
+            if ($class eq 'StructRef')          { return $self->_emit_struct_ref_expr($node); }
+            if ($class eq 'FieldAccess')        { return $self->_emit_field_access_expr($node); }
             # Fall through to _emit_node for statement-level types
             return $self->_emit_node($node);
         }
@@ -483,6 +498,39 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
         my @strs = map { $self->_emit_expr($_) } $pairs->@*;
         return '{ ' . join(', ', @strs) . ' }';
+    }
+
+    # Lower StructRef back to hash constructor: { key1 => val1, key2 => val2, ... }
+    method _emit_struct_ref_expr($node) {
+        my $schema_name = $node->inputs()->[0]->value();
+        my $field_vals  = $node->inputs()->[1];
+
+        my $schema = $_struct_schemas->{$schema_name};
+        unless (defined $schema) {
+            # Fallback: emit as empty hash if schema not found
+            return '{}';
+        }
+
+        my @fields = $schema->{fields}->@*;
+        my @pairs;
+        for my $i (0 .. $#fields) {
+            my $key = "'" . $fields[$i]{name} . "'";
+            my $val = (defined $field_vals && $i < scalar($field_vals->@*))
+                ? $self->_emit_expr($field_vals->[$i])
+                : 'undef';
+            push @pairs, "$key => $val";
+        }
+
+        return '{ ' . join(', ', @pairs) . ' }';
+    }
+
+    # Lower FieldAccess back to hash key access: $target->{'field_name'}
+    method _emit_field_access_expr($node) {
+        my $target     = $node->inputs()->[2];
+        my $field_name = $node->inputs()->[1]->value();
+
+        my $tgt = defined $target ? $self->_emit_expr($target) : '$self';
+        return "$tgt\->{'$field_name'}";
     }
 
     method _emit_array_ref_expr($node) {
