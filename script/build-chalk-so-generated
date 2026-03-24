@@ -23,6 +23,7 @@ use lib 't/bootstrap/lib';
 
 use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
 use Chalk::Bootstrap::Perl::Target::C;
+use Chalk::Bootstrap::Optimizer::StructPromotion;
 
 my $cc      = $Config{cc};
 my $ccflags = $Config{ccflags};
@@ -96,6 +97,25 @@ for my $spec (@source_files) {
 }
 printf "Phase 2 total: %.1fs\n\n", time() - $t0;
 
+# === Phase 2.5: Struct Promotion — rewrite hashes with known keys to C structs ===
+$t0 = time();
+print "Phase 2.5: Running struct promotion pass...\n";
+
+my $struct_optimizer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
+my ($rewritten_parsed, $struct_schemas) = $struct_optimizer->run(\@parsed);
+
+if (keys $struct_schemas->%*) {
+    @parsed = $rewritten_parsed->@*;
+    for my $sname (sort keys $struct_schemas->%*) {
+        my @fnames = map { "$_->{c_type} $_->{name}" } $struct_schemas->{$sname}{fields}->@*;
+        printf "  %s: { %s }\n", $sname, join(', ', @fnames);
+    }
+    printf "Phase 2.5: %d schemas promoted (%.1fs)\n\n",
+        scalar keys $struct_schemas->%*, time() - $t0;
+} else {
+    printf "Phase 2.5: no promotable schemas found (%.1fs)\n\n", time() - $t0;
+}
+
 # === Phase 3: Generate C files via Target::C ===
 $t0 = time();
 print "Phase 3: Generating C files via Target::C...\n";
@@ -111,6 +131,11 @@ for my $info (@parsed) {
         module_name => $class_name,
         ($ft->%* ? (field_types => $ft) : ()),
     );
+
+    # Pass struct schemas so typedef and struct emission works
+    if (keys $struct_schemas->%*) {
+        $target->set_struct_schemas($struct_schemas);
+    }
 
     my $result = eval {
         $target->generate_c_files(

@@ -15,6 +15,21 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # var_key => { field_name => { integer_ctx => bool } }
     field $field_usage = {};
 
+    # Top-level entry point: analyze schemas, then rewrite IR.
+    # Input: arrayref of { class_name, ir, ... } hashes.
+    # Returns: (rewritten_classes, schemas) in list context.
+    method run($parsed_classes) {
+        my $schemas = $self->analyze($parsed_classes);
+
+        if (!keys $schemas->%*) {
+            # No promotable schemas — return input unchanged
+            return ($parsed_classes, $schemas);
+        }
+
+        my $rewritten = $self->rewrite($parsed_classes, $schemas);
+        return ($rewritten, $schemas);
+    }
+
     # Analyze all parsed classes and detect promotable hash schemas.
     # Input: arrayref of { class_name, ir } hashes (one per compiled class).
     # Output: hashref of { schema_name => { fields => [...], constructor_sites => [...], access_sites => [...] } }

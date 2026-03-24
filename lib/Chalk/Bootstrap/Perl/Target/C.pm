@@ -1499,6 +1499,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
         push @c_lines, '';
 
+        # Emit struct typedefs for promoted schemas (if any)
+        my $typedefs = $self->generate_typedefs();
+        if (length $typedefs) {
+            push @c_lines, "/* Struct promotion typedefs */";
+            push @c_lines, $typedefs;
+        }
+
         # Emit class-scope static variable declarations (e.g., my $ZERO = []).
         # These are process-global statics, initialised lazily or via a BOOT-like init.
         if (keys $self->_get_class_scope_vars()->%*) {
