@@ -61,6 +61,18 @@ class Chalk::Bootstrap::Earley {
     # GC statistics for the most recent parse
     field %_gc_stats;
 
+    # Core set registry: hash_key => { id => int, core_ids => sorted arrayref }
+    # Grammar-lifetime: survives reset_parse_state, cleared by _clear_grammar_caches.
+    field %_core_set_registry;
+    field $_core_set_next_id = 0;
+
+    # DFA tables per core set: core_set_id => { terminal_map, completion_map }
+    # Grammar-lifetime.
+    field %_dfa_tables;
+
+    # Core set id per chart position (parse-lifetime)
+    field @_pos_core_set;
+
 
     ADJUST {
         $rule_table = {};
@@ -107,6 +119,105 @@ class Chalk::Bootstrap::Earley {
     # GC statistics accessor
     method gc_stats() {
         return \%_gc_stats;
+    }
+
+    # Core set registry and DFA table accessors (grammar-lifetime)
+    method core_set_registry() { return \%_core_set_registry; }
+    method dfa_tables() { return \%_dfa_tables; }
+
+    # Reset parse-lifetime state (chart, completed_at, leo_items, scan_cache),
+    # preserving grammar-lifetime data (core_set_registry, DFA tables).
+    method reset_parse_state() {
+        %completed_at = ();
+        %leo_items = ();
+        %_scan_cache = ();
+        $_leo_origin_min = undef;
+        %_gc_stats = ();
+        $_last_active_pos = 0;
+        $_diag_expected = {};
+        @_pos_core_set = ();
+    }
+
+    # Clear all caches including grammar-lifetime data.
+    # Use when grammar changes or for full reset.
+    method _clear_grammar_caches() {
+        $self->reset_parse_state();
+        %_core_set_registry = ();
+        $_core_set_next_id = 0;
+        %_dfa_tables = ();
+    }
+
+    # Discover the core set for a chart position: collect active core_ids,
+    # sort them, hash for dedup, register if new. Returns core_set_id.
+    method _discover_core_set($chart, $pos) {
+        # Collect active core_ids at this position
+        my @active;
+        my $slot = $chart->[$pos];
+        for my $core_id (0 .. $slot->$#*) {
+            my $oh = $slot->[$core_id];
+            next unless defined $oh;
+            next unless keys $oh->%*;
+            push @active, $core_id;
+        }
+        # @active is already sorted (iterated in order)
+
+        # Hash the sorted array for dedup lookup
+        my $hash_key = join(",", @active);
+
+        if (exists $_core_set_registry{$hash_key}) {
+            my $cs_id = $_core_set_registry{$hash_key}{id};
+            $_pos_core_set[$pos] = $cs_id;
+            return $cs_id;
+        }
+
+        # Register new core set
+        my $cs_id = $_core_set_next_id++;
+        $_core_set_registry{$hash_key} = {
+            id       => $cs_id,
+            core_ids => \@active,
+        };
+        $_pos_core_set[$pos] = $cs_id;
+
+        # Build DFA tables for this core set
+        $self->_build_dfa_tables($cs_id, \@active);
+
+        return $cs_id;
+    }
+
+    # Build DFA state tables for a core set: terminal_map and completion_map.
+    # These are precomputed on first encounter and reused across positions.
+    method _build_dfa_tables($cs_id, $core_ids) {
+        my %terminal_map;
+        my %completion_map;
+
+        my $ci_completions   = $core_index->completions();
+        my $ci_symbols_after = $core_index->symbols_after();
+        my $ci_rule_names    = $core_index->rule_names();
+
+        for my $core_id ($core_ids->@*) {
+            if ($ci_completions->[$core_id]) {
+                # Completed item — record in completion_map
+                my $rule_name = $ci_rule_names->[$core_id];
+                $completion_map{$rule_name} //= [];
+                push $completion_map{$rule_name}->@*, $core_id;
+            } else {
+                my $sym = $ci_symbols_after->[$core_id];
+                next unless defined $sym;
+                if ($sym->is_reference()) {
+                    # Nonterminal — not in terminal_map (handled by predict/complete)
+                } else {
+                    # Terminal — record in terminal_map
+                    my $pattern = $sym->value();
+                    $terminal_map{$pattern} //= [];
+                    push $terminal_map{$pattern}->@*, $core_id;
+                }
+            }
+        }
+
+        $_dfa_tables{$cs_id} = {
+            terminal_map   => \%terminal_map,
+            completion_map => \%completion_map,
+        };
     }
 
     # Detailed parse profiling — enabled by setting $ENV{EARLEY_PROFILE}
@@ -280,6 +391,7 @@ class Chalk::Bootstrap::Earley {
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
         $_last_active_pos = 0;
         $_diag_expected = {};
+        @_pos_core_set = ();
 
         # Find the start rule (first rule in grammar)
         my $start_rule = $grammar->[0];
@@ -565,6 +677,14 @@ class Chalk::Bootstrap::Earley {
                 warn sprintf("ORIGIN_DEBUG pos=%d true_min=%d (at q=%d) oldest_live=%d could_free=%d\n",
                     $pos, $true_min, $min_at_q, $oldest_live_pos,
                     $true_min - $oldest_live_pos);
+            }
+
+            # Core set discovery: identify the set of active core_ids at this
+            # position and register in the core set registry. DFA tables are
+            # built lazily on first encounter. Only discover if the position
+            # has active items (after GC may have cleared it).
+            if (defined $chart[$pos] && $chart[$pos]->@*) {
+                $self->_discover_core_set(\@chart, $pos);
             }
 
             # Profiling: track chart size and live positions per position
