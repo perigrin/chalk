@@ -97,4 +97,69 @@ subtest 'build_from_grammar enumerates all core items' => sub {
     is($index->advance($s0_0), $s0_1, 'advance works for grammar-built items');
 };
 
+# === Test 5: O(1) scalar accessors from register() ===
+subtest 'rule_name_for, alt_idx_for, dot_for return correct values' => sub {
+    my $index = Chalk::Bootstrap::CoreItemIndex->new();
+    $index->register('Expr', 2, 3);
+    $index->register('Stmt', 0, 0);
+
+    my $id_expr = $index->id_for('Expr', 2, 3);
+    is($index->rule_name_for($id_expr), 'Expr', 'rule_name_for returns rule name');
+    is($index->alt_idx_for($id_expr),   2,      'alt_idx_for returns alt index');
+    is($index->dot_for($id_expr),       3,      'dot_for returns dot position');
+
+    my $id_stmt = $index->id_for('Stmt', 0, 0);
+    is($index->rule_name_for($id_stmt), 'Stmt', 'rule_name_for correct for second item');
+    is($index->alt_idx_for($id_stmt),   0,      'alt_idx_for correct for second item');
+    is($index->dot_for($id_stmt),       0,      'dot_for correct for second item');
+};
+
+# === Test 6: rule_for returns Rule object from build_from_grammar() ===
+subtest 'rule_for returns Rule object' => sub {
+    my $sym_a = Chalk::Grammar::Symbol->new(type => 'terminal', value => 'a');
+    my $sym_b = Chalk::Grammar::Symbol->new(type => 'terminal', value => 'b');
+    my $sym_A = Chalk::Grammar::Symbol->new(type => 'reference', value => 'A');
+    my $sym_B = Chalk::Grammar::Symbol->new(type => 'reference', value => 'B');
+
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name => 'S', expressions => [[$sym_A, $sym_B], [$sym_a]],
+    );
+    my $rule_A = Chalk::Grammar::Rule->new(
+        name => 'A', expressions => [[$sym_a]],
+    );
+    my $rule_B = Chalk::Grammar::Rule->new(
+        name => 'B', expressions => [[$sym_b]],
+    );
+
+    my $index = Chalk::Bootstrap::CoreItemIndex->new();
+    $index->build_from_grammar([$rule_S, $rule_A, $rule_B]);
+
+    my $id_s00 = $index->id_for('S', 0, 0);
+    my $rule = $index->rule_for($id_s00);
+    ok(defined $rule, 'rule_for returns defined Rule object');
+    isa_ok($rule, 'Chalk::Grammar::Rule', 'rule_for returns a Rule');
+    is($rule->name(), 'S', 'rule_for returns correct Rule by name');
+
+    my $id_a00 = $index->id_for('A', 0, 0);
+    my $rule_a = $index->rule_for($id_a00);
+    is($rule_a->name(), 'A', 'rule_for returns correct Rule for A');
+
+    # All dot positions for the same rule/alt share the same Rule object
+    my $id_s01 = $index->id_for('S', 0, 1);
+    is($index->rule_for($id_s01), $rule_S, 'rule_for same object for different dots of same rule');
+};
+
+# === Test 7: scalar accessors consistent with item_for ===
+subtest 'scalar accessors are consistent with item_for' => sub {
+    my $index = Chalk::Bootstrap::CoreItemIndex->new();
+    $index->register('Block', 3, 7);
+
+    my $id = $index->id_for('Block', 3, 7);
+    my $info = $index->item_for($id);
+
+    is($index->rule_name_for($id), $info->{rule_name}, 'rule_name_for matches item_for');
+    is($index->alt_idx_for($id),   $info->{alt_idx},   'alt_idx_for matches item_for');
+    is($index->dot_for($id),       $info->{dot},       'dot_for matches item_for');
+};
+
 done_testing;

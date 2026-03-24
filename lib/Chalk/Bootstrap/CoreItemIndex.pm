@@ -5,9 +5,13 @@ use utf8;
 use experimental 'class';
 
 class Chalk::Bootstrap::CoreItemIndex {
-    field %id_for_key;   # "rule_name:alt_idx:dot" => integer
-    field @id_to_info;   # integer => { rule_name, alt_idx, dot }
-    field %advance_map;  # core_id => core_id for dot+1
+    field %id_for_key;        # "rule_name:alt_idx:dot" => integer
+    field @id_to_info;        # integer => { rule_name, alt_idx, dot }
+    field @id_to_rule_name;   # integer => rule name string (O(1) accessor)
+    field @id_to_alt_idx;     # integer => alt index integer (O(1) accessor)
+    field @id_to_dot;         # integer => dot position integer (O(1) accessor)
+    field @id_to_rule;        # integer => Rule object (populated by build_from_grammar)
+    field %advance_map;       # core_id => core_id for dot+1
     field $count :reader = 0;
 
     # Register a single core item, returns its integer ID
@@ -22,6 +26,9 @@ class Chalk::Bootstrap::CoreItemIndex {
             alt_idx   => $alt_idx,
             dot       => $dot,
         };
+        $id_to_rule_name[$id] = $rule_name;
+        $id_to_alt_idx[$id]   = $alt_idx;
+        $id_to_dot[$id]       = $dot;
         return $id;
     }
 
@@ -35,6 +42,12 @@ class Chalk::Bootstrap::CoreItemIndex {
     method item_for($id) {
         return $id_to_info[$id];
     }
+
+    # O(1) accessors that return individual fields for a given core_id integer
+    method rule_name_for($id) { return $id_to_rule_name[$id] }
+    method alt_idx_for($id)   { return $id_to_alt_idx[$id]   }
+    method dot_for($id)       { return $id_to_dot[$id]        }
+    method rule_for($id)      { return $id_to_rule[$id]       }
 
     # Get the ID for the same item but with dot+1
     method advance($id) {
@@ -50,7 +63,8 @@ class Chalk::Bootstrap::CoreItemIndex {
         return $next_id;
     }
 
-    # Build the index from a grammar (arrayref of Rule objects)
+    # Build the index from a grammar (arrayref of Rule objects).
+    # Also populates @id_to_rule so that rule_for($id) returns the Rule object.
     method build_from_grammar($grammar) {
         for my $rule ($grammar->@*) {
             my $name = $rule->name();
@@ -59,7 +73,8 @@ class Chalk::Bootstrap::CoreItemIndex {
                 my $alt = $expressions->[$alt_idx];
                 # Register dot positions 0 through length of alternative
                 for my $dot (0 .. scalar $alt->@*) {
-                    $self->register($name, $alt_idx, $dot);
+                    my $id = $self->register($name, $alt_idx, $dot);
+                    $id_to_rule[$id] = $rule;
                 }
             }
         }
