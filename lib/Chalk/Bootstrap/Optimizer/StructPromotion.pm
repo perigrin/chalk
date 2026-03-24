@@ -384,6 +384,351 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         $field_usage->{$var_key}{$field_name}{integer_ctx} = true;
     }
 
+    # Pass 2: Rewrite IR nodes for validated schemas.
+    # Input: parsed_classes arrayref, schemas hashref from analyze().
+    # Output: rewritten parsed_classes arrayref (shallow copies with new IR).
+    method rewrite($parsed_classes, $schemas) {
+        my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
+
+        # Build reverse map: var_key → schema_name
+        my %var_to_schema;
+        for my $sname (sort keys $schemas->%*) {
+            my $svars = $schemas->{$sname}{source_vars};
+            for my $vk ($svars->@*) {
+                $var_to_schema{$vk} = $sname;
+            }
+        }
+
+        # Build schema field-name lookup: schema_name → [field_name, ...]
+        my %schema_fields;
+        for my $sname (sort keys $schemas->%*) {
+            $schema_fields{$sname} = [
+                map { $_->{name} } $schemas->{$sname}{fields}->@*
+            ];
+        }
+
+        my @result;
+        for my $info ($parsed_classes->@*) {
+            my $class_name = $info->{class_name};
+            my $ir         = $info->{ir};
+
+            my $class_decl = $self->_find_class_decl($ir);
+            unless (defined $class_decl) {
+                push @result, { $info->%* };
+                next;
+            }
+
+            my $body = $class_decl->inputs()->[2];
+            unless (defined $body && ref($body) eq 'ARRAY') {
+                push @result, { $info->%* };
+                next;
+            }
+
+            my @new_body;
+            for my $item ($body->@*) {
+                unless ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($item->class() eq 'MethodDecl' || $item->class() eq 'SubDecl')) {
+                    push @new_body, $item;
+                    next;
+                }
+
+                my $method_name = $item->inputs()->[0]->value();
+                my $params      = $item->inputs()->[1];
+                my $method_body = $item->inputs()->[2];
+                my $var_prefix  = "${class_name}::${method_name}";
+
+                if (defined $method_body && ref($method_body) eq 'ARRAY') {
+                    my $new_method_body = $self->_rewrite_method_body(
+                        $factory, $var_prefix, $method_body,
+                        \%var_to_schema, \%schema_fields,
+                    );
+
+                    my $new_method = $factory->make('Constructor',
+                        class       => $item->class(),
+                        name        => $item->inputs()->[0],
+                        params      => $params,
+                        body        => $new_method_body,
+                        return_type => $item->inputs()->[3],
+                    );
+                    push @new_body, $new_method;
+                } else {
+                    push @new_body, $item;
+                }
+            }
+
+            # Rebuild ClassDecl with new body
+            my $new_class = $factory->make('Constructor',
+                class  => 'ClassDecl',
+                name   => $class_decl->inputs()->[0],
+                parent => $class_decl->inputs()->[1],
+                body   => \@new_body,
+            );
+
+            # Rebuild Program
+            my $new_program = $factory->make('Constructor',
+                class      => 'Program',
+                statements => [$new_class],
+            );
+
+            push @result, {
+                $info->%*,
+                ir => $new_program,
+            };
+        }
+
+        return \@result;
+    }
+
+    # Rewrite a method body: replace hash construct + assign patterns with StructRef,
+    # and replace SubscriptExpr on promoted vars with FieldAccess.
+    method _rewrite_method_body($factory, $var_prefix, $body, $var_to_schema, $schema_fields) {
+        # First pass: collect assignment values for each promoted var.
+        # Pattern: VarDecl($var, HashRefExpr([])) followed by BinaryExpr('=', SubscriptExpr($var, key), val)
+        my %promoted_vars;   # var_name => schema_name
+        my %field_values;    # var_name => { field_name => value_node }
+        my %to_remove;       # index => true (assignment statements to remove)
+
+        for (my $i = 0; $i < scalar($body->@*); $i++) {
+            my $stmt = $body->[$i];
+            next unless defined $stmt && $stmt isa Chalk::Bootstrap::IR::Node::Constructor;
+
+            # Detect VarDecl with empty HashRefExpr
+            if ($stmt->class() eq 'VarDecl') {
+                my $var_node    = $stmt->inputs()->[0];
+                my $initializer = $stmt->inputs()->[1];
+
+                next unless defined $initializer
+                    && $initializer isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $initializer->class() eq 'HashRefExpr';
+
+                my $var_name = $var_node->value();
+                my $var_key  = "${var_prefix}::${var_name}";
+
+                if (exists $var_to_schema->{$var_key}) {
+                    $promoted_vars{$var_name} = $var_to_schema->{$var_key};
+                    $field_values{$var_name}  = {};
+                }
+            }
+
+            # Detect assignment: $var->{key} = val
+            if ($stmt->class() eq 'BinaryExpr') {
+                my $op_node = $stmt->inputs()->[0];
+                next unless defined $op_node
+                    && $op_node isa Chalk::Bootstrap::IR::Node::Constant
+                    && $op_node->value() eq '=';
+
+                my $left = $stmt->inputs()->[1];
+                next unless defined $left
+                    && $left isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $left->class() eq 'SubscriptExpr';
+
+                my $target = $left->inputs()->[0];
+                next unless defined $target
+                    && $target isa Chalk::Bootstrap::IR::Node::Constant
+                    && $target->const_type() eq 'variable';
+
+                my $var_name = $target->value();
+                next unless exists $promoted_vars{$var_name};
+
+                my $index = $left->inputs()->[1];
+                next unless defined $index
+                    && $index isa Chalk::Bootstrap::IR::Node::Constant
+                    && $index->const_type() eq 'string';
+
+                my $field_name = $index->value();
+                my $rhs = $stmt->inputs()->[2];
+
+                $field_values{$var_name}{$field_name} = $rhs;
+                $to_remove{$i} = true;
+            }
+        }
+
+        # Second pass: build new statements
+        my @new_body;
+        for (my $i = 0; $i < scalar($body->@*); $i++) {
+            # Skip removed assignment statements
+            next if $to_remove{$i};
+
+            my $stmt = $body->[$i];
+
+            # Replace VarDecl(HashRefExpr) with VarDecl(StructRef)
+            if (defined $stmt
+                && $stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                && $stmt->class() eq 'VarDecl') {
+
+                my $var_node = $stmt->inputs()->[0];
+                my $var_name = $var_node->value();
+
+                if (exists $promoted_vars{$var_name}) {
+                    my $schema_name = $promoted_vars{$var_name};
+                    my $field_names = $schema_fields->{$schema_name};
+
+                    # Build field value array in schema field order
+                    my @field_vals;
+                    for my $fname ($field_names->@*) {
+                        push @field_vals, $field_values{$var_name}{$fname};
+                    }
+
+                    my $schema_node = $factory->make('Constant',
+                        const_type => 'string',
+                        value      => $schema_name,
+                    );
+
+                    my $struct_ref = $factory->make('Constructor',
+                        class  => 'StructRef',
+                        schema => $schema_node,
+                        fields => \@field_vals,
+                    );
+
+                    my $new_var_decl = $factory->make('Constructor',
+                        class       => 'VarDecl',
+                        variable    => $var_node,
+                        initializer => $struct_ref,
+                    );
+
+                    push @new_body, $new_var_decl;
+                    next;
+                }
+            }
+
+            # Rewrite any SubscriptExpr on promoted vars to FieldAccess
+            my $rewritten = $self->_rewrite_node(
+                $factory, $var_prefix, $stmt,
+                \%promoted_vars, $var_to_schema, $schema_fields,
+            );
+            push @new_body, $rewritten;
+        }
+
+        return \@new_body;
+    }
+
+    # Recursively rewrite a single IR node, replacing SubscriptExpr → FieldAccess
+    # on promoted variables.
+    method _rewrite_node($factory, $var_prefix, $node, $promoted_vars, $var_to_schema, $schema_fields) {
+        return $node unless defined $node;
+        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+
+        my $class = $node->class();
+
+        # Replace SubscriptExpr on promoted var with FieldAccess
+        if ($class eq 'SubscriptExpr') {
+            my $target = $node->inputs()->[0];
+            my $index  = $node->inputs()->[1];
+            my $style  = $node->inputs()->[2];
+
+            if (defined $style
+                && $style isa Chalk::Bootstrap::IR::Node::Constant
+                && $style->value() eq 'hash'
+                && defined $target
+                && $target isa Chalk::Bootstrap::IR::Node::Constant
+                && $target->const_type() eq 'variable'
+                && exists $promoted_vars->{$target->value()}
+                && defined $index
+                && $index isa Chalk::Bootstrap::IR::Node::Constant
+                && $index->const_type() eq 'string') {
+
+                my $schema_name = $promoted_vars->{$target->value()};
+                my $schema_node = $factory->make('Constant',
+                    const_type => 'string',
+                    value      => $schema_name,
+                );
+
+                return $factory->make('Constructor',
+                    class      => 'FieldAccess',
+                    schema     => $schema_node,
+                    field_name => $index,
+                    target     => $target,
+                );
+            }
+        }
+
+        # Recursively rewrite inputs
+        my $inputs = $node->inputs();
+        my @new_inputs;
+        my $changed = false;
+
+        for my $input ($inputs->@*) {
+            if (!defined $input) {
+                push @new_inputs, undef;
+            } elsif (ref($input) eq 'ARRAY') {
+                my @new_array;
+                for my $child ($input->@*) {
+                    my $new_child = $self->_rewrite_node(
+                        $factory, $var_prefix, $child,
+                        $promoted_vars, $var_to_schema, $schema_fields,
+                    );
+                    push @new_array, $new_child;
+                    $changed = true if !defined $child || !defined $new_child
+                        || refaddr($new_child) != refaddr($child);
+                }
+                push @new_inputs, \@new_array;
+            } else {
+                my $new_input = $self->_rewrite_node(
+                    $factory, $var_prefix, $input,
+                    $promoted_vars, $var_to_schema, $schema_fields,
+                );
+                push @new_inputs, $new_input;
+                $changed = true if refaddr($new_input) != refaddr($input);
+            }
+        }
+
+        # If nothing changed, return original node
+        return $node unless $changed;
+
+        # Rebuild the Constructor node with new inputs
+        # Use the INPUT_SPECS to map positional inputs back to named params
+        return $self->_rebuild_constructor($factory, $node, \@new_inputs);
+    }
+
+    # Rebuild a Constructor node with new inputs, preserving class and attributes.
+    method _rebuild_constructor($factory, $original, $new_inputs) {
+        my $class = $original->class();
+
+        # Map input positions back to named parameters using INPUT_SPECS knowledge.
+        # This is the inverse of NodeFactory's make() parameter separation.
+        my %input_specs = (
+            'Program'        => ['statements'],
+            'ClassDecl'      => ['name', 'parent', 'body'],
+            'MethodDecl'     => ['name', 'params', 'body', 'return_type'],
+            'SubDecl'        => ['name', 'params', 'body', 'scope'],
+            'VarDecl'        => ['variable', 'initializer'],
+            'BinaryExpr'     => ['op', 'left', 'right'],
+            'UnaryExpr'      => ['op', 'operand'],
+            'ReturnStmt'     => ['value'],
+            'SubscriptExpr'  => ['target', 'index', 'style'],
+            'MethodCallExpr' => ['invocant', 'method_name', 'args'],
+            'BuiltinCall'    => ['name', 'args'],
+            'HashRefExpr'    => ['pairs'],
+            'ArrayRefExpr'   => ['elements'],
+            'TernaryExpr'    => ['condition', 'true_expr', 'false_expr'],
+            'PostfixDerefExpr' => ['target', 'sigil'],
+            'CompoundAssign' => ['op', 'target', 'value'],
+            'FieldDecl'      => ['name', 'attributes', 'default_value'],
+            'AnonSubExpr'    => ['params', 'body'],
+            'RegexMatch'     => ['target', 'pattern', 'flags'],
+            'RegexSubst'     => ['target', 'pattern', 'replacement', 'flags'],
+            'DieCall'        => ['args'],
+            'TryCatchStmt'   => ['try_body', 'catch_var', 'catch_body'],
+            'InterpolatedString' => ['parts'],
+            'BacktickExpr'   => ['command'],
+            'StructRef'      => ['schema', 'fields'],
+            'FieldAccess'    => ['schema', 'field_name', 'target'],
+        );
+
+        my $names = $input_specs{$class};
+        unless ($names) {
+            # Unknown class — return original
+            return $original;
+        }
+
+        my %params = (class => $class);
+        for my $i (0 .. $#{$names}) {
+            $params{$names->[$i]} = $new_inputs->[$i];
+        }
+
+        return $factory->make('Constructor', %params);
+    }
+
     # Find the ClassDecl node in the IR tree.
     method _find_class_decl($ir) {
         return unless defined $ir;
