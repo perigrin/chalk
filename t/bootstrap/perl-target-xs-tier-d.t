@@ -420,16 +420,6 @@ test_file(
     ],
 );
 
-test_file(
-    file       => 'lib/Chalk/Bootstrap/Perl/Target/XS.pm',
-    label      => 'Perl::Target::XS.pm',
-    module     => 'Chalk::Bootstrap::XS::TierD::PerlTargetXS',
-    skip_build => 'XS emitter: av_push void value, type mismatch, early-return codegen issues',
-    structural => [
-        { pattern => qr/generate\(self/, label => 'has generate method', todo => 'structural check may not match after codegen changes' },
-    ],
-);
-
 # ============================================================
 # Actions / pipeline modules
 # ============================================================

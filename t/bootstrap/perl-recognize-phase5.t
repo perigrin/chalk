@@ -189,7 +189,6 @@ SKIP: {
 
     my %todo_files = (
         'lib/Chalk/Bootstrap/IR/Optimizer.pm'      => 'Complex regex/string patterns exceed grammar capacity',
-        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'Embedded C code and heredocs exceed grammar capacity',
         'lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm' => 'Large file (2249 lines) exceeds parse timeout',
         'lib/Chalk/Bootstrap/Perl/Target/C.pm'     => 'Large file (1818 lines) exceeds parse timeout',
     );

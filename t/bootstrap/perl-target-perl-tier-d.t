@@ -516,12 +516,6 @@ test_perl_file(
     },
 );
 
-test_perl_file(
-    file       => 'lib/Chalk/Bootstrap/Perl/Target/XS.pm',
-    label      => 'Perl::Target::XS.pm',
-    todo_parse => 'Perl::Target::XS.pm parse fails (s///ge, heredocs, complex string patterns)',
-);
-
 # ============================================================
 # Actions / pipeline modules
 # ============================================================

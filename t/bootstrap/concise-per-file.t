@@ -73,7 +73,6 @@ my @FILES = (
     ['lib/Chalk/Bootstrap/Semiring/Boolean.pm',           'Tier D: Semiring::Boolean'],
     ['lib/Chalk/Bootstrap/Perl/Actions.pm',              'Tier D: Perl::Actions'],
     ['lib/Chalk/Bootstrap/Perl/Target/Perl.pm',          'Tier D: Perl::Target::Perl'],
-    ['lib/Chalk/Bootstrap/Perl/Target/XS.pm',            'Tier D: Perl::Target::XS'],
 );
 
 # Check B::Concise is available
@@ -164,8 +163,6 @@ SKIP: {
         'lib/Chalk/Bootstrap/Semiring/TypeInference.pm' => 'Lexical subs produce introcv/clonecv ops we do not emit',
         'lib/Chalk/Bootstrap/Semiring/SemanticAction.pm' => 'Lexical subs produce introcv/clonecv ops we do not emit',
         'lib/Chalk/Bootstrap/Semiring/Structural.pm'   => 'Extra negate op from my $ZERO = -1 initializer vs constant folding',
-        # Parse failures — remaining ambiguities
-        'lib/Chalk/Bootstrap/Perl/Target/XS.pm'    => 'Linear but ~90ms/line constant factor: 4126 lines exceeds 120s timeout',
     );
 
     # Emit TAP for a single file result
