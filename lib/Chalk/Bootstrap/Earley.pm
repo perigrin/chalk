@@ -391,15 +391,15 @@ class Chalk::Bootstrap::Earley {
     # Values are stored directly — no item hashref wrappers.
     method _chart_has($chart, $pos, $core_id, $origin) {
         my $oh = $chart->[$pos][$core_id];
-        return defined $oh && defined $oh->[$pos - $origin];
+        return defined $oh && defined $oh->[($pos - $origin)];
     }
 
     method _chart_get($chart, $pos, $core_id, $origin) {
-        return $chart->[$pos][$core_id][$pos - $origin];
+        return $chart->[$pos][$core_id][($pos - $origin)];
     }
 
     method _chart_set($chart, $pos, $core_id, $origin, $value) {
-        ($chart->[$pos][$core_id] //= [])->[$pos - $origin] = $value;
+        ($chart->[$pos][$core_id] //= [])->[($pos - $origin)] = $value;
     }
 
     # Report the chart origin dimension type (for testing)
@@ -573,7 +573,7 @@ class Chalk::Bootstrap::Earley {
 
                 # Read value from chart (may have been updated by a merge since
                 # this entry was pushed to the agenda)
-                my $value = $chart[$pos][$core_id][$pos - $origin];
+                my $value = $chart[$pos][$core_id][($pos - $origin)];
 
                 if ($ci_completions->[$core_id]) {
                     # Apply on_complete for completed rule before propagating
@@ -584,7 +584,7 @@ class Chalk::Bootstrap::Earley {
                         $alt_idx, $pos, $origin, $on_epoch_commit
                     );
                     # Update the chart entry with the action-applied value
-                    $chart[$pos][$core_id][$pos - $origin] = $completed_value;
+                    $chart[$pos][$core_id][($pos - $origin)] = $completed_value;
                     # Skip propagation of zero-valued completions. A zero
                     # from on_complete (e.g. TypeInference rejecting a
                     # keyword-as-Identifier) must not poison parent items
