@@ -11,12 +11,15 @@ our @EXPORT_OK = qw(setup_xs_grammar parse_file_ir build_and_load fork_test);
 use File::Temp qw(tempdir);
 use File::Path qw(make_path);
 use File::Basename qw(dirname);
+use File::Copy;
+use Cwd;
 use Test::More;
 
+use Config;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::Perl::Target::XS;
+use Chalk::Bootstrap::Perl::Target::C;
 
 # Sets up the grammar pipeline for tests.
 # Accepts a namespace string used to rename the generated grammar module.
@@ -84,40 +87,123 @@ sub parse_file_ir($gen_grammar, $file) {
     return wantarray ? ($ir, $sa, $sem_ctx, \%cfg_snapshot) : $ir;
 }
 
-# Builds, compiles, and loads an XS module from IR with cfg_state dispatch.
-# Returns ($dist_hashref, $error_string). On success, $error_string is undef.
-sub build_and_load($ir, $sa, $sem_ctx, $module_name) {
-    my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
+# Builds, compiles, and loads a C-based XS module from IR.
+# Uses Target::C to generate .c/.h/.xs, then compiles and loads.
+# Returns ($result_hashref, $error_string). On success, $error_string is undef.
+sub build_and_load($ir, $sa, $sem_ctx, $module_name, %opts) {
+    my $field_types = $opts{field_types} // {};
+
+    my $target = Chalk::Bootstrap::Perl::Target::C->new(
         module_name => $module_name,
+        ($field_types->%* ? (field_types => $field_types) : ()),
     );
-    my $dist;
+
+    # Generate C files from IR
+    my $result;
     try {
-        $dist = $xs_target->generate_distribution_with_cfg($ir, $sa, $sem_ctx);
+        $target->_reset_cfg_lookup();
+        $target->_build_cfg_lookup($sa, $sem_ctx);
+        $result = $target->generate_c_files($ir, $sa, $sem_ctx);
     } catch ($e) {
-        return (undef, "generate_distribution_with_cfg died: $e");
+        return (undef, "generate_c_files died: $e");
     }
-    return (undef, "generate_distribution_with_cfg failed") unless ref($dist) eq 'HASH';
+    return (undef, "generate_c_files failed") unless ref($result) eq 'HASH';
 
+    # Generate XS wrapper
+    my $xs_text;
+    try {
+        $xs_text = $target->generate_xs_wrapper(
+            $ir,
+            $result->{exported_functions},
+            $result->{anon_sub_registrations},
+        );
+    } catch ($e) {
+        return (undef, "generate_xs_wrapper died: $e");
+    }
+    return (undef, "generate_xs_wrapper failed") unless defined $xs_text;
+
+    # Extract slug from module name
+    my ($slug) = $module_name =~ /(\w+)$/;
+    $slug = lc($slug);
+
+    my $c_text = $result->{files}{"${slug}.c"};
+    my $h_text = $result->{files}{"${slug}.h"};
+    return (undef, "No .c file generated for slug '$slug'") unless defined $c_text;
+
+    # Write files to temp directory
     my $tmpdir = tempdir(CLEANUP => 1);
-    for my $path (sort keys $dist->%*) {
-        my $full_path = "$tmpdir/$path";
-        my $dir = dirname($full_path);
-        make_path($dir) unless -d $dir;
-        open(my $fh, '>:encoding(UTF-8)', $full_path)
-            or die "Cannot write $full_path: $!";
-        print $fh $dist->{$path};
-        close $fh;
-    }
+    my $repo_root = Cwd::abs_path(dirname(__FILE__) . '/../../..');
+    my $c_src = "$repo_root/c_src";
 
-    my $build_output = `cd "$tmpdir" && "$^X" Build.PL 2>&1 && "$^X" Build 2>&1`;
-    my $exit = $? >> 8;
-    return (undef, "Build failed (exit $exit): $build_output") if $exit != 0;
+    # Copy chalk.h
+    File::Copy::copy("$c_src/chalk.h", "$tmpdir/chalk.h")
+        or return (undef, "Cannot copy chalk.h: $!");
 
-    unshift @INC, "$tmpdir/blib/lib", "$tmpdir/blib/arch";
+    # Write generated files
+    _write_file("$tmpdir/${slug}.c", $c_text);
+    _write_file("$tmpdir/${slug}.h", $h_text) if defined $h_text;
+    _write_file("$tmpdir/${slug}.xs", $xs_text);
+
+    # Compile .c → .o
+    my $cc      = $Config{cc};
+    my $ccflags = $Config{ccflags};
+    my $archlib = $Config{archlib};
+
+    my $c_file = "$tmpdir/${slug}.c";
+    my $o_file = "$tmpdir/${slug}.o";
+    my $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$tmpdir $c_file -o $o_file 2>&1";
+    my $out = `$cmd`;
+    return (undef, "C compile failed:\n$out\nCommand: $cmd") if $? >> 8 != 0;
+
+    my $so_ext = $Config{so_ext} // $Config{dlext};
+
+    # xsubpp: .xs → _xs.c
+    my $xsubpp = "$Config{privlibexp}/ExtUtils/xsubpp";
+    my $typemap = "$Config{privlibexp}/ExtUtils/typemap";
+    my $xs_c = "$tmpdir/${slug}_xs.c";
+    $cmd = "$^X $xsubpp -typemap $typemap $tmpdir/${slug}.xs > $xs_c 2>&1";
+    $out = `$cmd`;
+    return (undef, "xsubpp failed:\n$out\nCommand: $cmd") if $? >> 8 != 0;
+
+    # Compile _xs.c → _xs.o
+    my $xs_o = "$tmpdir/${slug}_xs.o";
+    $cmd = "$cc -c -fPIC $ccflags -I$archlib/CORE -I$tmpdir $xs_c -o $xs_o 2>&1";
+    $out = `$cmd`;
+    return (undef, "XS compile failed:\n$out\nCommand: $cmd") if $? >> 8 != 0;
+
+    # Link _xs.o + implementation .o → per-class .so (statically linked)
+    # XSLoader expects auto/<pkg_path>/<last_component>.so
+    my $pkg_path = $module_name =~ s{::}{/}gr;
+    my ($last_component) = $module_name =~ /(\w+)$/;
+    my $out_dir = "$tmpdir/auto/$pkg_path";
+    make_path($out_dir);
+    my $class_so = "$out_dir/${last_component}.$so_ext";
+    $cmd = "$cc -shared -fPIC $xs_o $o_file -o $class_so 2>&1";
+    $out = `$cmd`;
+    return (undef, "XS link failed:\n$out\nCommand: $cmd") if $? >> 8 != 0;
+
+    # Write a .pm stub that loads the XS .so via DynaLoader
+    my $pm_path = "$tmpdir/$pkg_path.pm";
+    _write_file($pm_path, <<"PMSTUB");
+package $module_name;
+use XSLoader;
+XSLoader::load('$module_name');
+PMSTUB
+
+    # Load the module
+    unshift @INC, $tmpdir;
     my $load_ok = eval "require $module_name; 1";
     return (undef, "Load failed: $@") unless $load_ok;
 
-    return ($dist, undef);
+    return ($result, undef);
+}
+
+sub _write_file($path, $content) {
+    my $dir = dirname($path);
+    make_path($dir) unless -d $dir;
+    open(my $fh, '>:encoding(UTF-8)', $path) or die "Cannot write $path: $!";
+    print $fh $content;
+    close $fh;
 }
 
 # Runs a behavioral test in a forked child process to catch segfaults.
