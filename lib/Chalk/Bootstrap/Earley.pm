@@ -1107,7 +1107,8 @@ class Chalk::Bootstrap::Earley {
                     try {
                         $merged_value = $semiring->add($existing_val, $combined);
                     } catch ($e) {
-                        die "Ambiguity resolving Leo item for '$rule_name': $e";
+                        die "Ambiguity resolving Leo item for '$rule_name' "
+                            . "(top_core=$top_core_id, top_origin=$top_origin, pos=$pos): $e";
                     }
                     $self->_chart_set($chart, $pos, $new_core_id, $top_origin, $merged_value);
                 } else {
