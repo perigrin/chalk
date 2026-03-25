@@ -46,10 +46,6 @@ class Chalk::Bootstrap::Earley {
     # Whether the semiring supports Leo optimization (cached at construction)
     field $_leo_enabled;
 
-    # Minimum Leo item origin position
-    # (tracked incrementally to avoid O(n) scan at every GC step)
-    field $_leo_origin_min;
-
     # Scan result cache: {pos}{pattern_string} => $end_pos (or undef)
     # Avoids redundant regex matching when multiple items scan the same
     # terminal at the same position (28% of scans are duplicates, 93% fail).
@@ -82,7 +78,11 @@ class Chalk::Bootstrap::Earley {
     # Scan statistics for terminal clustering
     field %_scan_stats;
 
-    # Prediction cache: core_set_id => [predicted rule names]
+    # Detailed parse profiling (parse-lifetime, only populated when EARLEY_PROFILE is set)
+    field %_profile_data;
+
+    # Prediction cache: core_set_hash => [predicted rule names]
+    # Key is comma-joined sorted core_id list (same string used in core_set_registry).
     # Grammar-lifetime: same core set always produces the same predictions.
     field %_prediction_cache;
 
@@ -147,7 +147,6 @@ class Chalk::Bootstrap::Earley {
         %completed_at = ();
         %leo_items = ();
         %_scan_cache = ();
-        $_leo_origin_min = undef;
         %_gc_stats = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
@@ -156,10 +155,12 @@ class Chalk::Bootstrap::Earley {
         %_set_registry = ();
         %_scan_stats = ();
         %_reuse_stats = ();
+        %_profile_data = ();
     }
 
-    # Clear all caches including grammar-lifetime data.
-    # Use when grammar changes or for full reset.
+    # Clear all caches including grammar-lifetime data (core set registry,
+    # DFA tables, prediction cache). The grammar itself is immutable after
+    # construction; to use a different grammar, create a new Earley instance.
     method _clear_grammar_caches() {
         $self->reset_parse_state();
         %_core_set_registry = ();
@@ -239,63 +240,29 @@ class Chalk::Bootstrap::Earley {
         $_set_registry{$set_key}{count}++;
     }
 
-    # Build DFA state tables for a core set: terminal_map and completion_map.
+    # Build DFA state tables for a core set: terminal_map.
     # These are precomputed on first encounter and reused across positions.
     method _build_dfa_tables($cs_id, $core_ids) {
         my %terminal_map;
-        my %completion_map;
 
         my $ci_completions   = $core_index->completions();
         my $ci_symbols_after = $core_index->symbols_after();
-        my $ci_rule_names    = $core_index->rule_names();
 
         for my $core_id ($core_ids->@*) {
-            if ($ci_completions->[$core_id]) {
-                # Completed item — record in completion_map
-                my $rule_name = $ci_rule_names->[$core_id];
-                $completion_map{$rule_name} //= [];
-                push $completion_map{$rule_name}->@*, $core_id;
-            } else {
-                my $sym = $ci_symbols_after->[$core_id];
-                next unless defined $sym;
-                if ($sym->is_reference()) {
-                    # Nonterminal — not in terminal_map (handled by predict/complete)
-                } else {
-                    # Terminal — record in terminal_map
-                    my $pattern = $sym->value();
-                    $terminal_map{$pattern} //= [];
-                    push $terminal_map{$pattern}->@*, $core_id;
-                }
-            }
+            next if $ci_completions->[$core_id];
+            my $sym = $ci_symbols_after->[$core_id];
+            next unless defined $sym;
+            next if $sym->is_reference();
+            my $pattern = $sym->value();
+            $terminal_map{$pattern} //= [];
+            push $terminal_map{$pattern}->@*, $core_id;
         }
 
         $_dfa_tables{$cs_id} = {
-            terminal_map   => \%terminal_map,
-            completion_map => \%completion_map,
+            terminal_map => \%terminal_map,
         };
     }
 
-    # Pre-scan all terminal patterns from a core set's terminal_map at $pos.
-    # Populates %_scan_cache so individual _scan calls get immediate hits.
-    # This is terminal clustering: try each distinct pattern once per position
-    # instead of discovering patterns item-by-item.
-    method _cluster_scan($pos, $input, $cs_id) {
-        my $table = $_dfa_tables{$cs_id};
-        return unless defined $table;
-        my $tmap = $table->{terminal_map};
-        return unless defined $tmap;
-
-        for my $pattern_str (keys $tmap->%*) {
-            next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pattern_str};
-            my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
-            my $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
-            $_scan_cache{$pos}{$pattern_str} = $end_pos;
-            $_scan_stats{clustered_scans}++;
-        }
-    }
-
-    # Detailed parse profiling — enabled by setting $ENV{EARLEY_PROFILE}
-    field %_profile_data;
     method profile_data() { return \%_profile_data; }
 
     # Aycock Ch6: check if an Earley set is "safe" — locally unambiguous.
@@ -459,8 +426,8 @@ class Chalk::Bootstrap::Earley {
     method _run_parse($input) {
         my $n = length($input);
 
-        # Chart: $chart[$pos][$core_id]{$origin} = $value
-        # Values are stored directly — no item hashref wrappers.
+        # Chart: $chart[$pos][$core_id][$rel_dist] = $value
+        # where rel_dist = pos - origin. Values are stored directly — no item hashref wrappers.
         # core_id encodes (rule_name, alt_idx, dot); CoreItemIndex provides O(1) lookups.
         my @chart = map { [] } (0 .. $n);
 
@@ -475,12 +442,12 @@ class Chalk::Bootstrap::Earley {
         %completed_at = ();
         %leo_items = ();
         %_scan_cache = ();
-        $_leo_origin_min = undef;
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
         %_dist_stats = (max_distance => 0);
         %_set_registry = ();
         %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
         %_reuse_stats = (prediction_reuses => 0, prediction_computes => 0);
+        %_profile_data = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
         @_pos_core_set = ();
@@ -566,33 +533,25 @@ class Chalk::Bootstrap::Earley {
                 if (exists $_prediction_cache{$pre_hash}) {
                     # Reuse cached predictions
                     my $cached_rules = $_prediction_cache{$pre_hash};
-                    for my $rule_name ($cached_rules->@*) {
-                        my $sym = Chalk::Grammar::Symbol->new(
-                            type  => 'reference',
-                            value => $rule_name,
-                        );
-                        $self->_predict($sym, $pos, \@chart, \@agenda, \%predicted_at);
+                    for my $rn ($cached_rules->@*) {
+                        $self->_predict($rn, $pos, \@chart, \@agenda, \%predicted_at);
                     }
                     $_reuse_stats{prediction_reuses}++;
                 } else {
                     # First encounter: collect nonterminals for this core set
                     my @expected_nonterminals;
+                    my %seen_nt;
                     for my $cid (@pre_active) {
                         next if $ci_completions->[$cid];
                         my $sym = $ci_symbols_after->[$cid];
                         next unless defined $sym && $sym->is_reference();
                         my $rn = $sym->value();
-                        push @expected_nonterminals, $rn
-                            unless grep { $_ eq $rn } @expected_nonterminals;
+                        push @expected_nonterminals, $rn unless $seen_nt{$rn}++;
                     }
                     $_prediction_cache{$pre_hash} = \@expected_nonterminals;
 
-                    for my $rule_name (@expected_nonterminals) {
-                        my $sym = Chalk::Grammar::Symbol->new(
-                            type  => 'reference',
-                            value => $rule_name,
-                        );
-                        $self->_predict($sym, $pos, \@chart, \@agenda, \%predicted_at);
+                    for my $rn (@expected_nonterminals) {
+                        $self->_predict($rn, $pos, \@chart, \@agenda, \%predicted_at);
                     }
                     $_reuse_stats{prediction_computes}++;
                 }
@@ -626,15 +585,17 @@ class Chalk::Bootstrap::Earley {
                     );
                     # Update the chart entry with the action-applied value
                     $chart[$pos][$core_id][$pos - $origin] = $completed_value;
-                    # Index this completed item for _advance_from_completed lookups
-                    $completed_at{$rule_name}{$origin}{$pos} //= [];
-                    push $completed_at{$rule_name}{$origin}{$pos}->@*, [$core_id, $origin];
                     # Skip propagation of zero-valued completions. A zero
                     # from on_complete (e.g. TypeInference rejecting a
                     # keyword-as-Identifier) must not poison parent items
                     # via multiply — the valid parse path will supply
                     # the correct value independently.
                     next if !defined($completed_value) || $semiring->is_zero($completed_value);
+                    # Index this completed item for _advance_from_completed lookups.
+                    # Only non-zero completions are indexed — zero-valued entries
+                    # would cause wasted work in _advance_from_completed.
+                    $completed_at{$rule_name}{$origin}{$pos} //= [];
+                    push $completed_at{$rule_name}{$origin}{$pos}->@*, [$core_id, $origin];
                     # Complete
                     $self->_complete($core_id, $origin, $completed_value, $pos, \@chart, \@agenda);
                 } else {
@@ -682,7 +643,7 @@ class Chalk::Bootstrap::Earley {
                         }
 
                         # Predict
-                        $self->_predict($symbol, $pos, \@chart, \@agenda, \%predicted_at);
+                        $self->_predict($w_rule, $pos, \@chart, \@agenda, \%predicted_at);
                         # Advance from already-completed items at this position.
                         # When a nullable nonterminal (e.g. _) appears multiple
                         # times in a rule, the second prediction is suppressed
@@ -1024,8 +985,7 @@ class Chalk::Bootstrap::Earley {
     # called to create SemanticAction placeholders for each skipped symbol.
     # Tracks which rules have been predicted at each position to avoid
     # re-iterating the prediction set on redundant calls.
-    method _predict($symbol, $pos, $chart, $agenda, $predicted_at = undef) {
-        my $rule_name = $symbol->value();
+    method _predict($rule_name, $pos, $chart, $agenda, $predicted_at = undef) {
 
         # Skip if this rule was already predicted at this position
         if (defined $predicted_at) {
@@ -1072,8 +1032,8 @@ class Chalk::Bootstrap::Earley {
         my $pattern_str = $symbol->value();
 
         # Check scan result cache before attempting regex match.
-        # Terminal clustering pre-populates this cache via _cluster_scan,
-        # so most lookups here are cache hits.
+        # Terminal clustering (inline at the top of the position loop in
+        # _run_parse) pre-populates this cache, so most lookups are hits.
         my $end_pos;
         if (exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pattern_str}) {
             $end_pos = $_scan_cache{$pos}{$pattern_str};
@@ -1294,9 +1254,6 @@ class Chalk::Bootstrap::Earley {
                     wait_core_id => $leo_candidate_core_id,
                     wait_origin  => $leo_candidate_w_origin,
                 };
-                # Track minimum Leo origin for GC
-                $_leo_origin_min = $top_origin
-                    if !defined $_leo_origin_min || $top_origin < $_leo_origin_min;
             }
         }
     }

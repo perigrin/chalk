@@ -73,11 +73,10 @@ my $parser = Chalk::Bootstrap::Earley->new(
     my $count = scalar keys $dfa_tables->%*;
     ok($count > 0, "dfa_tables has entries ($count states)");
 
-    # Each DFA table should have terminal_map, goto_table, completion_map
+    # Each DFA table should have terminal_map
     for my $cs_id (keys $dfa_tables->%*) {
         my $table = $dfa_tables->{$cs_id};
         ok(exists $table->{terminal_map}, "core set $cs_id has terminal_map");
-        ok(exists $table->{completion_map}, "core set $cs_id has completion_map");
         last;  # Just check one to keep test output manageable
     }
 }
