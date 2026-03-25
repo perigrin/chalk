@@ -594,9 +594,16 @@ class Chalk::Bootstrap::Earley {
                                 my $skip_oh = $chart[$pos][$skip_core];
                                 if (defined $skip_oh && defined $skip_oh->[$skip_rd]) {
                                     my $existing_val = $skip_oh->[$skip_rd];
-                                    my $merged = $semiring->add(
-                                        $existing_val, $skip_value
-                                    );
+                                    my $merged;
+                                    try {
+                                        $merged = $semiring->add(
+                                            $existing_val, $skip_value
+                                        );
+                                    } catch ($e) {
+                                        my $rn = $core_index->rule_name_for($skip_core);
+                                        die "Ambiguity in skip-optional merge for '$rn' "
+                                            . "(pos=$pos, origin=$origin): $e";
+                                    }
                                     my $merged_is_zero = $semiring->is_zero($merged);
                                     if (!$merged_is_zero) {
                                         $chart[$pos][$skip_core][$skip_rd] = $merged;
@@ -1044,7 +1051,14 @@ class Chalk::Bootstrap::Earley {
         if ($self->_chart_has($chart, $end_pos, $new_core_id, $origin)) {
             # Merge with existing value using semiring add
             my $existing_val = $self->_chart_get($chart, $end_pos, $new_core_id, $origin);
-            my $merged_value = $semiring->add($existing_val, $new_value);
+            my $merged_value;
+            try {
+                $merged_value = $semiring->add($existing_val, $new_value);
+            } catch ($e) {
+                my $rn = $core_index->rule_name_for($new_core_id);
+                die "Ambiguity in scan merge for '$rn' "
+                    . "(pos=$pos, end_pos=$end_pos, origin=$origin): $e";
+            }
             $self->_chart_set($chart, $end_pos, $new_core_id, $origin, $merged_value);
             # If zero-width match, add to current agenda for immediate processing
             if ($end_pos == $pos && $agenda) {
@@ -1258,7 +1272,16 @@ class Chalk::Bootstrap::Earley {
 
             if ($self->_chart_has($chart, $pos, $new_core_id, $waiting_origin)) {
                 my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $waiting_origin);
-                my $merged_value = $semiring->add($existing_val, $new_value);
+                my $merged_value;
+                try {
+                    $merged_value = $semiring->add($existing_val, $new_value);
+                } catch ($e) {
+                    my $rn = $core_index->rule_name_for($new_core_id);
+                    my $completed_rule = $symbol->value();
+                    die "Ambiguity in advance_from_completed for '$rn' "
+                        . "(pos=$pos, origin=$waiting_origin) "
+                        . "completing='$completed_rule': $e";
+                }
                 $self->_chart_set($chart, $pos, $new_core_id, $waiting_origin, $merged_value);
             } else {
                 $self->_chart_set($chart, $pos, $new_core_id, $waiting_origin, $new_value);
