@@ -116,32 +116,7 @@ my sub parse_file_ir($file) {
     }
 }
 
-# ============================================================
-# 3. Perl/Target/XS.pm — XS source emitter
-# ============================================================
-
-# NOTE: Perl/Target/XS.pm (1193 lines, 44+ methods) causes deep recursion in
-# the Earley parser and hangs the test suite if parse is attempted synchronously.
-# All tests for this file are skipped as TODO until the parser handles large files.
-
-{
-    TODO: {
-        local $TODO = 'Perl/Target/XS.pm: parse hangs due to deep recursion on large file';
-        ok(0, 'Perl/Target/XS: parse produces IR');
-    }
-
-    SKIP: {
-        skip 'Perl/Target/XS: parse not attempted (known hang)', 3;
-        my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Perl/Target/XS.pm');
-        my $module = 'Chalk::Bootstrap::Perl::XS::TierD5::PerlTargetXS';
-        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
-        ok(defined $result, 'Perl/Target/XS: XS builds');
-        SKIP: {
-            skip 'Perl/Target/XS: behavioral tests need parent class stub', 1;
-            ok(0, 'Perl/Target/XS: new() succeeds');
-        }
-    }
-}
+# Perl/Target/XS.pm — removed (#662). Tests for this file deleted.
 
 # ============================================================
 # 4. Target/XS/AST/XSUB.pm — XSUB node with emit method
