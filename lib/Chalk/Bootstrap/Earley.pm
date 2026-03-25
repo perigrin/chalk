@@ -730,14 +730,16 @@ class Chalk::Bootstrap::Earley {
                         last unless $safe_to_free;
                         my $oh = $chart[$pos][$cid];
                         next unless defined $oh;
+                        # Complete items are safe to free — only incomplete
+                        # items with origins in the window block freeing
+                        next if $self->_is_complete_id($cid);
                         # Check if any origin is in (last_safe_pos, pos)
                         # rel_dist = pos - origin, so origin in that range
                         # means rel_dist in (0, pos - last_safe_pos)
                         my $min_rd = 1;  # origin < pos → rd > 0
                         my $max_rd = $pos - $last_safe_pos;  # origin > last_safe_pos
                         for my $rd ($min_rd .. $max_rd - 1) {
-                            next unless defined $oh->[$rd];
-                            unless ($self->_is_complete_id($cid)) {
+                            if (defined $oh->[$rd]) {
                                 $safe_to_free = false;
                                 last;
                             }
