@@ -1,11 +1,8 @@
-# ABOUTME: Tests Perl IR to XS compilation for Tier D3 files (4 semiring files).
-# ABOUTME: SemanticAction, Precedence, Structural, TypeInference — compile+load+structural checks.
+# ABOUTME: Tests Perl IR to Target::C compilation for Tier D3 files (4 semiring files).
+# ABOUTME: SemanticAction, Precedence, Structural, TypeInference — compile+load+behavioral checks.
 use 5.42.0;
 use utf8;
 use Test::More;
-use File::Temp qw(tempdir);
-use File::Path qw(make_path);
-use File::Basename qw(dirname);
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
@@ -21,15 +18,12 @@ unless ($have_compiler) {
     plan skip_all => 'No C compiler available';
 }
 
-eval { require Module::Build; 1 }
-    or plan skip_all => 'Module::Build not installed';
-
 # === Setup ===
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use TestXSHelpers qw(build_and_load);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::Perl::Target::XS;
 
 # Build Perl grammar pipeline
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -45,52 +39,28 @@ is($@, '', 'generated grammar code evals cleanly') or BAIL_OUT("Cannot continue:
 my $gen_grammar = Chalk::Grammar::Perl::XSTierD3Test::grammar();
 ok(defined $gen_grammar, 'grammar objects loaded');
 
-# === Helper to parse file -> IR ===
+# === Helper to parse file -> IR, SemanticAction, semantic context ===
 
 my sub parse_file_ir($file) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
     my $source = <$fh>;
+    close $fh;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
     my $result = $parser->parse_value($source);
-    return undef unless defined $result;
+    return () unless defined $result;
 
+    my $sa = $semiring->semirings()->[4];
     my $sem_ctx = $result->[4];
-    return undef unless defined $sem_ctx;
-    return $sem_ctx->extract();
-}
-
-# === Helper to build, compile, load XS module ===
-
-my sub build_and_load($ir, $module_name) {
-    my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
-        module_name => $module_name,
-    );
-    my $dist = $xs_target->generate_distribution($ir);
-    return (undef, "generate_distribution failed") unless ref($dist) eq 'HASH';
-
-    my $tmpdir = tempdir(CLEANUP => 1);
-    for my $path (sort keys $dist->%*) {
-        my $full_path = "$tmpdir/$path";
-        my $dir = dirname($full_path);
-        make_path($dir) unless -d $dir;
-        open(my $fh, '>:encoding(UTF-8)', $full_path)
-            or die "Cannot write $full_path: $!";
-        print $fh $dist->{$path};
-        close $fh;
-    }
-
-    my $build_output = `cd "$tmpdir" && "$^X" Build.PL 2>&1 && "$^X" Build 2>&1`;
-    my $exit = $? >> 8;
-    return (undef, "Build failed (exit $exit): $build_output") if $exit != 0;
-
-    unshift @INC, "$tmpdir/blib/lib", "$tmpdir/blib/arch";
-    eval "require $module_name";
-    return (undef, "Load failed: $@") if $@;
-
-    return ($dist, undef);
+    return () unless defined $sem_ctx;
+    my $ir = $sem_ctx->extract();
+    return () unless defined $ir;
+    return ($ir, $sa, $sem_ctx);
 }
 
 # ============================================================
@@ -98,32 +68,28 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/SemanticAction.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Semiring/SemanticAction.pm');
     ok(defined $ir, 'SemanticAction: parse produces IR');
 
     SKIP: {
-        skip 'SemanticAction: no IR', 4 unless defined $ir;
+        skip 'SemanticAction: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD3::SemanticAction';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         TODO: {
             local $TODO = 'SemanticAction: XS emitter build failure (early-return codegen issues)';
-            ok(defined $dist, 'SemanticAction: XS builds') or diag $err;
+            ok(defined $result, 'SemanticAction: XS builds') or diag $err;
         }
-        if (!defined $dist) {
-            skip 'SemanticAction: build failed', 2;
+        if (!defined $result) {
+            skip 'SemanticAction: build failed', 1;
         }
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'SemanticAction: XS has MODULE line');
 
         # Methods that use coderefs/closures cannot be called from XS directly.
         # Verify new() constructs the object; method behaviorals are SKIP-guarded.
         SKIP: {
             skip 'SemanticAction: new() requires Context dependency stubs', 1;
-            my $sa = eval { $module->new() };
-            ok(defined $sa, 'SemanticAction: new() succeeds');
+            my $sa_obj = eval { $module->new() };
+            ok(defined $sa_obj, 'SemanticAction: new() succeeds');
         }
     }
 }
@@ -133,23 +99,18 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/Precedence.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Semiring/Precedence.pm');
     ok(defined $ir, 'Precedence: parse produces IR');
 
     SKIP: {
-        skip 'Precedence: no IR', 5 unless defined $ir;
+        skip 'Precedence: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD3::Precedence';
-        my ($dist, $err) = build_and_load($ir, $module);
-        ok(defined $dist, 'Precedence: XS builds') or do {
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
+        ok(defined $result, 'Precedence: XS builds') or do {
             diag $err;
-            skip 'Precedence: build failed', 3;
+            skip 'Precedence: build failed', 1;
         };
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'Precedence: XS has MODULE line');
-        like($xs_code, qr/zero\(/, 'Precedence: XS has zero method');
 
         my $prec = eval { $module->new(lookup => sub { undef }) };
         is($@, '', 'Precedence: new() succeeds');
@@ -161,24 +122,19 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/Structural.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Semiring/Structural.pm');
     ok(defined $ir, 'Structural: parse produces IR');
 
     SKIP: {
-        skip 'Structural: no IR', 6 unless defined $ir;
+        skip 'Structural: no IR', 3 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD3::Structural';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         TODO: {
             local $TODO = 'Structural: XS build failure from codegen gaps';
-            ok(defined $dist, 'Structural: XS builds');
+            ok(defined $result, 'Structural: XS builds');
         }
-        skip 'Structural: build failed', 4 unless defined $dist;
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'Structural: XS has MODULE line');
-        like($xs_code, qr/zero\(/, 'Structural: XS has zero method');
+        skip 'Structural: build failed', 2 unless defined $result;
 
         my $struct = eval { $module->new() };
         is($@, '', 'Structural: new() succeeds') or skip 'Structural: new failed', 1;
@@ -194,22 +150,18 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/TypeInference.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Semiring/TypeInference.pm');
     ok(defined $ir, 'TypeInference: parse produces IR');
 
     SKIP: {
-        skip 'TypeInference: no IR', 5 unless defined $ir;
+        skip 'TypeInference: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD3::TypeInference';
-        my ($dist, $err) = build_and_load($ir, $module);
-        ok(defined $dist, 'TypeInference: XS builds') or do {
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
+        ok(defined $result, 'TypeInference: XS builds') or do {
             diag $err;
-            skip 'TypeInference: build failed', 3;
+            skip 'TypeInference: build failed', 1;
         };
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'TypeInference: XS has MODULE line');
 
         # TypeInference.new() requires coderef params that involve Context stubs.
         SKIP: {

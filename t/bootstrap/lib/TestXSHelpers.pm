@@ -122,13 +122,16 @@ sub build_and_load($ir, $sa, $sem_ctx, $module_name, %opts) {
     }
     return (undef, "generate_xs_wrapper failed") unless defined $xs_text;
 
-    # Extract slug from module name
-    my ($slug) = $module_name =~ /(\w+)$/;
-    $slug = lc($slug);
+    # Extract slug from generated file names (Target::C derives slug from IR class name)
+    my ($slug) = map { /^(\w+)\.c$/ ? $1 : () } keys $result->{files}->%*;
+    return (undef, "No .c file found in generated files") unless defined $slug;
+
+    # Module slug may differ from IR slug (e.g., module_name='Test::Symbol' but IR class='Chalk::Grammar::Symbol')
+    my ($module_slug) = $module_name =~ /(\w+)$/;
+    $module_slug = lc($module_slug);
 
     my $c_text = $result->{files}{"${slug}.c"};
     my $h_text = $result->{files}{"${slug}.h"};
-    return (undef, "No .c file generated for slug '$slug'") unless defined $c_text;
 
     # Write files to temp directory
     my $tmpdir = tempdir(CLEANUP => 1);
@@ -143,6 +146,13 @@ sub build_and_load($ir, $sa, $sem_ctx, $module_name, %opts) {
     _write_file("$tmpdir/${slug}.c", $c_text);
     _write_file("$tmpdir/${slug}.h", $h_text) if defined $h_text;
     _write_file("$tmpdir/${slug}.xs", $xs_text);
+
+    # If module slug differs from IR slug, the XS wrapper includes
+    # "${module_slug}.h" but the generated file is "${slug}.h".
+    # Create a symlink so the include resolves.
+    if ($module_slug ne $slug && defined $h_text) {
+        symlink("${slug}.h", "$tmpdir/${module_slug}.h");
+    }
 
     # Compile .c → .o
     my $cc      = $Config{cc};

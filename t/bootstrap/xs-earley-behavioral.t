@@ -1,11 +1,8 @@
-# ABOUTME: Behavioral test for Earley.pm compiled to XS.
+# ABOUTME: Behavioral test for Earley.pm compiled to XS via Target::C.
 # ABOUTME: Builds XS module, loads it, creates parser instance, and parses a simple grammar.
 use 5.42.0;
 use utf8;
 use Test::More;
-use File::Temp qw(tempdir);
-use File::Path qw(make_path);
-use File::Basename qw(dirname);
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
@@ -20,11 +17,7 @@ unless ($have_compiler) {
     plan skip_all => 'No C compiler available';
 }
 
-eval { require Module::Build; 1 }
-    or plan skip_all => 'Module::Build not installed';
-
-use Chalk::Bootstrap::Perl::Target::XS;
-use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
+use TestXSHelpers qw(setup_xs_grammar parse_file_ir build_and_load);
 
 # --- Step 1: Parse Earley.pm to IR ---
 my $gen = eval { setup_xs_grammar('Chalk::Grammar::Perl::XSEarleyBehav') };
@@ -33,47 +26,11 @@ ok(defined $gen, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 my ($ir, $sa, $ctx) = eval { parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm') };
 ok(defined $ir, 'Earley.pm parses to IR') or BAIL_OUT("Parse failed: $@");
 
-# --- Step 2: Generate XS distribution ---
-my $xs = Chalk::Bootstrap::Perl::Target::XS->new(module_name => 'Test::XSEarley');
-my $dist = eval { $xs->generate_distribution_with_cfg($ir, $sa, $ctx) };
-ok(ref($dist) eq 'HASH', 'XS distribution generated') or BAIL_OUT("XS gen failed: $@");
+# --- Step 2: Build and load XS module via Target::C ---
+my ($result, $err) = eval { build_and_load($ir, $sa, $ctx, 'Test::XSEarley') };
+ok(defined $result, 'XS module built and loaded') or BAIL_OUT("Build failed: " . ($err // $@));
 
-# --- Step 3: Write to temp directory and build ---
-my $tmpdir = tempdir(CLEANUP => 1);
-
-for my $path (sort keys $dist->%*) {
-    my $full_path = "$tmpdir/$path";
-    my $dir = dirname($full_path);
-    make_path($dir) unless -d $dir;
-    open(my $wfh, '>:encoding(UTF-8)', $full_path) or die "Cannot write $full_path: $!";
-    print $wfh $dist->{$path};
-    close $wfh;
-}
-
-{
-    my $output = `cd "$tmpdir" && "$^X" -Ilib Build.PL 2>&1`;
-    my $exit = $? >> 8;
-    is($exit, 0, 'perl Build.PL exits cleanly') or BAIL_OUT("Build.PL failed: $output");
-}
-
-{
-    my $libs = join(':', 'lib', $ENV{PERL5LIB} // '');
-    my $output = `cd "$tmpdir" && PERL5LIB="$libs" "$^X" Build 2>&1`;
-    my $exit = $? >> 8;
-    is($exit, 0, './Build compiles XS') or BAIL_OUT("Build failed: $output");
-}
-
-# --- Step 4: Load the XS module ---
-unshift @INC, "$tmpdir/blib/lib", "$tmpdir/blib/arch";
-
-my $load_err;
-eval { require Test::XSEarley };
-$load_err = $@;
-
-is($load_err, '', 'Test::XSEarley loads without error')
-    or do { diag("Load failed: $load_err"); done_testing(); exit 0; };
-
-# --- Step 5: Verify ADJUST ran by checking readers ---
+# --- Step 3: Verify ADJUST ran by checking readers ---
 # Use BNF meta-grammar as test input — it's a real grammar with 10 rules
 use Chalk::Grammar::BNF;
 use Chalk::Bootstrap::Semiring::Boolean;
@@ -102,7 +59,7 @@ my $g_count = eval { scalar($g->@*) };
 ok(defined $g_count && $g_count == scalar($grammar_rules->@*),
     'grammar() returns correct number of rules (ADJUST completed)');
 
-# --- Step 6: Parse a simple BNF string ---
+# --- Step 4: Parse a simple BNF string ---
 my $bnf_input = 'Expr ::= /\\d+/';
 
 # Also parse with pure Perl for comparison
@@ -112,7 +69,7 @@ my $perl_parser = Chalk::Bootstrap::Earley->new(
 );
 my $perl_result = $perl_parser->parse($bnf_input);
 
-# --- Step 7: Compare results ---
+# --- Step 5: Compare results ---
 ok(defined $perl_result, 'Perl parser recognizes simple BNF');
 
 # Run XS parse in a child process to survive potential segfaults.

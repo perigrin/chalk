@@ -1,11 +1,8 @@
-# ABOUTME: Tests Perl IR to XS compilation for Tier D2 files (6 data-structure management files).
+# ABOUTME: Tests Perl IR to Target::C compilation for Tier D2 files (6 data-structure management files).
 # ABOUTME: Desugar, DCE, NodeFactory, Boolean, FilterComposite, Target::Perl — compile+load+field readers.
 use 5.42.0;
 use utf8;
 use Test::More;
-use File::Temp qw(tempdir);
-use File::Path qw(make_path);
-use File::Basename qw(dirname);
 
 use lib 'lib';
 use lib 't/bootstrap/lib';
@@ -21,15 +18,12 @@ unless ($have_compiler) {
     plan skip_all => 'No C compiler available';
 }
 
-eval { require Module::Build; 1 }
-    or plan skip_all => 'Module::Build not installed';
-
 # === Setup ===
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
+use TestXSHelpers qw(build_and_load);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::Perl::Target::XS;
 
 # Build Perl grammar pipeline
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -45,52 +39,28 @@ is($@, '', 'generated grammar code evals cleanly') or BAIL_OUT("Cannot continue:
 my $gen_grammar = Chalk::Grammar::Perl::XSTierD2Test::grammar();
 ok(defined $gen_grammar, 'grammar objects loaded');
 
-# === Helper to parse file -> IR ===
+# === Helper to parse file -> IR, SemanticAction, semantic context ===
 
 my sub parse_file_ir($file) {
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     open my $fh, '<:utf8', $file or die "Cannot read $file: $!";
     local $/;
     my $source = <$fh>;
+    close $fh;
 
     my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
+    my $semiring = $parser->semiring();
+    $semiring->reset_cache();
+
     my $result = $parser->parse_value($source);
-    return undef unless defined $result;
+    return () unless defined $result;
 
+    my $sa = $semiring->semirings()->[4];
     my $sem_ctx = $result->[4];
-    return undef unless defined $sem_ctx;
-    return $sem_ctx->extract();
-}
-
-# === Helper to build, compile, load XS module ===
-
-my sub build_and_load($ir, $module_name) {
-    my $xs_target = Chalk::Bootstrap::Perl::Target::XS->new(
-        module_name => $module_name,
-    );
-    my $dist = $xs_target->generate_distribution($ir);
-    return (undef, "generate_distribution failed") unless ref($dist) eq 'HASH';
-
-    my $tmpdir = tempdir(CLEANUP => 1);
-    for my $path (sort keys $dist->%*) {
-        my $full_path = "$tmpdir/$path";
-        my $dir = dirname($full_path);
-        make_path($dir) unless -d $dir;
-        open(my $fh, '>:encoding(UTF-8)', $full_path)
-            or die "Cannot write $full_path: $!";
-        print $fh $dist->{$path};
-        close $fh;
-    }
-
-    my $build_output = `cd "$tmpdir" && "$^X" Build.PL 2>&1 && "$^X" Build 2>&1`;
-    my $exit = $? >> 8;
-    return (undef, "Build failed (exit $exit): $build_output") if $exit != 0;
-
-    unshift @INC, "$tmpdir/blib/lib", "$tmpdir/blib/arch";
-    eval "require $module_name";
-    return (undef, "Load failed: $@") if $@;
-
-    return ($dist, undef);
+    return () unless defined $sem_ctx;
+    my $ir = $sem_ctx->extract();
+    return () unless defined $ir;
+    return ($ir, $sa, $sem_ctx);
 }
 
 # ============================================================
@@ -98,22 +68,18 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Desugar.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Desugar.pm');
     ok(defined $ir, 'Desugar: parse produces IR');
 
     SKIP: {
-        skip 'Desugar: no IR', 4 unless defined $ir;
+        skip 'Desugar: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::Desugar';
-        my ($dist, $err) = build_and_load($ir, $module);
-        ok(defined $dist, 'Desugar: XS builds') or do {
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
+        ok(defined $result, 'Desugar: XS builds') or do {
             diag $err;
-            skip 'Desugar: build failed', 2;
+            skip 'Desugar: build failed', 1;
         };
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'Desugar: XS has MODULE line');
 
         my $obj = eval { $module->new() };
         is($@, '', 'Desugar: new() succeeds');
@@ -125,23 +91,18 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Optimizer/DCE.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Optimizer/DCE.pm');
     ok(defined $ir, 'DCE: parse produces IR');
 
     SKIP: {
-        skip 'DCE: no IR', 5 unless defined $ir;
+        skip 'DCE: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::DCE';
-        my ($dist, $err) = build_and_load($ir, $module);
-        ok(defined $dist, 'DCE: XS builds') or do {
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
+        ok(defined $result, 'DCE: XS builds') or do {
             diag $err;
-            skip 'DCE: build failed', 3;
+            skip 'DCE: build failed', 1;
         };
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'DCE: XS has MODULE line');
-        like($xs_code, qr/run/, 'DCE: XS has run method (XSUB or eval_pv)');
 
         SKIP: {
             skip 'DCE: behavioral tests need parent class stub', 1;
@@ -156,22 +117,18 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/IR/NodeFactory.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/IR/NodeFactory.pm');
     ok(defined $ir, 'NodeFactory: parse produces IR');
 
     SKIP: {
-        skip 'NodeFactory: no IR', 4 unless defined $ir;
+        skip 'NodeFactory: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::NodeFactory';
-        my ($dist, $err) = build_and_load($ir, $module);
-        ok(defined $dist, 'NodeFactory: XS builds') or do {
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
+        ok(defined $result, 'NodeFactory: XS builds') or do {
             diag $err;
-            skip 'NodeFactory: build failed', 2;
+            skip 'NodeFactory: build failed', 1;
         };
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'NodeFactory: XS has MODULE line');
 
         my $obj = eval { $module->new() };
         is($@, '', 'NodeFactory: new() succeeds');
@@ -183,28 +140,20 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/Boolean.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Semiring/Boolean.pm');
     ok(defined $ir, 'Boolean: parse produces IR');
 
     SKIP: {
-        skip 'Boolean: no IR', 5 unless defined $ir;
+        skip 'Boolean: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::Boolean';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         TODO: {
             local $TODO = 'Boolean: XS emitter build failure (early-return codegen issues)';
-            ok(defined $dist, 'Boolean: XS builds') or diag $err;
+            ok(defined $result, 'Boolean: XS builds') or diag $err;
         }
-        if (!defined $dist) {
-            skip 'Boolean: build failed', 3;
-        }
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'Boolean: XS has MODULE line');
-        TODO: {
-            local $TODO = 'Boolean: is_zero emitted as eval_pv fallback, not XS method signature';
-            like($xs_code, qr/is_zero\(/, 'Boolean: XS has is_zero method');
+        if (!defined $result) {
+            skip 'Boolean: build failed', 1;
         }
 
         my $bool = eval { $module->new() };
@@ -217,23 +166,18 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/Semiring/FilterComposite.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/Semiring/FilterComposite.pm');
     ok(defined $ir, 'FilterComposite: parse produces IR');
 
     SKIP: {
-        skip 'FilterComposite: no IR', 5 unless defined $ir;
+        skip 'FilterComposite: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::FilterComposite';
-        my ($dist, $err) = build_and_load($ir, $module);
-        ok(defined $dist, 'FilterComposite: XS builds') or do {
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
+        ok(defined $result, 'FilterComposite: XS builds') or do {
             diag $err;
-            skip 'FilterComposite: build failed', 3;
+            skip 'FilterComposite: build failed', 1;
         };
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'FilterComposite: XS has MODULE line');
-        like($xs_code, qr/"reader"/, 'FilterComposite: XS applies :reader attribute via C API');
 
         my $comp = eval { $module->new(semirings => []) };
         is($@, '', 'FilterComposite: new() succeeds');
@@ -245,24 +189,19 @@ my sub build_and_load($ir, $module_name) {
 # ============================================================
 
 {
-    my $ir = parse_file_ir('lib/Chalk/Bootstrap/BNF/Target/Perl.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir('lib/Chalk/Bootstrap/BNF/Target/Perl.pm');
     ok(defined $ir, 'Target::Perl: parse produces IR');
 
     SKIP: {
-        skip 'Target::Perl: no IR', 5 unless defined $ir;
+        skip 'Target::Perl: no IR', 2 unless defined $ir;
 
         my $module = 'Chalk::Bootstrap::Perl::XS::TierD2::TargetPerl';
-        my ($dist, $err) = build_and_load($ir, $module);
+        my ($result, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
         TODO: {
             local $TODO = 'Target::Perl: XS build failure from codegen gaps';
-            ok(defined $dist, 'Target::Perl: XS builds');
+            ok(defined $result, 'Target::Perl: XS builds');
         }
-        skip 'Target::Perl: build failed', 3 unless defined $dist;
-
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
-        like($xs_code, qr/MODULE\s*=/, 'Target::Perl: XS has MODULE line');
-        like($xs_code, qr/generate_distribution\(/, 'Target::Perl: XS has generate_distribution method');
+        skip 'Target::Perl: build failed', 1 unless defined $result;
 
         SKIP: {
             skip 'Target::Perl: behavioral tests need parent class stub', 1;

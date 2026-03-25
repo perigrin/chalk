@@ -1,11 +1,8 @@
-# ABOUTME: Integration test for XS-compiled Earley with full 5-ary FilterComposite semiring.
+# ABOUTME: Integration test for Earley compiled via Target::C with full 5-ary FilterComposite semiring.
 # ABOUTME: Verifies dogfooded XS codegen produces a working parser for real Perl source files.
 use 5.42.0;
 use utf8;
 use Test::More;
-use File::Temp qw(tempdir);
-use File::Path qw(make_path);
-use File::Basename qw(dirname);
 use Time::HiRes qw(time);
 
 use lib 'lib';
@@ -21,11 +18,7 @@ unless ($have_compiler) {
     plan skip_all => 'No C compiler available';
 }
 
-eval { require Module::Build; 1 }
-    or plan skip_all => 'Module::Build not installed';
-
-use Chalk::Bootstrap::Perl::Target::XS;
-use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
+use TestXSHelpers qw(setup_xs_grammar parse_file_ir build_and_load);
 use TestPipeline qw(perl_pipeline build_perl_concise_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
@@ -48,57 +41,11 @@ ok(defined $gen, 'grammar pipeline setup') or BAIL_OUT("Cannot continue: $@");
 my ($ir, $sa, $ctx) = eval { parse_file_ir($gen, 'lib/Chalk/Bootstrap/Earley.pm') };
 ok(defined $ir, 'Earley.pm parses to IR') or BAIL_OUT("Parse failed: $@");
 
-# --- Step 2: Generate XS distribution ---
-my $xs = Chalk::Bootstrap::Perl::Target::XS->new(
-    module_name => 'Test::XSEarleyFull',
-    semiring_intrinsics => {
-        semiring => {
-            components => [
-                { type => 'boolean_refaddr' },
-                { type => 'hash_valid' },
-                { type => 'defined' },
-                { type => 'integer_eq', value => -1 },
-                { type => 'defined' },
-            ],
-        },
-    },
-);
-my $dist = eval { $xs->generate_distribution_with_cfg($ir, $sa, $ctx) };
-ok(ref($dist) eq 'HASH', 'XS distribution generated') or BAIL_OUT("XS gen failed: $@");
+# --- Step 2: Build and load XS module via Target::C ---
+my ($result, $build_err) = eval { build_and_load($ir, $sa, $ctx, 'Test::XSEarleyFull') };
+ok(defined $result, 'XS module built and loaded') or BAIL_OUT("Build failed: " . ($build_err // $@));
 
-# --- Step 3: Write to temp directory and build ---
-my $tmpdir = tempdir(CLEANUP => 1);
-
-for my $path (sort keys $dist->%*) {
-    my $full_path = "$tmpdir/$path";
-    my $dir = dirname($full_path);
-    make_path($dir) unless -d $dir;
-    open(my $wfh, '>:encoding(UTF-8)', $full_path) or die "Cannot write $full_path: $!";
-    print $wfh $dist->{$path};
-    close $wfh;
-}
-
-{
-    my $output = `cd "$tmpdir" && "$^X" -Ilib Build.PL 2>&1`;
-    my $exit = $? >> 8;
-    is($exit, 0, 'perl Build.PL exits cleanly') or BAIL_OUT("Build.PL failed: $output");
-}
-
-{
-    my $libs = join(':', 'lib', $ENV{PERL5LIB} // '');
-    my $output = `cd "$tmpdir" && PERL5LIB="$libs" "$^X" Build 2>&1`;
-    my $exit = $? >> 8;
-    is($exit, 0, './Build compiles XS') or BAIL_OUT("Build failed: $output");
-}
-
-# --- Step 4: Load the XS module ---
-unshift @INC, "$tmpdir/blib/lib", "$tmpdir/blib/arch";
-
-eval { require Test::XSEarleyFull };
-is($@, '', 'Test::XSEarleyFull loads without error')
-    or BAIL_OUT("Load failed: $@");
-
-# --- Step 5: Build the Perl grammar (shared between both parsers) ---
+# --- Step 3: Build the Perl grammar (shared between both parsers) ---
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 my $perl_ir = perl_pipeline();
 ok(defined $perl_ir, 'Perl grammar pipeline produces IR') or BAIL_OUT("Grammar failed");
@@ -117,7 +64,7 @@ my @ordered = sort {
 } $gen_grammar->@*;
 my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar(\@ordered);
 
-# --- Step 6: Build both parsers with full 5-ary semiring ---
+# --- Step 4: Build both parsers with full 5-ary semiring ---
 
 my sub build_full_semiring() {
     my $bool_sr = Chalk::Bootstrap::Semiring::Boolean->new();
@@ -144,7 +91,7 @@ my $source = do { local $/; <$fh> };
 close $fh;
 my $line_count = scalar(split /\n/, $source);
 
-# --- Step 7: Parse with pure Perl Earley ---
+# --- Step 5: Parse with pure Perl Earley ---
 {
     my $perl_semiring = build_full_semiring();
     my $perl_parser = Chalk::Bootstrap::Earley->new(
@@ -159,7 +106,7 @@ my $line_count = scalar(split /\n/, $source);
     diag sprintf("Perl Earley: %.2fs (%.1fms/line)", $perl_elapsed, $perl_elapsed / $line_count * 1000);
 }
 
-# --- Step 8: Parse with XS Earley (in forked child for segfault safety) ---
+# --- Step 6: Parse with XS Earley (in forked child for segfault safety) ---
 {
     my $xs_semiring = build_full_semiring();
     my $xs_parser = eval { Test::XSEarleyFull->new(
