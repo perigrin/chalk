@@ -62,9 +62,6 @@ class Chalk::Bootstrap::Earley {
     field %_core_set_registry;
     field $_core_set_next_id = 0;
 
-    # DFA tables per core set: core_set_id => { terminal_map, completion_map }
-    # Grammar-lifetime.
-    field %_dfa_tables;
 
     # Core set id per chart position (parse-lifetime)
     field @_pos_core_set;
@@ -139,7 +136,7 @@ class Chalk::Bootstrap::Earley {
 
     # Core set registry and DFA table accessors (grammar-lifetime)
     method core_set_registry() { return \%_core_set_registry; }
-    method dfa_tables() { return \%_dfa_tables; }
+
 
     # Reset parse-lifetime state (chart, completed_at, leo_items, scan_cache),
     # preserving grammar-lifetime data (core_set_registry, DFA tables).
@@ -165,7 +162,6 @@ class Chalk::Bootstrap::Earley {
         $self->reset_parse_state();
         %_core_set_registry = ();
         $_core_set_next_id = 0;
-        %_dfa_tables = ();
         %_prediction_cache = ();
     }
 
@@ -205,9 +201,6 @@ class Chalk::Bootstrap::Earley {
         };
         $_pos_core_set[$pos] = $cs_id;
 
-        # Build DFA tables for this core set
-        $self->_build_dfa_tables($cs_id, \@active);
-
         return $cs_id;
     }
 
@@ -238,29 +231,6 @@ class Chalk::Bootstrap::Earley {
             count       => 0,
         };
         $_set_registry{$set_key}{count}++;
-    }
-
-    # Build DFA state tables for a core set: terminal_map.
-    # These are precomputed on first encounter and reused across positions.
-    method _build_dfa_tables($cs_id, $core_ids) {
-        my %terminal_map;
-
-        my $ci_completions   = $core_index->completions();
-        my $ci_symbols_after = $core_index->symbols_after();
-
-        for my $core_id ($core_ids->@*) {
-            next if $ci_completions->[$core_id];
-            my $sym = $ci_symbols_after->[$core_id];
-            next unless defined $sym;
-            next if $sym->is_reference();
-            my $pattern = $sym->value();
-            $terminal_map{$pattern} //= [];
-            push $terminal_map{$pattern}->@*, $core_id;
-        }
-
-        $_dfa_tables{$cs_id} = {
-            terminal_map => \%terminal_map,
-        };
     }
 
     method profile_data() { return \%_profile_data; }

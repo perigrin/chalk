@@ -1,5 +1,5 @@
-# ABOUTME: Tests for core set discovery, DFA state tables, and GC lifetime (Component 5, #654).
-# ABOUTME: Verifies core sets are registered, DFA tables built, and parse-lifetime GC works.
+# ABOUTME: Tests for core set discovery and GC lifetime (Component 5, #654).
+# ABOUTME: Verifies core sets are registered and parse-lifetime GC works.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -64,39 +64,17 @@ my $parser = Chalk::Bootstrap::Earley->new(
     ok($count < 6, "fewer core sets than positions (reuse detected)");
 }
 
-# Test 2: DFA tables exist per core set
-{
-    my $dfa_tables = $parser->dfa_tables();
-    ok(defined $dfa_tables, "dfa_tables accessor exists");
-    ok(ref($dfa_tables) eq 'HASH', "dfa_tables returns a hashref");
-
-    my $count = scalar keys $dfa_tables->%*;
-    ok($count > 0, "dfa_tables has entries ($count states)");
-
-    # Each DFA table should have terminal_map
-    for my $cs_id (keys $dfa_tables->%*) {
-        my $table = $dfa_tables->{$cs_id};
-        ok(exists $table->{terminal_map}, "core set $cs_id has terminal_map");
-        last;  # Just check one to keep test output manageable
-    }
-}
-
-# Test 3: parse_state can be reset while preserving grammar-lifetime data
+# Test 2: parse_state can be reset while preserving grammar-lifetime data
 {
     my $registry_before = $parser->core_set_registry();
     my $count_before = scalar keys $registry_before->%*;
-    my $dfa_before = $parser->dfa_tables();
-    my $dfa_count_before = scalar keys $dfa_before->%*;
 
     $parser->reset_parse_state();
 
     my $registry_after = $parser->core_set_registry();
-    my $dfa_after = $parser->dfa_tables();
 
     is(scalar keys $registry_after->%*, $count_before,
         "core_set_registry preserved after reset_parse_state");
-    is(scalar keys $dfa_after->%*, $dfa_count_before,
-        "dfa_tables preserved after reset_parse_state");
 }
 
 # Test 4: sequential parses produce correct results after reset

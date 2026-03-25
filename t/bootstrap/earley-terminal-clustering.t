@@ -57,18 +57,6 @@ sub reference($value) {
     ok($parser->parse('1+2+3'), "arithmetic: accepts '1+2+3'");
     ok($parser->parse('abc'), "identifier: accepts 'abc'");
     ok(!$parser->parse('+'), "rejects bare operator");
-
-    # Verify DFA tables have terminal maps with the expected patterns
-    my $dfa = $parser->dfa_tables();
-    my $found_terminal_map = false;
-    for my $cs_id (keys $dfa->%*) {
-        my $tmap = $dfa->{$cs_id}{terminal_map};
-        if (defined $tmap && keys $tmap->%*) {
-            $found_terminal_map = true;
-            last;
-        }
-    }
-    ok($found_terminal_map, "DFA tables contain non-empty terminal maps");
 }
 
 # Test 2: parse correctness with terminal clustering
