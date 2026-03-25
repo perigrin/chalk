@@ -475,25 +475,36 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     }
 
     # should_scan: short-circuit AND — first false returns false
-    # New API: receives ($value, $rule_name, $alt_idx, $pos, $matched_text, $is_predicted)
-    # Slices value tuple to get each component's value directly.
     method _emit_composite_should_scan($h, $params, $slugs, $has_impl) {
         for my $i (0 .. $slugs->$#*) {
             my $slug = $slugs->[$i];
             my $sr = "(*av_fetch(_sr, $i, 0))";
+            # Build component_item: copy item hash, replace value with component slice
             push $h->@*, "    { /* Component [$i]: $slug */";
-            push $h->@*, "        SV *_cv = *av_fetch((AV*)SvRV(value), $i, 0);";
-            my $args = "aTHX_ $sr, _cv, rule_name, alt_idx, pos, matched_text, is_predicted";
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, matched_text, is_predicted";
             my $call = $self->_emit_component_call($slug, 'should_scan', $sr, $args, $has_impl);
             push $h->@*, "        SV *_r = $call;";
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
             push $h->@*, "        if (!SvTRUE(_r)) return &PL_sv_no;";
             push $h->@*, "    }";
         }
         push $h->@*, "    return &PL_sv_yes;";
     }
 
-    # on_scan: build result tuple, slicing value directly per component.
-    # New API: receives ($value, $rule_name, $alt_idx, $pos, $matched_text)
+    # on_scan: build result tuple with component item slicing, zero check per component
     method _emit_composite_on_scan($h, $params, $slugs, $has_impl) {
         my $class_slug = $self->_get_current_slug();
         push $h->@*, "    AV *_result = newAV();";
@@ -502,10 +513,25 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             my $slug = $slugs->[$i];
             my $sr = "(*av_fetch(_sr, $i, 0))";
             push $h->@*, "    { /* Component [$i]: $slug */";
-            push $h->@*, "        SV *_cv = *av_fetch((AV*)SvRV(value), $i, 0);";
-            my $args = "aTHX_ $sr, _cv, rule_name, alt_idx, pos, matched_text";
+            # Build component_item hash
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, matched_text";
             my $call = $self->_emit_component_call($slug, 'on_scan', $sr, $args, $has_impl);
             push $h->@*, "        _r = $call;";
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
+            # Zero check: if component returns zero, return composite zero
             my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
             push $h->@*, "        if (SvTRUE($iz_call)) {";
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
@@ -518,8 +544,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
     }
 
     # on_complete: like on_scan but threads TI result to SA via set_type_context
-    # on_complete: build result tuple, threading TI→SA.
-    # New API: receives ($value, $rule_name, $alt_idx, $pos, $origin, $on_epoch_commit)
     method _emit_composite_on_complete($h, $params, $slugs, $has_impl) {
         my $class_slug = $self->_get_current_slug();
         push $h->@*, "    AV *_result = newAV();";
@@ -532,6 +556,7 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             # Thread TI result (index 2) to SA (index 4)
             if ($i == 4) {
                 push $h->@*, "        if (_ti_result) {";
+                # SA set_type_context — use _impl_ if available
                 if ($has_impl->{'semanticaction'} && exists $_multi_class_methods{'semanticaction'}{'set_type_context'}) {
                     push $h->@*, "            _impl_semanticaction_set_type_context(aTHX_ $sr, _ti_result);";
                 } else {
@@ -540,16 +565,34 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
                 }
                 push $h->@*, "        }";
             }
-            push $h->@*, "        SV *_cv = *av_fetch((AV*)SvRV(value), $i, 0);";
-            my $args = "aTHX_ $sr, _cv, rule_name, alt_idx, pos, origin, on_epoch_commit";
+            # Build component_item hash
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
+            # Pass on_epoch_commit to each component's on_complete so
+            # SemanticAction can fire epoch boundary callbacks.
+            my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, on_epoch_commit";
             my $call = $self->_emit_component_call($slug, 'on_complete', $sr, $args, $has_impl);
             push $h->@*, "        _r = $call;";
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
+            # Zero check
             my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", $has_impl);
             push $h->@*, "        if (SvTRUE($iz_call)) {";
             push $h->@*, "            SvREFCNT_dec((SV*)_result);";
             push $h->@*, "            return _impl_${class_slug}_zero(aTHX_ self);";
             push $h->@*, "        }";
             push $h->@*, "        av_push(_result, _r);";
+            # Capture TI result at index 2
             if ($i == 2) {
                 push $h->@*, "        _ti_result = _r;";
             }
@@ -560,8 +603,6 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
 
     # on_skip_optional: like on_scan but uses on_skip_optional where available,
     # falls back to multiply(value, one()) for components without it
-    # on_skip_optional: build result tuple, slicing value directly.
-    # New API: receives ($value, $rule_name, $alt_idx, $pos, $symbol_name)
     method _emit_composite_on_skip_optional($h, $params, $slugs, $has_impl) {
         my $class_slug = $self->_get_current_slug();
         push $h->@*, "    AV *_result = newAV();";
@@ -570,18 +611,39 @@ class Chalk::Bootstrap::Perl::Target::XS :isa(Chalk::Bootstrap::Perl::Target::Em
             my $slug = $slugs->[$i];
             my $sr = "(*av_fetch(_sr, $i, 0))";
             push $h->@*, "    { /* Component [$i]: $slug */";
-            push $h->@*, "        SV *_cv = *av_fetch((AV*)SvRV(value), $i, 0);";
+            # Build component_item hash
+            push $h->@*, "        HV *_ci = newHV();";
+            push $h->@*, "        hv_iterinit((HV*)SvRV(item));";
+            push $h->@*, "        HE *_he;";
+            push $h->@*, "        while ((_he = hv_iternext((HV*)SvRV(item)))) {";
+            push $h->@*, "            STRLEN _kl; char *_kp = HePV(_he, _kl);";
+            push $h->@*, "            hv_store(_ci, _kp, _kl, SvREFCNT_inc(HeVAL(_he)), 0);";
+            push $h->@*, "        }";
+            push $h->@*, "        SV **_vp = hv_fetchs((HV*)SvRV(item), \"value\", 0);";
+            push $h->@*, "        if (_vp && SvROK(*_vp) && SvTYPE(SvRV(*_vp)) == SVt_PVAV) {";
+            push $h->@*, "            SV **_ep = av_fetch((AV*)SvRV(*_vp), $i, 0);";
+            push $h->@*, "            if (_ep) hv_stores(_ci, \"value\", SvREFCNT_inc(*_ep));";
+            push $h->@*, "        }";
+            push $h->@*, "        SV *_ci_ref = newRV_noinc((SV*)_ci);";
             if ($has_impl->{$slug} && exists $_multi_class_methods{$slug}{'on_skip_optional'}) {
-                my $args = "aTHX_ $sr, _cv, rule_name, alt_idx, pos, symbol_name";
+                my $args = "aTHX_ $sr, _ci_ref, alt_idx, pos, symbol_name";
                 my $call = $self->_emit_component_call($slug, 'on_skip_optional', $sr, $args, $has_impl);
                 push $h->@*, "        _r = $call;";
             } else {
-                # Fall back to multiply(value, one())
+                # Fall back to multiply(value, one()).
+                # Use a per-method has_impl lookup: $has_impl was built for on_skip_optional,
+                # but the fallback calls multiply/one/is_zero which may be compiled even when
+                # on_skip_optional is not. Without this, _emit_component_call falls through to
+                # call_method with nested dSP, causing stack corruption.
                 my %core_impl = ($slug => (exists $_multi_class_methods{$slug} ? 1 : 0));
+                my $comp_val = "({ SV **__vp = hv_fetchs(_ci, \"value\", 0); __vp ? *__vp : &PL_sv_undef; })";
                 my $one_call = $self->_emit_component_call($slug, 'one', $sr, "aTHX_ $sr", \%core_impl);
-                my $mul_call = $self->_emit_component_call($slug, 'multiply', $sr, "aTHX_ $sr, _cv, $one_call", \%core_impl);
+                my $mul_call = $self->_emit_component_call($slug, 'multiply', $sr, "aTHX_ $sr, $comp_val, $one_call", \%core_impl);
                 push $h->@*, "        _r = $mul_call;";
             }
+            push $h->@*, "        SvREFCNT_dec(_ci_ref);";
+            # Zero check — use per-method impl lookup since $has_impl is keyed
+            # on on_skip_optional, not is_zero
             my %core_impl_iz = ($slug => (exists $_multi_class_methods{$slug} ? 1 : 0));
             my $iz_call = $self->_emit_component_call($slug, 'is_zero', $sr, "aTHX_ $sr, _r", \%core_impl_iz);
             push $h->@*, "        if (SvTRUE($iz_call)) {";
