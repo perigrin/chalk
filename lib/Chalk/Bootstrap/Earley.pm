@@ -88,6 +88,12 @@ class Chalk::Bootstrap::Earley {
     # Grammar-lifetime: same core set always expects the same terminals.
     field %_terminal_map_cache;
 
+    # Combined scan regex per core set: core_set_id => { re => qr/.../, patterns => [...] }
+    # A single alternation regex with positional captures that replaces N individual
+    # regex matches with one match. @-/@+ identify which branch matched.
+    # Grammar-lifetime.
+    field %_combined_scan_cache;
+
     # Completion map cache: core_set_id => { nonterminal_name => [core_ids] }
     # For each nonterminal, which core_ids in this core set are waiting for it.
     # Narrows _complete search from all-grammar to only-this-core-set.
@@ -175,6 +181,7 @@ class Chalk::Bootstrap::Earley {
         $_core_set_next_id = 0;
         %_prediction_cache = ();
         %_terminal_map_cache = ();
+        %_combined_scan_cache = ();
         %_completion_map_cache = ();
     }
 
@@ -238,6 +245,18 @@ class Chalk::Bootstrap::Earley {
         }
         $_terminal_map_cache{$cs_id} = \%terminal_map;
         $_completion_map_cache{$cs_id} = \%completion_map;
+
+        # Build combined scan regex: one alternation with positional captures.
+        # Replaces N individual regex matches with a single match per position.
+        # @-/@+ after matching identify which branch (pattern) matched.
+        my @sorted_patterns = sort keys %terminal_map;
+        if (@sorted_patterns) {
+            my $combined = join('|', map { "($_)" } @sorted_patterns);
+            $_combined_scan_cache{$cs_id} = {
+                re       => qr/\G(?:$combined)/,
+                patterns => \@sorted_patterns,
+            };
+        }
 
         return $cs_id;
     }
@@ -551,9 +570,13 @@ class Chalk::Bootstrap::Earley {
             # items at this position. Runs AFTER predictions so predicted items
             # with terminals (e.g. Item -> . \w+) are included.
             #
-            # Uses the terminal_map_cache when the post-prediction core set has
-            # been seen before. On first encounter, iterates the chart to discover
-            # patterns and the terminal map is built by _discover_core_set later.
+            # When a previously-seen core set has a combined scan regex, one
+            # match replaces N individual matches. Multiple patterns may match
+            # at the same position (e.g. \w+ and \d+ both match "123"), so
+            # we try the combined regex first as a quick reject — if nothing
+            # matches, skip all patterns. If something matches, try each
+            # pattern from the terminal map individually. The terminal map
+            # narrows this to only patterns expected by this core set.
             if ($pos < $n) {
                 # Compute post-prediction core set hash
                 my @post_active;
@@ -567,23 +590,43 @@ class Chalk::Bootstrap::Earley {
                 }
                 my $post_hash = join(",", @post_active);
 
-                # Check if this post-prediction core set has a cached terminal map
+                # Look up terminal map and combined regex for this core set
                 my $tmap;
+                my $combined;
                 if (exists $_core_set_registry{$post_hash}) {
                     my $cs_id = $_core_set_registry{$post_hash}{id};
                     $tmap = $_terminal_map_cache{$cs_id};
+                    $combined = $_combined_scan_cache{$cs_id};
                 }
 
                 if (defined $tmap) {
-                    # Reuse cached terminal map: try only the patterns this core set expects
-                    for my $pstr (keys $tmap->%*) {
-                        next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
-                        my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
-                        $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
-                        $_scan_stats{clustered_scans}++;
+                    # Quick reject: if the combined regex doesn't match at all,
+                    # no terminal pattern can match — skip all individual checks.
+                    my $any_match = true;
+                    if (defined $combined) {
+                        pos($input) = $pos;
+                        $any_match = ($input =~ /$combined->{re}/) ? true : false;
+                    }
+
+                    if ($any_match) {
+                        # Try each pattern from the terminal map
+                        for my $pstr (keys $tmap->%*) {
+                            next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
+                            my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
+                            $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+                            $_scan_stats{clustered_scans}++;
+                        }
+                    } else {
+                        # Quick reject: mark all patterns as non-matching
+                        for my $pstr (keys $tmap->%*) {
+                            $_scan_cache{$pos}{$pstr} = undef
+                                unless exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
+                        }
+                        $_scan_stats{clustered_scans} += scalar keys $tmap->%*;
                     }
                 } else {
-                    # First encounter: iterate chart to discover terminal patterns
+                    # First encounter: per-pattern matching (fallback).
+                    # _discover_core_set will build the terminal map later.
                     my %seen_patterns;
                     for my $core_id (@post_active) {
                         my $sym = $ci_symbols_after->[$core_id];
