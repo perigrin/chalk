@@ -849,8 +849,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return $val_expr if $val_expr =~ /^&PL_sv_/;       # &PL_sv_yes, &PL_sv_no, etc.
         # call_method results already have SvREFCNT_inc from the call pattern
         return $val_expr if $val_expr =~ /SvREFCNT_inc/;
-        # sv_setsv returns void — can't be wrapped as a return value
-        return $val_expr if $val_expr =~ /^sv_setsv\b/;
+        # sv_setsv, hv_clear, av_clear return void — can't be wrapped as a return value
+        return $val_expr if $val_expr =~ /^(?:sv_setsv|hv_clear|av_clear)\b/;
         return "SvREFCNT_inc($val_expr)";
     }
 

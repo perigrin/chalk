@@ -260,7 +260,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my $final_line = pop @parts;
                 $code[-1] = join("\n", @parts);
                 if ($final_line =~ s/;\s*$//) {
-                    if ($final_line =~ /^sv_setsv\b/) {
+                    if ($final_line =~ /^(?:sv_setsv|hv_clear|av_clear)\b/) {
                         push @code, "$final_line;";
                     } else {
                         my $wrapped = $self->_wrap_retval($final_line);
@@ -271,7 +271,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
             } else {
                 if ($last_code =~ s/;\s*$//) {
-                    if ($last_code =~ /^sv_setsv\b/) {
+                    if ($last_code =~ /^(?:sv_setsv|hv_clear|av_clear)\b/) {
                         $code[-1] = "$last_code;";
                     } else {
                         my $wrapped = $self->_wrap_retval($last_code);
@@ -385,7 +385,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if (!$last_is_return && @code) {
             my $last_code = $code[-1];
             if ($last_code =~ s/;\s*$//) {
-                if ($last_code =~ /^sv_setsv\b/) {
+                if ($last_code =~ /^(?:sv_setsv|hv_clear|av_clear)\b/) {
                     $code[-1] = "$last_code;";
                 } else {
                     my $wrapped = $self->_wrap_retval($last_code);
@@ -500,8 +500,12 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # All exported C functions return SV* — no SvREFCNT_inc needed because
         # direct C calls return owned SVs (unlike call_method/POPs which returns
         # a mortal needing refcount bump).
+        # Skip methods that failed C compilation — they exist in Perl but not as
+        # C functions, so call_method dispatch is required.
+        my %_skipped_set = map { $_ => 1 } @_skipped_methods;
         if ($invocant_expr eq 'self' && defined $self->_get_class_methods()
-                && exists $self->_get_class_methods()->{$method_name}) {
+                && exists $self->_get_class_methods()->{$method_name}
+                && !exists $_skipped_set{$method_name}) {
             my $slug = $self->_get_current_slug();
             my $c_func_name = "${slug}_${method_name}";
             my @call_args = ('self', @arg_exprs);
@@ -516,7 +520,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # field, emit {target_slug}_{method}(aTHX_ {invocant}, {args...}) instead
         # of the generic call_method dSP/PUSHMARK/POPs sequence.
         # This requires field_types to declare the target class for the field.
-        if ($_field_type_slugs && keys $_field_type_slugs->%*) {
+        # Skip UNIVERSAL methods (can, isa, DOES, VERSION) — these are inherited
+        # from Perl's UNIVERSAL class and are not compiled into any target class.
+        my %_universal_methods = ('can' => 1, 'isa' => 1, 'DOES' => 1, 'VERSION' => 1);
+        if ($_field_type_slugs && keys $_field_type_slugs->%*
+                && !exists $_universal_methods{$method_name}) {
             # Identify when the invocant node is a plain variable referencing a typed field.
             # The invocant_node is a Constant with the field name as its value.
             my $field_name;
