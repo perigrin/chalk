@@ -501,26 +501,6 @@ class Chalk::Bootstrap::Earley {
                 $_last_active_pos = $pos;
             }
 
-            # Terminal clustering: pre-scan all terminal patterns expected by
-            # items at this position. Populates the scan cache so individual
-            # _scan calls get immediate cache hits.
-            if ($pos < $n) {
-                my %seen_patterns;
-                for my $core_id (0 .. $chart[$pos]->$#*) {
-                    next unless defined $chart[$pos][$core_id];
-                    my $sym = $ci_symbols_after->[$core_id];
-                    next unless defined $sym;
-                    next if $sym->is_reference();
-                    my $pstr = $sym->value();
-                    next if $seen_patterns{$pstr};
-                    $seen_patterns{$pstr} = true;
-                    next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
-                    my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
-                    $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
-                    $_scan_stats{clustered_scans}++;
-                }
-            }
-
             my @processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
 
@@ -564,6 +544,59 @@ class Chalk::Bootstrap::Earley {
                         $self->_predict($rn, $pos, \@chart, \@agenda, \%predicted_at);
                     }
                     $_reuse_stats{prediction_computes}++;
+                }
+            }
+
+            # Terminal clustering: pre-scan all terminal patterns expected by
+            # items at this position. Runs AFTER predictions so predicted items
+            # with terminals (e.g. Item -> . \w+) are included.
+            #
+            # Uses the terminal_map_cache when the post-prediction core set has
+            # been seen before. On first encounter, iterates the chart to discover
+            # patterns and the terminal map is built by _discover_core_set later.
+            if ($pos < $n) {
+                # Compute post-prediction core set hash
+                my @post_active;
+                for my $cid (0 .. $chart[$pos]->$#*) {
+                    my $oh = $chart[$pos][$cid];
+                    if (defined $oh) {
+                        for my $v ($oh->@*) {
+                            if (defined $v) { push @post_active, $cid; last; }
+                        }
+                    }
+                }
+                my $post_hash = join(",", @post_active);
+
+                # Check if this post-prediction core set has a cached terminal map
+                my $tmap;
+                if (exists $_core_set_registry{$post_hash}) {
+                    my $cs_id = $_core_set_registry{$post_hash}{id};
+                    $tmap = $_terminal_map_cache{$cs_id};
+                }
+
+                if (defined $tmap) {
+                    # Reuse cached terminal map: try only the patterns this core set expects
+                    for my $pstr (keys $tmap->%*) {
+                        next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
+                        my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
+                        $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+                        $_scan_stats{clustered_scans}++;
+                    }
+                } else {
+                    # First encounter: iterate chart to discover terminal patterns
+                    my %seen_patterns;
+                    for my $core_id (@post_active) {
+                        my $sym = $ci_symbols_after->[$core_id];
+                        next unless defined $sym;
+                        next if $sym->is_reference();
+                        my $pstr = $sym->value();
+                        next if $seen_patterns{$pstr};
+                        $seen_patterns{$pstr} = true;
+                        next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
+                        my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
+                        $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+                        $_scan_stats{clustered_scans}++;
+                    }
                 }
             }
 
