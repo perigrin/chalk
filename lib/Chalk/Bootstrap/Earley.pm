@@ -83,6 +83,17 @@ class Chalk::Bootstrap::Earley {
     # Grammar-lifetime: same core set always produces the same predictions.
     field %_prediction_cache;
 
+    # Terminal map cache: core_set_id => { pattern_str => [core_ids] }
+    # Maps each terminal pattern expected by a core set to the core_ids waiting for it.
+    # Grammar-lifetime: same core set always expects the same terminals.
+    field %_terminal_map_cache;
+
+    # Completion map cache: core_set_id => { nonterminal_name => [core_ids] }
+    # For each nonterminal, which core_ids in this core set are waiting for it.
+    # Narrows _complete search from all-grammar to only-this-core-set.
+    # Grammar-lifetime.
+    field %_completion_map_cache;
+
     # Set reuse statistics (parse-lifetime)
     field %_reuse_stats;
 
@@ -163,6 +174,8 @@ class Chalk::Bootstrap::Earley {
         %_core_set_registry = ();
         $_core_set_next_id = 0;
         %_prediction_cache = ();
+        %_terminal_map_cache = ();
+        %_completion_map_cache = ();
     }
 
     # Discover the core set for a chart position: collect active core_ids,
@@ -200,6 +213,31 @@ class Chalk::Bootstrap::Earley {
             core_ids => \@active,
         };
         $_pos_core_set[$pos] = $cs_id;
+
+        # Build terminal map and completion map for this core set.
+        # Terminal map: pattern_str => [core_ids expecting that terminal]
+        # Completion map: nonterminal_name => [core_ids waiting for it]
+        my $ci_completions   = $core_index->completions();
+        my $ci_symbols_after = $core_index->symbols_after();
+
+        my %terminal_map;
+        my %completion_map;
+        for my $core_id (@active) {
+            next if $ci_completions->[$core_id];
+            my $sym = $ci_symbols_after->[$core_id];
+            next unless defined $sym;
+            if ($sym->is_reference()) {
+                my $nt = $sym->value();
+                $completion_map{$nt} //= [];
+                push $completion_map{$nt}->@*, $core_id;
+            } else {
+                my $pattern = $sym->value();
+                $terminal_map{$pattern} //= [];
+                push $terminal_map{$pattern}->@*, $core_id;
+            }
+        }
+        $_terminal_map_cache{$cs_id} = \%terminal_map;
+        $_completion_map_cache{$cs_id} = \%completion_map;
 
         return $cs_id;
     }
@@ -379,6 +417,8 @@ class Chalk::Bootstrap::Earley {
     method distance_stats() { return \%_dist_stats; }
     method set_registry() { return \%_set_registry; }
     method scan_stats() { return \%_scan_stats; }
+    method terminal_map_cache() { return \%_terminal_map_cache; }
+    method completion_map_cache() { return \%_completion_map_cache; }
     method prediction_cache() { return \%_prediction_cache; }
     method reuse_stats() { return \%_reuse_stats; }
 
@@ -1126,11 +1166,18 @@ class Chalk::Bootstrap::Earley {
             $leo_resolved_origin = $leo->{wait_origin};
         }
 
-        # Look up items waiting for this rule name via chart-based scan.
-        # %_waiting_core_ids{$rule_name} lists the core item IDs where the dot
-        # is immediately before $rule_name. We scan chart[$origin][core_id] for
-        # each such core_id to find all live waiting items (keyed by w_origin).
-        my $chart_waiting_ids = $_waiting_core_ids{$rule_name};
+        # Look up items waiting for this rule name. Use the completion map
+        # for the origin position's core set when available (narrows from
+        # all-grammar to only core_ids present at the origin). Falls back to
+        # the global %_waiting_core_ids for same-position completions where
+        # the origin's core set hasn't been discovered yet.
+        my $origin_cs_id = $_pos_core_set[$origin];
+        my $chart_waiting_ids;
+        if (defined $origin_cs_id && exists $_completion_map_cache{$origin_cs_id}) {
+            $chart_waiting_ids = $_completion_map_cache{$origin_cs_id}{$rule_name};
+        } else {
+            $chart_waiting_ids = $_waiting_core_ids{$rule_name};
+        }
         return unless defined $chart_waiting_ids;
 
         # Count non-zero waiting items and track the single candidate for Leo
