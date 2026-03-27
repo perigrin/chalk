@@ -776,9 +776,19 @@ a name.
 **On multiply:** propagate type tags from left to right. The `type` tag
 from a child flows into the parent context.
 
-**On add:** return both alternatives (as an arrayref) for
-FilterComposite to resolve. TypeInference does not pick winners — it
-provides type information that other semirings use.
+**On add (merge):** prefer the alternative with more specific type
+information. Between two valid alternatives, the one with fewer
+`Unknown` tags and more concrete types wins. For example, if one
+derivation types `$x` as `Int` and the other as `Unknown`, the `Int`
+derivation is preferred — it provides tighter constraints for
+downstream disambiguation and code generation. This parallels
+Precedence's preference for the most constraining level:
+TypeInference prefers the most constraining type.
+
+When both alternatives have equally specific types, return both (as
+an arrayref) for FilterComposite to pass to Structural. TypeInference
+kills invalid paths via zero (hard reject through `TypeSatisfies`
+failure) and ranks valid paths by type specificity (soft preference).
 
 #### 4.2.4 Structural — Syntactic Disambiguation
 
