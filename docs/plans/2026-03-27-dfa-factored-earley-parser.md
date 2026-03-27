@@ -1767,8 +1767,8 @@ nonterminal at DFA construction time.
 
 ### 7.5 Completion with DFA Completion Maps
 
-The `complete` function uses the DFA's completion map to narrow the
-waiter search:
+The `complete` function uses the DFA state's completion map as the
+source of truth for which items are waiting for a completed nonterminal.
 
 ```
 complete(completed_core_id, origin, completed_value, pos, chart, agenda):
@@ -1778,17 +1778,28 @@ complete(completed_core_id, origin, completed_value, pos, chart, agenda):
   if leo_enabled and leo_items[rule_name][origin] exists:
     resolve_leo(rule_name, origin, completed_value, pos, chart, agenda)
 
-  # Find waiters: iterate global_waiting_core_ids for this nonterminal.
-  # For each candidate, check chart[origin][waiter_core_id] to see if
-  # the waiter is actually live at the origin. This is an O(1) array
-  # access per candidate — no hash lookup or chart scan.
+  # Find waiters via the DFA completion map.
+  # Each waiter core_id at the origin belongs to a DFA state. That
+  # state's completion map lists exactly which core_ids wait for each
+  # nonterminal — by construction, because the DFA state is the
+  # closure of exactly those items.
+  #
+  # We iterate the global_waiting_core_ids to find candidate waiters,
+  # then use state_for_core to confirm the candidate belongs to a
+  # state whose completion map includes this nonterminal. Finally,
+  # the chart check confirms the waiter is live (has a defined value).
   chart_waiting_ids = global_waiting_core_ids[rule_name]
 
   if not defined(chart_waiting_ids): return
 
   for each waiter_core_id in chart_waiting_ids:
+    # DFA validation: confirm this waiter's state expects this nonterminal
+    waiter_state = dfa.state(state_for_core[waiter_core_id])
+    if rule_name not in waiter_state.completion_map: skip
+
+    # Liveness check: is this waiter actually in the chart at the origin?
     oh = chart[origin][waiter_core_id]
-    if not defined(oh): skip  # waiter not live at origin
+    if not defined(oh): skip
 
     for each (waiter_value, waiter_origin) in oh:
       combined = semiring.multiply(waiter_value, completed_value)
@@ -1802,37 +1813,41 @@ complete(completed_core_id, origin, completed_value, pos, chart, agenda):
     check_leo_creation(...)
 ```
 
-**Completion indexing structures.** The completion step uses two
-pre-built indexes and one runtime data structure:
+**Completion indexing structures.** The completion step uses three
+layers of filtering, from broadest to narrowest:
 
 1. `global_waiting_core_ids[nonterminal]` → `[core_id, ...]`
    - Built at grammar construction time.
-   - For each nonterminal N, lists all core_ids in the grammar where
+   - For each nonterminal N, lists ALL core_ids in the grammar where
      the dot is immediately before N. These are the items that COULD
-     be waiting for N to complete.
+     be waiting for N to complete, across all DFA states.
    - Typically 5-15 entries per nonterminal for the Perl grammar.
 
-2. `completed_at[rule_name][origin][pos]` → `[(core_id, origin), ...]`
-   - Built during parsing.
-   - Records which rules completed at which positions, for the
-     `advance_from_completed` operation (handling nullable nonterminals
-     that complete at the same position where a new waiter appears).
+2. `state.completion_map[nonterminal]` → `[core_id, ...]`
+   - Built at DFA construction time, per state.
+   - For each nonterminal N, lists the core_ids IN THIS STATE that
+     wait for N. This is a subset of the global list — only items
+     present in this particular DFA state.
+   - The DFA state is looked up via `state_for_core[waiter_core_id]`.
+   - This is the correct source of truth: the completion map is
+     derived from the state's epsilon-closure and reflects exactly
+     which items are structurally present.
 
 3. `chart[origin][waiter_core_id][rel_dist]` → `value`
-   - The chart itself is the runtime filter. For each candidate in
-     `global_waiting_core_ids`, checking `chart[origin][waiter_core_id]`
-     is an O(1) array access that determines whether the waiter is
-     live at the origin.
+   - Parse-time liveness filter. A core_id may be in the DFA state's
+     completion map but not live at this origin (its value was killed
+     by a semiring zero, or the scan that would have populated it
+     never matched). The chart check confirms the waiter has a defined
+     value at the origin.
 
 The completion join key is `(nonterminal, origin)`:
-- `nonterminal` selects the candidate list from `global_waiting_core_ids`
-- `origin` selects the chart position to check for live waiters
-- The chart check filters candidates to only those actually present
+- `nonterminal` selects the global candidate list
+- `state_for_core` narrows to candidates in the origin's active state
+- `chart[origin]` confirms liveness
 
-This avoids per-position chart scanning. The DFA provides the
-structural knowledge (which core_ids could wait for which
-nonterminals) at construction time. The chart provides the runtime
-filter (which of those are actually live at this origin).
+The three-layer approach avoids per-position chart scanning. Layer 1
+is grammar-wide (precomputed). Layer 2 is per-DFA-state (precomputed).
+Layer 3 is per-position (O(1) array access per candidate).
 
 ### 7.6 Scanning with Terminal Maps
 
@@ -2000,9 +2015,11 @@ When the parser needs DFA state properties during the agenda loop:
   most items at a position share one or two DFA states, so the union
   is small.
 
-- **For completion**: look up `state_for_core[waiter_core_id]` to get
-  the waiter's DFA state, then use that state's completion map. This
-  is O(1) per waiter — no chart scanning, no hash-key computation.
+- **For completion**: the three-layer filter (Section 7.5). The global
+  waiting list provides candidates; `state_for_core[waiter_core_id]`
+  confirms the candidate's DFA state expects this nonterminal via its
+  completion map; `chart[origin][waiter_core_id]` confirms liveness.
+  Each layer is O(1). No chart scanning or hash-key computation.
 
 - **For prediction**: look up `dfa.prediction_items_for(nonterminal)`,
   which returns the epsilon-closure precomputed at DFA construction
