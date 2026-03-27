@@ -2196,7 +2196,7 @@ comments or skipping the affected statement.
 
 ## 9. Grammar Construction and BNF Bootstrap
 
-### 10.1 Grammar Builder API
+### 9.1 Grammar Builder API
 
 The grammar is an array of Rule objects. Each Rule has a name and a
 list of alternatives. Each alternative is a list of Symbols.
@@ -2227,7 +2227,7 @@ grammar = [
 
 The first rule in the array is the start rule.
 
-### 10.2 BNF Syntax
+### 9.2 BNF Syntax
 
 The grammar can also be specified in BNF notation:
 
@@ -2243,7 +2243,7 @@ separated by `|`. Terminals can be single-quoted strings (literal match)
 or `/regex/` patterns. Nonterminal references are bare names. Comments
 start with `#`.
 
-### 10.3 The BNF Bootstrap
+### 9.3 The BNF Bootstrap
 
 The parser can compile its own grammar format. The BNF meta-grammar
 (a grammar that describes BNF syntax) is:
