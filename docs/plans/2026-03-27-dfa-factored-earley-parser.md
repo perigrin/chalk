@@ -4,7 +4,7 @@
 state machines, distance-factored chart representation, and type-directed
 disambiguation.**
 
-**Version**: 0.4 (Draft)
+**Version**: 0.5 (Draft)
 **Date**: 2026-03-27
 **Status**: Design
 
@@ -1524,6 +1524,25 @@ nonterminal."
 - `rel_dist`: `pos - origin` (relative distance, from Section 6)
 - `value`: 5-element semiring tuple
 
+The chart IS the value store. There is no separate `semiring_map` or
+value table. Each cell holds exactly one semiring value — the current
+winner for that `(core_id, origin, position)` triple. When two
+derivations reach the same cell, `semiring.add()` picks the winner
+and the loser is discarded. The chart stores the winner only.
+
+Values are updated in two situations:
+1. **New item**: the cell was empty. Store the value directly.
+2. **Merge**: the cell already has a value. Call `semiring.add(existing,
+   new_value)`. The result replaces the existing value. The loser is
+   not retained — this is eager, single-winner disambiguation.
+
+This means the parser never maintains multiple derivations for the
+same `(core_id, origin, position)`. Ambiguity is resolved immediately
+at merge time via the semiring's ordered priority (Section 4.3).
+FilterComposite consults each semiring in priority order; the first
+to express a preference picks the winner. If none express a preference,
+left (existing) wins deterministically.
+
 **Completed index.** `completed_at[rule_name][origin][pos] = [(core_id, origin), ...]`
 - Secondary index for completion lookups. Records which rules completed
   at which positions, for `_advance_from_completed` to use.
@@ -2299,23 +2318,53 @@ redundant work:
 - **Terminal map reuse**: terminal matching patterns are tried once per
   DFA state per position, not once per item.
 
-### 11.3 Memory
+### 11.3 Memory and Cost Model
 
-The DFA adds grammar-proportional memory:
-- DFA states: O(grammar_size) states, each containing O(items) core_ids
-- Operation tables: O(grammar_size) entries
-- Terminal maps: O(terminals * states)
-- Completion maps: O(nonterminals * states)
+**Grammar-lifetime structures** (computed once, reused across files):
 
-For a 65-rule grammar, this is kilobytes of static data. The chart
-remains the dominant memory consumer at O(n * items * distances), where
-n is the input length, items is the average chart width, and distances
-is the average number of origins per item.
+| Structure | Size estimate (65-rule grammar) | Access cost |
+|-----------|-------------------------------|-------------|
+| Core item index | ~350 core_ids, 7 arrays of 350 entries | O(1) per lookup |
+| DFA states | ~80-120 states, ~20 core_ids avg per state | O(1) via `state_for_core` |
+| Terminal maps | ~15 patterns per state, ~100 states = ~1500 entries | O(patterns) per position |
+| Completion maps | ~10 nonterminals per state, ~100 states = ~1000 entries | O(1) per nonterminal |
+| Goto tables | ~25 symbols per state, ~100 states = ~2500 entries | O(1) per transition |
+| Prediction closures | ~65 nonterminals, ~10 items avg per closure = ~650 entries | O(items) per predict |
+| `global_waiting_core_ids` | ~65 nonterminals, ~8 waiters avg = ~520 entries | O(waiters) per complete |
 
-Distance factoring reduces chart memory by sharing core data across
-positions. The sparse array representation (`chart[pos][core_id][rel_dist]`)
-is memory-efficient because most items have small relative distances
-(82% are 0-7).
+Total grammar-lifetime memory: approximately 50-100 KB for a 65-rule
+grammar. This is negligible compared to the chart.
+
+**Parse-lifetime structures** (per file):
+
+| Structure | Size | Access cost |
+|-----------|------|-------------|
+| Chart `[pos][core_id][rel_dist]` | O(n * W * D) where W = avg chart width, D = avg distances per item | O(1) per cell |
+| Scan cache `[pos][pattern]` | O(n * P) where P = patterns per position | O(1) per lookup |
+| `completed_at` index | O(completions) — one entry per non-zero completion | O(1) per lookup |
+| `processed` dedup | O(W * origins) per position, cleared each position | O(1) per check |
+
+For a 2,000-byte source file with average chart width 50 and average
+2 distances per item: chart ≈ 2000 * 50 * 2 = 200K cells. Each cell
+holds one semiring value (5-element tuple of references). At ~40 bytes
+per value, that is ~8 MB peak before GC. Safe-set and epoch GC reduce
+live memory to the span of the current statement (~50-200 positions).
+
+**Per-operation costs:**
+
+| Operation | Standard Earley | DFA-factored |
+|-----------|----------------|--------------|
+| Predict one nonterminal | Iterate rules: O(alternatives) | DFA closure lookup: O(closure size) |
+| Check terminal at position | Regex match: O(pattern) | Scan cache lookup: O(1) |
+| Find waiters for completion | Iterate global list + chart check: O(waiters) | Same: O(waiters) with O(1) chart filter |
+| Merge two values | `semiring.add()`: O(semirings) | Same: O(semirings) |
+| Core set / state lookup | Chart scan + hash: O(chart width) | `state_for_core[core_id]`: O(1) |
+
+The largest cost reduction is in prediction (DFA closure replaces
+per-rule iteration) and state identification (`state_for_core`
+replaces chart scanning). Completion cost is the same in both
+approaches. Semiring operations dominate only for ambiguous grammars
+where many merges occur.
 
 ### 11.4 Benchmark Methodology
 
