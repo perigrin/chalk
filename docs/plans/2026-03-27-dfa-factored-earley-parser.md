@@ -1580,6 +1580,30 @@ result in the cache — no regex execution during the agenda loop. The
 terminal maps are precomputed at DFA construction time, so no lazy
 discovery or chart scanning is needed.
 
+**Interaction between terminal clustering and `should_scan`.** Terminal
+clustering determines WHETHER a pattern matches at a position — a
+property of the input text, independent of any item. The `should_scan`
+gate determines whether a SPECIFIC ITEM should use that match — a
+property of the item's semiring value and the parser's prediction
+state. These are separate concerns operating at different levels:
+
+- Terminal clustering: per-position, per-pattern. Caches the regex
+  result (matched text or undef).
+- `should_scan`: per-item. Consults the item's accumulated value and
+  the predicted-rules set to decide whether to proceed with the scan.
+
+The same terminal pattern might match at a position but be accepted by
+`should_scan` for one item and rejected for another. For example, the
+word `class` matches the `\w+` terminal, but `should_scan` in
+TypeInference rejects it for QualifiedIdentifier items when a
+ClassDeclaration rule is predicted (because `class` is a keyword in
+that context). Other items expecting `\w+` (e.g., in a method name
+position) accept the same match.
+
+An implementer must not skip the `should_scan` gate just because the
+terminal clustering found a match. The cache provides the regex result;
+the gate filters per-item.
+
 ### 7.7 Leo Optimization
 
 The Leo optimization handles right-recursive rules in O(1) per
