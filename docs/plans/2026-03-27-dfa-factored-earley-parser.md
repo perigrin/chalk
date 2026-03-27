@@ -4,7 +4,7 @@
 state machines, distance-factored chart representation, and type-directed
 disambiguation.**
 
-**Version**: 0.1 (Draft)
+**Version**: 0.2 (Draft)
 **Date**: 2026-03-27
 **Status**: Design
 
@@ -18,17 +18,17 @@ disambiguation.**
 4. [Disambiguation via Semiring Composition](#4-disambiguation-via-semiring-composition)
 5. [LR(0) DFA Construction](#5-lr0-dfa-construction)
 6. [Distance Factoring](#6-distance-factoring)
-7. [The Operation Table](#7-the-operation-table)
-8. [The Parse Loop](#8-the-parse-loop)
-9. [Error Detection, Diagnostics, and Recovery](#9-error-detection-diagnostics-and-recovery)
-10. [Grammar Construction and BNF Bootstrap](#10-grammar-construction-and-bnf-bootstrap)
-11. [Code Generation Pipeline](#11-code-generation-pipeline)
-12. [Performance Analysis](#12-performance-analysis)
+7. [The Parse Loop](#7-the-parse-loop)
+8. [Error Detection, Diagnostics, and Recovery](#8-error-detection-diagnostics-and-recovery)
+9. [Grammar Construction and BNF Bootstrap](#9-grammar-construction-and-bnf-bootstrap)
+10. [Code Generation Pipeline](#10-code-generation-pipeline)
+11. [Performance Analysis](#11-performance-analysis)
 
 Appendices:
 - [A: Example BNF Grammar](#appendix-a-example-bnf-grammar)
 - [B: Full Worked Trace](#appendix-b-full-worked-trace)
 - [C: Glossary](#appendix-c-glossary)
+- [D: Operation Table Design (Future Optimization)](#appendix-d-operation-table-design-future-optimization)
 
 ---
 
@@ -123,13 +123,17 @@ compiled output:
 - **Sections 2-4**: The parsing algorithm, the type system, and the
   semiring architecture. These sections provide the conceptual
   foundation.
-- **Sections 5-8**: The DFA construction, distance factoring, operation
-  tables, and the parse loop. These sections specify the implementation.
-- **Section 9**: Error handling — detection, diagnostics, and recovery.
-- **Section 10**: Grammar construction and the BNF bootstrap path.
-- **Section 11**: The code generation pipeline from parse result to
+- **Sections 5-7**: The DFA construction, distance factoring, and the
+  parse loop. These sections specify the implementation. The parse loop
+  retains Earley's agenda-driven structure (proven correct) while the
+  DFA and distance factoring reduce its per-item overhead.
+- **Section 8**: Error handling — detection, diagnostics, and recovery.
+- **Section 9**: Grammar construction and the BNF bootstrap path.
+- **Section 10**: The code generation pipeline from parse result to
   compiled C output.
-- **Section 12**: Performance analysis and complexity bounds.
+- **Section 11**: Performance analysis and complexity bounds.
+- **Appendix D**: A speculative future optimization — replacing the
+  agenda loop with precomputed operation tables per DFA state.
 
 Each concept is introduced with a toy arithmetic grammar, then applied
 to a realistic Perl subset grammar. Appendix B traces a complete parse
@@ -1252,342 +1256,331 @@ replaced with empty arrays.
 
 ---
 
-## 7. The Operation Table
+## 7. The Parse Loop
 
-The operation table is the central data structure of the DFA-factored
-parser. Each DFA state has a table that encodes every operation the
-parser will perform when processing items in that state. The parse loop
-becomes a table interpreter: read an entry, execute it against
-per-position values.
+The parse loop is the runtime algorithm. It retains Earley's
+agenda-driven structure — processing items one at a time through
+predict, scan, and complete operations — while using the DFA and
+distance factoring to reduce per-item overhead. The agenda loop is
+preserved because Earley sets can contain items from multiple DFA
+states (completions advance items from the origin's state into the
+current position), and a single-state-per-position model would not
+handle this correctly.
 
-### 7.1 Table Structure
+### 7.1 What the DFA Provides
 
-An operation table is an array of *entries*. Each entry describes one
-operation:
+The DFA does not replace the agenda loop. It optimizes three specific
+operations within the loop:
 
-```
-Entry = {
-  op_type:       'complete' | 'scan' | 'predict' | 'skip_optional'
-  core_id:       the core item this entry applies to
-  rule_name:     the rule name (precomputed from core_id)
-  alt_idx:       the alternative index (precomputed from core_id)
+**Prediction.** Standard Earley iterates all alternatives of a
+nonterminal to add prediction items. With the DFA, prediction is a
+state lookup: `dfa.prediction_items_for(nonterminal)` returns the
+pre-clustered set of core_ids to add, including transitive predictions
+and nullable-symbol advancement (Aycock-Horspool optimization).
 
-  # For 'complete' entries:
-  target_state:  DFA state after advancing past the completed nonterminal
-  waiters:       [core_ids in this state waiting for this nonterminal]
+**Terminal matching.** Standard Earley tries each terminal pattern per
+item. With the DFA, each state has a *terminal map* listing the
+distinct patterns expected by its items. The parser tries each pattern
+once per position (not once per item) and caches the result. Items
+sharing the same terminal pattern get immediate cache hits.
 
-  # For 'scan' entries:
-  pattern:       the terminal regex pattern to match
-  target_state:  DFA state after advancing past the terminal
-  compiled_re:   precompiled regex object
+**Completion search.** Standard Earley searches all items at the
+origin position for those waiting for the completed nonterminal. With
+the DFA, each state has a *completion map* listing which core_ids wait
+for each nonterminal. The search narrows from "all items at the origin"
+to "only items in the origin state's completion map for this
+nonterminal."
 
-  # For 'predict' entries:
-  predicted_state: the DFA state containing the predicted items
-
-  # Semiring columns (one per semiring):
-  boolean_op:    'identity' | 'check_zero'
-  prec_op:       'identity' | 'reset' | 'assign_level' | 'pass_through'
-  prec_level:    integer (for 'assign_level')
-  prec_assoc:    'left' | 'right' | 'nonassoc' (for 'assign_level')
-  type_op:       'identity' | 'check_signature' | 'assign_type' | 'reject_keyword'
-  type_result:   Type bitset (for 'assign_type')
-  type_sig:      {left: Type, right: Type, result: Type} (for 'check_signature')
-  struct_op:     'identity' | 'tag'
-  struct_bits:   integer bitfield (for 'tag')
-  sa_action:     reference to semantic action function (for 'complete')
-}
-```
-
-### 7.2 Building the Table
-
-The operation table for a DFA state is built once at grammar
-construction time (or lazily on first encounter during parsing). For
-each core_id in the state:
-
-1. If `is_complete(core_id)`: create a `'complete'` entry. Look up the
-   rule_name. Consult each semiring's `on_complete` behavior for this
-   rule to fill the semiring columns. Look up the completion map to
-   find waiters. Look up the goto table for the target state.
-
-2. If `symbol_after(core_id)` is a terminal: create a `'scan'` entry.
-   Record the pattern and compiled regex. Look up the goto table for
-   the target state. Fill semiring columns from each semiring's
-   `on_scan` behavior for this rule.
-
-3. If `symbol_after(core_id)` is a nonterminal reference: create a
-   `'predict'` entry. The predicted state is `goto(this_state, N)`.
-
-4. If the nonterminal is nullable or `?`-quantified: create a
-   `'skip_optional'` entry. The target is `advance(core_id)`.
-
-### 7.3 Semiring Column Compilation
-
-Each semiring contributes a column to the operation table. The column
-encodes what that semiring would do for this entry, expressed as data
-rather than method calls:
-
-**Boolean column.** Always `'identity'` for non-zero items. The
-Boolean semiring's `on_complete` and `on_scan` are transparent —
-they return their input unchanged. The only meaningful operation is
-`is_zero`, which is checked at the composite level.
-
-**Precedence column.** Determined by the rule_name:
-- `ParenExpr`, `ArrayConstructor`, `HashConstructor` → `'reset'`
-  (return `one()`)
-- `PostfixExpression`, `UnaryExpression` → `'assign_level'` with the
-  expression type's level
-- `BinaryOp`, `AssignOp` → `'pass_through'` (value carries operator
-  info from scan)
-- `BinaryExpression`, `Expression` → `'pass_through'`
-- `Subscript` → conditional (pass through if level >= 100, else reset)
-- Other rules → `'reset'`
-
-**TypeInference column.** Determined by the rule_name and action
-dispatch:
-- Rules with type actions → `'check_signature'` with the operator/
-  builtin signature
-- Boundary rules → `'identity'` (propagate child type)
-- Keyword-sensitive rules → `'reject_keyword'` with the keyword table
-
-**Structural column.** Determined by the rule_name:
-- `Block` → `'tag'` with `STRUCT_IS_BLOCK`
-- `CallExpression` → `'tag'` with `STRUCT_IS_CALL`
-- `HashConstructor` → `'tag'` with `STRUCT_IS_HASH`
-- etc.
-
-**SemanticAction column.** A reference to the rule's semantic action
-function (a closure or function pointer). This is the only column that
-cannot be fully reduced to a simple data value — the action function
-builds IR nodes and requires the actual parse values as input.
-
-### 7.4 Table Execution
-
-Executing an operation table entry against per-position values:
-
-```
-execute_complete(entry, completed_value, chart, pos):
-  # Apply semiring on_complete operations
-  if entry.boolean_op == 'check_zero':
-    return if is_zero(completed_value[0])
-
-  prec_value = apply_prec_op(entry, completed_value[1])
-  type_value = apply_type_op(entry, completed_value[2])
-  struct_value = apply_struct_op(entry, completed_value[3])
-  sa_value = apply_sa_action(entry, completed_value[4])
-
-  if is_zero(prec_value) or is_zero(type_value):
-    return  # path killed by disambiguation
-
-  result = [true, prec_value, type_value, struct_value, sa_value]
-
-  # Advance waiting items (from entry.waiters)
-  for waiter_core_id in entry.waiters:
-    for each (waiter_value, waiter_origin) at chart[origin][waiter_core_id]:
-      combined = composite_multiply(waiter_value, result)
-      target_core_id = advance(waiter_core_id)
-      add_to_chart(pos, target_core_id, waiter_origin, combined)
-```
-
-The key difference from standard Earley: the entry knows which
-semiring operations to apply (data) and which items to advance
-(precomputed). The loop applies values to a fixed structure rather than
-discovering the structure at runtime.
-
-### 7.5 Worked Example: Operation Table for State 4
-
-From the arithmetic DFA (Section 5.4), State 4 contains:
-```
-{2: Expr -> Expr '+' . Term,  6: Term -> . 'number'}
-```
-
-Operation table:
-```
-Entry 0: {
-  op_type: 'scan',
-  core_id: 6,  (Term -> . 'number')
-  pattern: '\d+',
-  target_state: 3,  (State 3 = {7: Term -> 'number' .})
-  boolean_op: 'identity',
-  prec_op: 'identity',
-  type_op: 'assign_type',
-  type_result: Int,
-  struct_op: 'identity',
-}
-
-Entry 1: {
-  op_type: 'complete',  (handled when Term completes at this origin)
-  core_id: 2,  (Expr -> Expr '+' . Term)
-  waiters: [2],  (core_id 2 is waiting for Term)
-  target_state: 5,  (State 5 = {3: Expr -> Expr '+' Term .})
-  boolean_op: 'identity',
-  prec_op: 'pass_through',
-  type_op: 'check_signature',
-  type_sig: {left: Num, right: Num, result: Num},
-  struct_op: 'identity',
-}
-```
-
-When the parser is in State 4 at position 2 (after `+` in `2+3`):
-1. Execute Entry 0: try matching `\d+`. It matches `3` (pos 2..3).
-   Create a scan result with type Int. Advance to State 3.
-2. When Term completes at State 3 (Entry 1 fires at the origin):
-   multiply the waiting Expr value with the Term value. Check the
-   type signature: left operand from Expr is Num (from scanning `2`),
-   right operand from Term is Int (which satisfies Num). Result type
-   is Num. Advance to State 5.
-
----
-
-## 8. The Parse Loop
-
-The parse loop is the runtime algorithm. It processes input positions
-sequentially, executing operation table entries against per-position
-values. The DFA provides all structural decisions; the loop only
-performs value work.
-
-### 8.1 Data Structures
+### 7.2 Data Structures
 
 **Chart.** `chart[pos][core_id][rel_dist] = value`
 - `pos`: input position (0 to N)
 - `core_id`: integer from core item index
-- `rel_dist`: `pos - origin` (relative distance)
+- `rel_dist`: `pos - origin` (relative distance, from Section 6)
 - `value`: 5-element semiring tuple
 
-**DFA state per position.** `state_at[pos] = dfa_state_id`
-- Tracked from goto transitions, not discovered by scanning the chart.
-
 **Completed index.** `completed_at[rule_name][origin][pos] = [(core_id, origin), ...]`
-- Secondary index for completion lookups.
+- Secondary index for completion lookups. Records which rules completed
+  at which positions, for `_advance_from_completed` to use.
 
 **Leo items.** `leo_items[rule_name][origin] = {top_core_id, top_origin, value, wait_core_id, wait_origin}`
-- Side table for right-recursive chain shortcutting.
+- Side table for right-recursive chain shortcutting (Section 7.7).
 
-### 8.2 The Algorithm
+**Processed items.** `processed[core_id][origin] = bool`
+- Per-position deduplication to prevent re-processing the same item
+  when it appears on the agenda multiple times (from merges).
+
+**Scan cache.** `scan_cache[pos][pattern_string] = end_pos | undef`
+- Per-position memoization of terminal regex matches. Populated by
+  terminal clustering before the agenda loop; individual scan calls
+  get cache hits.
+
+### 7.3 The Algorithm
 
 ```
 parse(input, grammar, dfa):
   N = length(input)
   chart = array of (N+1) empty slots
-  state_at = array of (N+1) slots
+
+  # Cache DFA lookup arrays for hot-loop direct indexing
+  ci_completions   = core_index.completions()
+  ci_symbols_after = core_index.symbols_after()
+  ci_rule_names    = core_index.rule_names()
+  ci_alt_idxs      = core_index.alt_idxs()
 
   # Initialize: place start rule items at position 0
-  start_state = dfa.state(0)
-  for each core_id in start_state.core_ids:
+  start_rule = grammar[0]
+  for each alt_idx of start_rule:
+    core_id = core_index.id_for(start_rule.name, alt_idx, 0)
     chart[0][core_id][0] = semiring.one()
-  state_at[0] = start_state.id
-
-  # Pre-scan: for each terminal pattern in the grammar,
-  # find all positions where it matches (optional optimization)
 
   for pos = 0 to N:
-    state = dfa.state(state_at[pos])
 
-    # Phase 1: Process completions
-    for each complete entry in state.operation_table:
-      core_id = entry.core_id
-      rule_name = entry.rule_name
-      for each (value, origin) at chart[pos][core_id]:
-        completed_value = execute_on_complete(entry, value, pos, origin)
+    # --- Build agenda from chart entries at this position ---
+    agenda = []
+    for each (core_id, rel_dist, value) in chart[pos]:
+      push agenda, [core_id, pos - rel_dist]  # [core_id, origin]
+
+    # --- Prediction reuse ---
+    # Compute the set of active core_ids (pre-prediction).
+    # If this set was seen before, reuse the cached prediction list.
+    # Otherwise, discover which nonterminals need prediction and cache.
+    pre_active = [core_ids with defined values at chart[pos]]
+    pre_hash = join(",", pre_active)
+
+    if prediction_cache[pre_hash] exists:
+      for each rule_name in prediction_cache[pre_hash]:
+        predict(rule_name, pos, chart, agenda, predicted_at)
+    else:
+      expected = [nonterminals expected by non-complete items in pre_active]
+      prediction_cache[pre_hash] = expected
+      for each rule_name in expected:
+        predict(rule_name, pos, chart, agenda, predicted_at)
+
+    # --- Terminal clustering ---
+    # After predictions, the chart has all items for this position.
+    # Compute the post-prediction core set. If a DFA state with a
+    # terminal map exists for this set, use it. Otherwise, iterate
+    # the chart to discover terminal patterns.
+    if pos < N:
+      post_active = [core_ids with defined values at chart[pos]]
+      post_hash = join(",", post_active)
+
+      if core_set_registry[post_hash] has terminal_map:
+        tmap = terminal_map for this core set
+        for each pattern in tmap:
+          if not in scan_cache[pos]:
+            scan_cache[pos][pattern] = try_match(input, pos, pattern)
+      else:
+        # First encounter — discover patterns from chart
+        for each core_id in post_active:
+          sym = symbol_after(core_id)
+          if sym is terminal and pattern not in scan_cache:
+            scan_cache[pos][sym.pattern] = try_match(input, pos, sym)
+
+    # --- Agenda loop: predict, scan, complete ---
+    processed = []
+
+    while agenda not empty:
+      (core_id, origin) = pop agenda
+
+      # Dedup: skip if already processed
+      if processed[core_id][origin]: skip
+      processed[core_id][origin] = true
+
+      # Re-read value from chart (may have been updated by a merge)
+      value = chart[pos][core_id][pos - origin]
+
+      if ci_completions[core_id]:
+        # --- COMPLETE ---
+        rule_name = ci_rule_names[core_id]
+        alt_idx = ci_alt_idxs[core_id]
+        completed_value = semiring.on_complete(
+            value, rule_name, alt_idx, pos, origin)
+
+        # Update chart with action-applied value
+        chart[pos][core_id][pos - origin] = completed_value
+
+        # Skip zero-valued completions
         if is_zero(completed_value): skip
 
-        # Record completion
-        completed_at[rule_name][origin][pos].push(core_id, origin)
+        # Index this completion
+        completed_at[rule_name][origin][pos].push([core_id, origin])
 
-        # Find waiters at the origin position
-        origin_state = dfa.state(state_at[origin])
-        waiters = origin_state.completion_map[rule_name]
-        for each waiter_core_id in waiters:
-          for each (waiter_value, waiter_origin) at chart[origin][waiter_core_id]:
-            combined = semiring.multiply(waiter_value, completed_value)
-            if is_zero(combined): skip
-            target_core_id = advance(waiter_core_id)
-            merge_into_chart(pos, target_core_id, waiter_origin, combined)
+        # Propagate to waiting items (DFA-optimized)
+        complete(core_id, origin, completed_value, pos, chart, agenda)
 
-    # Phase 2: Process scans (only if not at end of input)
-    if pos < N:
-      for each scan entry in state.operation_table:
-        pattern = entry.pattern
-        end_pos = try_match(input, pos, entry.compiled_re)
-        if end_pos is undef: skip
+      else:
+        sym = ci_symbols_after[core_id]
+        rule_name = ci_rule_names[core_id]
+        alt_idx = ci_alt_idxs[core_id]
 
-        matched_text = substr(input, pos, end_pos - pos)
+        if sym.is_reference():
+          # --- PREDICT ---
+          predict(sym.value, pos, chart, agenda, predicted_at)
 
-        # Apply should_scan gate
-        for each (value, origin) at chart[pos][entry.core_id]:
-          if not should_scan(entry, value, matched_text): skip
-          scan_value = execute_on_scan(entry, value, pos, matched_text)
-          if is_zero(scan_value): skip
-          target_core_id = advance(entry.core_id)
-          merge_into_chart(end_pos, target_core_id, origin, scan_value)
+          # Handle ?-quantified optionals
+          if sym.quantifier == '?':
+            skip_value = semiring.on_skip_optional(
+                value, rule_name, alt_idx, pos, sym.value)
+            if not is_zero(skip_value):
+              skip_core = advance(core_id)
+              merge_into_chart(pos, skip_core, origin, skip_value, agenda)
 
-        # Record the target DFA state at end_pos
-        state_at[end_pos] = entry.target_state
+          # Advance from already-completed items at this position
+          advance_from_completed(core_id, origin, value, sym, pos, chart, agenda)
 
-    # Phase 3: GC (safe-set and epoch)
+        else:
+          # --- SCAN ---
+          scan(core_id, origin, value, sym, pos, input, chart, N, agenda)
+
+    # --- Post-position: core set discovery and GC ---
+    # Discover the core set for this position (for future reuse).
+    # Build terminal map and completion map if this is a new core set.
+    discover_core_set(chart, pos)
+
+    # Safe-set and epoch GC
     perform_gc(chart, pos)
 
-  # Check for completed start rule at position N
-  start_rule_name = grammar.start_rule.name
-  for each alt of start rule:
-    end_core_id = id_for(start_rule_name, alt, alt.length)
-    value = chart[N][end_core_id][N]  # rel_dist = N - 0 = N
+  # --- Check for completed start rule at position N ---
+  for each alt of grammar[0]:
+    end_dot = length(alt)
+    end_core_id = id_for(grammar[0].name, alt_idx, end_dot)
+    value = chart[N][end_core_id][N]
     if defined(value) and not is_zero(value):
       return value
 
   return undef  # parse failure
 ```
 
-### 8.3 Merge Protocol
+### 7.4 Prediction with DFA Clustering
 
-When adding a value to a chart cell that already contains a value:
+The `predict` function uses the DFA's precomputed prediction closures
+instead of iterating grammar rules:
 
 ```
-merge_into_chart(pos, core_id, origin, new_value):
-  rel_dist = pos - origin
-  existing = chart[pos][core_id][rel_dist]
+predict(rule_name, pos, chart, agenda, predicted_at):
+  if predicted_at[rule_name]: return
+  predicted_at[rule_name] = true
 
-  if not defined(existing):
-    chart[pos][core_id][rel_dist] = new_value
-    return  # new item — add to processing queue
+  # DFA provides all prediction items, including transitive
+  # predictions and dot-advanced past nullable symbols
+  prediction_items = dfa.prediction_items_for(rule_name)
 
-  # Existing item — merge via semiring add
-  merged = semiring.add(existing, new_value)
-  chart[pos][core_id][rel_dist] = merged
+  for each (core_id, skip_symbols) in prediction_items:
+    if chart_has(pos, core_id, pos): skip  # already predicted
+
+    # Build initial value, applying on_skip_optional for each
+    # nullable symbol skipped to reach this dot position
+    value = semiring.one()
+    for each sym_name in skip_symbols:
+      value = semiring.on_skip_optional(value, ..., sym_name)
+      if is_zero(value): break
+
+    if not is_zero(value):
+      chart_set(pos, core_id, pos, value)
+      push agenda, [core_id, pos]
 ```
 
-The semiring `add` resolves ambiguity: Precedence picks the better
-operator grouping, Structural picks block over hash, TypeInference
-provides type information for the choice.
+The DFA's `prediction_items_for` returns the epsilon-closure: all
+core_ids reachable by transitively following nonterminal references.
+This includes items with dot > 0 for nullable-symbol advancement
+(Aycock-Horspool optimization). The closure is computed once per
+nonterminal at DFA construction time.
 
-### 8.4 DFA State Tracking
+### 7.5 Completion with DFA Completion Maps
 
-The critical difference from the current Earley implementation: DFA
-state tracking replaces chart scanning.
+The `complete` function uses the DFA's completion map to narrow the
+waiter search:
 
-In standard Earley, the parser discovers which rules are active by
-examining the chart. In the DFA-factored parser, the state follows from
-transitions:
+```
+complete(completed_core_id, origin, completed_value, pos, chart, agenda):
+  rule_name = rule_name_for(completed_core_id)
 
-- **Initial state**: the DFA's start state.
-- **After a scan**: the target state is `scan_entry.target_state`.
-- **After a completion**: the target state for the advanced item is
-  determined by `goto(origin_state, completed_nonterminal)`.
+  # Leo optimization: check for deterministic chain
+  if leo_enabled and leo_items[rule_name][origin] exists:
+    resolve_leo(rule_name, origin, completed_value, pos, chart, agenda)
 
-Multiple scans or completions at the same position may produce items
-belonging to different DFA states. The `state_at[pos]` tracks the
-primary state (from scanning). Completion-produced items are looked up
-via the goto table on the origin's state, not by discovering a new
-DFA state.
+  # Find waiters using DFA completion map when available.
+  # The completion map narrows from all-grammar waiters to only those
+  # core_ids present in the origin position's core set.
+  origin_core_set_id = pos_core_set[origin]
+  if defined(origin_core_set_id) and completion_map_cache[origin_core_set_id] exists:
+    chart_waiting_ids = completion_map_cache[origin_core_set_id][rule_name]
+  else:
+    # Fallback for same-position completions (core set not yet discovered)
+    chart_waiting_ids = global_waiting_core_ids[rule_name]
 
-This eliminates the `_discover_core_set` chart scan that currently
-runs at every position — a significant source of overhead.
+  if not defined(chart_waiting_ids): return
 
-### 8.5 Leo Optimization
+  for each waiter_core_id in chart_waiting_ids:
+    for each (waiter_value, waiter_origin) at chart[origin][waiter_core_id]:
+      combined = semiring.multiply(waiter_value, completed_value)
+      if is_zero(combined): skip
+
+      target_core_id = advance(waiter_core_id)
+      merge_into_chart(pos, target_core_id, waiter_origin, combined, agenda)
+
+    # Leo creation: if exactly one waiter advanced successfully
+    # and it would be complete after advancing, create a Leo item
+    check_leo_creation(...)
+```
+
+The completion map for a core set is built lazily in
+`discover_core_set`. For each nonterminal N, the map lists which
+core_ids in that core set have N after their dot. This is the
+intersection of the global `waiting_core_ids[N]` with the core set's
+active items.
+
+The fallback to `global_waiting_core_ids` handles same-position
+completions where `origin == pos` and the origin's core set has not
+yet been discovered (it is discovered at the end of position
+processing).
+
+### 7.6 Scanning with Terminal Maps
+
+The scan function uses the pre-populated scan cache from terminal
+clustering:
+
+```
+scan(core_id, origin, value, symbol, pos, input, chart, N, agenda):
+  pattern = symbol.value()
+
+  # Check scan cache (populated by terminal clustering above)
+  end_pos = scan_cache[pos][pattern]
+  if end_pos is undef: return  # no match
+
+  matched_text = substr(input, pos, end_pos - pos)
+
+  # Gate: ask semiring if scan should proceed
+  if not semiring.should_scan(value, rule_name, alt_idx, pos, matched_text, predicted_at):
+    return
+
+  # Apply on_scan
+  new_value = semiring.on_scan(value, rule_name, alt_idx, pos, matched_text)
+  if is_zero(new_value): return
+
+  # Advance dot and add to next position's chart
+  new_core_id = advance(core_id)
+  merge_into_chart(end_pos, new_core_id, origin, new_value, agenda)
+```
+
+Terminal clustering before the agenda loop pre-scans all patterns
+expected by the current core set. The scan function finds the result
+in the cache — no regex execution during the agenda loop.
+
+For the first encounter of a core set (no cached terminal map), the
+fallback iterates the chart to discover terminal patterns and scan
+them individually. The terminal map is built by `discover_core_set`
+at the end of position processing for future reuse.
+
+### 7.7 Leo Optimization
 
 The Leo optimization handles right-recursive rules in O(1) per
 recursive step instead of O(n). When a completion is *deterministic*
-(exactly one waiting item, at the penultimate position), the parser
-creates a Leo item that represents the entire chain.
+(exactly one waiting item, and that item would be complete after
+advancing), the parser creates a Leo item that represents the entire
+chain.
 
 Leo items store:
 ```
@@ -1608,22 +1601,135 @@ resolves the entire chain in one step: multiply the Leo chain's
 accumulated value with the completed value, then advance the top-of-
 chain item.
 
-### 8.6 Interaction with Operation Tables
+### 7.8 Merge Protocol
 
-The parse loop interleaves DFA-driven control flow with per-position
-value work:
+When adding a value to a chart cell that already contains a value:
 
-1. The DFA state determines WHICH entries to execute (control flow).
-2. The operation table determines WHAT each entry does to the semiring
-   values (partially applied from grammar analysis).
-3. The per-position chart provides the VALUES to operate on.
+```
+merge_into_chart(pos, core_id, origin, new_value, agenda):
+  rel_dist = pos - origin
+  existing = chart[pos][core_id][rel_dist]
 
-The DFA state and operation table are grammar-lifetime data. The chart
-values are parse-lifetime data. The parse loop connects them.
+  if not defined(existing):
+    chart[pos][core_id][rel_dist] = new_value
+    push agenda, [core_id, origin]  # new item — add to agenda
+    return
+
+  # Existing item — merge via semiring add
+  merged = semiring.add(existing, new_value)
+  chart[pos][core_id][rel_dist] = merged
+```
+
+The semiring `add` resolves ambiguity: Precedence picks the better
+operator grouping, Structural picks block over hash, TypeInference
+provides type information for the choice. FilterComposite's first-wins
+ordered priority determines which semiring's preference takes effect.
+
+### 7.9 Core Set Discovery
+
+After the agenda loop completes for a position, the parser discovers
+the core set (the set of active core_ids) and registers it for future
+reuse:
+
+```
+discover_core_set(chart, pos):
+  active = [core_ids with defined values at chart[pos]]
+  hash_key = join(",", active)
+
+  if core_set_registry[hash_key] exists:
+    # Known core set — reuse its properties
+    cs_id = core_set_registry[hash_key].id
+  else:
+    # New core set — register and build maps
+    cs_id = next_core_set_id++
+    core_set_registry[hash_key] = {id: cs_id, core_ids: active}
+
+    # Build terminal map: pattern -> [core_ids expecting that pattern]
+    # Build completion map: nonterminal -> [core_ids waiting for it]
+    for each core_id in active:
+      if is_complete(core_id): skip
+      sym = symbol_after(core_id)
+      if sym is reference:
+        completion_map[cs_id][sym.name].push(core_id)
+      else:
+        terminal_map[cs_id][sym.pattern].push(core_id)
+
+  pos_core_set[pos] = cs_id
+```
+
+Core set discovery runs AFTER position processing (not before) because
+the agenda loop adds items through completions and predictions. The
+core set represents the final state of the position after all
+operations. Properties computed from the core set (terminal maps,
+completion maps) benefit future positions that arrive at the same
+core set.
+
+This is where Aycock's DFA and YAEP's set factoring converge: the
+core set IS a DFA state discovered lazily during parsing. The first
+encounter builds the state's properties; subsequent encounters reuse
+them.
+
+### 7.10 Worked Example: Parsing `2+3`
+
+Using the grammar and DFA from Section 5.4:
+
+**Position 0.** Agenda: `{[0,0], [4,0], [6,0]}` (Expr->., Expr->., Term->.)
+
+- Item [0,0]: `Expr -> . Expr '+' Term`. Dot before nonterminal Expr.
+  Predict Expr — already predicted.
+- Item [4,0]: `Expr -> . Term`. Dot before nonterminal Term.
+  Predict Term — adds [6,0] (already present).
+- Item [6,0]: `Term -> . 'number'`. Dot before terminal `\d+`.
+  Scan: matches `2` (pos 0..1). Add [7,0] to chart[1].
+
+Core set discovered: {0, 4, 6}. Terminal map: `{'\d+' -> [6]}`.
+Completion map: `{Expr -> [0], Term -> [4]}`.
+
+**Position 1.** Agenda: `{[7,0]}` (from scan).
+
+- Item [7,0]: `Term -> 'number' .` — complete! Rule Term, origin 0.
+  on_complete: TypeInference assigns type Int.
+  Complete Term: completion map at origin (core set {0,4,6}) says
+  core_id 4 waits for Term. chart[0][4] has value at rel_dist 0.
+  Multiply: waiter_value * completed_value. Advance core_id 4 → 5.
+  Add [5,0] to chart[1].
+
+- Item [5,0]: `Expr -> Term .` — complete! Rule Expr, origin 0.
+  on_complete: transparent (Expr passes through).
+  Complete Expr: completion map says core_id 0 waits for Expr.
+  chart[0][0] has value at rel_dist 0.
+  Multiply. Advance core_id 0 → 1.
+  Add [1,0] to chart[1].
+
+- Item [1,0]: `Expr -> Expr . '+' Term`. Dot before terminal `+`.
+  Scan: matches `+` (pos 1..2). Advance to [2,0] at chart[2].
+  Precedence on_scan: records level 3, left-associative.
+
+**Position 2.** Agenda: `{[2,0]}`.
+
+- Item [2,0]: `Expr -> Expr '+' . Term`. Dot before nonterminal Term.
+  Predict Term — adds [6,2] to chart[2].
+
+- Item [6,2]: `Term -> . 'number'`. Scan: matches `3` (pos 2..3).
+  Add [7,2] to chart[3].
+  TypeInference on_scan: assigns type Int.
+
+**Position 3.** Agenda: `{[7,2]}`.
+
+- Item [7,2]: `Term -> 'number' .` — complete! Origin 2.
+  Complete Term: completion map at origin position 2 (core set
+  discovered as {2, 6}) says core_id 2 waits for Term.
+  chart[2][2] has value at rel_dist 0.
+  Multiply. Advance core_id 2 → 3. Add [3,0] to chart[3].
+  TypeInference: check `+` signature (Num, Num) -> Num.
+  Left operand Num, right operand Int (satisfies Num). Result: Num.
+
+- Item [3,0]: `Expr -> Expr '+' Term .` — complete! Origin 0.
+  This is the start rule complete at the end of input. Parse succeeds.
 
 ---
 
-## 9. Error Detection, Diagnostics, and Recovery
+## 8. Error Detection, Diagnostics, and Recovery
 
 ### 9.1 Error Detection
 
@@ -1699,7 +1805,7 @@ comments or skipping the affected statement.
 
 ---
 
-## 10. Grammar Construction and BNF Bootstrap
+## 9. Grammar Construction and BNF Bootstrap
 
 ### 10.1 Grammar Builder API
 
@@ -1786,14 +1892,14 @@ hand-written one.
 
 ---
 
-## 11. Code Generation Pipeline
+## 10. Code Generation Pipeline
 
 The parser produces a composite semiring value containing an IR tree
 (from SemanticAction) annotated with type information (from
 TypeInference). This section describes the pipeline from parse result
 to compiled output.
 
-### 11.1 The IR: Sea of Nodes
+### 10.1 The IR: Sea of Nodes
 
 The IR uses a Sea of Nodes representation:
 
@@ -1804,7 +1910,7 @@ The IR uses a Sea of Nodes representation:
 All nodes are immutable and hash-consed. Identical subexpressions share
 the same node object.
 
-### 11.2 Pipeline Stages
+### 10.2 Pipeline Stages
 
 ```
 Source Text
@@ -1829,7 +1935,7 @@ Source Text
 [Linker]              -->  .so shared library
 ```
 
-### 11.3 C Code Generation
+### 10.3 C Code Generation
 
 The code generator (Target::C) translates IR nodes to C functions:
 
@@ -1840,7 +1946,7 @@ The code generator (Target::C) translates IR nodes to C functions:
 - The DFA tables can be emitted as static C arrays, making the parser
   itself compilable to C.
 
-### 11.4 XS Wrappers
+### 10.4 XS Wrappers
 
 Each generated C file gets a thin XS wrapper that:
 - Registers the C functions as Perl methods (via BOOT block)
@@ -1851,7 +1957,7 @@ Each generated C file gets a thin XS wrapper that:
 The result is a shared library (`.so`) that Perl loads at runtime,
 replacing the pure-Perl implementation with compiled C.
 
-### 11.5 Type Information in Code Generation
+### 10.5 Type Information in Code Generation
 
 TypeInference's output influences code generation:
 
@@ -1870,9 +1976,9 @@ TypeInference's output influences code generation:
 
 ---
 
-## 12. Performance Analysis
+## 11. Performance Analysis
 
-### 12.1 Complexity
+### 11.1 Complexity
 
 **Standard Earley**: O(n^3) worst case, O(n^2) unambiguous, O(n) LR(k).
 The constant factors are dominated by item allocation, hash-based
@@ -1883,16 +1989,21 @@ constant factors:
 
 | Operation | Standard | DFA-factored |
 |-----------|----------|-------------|
-| Prediction | O(rules) per position | O(1) DFA state lookup |
+| Prediction | O(rules) per position | O(1) DFA closure lookup |
 | Membership | Hash lookup per item | Array index per core_id |
 | Completion search | O(items at origin) | O(waiters in completion map) |
 | Terminal matching | O(items * patterns) | O(patterns in terminal map) |
-| Core set discovery | O(chart width) per position | DFA transition (O(1)) |
+| Core set discovery | O(chart width) per position | O(chart width) first encounter, O(1) cached |
 
-The DFA-factored parser eliminates the O(chart width) per-position
-overhead for prediction, terminal discovery, and core set tracking.
+The DFA-factored parser reduces per-position overhead through cached
+prediction closures, precomputed completion maps, and terminal
+clustering. Core set discovery retains an O(chart width) scan but
+caches the result for future positions with the same active items.
+The agenda loop is preserved for correctness — it handles the
+nondeterministic merging of items from multiple DFA states at the
+same position.
 
-### 12.2 Set Reuse Impact
+### 11.2 Set Reuse Impact
 
 For repetitive source code (common in real programs), set reuse avoids
 redundant work:
@@ -1907,7 +2018,7 @@ redundant work:
 - **Terminal map reuse**: terminal matching patterns are tried once per
   DFA state per position, not once per item.
 
-### 12.3 Memory
+### 11.3 Memory
 
 The DFA adds grammar-proportional memory:
 - DFA states: O(grammar_size) states, each containing O(items) core_ids
@@ -1925,7 +2036,7 @@ positions. The sparse array representation (`chart[pos][core_id][rel_dist]`)
 is memory-efficient because most items have small relative distances
 (82% are 0-7).
 
-### 12.4 Benchmark Methodology
+### 11.4 Benchmark Methodology
 
 To validate the DFA-factored parser's performance:
 
@@ -2122,9 +2233,10 @@ in a side table.
 **Nonterminal.** A grammar symbol that refers to a rule by name (a
 reference). Contrast with terminal.
 
-**Operation table.** Per DFA state: an array of entries describing
-every operation the parser performs in that state, with precomputed
-semiring columns.
+**Operation table.** (Future optimization, Appendix D.) Per DFA state:
+an array of entries describing every operation the parser performs in
+that state, with precomputed semiring columns. Speculative — requires
+the single-state-per-position assumption that has not been validated.
 
 **Origin.** The input position where an Earley item began matching.
 Stored as a relative distance in the chart.
@@ -2162,3 +2274,135 @@ once-per-item.
 **TypeSatisfies.** The subtype check: can a value of `actual` type
 satisfy a `required` type? Accounts for subtyping, polymorphic
 containers, and unknown types.
+
+---
+
+## Appendix D: Operation Table Design (Future Optimization)
+
+This appendix describes a speculative optimization that goes beyond the
+proven Aycock and YAEP techniques. It has not been validated and should
+be treated as a research direction, not a specification.
+
+### D.1 The Idea
+
+The agenda loop in Section 7 processes items one at a time, dispatching
+to predict, scan, or complete based on each item's properties. The DFA
+precomputes *which* operations will happen (terminal maps, completion
+maps, prediction closures), but the loop still decides *how* to handle
+each item at runtime — reading the core_id, looking up the symbol after
+the dot, branching on terminal vs. nonterminal, calling the appropriate
+semiring methods.
+
+The operation table eliminates this per-item dispatch by precomputing
+the complete sequence of operations for each DFA state. Instead of "for
+each item, decide what to do," the parser executes "for this state,
+here is what to do" — a table of entries, each with precomputed
+semiring operation descriptors.
+
+### D.2 Table Structure
+
+An operation table is an array of entries, one per core_id in the DFA
+state. Each entry describes the operation for that core_id:
+
+```
+Entry = {
+  op_type:     'complete' | 'scan' | 'predict' | 'skip_optional'
+  core_id:     the core item this entry applies to
+  rule_name:   precomputed from core_id
+  alt_idx:     precomputed from core_id
+
+  # For 'complete':
+  target_state:  DFA state after advancing past the completed nonterminal
+  waiters:       [core_ids waiting for this nonterminal]
+
+  # For 'scan':
+  pattern:       terminal regex pattern
+  target_state:  DFA state after advancing past the terminal
+  compiled_re:   precompiled regex object
+
+  # Semiring columns (one per semiring, expressed as data):
+  boolean_op:    'identity' | 'check_zero'
+  prec_op:       'identity' | 'reset' | 'assign_level' | 'pass_through'
+  prec_level:    integer (for 'assign_level')
+  type_op:       'identity' | 'check_signature' | 'assign_type'
+  type_result:   Type bitset (for 'assign_type')
+  type_sig:      {left: Type, right: Type, result: Type}
+  struct_op:     'identity' | 'tag'
+  struct_bits:   integer bitfield (for 'tag')
+  sa_action:     reference to semantic action function
+}
+```
+
+Each semiring's contribution is compiled to a data descriptor at DFA
+construction time. At parse time, the executor reads the descriptor
+and applies it — a switch on a small enum, not a method call through
+the full semiring dispatch chain.
+
+### D.3 Why This Is Speculative
+
+The operation table assumes that each position can be processed as a
+single DFA state. Earley parsing is nondeterministic: completions at
+position P advance items from the origin's state into P, producing
+items that may belong to different DFA states. A position's items are
+the union of items from multiple goto transitions.
+
+Aycock's dissertation retains the agenda loop precisely because of this
+nondeterminism. The DFA optimizes prediction and terminal clustering
+but does not replace the per-item loop.
+
+The operation table would work correctly only if one of the following
+holds:
+
+1. **Single-state dominance.** Most positions are dominated by one DFA
+   state (from scanning). Completion-produced items from other states
+   are rare and can be handled by a fallback path. This needs empirical
+   validation.
+
+2. **State merging.** Positions where multiple DFA states contribute
+   items could be handled by a merged operation table (union of the
+   contributing states' tables). This preserves correctness but reduces
+   the benefit if many states merge frequently.
+
+3. **Phased processing.** Process scans via operation table (single
+   state, deterministic), then process completions via the agenda loop
+   (nondeterministic). This hybrid captures the scan benefit without
+   requiring single-state positions.
+
+### D.4 Potential Benefit
+
+Profiling of the current parser shows that 72% of parse time is
+overhead — agenda building, processed-item deduplication, chart
+scanning, symbol dispatch. Only 5% is semiring operations and 23%
+is in the predict/scan/complete methods themselves.
+
+The operation table targets the 72% overhead by replacing the agenda
+loop's per-item branching with table-driven execution. If the
+single-state assumption holds for 90%+ of positions, the operation
+table could reduce per-position overhead significantly — potentially
+the largest constant-factor improvement available.
+
+However, this has not been implemented or benchmarked. The agenda-loop
+architecture in Section 7 is the proven design. The operation table
+should be pursued only after the Section 7 design is implemented,
+validated, and profiled, providing empirical data on DFA state
+distribution and single-state frequency.
+
+### D.5 Relationship to Partially-Applied Functions
+
+The operation table can be viewed as a partially-applied function per
+DFA state. The DFA state determines the *structure* of the operation
+(which rules complete, which terminals to scan, which semiring
+operations to apply). The per-position values provide the *arguments*.
+
+Each entry's semiring columns are the partial application: the
+`prec_op: 'assign_level', prec_level: -2` entry for PostfixExpression
+is the partial application `sub ($v) { _intern(true, -2, undef, false) }`.
+The table representation makes this inspectable and serializable where
+closures would be opaque.
+
+If the operation table proves feasible, the natural evolution is to
+compile the tables to C code (via Target::C), producing a
+directly-executable parser where each DFA state is a C function that
+processes its entries without interpretation overhead. This is Aycock's
+SHALLOW concept (directly-executable Earley parsing) applied to the
+operation table architecture.
