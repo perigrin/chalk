@@ -1005,13 +1005,42 @@ closure(kernel):
           if new_id not in result:
             add new_id to result
             add new_id to worklist
+
+          # Aycock-Horspool nullable optimization:
+          # Advance through consecutive nullable symbols at the start
+          # of this alternative. A symbol is nullable if it is
+          # ?-quantified or its nonterminal can derive epsilon.
+          # Each advanced item carries a skip_symbols list recording
+          # which symbols were skipped, so on_skip_optional can
+          # create placeholder semiring values at parse time.
+          dot = 0
+          skip_symbols = []
+          alt = alternatives_of(N)[A]
+          while dot < length(alt):
+            s = alt[dot]
+            if not s.is_reference(): break
+            if not (s.is_nullable() or s.quantifier == '?'): break
+            if s.quantifier == '?':
+              push skip_symbols, s.value
+            dot = dot + 1
+            adv_id = id_for(N, A, dot)
+            add (adv_id, copy(skip_symbols)) to result
   return result
 ```
 
-The closure also handles nullable symbols: if the symbol after the dot
-is nullable (can derive the empty string), advance past it and include
-the advanced core_id in the closure. This is the Aycock-Horspool
-nullable optimization.
+The nullable optimization is critical for grammars that use `?`
+quantifiers (optional elements). Without it, items like
+`Statement -> VarDecl? Expression` would not advance past the optional
+`VarDecl` during prediction, requiring the parse loop to discover the
+skip path at runtime for every position. With it, the DFA's prediction
+closure includes both `[Statement, 0, 0]` (dot before VarDecl) and
+`[Statement, 0, 1]` (dot after VarDecl, with skip_symbols=["VarDecl"]).
+The parse loop calls `on_skip_optional` for each skipped symbol to
+create placeholder semiring values.
+
+Mid-rule nullable symbols (where the dot reaches a nullable during
+parsing, not at prediction time) are handled separately by the agenda
+loop's `on_skip_optional` step (Section 7.3, lines 1655-1661).
 
 **Goto.** Given a DFA state S and a symbol X (terminal or nonterminal),
 compute the set of core_ids that result from advancing all items in S
