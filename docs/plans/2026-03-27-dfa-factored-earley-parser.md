@@ -4,7 +4,7 @@
 state machines, distance-factored chart representation, and type-directed
 disambiguation.**
 
-**Version**: 0.2 (Draft)
+**Version**: 0.3 (Draft)
 **Date**: 2026-03-27
 **Status**: Design
 
