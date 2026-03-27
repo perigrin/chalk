@@ -1201,29 +1201,37 @@ chart[position][core_id][rel_dist] = value
 This replaces hash-based origin indexing with direct array access. No
 hash computation, no key comparison, no collision handling.
 
-### 6.3 Core and Distance Hashing
+### 6.3 State Identity and Distance Hashing
 
-Both cores and distance vectors are hash-consed for deduplication:
+**Core identity at construction time.** Each DFA state receives a
+unique integer ID during DFA construction (Section 5.2). At parse
+time, the DFA state for any item is known via `state_for_core[core_id]`
+(Section 5.3). No runtime hashing of core sets is needed — the DFA
+already assigns state IDs.
 
-**Core hashing.** A core is identified by its sorted list of active
-core_ids. The hash key is the comma-joined string of these integers.
-The core registry maps this key to a unique core_id integer.
+**Distance vector hashing at parse time.** Two positions with the
+same DFA state may have different distance vectors (different origins
+for the same items). YAEP's insight: if two positions also share the
+same distance vector, they are structurally identical and the parse
+will proceed identically from both.
 
-```
-core_key = join(",", sort @active_core_ids)
-core_id  = core_registry{core_key} // assign_new_id()
-```
-
-**Distance vector hashing.** A distance vector is the set of
-`(core_id, rel_dist)` pairs at a position. The hash key is the
-semicolon-joined string of these pairs.
+A distance vector is the set of `(core_id, rel_dist)` pairs at a
+position. The hash key is computed from these pairs:
 
 ```
 dist_key = join(";", sort map { "$cid:$rd" } @pairs)
-set_key  = "$core_id:$dist_key"
+set_key  = "$state_id:$dist_key"
 ```
 
-Two positions with the same `set_key` are structurally identical.
+Two positions with the same `set_key` — same DFA state AND same
+relative distances — are structurally identical. The set registry
+tracks these for potential set reuse optimizations (prediction results,
+completion patterns).
+
+Distance vector hashing is parse-lifetime work (cleared between files).
+It is optional — the parser is correct without it. It enables
+measurement of set reuse frequency, which informs whether more
+aggressive reuse optimizations (Appendix D) would be beneficial.
 
 ### 6.4 Lifetime Management
 
