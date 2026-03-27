@@ -636,6 +636,18 @@ through every parse item. Each semiring answers a different question
 about the parse. Together, they resolve all ambiguities in the grammar
 and construct the output.
 
+**Operational summary for implementers.** The composite value at every
+chart cell is a 5-element tuple `[Boolean, Precedence, TypeInference,
+Structural, SemanticAction]`. Every semiring operation (`multiply`,
+`add`, `on_scan`, `on_complete`) is delegated to all five components.
+If ANY component returns zero, the entire tuple is zero (the parse path
+dies). On `add` (merge), components are consulted in priority order
+(Boolean first, SemanticAction last); the first component to express a
+preference determines the winner (Section 4.3). Semiring values are
+per-item — they travel with the item through the chart, not cached per
+DFA state, because values depend on the input (what was scanned) not
+just the grammar structure (which rule is active).
+
 ### 4.1 What Is a Semiring (for Parsing)?
 
 A semiring provides four operations that the parser calls at specific
@@ -1135,6 +1147,109 @@ The DFA state count is independent of input size. A 10-line file and a
 10,000-line file navigate the same DFA states — only the number of
 transitions differs.
 
+### 5.6 Runtime Representation and Invariants
+
+This section consolidates the runtime data structures into concrete
+definitions that an implementer can code directly.
+
+**The runtime item.** At parse time, an item is NOT an object or
+struct. It is an implicit triple of integers identifying a position in
+the chart:
+
+```
+(core_id, origin, position)
+```
+
+- `core_id`: integer index into the core item table (Section 5.1).
+  Encodes the rule, alternative, and dot position. From the core_id,
+  all grammar context is recoverable in O(1):
+  - `rule_name_for(core_id)` → which rule
+  - `alt_idx_for(core_id)` → which alternative
+  - `dot_for(core_id)` → dot position within the alternative
+  - `is_complete(core_id)` → whether the dot is at the end
+  - `symbol_after(core_id)` → the next expected symbol
+  - `state_for_core(core_id)` → which DFA state this item belongs to
+- `origin`: the input position where this item began matching. Stored
+  as a relative distance in the chart: `rel_dist = position - origin`.
+- `position`: the current input position (the chart index).
+
+The chart stores the semiring value at the intersection of these three
+coordinates:
+
+```
+chart[position][core_id][rel_dist] = semiring_value
+```
+
+There is no separate item struct. The chart IS the item storage. To
+enumerate items at a position, iterate `chart[pos]` for defined
+entries. To look up a specific item, index directly:
+`chart[pos][core_id][pos - origin]`.
+
+**The agenda.** The agenda is a list of `[core_id, origin]` pairs
+waiting to be processed at the current position. Values are read from
+the chart when the item is processed (not when it is enqueued), because
+merges may update the value between enqueue and processing.
+
+**Core invariant: DFA states partition core items by future.**
+
+```
+For all core_ids C1, C2 in the same DFA state S:
+  closure({C1}) ∩ closure({C2}) ⊇ nonkernel(S)
+```
+
+All items in the same DFA state share the same prediction closure
+(nonkernel items). This means: at any parse position, items in the
+same DFA state expect the same set of nonterminals to be predicted
+and the same set of terminals to be scanned. Their *pasts* differ
+(different rules, different dot positions, different origins) but
+their *futures* — what they collectively predict and scan — are
+identical.
+
+More precisely, a DFA state is the epsilon-closure of a kernel set.
+The kernel items (dot > 0) represent different grammar positions
+arrived at by different paths. The nonkernel items (dot = 0) are
+the predictions shared by all kernel items. The terminal map and
+completion map are properties of the ENTIRE state (kernel +
+nonkernel), not of individual items.
+
+This invariant guarantees:
+
+1. **Prediction correctness.** Adding prediction items for a DFA state
+   is equivalent to adding them for each kernel item individually.
+   No predictions are missed or spuriously added.
+
+2. **Terminal map correctness.** The terminal map includes all patterns
+   expected by any item in the state. No terminal match is missed.
+
+3. **Completion map correctness.** The completion map includes all
+   core_ids in the state that wait for each nonterminal. When a
+   nonterminal completes, checking the completion map finds all
+   relevant waiters.
+
+**Diagnostic mapping.** Every core_id maps back to human-readable
+grammar positions via the core item index:
+
+```
+core_id 42 → item_for(42) = {rule: "BinaryExpression", alt: 0, dot: 2}
+           → "BinaryExpression -> Expression BinaryOp . Expression"
+```
+
+For logging and error diagnostics, the parser can reconstruct the full
+grammar context of any chart entry:
+
+```
+format_item(core_id, origin, pos):
+  info = item_for(core_id)
+  rule = grammar.rule_for(info.rule_name)
+  alt = rule.alternatives[info.alt_idx]
+  lhs = info.rule_name
+  rhs = format_rhs_with_dot(alt, info.dot)
+  return "[{lhs} -> {rhs}] @ {origin} (pos {pos})"
+```
+
+This mapping is O(1) per item — it reads precomputed arrays. The DFA
+does not obscure grammar positions; it indexes them by integer.
+
 ---
 
 ## 6. Distance Factoring
@@ -1542,19 +1657,37 @@ complete(completed_core_id, origin, completed_value, pos, chart, agenda):
     check_leo_creation(...)
 ```
 
-The `global_waiting_core_ids` is precomputed at grammar construction
-time: for each nonterminal N, the list of all core_ids in the grammar
-where N appears after the dot. This list is typically short (5-15
-entries for the Perl grammar). The chart check at
-`chart[origin][waiter_core_id]` filters to only those actually live
-at the origin — an O(1) array access per candidate.
+**Completion indexing structures.** The completion step uses two
+pre-built indexes and one runtime data structure:
 
-No per-position chart scanning or core set discovery is needed. The
-DFA provides the structural knowledge (which core_ids could wait for
-which nonterminals) at construction time. The chart provides the
-runtime filter (which of those are actually live at this origin).
-yet been discovered (it is discovered at the end of position
-processing).
+1. `global_waiting_core_ids[nonterminal]` → `[core_id, ...]`
+   - Built at grammar construction time.
+   - For each nonterminal N, lists all core_ids in the grammar where
+     the dot is immediately before N. These are the items that COULD
+     be waiting for N to complete.
+   - Typically 5-15 entries per nonterminal for the Perl grammar.
+
+2. `completed_at[rule_name][origin][pos]` → `[(core_id, origin), ...]`
+   - Built during parsing.
+   - Records which rules completed at which positions, for the
+     `advance_from_completed` operation (handling nullable nonterminals
+     that complete at the same position where a new waiter appears).
+
+3. `chart[origin][waiter_core_id][rel_dist]` → `value`
+   - The chart itself is the runtime filter. For each candidate in
+     `global_waiting_core_ids`, checking `chart[origin][waiter_core_id]`
+     is an O(1) array access that determines whether the waiter is
+     live at the origin.
+
+The completion join key is `(nonterminal, origin)`:
+- `nonterminal` selects the candidate list from `global_waiting_core_ids`
+- `origin` selects the chart position to check for live waiters
+- The chart check filters candidates to only those actually present
+
+This avoids per-position chart scanning. The DFA provides the
+structural knowledge (which core_ids could wait for which
+nonterminals) at construction time. The chart provides the runtime
+filter (which of those are actually live at this origin).
 
 ### 7.6 Scanning with Terminal Maps
 
