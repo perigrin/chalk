@@ -4,7 +4,7 @@
 state machines, distance-factored chart representation, and type-directed
 disambiguation.**
 
-**Version**: 0.3 (Draft)
+**Version**: 0.4 (Draft)
 **Date**: 2026-03-27
 **Status**: Design
 
@@ -898,9 +898,44 @@ completes, its result is passed to SemanticAction (index 4) via
 type annotations (e.g., return type, argument types) when constructing
 IR nodes.
 
+**Semiring value caching (hash-consing).** Semiring values are per-item
+(not per-DFA-state) because they depend on what was scanned, not just
+which rule is active. However, identical derivations produce identical
+values. Hash-consing exploits this:
+
+- **Precedence** values are hash-consed by `(valid, level, assoc,
+  is_operator)`. The `_intern` function returns the canonical object
+  for each 4-tuple. Identity comparison via `refaddr` is O(1).
+
+- **TypeInference** Context objects are hash-consed by focus content
+  and children refaddrs. Two derivations producing the same type tags
+  share the same Context. Cache key is
+  `"ext:$rule_name:$focus_key:$children_key"`.
+
+- **SemanticAction** Context objects are hash-consed by scanned text
+  (for leaves) and by rule + children (for completions). Same-text
+  scans at different positions share the same leaf Context.
+
+- **Structural** values are plain integers (bitfields). No caching
+  needed — integer comparison is direct.
+
+- **Boolean** values are `true` or a unique zero reference. No caching
+  needed.
+
+Hash-consing serves two purposes: it reduces memory (identical
+derivations share one object) and it enables FilterComposite's
+identity-based disambiguation (when `add()` returns a value that is
+`refaddr`-equal to one input, FilterComposite knows which side won).
+
+Cache lifetime: hash-cons caches are cleared between file parses via
+`reset_cache()`. Within a parse, caches grow monotonically. For large
+files, this is the primary source of memory growth — bounded by the
+number of distinct derivation shapes, which is grammar-proportional
+(not input-proportional) for repetitive source code.
+
 ---
 
-*Sections 5-12 and Appendices continue in subsequent commits.*
+*Sections 5-11 and Appendices continue below.*
 
 ---
 
@@ -1249,6 +1284,49 @@ format_item(core_id, origin, pos):
 
 This mapping is O(1) per item — it reads precomputed arrays. The DFA
 does not obscure grammar positions; it indexes them by integer.
+
+**Testable invariant assertions.** The DFA correctness invariant can
+be verified programmatically after DFA construction:
+
+```
+verify_dfa_invariants(dfa, core_index):
+  for each state S in dfa.states:
+    # 1. Every core_id in S maps back to S
+    for each core_id in S.core_ids:
+      assert state_for_core[core_id] == S.id
+
+    # 2. Nonkernel items are the prediction closure of kernel items
+    kernel = [c for c in S.core_ids if dot_for(c) > 0 or c is start item]
+    expected_nonkernel = epsilon_closure(kernel) - kernel
+    actual_nonkernel = [c for c in S.core_ids if dot_for(c) == 0]
+    assert set(actual_nonkernel) == set(expected_nonkernel)
+
+    # 3. Terminal map covers all terminal-expecting items
+    for each core_id in S.core_ids:
+      sym = symbol_after(core_id)
+      if sym is terminal:
+        assert sym.pattern in S.terminal_map
+        assert core_id in S.terminal_map[sym.pattern]
+
+    # 4. Completion map covers all nonterminal-waiting items
+    for each core_id in S.core_ids:
+      sym = symbol_after(core_id)
+      if sym is nonterminal reference:
+        assert sym.name in S.completion_map
+        assert core_id in S.completion_map[sym.name]
+
+    # 5. Goto transitions are consistent
+    for each (symbol, target_state_id) in S.goto_table:
+      target = dfa.state(target_state_id)
+      advanced = [advance(c) for c in S.core_ids
+                  if symbol_after(c) == symbol]
+      for each a in advanced:
+        assert a in target.core_ids
+```
+
+These assertions run once after DFA construction (not during parsing)
+and catch any inconsistency between the DFA tables and the core item
+index. An implementation should run them in the test suite.
 
 ---
 
@@ -2256,6 +2334,26 @@ To validate the DFA-factored parser's performance:
 4. **Validate correctness**: the DFA-factored parser must produce
    identical IR output for all source files. Any difference indicates
    a bug.
+
+### 11.5 Scope Limitations
+
+**Incremental parsing** (reparsing after edits, IDE integration) is
+out of scope for this design. The parser processes complete source
+files from start to finish. The DFA and distance factoring are
+optimized for batch parsing — chart positions reference earlier
+positions via relative distances, and GC frees intermediate positions.
+Incremental updates (inserting or deleting text) would invalidate
+distances and require re-parsing from the edit point.
+
+Future work could explore incremental extensions:
+- **Tree-sitter style**: maintain a concrete syntax tree and reparse
+  only the affected subtree. The DFA state at the edit boundary
+  determines where to resume.
+- **Chart checkpointing**: save chart state at safe-set boundaries
+  (statement-level). After an edit, restore the most recent checkpoint
+  before the edit and reparse from there.
+
+These are research directions, not part of the current specification.
 
 ---
 
