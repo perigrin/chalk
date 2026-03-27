@@ -2124,8 +2124,32 @@ error: parse failed at line 12, column 5
    = note: parsing stopped at 245 of 500 bytes
 ```
 
-The expected token set comes from `state.terminal_map.keys()`. The
-source context comes from the input text around the failure position.
+The expected token set comes from the terminal maps of the DFA states
+active at the last active position. Collect `state_for_core[core_id]`
+for each active item, union their terminal maps, and report the keys.
+The source context comes from the input text around the failure
+position.
+
+**Distinguishing error-position and recovery-position diagnostics.**
+The expected tokens at the error position describe what would have
+allowed parsing to continue — these come from the stalled state's
+terminal maps. After recovery (Section 8.3), the parser resets to the
+statement-start DFA state, which has a different terminal map
+(statement-level expectations). Diagnostics should report both:
+
+```
+error: parse failed at line 12, column 5
+  --> lib/Foo.pm:12:5
+   |
+12 |     frobnicate();
+   |     ^
+   = expected: identifier, '->', ';'
+   = note: recovered at line 12, column 19 (';')
+```
+
+The "expected" line reflects the error position. The "recovered" line
+reflects where the parser resumed. Subsequent errors report expected
+tokens from the recovery state, not the original error state.
 
 ### 8.3 Error Recovery
 
