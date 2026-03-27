@@ -1614,7 +1614,50 @@ An implementer must not skip the `should_scan` gate just because the
 terminal clustering found a match. The cache provides the regex result;
 the gate filters per-item.
 
-### 7.7 Leo Optimization
+### 7.7 Scannerless Whitespace Handling
+
+This parser is *scannerless* — it has no separate lexer. Whitespace
+and comments are grammar terminals matched by the same mechanism as
+keywords and operators. The Perl grammar uses a whitespace terminal
+with the pattern `(?:\s|#[^\n]*)*` (zero or more whitespace characters
+or line comments). This pattern appears in most grammar rules between
+significant tokens.
+
+Scannerless whitespace has three properties that affect the parser:
+
+**Zero-width matches.** The whitespace pattern uses `*` (zero or more),
+so it matches the empty string at every position. A zero-width match
+advances the item's dot but does NOT advance the input position. The
+advanced item is added to the CURRENT position's agenda (not the next
+position's chart). The agenda loop processes it immediately.
+
+This means: at every position, the whitespace terminal matches. Every
+item expecting whitespace advances past it (to the same position) and
+continues to the next symbol in its rule. Whitespace consumption is
+invisible to the position-level loop — it happens within a single
+position's agenda processing.
+
+**Ubiquity in terminal maps.** Because most DFA states contain items
+expecting whitespace, most states' terminal maps include the whitespace
+pattern. Terminal clustering tries it at every position and it always
+matches (zero-width at minimum). This is correct but means the
+whitespace pattern never enables quick-reject filtering — it always
+produces a hit.
+
+**Impact on scan cache.** The scan cache at every position contains
+an entry for the whitespace pattern. Since the match is always
+successful (at least zero-width), this cache entry is always populated.
+The cost is one regex execution per position for whitespace, regardless
+of DFA state.
+
+**Grammar design implication.** The whitespace terminal should use a
+single shared pattern across all rules. If different rules used
+different whitespace patterns (e.g., one allowing newlines, another
+not), the terminal map would contain multiple whitespace entries and
+each would be tried. A single canonical whitespace pattern minimizes
+redundant matching.
+
+### 7.8 Leo Optimization
 
 The Leo optimization handles right-recursive rules in O(1) per
 recursive step instead of O(n). When a completion is *deterministic*
@@ -1641,7 +1684,7 @@ resolves the entire chain in one step: multiply the Leo chain's
 accumulated value with the completed value, then advance the top-of-
 chain item.
 
-### 7.8 Merge Protocol
+### 7.9 Merge Protocol
 
 When adding a value to a chart cell that already contains a value:
 
@@ -1665,7 +1708,7 @@ operator grouping, Structural picks block over hash, TypeInference
 provides type information for the choice. FilterComposite's first-wins
 ordered priority determines which semiring's preference takes effect.
 
-### 7.9 DFA State at Runtime
+### 7.10 DFA State at Runtime
 
 The DFA is constructed fully at grammar construction time (Section 5).
 At parse time, no state discovery or chart scanning is needed. The
@@ -1691,7 +1734,7 @@ This eliminates the runtime cost of core set discovery (previously
 O(chart width) per position with hash-key string construction and
 registry lookup). The DFA state is always known from the core_id.
 
-### 7.10 Worked Example: Parsing `2+3`
+### 7.11 Worked Example: Parsing `2+3`
 
 Using the grammar and DFA from Section 5.4:
 
