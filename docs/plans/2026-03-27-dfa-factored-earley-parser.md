@@ -1037,6 +1037,20 @@ This replaces the `advance` + chart-scan pattern. When a scan or
 completion advances past symbol X, the next state is
 `goto_table[current_state][X]` — a single table lookup.
 
+**Core_id to state mapping.** Each core_id belongs to exactly one DFA
+state. This mapping is precomputed at DFA construction time:
+
+```
+state_for_core: core_id -> state_id
+```
+
+This is the inverse of the state's core_id list. At parse time, when
+the parser needs the DFA state properties for an item (e.g., to look
+up the completion map at an origin position), it looks up
+`state_for_core[core_id]` — an O(1) array access. No chart scanning
+or hash-key computation is required to determine which DFA state a
+position is in.
+
 ### 5.4 Worked Example: DFA for Arithmetic
 
 Grammar:
@@ -1341,42 +1355,31 @@ parse(input, grammar, dfa):
     for each (core_id, rel_dist, value) in chart[pos]:
       push agenda, [core_id, pos - rel_dist]  # [core_id, origin]
 
-    # --- Prediction reuse ---
-    # Compute the set of active core_ids (pre-prediction).
-    # If this set was seen before, reuse the cached prediction list.
-    # Otherwise, discover which nonterminals need prediction and cache.
-    pre_active = [core_ids with defined values at chart[pos]]
-    pre_hash = join(",", pre_active)
+    # --- DFA-driven prediction ---
+    # For each active non-complete item, look up its DFA state via
+    # state_for_core. The state's prediction closure provides all
+    # nonterminals to predict. No hash computation or cache lookup.
+    for each (core_id, origin) in agenda:
+      if not ci_completions[core_id]:
+        sym = ci_symbols_after[core_id]
+        if sym and sym.is_reference():
+          predict(sym.value, pos, chart, agenda, predicted_at)
 
-    if prediction_cache[pre_hash] exists:
-      for each rule_name in prediction_cache[pre_hash]:
-        predict(rule_name, pos, chart, agenda, predicted_at)
-    else:
-      expected = [nonterminals expected by non-complete items in pre_active]
-      prediction_cache[pre_hash] = expected
-      for each rule_name in expected:
-        predict(rule_name, pos, chart, agenda, predicted_at)
-
-    # --- Terminal clustering ---
-    # After predictions, the chart has all items for this position.
-    # Compute the post-prediction core set. If a DFA state with a
-    # terminal map exists for this set, use it. Otherwise, iterate
-    # the chart to discover terminal patterns.
+    # --- DFA-driven terminal clustering ---
+    # After predictions, collect terminal maps from the DFA states of
+    # all active items. Each core_id maps to a DFA state (O(1) via
+    # state_for_core). Each state has a precomputed terminal map.
+    # Union the maps and try each distinct pattern once.
     if pos < N:
-      post_active = [core_ids with defined values at chart[pos]]
-      post_hash = join(",", post_active)
-
-      if core_set_registry[post_hash] has terminal_map:
-        tmap = terminal_map for this core set
+      seen_patterns = {}
+      for each core_id with defined values at chart[pos]:
+        state_id = state_for_core[core_id]
+        tmap = dfa.state(state_id).terminal_map
         for each pattern in tmap:
-          if not in scan_cache[pos]:
-            scan_cache[pos][pattern] = try_match(input, pos, pattern)
-      else:
-        # First encounter — discover patterns from chart
-        for each core_id in post_active:
-          sym = symbol_after(core_id)
-          if sym is terminal and pattern not in scan_cache:
-            scan_cache[pos][sym.pattern] = try_match(input, pos, sym)
+          if not seen_patterns[pattern]:
+            seen_patterns[pattern] = true
+            if not in scan_cache[pos]:
+              scan_cache[pos][pattern] = try_match(input, pos, pattern)
 
     # --- Agenda loop: predict, scan, complete ---
     processed = []
@@ -1434,12 +1437,8 @@ parse(input, grammar, dfa):
           # --- SCAN ---
           scan(core_id, origin, value, sym, pos, input, chart, N, agenda)
 
-    # --- Post-position: core set discovery and GC ---
-    # Discover the core set for this position (for future reuse).
-    # Build terminal map and completion map if this is a new core set.
-    discover_core_set(chart, pos)
-
-    # Safe-set and epoch GC
+    # --- Post-position: GC ---
+    # Safe-set and epoch GC (Sections 6.5)
     perform_gc(chart, pos)
 
   # --- Check for completed start rule at position N ---
@@ -1501,20 +1500,19 @@ complete(completed_core_id, origin, completed_value, pos, chart, agenda):
   if leo_enabled and leo_items[rule_name][origin] exists:
     resolve_leo(rule_name, origin, completed_value, pos, chart, agenda)
 
-  # Find waiters using DFA completion map when available.
-  # The completion map narrows from all-grammar waiters to only those
-  # core_ids present in the origin position's core set.
-  origin_core_set_id = pos_core_set[origin]
-  if defined(origin_core_set_id) and completion_map_cache[origin_core_set_id] exists:
-    chart_waiting_ids = completion_map_cache[origin_core_set_id][rule_name]
-  else:
-    # Fallback for same-position completions (core set not yet discovered)
-    chart_waiting_ids = global_waiting_core_ids[rule_name]
+  # Find waiters: iterate global_waiting_core_ids for this nonterminal.
+  # For each candidate, check chart[origin][waiter_core_id] to see if
+  # the waiter is actually live at the origin. This is an O(1) array
+  # access per candidate — no hash lookup or chart scan.
+  chart_waiting_ids = global_waiting_core_ids[rule_name]
 
   if not defined(chart_waiting_ids): return
 
   for each waiter_core_id in chart_waiting_ids:
-    for each (waiter_value, waiter_origin) at chart[origin][waiter_core_id]:
+    oh = chart[origin][waiter_core_id]
+    if not defined(oh): skip  # waiter not live at origin
+
+    for each (waiter_value, waiter_origin) in oh:
       combined = semiring.multiply(waiter_value, completed_value)
       if is_zero(combined): skip
 
@@ -1526,14 +1524,17 @@ complete(completed_core_id, origin, completed_value, pos, chart, agenda):
     check_leo_creation(...)
 ```
 
-The completion map for a core set is built lazily in
-`discover_core_set`. For each nonterminal N, the map lists which
-core_ids in that core set have N after their dot. This is the
-intersection of the global `waiting_core_ids[N]` with the core set's
-active items.
+The `global_waiting_core_ids` is precomputed at grammar construction
+time: for each nonterminal N, the list of all core_ids in the grammar
+where N appears after the dot. This list is typically short (5-15
+entries for the Perl grammar). The chart check at
+`chart[origin][waiter_core_id]` filters to only those actually live
+at the origin — an O(1) array access per candidate.
 
-The fallback to `global_waiting_core_ids` handles same-position
-completions where `origin == pos` and the origin's core set has not
+No per-position chart scanning or core set discovery is needed. The
+DFA provides the structural knowledge (which core_ids could wait for
+which nonterminals) at construction time. The chart provides the
+runtime filter (which of those are actually live at this origin).
 yet been discovered (it is discovered at the end of position
 processing).
 
@@ -1566,13 +1567,10 @@ scan(core_id, origin, value, symbol, pos, input, chart, N, agenda):
 ```
 
 Terminal clustering before the agenda loop pre-scans all patterns
-expected by the current core set. The scan function finds the result
-in the cache — no regex execution during the agenda loop.
-
-For the first encounter of a core set (no cached terminal map), the
-fallback iterates the chart to discover terminal patterns and scan
-them individually. The terminal map is built by `discover_core_set`
-at the end of position processing for future reuse.
+expected by the active items' DFA states. The scan function finds the
+result in the cache — no regex execution during the agenda loop. The
+terminal maps are precomputed at DFA construction time, so no lazy
+discovery or chart scanning is needed.
 
 ### 7.7 Leo Optimization
 
@@ -1625,49 +1623,31 @@ operator grouping, Structural picks block over hash, TypeInference
 provides type information for the choice. FilterComposite's first-wins
 ordered priority determines which semiring's preference takes effect.
 
-### 7.9 Core Set Discovery
+### 7.9 DFA State at Runtime
 
-After the agenda loop completes for a position, the parser discovers
-the core set (the set of active core_ids) and registers it for future
-reuse:
+The DFA is constructed fully at grammar construction time (Section 5).
+At parse time, no state discovery or chart scanning is needed. The
+DFA state for any item is determined by `state_for_core[core_id]` —
+an O(1) array lookup precomputed during DFA construction.
 
-```
-discover_core_set(chart, pos):
-  active = [core_ids with defined values at chart[pos]]
-  hash_key = join(",", active)
+When the parser needs DFA state properties during the agenda loop:
 
-  if core_set_registry[hash_key] exists:
-    # Known core set — reuse its properties
-    cs_id = core_set_registry[hash_key].id
-  else:
-    # New core set — register and build maps
-    cs_id = next_core_set_id++
-    core_set_registry[hash_key] = {id: cs_id, core_ids: active}
+- **For terminal clustering**: collect the DFA states of all active
+  items at the position, then union their terminal maps. In practice,
+  most items at a position share one or two DFA states, so the union
+  is small.
 
-    # Build terminal map: pattern -> [core_ids expecting that pattern]
-    # Build completion map: nonterminal -> [core_ids waiting for it]
-    for each core_id in active:
-      if is_complete(core_id): skip
-      sym = symbol_after(core_id)
-      if sym is reference:
-        completion_map[cs_id][sym.name].push(core_id)
-      else:
-        terminal_map[cs_id][sym.pattern].push(core_id)
+- **For completion**: look up `state_for_core[waiter_core_id]` to get
+  the waiter's DFA state, then use that state's completion map. This
+  is O(1) per waiter — no chart scanning, no hash-key computation.
 
-  pos_core_set[pos] = cs_id
-```
+- **For prediction**: look up `dfa.prediction_items_for(nonterminal)`,
+  which returns the epsilon-closure precomputed at DFA construction
+  time. The DFA state is implicit in the prediction closure.
 
-Core set discovery runs AFTER position processing (not before) because
-the agenda loop adds items through completions and predictions. The
-core set represents the final state of the position after all
-operations. Properties computed from the core set (terminal maps,
-completion maps) benefit future positions that arrive at the same
-core set.
-
-This is where Aycock's DFA and YAEP's set factoring converge: the
-core set IS a DFA state discovered lazily during parsing. The first
-encounter builds the state's properties; subsequent encounters reuse
-them.
+This eliminates the runtime cost of core set discovery (previously
+O(chart width) per position with hash-key string construction and
+registry lookup). The DFA state is always known from the core_id.
 
 ### 7.10 Worked Example: Parsing `2+3`
 
