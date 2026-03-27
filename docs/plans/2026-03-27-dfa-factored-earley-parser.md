@@ -1743,7 +1743,7 @@ Completion map: `{Expr -> [0], Term -> [4]}`.
 
 ## 8. Error Detection, Diagnostics, and Recovery
 
-### 9.1 Error Detection
+### 8.1 Error Detection
 
 A parse fails when no complete start-rule item exists at position N.
 The parser detects this by checking `chart[N]` for the start rule.
@@ -1754,7 +1754,7 @@ position is less than N, the input was not fully consumed. The
 difference between last active position and N indicates where parsing
 stalled.
 
-### 9.2 Diagnostics
+### 8.2 Diagnostics
 
 At the last active position, the DFA state's terminal map provides the
 set of *expected tokens*: the terminals that could have allowed parsing
@@ -1779,30 +1779,35 @@ error: parse failed at line 12, column 5
 The expected token set comes from `state.terminal_map.keys()`. The
 source context comes from the input text around the failure position.
 
-### 9.3 Error Recovery
+### 8.3 Error Recovery
 
 Error recovery allows the parser to continue past syntax errors,
 producing partial parse results and additional diagnostics.
 
-**Token skipping recovery.** When the parser detects failure at
+**Statement-level recovery.** When the parser detects failure at
 position P:
 
 1. Record the error and expected tokens at P.
-2. Find the nearest *synchronization point*: a position after P where
-   a token from the expected set matches. Synchronization tokens are
-   typically statement terminators (`;`), block closers (`}`), or
-   declaration keywords (`method`, `field`, `class`).
-3. Skip input from P to the synchronization point.
-4. Resume parsing from the synchronization point's DFA state.
+2. Scan forward from P to find the nearest *synchronization token*:
+   a statement terminator (`;`), block closer (`}`), or declaration
+   keyword (`method`, `field`, `class`).
+3. Skip the input between P and the synchronization point.
+4. Resume parsing from the grammar's statement-start DFA state at the
+   synchronization point.
 
-**Recovery state selection.** The DFA state at the synchronization
-point is determined by examining which DFA states could have reached
-the synchronization token. In practice, statement-level recovery works
-by:
-1. Walking backward from the failure to find the most recent safe-set
-   boundary (Aycock Chapter 6).
-2. Using the DFA state at that boundary as the recovery starting point.
-3. Scanning forward to the synchronization token.
+**Why statement-level, not backward-walking.** Safe-set GC
+(Section 6.5) frees chart data at statement boundaries. Walking
+backward to find a safe-set boundary would find freed positions with
+no chart data. Statement-level recovery avoids this: instead of
+reconstructing parser state from a freed position, it resets to a
+known DFA state (the state that begins a new statement). This is the
+same state the parser enters after every `;` during normal parsing.
+
+**Recovery state selection.** The statement-start DFA state is
+identified during DFA construction: it is the state containing the
+prediction closure for the Statement nonterminal. This state is the
+same at every statement boundary, so the parser can resume with
+`semiring.one()` values and parse the next statement independently.
 
 **Multiple error reporting.** After recovery, parsing continues
 normally. If additional errors are found, they are reported with the
