@@ -1585,10 +1585,28 @@ parse(input, grammar, dfa):
     for each (core_id, rel_dist, value) in chart[pos]:
       push agenda, [core_id, pos - rel_dist]  # [core_id, origin]
 
-    # --- DFA-driven prediction ---
-    # For each active non-complete item, look up its DFA state via
-    # state_for_core. The state's prediction closure provides all
-    # nonterminals to predict. No hash computation or cache lookup.
+    # --- Pre-loop prediction ---
+    # Predict nonterminals expected by seed items BEFORE the agenda
+    # loop runs. This serves two purposes:
+    #
+    # 1. It adds predicted items (dot=0) to the chart so that terminal
+    #    clustering (below) sees all terminal-expecting items, including
+    #    predictions. Without this step, terminal clustering would miss
+    #    terminals expected by predicted items (e.g., Term -> . 'number'
+    #    is a prediction of Expr -> . Term, and 'number' must be in the
+    #    terminal map).
+    #
+    # 2. It populates the agenda with predicted items so the agenda
+    #    loop can process them. The agenda loop also calls predict()
+    #    (line 1653 below) for items it encounters with nonterminals
+    #    after the dot. That second predict call handles nonterminals
+    #    that become expected after completions fire during the loop —
+    #    cases the pre-loop pass cannot anticipate.
+    #
+    # The two prediction steps are not redundant: the pre-loop pass
+    # handles seed items; the in-loop pass handles completion-produced
+    # items. Both use the DFA's prediction closure (O(1) lookup per
+    # nonterminal), so the cost of the overlap is negligible.
     for each (core_id, origin) in agenda:
       if not ci_completions[core_id]:
         sym = ci_symbols_after[core_id]
@@ -1597,9 +1615,10 @@ parse(input, grammar, dfa):
 
     # --- DFA-driven terminal clustering ---
     # After predictions, collect terminal maps from the DFA states of
-    # all active items. Each core_id maps to a DFA state (O(1) via
-    # state_for_core). Each state has a precomputed terminal map.
-    # Union the maps and try each distinct pattern once.
+    # all active items (including items just added by prediction).
+    # Each core_id maps to a DFA state (O(1) via state_for_core).
+    # Each state has a precomputed terminal map. Union the maps and
+    # try each distinct pattern once.
     if pos < N:
       seen_patterns = {}
       for each core_id with defined values at chart[pos]:
