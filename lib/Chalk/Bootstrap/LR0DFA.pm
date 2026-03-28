@@ -1,5 +1,5 @@
-# ABOUTME: LR(0) DFA construction from grammar for Aycock prediction optimization.
-# ABOUTME: Pre-clusters predicted items into states for O(1) prediction lookup per nonterminal.
+# ABOUTME: Full LR(0) DFA construction from grammar with closure/goto algorithm.
+# ABOUTME: Builds states with terminal maps, completion maps, goto tables, and state_for_core mapping.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -20,23 +20,193 @@ class Chalk::Bootstrap::LR0DFA {
     # derive the empty string. Computed via fixed-point iteration.
     field %nullable;
 
+    # Full DFA states: array indexed by state_id
+    # Each state: { id, core_ids, terminal_map, completion_map, goto_table }
+    field @states;
+
+    # State registry: sorted core_ids key => state_id (deduplication)
+    field %state_registry;
+
     # State count for reporting
     field $state_count :reader = 0;
 
-    # Build the DFA prediction tables from the grammar.
-    # First computes the nullable set, then for each nonterminal computes the
-    # epsilon-closure including dot-advanced items past nullable symbols.
+    # Accessors for DFA states
+    method states()         { return \@states }
+    method state($id)       { return $states[$id] }
+    method state_count_dfa(){ return scalar @states }
+
+    # Build the DFA: nullable set, prediction closures, then full state construction.
     method build() {
         $self->_compute_nullable_set();
 
-        # For each nonterminal, compute prediction items via epsilon-closure
+        # Prediction closures (used by predict() at parse time)
         for my $rule ($grammar->@*) {
             my $name = $rule->name();
             next if exists $prediction_items{$name};
             $self->_compute_prediction_closure($name);
         }
-        # Count unique states (one per nonterminal prediction set)
-        $state_count = scalar keys %prediction_items;
+
+        # Full DFA state construction via closure/goto
+        $self->_build_dfa_states();
+
+        $state_count = scalar @states;
+    }
+
+    # Compute LR(0) closure of a kernel set of core_ids.
+    # Returns a sorted arrayref of all core_ids reachable by transitively
+    # following nonterminal references (predictions) and advancing past
+    # nullable symbols (Aycock-Horspool optimization).
+    method _closure($kernel) {
+        my %in_set;
+        $in_set{$_} = 1 for $kernel->@*;
+        my @worklist = $kernel->@*;
+
+        while (@worklist) {
+            my $core_id = shift @worklist;
+            next if $core_index->is_complete($core_id);
+            my $sym = $core_index->symbol_after($core_id);
+            next unless defined $sym && $sym->is_reference();
+
+            my $nt = $sym->value();
+            my $rule = $rule_table->{$nt};
+            next unless defined $rule;
+
+            # Add prediction items for all alternatives of this nonterminal
+            my $expressions = $rule->expressions();
+            for my $alt_idx (0 .. $expressions->$#*) {
+                my $pred_id = $core_index->id_for($nt, $alt_idx, 0);
+                if (defined $pred_id && !$in_set{$pred_id}) {
+                    $in_set{$pred_id} = 1;
+                    push @worklist, $pred_id;
+                }
+            }
+
+            # Aycock-Horspool: if the nonterminal is nullable or ?-quantified,
+            # advance past it and add the advanced item to the closure
+            my $is_nullable_sym = ($sym->is_quantified() && $sym->quantifier() eq '?')
+                               || $nullable{$nt};
+            if ($is_nullable_sym) {
+                my $adv_id = $core_index->advance($core_id);
+                if (defined $adv_id && !$in_set{$adv_id}) {
+                    $in_set{$adv_id} = 1;
+                    push @worklist, $adv_id;
+                }
+            }
+        }
+
+        return [sort { $a <=> $b } keys %in_set];
+    }
+
+    # Compute goto(state, symbol): the set of core_ids reachable by advancing
+    # all items in the state that have the given symbol after their dot.
+    # Returns closure of the advanced kernel, or undef if no items match.
+    method _goto($state_core_ids, $symbol_str, $symbol_is_ref) {
+        my @kernel;
+        for my $core_id ($state_core_ids->@*) {
+            next if $core_index->is_complete($core_id);
+            my $sym = $core_index->symbol_after($core_id);
+            next unless defined $sym;
+
+            # Match by symbol string (value for both terminals and references)
+            my $this_str = $sym->value();
+            my $this_is_ref = $sym->is_reference();
+            next unless $this_str eq $symbol_str && $this_is_ref == $symbol_is_ref;
+
+            my $adv = $core_index->advance($core_id);
+            push @kernel, $adv if defined $adv;
+        }
+        return undef unless @kernel;
+        return $self->_closure(\@kernel);
+    }
+
+    # Build the full DFA via subset construction.
+    method _build_dfa_states() {
+        @states = ();
+        %state_registry = ();
+
+        # Start state: closure of start rule's alternatives at dot=0
+        my $start_rule = $grammar->[0];
+        my @start_kernel;
+        my $expressions = $start_rule->expressions();
+        for my $alt_idx (0 .. $expressions->$#*) {
+            my $id = $core_index->id_for($start_rule->name(), $alt_idx, 0);
+            push @start_kernel, $id if defined $id;
+        }
+        my $start_core_ids = $self->_closure(\@start_kernel);
+        $self->_register_state($start_core_ids);
+
+        # Iterate states, computing goto for each symbol
+        my $i = 0;
+        while ($i < scalar @states) {
+            my $state = $states[$i];
+            my $core_ids = $state->{core_ids};
+
+            # Collect all distinct symbols after the dot in this state
+            my %symbols;  # symbol_str => is_reference
+            for my $core_id ($core_ids->@*) {
+                next if $core_index->is_complete($core_id);
+                my $sym = $core_index->symbol_after($core_id);
+                next unless defined $sym;
+                $symbols{$sym->value()} = $sym->is_reference();
+            }
+
+            # Compute goto for each symbol
+            for my $sym_str (sort keys %symbols) {
+                my $is_ref = $symbols{$sym_str};
+                my $target_core_ids = $self->_goto($core_ids, $sym_str, $is_ref);
+                next unless defined $target_core_ids;
+
+                my $target_id = $self->_register_state($target_core_ids);
+                $state->{goto_table}{$sym_str} = $target_id;
+            }
+
+            $i++;
+        }
+
+        # Populate state_for_core mapping in CoreItemIndex
+        for my $state (@states) {
+            for my $core_id ($state->{core_ids}->@*) {
+                $core_index->set_state_for($core_id, $state->{id});
+            }
+        }
+    }
+
+    # Register a new state or return existing state ID if already known.
+    # Also builds terminal_map and completion_map for new states.
+    method _register_state($core_ids) {
+        my $key = join(',', $core_ids->@*);
+        return $state_registry{$key} if exists $state_registry{$key};
+
+        my $state_id = scalar @states;
+        $state_registry{$key} = $state_id;
+
+        # Build terminal map and completion map
+        my %terminal_map;
+        my %completion_map;
+        for my $core_id ($core_ids->@*) {
+            next if $core_index->is_complete($core_id);
+            my $sym = $core_index->symbol_after($core_id);
+            next unless defined $sym;
+            if ($sym->is_reference()) {
+                my $nt = $sym->value();
+                $completion_map{$nt} //= [];
+                push $completion_map{$nt}->@*, $core_id;
+            } else {
+                my $pattern = $sym->value();
+                $terminal_map{$pattern} //= [];
+                push $terminal_map{$pattern}->@*, $core_id;
+            }
+        }
+
+        push @states, {
+            id             => $state_id,
+            core_ids       => $core_ids,
+            terminal_map   => \%terminal_map,
+            completion_map => \%completion_map,
+            goto_table     => {},
+        };
+
+        return $state_id;
     }
 
     # Compute the set of nullable nonterminals using fixed-point iteration.
