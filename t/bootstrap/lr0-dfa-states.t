@@ -214,4 +214,191 @@ subtest 'DFA invariant: goto transitions are consistent' => sub {
     }
 };
 
+# === Test 10: DFA invariant 2 — nonkernel = prediction closure of kernel ===
+# Design doc Section 5.6: for each state, nonkernel items (dot=0, except
+# start rule kernel items) equal the epsilon-closure of kernel items minus
+# the kernel items themselves.
+subtest 'DFA invariant: nonkernel items equal prediction closure of kernel' => sub {
+    my $states = $dfa->states();
+    my $start_rule_name = $grammar[0]->name();
+
+    for my $state ($states->@*) {
+        my @kernel;
+        my @nonkernel;
+
+        for my $core_id ($state->{core_ids}->@*) {
+            my $dot = $core_index->dot_for($core_id);
+            if ($dot > 0) {
+                # Kernel: items with dot > 0
+                push @kernel, $core_id;
+            } elsif ($state->{id} == 0
+                     && $core_index->rule_name_for($core_id) eq $start_rule_name) {
+                # Start state seed items at dot=0 are kernel, not predictions
+                push @kernel, $core_id;
+            } else {
+                push @nonkernel, $core_id;
+            }
+        }
+
+        # Compute epsilon-closure of kernel items
+        my $closure = $dfa->_closure(\@kernel);
+        my %kernel_set = map { $_ => 1 } @kernel;
+        my @expected_nonkernel = sort { $a <=> $b }
+            grep { !$kernel_set{$_} } $closure->@*;
+        my @actual_nonkernel = sort { $a <=> $b } @nonkernel;
+
+        is_deeply(\@actual_nonkernel, \@expected_nonkernel,
+            "state $state->{id}: nonkernel items match prediction closure of kernel");
+    }
+};
+
+# ====================================================================
+# Nullable grammar for epsilon production tests (I4 + task #2)
+# ====================================================================
+# S      ::= A B
+# A      ::= 'a'        (alt 0)
+#           |            (alt 1, epsilon)
+# B      ::= 'b'
+subtest 'nullable grammar: epsilon production DFA construction' => sub {
+    my @nullable_grammar = (
+        Chalk::Grammar::Rule->new(name => 'S', expressions => [
+            [reference('A'), reference('B')],
+        ]),
+        Chalk::Grammar::Rule->new(name => 'A', expressions => [
+            [terminal('a')],
+            [],  # epsilon
+        ]),
+        Chalk::Grammar::Rule->new(name => 'B', expressions => [
+            [terminal('b')],
+        ]),
+    );
+
+    my %nullable_rule_table = map { $_->name() => $_ } @nullable_grammar;
+    my $nullable_ci = Chalk::Bootstrap::CoreItemIndex->new();
+    $nullable_ci->build_from_grammar(\@nullable_grammar);
+
+    my $nullable_dfa = Chalk::Bootstrap::LR0DFA->new(
+        grammar    => \@nullable_grammar,
+        core_index => $nullable_ci,
+        rule_table => \%nullable_rule_table,
+    );
+    $nullable_dfa->build();
+
+    my $nstates = $nullable_dfa->states();
+    ok(scalar $nstates->@* > 0, 'nullable grammar produces states');
+
+    # A is nullable, so _compute_nullable_set should detect it
+    ok($nullable_dfa->is_nullable('A'), 'A is nullable (has epsilon production)');
+    ok(!$nullable_dfa->is_nullable('B'), 'B is not nullable');
+    ok(!$nullable_dfa->is_nullable('S'), 'S is not nullable (B is required)');
+
+    # Start state should contain S -> . A B at dot=0, and also
+    # S -> A . B at dot=1 (because A is nullable, closure advances past it)
+    my $start = $nullable_dfa->state(0);
+    my $s_0_0 = $nullable_ci->id_for('S', 0, 0);
+    my $s_0_1 = $nullable_ci->id_for('S', 0, 1);
+    my %in_start = map { $_ => 1 } $start->{core_ids}->@*;
+    ok($in_start{$s_0_0}, 'start state has S -> . A B');
+    ok($in_start{$s_0_1}, 'start state has S -> A . B (nullable advancement past A)');
+
+    # The start state should expect both 'a' (from A -> . 'a') and 'b'
+    # (from B -> . 'b', predicted via the nullable-advanced S -> A . B)
+    my $tmap = $start->{terminal_map};
+    ok(exists $tmap->{'a'}, 'start state expects terminal "a" (from A)');
+    ok(exists $tmap->{'b'}, 'start state expects terminal "b" (from B via nullable A)');
+
+    # Verify invariants on nullable grammar
+    for my $state ($nstates->@*) {
+        for my $core_id ($state->{core_ids}->@*) {
+            next if $nullable_ci->is_complete($core_id);
+            my $sym = $nullable_ci->symbol_after($core_id);
+            next unless defined $sym;
+            if ($sym->is_reference()) {
+                ok(exists $state->{completion_map}{$sym->value()},
+                    "nullable state $state->{id}: completion_map has '${\$sym->value()}'");
+            } else {
+                ok(exists $state->{terminal_map}{$sym->value()},
+                    "nullable state $state->{id}: terminal_map has '${\$sym->value()}'");
+            }
+        }
+    }
+};
+
+# ====================================================================
+# Error-path tests (I4)
+# ====================================================================
+
+# Circular nonterminals should terminate without infinite loop
+subtest 'circular nonterminal references terminate' => sub {
+    my @circular_grammar = (
+        Chalk::Grammar::Rule->new(name => 'A', expressions => [
+            [reference('B')],
+        ]),
+        Chalk::Grammar::Rule->new(name => 'B', expressions => [
+            [reference('A')],
+            [terminal('x')],
+        ]),
+    );
+
+    my %circ_rt = map { $_->name() => $_ } @circular_grammar;
+    my $circ_ci = Chalk::Bootstrap::CoreItemIndex->new();
+    $circ_ci->build_from_grammar(\@circular_grammar);
+
+    my $circ_dfa = Chalk::Bootstrap::LR0DFA->new(
+        grammar    => \@circular_grammar,
+        core_index => $circ_ci,
+        rule_table => \%circ_rt,
+    );
+    $circ_dfa->build();
+
+    ok(scalar $circ_dfa->states()->@* > 0,
+        'circular grammar produces states without infinite loop');
+
+    # Both A and B should be predicted in the start state
+    my $start = $circ_dfa->state(0);
+    my %in_start = map { $_ => 1 } $start->{core_ids}->@*;
+    my $a_0_0 = $circ_ci->id_for('A', 0, 0);
+    my $b_0_0 = $circ_ci->id_for('B', 0, 0);
+    my $b_1_0 = $circ_ci->id_for('B', 1, 0);
+    ok($in_start{$a_0_0}, 'start state contains A -> . B');
+    ok($in_start{$b_0_0}, 'start state contains B -> . A (circular prediction)');
+    ok($in_start{$b_1_0}, 'start state contains B -> . x');
+};
+
+# Empty grammar should die with clear message
+subtest 'empty grammar dies with descriptive error' => sub {
+    my $empty_ci = Chalk::Bootstrap::CoreItemIndex->new();
+    my $empty_dfa = Chalk::Bootstrap::LR0DFA->new(
+        grammar    => [],
+        core_index => $empty_ci,
+        rule_table => {},
+    );
+
+    eval { $empty_dfa->build() };
+    like($@, qr/Cannot build DFA from empty grammar/,
+        'empty grammar produces descriptive error');
+};
+
+# Double build() should die
+subtest 'double build() dies' => sub {
+    my @simple_grammar = (
+        Chalk::Grammar::Rule->new(name => 'S', expressions => [
+            [terminal('x')],
+        ]),
+    );
+    my %simple_rt = map { $_->name() => $_ } @simple_grammar;
+    my $simple_ci = Chalk::Bootstrap::CoreItemIndex->new();
+    $simple_ci->build_from_grammar(\@simple_grammar);
+
+    my $simple_dfa = Chalk::Bootstrap::LR0DFA->new(
+        grammar    => \@simple_grammar,
+        core_index => $simple_ci,
+        rule_table => \%simple_rt,
+    );
+    $simple_dfa->build();
+
+    eval { $simple_dfa->build() };
+    like($@, qr/already called/, 'double build() produces descriptive error');
+};
+
 done_testing;
