@@ -62,7 +62,7 @@ class Chalk::Bootstrap::LR0DFA {
         my @worklist = $kernel->@*;
 
         while (@worklist) {
-            my $core_id = shift @worklist;
+            my $core_id = pop @worklist;
             next if $core_index->is_complete($core_id);
             my $sym = $core_index->symbol_after($core_id);
             next unless defined $sym && $sym->is_reference();
@@ -135,26 +135,31 @@ class Chalk::Bootstrap::LR0DFA {
         my $start_core_ids = $self->_closure(\@start_kernel);
         $self->_register_state($start_core_ids);
 
-        # Iterate states, computing goto for each symbol
+        # Iterate states, computing goto for each symbol.
+        # Single pass per state: group advanced items by symbol, then close each kernel.
+        # Avoids O(S*I) rescanning that _goto per symbol would cause.
         my $i = 0;
         while ($i < scalar @states) {
             my $state = $states[$i];
             my $core_ids = $state->{core_ids};
 
-            # Collect all distinct symbols after the dot in this state
-            my %symbols;  # symbol_str => is_reference
+            # Single pass: collect advanced core_ids grouped by symbol
+            my %kernels;  # symbol_str => [advanced core_ids]
             for my $core_id ($core_ids->@*) {
                 next if $core_index->is_complete($core_id);
                 my $sym = $core_index->symbol_after($core_id);
                 next unless defined $sym;
-                $symbols{$sym->value()} = $sym->is_reference();
+                my $adv = $core_index->advance($core_id);
+                next unless defined $adv;
+                my $sym_str = $sym->value();
+                $kernels{$sym_str} //= [];
+                push $kernels{$sym_str}->@*, $adv;
             }
 
-            # Compute goto for each symbol
-            for my $sym_str (sort keys %symbols) {
-                my $is_ref = $symbols{$sym_str};
-                my $target_core_ids = $self->_goto($core_ids, $sym_str, $is_ref);
-                next unless defined $target_core_ids;
+            # Compute closure of each kernel and register as target state
+            for my $sym_str (sort keys %kernels) {
+                my $target_core_ids = $self->_closure($kernels{$sym_str});
+                next unless $target_core_ids->@*;
 
                 my $target_id = $self->_register_state($target_core_ids);
                 $state->{goto_table}{$sym_str} = $target_id;
