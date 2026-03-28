@@ -195,18 +195,17 @@ subtest 'DFA invariant: goto transitions are consistent' => sub {
 
             # Every core_id in this state that has $sym_str after its dot,
             # when advanced, should appear in the target state.
-            # goto_table keys are prefixed "t:" or "n:" — match the same way.
+            # goto_table keys use Symbol->goto_key() — match the same way.
+            my %in_target = map { $_ => 1 } $target->{core_ids}->@*;
             for my $core_id ($state->{core_ids}->@*) {
                 next if $core_index->is_complete($core_id);
                 my $sym = $core_index->symbol_after($core_id);
                 next unless defined $sym;
-                my $sym_key = ($sym->is_reference() ? 'n:' : 't:') . $sym->value();
-                next unless $sym_key eq $sym_str;
+                next unless $sym->goto_key() eq $sym_str;
 
                 my $advanced = $core_index->advance($core_id);
                 next unless defined $advanced;
 
-                my %in_target = map { $_ => 1 } $target->{core_ids}->@*;
                 ok($in_target{$advanced},
                     "state $state->{id}: advance($core_id) = $advanced is in goto target $target_id");
             }

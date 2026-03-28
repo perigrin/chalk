@@ -13,6 +13,11 @@ class Chalk::Grammar::Symbol {
     method is_reference()  { $type eq 'reference' }
     method is_quantified() { defined $quantifier }
 
+    # Prefixed key for DFA goto_table: "t:value" for terminals, "n:value" for
+    # nonterminals. Prevents collisions when a terminal pattern string matches
+    # a nonterminal name.
+    method goto_key() { ($type eq 'reference' ? 'n:' : 't:') . $value }
+
     method to_string() {
         my $str = $self->is_terminal() ? "/$value/" : $value;
         $str .= $quantifier if defined $quantifier;

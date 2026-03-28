@@ -33,7 +33,6 @@ class Chalk::Bootstrap::LR0DFA {
     # Accessors for DFA states
     method states()         { return \@states }
     method state($id)       { return $states[$id] }
-    method state_count_dfa(){ return scalar @states }
 
     # Build the DFA: nullable set, prediction closures, then full state construction.
     # DFA states are infrastructure for Issues #3-5 (DFA-factored prediction,
@@ -126,25 +125,24 @@ class Chalk::Bootstrap::LR0DFA {
         $self->_register_state($start_core_ids);
 
         # Iterate states, computing goto for each symbol.
-        # Single pass per state: group advanced items by symbol, then close each kernel.
-        # Avoids O(S*I) rescanning that _goto per symbol would cause.
+        # Single pass per state groups advanced items by symbol, then closes
+        # each kernel — avoids O(S*I) per-symbol rescanning of all items.
         my $i = 0;
         while ($i < scalar @states) {
             my $state = $states[$i];
             my $core_ids = $state->{core_ids};
 
             # Single pass: collect advanced core_ids grouped by symbol.
-            # Keys are prefixed with "t:" (terminal) or "n:" (nonterminal)
-            # to prevent collisions between terminal patterns and rule names
-            # that happen to share the same string value.
-            my %kernels;  # "t:pattern" or "n:name" => [advanced core_ids]
+            # Keys use Symbol->goto_key() ("t:pattern" or "n:name") to prevent
+            # collisions between terminal patterns and nonterminal rule names.
+            my %kernels;  # goto_key => [advanced core_ids]
             for my $core_id ($core_ids->@*) {
                 next if $core_index->is_complete($core_id);
                 my $sym = $core_index->symbol_after($core_id);
                 next unless defined $sym;
                 my $adv = $core_index->advance($core_id);
                 next unless defined $adv;
-                my $sym_key = ($sym->is_reference() ? 'n:' : 't:') . $sym->value();
+                my $sym_key = $sym->goto_key();
                 $kernels{$sym_key} //= [];
                 push $kernels{$sym_key}->@*, $adv;
             }

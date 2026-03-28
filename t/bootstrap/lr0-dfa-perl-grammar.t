@@ -129,8 +129,7 @@ SKIP: {
                     next if $core_index->is_complete($core_id);
                     my $sym = $core_index->symbol_after($core_id);
                     next unless defined $sym;
-                    my $this_key = ($sym->is_reference() ? 'n:' : 't:') . $sym->value();
-                    next unless $this_key eq $sym_key;
+                    next unless $sym->goto_key() eq $sym_key;
 
                     my $advanced = $core_index->advance($core_id);
                     next unless defined $advanced;
