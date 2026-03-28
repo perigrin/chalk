@@ -78,11 +78,6 @@ class Chalk::Bootstrap::Earley {
     # Detailed parse profiling (parse-lifetime, only populated when EARLEY_PROFILE is set)
     field %_profile_data;
 
-    # Prediction cache: core_set_hash => [predicted rule names]
-    # Key is comma-joined sorted core_id list (same string used in core_set_registry).
-    # Grammar-lifetime: same core set always produces the same predictions.
-    field %_prediction_cache;
-
     # Terminal map cache: core_set_id => { pattern_str => [core_ids] }
     # Maps each terminal pattern expected by a core set to the core_ids waiting for it.
     # Grammar-lifetime: same core set always expects the same terminals.
@@ -99,10 +94,6 @@ class Chalk::Bootstrap::Earley {
     # Narrows _complete search from all-grammar to only-this-core-set.
     # Grammar-lifetime.
     field %_completion_map_cache;
-
-    # Set reuse statistics (parse-lifetime)
-    field %_reuse_stats;
-
 
     ADJUST {
         $rule_table = {};
@@ -168,18 +159,16 @@ class Chalk::Bootstrap::Earley {
         %_dist_stats = ();
         %_set_registry = ();
         %_scan_stats = ();
-        %_reuse_stats = ();
         %_profile_data = ();
     }
 
     # Clear all caches including grammar-lifetime data (core set registry,
-    # DFA tables, prediction cache). The grammar itself is immutable after
-    # construction; to use a different grammar, create a new Earley instance.
+    # DFA tables). The grammar itself is immutable after construction;
+    # to use a different grammar, create a new Earley instance.
     method _clear_grammar_caches() {
         $self->reset_parse_state();
         %_core_set_registry = ();
         $_core_set_next_id = 0;
-        %_prediction_cache = ();
         %_terminal_map_cache = ();
         %_combined_scan_cache = ();
         %_completion_map_cache = ();
@@ -432,14 +421,12 @@ class Chalk::Bootstrap::Earley {
     # Report the chart origin dimension type (for testing)
     method chart_origin_type() { return 'ARRAY'; }
 
-    # Accessors for distance stats, set registry, scan stats, prediction cache, reuse stats
+    # Accessors for distance stats, set registry, scan stats
     method distance_stats() { return \%_dist_stats; }
     method set_registry() { return \%_set_registry; }
     method scan_stats() { return \%_scan_stats; }
     method terminal_map_cache() { return \%_terminal_map_cache; }
     method completion_map_cache() { return \%_completion_map_cache; }
-    method prediction_cache() { return \%_prediction_cache; }
-    method reuse_stats() { return \%_reuse_stats; }
 
     # Get the symbol after the dot for a core item (O(1) precomputed lookup)
     method _symbol_after_dot_for($core_id) {
@@ -475,7 +462,6 @@ class Chalk::Bootstrap::Earley {
         %_dist_stats = (max_distance => 0);
         %_set_registry = ();
         %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
-        %_reuse_stats = (prediction_reuses => 0, prediction_computes => 0);
         %_profile_data = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
@@ -524,46 +510,23 @@ class Chalk::Bootstrap::Earley {
             my @processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
 
-            # Set reuse: pre-predict all nonterminals expected by this core set.
-            # On first encounter, discover which nonterminals the core set expects
-            # and cache the list. On subsequent encounters, reuse the cached list.
+            # Pre-predict all nonterminals expected by active items.
+            # Uses DFA prediction closure directly — no per-position caching needed.
+            # The DFA closure IS the cache: prediction_items_for() is O(1) per
+            # nonterminal, and %predicted_at prevents re-predicting the same rule.
             if ($pos < $n && defined $chart[$pos] && $chart[$pos]->@*) {
-                # Compute preliminary core set hash from current entries
-                my @pre_active;
                 for my $cid (0 .. $chart[$pos]->$#*) {
                     my $oh = $chart[$pos][$cid];
-                    if (defined $oh) {
-                        for my $v ($oh->@*) {
-                            if (defined $v) { push @pre_active, $cid; last; }
-                        }
+                    next unless defined $oh;
+                    my $has_values = false;
+                    for my $v ($oh->@*) {
+                        if (defined $v) { $has_values = true; last; }
                     }
-                }
-                my $pre_hash = join(",", @pre_active);
-
-                if (exists $_prediction_cache{$pre_hash}) {
-                    # Reuse cached predictions
-                    my $cached_rules = $_prediction_cache{$pre_hash};
-                    for my $rn ($cached_rules->@*) {
-                        $self->_predict($rn, $pos, \@chart, \@agenda, \%predicted_at);
-                    }
-                    $_reuse_stats{prediction_reuses}++;
-                } else {
-                    # First encounter: collect nonterminals for this core set
-                    my @expected_nonterminals;
-                    my %seen_nt;
-                    for my $cid (@pre_active) {
-                        next if $ci_completions->[$cid];
-                        my $sym = $ci_symbols_after->[$cid];
-                        next unless defined $sym && $sym->is_reference();
-                        my $rn = $sym->value();
-                        push @expected_nonterminals, $rn unless $seen_nt{$rn}++;
-                    }
-                    $_prediction_cache{$pre_hash} = \@expected_nonterminals;
-
-                    for my $rn (@expected_nonterminals) {
-                        $self->_predict($rn, $pos, \@chart, \@agenda, \%predicted_at);
-                    }
-                    $_reuse_stats{prediction_computes}++;
+                    next unless $has_values;
+                    next if $ci_completions->[$cid];
+                    my $sym = $ci_symbols_after->[$cid];
+                    next unless defined $sym && $sym->is_reference();
+                    $self->_predict($sym->value(), $pos, \@chart, \@agenda, \%predicted_at);
                 }
             }
 
@@ -1243,18 +1206,10 @@ class Chalk::Bootstrap::Earley {
             $leo_resolved_origin = $leo->{wait_origin};
         }
 
-        # Look up items waiting for this rule name. Use the completion map
-        # for the origin position's core set when available (narrows from
-        # all-grammar to only core_ids present at the origin). Falls back to
-        # the global %_waiting_core_ids for same-position completions where
-        # the origin's core set hasn't been discovered yet.
-        my $origin_cs_id = $_pos_core_set[$origin];
-        my $chart_waiting_ids;
-        if (defined $origin_cs_id && exists $_completion_map_cache{$origin_cs_id}) {
-            $chart_waiting_ids = $_completion_map_cache{$origin_cs_id}{$rule_name};
-        } else {
-            $chart_waiting_ids = $_waiting_core_ids{$rule_name};
-        }
+        # Look up items waiting for this rule name. Uses the precomputed
+        # global %_waiting_core_ids as the candidate set. The chart liveness
+        # check below (defined $oh) filters to only live items at origin.
+        my $chart_waiting_ids = $_waiting_core_ids{$rule_name};
         return unless defined $chart_waiting_ids;
 
         # Count non-zero waiting items and track the single candidate for Leo
