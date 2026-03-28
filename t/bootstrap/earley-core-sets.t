@@ -1,5 +1,5 @@
-# ABOUTME: Tests for core set discovery and GC lifetime (Component 5, #654).
-# ABOUTME: Verifies core sets are registered and parse-lifetime GC works.
+# ABOUTME: Tests that the DFA provides correct structural information for parsing.
+# ABOUTME: Verifies DFA states, prediction, and parse correctness across resets.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -10,7 +10,6 @@ use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
 
-# Helper to create terminal symbol
 sub terminal($value) {
     return Chalk::Grammar::Symbol->new(
         type  => 'terminal',
@@ -18,7 +17,6 @@ sub terminal($value) {
     );
 }
 
-# Helper to create reference symbol (nonterminal)
 sub reference($value) {
     return Chalk::Grammar::Symbol->new(
         type  => 'reference',
@@ -50,59 +48,60 @@ my $parser = Chalk::Bootstrap::Earley->new(
     semiring => $semiring,
 );
 
-# Test 1: core_set_registry exists and is populated after parsing
-{
-    ok($parser->parse('a,b,c'), "parse succeeds");
+# Test 1: DFA is built at construction time and has states
+subtest 'DFA built at construction' => sub {
+    my $dfa = $parser->lr0_dfa();
+    ok(defined $dfa, "lr0_dfa accessor exists");
+    my $states = $dfa->states();
+    ok(scalar $states->@* > 0, "DFA has states");
+    ok($dfa->state_count() > 0, "state_count is positive");
+};
 
-    my $registry = $parser->core_set_registry();
-    ok(defined $registry, "core_set_registry accessor exists");
-    ok(ref($registry) eq 'HASH', "core_set_registry returns a hashref");
-
-    my $count = scalar keys $registry->%*;
-    ok($count > 0, "core_set_registry has entries ($count core sets)");
-    # For "a,b,c" there are 6 positions (0..5), but some share core sets
-    ok($count < 6, "fewer core sets than positions (reuse detected)");
-}
-
-# Test 2: parse_state can be reset while preserving grammar-lifetime data
-{
-    my $registry_before = $parser->core_set_registry();
-    my $count_before = scalar keys $registry_before->%*;
+# Test 2: parse correctness preserved after reset_parse_state
+subtest 'parse correctness across resets' => sub {
+    ok($parser->parse('a,b,c'), "first parse: accepts 'a,b,c'");
 
     $parser->reset_parse_state();
-
-    my $registry_after = $parser->core_set_registry();
-
-    is(scalar keys $registry_after->%*, $count_before,
-        "core_set_registry preserved after reset_parse_state");
-}
-
-# Test 4: sequential parses produce correct results after reset
-{
-    $parser->reset_parse_state();
-    ok($parser->parse('x,y'), "first parse after reset: accepts 'x,y'");
+    ok($parser->parse('x,y'), "after reset: accepts 'x,y'");
 
     $parser->reset_parse_state();
-    ok($parser->parse('a,b,c,d'), "second parse after reset: accepts 'a,b,c,d'");
+    ok($parser->parse('a,b,c,d'), "after second reset: accepts 'a,b,c,d'");
 
     $parser->reset_parse_state();
-    ok(!$parser->parse('a,,b'), "third parse after reset: rejects 'a,,b'");
-}
+    ok(!$parser->parse('a,,b'), "after third reset: rejects 'a,,b'");
+};
 
-# Test 5: core set sharing — repetitive patterns share core sets
-{
+# Test 3: DFA state properties are consistent
+subtest 'DFA state invariants' => sub {
+    my $dfa = $parser->lr0_dfa();
+    my $core_index = $parser->core_index();
+    my $states = $dfa->states();
+
+    for my $state ($states->@*) {
+        # Every non-complete item with a terminal should be in terminal_map
+        for my $core_id ($state->{core_ids}->@*) {
+            next if $core_index->is_complete($core_id);
+            my $sym = $core_index->symbol_after($core_id);
+            next unless defined $sym;
+            if ($sym->is_reference()) {
+                ok(exists $state->{completion_map}{$sym->value()},
+                    "state $state->{id}: completion_map has '${\$sym->value()}'");
+            } else {
+                ok(exists $state->{terminal_map}{$sym->value()},
+                    "state $state->{id}: terminal_map has '${\$sym->value()}'");
+            }
+        }
+    }
+};
+
+# Test 4: long list parses correctly (exercises DFA across many positions)
+subtest 'long list parsing' => sub {
     $parser->reset_parse_state();
-    # Clear registry to measure fresh
-    my $old_registry = $parser->core_set_registry();
-    $parser->_clear_grammar_caches();  # full reset for measurement
+    ok($parser->parse('a,b,c,d,e,f,g,h'), "8-item list parses");
 
-    ok($parser->parse('a,b,c,d,e,f,g,h'), "parse long list");
-
-    my $registry = $parser->core_set_registry();
-    my $core_set_count = scalar keys $registry->%*;
-    # For "a,b,c,d,e,f,g,h" (15 positions), many positions share core sets
-    # because the repeating pattern (Item, Comma, Item, ...) cycles
-    ok($core_set_count < 15, "core set reuse: $core_set_count sets for 15 positions");
-}
+    $parser->reset_parse_state();
+    my $long = join(',', ('x') x 100);
+    ok($parser->parse($long), "100-item list parses");
+};
 
 done_testing;

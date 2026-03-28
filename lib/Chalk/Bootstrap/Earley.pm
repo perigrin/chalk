@@ -57,43 +57,11 @@ class Chalk::Bootstrap::Earley {
     # GC statistics for the most recent parse
     field %_gc_stats;
 
-    # Core set registry: hash_key => { id => int, core_ids => sorted arrayref }
-    # Grammar-lifetime: survives reset_parse_state, cleared by _clear_grammar_caches.
-    field %_core_set_registry;
-    field $_core_set_next_id = 0;
-
-
-    # Core set id per chart position (parse-lifetime)
-    field @_pos_core_set;
-
-    # Distance statistics for the most recent parse (parse-lifetime)
-    field %_dist_stats;
-
-    # Set registry: (core_set_id, distance_vector_hash) pairs (parse-lifetime)
-    field %_set_registry;
-
     # Scan statistics for terminal clustering
     field %_scan_stats;
 
     # Detailed parse profiling (parse-lifetime, only populated when EARLEY_PROFILE is set)
     field %_profile_data;
-
-    # Terminal map cache: core_set_id => { pattern_str => [core_ids] }
-    # Maps each terminal pattern expected by a core set to the core_ids waiting for it.
-    # Grammar-lifetime: same core set always expects the same terminals.
-    field %_terminal_map_cache;
-
-    # Combined scan regex per core set: core_set_id => { re => qr/.../, patterns => [...] }
-    # A single alternation regex with positional captures that replaces N individual
-    # regex matches with one match. @-/@+ identify which branch matched.
-    # Grammar-lifetime.
-    field %_combined_scan_cache;
-
-    # Completion map cache: core_set_id => { nonterminal_name => [core_ids] }
-    # For each nonterminal, which core_ids in this core set are waiting for it.
-    # Narrows _complete search from all-grammar to only-this-core-set.
-    # Grammar-lifetime.
-    field %_completion_map_cache;
 
     ADJUST {
         $rule_table = {};
@@ -143,11 +111,10 @@ class Chalk::Bootstrap::Earley {
     }
 
     # Core set registry and DFA table accessors (grammar-lifetime)
-    method core_set_registry() { return \%_core_set_registry; }
+    method lr0_dfa() { return $lr0_dfa; }
 
 
     # Reset parse-lifetime state (chart, completed_at, leo_items, scan_cache),
-    # preserving grammar-lifetime data (core_set_registry, DFA tables).
     method reset_parse_state() {
         %completed_at = ();
         %leo_items = ();
@@ -155,128 +122,8 @@ class Chalk::Bootstrap::Earley {
         %_gc_stats = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
-        @_pos_core_set = ();
-        %_dist_stats = ();
-        %_set_registry = ();
         %_scan_stats = ();
         %_profile_data = ();
-    }
-
-    # Clear all caches including grammar-lifetime data (core set registry,
-    # DFA tables). The grammar itself is immutable after construction;
-    # to use a different grammar, create a new Earley instance.
-    method _clear_grammar_caches() {
-        $self->reset_parse_state();
-        %_core_set_registry = ();
-        $_core_set_next_id = 0;
-        %_terminal_map_cache = ();
-        %_combined_scan_cache = ();
-        %_completion_map_cache = ();
-    }
-
-    # Discover the core set for a chart position: collect active core_ids,
-    # sort them, hash for dedup, register if new. Returns core_set_id.
-    method _discover_core_set($chart, $pos) {
-        # Collect active core_ids at this position
-        my @active;
-        my $slot = $chart->[$pos];
-        for my $core_id (0 .. $slot->$#*) {
-            my $oh = $slot->[$core_id];
-            next unless defined $oh;
-            # Check if any defined values exist in the array
-            my $has_values = false;
-            for my $v ($oh->@*) {
-                if (defined $v) { $has_values = true; last; }
-            }
-            next unless $has_values;
-            push @active, $core_id;
-        }
-        # @active is already sorted (iterated in order)
-
-        # Hash the sorted array for dedup lookup
-        my $hash_key = join(",", @active);
-
-        if (exists $_core_set_registry{$hash_key}) {
-            my $cs_id = $_core_set_registry{$hash_key}{id};
-            $_pos_core_set[$pos] = $cs_id;
-            return $cs_id;
-        }
-
-        # Register new core set
-        my $cs_id = $_core_set_next_id++;
-        $_core_set_registry{$hash_key} = {
-            id       => $cs_id,
-            core_ids => \@active,
-        };
-        $_pos_core_set[$pos] = $cs_id;
-
-        # Build terminal map and completion map for this core set.
-        # Terminal map: pattern_str => [core_ids expecting that terminal]
-        # Completion map: nonterminal_name => [core_ids waiting for it]
-        my $ci_completions   = $core_index->completions();
-        my $ci_symbols_after = $core_index->symbols_after();
-
-        my %terminal_map;
-        my %completion_map;
-        for my $core_id (@active) {
-            next if $ci_completions->[$core_id];
-            my $sym = $ci_symbols_after->[$core_id];
-            next unless defined $sym;
-            if ($sym->is_reference()) {
-                my $nt = $sym->value();
-                $completion_map{$nt} //= [];
-                push $completion_map{$nt}->@*, $core_id;
-            } else {
-                my $pattern = $sym->value();
-                $terminal_map{$pattern} //= [];
-                push $terminal_map{$pattern}->@*, $core_id;
-            }
-        }
-        $_terminal_map_cache{$cs_id} = \%terminal_map;
-        $_completion_map_cache{$cs_id} = \%completion_map;
-
-        # Build combined scan regex: one alternation with positional captures.
-        # Replaces N individual regex matches with a single match per position.
-        # @-/@+ after matching identify which branch (pattern) matched.
-        my @sorted_patterns = sort keys %terminal_map;
-        if (@sorted_patterns) {
-            my $combined = join('|', map { "($_)" } @sorted_patterns);
-            $_combined_scan_cache{$cs_id} = {
-                re       => qr/\G(?:$combined)/,
-                patterns => \@sorted_patterns,
-            };
-        }
-
-        return $cs_id;
-    }
-
-    # Build distance vector for a chart position and register in set registry.
-    # Called after core set discovery. Tracks max distance for stats.
-    method _register_distance_vector($chart, $pos, $cs_id) {
-        my $slot = $chart->[$pos];
-        my @dist_pairs;
-
-        for my $core_id (0 .. $slot->$#*) {
-            my $oh = $slot->[$core_id];
-            next unless defined $oh;
-            for my $rd (0 .. $oh->$#*) {
-                next unless defined $oh->[$rd];
-                push @dist_pairs, "$core_id:$rd";
-                # Track max distance
-                if (!defined $_dist_stats{max_distance} || $rd > $_dist_stats{max_distance}) {
-                    $_dist_stats{max_distance} = $rd;
-                }
-            }
-        }
-
-        my $dist_hash = join(";", sort @dist_pairs);
-        my $set_key = "$cs_id:$dist_hash";
-        $_set_registry{$set_key} //= {
-            core_set_id => $cs_id,
-            dist_hash   => $dist_hash,
-            count       => 0,
-        };
-        $_set_registry{$set_key}{count}++;
     }
 
     method profile_data() { return \%_profile_data; }
@@ -421,12 +268,8 @@ class Chalk::Bootstrap::Earley {
     # Report the chart origin dimension type (for testing)
     method chart_origin_type() { return 'ARRAY'; }
 
-    # Accessors for distance stats, set registry, scan stats
-    method distance_stats() { return \%_dist_stats; }
-    method set_registry() { return \%_set_registry; }
+    # Accessor for scan statistics
     method scan_stats() { return \%_scan_stats; }
-    method terminal_map_cache() { return \%_terminal_map_cache; }
-    method completion_map_cache() { return \%_completion_map_cache; }
 
     # Get the symbol after the dot for a core item (O(1) precomputed lookup)
     method _symbol_after_dot_for($core_id) {
@@ -459,13 +302,10 @@ class Chalk::Bootstrap::Earley {
         %leo_items = ();
         %_scan_cache = ();
         %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
-        %_dist_stats = (max_distance => 0);
-        %_set_registry = ();
         %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
         %_profile_data = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
-        @_pos_core_set = ();
 
         # Find the start rule (first rule in grammar).
         # Convention: grammar->[0] is the start rule (same as LR0DFA.pm).
@@ -820,15 +660,6 @@ class Chalk::Bootstrap::Earley {
                 warn sprintf("ORIGIN_DEBUG pos=%d true_min=%d (at q=%d) oldest_live=%d could_free=%d\n",
                     $pos, $true_min, $min_at_q, $oldest_live_pos,
                     $true_min - $oldest_live_pos);
-            }
-
-            # Core set discovery: identify the set of active core_ids at this
-            # position and register in the core set registry. DFA tables are
-            # built lazily on first encounter. Only discover if the position
-            # has active items (after GC may have cleared it).
-            if (defined $chart[$pos] && $chart[$pos]->@*) {
-                my $cs_id = $self->_discover_core_set(\@chart, $pos);
-                $self->_register_distance_vector(\@chart, $pos, $cs_id);
             }
 
             # Profiling: track chart size and live positions per position

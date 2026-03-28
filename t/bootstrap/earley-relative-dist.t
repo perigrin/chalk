@@ -1,5 +1,5 @@
-# ABOUTME: Tests for relative distance chart representation (Component 6, #655).
-# ABOUTME: Verifies chart uses arrays for origin dimension and distance vectors are small.
+# ABOUTME: Tests for relative distance chart representation.
+# ABOUTME: Verifies chart uses arrays for origin dimension and parsing is correct.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -10,7 +10,6 @@ use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::Boolean;
 
-# Helper to create terminal symbol
 sub terminal($value) {
     return Chalk::Grammar::Symbol->new(
         type  => 'terminal',
@@ -18,7 +17,6 @@ sub terminal($value) {
     );
 }
 
-# Helper to create reference symbol (nonterminal)
 sub reference($value) {
     return Chalk::Grammar::Symbol->new(
         type  => 'reference',
@@ -50,45 +48,14 @@ my $parser = Chalk::Bootstrap::Earley->new(
     semiring => $semiring,
 );
 
-# Test 1: chart origin dimension is now an array (not a hash)
-# After the refactor, $chart[$pos][$core_id] should be an ARRAY ref
-# containing values indexed by relative distance, not a HASH ref
-# keyed by absolute origin.
+# Test 1: chart origin dimension is array (relative distances)
 {
     ok($parser->parse('a,b,c'), "parse succeeds");
-
-    # Access the chart structure to verify array representation.
-    # The chart_origin_type method returns 'ARRAY' or 'HASH' based on
-    # the internal representation.
     my $origin_type = $parser->chart_origin_type();
     is($origin_type, 'ARRAY', "chart origin dimension is array (relative distances)");
 }
 
-# Test 2: distance vectors contain small relative integers
-{
-    $parser->reset_parse_state();
-    ok($parser->parse('a,b,c,d,e'), "parse long list");
-
-    my $dist_stats = $parser->distance_stats();
-    ok(defined $dist_stats, "distance_stats accessor exists");
-    ok($dist_stats->{max_distance} >= 0, "max distance is non-negative");
-    # For a comma-separated list, relative distances should be small
-    # (most items have origin close to current position)
-    ok($dist_stats->{max_distance} < 20,
-        "max distance is small ($dist_stats->{max_distance} < 20)");
-}
-
-# Test 3: set registry records (core_set_id, distance_vector_hash) pairs
-{
-    my $set_registry = $parser->set_registry();
-    ok(defined $set_registry, "set_registry accessor exists");
-    ok(ref($set_registry) eq 'HASH', "set_registry is a hashref");
-
-    my $count = scalar keys $set_registry->%*;
-    ok($count > 0, "set_registry has entries ($count)");
-}
-
-# Test 4: parse correctness preserved across all patterns
+# Test 2: parse correctness preserved across all patterns
 {
     $parser->reset_parse_state();
     ok($parser->parse('x'), "single item");
@@ -102,7 +69,7 @@ my $parser = Chalk::Bootstrap::Earley->new(
     ok(!$parser->parse('a,'), "rejects trailing comma");
 }
 
-# Test 5: right-recursive correctness with relative distances
+# Test 3: right-recursive correctness with relative distances
 {
     my $rr_grammar = [
         Chalk::Grammar::Rule->new(
@@ -131,7 +98,7 @@ my $parser = Chalk::Bootstrap::Earley->new(
     ok(!$rr_parser->parse('a,,b'), "right-recursive: rejects 'a,,b'");
 }
 
-# Test 6: parse_value returns correct value (not just boolean)
+# Test 4: parse_value returns correct value
 {
     $parser->reset_parse_state();
     my $value = $parser->parse_value('a,b');
