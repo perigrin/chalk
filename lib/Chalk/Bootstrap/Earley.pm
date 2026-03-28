@@ -988,11 +988,16 @@ class Chalk::Bootstrap::Earley {
             $leo_resolved_origin = $leo->{wait_origin};
         }
 
-        # Look up items waiting for this rule name. Uses the precomputed
-        # global %_waiting_core_ids as the candidate set. The chart liveness
-        # check below (defined $oh) filters to only live items at origin.
+        # Three-layer completion filter (design doc Section 7.5):
+        # Layer 1: global_waiting_core_ids — all grammar-wide candidates
+        # Layer 2: DFA state completion_map — narrows to candidates whose
+        #          DFA state actually expects this nonterminal
+        # Layer 3: chart liveness — confirms the waiter has a defined value
         my $chart_waiting_ids = $_waiting_core_ids{$rule_name};
         return unless defined $chart_waiting_ids;
+
+        # Cache DFA state lookups for layer 2 filtering
+        my $ci_states = $core_index->states_for_bulk();
 
         # Count non-zero waiting items and track the single candidate for Leo
         my $eligible_count = 0;
@@ -1001,6 +1006,15 @@ class Chalk::Bootstrap::Earley {
         my $leo_candidate_value;
 
         for my $w_core_id ($chart_waiting_ids->@*) {
+            # Layer 2: DFA state narrowing — skip waiters whose DFA state
+            # does not expect this nonterminal in its completion map.
+            my $w_state_id = $ci_states->[$w_core_id];
+            if (defined $w_state_id) {
+                my $w_state = $lr0_dfa->state($w_state_id);
+                next unless exists $w_state->{completion_map}{$rule_name};
+            }
+
+            # Layer 3: chart liveness — confirm waiter is live at origin
             my $oh = $chart->[$origin][$w_core_id];
             next unless defined $oh;
 
