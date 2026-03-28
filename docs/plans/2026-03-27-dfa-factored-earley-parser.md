@@ -1116,26 +1116,37 @@ end). These trigger the completion step.
 **Goto table.** For each symbol X, which DFA state results:
 
 ```
-goto_table: { symbol -> target_state_id }
+goto_table: { prefixed_symbol -> target_state_id }
 ```
+
+Keys are prefixed to distinguish terminals from nonterminals:
+`"t:pattern"` for terminals, `"n:name"` for nonterminals. This
+prevents collisions when a terminal pattern string happens to match
+a nonterminal name.
 
 This replaces the `advance` + chart-scan pattern. When a scan or
 completion advances past symbol X, the next state is
-`goto_table[current_state][X]` — a single table lookup.
+`goto_table[current_state]["t:" + X]` (for terminals) or
+`goto_table[current_state]["n:" + X]` (for nonterminals).
 
-**Core_id to state mapping.** Each core_id belongs to exactly one DFA
+**Core_id to state mapping.** Each *kernel* core_id (dot > 0, or
+start rule items at dot=0) belongs to exactly one DFA state.
+Nonkernel core_ids (predicted items at dot=0) may appear in multiple
+states; `state_for_core` maps them to the lowest-numbered containing
 state. This mapping is precomputed at DFA construction time:
 
 ```
 state_for_core: core_id -> state_id
 ```
 
-This is the inverse of the state's core_id list. At parse time, when
+For kernel items, this is a true inverse of the state's core_id list.
+For nonkernel items, it returns one of potentially several containing
+states (deterministically: the lowest state_id). At parse time, when
 the parser needs the DFA state properties for an item (e.g., to look
 up the completion map at an origin position), it looks up
-`state_for_core[core_id]` — an O(1) array access. No chart scanning
-or hash-key computation is required to determine which DFA state a
-position is in.
+`state_for_core[core_id]` — an O(1) array access. For nonkernel
+items in the completion step, the parser should verify the returned
+state against the chart's recorded core set at that origin.
 
 ### 5.4 Worked Example: DFA for Arithmetic
 
@@ -1320,9 +1331,10 @@ be verified programmatically after DFA construction:
 ```
 verify_dfa_invariants(dfa, core_index):
   for each state S in dfa.states:
-    # 1. Every core_id in S maps back to S
+    # 1. Every core_id in S maps to a valid containing state
+    # (Kernel items map uniquely; nonkernel items may share across states)
     for each core_id in S.core_ids:
-      assert state_for_core[core_id] == S.id
+      assert S.id in states_containing(core_id)
 
     # 2. Nonkernel items are the prediction closure of kernel items
     kernel = [c for c in S.core_ids if dot_for(c) > 0 or c is start item]
