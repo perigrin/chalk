@@ -14,6 +14,7 @@ class Chalk::Bootstrap::CoreItemIndex {
     field @id_is_complete;    # integer => boolean (precomputed: dot >= length of alt)
     field @id_symbol_after;   # integer => Symbol object or undef (precomputed)
     field %advance_map;       # core_id => core_id for dot+1
+    field @id_to_state;       # core_id => DFA state_id (populated after DFA construction)
     field $count :reader = 0;
 
     # Register a single core item, returns its integer ID
@@ -52,6 +53,10 @@ class Chalk::Bootstrap::CoreItemIndex {
     method rule_for($id)      { return $id_to_rule[$id]       }
     method is_complete($id)   { return $id_is_complete[$id]   }
     method symbol_after($id)  { return $id_symbol_after[$id]  }
+    method state_for($id)     { return $id_to_state[$id]      }
+
+    # Set the DFA state for a core_id (called by LR0DFA after construction)
+    method set_state_for($id, $state_id) { $id_to_state[$id] = $state_id }
 
     # Bulk accessors returning arrayrefs for hot-loop direct indexing.
     # Avoids per-element method dispatch overhead in the Earley inner loop.
@@ -60,6 +65,7 @@ class Chalk::Bootstrap::CoreItemIndex {
     method dots()             { return \@id_to_dot            }
     method completions()      { return \@id_is_complete       }
     method symbols_after()    { return \@id_symbol_after      }
+    method states_for_bulk()  { return \@id_to_state          }
 
     # Get the ID for the same item but with dot+1
     method advance($id) {

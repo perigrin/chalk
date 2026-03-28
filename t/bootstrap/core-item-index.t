@@ -164,4 +164,47 @@ subtest 'scalar accessors are consistent with item_for' => sub {
     is($index->dot_for($id),       $info->{dot},       'dot_for matches item_for');
 };
 
+# === Test 8: state_for_core mapping ===
+subtest 'state_for_core mapping' => sub {
+    my $sym_a = Chalk::Grammar::Symbol->new(type => 'terminal', value => 'a');
+    my $sym_b = Chalk::Grammar::Symbol->new(type => 'terminal', value => 'b');
+    my $sym_A = Chalk::Grammar::Symbol->new(type => 'reference', value => 'A');
+    my $sym_B = Chalk::Grammar::Symbol->new(type => 'reference', value => 'B');
+
+    my $rule_S = Chalk::Grammar::Rule->new(
+        name => 'S', expressions => [[$sym_A, $sym_B], [$sym_a]],
+    );
+    my $rule_A = Chalk::Grammar::Rule->new(
+        name => 'A', expressions => [[$sym_a]],
+    );
+    my $rule_B = Chalk::Grammar::Rule->new(
+        name => 'B', expressions => [[$sym_b]],
+    );
+
+    my $index = Chalk::Bootstrap::CoreItemIndex->new();
+    $index->build_from_grammar([$rule_S, $rule_A, $rule_B]);
+
+    # Before any state assignment, state_for returns undef
+    my $id_s00 = $index->id_for('S', 0, 0);
+    ok(!defined $index->state_for($id_s00), 'state_for returns undef before assignment');
+
+    # Assign states
+    $index->set_state_for($id_s00, 0);
+    is($index->state_for($id_s00), 0, 'state_for returns assigned state');
+
+    my $id_a00 = $index->id_for('A', 0, 0);
+    $index->set_state_for($id_a00, 1);
+    is($index->state_for($id_a00), 1, 'state_for returns different state for different item');
+
+    # Bulk accessor returns arrayref for hot-loop direct indexing
+    my $bulk = $index->states_for_bulk();
+    ok(ref $bulk eq 'ARRAY', 'states_for_bulk returns arrayref');
+    is($bulk->[$id_s00], 0, 'bulk accessor matches state_for for S');
+    is($bulk->[$id_a00], 1, 'bulk accessor matches state_for for A');
+
+    # Unassigned items are undef in the bulk array
+    my $id_b00 = $index->id_for('B', 0, 0);
+    ok(!defined $bulk->[$id_b00], 'unassigned items are undef in bulk array');
+};
+
 done_testing;
