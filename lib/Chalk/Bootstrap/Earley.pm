@@ -828,7 +828,8 @@ class Chalk::Bootstrap::Earley {
     # Predict: add items for all alternatives of a nonterminal using
     # pre-computed LR(0) DFA epsilon-closure prediction items.
     # The DFA provides [$core_id, $skip_symbols] pairs where $skip_symbols
-    # lists ?-quantified symbol names skipped to reach that dot position
+    # lists nullable symbol names (both ?-quantified and epsilon-nullable
+    # nonterminals) skipped to reach that dot position
     # (Aycock nullable optimization). For dot>0 items, on_skip_optional is
     # called to create SemanticAction placeholders for each skipped symbol.
     # Tracks which rules have been predicted at each position to avoid
@@ -849,7 +850,7 @@ class Chalk::Bootstrap::Earley {
             unless ($self->_chart_has($chart, $pos, $core_id, $pos)) {
                 my $info = $core_index->item_for($core_id);
 
-                # Build initial value. For dot>0 items with skipped ? symbols,
+                # Build initial value. For dot>0 items with skipped nullable symbols,
                 # call on_skip_optional for each skipped symbol to create
                 # SemanticAction placeholder contexts.
                 my $value = $semiring->one();
@@ -995,16 +996,18 @@ class Chalk::Bootstrap::Earley {
             $leo_resolved_origin = $leo->{wait_origin};
         }
 
-        # Three-layer completion filter (design doc Section 7.5):
+        # Completion filter (design doc Section 7.5):
         # Layer 1: global_waiting_core_ids — all grammar-wide candidates
-        # Layer 2: DFA state completion_map — narrows to candidates whose
-        #          DFA state actually expects this nonterminal
-        # Layer 3: chart liveness — confirms the waiter has a defined value
+        # Layer 2: chart liveness — confirms the waiter has a defined value
+        #
+        # NOTE: The design doc describes a DFA state completion_map layer
+        # between these two, but with the static state_for_core mapping it
+        # is a no-op: every waiter's mapped state contains $rule_name in
+        # its completion_map by construction. To make DFA narrowing effective,
+        # we would need per-position DFA state tracking (the completion_map
+        # core_id list would replace _waiting_core_ids as the candidate set).
         my $chart_waiting_ids = $_waiting_core_ids{$rule_name};
         return unless defined $chart_waiting_ids;
-
-        # Cache DFA state lookups for layer 2 filtering
-        my $ci_states = $core_index->states_for_bulk();
 
         # Count non-zero waiting items and track the single candidate for Leo
         my $eligible_count = 0;
@@ -1013,15 +1016,7 @@ class Chalk::Bootstrap::Earley {
         my $leo_candidate_value;
 
         for my $w_core_id ($chart_waiting_ids->@*) {
-            # Layer 2: DFA state narrowing — skip waiters whose DFA state
-            # does not expect this nonterminal in its completion map.
-            my $w_state_id = $ci_states->[$w_core_id];
-            if (defined $w_state_id) {
-                my $w_state = $lr0_dfa->state($w_state_id);
-                next unless exists $w_state->{completion_map}{$rule_name};
-            }
-
-            # Layer 3: chart liveness — confirm waiter is live at origin
+            # Layer 2: chart liveness — confirm waiter is live at origin
             my $oh = $chart->[$origin][$w_core_id];
             next unless defined $oh;
 

@@ -35,9 +35,8 @@ class Chalk::Bootstrap::LR0DFA {
     method state($id)       { return $states[$id] }
 
     # Build the DFA: nullable set, prediction closures, then full state construction.
-    # DFA states are infrastructure for Issues #3-5 (DFA-factored prediction,
-    # terminal clustering, and completion in Earley.pm). Currently only
-    # prediction_items_for() is consumed by Earley.pm at parse time.
+    # DFA states provide prediction_items_for() (epsilon-closure), terminal_map
+    # (clustered scanning), and completion_map (completion filtering) to Earley.pm.
     field $built = false;
     method build() {
         die "LR0DFA::build() already called" if $built;
