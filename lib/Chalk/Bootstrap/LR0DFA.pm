@@ -12,8 +12,8 @@ class Chalk::Bootstrap::LR0DFA {
     # Prediction cache: { nonterminal_name => [[$core_id, $skip_symbols], ...] }
     # Each entry is the set of core items reachable by transitively predicting
     # nonterminals. Includes dot>0 items for nullable symbol advancement.
-    # $skip_symbols is an arrayref of ?-quantified symbol names skipped to reach
-    # this dot position (empty arrayref for dot=0 items).
+    # $skip_symbols is an arrayref of nullable symbol names skipped to reach
+    # this dot position (both ?-quantified and epsilon-nullable nonterminals).
     field %prediction_items;
 
     # Nullable set: { nonterminal_name => true } for nonterminals that can
@@ -58,6 +58,17 @@ class Chalk::Bootstrap::LR0DFA {
         $state_count = scalar @states;
     }
 
+    # Check if a nonterminal reference symbol can be skipped (is nullable).
+    # A symbol is nullable if it has the ? quantifier or its nonterminal
+    # can derive the empty string (via epsilon production or desugared *).
+    # Used by both _closure (DFA construction) and _compute_prediction_closure
+    # (Earley prediction) to ensure consistent nullable advancement.
+    method _is_nullable_symbol($sym) {
+        return false unless $sym->is_reference();
+        return true if $sym->is_quantified() && $sym->quantifier() eq '?';
+        return $nullable{$sym->value()} ? true : false;
+    }
+
     # Compute LR(0) closure of a kernel set of core_ids.
     # Returns a sorted arrayref of all core_ids reachable by transitively
     # following nonterminal references (predictions) and advancing past
@@ -87,15 +98,9 @@ class Chalk::Bootstrap::LR0DFA {
                 }
             }
 
-            # Aycock-Horspool: if the nonterminal is nullable or ?-quantified,
-            # advance past it and add the advanced item to the closure.
-            # Note: *-quantified symbols are desugared by Desugar.pm into
-            # helper rules with epsilon alternatives before reaching LR0DFA,
-            # so they appear as nullable via $nullable{$nt} rather than
-            # needing an explicit quantifier check here.
-            my $is_nullable_sym = ($sym->is_quantified() && $sym->quantifier() eq '?')
-                               || $nullable{$nt};
-            if ($is_nullable_sym) {
+            # Aycock-Horspool: if the nonterminal is nullable, advance past
+            # it and add the advanced item to the closure.
+            if ($self->_is_nullable_symbol($sym)) {
                 my $adv_id = $core_index->advance($core_id);
                 if (defined $adv_id && !$in_set{$adv_id}) {
                     $in_set{$adv_id} = 1;
@@ -294,21 +299,18 @@ class Chalk::Bootstrap::LR0DFA {
                     push @worklist, $ref_name unless $visited{$ref_name};
 
                     # Is this symbol nullable (can be skipped)?
-                    my $is_nullable_sym = ($sym->is_quantified() && $sym->quantifier() eq '?')
-                                       || $nullable{$ref_name};
-                    if ($is_nullable_sym) {
-                        # Track ?-quantified skips for on_skip_optional placeholders
+                    if ($self->_is_nullable_symbol($sym)) {
+                        # Track all nullable skips for on_skip_optional placeholders.
+                        # Both ?-quantified and epsilon-nullable nonterminals need
+                        # placeholder Context entries so SemanticAction child arrays
+                        # maintain correct positional alignment.
                         my @skip_copy = @skipped;
-                        if ($sym->is_quantified() && $sym->quantifier() eq '?') {
-                            push @skip_copy, $ref_name;
-                        }
+                        push @skip_copy, $ref_name;
                         # Add dot-advanced core item
                         my $adv_id = $core_index->id_for($nt, $alt_idx, $dot + 1);
                         push @result, [$adv_id, \@skip_copy] if defined $adv_id;
                         # Update running skip list for further advancement
-                        if ($sym->is_quantified() && $sym->quantifier() eq '?') {
-                            push @skipped, $ref_name;
-                        }
+                        push @skipped, $ref_name;
                         $dot++;
                     } else {
                         last;
