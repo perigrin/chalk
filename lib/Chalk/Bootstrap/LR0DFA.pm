@@ -291,7 +291,7 @@ class Chalk::Bootstrap::LR0DFA {
                 # of this alternative, adding dot-advanced items.
                 my $alt = $expressions->[$alt_idx];
                 my $dot = 0;
-                my @skipped;  # Track ?-quantified symbol names skipped
+                my @skipped;  # Track nullable symbol names skipped
                 while ($dot < scalar $alt->@*) {
                     my $sym = $alt->[$dot];
                     last unless $sym->is_reference();
