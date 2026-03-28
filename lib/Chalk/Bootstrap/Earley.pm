@@ -533,77 +533,28 @@ class Chalk::Bootstrap::Earley {
             # Terminal clustering: pre-scan all terminal patterns expected by
             # items at this position. Runs AFTER predictions so predicted items
             # with terminals (e.g. Item -> . \w+) are included.
-            #
-            # When a previously-seen core set has a combined scan regex, one
-            # match replaces N individual matches. Multiple patterns may match
-            # at the same position (e.g. \w+ and \d+ both match "123"), so
-            # we try the combined regex first as a quick reject — if nothing
-            # matches, skip all patterns. If something matches, try each
-            # pattern from the terminal map individually. The terminal map
-            # narrows this to only patterns expected by this core set.
+            # Iterates active items directly to collect distinct terminal
+            # patterns, then tries each pattern once per position.
             if ($pos < $n) {
-                # Compute post-prediction core set hash
-                my @post_active;
+                my %seen_patterns;
                 for my $cid (0 .. $chart[$pos]->$#*) {
                     my $oh = $chart[$pos][$cid];
-                    if (defined $oh) {
-                        for my $v ($oh->@*) {
-                            if (defined $v) { push @post_active, $cid; last; }
-                        }
+                    next unless defined $oh;
+                    my $has_values = false;
+                    for my $v ($oh->@*) {
+                        if (defined $v) { $has_values = true; last; }
                     }
-                }
-                my $post_hash = join(",", @post_active);
-
-                # Look up terminal map and combined regex for this core set
-                my $tmap;
-                my $combined;
-                if (exists $_core_set_registry{$post_hash}) {
-                    my $cs_id = $_core_set_registry{$post_hash}{id};
-                    $tmap = $_terminal_map_cache{$cs_id};
-                    $combined = $_combined_scan_cache{$cs_id};
-                }
-
-                if (defined $tmap) {
-                    # Quick reject: if the combined regex doesn't match at all,
-                    # no terminal pattern can match — skip all individual checks.
-                    my $any_match = true;
-                    if (defined $combined) {
-                        pos($input) = $pos;
-                        $any_match = ($input =~ /$combined->{re}/) ? true : false;
-                    }
-
-                    if ($any_match) {
-                        # Try each pattern from the terminal map
-                        for my $pstr (keys $tmap->%*) {
-                            next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
-                            my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
-                            $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
-                            $_scan_stats{clustered_scans}++;
-                        }
-                    } else {
-                        # Quick reject: mark all patterns as non-matching
-                        for my $pstr (keys $tmap->%*) {
-                            $_scan_cache{$pos}{$pstr} = undef
-                                unless exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
-                        }
-                        $_scan_stats{clustered_scans} += scalar keys $tmap->%*;
-                    }
-                } else {
-                    # First encounter: per-pattern matching (fallback).
-                    # _discover_core_set will build the terminal map later.
-                    my %seen_patterns;
-                    for my $core_id (@post_active) {
-                        my $sym = $ci_symbols_after->[$core_id];
-                        next unless defined $sym;
-                        next if $sym->is_reference();
-                        my $pstr = $sym->value();
-                        next if $seen_patterns{$pstr};
-                        $seen_patterns{$pstr} = true;
-                        next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
-                        my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
-                        $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
-                        $_scan_stats{clustered_scans}++;
-                    }
+                    next unless $has_values;
+                    next if $ci_completions->[$cid];
+                    my $sym = $ci_symbols_after->[$cid];
+                    next unless defined $sym;
+                    next if $sym->is_reference();
+                    my $pstr = $sym->value();
+                    next if $seen_patterns{$pstr}++;
+                    next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
+                    my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
+                    $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+                    $_scan_stats{clustered_scans}++;
                 }
             }
 
