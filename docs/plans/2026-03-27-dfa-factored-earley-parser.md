@@ -1454,7 +1454,7 @@ time, the DFA state for any item is known via `state_for_core[core_id]`
 already assigns state IDs.
 
 **Distance vector hashing at parse time.** Two positions with the
-same DFA state may have different distance vectors (different origins
+same active items may have different distance vectors (different origins
 for the same items). YAEP's insight: if two positions also share the
 same distance vector, they are structurally identical and the parse
 will proceed identically from both.
@@ -1463,14 +1463,22 @@ A distance vector is the set of `(core_id, rel_dist)` pairs at a
 position. The hash key is computed from these pairs:
 
 ```
-dist_key = join(";", sort map { "$cid:$rd" } @pairs)
-set_key  = "$state_id:$dist_key"
+set_key = join(";", sort map { "$cid:$rd" } @pairs)
 ```
 
-Two positions with the same `set_key` — same DFA state AND same
-relative distances — are structurally identical. The set registry
+Two positions with the same `set_key` — same active core_ids AND
+same relative distances — are structurally identical. The set registry
 tracks these for potential set reuse optimizations (prediction results,
 completion patterns).
+
+Note: an earlier draft used `"$state_id:$dist_key"`, prefixing a
+single DFA state ID. This assumed one DFA state per position, but
+Section 7 establishes that positions can contain items from multiple
+DFA states (completions advance items from the origin's state into the
+current position). The full `(core_id, rel_dist)` pair set encodes the
+DFA state implicitly — identical core_id sets imply identical state
+membership — and handles multi-state positions correctly. This
+correction emerged during implementation.
 
 Distance vector hashing is parse-lifetime work (cleared between files).
 It is optional — the parser is correct without it. It enables
