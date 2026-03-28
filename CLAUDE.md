@@ -115,67 +115,49 @@ See `docs/ir-node-types.md` for complete taxonomy.
 
 ## Development Workflow
 
-Implementation follows a **build-then-review** pattern using specialized agents.
-This workflow applies to every phase in `docs/chalk-parse-perl-plan.md`.
+Implementation follows a **build-then-review** pattern. Reviews happen after
+every issue (milestone task), not just after phases. Use the `paad:agentic-review`
+skill for automated multi-agent review.
 
-### Step 1: Implementation (software-engineer agent)
+### Step 1: Implementation
 
-A `software-engineer` subagent performs the implementation work for each phase.
-It follows TDD, writes code, and runs tests. It should invoke the required
-skills (`writing-perl-5.42.0`, `test-driven-development`) and commit frequently.
+Follow TDD (test-driven-development skill). Write failing test, implement
+minimal code to pass, refactor, commit. Use the required skills
+(`writing-perl-5.42.0`, `test-driven-development`). Commit frequently.
 
-### Step 2: Triple Review (after every phase completes)
+### Step 2: Review (after every issue completes)
 
-After each phase, launch **three review agents in parallel** to evaluate the work:
+Run `/paad:agentic-review` after completing each milestone issue. This dispatches
+specialist agents (Logic, Error Handling, Contract, Concurrency, Security) in
+parallel, verifies findings, and produces a report in `paad/code-reviews/`.
 
-1. **code-reviewer** — Correctness and accuracy
-   - Does the implementation match the phase requirements in `docs/chalk-parse-perl-plan.md`?
-   - Are there logic errors, security issues, or violations of project conventions?
-   - Does the code follow the architecture (immutability, determinism, semiring contracts)?
+Do NOT proceed to the next issue until review findings are addressed.
 
-2. **test-architect** — Test coverage and quality
-   - Are all implemented features covered by tests?
-   - Do tests use real data (actual grammars, actual source files), not just toy examples?
-   - Are there missing integration tests or edge cases?
-   - Are there test anti-patterns (testing mocks, brittle assertions)?
-
-3. **code-reviewer** (performance focus) — Performance and scalability
-   - Are there O(n²) algorithms where O(n) is possible?
-   - Will the implementation scale to the 65-rule grammar / 31 source files?
-   - Are there unnecessary allocations, redundant computations, or missed caching?
-   - Is this the point where Aycock optimizations (`docs/chalk-ayock-optimizations.md`)
-     become necessary?
+**Why per-issue**: Reviewing after each issue catches problems before they
+compound. A bug in Issue #2 (DFA construction) that isn't caught until Issue #5
+(completion refactoring) is much harder to fix. The earlier review found the
+DFA terminal_map built-but-never-consumed gap at Milestone 12 — per-issue
+review would have caught it at the issue where it was built.
 
 ### Step 3: Address Findings
 
-Fix issues identified by reviewers before proceeding to the next phase. This
-prevents technical debt from accumulating across phases.
+Fix Critical and Important issues before proceeding. Suggestions can be
+deferred. Use the `receiving-code-review` skill for guided implementation
+of review feedback.
 
-**Why three reviewers**: A single reviewer tends to focus on one dimension
-(usually correctness) while missing test gaps or performance issues. The triple
-review caught the missing integration test gap at Phase 2b — 299 tests passing
-but none using the actual BNF meta-grammar.
+## Code Review Standards
 
-## Code Review Requirements
+Reviews (whether via `paad:agentic-review` or ad-hoc) MUST verify:
 
-**CRITICAL**: In addition to the triple review workflow above, any ad-hoc code
-review (via code-reviewer subagent or similar) MUST:
+1. **Test coverage** — all implemented methods have tests, tests use real
+   grammars (not just toy examples), integration tests exist
+2. **Missing artifacts** — required data files, grammar specs, config files
+3. **Test reality** — tests parse real input, generate real output, validate
+   against actual grammar specifications
 
-1. **Verify Test Coverage** - Launch a test coverage verification subagent (test-architect or similar) to check:
-   - Unit test coverage for all implemented functionality
-   - **Integration test coverage** - especially verify tests use real data/grammars, not just toy examples
-   - Test quality - do tests actually validate behavior or just exercise code?
-
-2. **Check for Missing Artifacts** - Ensure all required data files, grammar specifications, or configuration files exist and are tested
-
-3. **Validate Test Reality** - Verify tests use real production data:
-   - If building a grammar compiler, tests should use the actual grammar specification
-   - If building a parser, tests should parse real input files
-   - If building a code generator, tests should generate and validate real output
-
-**Why This Matters**: It's easy to pass 100% of tests while missing critical integration testing. Code reviews must verify not just that tests pass, but that tests are comprehensive and realistic.
-
-**Example**: In this bootstrap project, we reached 299 passing tests across Phases 0-2b but never tested parsing the actual 10-rule BNF meta-grammar - all tests used toy grammars created inline. This gap wasn't caught until explicitly invoking test-architect to review test coverage.
+**Why**: We reached 299 passing tests across Phases 0-2b but never tested
+parsing the actual BNF meta-grammar — all tests used inline toy grammars.
+Reviews must verify tests are comprehensive and realistic, not just passing.
 
 ## Implementation Phases
 
