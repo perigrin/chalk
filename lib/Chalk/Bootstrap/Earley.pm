@@ -296,6 +296,7 @@ class Chalk::Bootstrap::Earley {
         my $ci_symbols_after = $core_index->symbols_after();
         my $ci_rule_names    = $core_index->rule_names();
         my $ci_alt_idxs      = $core_index->alt_idxs();
+        my $ci_states_bulk   = $core_index->states_for_bulk();
 
         # Reset secondary indexes for this parse
         %completed_at = ();
@@ -371,12 +372,13 @@ class Chalk::Bootstrap::Earley {
             }
 
             # Terminal clustering: pre-scan all terminal patterns expected by
-            # items at this position. Runs AFTER predictions so predicted items
-            # with terminals (e.g. Item -> . \w+) are included.
-            # Iterates active items directly to collect distinct terminal
-            # patterns, then tries each pattern once per position.
+            # items at this position using DFA state terminal maps.
+            # For each active item, look up its DFA state and collect that
+            # state's terminal_map patterns. Each distinct pattern is tried
+            # once per position via the scan cache.
             if ($pos < $n) {
                 my %seen_patterns;
+                my %seen_states;
                 for my $cid (0 .. $chart[$pos]->$#*) {
                     my $oh = $chart[$pos][$cid];
                     next unless defined $oh;
@@ -385,16 +387,21 @@ class Chalk::Bootstrap::Earley {
                         if (defined $v) { $has_values = true; last; }
                     }
                     next unless $has_values;
-                    next if $ci_completions->[$cid];
-                    my $sym = $ci_symbols_after->[$cid];
-                    next unless defined $sym;
-                    next if $sym->is_reference();
-                    my $pstr = $sym->value();
-                    next if $seen_patterns{$pstr}++;
-                    next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
-                    my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
-                    $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
-                    $_scan_stats{clustered_scans}++;
+
+                    # Look up DFA state for this core_id
+                    my $state_id = $ci_states_bulk->[$cid];
+                    next unless defined $state_id;
+                    next if $seen_states{$state_id}++;
+
+                    # Union this state's terminal map into the scan cache
+                    my $tmap = $lr0_dfa->state($state_id)->{terminal_map};
+                    for my $pstr (keys $tmap->%*) {
+                        next if $seen_patterns{$pstr}++;
+                        next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
+                        my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
+                        $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+                        $_scan_stats{clustered_scans}++;
+                    }
                 }
             }
 
