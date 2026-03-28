@@ -145,6 +145,13 @@ Fix Critical and Important issues before proceeding. Suggestions can be
 deferred. Use the `receiving-code-review` skill for guided implementation
 of review feedback.
 
+### Step 4: Simplify
+
+After addressing review findings and committing fixes, run `/simplify` to
+review all changed code for reuse opportunities, quality issues, and
+efficiency problems. This catches redundant state, copy-paste divergence,
+stringly-typed patterns, and dead code introduced during the fix cycle.
+
 ## Code Review Standards
 
 Reviews (whether via `paad:agentic-review` or ad-hoc) MUST verify:
