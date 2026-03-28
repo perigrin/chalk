@@ -335,13 +335,17 @@ class Chalk::Bootstrap::Earley {
             # Agenda carries [$core_id, $origin] pairs; values are in the chart.
             # Chart uses relative distances: rel_dist = pos - origin.
             my @agenda;
+            my @active_cids;  # core_ids with at least one defined value
             for my $core_id (0 .. $chart[$pos]->$#*) {
                 my $oh = $chart[$pos][$core_id];
                 next unless defined $oh;
+                my $found = false;
                 for my $rel_dist (0 .. $oh->$#*) {
                     next unless defined $oh->[$rel_dist];
                     push @agenda, [$core_id, $pos - $rel_dist];
+                    $found = true;
                 }
+                push @active_cids, $core_id if $found;
             }
             # Track furthest position with active items for diagnostics
             if (@agenda) {
@@ -351,49 +355,28 @@ class Chalk::Bootstrap::Earley {
             my @processed;
             my %predicted_at;  # Track which rules have been predicted at this pos
 
-            # Pre-predict all nonterminals expected by active items.
-            # Uses DFA prediction closure directly — no per-position caching needed.
-            # The DFA closure IS the cache: prediction_items_for() is O(1) per
-            # nonterminal, and %predicted_at prevents re-predicting the same rule.
-            if ($pos < $n && defined $chart[$pos] && $chart[$pos]->@*) {
-                for my $cid (0 .. $chart[$pos]->$#*) {
-                    my $oh = $chart[$pos][$cid];
-                    next unless defined $oh;
-                    my $has_values = false;
-                    for my $v ($oh->@*) {
-                        if (defined $v) { $has_values = true; last; }
-                    }
-                    next unless $has_values;
-                    next if $ci_completions->[$cid];
-                    my $sym = $ci_symbols_after->[$cid];
-                    next unless defined $sym && $sym->is_reference();
-                    $self->_predict($sym->value(), $pos, \@chart, \@agenda, \%predicted_at);
-                }
-            }
-
-            # Terminal clustering: pre-scan all terminal patterns expected by
-            # items at this position using DFA state terminal maps.
-            # For each active item, look up its DFA state and collect that
-            # state's terminal_map patterns. Each distinct pattern is tried
-            # once per position via the scan cache.
+            # Pre-predict nonterminals and pre-scan terminals in a single pass
+            # over active core_ids. The @active_cids list was built during agenda
+            # construction, avoiding a redundant has_values scan per item.
             if ($pos < $n) {
                 my %seen_patterns;
                 my %seen_states;
-                for my $cid (0 .. $chart[$pos]->$#*) {
-                    my $oh = $chart[$pos][$cid];
-                    next unless defined $oh;
-                    my $has_values = false;
-                    for my $v ($oh->@*) {
-                        if (defined $v) { $has_values = true; last; }
+                for my $cid (@active_cids) {
+                    # Prediction: if this item expects a nonterminal, predict it
+                    if (!$ci_completions->[$cid]) {
+                        my $sym = $ci_symbols_after->[$cid];
+                        if (defined $sym && $sym->is_reference()) {
+                            $self->_predict($sym->value(), $pos, \@chart, \@agenda, \%predicted_at);
+                        }
                     }
-                    next unless $has_values;
 
-                    # Look up DFA state for this core_id
+                    # Terminal clustering: look up DFA state and union its
+                    # terminal_map patterns into the scan cache. Each distinct
+                    # pattern is tried once per position.
                     my $state_id = $ci_states_bulk->[$cid];
                     next unless defined $state_id;
                     next if $seen_states{$state_id}++;
 
-                    # Union this state's terminal map into the scan cache
                     my $tmap = $lr0_dfa->state($state_id)->{terminal_map};
                     for my $pstr (keys $tmap->%*) {
                         next if $seen_patterns{$pstr}++;
