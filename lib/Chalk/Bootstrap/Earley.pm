@@ -528,7 +528,11 @@ class Chalk::Bootstrap::Earley {
 
             # Set registry: compute distance vector set_key for this position.
             # Two positions with the same set_key are structurally identical —
-            # same DFA state and same relative distances (Section 6.3).
+            # same active items and same relative distances (Section 6.3).
+            # The spec uses "$state_id:$dist_key" assuming one DFA state per
+            # position, but positions can contain items from multiple states
+            # (Section 7). Using the full (core_id, rel_dist) pair set is
+            # equivalent and handles multi-state positions correctly.
             {
                 my @pairs;
                 for my $core_id (0 .. $chart[$pos]->$#*) {
