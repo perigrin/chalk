@@ -481,7 +481,8 @@ class Chalk::Bootstrap::Earley {
         $_diag_expected = {};
         @_pos_core_set = ();
 
-        # Find the start rule (first rule in grammar)
+        # Find the start rule (first rule in grammar).
+        # Convention: grammar->[0] is the start rule (same as LR0DFA.pm).
         my $start_rule = $grammar->[0];
 
         # Initialize chart[0] with start rule items (one per alternative)

@@ -36,7 +36,14 @@ class Chalk::Bootstrap::LR0DFA {
     method state_count_dfa(){ return scalar @states }
 
     # Build the DFA: nullable set, prediction closures, then full state construction.
+    # DFA states are infrastructure for Issues #3-5 (DFA-factored prediction,
+    # terminal clustering, and completion in Earley.pm). Currently only
+    # prediction_items_for() is consumed by Earley.pm at parse time.
+    field $built = false;
     method build() {
+        die "LR0DFA::build() already called" if $built;
+        $built = true;
+        die "Cannot build DFA from empty grammar" unless $grammar->@*;
         $self->_compute_nullable_set();
 
         # Prediction closures (used by predict() at parse time)
@@ -82,7 +89,11 @@ class Chalk::Bootstrap::LR0DFA {
             }
 
             # Aycock-Horspool: if the nonterminal is nullable or ?-quantified,
-            # advance past it and add the advanced item to the closure
+            # advance past it and add the advanced item to the closure.
+            # Note: *-quantified symbols are desugared by Desugar.pm into
+            # helper rules with epsilon alternatives before reaching LR0DFA,
+            # so they appear as nullable via $nullable{$nt} rather than
+            # needing an explicit quantifier check here.
             my $is_nullable_sym = ($sym->is_quantified() && $sym->quantifier() eq '?')
                                || $nullable{$nt};
             if ($is_nullable_sym) {
@@ -102,7 +113,8 @@ class Chalk::Bootstrap::LR0DFA {
         @states = ();
         %state_registry = ();
 
-        # Start state: closure of start rule's alternatives at dot=0
+        # Start state: closure of start rule's alternatives at dot=0.
+        # Convention: grammar->[0] is the start rule (same as Earley.pm).
         my $start_rule = $grammar->[0];
         my @start_kernel;
         my $expressions = $start_rule->expressions();
@@ -149,10 +161,16 @@ class Chalk::Bootstrap::LR0DFA {
             $i++;
         }
 
-        # Populate state_for_core mapping in CoreItemIndex
+        # Populate state_for_core mapping in CoreItemIndex.
+        # Nonkernel items (dot=0, predicted) may appear in multiple states.
+        # We use first-write-wins (lowest state_id) for determinism. The
+        # mapping is many-to-one for nonkernel items; callers needing the
+        # specific state for a parse-time item should use the chart's
+        # recorded core set rather than relying on state_for_core alone.
         for my $state (@states) {
             for my $core_id ($state->{core_ids}->@*) {
-                $core_index->set_state_for($core_id, $state->{id});
+                $core_index->set_state_for($core_id, $state->{id})
+                    unless defined $core_index->state_for($core_id);
             }
         }
     }
@@ -199,6 +217,8 @@ class Chalk::Bootstrap::LR0DFA {
     # A nonterminal N is nullable if any of its alternatives:
     #   - Is empty (epsilon production), OR
     #   - Has all symbols being nullable (nonterminal + nullable, or ?-quantified)
+    # Note: *-quantified symbols are desugared into helper rules with epsilon
+    # alternatives before reaching LR0DFA, so they become nullable nonterminals.
     method _compute_nullable_set() {
         # Seed: find all nonterminals with empty alternatives
         my $changed = true;
