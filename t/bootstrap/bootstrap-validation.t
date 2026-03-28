@@ -211,6 +211,10 @@ package TestSymbol {
         method is_quantified() {
             return false;
         }
+
+        method goto_key() {
+            return ($type eq 'reference' ? 'n:' : 't:') . $value;
+        }
     }
 }
 

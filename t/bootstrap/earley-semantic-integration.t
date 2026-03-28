@@ -42,6 +42,7 @@ package TestSymbol {
     sub is_reference { $_[0]->{_type} eq 'reference' }
     sub is_terminal { $_[0]->{_type} eq 'terminal' }
     sub is_quantified { false }
+    sub goto_key { ($_[0]->{_type} eq 'reference' ? 'n:' : 't:') . $_[0]->{_value} }
 }
 
 package TestRule {
