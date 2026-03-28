@@ -108,10 +108,11 @@ subtest 'goto table transitions' => sub {
     ok(ref $goto eq 'HASH', 'goto_table is a hashref');
 
     # Scanning 'number' from start state should transition somewhere
-    ok(exists $goto->{'\\d+'}, 'goto_table has transition for number terminal');
+    # goto_table keys are prefixed: "t:" for terminals, "n:" for nonterminals
+    ok(exists $goto->{'t:\\d+'}, 'goto_table has transition for number terminal');
     # Advancing past Expr should transition somewhere
-    ok(exists $goto->{'Expr'}, 'goto_table has transition for Expr nonterminal');
-    ok(exists $goto->{'Term'}, 'goto_table has transition for Term nonterminal');
+    ok(exists $goto->{'n:Expr'}, 'goto_table has transition for Expr nonterminal');
+    ok(exists $goto->{'n:Term'}, 'goto_table has transition for Term nonterminal');
 
     # The target states should be valid state IDs
     my $states = $dfa->states();
@@ -193,12 +194,13 @@ subtest 'DFA invariant: goto transitions are consistent' => sub {
             ok(defined $target, "state $state->{id}: goto target $target_id exists");
 
             # Every core_id in this state that has $sym_str after its dot,
-            # when advanced, should appear in the target state
+            # when advanced, should appear in the target state.
+            # goto_table keys are prefixed "t:" or "n:" — match the same way.
             for my $core_id ($state->{core_ids}->@*) {
                 next if $core_index->is_complete($core_id);
                 my $sym = $core_index->symbol_after($core_id);
                 next unless defined $sym;
-                my $sym_key = $sym->is_reference() ? $sym->value() : $sym->value();
+                my $sym_key = ($sym->is_reference() ? 'n:' : 't:') . $sym->value();
                 next unless $sym_key eq $sym_str;
 
                 my $advanced = $core_index->advance($core_id);

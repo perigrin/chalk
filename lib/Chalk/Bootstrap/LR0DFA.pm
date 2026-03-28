@@ -97,28 +97,6 @@ class Chalk::Bootstrap::LR0DFA {
         return [sort { $a <=> $b } keys %in_set];
     }
 
-    # Compute goto(state, symbol): the set of core_ids reachable by advancing
-    # all items in the state that have the given symbol after their dot.
-    # Returns closure of the advanced kernel, or undef if no items match.
-    method _goto($state_core_ids, $symbol_str, $symbol_is_ref) {
-        my @kernel;
-        for my $core_id ($state_core_ids->@*) {
-            next if $core_index->is_complete($core_id);
-            my $sym = $core_index->symbol_after($core_id);
-            next unless defined $sym;
-
-            # Match by symbol string (value for both terminals and references)
-            my $this_str = $sym->value();
-            my $this_is_ref = $sym->is_reference();
-            next unless $this_str eq $symbol_str && $this_is_ref == $symbol_is_ref;
-
-            my $adv = $core_index->advance($core_id);
-            push @kernel, $adv if defined $adv;
-        }
-        return undef unless @kernel;
-        return $self->_closure(\@kernel);
-    }
-
     # Build the full DFA via subset construction.
     method _build_dfa_states() {
         @states = ();
@@ -143,26 +121,29 @@ class Chalk::Bootstrap::LR0DFA {
             my $state = $states[$i];
             my $core_ids = $state->{core_ids};
 
-            # Single pass: collect advanced core_ids grouped by symbol
-            my %kernels;  # symbol_str => [advanced core_ids]
+            # Single pass: collect advanced core_ids grouped by symbol.
+            # Keys are prefixed with "t:" (terminal) or "n:" (nonterminal)
+            # to prevent collisions between terminal patterns and rule names
+            # that happen to share the same string value.
+            my %kernels;  # "t:pattern" or "n:name" => [advanced core_ids]
             for my $core_id ($core_ids->@*) {
                 next if $core_index->is_complete($core_id);
                 my $sym = $core_index->symbol_after($core_id);
                 next unless defined $sym;
                 my $adv = $core_index->advance($core_id);
                 next unless defined $adv;
-                my $sym_str = $sym->value();
-                $kernels{$sym_str} //= [];
-                push $kernels{$sym_str}->@*, $adv;
+                my $sym_key = ($sym->is_reference() ? 'n:' : 't:') . $sym->value();
+                $kernels{$sym_key} //= [];
+                push $kernels{$sym_key}->@*, $adv;
             }
 
             # Compute closure of each kernel and register as target state
-            for my $sym_str (sort keys %kernels) {
-                my $target_core_ids = $self->_closure($kernels{$sym_str});
+            for my $sym_key (sort keys %kernels) {
+                my $target_core_ids = $self->_closure($kernels{$sym_key});
                 next unless $target_core_ids->@*;
 
                 my $target_id = $self->_register_state($target_core_ids);
-                $state->{goto_table}{$sym_str} = $target_id;
+                $state->{goto_table}{$sym_key} = $target_id;
             }
 
             $i++;
