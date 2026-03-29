@@ -2176,24 +2176,53 @@ tokens from the recovery state, not the original error state.
 Error recovery allows the parser to continue past syntax errors,
 producing partial parse results and additional diagnostics.
 
-**Statement-level recovery.** When the parser detects failure at
-position P:
+**Two-tier recovery.** When the parser detects failure at position P:
 
 1. Record the error and expected tokens at P.
-2. Scan forward from P to find the nearest *synchronization token*:
-   a statement terminator (`;`), block closer (`}`), or declaration
-   keyword (`method`, `field`, `class`).
-3. Skip the input between P and the synchronization point.
-4. Resume parsing from the grammar's statement-start DFA state at the
+2. **Tier 1 — Ruby Slippers delimiter insertion.** Check whether the
+   expected tokens (from the DFA state terminal maps at the last active
+   position) include a closing delimiter (`)`, `]`, `}`). If so, and
+   the actual next character is a *different* closing delimiter or `;`,
+   insert a virtual closer and resume parsing. Record the insertion as
+   a diagnostic. This handles the common cases of missing `;` before
+   `}`, missing `)` before `{`, etc. without skipping any input.
+3. **Tier 2 — Brace-depth-aware panic mode.** If Ruby Slippers does
+   not apply (or does not resolve the error), scan forward from P with
+   brace-depth tracking to find a synchronization point:
+   a. Maintain a depth counter: `{` increments, `}` decrements.
+   b. A `;` at depth 0 is a statement boundary — sync here.
+   c. A `}` that decrements depth below 0 closes the enclosing
+      block — sync after the `}`.
+   d. A declaration keyword (`method`, `field`, `class`, `sub`, `use`)
+      at depth 0 is a construct boundary — sync at the keyword.
+   e. If none found before EOF, the parse fails with accumulated
+      errors.
+4. Skip the input between P and the synchronization point.
+5. Resume parsing from the grammar's statement-start DFA state at the
    synchronization point.
+
+**Why brace-depth tracking matters.** A naive "scan to first `;` or
+`}`" fails when delimiters are mismatched:
+
+```perl
+method foo($self) {
+    my $x = {        # missing closing brace
+    my $y = 1;       # naive: resumes here, inside broken hash
+}                    # naive: orphaned closer
+```
+
+With depth tracking, the scanner sees the `{` (depth +1), ignores the
+`;` (depth 1, not 0), and syncs on the `}` that decrements below 0
+(closing the enclosing method block). This produces one error spanning
+the broken region instead of cascading failures.
 
 **Why statement-level, not backward-walking.** Safe-set GC
 (Section 6.5) frees chart data at statement boundaries. Walking
 backward to find a safe-set boundary would find freed positions with
-no chart data. Statement-level recovery avoids this: instead of
-reconstructing parser state from a freed position, it resets to a
-known DFA state (the state that begins a new statement). This is the
-same state the parser enters after every `;` during normal parsing.
+no chart data. Forward-scanning avoids this: instead of reconstructing
+parser state from a freed position, it resets to a known DFA state
+(the state that begins a new statement). This is the same state the
+parser enters after every `;` during normal parsing.
 
 **Recovery state selection.** The statement-start DFA state is
 identified during DFA construction: it is the state containing the
@@ -2203,14 +2232,21 @@ same at every statement boundary, so the parser can resume with
 
 **Multiple error reporting.** After recovery, parsing continues
 normally. If additional errors are found, they are reported with the
-same diagnostic format. The parser limits the number of reported errors
-(typically 10-20) to avoid cascading noise.
+same diagnostic format. The parser limits the number of reported
+errors to 20 to avoid cascading noise from a single root cause.
 
 **Partial result construction.** When SemanticAction encounters a
 recovery point, it inserts an error placeholder node in the IR tree.
 The placeholder records the skipped span and the recovery point. The
 code generation pipeline can handle error nodes by emitting diagnostic
 comments or skipping the affected statement.
+
+Note: the two-tier strategy emerged from implementation and research
+into Earley error recovery (Marpa's Ruby Slippers, Diekmann & Tratt's
+"Don't Panic!" ECOOP 2020, YAEP's error symbol approach). The original
+draft described only statement-level panic mode; brace-depth tracking
+and Ruby Slippers insertion were added to handle delimiter mismatches
+and reduce unnecessary skipping.
 
 ---
 
