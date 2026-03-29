@@ -1,2 +1,3 @@
 t/bootstrap/.oracle-cache/
 .build/
+.worktrees/
