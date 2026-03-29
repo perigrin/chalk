@@ -185,4 +185,64 @@ subtest 'errors accessor reports recovery events' => sub {
     ok(exists $err->{sync_type}, 'error has sync_type');
 };
 
+# === Ruby Slippers tests ===
+
+# Grammar with paired delimiters for Ruby Slippers testing
+# Block     ::= '{' Program '}'
+# Program   ::= Statement | Program ';' Statement
+# Statement ::= Identifier '=' Value
+my $block_grammar = [
+    Chalk::Grammar::Rule->new(
+        name        => 'Block',
+        expressions => [[terminal('\\{'), reference('Program'), terminal('\\}')]],
+    ),
+    Chalk::Grammar::Rule->new(
+        name        => 'Program',
+        expressions => [
+            [reference('Statement')],
+            [reference('Program'), terminal(';'), reference('Statement')],
+        ],
+    ),
+    Chalk::Grammar::Rule->new(
+        name        => 'Statement',
+        expressions => [[reference('Identifier'), terminal('='), reference('Value')]],
+    ),
+    Chalk::Grammar::Rule->new(
+        name        => 'Identifier',
+        expressions => [[terminal('[a-z]+')]],
+    ),
+    Chalk::Grammar::Rule->new(
+        name        => 'Value',
+        expressions => [[terminal('\\d+')]],
+    ),
+];
+
+subtest 'Ruby Slippers: missing semicolon before }' => sub {
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $block_grammar,
+        semiring => $semiring,
+        recover  => true,
+    );
+
+    # "{x=1}" is valid. "{x=1 y=2}" is missing the semicolon.
+    # The parser stalls after "1" because it expects ; or } but sees "y".
+    # Ruby Slippers should NOT fire here (expected is ; or }, got identifier).
+    # This is a Tier 2 panic mode case.
+    # But "{x=1;y=2}" should parse fine.
+    ok($parser->parse('{x=1;y=2}'), 'valid block parses');
+};
+
+subtest 'error recovery reports errors for invalid block' => sub {
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $block_grammar,
+        semiring => $semiring,
+        recover  => true,
+    );
+
+    # "{x=1;@@@;y=2}" - garbage in the middle
+    $parser->parse('{x=1;@@@;y=2}');
+    my $errors = $parser->errors();
+    cmp_ok(scalar $errors->@*, '>=', 1, 'at least one error in block parse');
+};
+
 done_testing;
