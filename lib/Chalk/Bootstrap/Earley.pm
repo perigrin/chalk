@@ -11,11 +11,15 @@ use Chalk::Bootstrap::LR0DFA;
 class Chalk::Bootstrap::Earley {
     field $grammar  :param :reader;
     field $semiring :param :reader;
+    field $_recover :param(recover) = false;
 
     # Source file path for diagnostics (set per parse_value call)
     field $_parse_file;
     field $_last_active_pos;
     field $_diag_expected;
+
+    # Error recovery state (parse-lifetime)
+    field @_errors;
 
     # Build a lookup table for rules by name
     field $rule_table;
@@ -130,6 +134,7 @@ class Chalk::Bootstrap::Earley {
         %_profile_data = ();
         %_set_registry = ();
         %_set_reuse_stats = ();
+        @_errors = ();
     }
 
     method profile_data() { return \%_profile_data; }
@@ -280,6 +285,9 @@ class Chalk::Bootstrap::Earley {
     # Accessor for set reuse statistics (Section 6.3 distance vector registry)
     method set_reuse_stats() { return \%_set_reuse_stats; }
 
+    # Accessor for errors collected during recovery
+    method errors() { return \@_errors; }
+
     # Find a synchronization point for error recovery (Section 8.3 Tier 2).
     # Scans forward from $start_pos with brace-depth tracking.
     # Returns ($sync_pos, $sync_type) or (undef, undef) if no sync found.
@@ -366,6 +374,7 @@ class Chalk::Bootstrap::Earley {
         %_profile_data = ();
         $_last_active_pos = 0;
         $_diag_expected = {};
+        @_errors = ();
 
         # Find the start rule (first rule in grammar).
         # Convention: grammar->[0] is the start rule (same as LR0DFA.pm).
@@ -388,8 +397,9 @@ class Chalk::Bootstrap::Earley {
             push @pending_sweeps, [$origin, $end];
         };
 
-        # Process each chart position
-        for my $pos (0 .. $n) {
+        # Process each chart position (while loop enables recovery skip)
+        my $pos = 0;
+        while ($pos <= $n) {
             # Build agenda from all entries at this position.
             # Agenda carries [$core_id, $origin] pairs; values are in the chart.
             # Chart uses relative distances: rel_dist = pos - origin.
@@ -406,6 +416,36 @@ class Chalk::Bootstrap::Earley {
                 }
                 push @active_cids, $core_id if $found;
             }
+
+            # Stall detection: empty agenda means no items survived to this
+            # position. If recovery is enabled, find a sync point and resume.
+            if (!@agenda && $pos > 0 && $pos < $n && $_recover) {
+                if (scalar(@_errors) < 20) {
+                    push @_errors, {
+                        position  => $pos,
+                        expected  => { $_diag_expected->%* },
+                    };
+
+                    my ($sync_pos, $sync_type) = $self->_find_sync_point($input, $pos);
+                    if (defined $sync_pos) {
+                        $_errors[-1]{sync_pos}  = $sync_pos;
+                        $_errors[-1]{sync_type} = $sync_type;
+
+                        # Seed chart at recovery position with start rule items
+                        for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
+                            my $seed_id = $core_index->id_for(
+                                $start_rule->name(), $alt_idx, 0);
+                            ($chart[$sync_pos][$seed_id] //= [])->[0]
+                                = $semiring->one();
+                        }
+                        $pos = $sync_pos;
+                        next;
+                    }
+                }
+                # No sync point or error limit reached — stop
+                last;
+            }
+
             # Track furthest position with active items for diagnostics
             if (@agenda) {
                 $_last_active_pos = $pos;
@@ -765,6 +805,8 @@ class Chalk::Bootstrap::Earley {
                         $_profile_data{max_items_at_pos}, $_profile_data{live_positions}, $rss);
                 }
             }
+
+            $pos++;
         }
 
         # Check if we have a completed start rule spanning entire input
@@ -775,6 +817,24 @@ class Chalk::Bootstrap::Earley {
             my $end_oh = $chart[$n][$core_id];
             if (defined $end_oh && defined $end_oh->[$n]) {
                 return $end_oh->[$n];
+            }
+        }
+
+        # With recovery enabled, the start rule may not span the full input
+        # (origin 0 to $n) because recovery seeds fresh start-rule items at
+        # the sync position. Check for a start rule completion from any origin.
+        if ($_recover && @_errors) {
+            for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
+                my $end_dot = scalar($start_rule->expressions()->[$alt_idx]->@*);
+                my $core_id = $core_index->id_for($start_rule->name(), $alt_idx, $end_dot);
+
+                my $end_oh = $chart[$n][$core_id];
+                next unless defined $end_oh;
+                for my $rd (0 .. $end_oh->$#*) {
+                    next unless defined $end_oh->[$rd];
+                    # Found a completed start rule from a recovery origin
+                    return $end_oh->[$rd];
+                }
             }
         }
 

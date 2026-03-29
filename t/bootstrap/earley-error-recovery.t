@@ -125,4 +125,64 @@ subtest '_find_sync_point: declaration keyword at depth 0' => sub {
     is($sync_type, 'keyword', 'sync type is keyword');
 };
 
+# === Stall detection and recovery tests ===
+
+subtest 'parse recovers past error and continues' => sub {
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+        recover  => true,
+    );
+
+    # "x=1;@@@;y=2" - valid statement, garbage, valid statement
+    # Without recovery: parse fails at @@@
+    # With recovery: should skip past @@@ to ; and continue
+    my $result = $parser->parse('x=1;@@@;y=2');
+    ok($result, 'parse succeeds despite error in middle');
+};
+
+subtest 'parse without recovery still fails on error' => sub {
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+    );
+
+    # Default: no recovery
+    my $result = $parser->parse('x=1;@@@;y=2');
+    ok(!$result, 'parse fails without recovery enabled');
+};
+
+subtest 'valid input parses identically with recovery enabled' => sub {
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+        recover  => true,
+    );
+
+    ok($parser->parse('x=1'), 'single statement');
+    $parser->reset_parse_state();
+    ok($parser->parse('x=1;y=2;z=3'), 'multiple statements');
+    $parser->reset_parse_state();
+    ok(!$parser->parse(''), 'empty still rejected');
+};
+
+subtest 'errors accessor reports recovery events' => sub {
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar  => $grammar,
+        semiring => $semiring,
+        recover  => true,
+    );
+
+    $parser->parse('x=1;@@@;y=2');
+    my $errors = $parser->errors();
+    ok(defined $errors, 'errors returns defined value');
+    is(ref $errors, 'ARRAY', 'errors returns arrayref');
+    cmp_ok(scalar $errors->@*, '>=', 1, 'at least one error recorded');
+
+    my $err = $errors->[0];
+    ok(exists $err->{position}, 'error has position');
+    ok(exists $err->{sync_pos}, 'error has sync_pos');
+    ok(exists $err->{sync_type}, 'error has sync_type');
+};
+
 done_testing;
