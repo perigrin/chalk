@@ -280,6 +280,54 @@ class Chalk::Bootstrap::Earley {
     # Accessor for set reuse statistics (Section 6.3 distance vector registry)
     method set_reuse_stats() { return \%_set_reuse_stats; }
 
+    # Find a synchronization point for error recovery (Section 8.3 Tier 2).
+    # Scans forward from $start_pos with brace-depth tracking.
+    # Returns ($sync_pos, $sync_type) or (undef, undef) if no sync found.
+    # sync_type: 'semicolon', 'block_close', 'keyword'
+    method _find_sync_point($input, $start_pos) {
+        my $n = length($input);
+        my $depth = 0;
+        my $pos = $start_pos;
+
+        while ($pos < $n) {
+            my $ch = substr($input, $pos, 1);
+
+            if ($ch eq '{') {
+                $depth++;
+            } elsif ($ch eq '}') {
+                $depth--;
+                if ($depth < 0) {
+                    # Closing brace exits the enclosing block
+                    return ($pos + 1, 'block_close');
+                }
+            } elsif ($ch eq ';' && $depth == 0) {
+                return ($pos + 1, 'semicolon');
+            }
+
+            # Check for declaration keywords at depth 0
+            if ($depth == 0 && $ch =~ /[a-z]/) {
+                for my $kw (qw(method field class sub use)) {
+                    my $kw_len = length($kw);
+                    if ($pos + $kw_len <= $n
+                        && substr($input, $pos, $kw_len) eq $kw
+                        && ($pos + $kw_len >= $n
+                            || substr($input, $pos + $kw_len, 1) =~ /\W/))
+                    {
+                        # Only sync on keyword if it's not at the very start
+                        # of the scan (that would be the error position itself)
+                        if ($pos > $start_pos) {
+                            return ($pos, 'keyword');
+                        }
+                    }
+                }
+            }
+
+            $pos++;
+        }
+
+        return (undef, undef);
+    }
+
     # Get the symbol after the dot for a core item (O(1) precomputed lookup)
     method _symbol_after_dot_for($core_id) {
         return $core_index->symbol_after($core_id);
