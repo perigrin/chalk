@@ -1609,11 +1609,11 @@ class Chalk::Bootstrap::Perl::Actions {
         return _make_const($factory, $text);
     }
 
-    # §19 RegexLiteral — return as Constant
+    # §19 RegexLiteral — return as Constant with regex type
     method RegexLiteral($ctx) {
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        return _make_const($factory, $text);
+        return $factory->make('Constant', const_type => 'regex', value => $text);
     }
 
     # §20 QualifiedIdentifier — return as Constant

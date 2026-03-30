@@ -187,10 +187,8 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
             my $eval_ok = eval { Chalk::Bootstrap::ConciseTree::OracleGenerated->can('new') };
             skip 'Oracle.pm: eval not yet supported', 2 unless $eval_ok;
 
-            # Behavioral tests wrapped in TODO — generated code compiles but
-            # parse_concise_output has IR codegen bugs in regex/split handling.
-            TODO: {
-                local $TODO = 'Generated Oracle has IR codegen bugs (regex captures, split)';
+            # Behavioral tests for parse_concise_output
+            {
                 my $oracle = Chalk::Bootstrap::ConciseTree::OracleGenerated->new();
                 my $sample = <<'CONCISE';
 1     <0> enter

@@ -355,6 +355,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($val eq 'true' || $val eq 'false' || $val eq 'undef') {
                 return $val;
             }
+            # Regex literals — emit bare (not quoted)
+            if ($ct eq 'regex') {
+                return $val;
+            }
             return "'" . $self->_escape_single_quote($val) . "'";
         }
 
