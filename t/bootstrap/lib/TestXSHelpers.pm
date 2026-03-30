@@ -205,6 +205,9 @@ PMSTUB
     my $load_ok = eval "require $module_name; 1";
     return (undef, "Load failed: $@") unless $load_ok;
 
+    # Include XS text in result for structural inspection by tests
+    $result->{files}{"${slug}.xs"} = $xs_text if defined $xs_text;
+
     return ($result, undef);
 }
 

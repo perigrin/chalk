@@ -46,8 +46,8 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
                 diag $err;
                 # Dump XS for debugging
                 if (defined $dist) {
-                    for my $path (sort keys $dist->%*) {
-                        diag "=== $path ===\n" . $dist->{$path} if $path =~ /\.xs$/;
+                    for my $path (sort keys $dist->{files}->%*) {
+                        diag "=== $path ===\n" . $dist->{files}{$path} if $path =~ /\.xs$/;
                     }
                 }
             };
@@ -57,8 +57,8 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
         }
 
         # Structural: XS has method signatures
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->{files}->%*;
+        my $xs_code = defined $xs_file ? $dist->{files}{$xs_file} : undef;
         like($xs_code, qr/to_string\(/, 'ConciseOp: XS has to_string method');
         like($xs_code, qr/structural_key\(/, 'ConciseOp: XS has structural_key method');
         # Methods should use ObjectFIELDS for field access (not hv_fetch)
@@ -134,8 +134,8 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
         };
 
         # Structural checks on the XS file
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        my $xs_code = $dist->{$xs_file};
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->{files}->%*;
+        my $xs_code = defined $xs_file ? $dist->{files}{$xs_file} : undef;
         like($xs_code, qr/MODULE\s*=/, 'ConciseTree: XS has MODULE line');
         like($xs_code, qr/"reader"/, 'ConciseTree: XS applies :reader attribute via C API');
 
@@ -230,8 +230,8 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
         }
 
         # Structural check
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        like($dist->{$xs_file}, qr/MODULE\s*=/, 'Comparator: XS has MODULE line');
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->{files}->%*;
+        like(defined $xs_file ? $dist->{files}{$xs_file} : undef, qr/MODULE\s*=/, 'Comparator: XS has MODULE line');
 
         my $cmp = eval { $module->new() };
         is($@, '', 'Comparator: new() succeeds') or do {
@@ -327,8 +327,8 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
         }
 
         # Structural check
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        like($dist->{$xs_file}, qr/MODULE\s*=/, 'Oracle: XS has MODULE line');
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->{files}->%*;
+        like(defined $xs_file ? $dist->{files}{$xs_file} : undef, qr/MODULE\s*=/, 'Oracle: XS has MODULE line');
 
         my $oracle = eval { $module->new() };
         is($@, '', 'Oracle: new() succeeds') or do {
@@ -386,8 +386,8 @@ CONCISE
         };
 
         # Structural check
-        my ($xs_file) = grep { /\.xs$/ } keys $dist->%*;
-        like($dist->{$xs_file}, qr/MODULE\s*=/, 'Context: XS has MODULE line');
+        my ($xs_file) = grep { /\.xs$/ } keys $dist->{files}->%*;
+        like(defined $xs_file ? $dist->{files}{$xs_file} : undef, qr/MODULE\s*=/, 'Context: XS has MODULE line');
 
         # Basic construction with focus
         my $ctx = eval { $module->new(focus => 'hello') };
