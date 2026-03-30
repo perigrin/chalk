@@ -135,7 +135,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
             # has runtime bugs: compare() returns string 'match' instead of
             # hashref, normalize() uses wrong deref chain ($tree->@*->ops()).
             TODO: {
-                local $TODO = 'Generated Comparator has IR codegen bugs (HashRefExpr, deref chaining)';
+                local $TODO = 'return { key => val } parsed as Block not HashConstructor (#673)';
                 my $cmp = Chalk::Bootstrap::ConciseTree::ComparatorGenerated->new();
                 use Chalk::Bootstrap::ConciseOp;
                 my $op1 = Chalk::Bootstrap::ConciseOp->new(
