@@ -2251,19 +2251,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 return $result;
             }
-            # Plain assignment: Return as VarDecl if target is variable.
-            if ($target isa Chalk::Bootstrap::IR::Node::Constant
-                    && defined $target->value()
-                    && $target->value() =~ /^[\$\@\%]/) {
-                my $result = $factory->make('Constructor',
-                    'class'       => 'VarDecl',
-                    variable    => $target,
-                    initializer => $value,
-                );
-                $update_scope->($target->value(), $result);
-                return $result;
-            }
-            # Otherwise binary expression for assignment
+            # Plain variable assignment ($var = expr) — emit as BinaryExpr, not VarDecl.
+            # VarDecl is only for explicit `my`/`our`/`state` declarations (handled above).
             return $factory->make('Constructor',
                 'class' => 'BinaryExpr',
                 op    => $op,
