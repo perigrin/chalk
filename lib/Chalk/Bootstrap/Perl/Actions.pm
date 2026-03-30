@@ -1853,6 +1853,8 @@ class Chalk::Bootstrap::Perl::Actions {
             $op = $1;
         } elsif ($text =~ /^\s*(not)\b/) {
             $op = $1;
+        } elsif ($text =~ /^\s*(\\)/) {
+            $op = $1;
         }
 
         my @values = _collect_ir_values($ctx);
@@ -2671,6 +2673,12 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return undef unless defined $iterator;
+
+        # Fix postfix deref chains in the list expression (e.g.,
+        # $tree->ops()->@* parsed as $tree->@*->ops() due to Earley merge)
+        if (defined $list && $list isa Chalk::Bootstrap::IR::Node) {
+            $list = _fix_postfix_chain($factory, $list);
+        }
 
         $body = _fixup_stmts($factory, $body // []);
 
