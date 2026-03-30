@@ -223,10 +223,8 @@ CONCISE
         like($code, qr/method leaves/, 'Context.pm: has method leaves');
         like($code, qr/method scanned_text/, 'Context.pm: has method scanned_text');
 
-        # Rename and eval — method bodies use anon sub, isa operator, recursion,
-        # ref(), PostfixDeref that fragment in the ambiguous grammar.
-        TODO: {
-            local $TODO = 'Method bodies use anon sub, isa, recursion, PostfixDeref that fragment';
+        # Rename and eval
+        {
             my ($ok, $err) = eval_module($code,
                 'Chalk::Bootstrap::Context',
                 'Chalk::Bootstrap::ContextGenerated');

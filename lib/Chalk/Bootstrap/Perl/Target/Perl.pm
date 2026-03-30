@@ -118,7 +118,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Statement-level types that handle their own formatting (no auto-semicolon)
     my %STATEMENT_TYPES = map { $_ => 1 } qw(
         Program UseDecl ClassDecl MethodDecl ReturnStmt DieCall FieldDecl
-        VarDecl CompoundAssign TryCatchStmt
+        VarDecl TryCatchStmt
     );
 
     # Expression types that need semicolons when used as statements
@@ -126,6 +126,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         BinaryExpr UnaryExpr MethodCallExpr SubscriptExpr PostfixDerefExpr
         TernaryExpr HashRefExpr ArrayRefExpr AnonSubExpr RegexMatch
         RegexSubst BuiltinCall BacktickExpr InterpolatedString
+        CompoundAssign
     );
 
     method _emit_node($node) {
