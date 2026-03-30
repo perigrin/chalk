@@ -117,7 +117,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     # Statement-level types that handle their own formatting (no auto-semicolon)
     my %STATEMENT_TYPES = map { $_ => 1 } qw(
-        Program UseDecl ClassDecl MethodDecl ReturnStmt DieCall FieldDecl
+        Program UseDecl ClassDecl MethodDecl SubDecl ReturnStmt DieCall FieldDecl
         VarDecl TryCatchStmt
     );
 
@@ -194,6 +194,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'UseDecl')    { return $self->_emit_use_decl($node); }
             if ($class eq 'ClassDecl')  { return $self->_emit_class_decl($node); }
             if ($class eq 'MethodDecl') { return $self->_emit_method_decl($node); }
+            if ($class eq 'SubDecl')    { return $self->_emit_sub_decl($node); }
             if ($class eq 'ReturnStmt') { return $self->_emit_return_stmt($node); }
             if ($class eq 'DieCall')    { return $self->_emit_die_call($node); }
             if ($class eq 'FieldDecl')  { return $self->_emit_field_decl($node); }
@@ -266,6 +267,32 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
         my $decl = "method $name$sig {";
+
+        my @lines = ($decl);
+        for my $item ($body->@*) {
+            my $code = $self->_emit_node($item);
+            if (defined $code) {
+                for my $line (split /\n/, $code) {
+                    push @lines, "    $line";
+                }
+            }
+        }
+        push @lines, "}";
+
+        return join("\n", @lines);
+    }
+
+    # SubDecl inputs: [name, params, body, scope]
+    method _emit_sub_decl($node) {
+        my $name   = $node->inputs()->[0]->value();
+        my $params = $node->inputs()->[1];
+        my $body   = $node->inputs()->[2];
+        my $scope_node = $node->inputs()->[3];
+        my $scope  = defined $scope_node ? $scope_node->value() : 'package';
+
+        my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
+        my $prefix = $scope eq 'package' ? 'sub' : "$scope sub";
+        my $decl = "$prefix $name$sig {";
 
         my @lines = ($decl);
         for my $item ($body->@*) {
