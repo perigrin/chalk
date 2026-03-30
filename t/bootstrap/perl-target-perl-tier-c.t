@@ -131,11 +131,8 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
             my $eval_ok = eval { Chalk::Bootstrap::ConciseTree::ComparatorGenerated->can('new') };
             skip 'Comparator.pm: eval not yet supported', 4 unless $eval_ok;
 
-            # Behavioral tests wrapped in TODO — generated code compiles but
-            # has runtime bugs: compare() returns string 'match' instead of
-            # hashref, normalize() uses wrong deref chain ($tree->@*->ops()).
-            TODO: {
-                local $TODO = 'return { key => val } parsed as Block not HashConstructor (#673)';
+            # Behavioral tests — compare() returns hashref, normalize() works
+            {
                 my $cmp = Chalk::Bootstrap::ConciseTree::ComparatorGenerated->new();
                 use Chalk::Bootstrap::ConciseOp;
                 my $op1 = Chalk::Bootstrap::ConciseOp->new(

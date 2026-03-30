@@ -892,6 +892,23 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §3 SimpleStatement — transparent pass-through
+    # §3 ReturnStatement ::= /return\b/ WS Expression | /return\b/
+    method ReturnStatement($ctx) {
+        my @values = _collect_ir_values($ctx);
+        # First IR value is the return expression (if present)
+        my $value;
+        for my $val (@values) {
+            if ($val isa Chalk::Bootstrap::IR::Node) {
+                $value = $val;
+                last;
+            }
+        }
+        return $factory->make('Constructor',
+            'class' => 'ReturnStmt',
+            value => $value // _make_const($factory, 'undef'),
+        );
+    }
+
     method SimpleStatement($ctx) {
         my @values = _collect_ir_values($ctx);
         my @ir_nodes;

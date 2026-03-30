@@ -31,8 +31,12 @@ StatementItem ::= SimpleStatement _ /;/
 
 # §3  STATEMENT CATEGORIES
 
-SimpleStatement ::= ExpressionStatement
+SimpleStatement ::= ReturnStatement
+    | ExpressionStatement
     | UseDeclaration ;
+
+ReturnStatement ::= /return\b/ WS Expression
+    | /return\b/ ;
 
 CompoundStatement ::= Block
     | IfStatement

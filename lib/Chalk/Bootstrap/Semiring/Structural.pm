@@ -154,35 +154,38 @@ class Chalk::Bootstrap::Semiring::Structural {
             }
         }
 
-        # Both valid: prefer is_block over is_hash.
-        # Returns the actual winning object ($left or $right) so that FilterComposite
-        # can detect the preference via numeric identity comparison.
+        # Both valid: prefer is_hash over is_block.
+        # A bare Block is not an expression, so when both Block and HashConstructor
+        # produce valid parses, the hash interpretation is correct in expression
+        # context (return { key => val }, $x = { ... }, f({ ... })).
+        # Block is still correct in pure statement context, but there HashConstructor
+        # typically doesn't produce a valid parse (semicolons inside { ; } break
+        # ExpressionList, leaving Block as the only alternative).
         my $left_block  = $left  & STRUCT_IS_BLOCK;
         my $right_block = $right & STRUCT_IS_BLOCK;
         my $left_hash   = $left  & STRUCT_IS_HASH;
         my $right_hash  = $right & STRUCT_IS_HASH;
-        if ($left_block || $right_block) {
-            # When both are is_block, prefer the one without is_hash.
-            # This resolves `{ {} }` where one Block alt has inner Block
-            # (pure is_block) and another has trailing HashConstructor
-            # (is_block + is_hash).
-            if ($left_block && $right_block) {
-                if ($right_hash && !$left_hash) {
+        if ($left_hash || $right_hash) {
+            # When both are is_hash, prefer the one without is_block.
+            # This resolves `{ {} }` where one derivation has inner HashConstructor
+            # (pure is_hash) and another has trailing Block-wrapped hash
+            # (is_hash + is_block).
+            if ($left_hash && $right_hash) {
+                if ($right_block && !$left_block) {
                     return $left;
                 }
-                if ($left_hash && !$right_hash) {
+                if ($left_block && !$right_block) {
                     return $right;
                 }
-                # Both have is_block and same hash status — pick left
+                # Both have is_hash and same block status — pick left
                 return $left;
             }
-            # One-sided: the block side wins
-            return $left_block ? $left : $right;
+            # One-sided: the hash side wins
+            return $left_hash ? $left : $right;
         }
 
-        # Both valid, neither is block: prefer is_hash if present.
-        # Returns the actual winning object for FilterComposite identity detection.
-        if ($left_hash || $right_hash) {
+        # Both valid, neither is hash: prefer is_block if present.
+        if ($left_block || $right_block) {
             if ($left_hash && !$right_hash) {
                 return $left;
             }
