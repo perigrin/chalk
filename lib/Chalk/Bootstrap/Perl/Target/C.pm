@@ -1685,15 +1685,18 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @lines, '';
 
         # Classify exported functions: skip init_statics and _ADJUST from regular XSUBs.
-        my $init_fn    = "${slug}_init_statics";
-        my $adjust_fn  = "${slug}_ADJUST";
+        # Match by suffix because class slug may differ from module slug.
         my $has_adjust = false;
+        my $actual_init_fn;
+        my $adjust_fn;
         my @xsub_fns;
         for my $fn ($exported_functions->@*) {
-            if ($fn->{name} eq $init_fn) {
+            if ($fn->{name} =~ /_init_statics$/) {
+                $actual_init_fn = $fn->{name};
                 next;  # called from BOOT, not exposed as XSUB
             }
-            if ($fn->{name} eq $adjust_fn) {
+            if ($fn->{name} =~ /_ADJUST$/) {
+                $adjust_fn = $fn->{name};
                 $has_adjust = true;
                 next;  # emitted as void _ADJUST XSUB separately
             }
@@ -1780,12 +1783,15 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
             }
 
+            my $call_args = @param_names
+                ? 'aTHX_ ' . join(', ', @param_names)
+                : 'aTHX';
             if ($return_type eq 'void') {
                 push @lines, '  CODE:';
-                push @lines, "    ${fname}(aTHX_ " . join(', ', @param_names) . ");";
+                push @lines, "    ${fname}(${call_args});";
             } else {
                 push @lines, '  CODE:';
-                push @lines, "    RETVAL = ${fname}(aTHX_ " . join(', ', @param_names) . ");";
+                push @lines, "    RETVAL = ${fname}(${call_args});";
                 push @lines, '  OUTPUT:';
                 push @lines, '    RETVAL';
             }
@@ -1858,7 +1864,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
 
         # Call init_statics to initialize class-scope static variables
-        push @lines, "    ${init_fn}(aTHX);";
+        if (defined $actual_init_fn) {
+            push @lines, "    ${actual_init_fn}(aTHX);";
+        }
         push @lines, '';
 
         # LEAVE triggers SAVEDESTRUCTOR_X which calls class_seal_stash
