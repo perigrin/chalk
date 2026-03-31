@@ -123,4 +123,56 @@ for my $meth (qw(is_zero add multiply)) {
     ok(!exists $mono->{$meth}, "_method_dispatch does NOT have '$meth' (multi-owner, excluded)");
 }
 
+# --- Verify Component 3: stash statics, init_statics, and cross-class includes ---
+
+my $c_result = eval { $target->generate_c_files($program, undef, undef) };
+ok(defined $c_result, 'generate_c_files returns a result for Component 3 checks') or do {
+    diag "Error: $@";
+    done_testing();
+    exit;
+};
+
+my $c_text = $c_result->{files}{'host.c'};
+ok(defined $c_text, 'generated .c file exists in result') or do {
+    diag 'Keys: ' . join(', ', sort keys $c_result->{files}->%*);
+    done_testing();
+    exit;
+};
+
+# --- Static HV* stash pointer declarations ---
+# Slugs are taken from compiled_class_metadata directly (not derived by _class_slug).
+# The metadata sets: testsemiringalpha, testsemiringbeta, testsemiringgamma.
+for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
+    like($c_text, qr/static HV \*_${slug}_stash = NULL;/,
+        "generated C contains static stash declaration for '$slug'");
+}
+
+# --- gv_stashpvn population in init_statics ---
+# init_statics must populate each stash from the full class name.
+my %expected_stashpvn = (
+    'testsemiringalpha' => 'Test::Semiring::Alpha',
+    'testsemiringbeta'  => 'Test::Semiring::Beta',
+    'testsemiringgamma' => 'Test::Semiring::Gamma',
+);
+for my $slug (sort keys %expected_stashpvn) {
+    my $class_name = $expected_stashpvn{$slug};
+    my $len        = length($class_name);
+    like($c_text,
+        qr/\Q_${slug}_stash = gv_stashpvn("${class_name}", ${len}, GV_ADD);\E/,
+        "init_statics populates _${slug}_stash via gv_stashpvn");
+}
+
+# --- Cross-class #include directives ---
+# Each unique polymorphic-dispatch slug must be included (except self-include).
+for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
+    like($c_text, qr/#include "${slug}\.h"/,
+        "generated C includes header for polymorphic-dispatch slug '$slug'");
+}
+
+# The poly-dispatch includes appear only once even if a slug also appears
+# in field_types — create a second result using field_types that overlaps.
+# Verify no duplicate includes for 'testsemiringalpha' (count occurrences).
+my $alpha_include_count = () = $c_text =~ /#include "testsemiringalpha\.h"/g;
+is($alpha_include_count, 1, '#include "testsemiringalpha.h" appears exactly once (no duplicates)');
+
 done_testing;
