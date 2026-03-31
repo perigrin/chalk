@@ -124,13 +124,16 @@ ok(exists $empty_result->{'dfa_tables.c'}, 'empty grammar result has dfa_tables.
 ok(exists $empty_result->{'dfa_tables.h'}, 'empty grammar result has dfa_tables.h');
 
 # === Tests 9-25: CoreItemIndex static C array emission ===
-# Re-run generate() with the 3-rule grammar to get the C output
+# Re-run generate() with the 3-rule grammar to get the C output.
+# $h_text_ci is the header for this generate() call; #define constants and
+# typedefs now live in the header rather than the .c file.
 
 my $c_result = $target->generate($ir);
 my $c_text = $c_result->{'dfa_tables.c'};
+my $h_text_ci = $c_result->{'dfa_tables.h'};
 
-# === Test 9: NUM_CORE_ITEMS define is present ===
-like($c_text, qr/#define NUM_CORE_ITEMS \d+/,
+# === Test 9: NUM_CORE_ITEMS define is present in the header ===
+like($h_text_ci, qr/#define NUM_CORE_ITEMS \d+/,
     'dfa_tables.c contains #define NUM_CORE_ITEMS');
 
 # === Test 10-16: All 7 CoreItemIndex array declarations are present ===
@@ -151,8 +154,8 @@ like($c_text, qr/ci_symbol_after_is_ref\[/,  'dfa_tables.c contains ci_symbol_af
 #   B: 2 items (dot 0,1)
 # Total = 7 core items.
 my $n = $target->last_dfa_state_count(); # we want core count — use core_index instead
-# Extract N from the define
-my ($num_core_items) = $c_text =~ /#define NUM_CORE_ITEMS (\d+)/;
+# Extract N from the header (defines now live in dfa_tables.h, not dfa_tables.c)
+my ($num_core_items) = $h_text_ci =~ /#define NUM_CORE_ITEMS (\d+)/;
 ok(defined $num_core_items, 'NUM_CORE_ITEMS is parseable from C text');
 cmp_ok($num_core_items, '>', 0, 'NUM_CORE_ITEMS is positive');
 
@@ -241,11 +244,12 @@ for my ($idx, $pat) (indexed @sym_pat_entries) {
 # The grammar has terminals /a/ and /b/, nonterminals S/A/B, and several DFA states with
 # goto entries.
 
-# Extract the number of DFA states for later cross-checks
-my ($num_dfa_states) = $c_text =~ /#define NUM_DFA_STATES (\d+)/;
+# Extract the number of DFA states for later cross-checks.
+# Defines now live in dfa_tables.h, not dfa_tables.c.
+my ($num_dfa_states) = $h_text_ci =~ /#define NUM_DFA_STATES (\d+)/;
 
-# === Test: NUM_DFA_STATES define is present ===
-like($c_text, qr/#define NUM_DFA_STATES \d+/,
+# === Test: NUM_DFA_STATES define is present in header ===
+like($h_text_ci, qr/#define NUM_DFA_STATES \d+/,
     'dfa_tables.c contains #define NUM_DFA_STATES');
 ok(defined $num_dfa_states && $num_dfa_states > 0,
     'NUM_DFA_STATES is a positive integer');
@@ -255,23 +259,23 @@ ok(defined $num_dfa_states && $num_dfa_states > 0,
 # ============================================================
 
 # === Test: TOTAL_TMAP_ENTRIES define ===
-like($c_text, qr/#define TOTAL_TMAP_ENTRIES \d+/,
+like($h_text_ci, qr/#define TOTAL_TMAP_ENTRIES \d+/,
     'dfa_tables.c contains #define TOTAL_TMAP_ENTRIES');
-my ($total_tmap_entries) = $c_text =~ /#define TOTAL_TMAP_ENTRIES (\d+)/;
+my ($total_tmap_entries) = $h_text_ci =~ /#define TOTAL_TMAP_ENTRIES (\d+)/;
 ok(defined $total_tmap_entries && $total_tmap_entries > 0,
     'TOTAL_TMAP_ENTRIES is positive (the test grammar has terminals)');
 
 # === Test: TOTAL_TMAP_SLICES define ===
-like($c_text, qr/#define TOTAL_TMAP_SLICES \d+/,
+like($h_text_ci, qr/#define TOTAL_TMAP_SLICES \d+/,
     'dfa_tables.c contains #define TOTAL_TMAP_SLICES');
-my ($total_tmap_slices) = $c_text =~ /#define TOTAL_TMAP_SLICES (\d+)/;
+my ($total_tmap_slices) = $h_text_ci =~ /#define TOTAL_TMAP_SLICES (\d+)/;
 ok(defined $total_tmap_slices && $total_tmap_slices > 0,
     'TOTAL_TMAP_SLICES is positive');
 
 # === Test: NUM_UNIQUE_TMAP_PATTERNS define ===
-like($c_text, qr/#define NUM_UNIQUE_TMAP_PATTERNS \d+/,
+like($h_text_ci, qr/#define NUM_UNIQUE_TMAP_PATTERNS \d+/,
     'dfa_tables.c contains #define NUM_UNIQUE_TMAP_PATTERNS');
-my ($num_unique_tmap) = $c_text =~ /#define NUM_UNIQUE_TMAP_PATTERNS (\d+)/;
+my ($num_unique_tmap) = $h_text_ci =~ /#define NUM_UNIQUE_TMAP_PATTERNS (\d+)/;
 ok(defined $num_unique_tmap && $num_unique_tmap > 0,
     'NUM_UNIQUE_TMAP_PATTERNS is positive');
 
@@ -281,8 +285,8 @@ like($c_text, qr/tmap_core_ids\[/, 'dfa_tables.c contains tmap_core_ids array');
 # === Test: tmap_patterns array present ===
 like($c_text, qr/tmap_patterns\[/, 'dfa_tables.c contains tmap_patterns array');
 
-# === Test: TMapSlice typedef present ===
-like($c_text, qr/typedef struct \{[^}]*pattern_idx[^}]*\}\s*TMapSlice/s,
+# === Test: TMapSlice typedef present in header ===
+like($h_text_ci, qr/typedef struct \{[^}]*pattern_idx[^}]*\}\s*TMapSlice/s,
     'dfa_tables.c contains TMapSlice typedef');
 
 # === Test: tmap_slices array present ===
@@ -320,15 +324,15 @@ is(scalar @tmap_ci_vals, $total_tmap_entries,
 # ============================================================
 
 # === Test: TOTAL_CMAP_ENTRIES define ===
-like($c_text, qr/#define TOTAL_CMAP_ENTRIES \d+/,
+like($h_text_ci, qr/#define TOTAL_CMAP_ENTRIES \d+/,
     'dfa_tables.c contains #define TOTAL_CMAP_ENTRIES');
 
 # === Test: TOTAL_CMAP_SLICES define ===
-like($c_text, qr/#define TOTAL_CMAP_SLICES \d+/,
+like($h_text_ci, qr/#define TOTAL_CMAP_SLICES \d+/,
     'dfa_tables.c contains #define TOTAL_CMAP_SLICES');
 
 # === Test: NUM_UNIQUE_CMAP_NONTERMS define ===
-like($c_text, qr/#define NUM_UNIQUE_CMAP_NONTERMS \d+/,
+like($h_text_ci, qr/#define NUM_UNIQUE_CMAP_NONTERMS \d+/,
     'dfa_tables.c contains #define NUM_UNIQUE_CMAP_NONTERMS');
 
 # === Test: cmap_core_ids array present ===
@@ -337,8 +341,8 @@ like($c_text, qr/cmap_core_ids\[/, 'dfa_tables.c contains cmap_core_ids array');
 # === Test: cmap_nonterminals array present ===
 like($c_text, qr/cmap_nonterminals\[/, 'dfa_tables.c contains cmap_nonterminals array');
 
-# === Test: CMapSlice typedef present ===
-like($c_text, qr/typedef struct \{[^}]*nonterm_idx[^}]*\}\s*CMapSlice/s,
+# === Test: CMapSlice typedef present in header ===
+like($h_text_ci, qr/typedef struct \{[^}]*nonterm_idx[^}]*\}\s*CMapSlice/s,
     'dfa_tables.c contains CMapSlice typedef');
 
 # === Test: cmap_slices array present ===
@@ -363,14 +367,14 @@ is(scalar @cmap_sc_vals, $num_dfa_states,
 # ============================================================
 
 # === Test: TOTAL_GOTO_ENTRIES define ===
-like($c_text, qr/#define TOTAL_GOTO_ENTRIES \d+/,
+like($h_text_ci, qr/#define TOTAL_GOTO_ENTRIES \d+/,
     'dfa_tables.c contains #define TOTAL_GOTO_ENTRIES');
-my ($total_goto_entries) = $c_text =~ /#define TOTAL_GOTO_ENTRIES (\d+)/;
+my ($total_goto_entries) = $h_text_ci =~ /#define TOTAL_GOTO_ENTRIES (\d+)/;
 ok(defined $total_goto_entries && $total_goto_entries > 0,
     'TOTAL_GOTO_ENTRIES is positive (the test grammar has goto transitions)');
 
-# === Test: GotoEntry typedef present ===
-like($c_text, qr/typedef struct \{[^}]*symbol_key[^}]*target_state[^}]*\}\s*GotoEntry/s,
+# === Test: GotoEntry typedef present in header ===
+like($h_text_ci, qr/typedef struct \{[^}]*symbol_key[^}]*target_state[^}]*\}\s*GotoEntry/s,
     'dfa_tables.c contains GotoEntry typedef');
 
 # === Test: goto_entries array present ===
@@ -463,22 +467,22 @@ is($c_text2, $c_text, 'generate() is deterministic: two runs on equivalent IR ar
 # That grammar has no nullable nonterminals but does have prediction closures
 # for S, A, and B.
 
-# === Test: TOTAL_PRED_ENTRIES define is present ===
-like($c_text, qr/#define TOTAL_PRED_ENTRIES \d+/,
+# === Test: TOTAL_PRED_ENTRIES define is present in header ===
+like($h_text_ci, qr/#define TOTAL_PRED_ENTRIES \d+/,
     'dfa_tables.c contains #define TOTAL_PRED_ENTRIES');
-my ($total_pred_entries) = $c_text =~ /#define TOTAL_PRED_ENTRIES (\d+)/;
+my ($total_pred_entries) = $h_text_ci =~ /#define TOTAL_PRED_ENTRIES (\d+)/;
 ok(defined $total_pred_entries && $total_pred_entries > 0,
     'TOTAL_PRED_ENTRIES is positive (test grammar has prediction items)');
 
-# === Test: NUM_PRED_NONTERMS define is present ===
-like($c_text, qr/#define NUM_PRED_NONTERMS \d+/,
+# === Test: NUM_PRED_NONTERMS define is present in header ===
+like($h_text_ci, qr/#define NUM_PRED_NONTERMS \d+/,
     'dfa_tables.c contains #define NUM_PRED_NONTERMS');
-my ($num_pred_nonterms) = $c_text =~ /#define NUM_PRED_NONTERMS (\d+)/;
+my ($num_pred_nonterms) = $h_text_ci =~ /#define NUM_PRED_NONTERMS (\d+)/;
 ok(defined $num_pred_nonterms && $num_pred_nonterms > 0,
     'NUM_PRED_NONTERMS is positive (test grammar has nonterminals)');
 
-# === Test: PredictionEntry typedef present ===
-like($c_text, qr/typedef struct \{[^}]*core_id[^}]*skip_count[^}]*\}\s*PredictionEntry/s,
+# === Test: PredictionEntry typedef present in header ===
+like($h_text_ci, qr/typedef struct \{[^}]*core_id[^}]*skip_count[^}]*\}\s*PredictionEntry/s,
     'dfa_tables.c contains PredictionEntry typedef');
 
 # === Test: prediction_entries array present ===
@@ -569,10 +573,10 @@ is(scalar @negative_skips, 0, 'all skip_count values are non-negative');
 # The test grammar S::=AB A::=/a/ B::=/b/ has no nullable nonterminals.
 # We test that the define and array are present; NUM_NULLABLE may be 0.
 
-# === Test: NUM_NULLABLE define is present ===
-like($c_text, qr/#define NUM_NULLABLE \d+/,
+# === Test: NUM_NULLABLE define is present in header ===
+like($h_text_ci, qr/#define NUM_NULLABLE \d+/,
     'dfa_tables.c contains #define NUM_NULLABLE');
-my ($num_nullable) = $c_text =~ /#define NUM_NULLABLE (\d+)/;
+my ($num_nullable) = $h_text_ci =~ /#define NUM_NULLABLE (\d+)/;
 ok(defined $num_nullable, 'NUM_NULLABLE is parseable from C text');
 # For this grammar there are no nullable nonterminals
 is($num_nullable, 0, 'NUM_NULLABLE is 0 for the non-nullable test grammar');
@@ -638,9 +642,10 @@ my $ir3 = [
 my $target3 = Chalk::Bootstrap::BNF::Target::C->new();
 my $result3  = $target3->generate($ir3);
 my $c_text3  = $result3->{'dfa_tables.c'};
+my $h_text3  = $result3->{'dfa_tables.h'};
 
-# === Test: nullable grammar has NUM_NULLABLE > 0 ===
-my ($num_nullable3) = $c_text3 =~ /#define NUM_NULLABLE (\d+)/;
+# === Test: nullable grammar has NUM_NULLABLE > 0 (define is in header) ===
+my ($num_nullable3) = $h_text3 =~ /#define NUM_NULLABLE (\d+)/;
 ok(defined $num_nullable3 && $num_nullable3 > 0,
     'NUM_NULLABLE > 0 for grammar with nullable nonterminal A');
 
@@ -648,5 +653,208 @@ ok(defined $num_nullable3 && $num_nullable3 > 0,
 my ($null_nt_init3) = $c_text3 =~ /nullable_nonterminals\[\d+\]\s*=\s*\{([^}]*)\}/s;
 ok(defined $null_nt_init3, 'nullable_nonterminals initializer parseable for nullable grammar');
 like($null_nt_init3, qr/"A"/, 'nullable_nonterminals contains "A" for nullable grammar');
+
+# ============================================================
+# === Component 5: dfa_tables.h header emission           ===
+# ============================================================
+# Re-use $c_text and $result from the 3-rule S::=AB A::=/a/ B::=/b/ grammar.
+# $result was the last call to $target->generate($ir).
+# We re-generate to get a fresh result with the current target.
+
+my $h_result = $target->generate($ir);
+my $h_text   = $h_result->{'dfa_tables.h'};
+my $c_text_h = $h_result->{'dfa_tables.c'};
+
+# === Test: dfa_tables.h starts with #pragma once ===
+like($h_text, qr/\A\s*#pragma once/,
+    'dfa_tables.h begins with #pragma once');
+
+# === Test: dfa_tables.c includes chalk.h before dfa_tables.h ===
+# chalk.h sets up the Perl environment (EXTERN.h + perl.h + XSUB.h) which
+# dfa_tables.h depends on at the usage site.
+like($c_text_h, qr/#include\s+"chalk\.h"/,
+    'dfa_tables.c includes chalk.h (Perl environment setup)');
+
+# === Test: dfa_tables.h contains all #define constants ===
+like($h_text, qr/#define NUM_CORE_ITEMS \d+/,
+    'dfa_tables.h contains #define NUM_CORE_ITEMS');
+like($h_text, qr/#define NUM_DFA_STATES \d+/,
+    'dfa_tables.h contains #define NUM_DFA_STATES');
+like($h_text, qr/#define TOTAL_TMAP_ENTRIES \d+/,
+    'dfa_tables.h contains #define TOTAL_TMAP_ENTRIES');
+like($h_text, qr/#define TOTAL_TMAP_SLICES \d+/,
+    'dfa_tables.h contains #define TOTAL_TMAP_SLICES');
+like($h_text, qr/#define NUM_UNIQUE_TMAP_PATTERNS \d+/,
+    'dfa_tables.h contains #define NUM_UNIQUE_TMAP_PATTERNS');
+like($h_text, qr/#define TOTAL_CMAP_ENTRIES \d+/,
+    'dfa_tables.h contains #define TOTAL_CMAP_ENTRIES');
+like($h_text, qr/#define TOTAL_CMAP_SLICES \d+/,
+    'dfa_tables.h contains #define TOTAL_CMAP_SLICES');
+like($h_text, qr/#define NUM_UNIQUE_CMAP_NONTERMS \d+/,
+    'dfa_tables.h contains #define NUM_UNIQUE_CMAP_NONTERMS');
+like($h_text, qr/#define TOTAL_GOTO_ENTRIES \d+/,
+    'dfa_tables.h contains #define TOTAL_GOTO_ENTRIES');
+like($h_text, qr/#define TOTAL_PRED_ENTRIES \d+/,
+    'dfa_tables.h contains #define TOTAL_PRED_ENTRIES');
+like($h_text, qr/#define NUM_PRED_NONTERMS \d+/,
+    'dfa_tables.h contains #define NUM_PRED_NONTERMS');
+like($h_text, qr/#define NUM_NULLABLE \d+/,
+    'dfa_tables.h contains #define NUM_NULLABLE');
+
+# === Test: dfa_tables.h contains all four typedefs ===
+like($h_text, qr/typedef struct \{[^}]*pattern_idx[^}]*\}\s*TMapSlice/s,
+    'dfa_tables.h contains TMapSlice typedef');
+like($h_text, qr/typedef struct \{[^}]*nonterm_idx[^}]*\}\s*CMapSlice/s,
+    'dfa_tables.h contains CMapSlice typedef');
+like($h_text, qr/typedef struct \{[^}]*symbol_key[^}]*target_state[^}]*\}\s*GotoEntry/s,
+    'dfa_tables.h contains GotoEntry typedef');
+like($h_text, qr/typedef struct \{[^}]*core_id[^}]*skip_count[^}]*\}\s*PredictionEntry/s,
+    'dfa_tables.h contains PredictionEntry typedef');
+
+# === Test: dfa_tables.h contains extern declarations for all CoreItemIndex arrays ===
+like($h_text, qr/extern\s+const\s+char\s*\*\s*ci_rule_names\b/,
+    'dfa_tables.h contains extern decl for ci_rule_names');
+like($h_text, qr/extern\s+const\s+int\s+ci_alt_idxs\b/,
+    'dfa_tables.h contains extern decl for ci_alt_idxs');
+like($h_text, qr/extern\s+const\s+int\s+ci_dots\b/,
+    'dfa_tables.h contains extern decl for ci_dots');
+like($h_text, qr/extern\s+const\s+int\s+ci_is_complete\b/,
+    'dfa_tables.h contains extern decl for ci_is_complete');
+like($h_text, qr/extern\s+const\s+int\s+ci_advance\b/,
+    'dfa_tables.h contains extern decl for ci_advance');
+like($h_text, qr/extern\s+const\s+int\s+ci_to_state\b/,
+    'dfa_tables.h contains extern decl for ci_to_state');
+like($h_text, qr/extern\s+const\s+char\s*\*\s*ci_symbol_after_pattern\b/,
+    'dfa_tables.h contains extern decl for ci_symbol_after_pattern');
+like($h_text, qr/extern\s+const\s+int\s+ci_symbol_after_is_ref\b/,
+    'dfa_tables.h contains extern decl for ci_symbol_after_is_ref');
+
+# === Test: dfa_tables.h contains extern declarations for all terminal map arrays ===
+like($h_text, qr/extern\s+const\s+int\s+tmap_core_ids\b/,
+    'dfa_tables.h contains extern decl for tmap_core_ids');
+like($h_text, qr/extern\s+const\s+char\s*\*\s*tmap_patterns\b/,
+    'dfa_tables.h contains extern decl for tmap_patterns');
+like($h_text, qr/extern\s+const\s+TMapSlice\s+tmap_slices\b/,
+    'dfa_tables.h contains extern decl for tmap_slices');
+like($h_text, qr/extern\s+const\s+int\s+tmap_state_offset\b/,
+    'dfa_tables.h contains extern decl for tmap_state_offset');
+like($h_text, qr/extern\s+const\s+int\s+tmap_state_count\b/,
+    'dfa_tables.h contains extern decl for tmap_state_count');
+
+# === Test: dfa_tables.h contains extern declarations for all completion map arrays ===
+like($h_text, qr/extern\s+const\s+int\s+cmap_core_ids\b/,
+    'dfa_tables.h contains extern decl for cmap_core_ids');
+like($h_text, qr/extern\s+const\s+char\s*\*\s*cmap_nonterminals\b/,
+    'dfa_tables.h contains extern decl for cmap_nonterminals');
+like($h_text, qr/extern\s+const\s+CMapSlice\s+cmap_slices\b/,
+    'dfa_tables.h contains extern decl for cmap_slices');
+like($h_text, qr/extern\s+const\s+int\s+cmap_state_offset\b/,
+    'dfa_tables.h contains extern decl for cmap_state_offset');
+like($h_text, qr/extern\s+const\s+int\s+cmap_state_count\b/,
+    'dfa_tables.h contains extern decl for cmap_state_count');
+
+# === Test: dfa_tables.h contains extern declarations for goto table arrays ===
+like($h_text, qr/extern\s+const\s+GotoEntry\s+goto_entries\b/,
+    'dfa_tables.h contains extern decl for goto_entries');
+like($h_text, qr/extern\s+const\s+int\s+goto_state_offset\b/,
+    'dfa_tables.h contains extern decl for goto_state_offset');
+like($h_text, qr/extern\s+const\s+int\s+goto_state_count\b/,
+    'dfa_tables.h contains extern decl for goto_state_count');
+
+# === Test: dfa_tables.h contains extern declarations for prediction table arrays ===
+like($h_text, qr/extern\s+const\s+PredictionEntry\s+prediction_entries\b/,
+    'dfa_tables.h contains extern decl for prediction_entries');
+like($h_text, qr/extern\s+const\s+char\s*\*\s*prediction_nonterminals\b/,
+    'dfa_tables.h contains extern decl for prediction_nonterminals');
+like($h_text, qr/extern\s+const\s+int\s+prediction_offset\b/,
+    'dfa_tables.h contains extern decl for prediction_offset');
+like($h_text, qr/extern\s+const\s+int\s+prediction_count\b/,
+    'dfa_tables.h contains extern decl for prediction_count');
+
+# === Test: dfa_tables.h contains extern declaration for nullable_nonterminals ===
+like($h_text, qr/extern\s+const\s+char\s*\*\s*nullable_nonterminals\b/,
+    'dfa_tables.h contains extern decl for nullable_nonterminals');
+
+# === Test: dfa_tables.c includes dfa_tables.h (not stub) ===
+like($c_text_h, qr/#include\s+"dfa_tables\.h"/,
+    'dfa_tables.c includes "dfa_tables.h"');
+
+# === Test: dfa_tables.c does NOT contain duplicate #define constants ===
+# After moving defines to header, the .c file should not duplicate them
+unlike($c_text_h, qr/#define NUM_CORE_ITEMS/,
+    'dfa_tables.c does not duplicate #define NUM_CORE_ITEMS (now in header)');
+unlike($c_text_h, qr/#define NUM_DFA_STATES/,
+    'dfa_tables.c does not duplicate #define NUM_DFA_STATES (now in header)');
+
+# === Test: dfa_tables.c does NOT contain duplicate typedef definitions ===
+unlike($c_text_h, qr/typedef struct \{[^}]*pattern_idx[^}]*\}\s*TMapSlice/s,
+    'dfa_tables.c does not duplicate TMapSlice typedef (now in header)');
+unlike($c_text_h, qr/typedef struct \{[^}]*nonterm_idx[^}]*\}\s*CMapSlice/s,
+    'dfa_tables.c does not duplicate CMapSlice typedef (now in header)');
+unlike($c_text_h, qr/typedef struct \{[^}]*symbol_key[^}]*target_state[^}]*\}\s*GotoEntry/s,
+    'dfa_tables.c does not duplicate GotoEntry typedef (now in header)');
+unlike($c_text_h, qr/typedef struct \{[^}]*core_id[^}]*skip_count[^}]*\}\s*PredictionEntry/s,
+    'dfa_tables.c does not duplicate PredictionEntry typedef (now in header)');
+
+# === Test: dfa_tables.c still contains the array definitions ===
+like($c_text_h, qr/const.*ci_rule_names\[/,
+    'dfa_tables.c still has ci_rule_names definition');
+like($c_text_h, qr/const.*tmap_core_ids\[/,
+    'dfa_tables.c still has tmap_core_ids definition');
+
+# ============================================================
+# === Compilation test: cc -c dfa_tables.c must succeed   ===
+# ============================================================
+
+use File::Temp qw(tempdir);
+use File::Copy qw(copy);
+use Config;
+use ExtUtils::CBuilder;
+
+SKIP: {
+    skip 'No C compiler available', 1
+        unless ExtUtils::CBuilder->new(quiet => 1)->have_compiler;
+
+    my $tmpdir = tempdir(CLEANUP => 1);
+
+    # Write .c and .h to tempdir
+    open(my $cfh, '>', "$tmpdir/dfa_tables.c")
+        or die "Cannot write dfa_tables.c: $!";
+    print $cfh $c_text_h;
+    close $cfh;
+
+    open(my $hfh, '>', "$tmpdir/dfa_tables.h")
+        or die "Cannot write dfa_tables.h: $!";
+    print $hfh $h_text;
+    close $hfh;
+
+    # Copy chalk.h into tempdir so the include resolves
+    my $chalk_h_src = 'c_src/chalk.h';
+    copy($chalk_h_src, "$tmpdir/chalk.h")
+        or die "Cannot copy chalk.h: $!";
+
+    # Also copy EXTERN.h and XSUB.h stubs if needed, but the perl archlib path
+    # is on the include line so Perl's headers resolve from there.
+    # The -I$Config{archlib}/CORE flag covers perl.h / EXTERN.h / XSUB.h.
+    my $perl_core = "$Config{archlib}/CORE";
+    my $cmd = "$Config{cc} -c -fPIC $Config{ccflags} -I$perl_core -I$tmpdir"
+            . " $tmpdir/dfa_tables.c -o $tmpdir/dfa_tables.o 2>&1";
+    my $output = `$cmd`;
+    my $exit = $?;
+
+    is($exit, 0, 'dfa_tables.c compiles without errors (cc -c)')
+        or diag("Compiler output:\n$output");
+}
+
+# ============================================================
+# === Determinism: .h output must be byte-identical       ===
+# ============================================================
+
+my $target_det = Chalk::Bootstrap::BNF::Target::C->new();
+my $result_det = $target_det->generate($ir);
+my $h_text_det = $result_det->{'dfa_tables.h'};
+
+is($h_text_det, $h_text,
+    'dfa_tables.h is deterministic: two runs on equivalent IR are byte-identical');
 
 done_testing();

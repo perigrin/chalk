@@ -26,7 +26,7 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
     # Values must already be formatted as C literal strings (e.g. via _c_string, or plain ints).
     my sub _emit_c_array($type, $name, $n, $values) {
         my $init = join(', ', $values->@*);
-        return "static $type $name\[$n\] = { $init };\n";
+        return "$type $name\[$n\] = { $init };\n";
     }
 
     # Stored after the most recent generate() call for introspection by tests
@@ -39,6 +39,10 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
     field $core_index;
     field $lr0_dfa;
     field $grammar;
+
+    # Ordered list of [name, value] pairs collected during _emit_* calls.
+    # Populated during generate(); consumed by _emit_header().
+    field $_defines = [];
 
     # Generate stub C output from an arrayref of Constructor:Rule IR nodes.
     # Reconstructs Rule/Symbol objects, builds CoreItemIndex and LR0DFA,
@@ -54,6 +58,7 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         $core_index = undef;
         $lr0_dfa    = undef;
         $grammar    = undef;
+        $_defines   = [];
 
         # Reconstruct Rule/Symbol objects from the IR
         my @rules = $self->_reconstruct_rules($ir);
@@ -90,23 +95,28 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             $last_dfa_state_count = $dfa->state_count();
         }
 
-        my $c_body = "/* stub */\n";
+        my $c_arrays = "/* stub */\n";
         if ($core_index) {
-            $c_body  = $self->_emit_core_item_arrays();
-            $c_body .= $self->_emit_terminal_maps();
-            $c_body .= $self->_emit_completion_maps();
-            $c_body .= $self->_emit_goto_tables();
-            $c_body .= $self->_emit_prediction_tables();
-            $c_body .= $self->_emit_nullable_set();
+            $c_arrays  = $self->_emit_core_item_arrays();
+            $c_arrays .= $self->_emit_terminal_maps();
+            $c_arrays .= $self->_emit_completion_maps();
+            $c_arrays .= $self->_emit_goto_tables();
+            $c_arrays .= $self->_emit_prediction_tables();
+            $c_arrays .= $self->_emit_nullable_set();
         }
+
+        # The .c file includes chalk.h (which sets up the Perl environment) then
+        # dfa_tables.h (which provides defines, typedefs, and extern declarations),
+        # followed by the const array definitions with external linkage.
+        my $c_body = qq(#include "chalk.h"\n#include "dfa_tables.h"\n\n) . $c_arrays;
 
         return {
             'dfa_tables.c' => $c_body,
-            'dfa_tables.h' => "/* stub */\n",
+            'dfa_tables.h' => $self->_emit_header(),
         };
     }
 
-    # Emit the 7 CoreItemIndex parallel arrays as static C source.
+    # Emit the 7 CoreItemIndex parallel arrays as C source.
     # All arrays are indexed by core_id (0 to count-1).
     method _emit_core_item_arrays() {
         my $n = $core_index->count();
@@ -146,9 +156,9 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        my $out = '';
+        push $_defines->@*, ['NUM_CORE_ITEMS', $n];
 
-        $out .= "#define NUM_CORE_ITEMS $n\n\n";
+        my $out = '';
 
         $out .= _emit_c_array('const char *', 'ci_rule_names',          $n, \@rule_names);
         $out .= _emit_c_array('const int',    'ci_alt_idxs',            $n, \@alt_idxs);
@@ -216,18 +226,19 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         }
         my $total_slices = scalar @all_slices;
 
+        push $_defines->@*, ['NUM_DFA_STATES',           $num_states];
+        push $_defines->@*, ['TOTAL_TMAP_ENTRIES',       $total_entries];
+        push $_defines->@*, ['TOTAL_TMAP_SLICES',        $total_slices];
+        push $_defines->@*, ['NUM_UNIQUE_TMAP_PATTERNS', $num_patterns];
+
         my $out = '';
-        $out .= "#define NUM_DFA_STATES $num_states\n";
-        $out .= "#define TOTAL_TMAP_ENTRIES $total_entries\n";
-        $out .= "#define TOTAL_TMAP_SLICES $total_slices\n";
-        $out .= "#define NUM_UNIQUE_TMAP_PATTERNS $num_patterns\n\n";
 
         # tmap_core_ids
         if ($total_entries > 0) {
             $out .= _emit_c_array('const int', 'tmap_core_ids', $total_entries, \@flat_core_ids);
         }
         else {
-            $out .= "static const int tmap_core_ids[1] = { -1 }; /* empty */\n";
+            $out .= "const int tmap_core_ids[1] = { -1 }; /* empty */\n";
         }
 
         # tmap_patterns (unique pattern strings)
@@ -236,17 +247,16 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             $out .= _emit_c_array('const char *', 'tmap_patterns', $num_patterns, \@pat_vals);
         }
         else {
-            $out .= "static const char *tmap_patterns[1] = { NULL }; /* empty */\n";
+            $out .= "const char *tmap_patterns[1] = { NULL }; /* empty */\n";
         }
 
-        # TMapSlice typedef + tmap_slices
-        $out .= "typedef struct { int pattern_idx; int offset; int count; } TMapSlice;\n";
+        # tmap_slices: typedef is now in the header; emit array only
         if ($total_slices > 0) {
             my @slice_vals = map { "{$_->{pattern_idx}, $_->{offset}, $_->{count}}" } @all_slices;
             $out .= _emit_c_array('const TMapSlice', 'tmap_slices', $total_slices, \@slice_vals);
         }
         else {
-            $out .= "static const TMapSlice tmap_slices[1] = { {0, 0, 0} }; /* empty */\n";
+            $out .= "const TMapSlice tmap_slices[1] = { {0, 0, 0} }; /* empty */\n";
         }
 
         $out .= _emit_c_array('const int', 'tmap_state_offset', $num_states, \@so_vals);
@@ -301,16 +311,17 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         }
         my $total_slices = scalar @all_slices;
 
+        push $_defines->@*, ['TOTAL_CMAP_ENTRIES',      $total_entries];
+        push $_defines->@*, ['TOTAL_CMAP_SLICES',       $total_slices];
+        push $_defines->@*, ['NUM_UNIQUE_CMAP_NONTERMS',$num_nonterms];
+
         my $out = '';
-        $out .= "#define TOTAL_CMAP_ENTRIES $total_entries\n";
-        $out .= "#define TOTAL_CMAP_SLICES $total_slices\n";
-        $out .= "#define NUM_UNIQUE_CMAP_NONTERMS $num_nonterms\n\n";
 
         if ($total_entries > 0) {
             $out .= _emit_c_array('const int', 'cmap_core_ids', $total_entries, \@flat_core_ids);
         }
         else {
-            $out .= "static const int cmap_core_ids[1] = { -1 }; /* empty */\n";
+            $out .= "const int cmap_core_ids[1] = { -1 }; /* empty */\n";
         }
 
         my @nt_vals = map { _c_string($_) } @unique_nonterms;
@@ -318,16 +329,16 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             $out .= _emit_c_array('const char *', 'cmap_nonterminals', $num_nonterms, \@nt_vals);
         }
         else {
-            $out .= "static const char *cmap_nonterminals[1] = { NULL }; /* empty */\n";
+            $out .= "const char *cmap_nonterminals[1] = { NULL }; /* empty */\n";
         }
 
-        $out .= "typedef struct { int nonterm_idx; int offset; int count; } CMapSlice;\n";
+        # cmap_slices: typedef is now in the header; emit array only
         if ($total_slices > 0) {
             my @slice_vals = map { "{$_->{nonterm_idx}, $_->{offset}, $_->{count}}" } @all_slices;
             $out .= _emit_c_array('const CMapSlice', 'cmap_slices', $total_slices, \@slice_vals);
         }
         else {
-            $out .= "static const CMapSlice cmap_slices[1] = { {0, 0, 0} }; /* empty */\n";
+            $out .= "const CMapSlice cmap_slices[1] = { {0, 0, 0} }; /* empty */\n";
         }
 
         $out .= _emit_c_array('const int', 'cmap_state_offset', $num_states, \@so_vals);
@@ -361,16 +372,17 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
 
         my $total_entries = scalar @flat_entries;
 
-        my $out = '';
-        $out .= "#define TOTAL_GOTO_ENTRIES $total_entries\n\n";
-        $out .= "typedef struct { const char *symbol_key; int target_state; } GotoEntry;\n";
+        push $_defines->@*, ['TOTAL_GOTO_ENTRIES', $total_entries];
 
+        my $out = '';
+
+        # goto_entries: typedef is now in the header; emit array only
         if ($total_entries > 0) {
             my @entry_vals = map { "{" . _c_string($_->{symbol_key}) . ", $_->{target_state}}" } @flat_entries;
             $out .= _emit_c_array('const GotoEntry', 'goto_entries', $total_entries, \@entry_vals);
         }
         else {
-            $out .= "static const GotoEntry goto_entries[1] = { {NULL, -1} }; /* empty */\n";
+            $out .= "const GotoEntry goto_entries[1] = { {NULL, -1} }; /* empty */\n";
         }
 
         $out .= _emit_c_array('const int', 'goto_state_offset', $num_states, \@so_vals);
@@ -411,17 +423,18 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         my $total_entries  = scalar @flat_entries;
         my $num_pred_nts   = scalar @pred_nonterms;
 
-        my $out = '';
-        $out .= "#define TOTAL_PRED_ENTRIES $total_entries\n";
-        $out .= "#define NUM_PRED_NONTERMS $num_pred_nts\n\n";
+        push $_defines->@*, ['TOTAL_PRED_ENTRIES', $total_entries];
+        push $_defines->@*, ['NUM_PRED_NONTERMS',  $num_pred_nts];
 
-        $out .= "typedef struct { int core_id; int skip_count; } PredictionEntry;\n";
+        my $out = '';
+
+        # prediction_entries: typedef is now in the header; emit array only
         if ($total_entries > 0) {
             my @entry_vals = map { "{$_->{core_id}, $_->{skip_count}}" } @flat_entries;
             $out .= _emit_c_array('const PredictionEntry', 'prediction_entries', $total_entries, \@entry_vals);
         }
         else {
-            $out .= "static const PredictionEntry prediction_entries[1] = { {0, 0} }; /* empty */\n";
+            $out .= "const PredictionEntry prediction_entries[1] = { {0, 0} }; /* empty */\n";
         }
 
         my @nt_vals = map { _c_string($_) } @pred_nonterms;
@@ -431,16 +444,16 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             $out .= _emit_c_array('const int',    'prediction_count',        $num_pred_nts, \@pred_counts);
         }
         else {
-            $out .= "static const char *prediction_nonterminals[1] = { NULL }; /* empty */\n";
-            $out .= "static const int prediction_offset[1] = { 0 }; /* empty */\n";
-            $out .= "static const int prediction_count[1] = { 0 }; /* empty */\n";
+            $out .= "const char *prediction_nonterminals[1] = { NULL }; /* empty */\n";
+            $out .= "const int prediction_offset[1] = { 0 }; /* empty */\n";
+            $out .= "const int prediction_count[1] = { 0 }; /* empty */\n";
         }
 
         $out .= "\n";
         return $out;
     }
 
-    # Emit the nullable nonterminal set as a static C string array.
+    # Emit the nullable nonterminal set as a C string array.
     # Iterates all grammar rule names sorted for determinism, checks each against
     # the LR0DFA nullable set, and emits a flat array of quoted names.
     method _emit_nullable_set() {
@@ -448,18 +461,93 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         my @nullable_names = grep { $lr0_dfa->is_nullable($_) } @rule_names;
 
         my $num_nullable = scalar @nullable_names;
+        push $_defines->@*, ['NUM_NULLABLE', $num_nullable];
+
         my $out = '';
-        $out .= "#define NUM_NULLABLE $num_nullable\n";
 
         if ($num_nullable > 0) {
             my @nt_vals = map { _c_string($_) } @nullable_names;
             $out .= _emit_c_array('const char *', 'nullable_nonterminals', $num_nullable, \@nt_vals);
         }
         else {
-            $out .= "static const char *nullable_nonterminals[1] = { NULL }; /* empty */\n";
+            $out .= "const char *nullable_nonterminals[1] = { NULL }; /* empty */\n";
         }
 
         $out .= "\n";
+        return $out;
+    }
+
+    # Emit the dfa_tables.h header.
+    # Generates #pragma once, includes, all #define constants (collected by the
+    # _emit_* methods via $_defines), all struct typedefs, and extern const
+    # declarations for every array defined in dfa_tables.c.
+    # Must be called after all _emit_* methods have run (so $_defines is populated).
+    method _emit_header() {
+        my $out = '';
+
+        $out .= "#pragma once\n";
+        $out .= "/* Include this header after chalk.h (which provides perl.h) */\n";
+        $out .= "\n";
+
+        # All #define constants, in the order they were collected by _emit_* methods.
+        $out .= "/* Counts */\n";
+        for my $pair ($_defines->@*) {
+            $out .= "#define $pair->[0] $pair->[1]\n";
+        }
+        $out .= "\n";
+
+        # Struct typedefs (must appear before the extern declarations that reference them).
+        $out .= "/* Typedefs */\n";
+        $out .= "typedef struct { int pattern_idx; int offset; int count; } TMapSlice;\n";
+        $out .= "typedef struct { int nonterm_idx; int offset; int count; } CMapSlice;\n";
+        $out .= "typedef struct { const char *symbol_key; int target_state; } GotoEntry;\n";
+        $out .= "typedef struct { int core_id; int skip_count; } PredictionEntry;\n";
+        $out .= "\n";
+
+        # extern const declarations for all arrays defined in dfa_tables.c.
+        $out .= "/* CoreItemIndex arrays */\n";
+        $out .= "extern const char *ci_rule_names[];\n";
+        $out .= "extern const int ci_alt_idxs[];\n";
+        $out .= "extern const int ci_dots[];\n";
+        $out .= "extern const int ci_is_complete[];\n";
+        $out .= "extern const int ci_advance[];\n";
+        $out .= "extern const int ci_to_state[];\n";
+        $out .= "extern const char *ci_symbol_after_pattern[];\n";
+        $out .= "extern const int ci_symbol_after_is_ref[];\n";
+        $out .= "\n";
+
+        $out .= "/* Terminal map arrays */\n";
+        $out .= "extern const int tmap_core_ids[];\n";
+        $out .= "extern const char *tmap_patterns[];\n";
+        $out .= "extern const TMapSlice tmap_slices[];\n";
+        $out .= "extern const int tmap_state_offset[];\n";
+        $out .= "extern const int tmap_state_count[];\n";
+        $out .= "\n";
+
+        $out .= "/* Completion map arrays */\n";
+        $out .= "extern const int cmap_core_ids[];\n";
+        $out .= "extern const char *cmap_nonterminals[];\n";
+        $out .= "extern const CMapSlice cmap_slices[];\n";
+        $out .= "extern const int cmap_state_offset[];\n";
+        $out .= "extern const int cmap_state_count[];\n";
+        $out .= "\n";
+
+        $out .= "/* Goto table arrays */\n";
+        $out .= "extern const GotoEntry goto_entries[];\n";
+        $out .= "extern const int goto_state_offset[];\n";
+        $out .= "extern const int goto_state_count[];\n";
+        $out .= "\n";
+
+        $out .= "/* Prediction table arrays */\n";
+        $out .= "extern const PredictionEntry prediction_entries[];\n";
+        $out .= "extern const char *prediction_nonterminals[];\n";
+        $out .= "extern const int prediction_offset[];\n";
+        $out .= "extern const int prediction_count[];\n";
+        $out .= "\n";
+
+        $out .= "/* Nullable set */\n";
+        $out .= "extern const char *nullable_nonterminals[];\n";
+
         return $out;
     }
 
