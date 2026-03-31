@@ -602,15 +602,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # Each stash pointer is initialized in init_statics via gv_stashpvn and stored
         # in a file-scope static for O(1) pointer comparison at each call site.
         if ($_polymorphic_dispatch && exists $_polymorphic_dispatch->{$method_name}) {
-            my @candidates = sort { $a->{slug} cmp $b->{slug} }
-                             $_polymorphic_dispatch->{$method_name}->@*;
+            my @candidates = $_polymorphic_dispatch->{$method_name}->@*;
 
             my @call_args  = ($invocant_expr, @arg_exprs);
             my $args_str   = join(', ', @call_args);
 
             my @stmts;
             push @stmts, @pre_eval;
-            push @stmts, "HV *_pd_stash = SvSTASH(SvRV($invocant_expr))";
+            push @stmts, "HV *_pd_stash = SvROK($invocant_expr) ? SvSTASH(SvRV($invocant_expr)) : NULL";
             push @stmts, 'SV *_mcr';
 
             # Build the if/else-if chain of stash compares with direct C calls.
@@ -1500,6 +1499,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 # Skip methods where any owner is a reader (no C function exists)
                 next if grep { $_->{type} eq 'reader' } @owners;
                 $poly{$mname} = [
+                    sort { $a->{slug} cmp $b->{slug} }
                     map { { slug => $_->{slug}, class_name => $_->{class_name} } }
                         @owners
                 ];
@@ -1723,9 +1723,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # each polymorphic call site.
         for my $poly_slug (sort keys %poly_slug_to_class) {
             my $class_name = $poly_slug_to_class{$poly_slug};
+            my $escaped_class = $self->_escape_c_string($class_name);
             my $len        = length($class_name);
             push @init_lines,
-                "    _${poly_slug}_stash = gv_stashpvn(\"${class_name}\", ${len}, GV_ADD);";
+                "    _${poly_slug}_stash = gv_stashpvn(\"${escaped_class}\", ${len}, GV_ADD);";
         }
         push @init_lines, "}";
         push @c_lines, "/* One-time static initializer — called from BOOT */";

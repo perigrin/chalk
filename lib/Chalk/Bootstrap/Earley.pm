@@ -9,6 +9,11 @@ use Chalk::Bootstrap::CoreItemIndex;
 use Chalk::Bootstrap::LR0DFA;
 
 class Chalk::Bootstrap::Earley {
+    # Ruby Slippers: the set of terminal patterns that are closing delimiters
+    # or semicolons, eligible for virtual insertion during error recovery.
+    my %CLOSER_PATTERNS = map { $_ => 1 }
+        '\\)', '\\]', '\\}', '\\;', ')', ']', '}', ';';
+
     field $grammar  :param :reader;
     field $semiring :param :reader;
     field $_recover :param(recover) = false;
@@ -435,7 +440,7 @@ class Chalk::Bootstrap::Earley {
                     # parsing continue. Insert it as a zero-width virtual token.
                     my $ruby_recovered = false;
                     if ($_diag_expected && $_diag_expected->%*) {
-                        my @closers = grep { /^\\[)\]}\;]$|^\)$|^\}$|^\]$|^;$/ }
+                        my @closers = grep { exists $CLOSER_PATTERNS{$_} }
                                       keys $_diag_expected->%*;
                         for my $closer (@closers) {
                             # Find items at the last active position waiting for this terminal
@@ -905,7 +910,7 @@ class Chalk::Bootstrap::Earley {
                     next unless defined $sym && !$sym->is_reference();
                     my $pat = $sym->value();
                     # Only insert closing delimiters and semicolons
-                    next unless $pat =~ /^\\[)\]}\;]$|^\)$|^\}$|^\]$|^;$/;
+                    next unless exists $CLOSER_PATTERNS{$pat};
                     for my $rd (0 .. $oh->$#*) {
                         next unless defined $oh->[$rd];
                         my $item_origin = $n - $rd;
@@ -928,9 +933,12 @@ class Chalk::Bootstrap::Earley {
                 }
                 last unless $inserted;
 
-                # Process completions from virtual insertions
+                # Process completions from virtual insertions.
+                # Pass a real arrayref (not undef) so _complete can push
+                # newly discovered items for further processing.
                 my @virt_agenda;
                 for my $cid (0 .. $chart[$n]->$#*) {
+                    next unless $self->_is_complete_id($cid);
                     my $oh = $chart[$n][$cid];
                     next unless defined $oh;
                     for my $rd (0 .. $oh->$#*) {
@@ -938,12 +946,12 @@ class Chalk::Bootstrap::Earley {
                         push @virt_agenda, [$cid, $n - $rd];
                     }
                 }
+                my @virt_new;
                 for my $entry (@virt_agenda) {
                     my ($cid, $origin) = $entry->@*;
-                    next unless $self->_is_complete_id($cid);
                     $self->_complete(
                         $cid, $origin, $chart[$n][$cid][($n - $origin)],
-                        $n, \@chart, undef,
+                        $n, \@chart, \@virt_new,
                     );
                 }
 

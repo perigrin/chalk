@@ -19,6 +19,11 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
     my sub _c_string($s) {
         $s =~ s/\\/\\\\/g;
         $s =~ s/"/\\"/g;
+        $s =~ s/\n/\\n/g;
+        $s =~ s/\t/\\t/g;
+        $s =~ s/\r/\\r/g;
+        $s =~ s/\0/\\0/g;
+        $s =~ s/([^\x20-\x7E])/sprintf("\\x%02x", ord($1))/ge;
         return qq("$s");
     }
 
@@ -116,7 +121,7 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         };
     }
 
-    # Emit the 7 CoreItemIndex parallel arrays as C source.
+    # Emit the 8 CoreItemIndex parallel arrays as C source.
     # All arrays are indexed by core_id (0 to count-1).
     method _emit_core_item_arrays() {
         my $n = $core_index->count();
@@ -608,7 +613,7 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
 
         # Strip /…/ delimiters from terminal values (same logic as Target::Perl)
         my $value = $raw_value;
-        if ($type_str eq 'terminal' && $value =~ m{^/(.*)/$}s) {
+        if ($type_str eq 'terminal' && $value =~ m{^/(.*)/$}) {
             $value = $1;
         }
 
