@@ -321,4 +321,189 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
     ok(exists $pd->{is_zero}, 'reader edge case: is_zero (pure method) IS in polymorphic dispatch');
 }
 
+# ============================================================
+# Component 4: Behavioral verification on real FilterComposite.pm
+#
+# Parse lib/Chalk/Bootstrap/Semiring/FilterComposite.pm through
+# the full grammar pipeline, generate C with compiled_class_metadata
+# for the real 5 semiring classes, and verify the generated C
+# contains stash-compare dispatch chains for is_zero, add, multiply.
+#
+# We do NOT compile/load the generated module — that would require
+# all 5 semiring .so files to be present.  We only inspect the
+# generated C text.
+# ============================================================
+
+subtest 'Component 4: real FilterComposite.pm pipeline' => sub {
+    use lib 't/bootstrap/lib';
+    use TestXSHelpers qw(setup_xs_grammar parse_file_ir);
+
+    # ---- grammar setup ----
+    my $gen_grammar = eval { setup_xs_grammar('TestXSGrammar::C4') };
+    if ($@ || !defined $gen_grammar) {
+        BAIL_OUT("Component 4: grammar pipeline setup failed: $@");
+    }
+    pass('Component 4: grammar pipeline setup succeeded');
+
+    # ---- parse FilterComposite.pm to IR ----
+    my $fc_file = 'lib/Chalk/Bootstrap/Semiring/FilterComposite.pm';
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, $fc_file);
+    if (!defined $ir) {
+        BAIL_OUT("Component 4: parse of FilterComposite.pm failed — IR is undef");
+    }
+    pass('Component 4: FilterComposite.pm parsed to IR');
+
+    # ---- set up compiled_class_metadata for the real 5 semiring classes ----
+    my $real_metadata = {
+        'Chalk::Bootstrap::Semiring::Boolean' => {
+            slug    => 'boolean',
+            readers => {},
+            methods => {
+                is_zero    => 1,
+                add        => 1,
+                multiply   => 1,
+                zero       => 1,
+                one        => 1,
+                on_scan    => 1,
+                on_complete => 1,
+                should_scan => 1,
+            },
+        },
+        'Chalk::Bootstrap::Semiring::Precedence' => {
+            slug    => 'precedence',
+            readers => {},
+            methods => {
+                is_zero    => 1,
+                add        => 1,
+                multiply   => 1,
+                zero       => 1,
+                one        => 1,
+                on_scan    => 1,
+                on_complete => 1,
+                should_scan => 1,
+            },
+        },
+        'Chalk::Bootstrap::Semiring::TypeInference' => {
+            slug    => 'typeinference',
+            readers => {},
+            methods => {
+                is_zero    => 1,
+                add        => 1,
+                multiply   => 1,
+                zero       => 1,
+                one        => 1,
+                on_scan    => 1,
+                on_complete => 1,
+                should_scan => 1,
+            },
+        },
+        'Chalk::Bootstrap::Semiring::Structural' => {
+            slug    => 'structural',
+            readers => {},
+            methods => {
+                is_zero    => 1,
+                add        => 1,
+                multiply   => 1,
+                zero       => 1,
+                one        => 1,
+                on_scan    => 1,
+                on_complete => 1,
+                should_scan => 1,
+            },
+        },
+        'Chalk::Bootstrap::Semiring::SemanticAction' => {
+            slug    => 'semanticaction',
+            readers => {},
+            methods => {
+                is_zero    => 1,
+                add        => 1,
+                multiply   => 1,
+                zero       => 1,
+                one        => 1,
+                on_scan    => 1,
+                on_complete => 1,
+                should_scan => 1,
+            },
+        },
+    };
+
+    my $fc_target = Chalk::Bootstrap::Perl::Target::C->new(
+        module_name             => 'Chalk::Bootstrap::Semiring::FilterComposite',
+        compiled_class_metadata => $real_metadata,
+    );
+
+    # ---- generate C files ----
+    my $fc_result = eval {
+        $fc_target->_reset_cfg_lookup();
+        $fc_target->_build_cfg_lookup($sa, $sem_ctx);
+        $fc_target->generate_c_files($ir, $sa, $sem_ctx);
+    };
+    if ($@ || !defined $fc_result) {
+        BAIL_OUT("Component 4: generate_c_files for FilterComposite failed: $@");
+    }
+    pass('Component 4: generate_c_files succeeded for FilterComposite');
+
+    # ---- locate the generated .c file ----
+    my ($c_key) = grep { /\.c$/ } sort keys $fc_result->{files}->%*;
+    ok(defined $c_key, 'Component 4: generated .c file key exists in result')
+        or do { diag 'Keys: ' . join(', ', sort keys $fc_result->{files}->%*); done_testing(); return; };
+
+    my $c_text = $fc_result->{files}{$c_key};
+    ok(defined $c_text && length($c_text) > 0, 'Component 4: generated .c file has content');
+
+    # ---- stash-compare dispatch chain present ----
+    like($c_text, qr/SvSTASH\s*\(\s*SvRV\s*\(/,
+        'Component 4: generated C contains stash-compare SvSTASH(SvRV(');
+
+    # ---- direct calls for the 5 real semiring slugs on each shared method ----
+    for my $method (qw(is_zero add multiply)) {
+        for my $slug (qw(boolean precedence typeinference structural semanticaction)) {
+            like($c_text, qr/\b${slug}_${method}\b/,
+                "Component 4: generated C contains direct call ${slug}_${method}");
+        }
+    }
+
+    # ---- call_method fallback still present ----
+    like($c_text, qr/call_method/,
+        'Component 4: generated C retains call_method fallback');
+
+    # ---- stash pointer statics for all 5 semirings ----
+    for my $slug (qw(boolean precedence typeinference structural semanticaction)) {
+        like($c_text, qr/static HV \*_${slug}_stash = NULL;/,
+            "Component 4: generated C has static stash declaration for '$slug'");
+    }
+
+    # ---- gv_stashpvn in init_statics for all 5 semirings ----
+    my %real_class_names = (
+        boolean       => 'Chalk::Bootstrap::Semiring::Boolean',
+        precedence    => 'Chalk::Bootstrap::Semiring::Precedence',
+        typeinference => 'Chalk::Bootstrap::Semiring::TypeInference',
+        structural    => 'Chalk::Bootstrap::Semiring::Structural',
+        semanticaction => 'Chalk::Bootstrap::Semiring::SemanticAction',
+    );
+    for my $slug (sort keys %real_class_names) {
+        my $class_name = $real_class_names{$slug};
+        my $len        = length($class_name);
+        like($c_text,
+            qr/\Q_${slug}_stash = gv_stashpvn("${class_name}", ${len}, GV_ADD);\E/,
+            "Component 4: init_statics populates _${slug}_stash via gv_stashpvn");
+    }
+
+    # ---- cross-class #include directives ----
+    for my $slug (qw(boolean precedence typeinference structural semanticaction)) {
+        like($c_text, qr/#include "${slug}\.h"/,
+            "Component 4: generated C includes header for '$slug'");
+    }
+
+    # ---- count call_method vs direct-dispatch — report but don't gate on ratio ----
+    my $call_method_count = () = $c_text =~ /call_method/g;
+    my $direct_call_count = () = $c_text =~ /\b(?:boolean|precedence|typeinference|structural|semanticaction)_(?:is_zero|add|multiply|zero|one|on_scan|on_complete|should_scan)\b/g;
+    diag sprintf(
+        'Component 4 dispatch stats: %d direct calls replaced, %d call_method calls remain',
+        $direct_call_count, $call_method_count,
+    );
+
+    done_testing();
+};
+
 done_testing;
