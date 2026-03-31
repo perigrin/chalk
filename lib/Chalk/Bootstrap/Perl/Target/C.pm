@@ -333,9 +333,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     method _emit_sub($name, $params, $body) {
         my @code;
 
-        # Track current sub name for __SUB__ recursion resolution
+        # Track current sub name for __SUB__ recursion resolution.
+        # Save/restore both _current_sub_name and _return_context so that
+        # an exception during body compilation does not leak state into
+        # subsequent method/sub compilation within the same class.
         my $prev_sub_name = $self->_get_current_sub_name();
         $self->_set_current_sub_name($name);
+
+        my $result = eval {
 
         my $last_item = $body->[-1];
         my $last_is_return = (defined $last_item
@@ -433,10 +438,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
         push @helper, '}';
 
-        # Restore previous sub name
+        { helper => \@helper };
+        }; # end eval
+
+        # Always restore state, even if body compilation threw
         $self->_set_current_sub_name($prev_sub_name);
 
-        return { helper => \@helper };
+        die $@ if $@;
+        return $result;
     }
 
     # Emit a Constant IR node as a C expression
@@ -619,6 +628,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # is created via newXS in the BOOT block so call_sv can dispatch to it.
     # The CV is cached in a static SV* for zero-overhead repeated use.
     method _emit_anon_sub_expr($node, $declared_vars) {
+        # Clear current sub name so __SUB__ recursion detection does not
+        # fire for coderef calls inside this anonymous sub's body.
+        my $prev_sub_name = $self->_get_current_sub_name();
+        $self->_set_current_sub_name('');
+
         my $params_node = $node->inputs()->[0];
         my $body_items  = $node->inputs()->[1] // [];
 
@@ -703,6 +717,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 cv_var => $cv_var,
             };
 
+            $self->_set_current_sub_name($prev_sub_name);
             return $cv_var;
         }
 
@@ -711,6 +726,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $perl_src = $perl_target->_emit_anon_sub_expr($node);
         my $prefix = 'use feature "signatures"; no warnings "experimental::signatures"; ';
         my $escaped = $self->_escape_c_string($prefix . $perl_src);
+        $self->_set_current_sub_name($prev_sub_name);
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
@@ -1692,7 +1708,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @lines, '';
 
         # Classify exported functions: skip init_statics and _ADJUST from regular XSUBs.
-        # Match by suffix because class slug may differ from module slug.
+        # Match by suffix because class slug (from IR class name) may differ from
+        # module slug (from module_name param) — e.g., class Node → slug "node" but
+        # module Test::IRNode → slug "irnode". Exact match with $slug would miss.
+        # NOTE: suffix matching could theoretically collide with a user method named
+        # "init_statics" or "_ADJUST", but no bootstrap source uses these names.
         my $has_adjust = false;
         my $actual_init_fn;
         my $adjust_fn;

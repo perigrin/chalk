@@ -1746,6 +1746,10 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # __SUB__->() recursion: emit direct C call to current static helper.
             # The Earley parser loses the __SUB__ invocant via stale-value merge,
             # so target is undef. Detect: undef target + inside a my sub body.
+            # ASSUMPTION: the only coderef calls with undef target inside my-sub
+            # bodies are __SUB__ recursion. If a different coderef call (e.g.,
+            # $callback->($arg)) also loses its target to stale-value merge,
+            # this heuristic would incorrectly emit a self-recursive call.
             my $is_sub_recursion = (!defined $target
                 && length $self->_get_current_sub_name());
             if ($is_sub_recursion) {
