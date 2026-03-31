@@ -1,5 +1,5 @@
 # ABOUTME: C code generation target that reconstructs grammar from BNF IR and builds LR0DFA.
-# ABOUTME: Returns stub C file content; serialization of static DFA tables is done in later phases.
+# ABOUTME: Serializes CoreItemIndex, DFA state tables, prediction closures, and nullable set as static C arrays.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -96,6 +96,8 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             $c_body .= $self->_emit_terminal_maps();
             $c_body .= $self->_emit_completion_maps();
             $c_body .= $self->_emit_goto_tables();
+            $c_body .= $self->_emit_prediction_tables();
+            $c_body .= $self->_emit_nullable_set();
         }
 
         return {
@@ -375,6 +377,89 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         $out .= _emit_c_array('const int', 'goto_state_count',  $num_states, \@sc_vals);
         $out .= "\n";
 
+        return $out;
+    }
+
+    # Emit prediction table arrays as static C.
+    # For each grammar nonterminal (sorted for determinism): collect prediction items
+    # from the LR0DFA, flatten into a single PredictionEntry array, and emit per-nonterminal
+    # offset/count arrays for O(1) lookup in the C consumer.
+    # skip_count is the number of nullable symbols skipped to reach this prediction item.
+    method _emit_prediction_tables() {
+        my @rule_names = sort map { $_->name() } $grammar->@*;
+
+        # Only include nonterminals that have prediction items in the DFA
+        my @pred_nonterms;
+        my @pred_offsets;
+        my @pred_counts;
+        my @flat_entries;   # { core_id, skip_count }
+
+        for my $name (@rule_names) {
+            my $items = $lr0_dfa->prediction_items_for($name);
+            next unless defined $items && scalar $items->@*;
+
+            push @pred_offsets, scalar @flat_entries;
+            push @pred_counts,  scalar $items->@*;
+            push @pred_nonterms, $name;
+
+            for my $item ($items->@*) {
+                my ($core_id, $skip_symbols) = $item->@*;
+                push @flat_entries, { core_id => $core_id, skip_count => scalar $skip_symbols->@* };
+            }
+        }
+
+        my $total_entries  = scalar @flat_entries;
+        my $num_pred_nts   = scalar @pred_nonterms;
+
+        my $out = '';
+        $out .= "#define TOTAL_PRED_ENTRIES $total_entries\n";
+        $out .= "#define NUM_PRED_NONTERMS $num_pred_nts\n\n";
+
+        $out .= "typedef struct { int core_id; int skip_count; } PredictionEntry;\n";
+        if ($total_entries > 0) {
+            my @entry_vals = map { "{$_->{core_id}, $_->{skip_count}}" } @flat_entries;
+            $out .= _emit_c_array('const PredictionEntry', 'prediction_entries', $total_entries, \@entry_vals);
+        }
+        else {
+            $out .= "static const PredictionEntry prediction_entries[1] = { {0, 0} }; /* empty */\n";
+        }
+
+        my @nt_vals = map { _c_string($_) } @pred_nonterms;
+        if ($num_pred_nts > 0) {
+            $out .= _emit_c_array('const char *', 'prediction_nonterminals', $num_pred_nts, \@nt_vals);
+            $out .= _emit_c_array('const int',    'prediction_offset',       $num_pred_nts, \@pred_offsets);
+            $out .= _emit_c_array('const int',    'prediction_count',        $num_pred_nts, \@pred_counts);
+        }
+        else {
+            $out .= "static const char *prediction_nonterminals[1] = { NULL }; /* empty */\n";
+            $out .= "static const int prediction_offset[1] = { 0 }; /* empty */\n";
+            $out .= "static const int prediction_count[1] = { 0 }; /* empty */\n";
+        }
+
+        $out .= "\n";
+        return $out;
+    }
+
+    # Emit the nullable nonterminal set as a static C string array.
+    # Iterates all grammar rule names sorted for determinism, checks each against
+    # the LR0DFA nullable set, and emits a flat array of quoted names.
+    method _emit_nullable_set() {
+        my @rule_names = sort map { $_->name() } $grammar->@*;
+        my @nullable_names = grep { $lr0_dfa->is_nullable($_) } @rule_names;
+
+        my $num_nullable = scalar @nullable_names;
+        my $out = '';
+        $out .= "#define NUM_NULLABLE $num_nullable\n";
+
+        if ($num_nullable > 0) {
+            my @nt_vals = map { _c_string($_) } @nullable_names;
+            $out .= _emit_c_array('const char *', 'nullable_nonterminals', $num_nullable, \@nt_vals);
+        }
+        else {
+            $out .= "static const char *nullable_nonterminals[1] = { NULL }; /* empty */\n";
+        }
+
+        $out .= "\n";
         return $out;
     }
 

@@ -456,4 +456,197 @@ my $c_text2  = $result2->{'dfa_tables.c'};
 
 is($c_text2, $c_text, 'generate() is deterministic: two runs on equivalent IR are byte-identical');
 
+# ============================================================
+# === Tests: Prediction tables (Component 4)              ===
+# ============================================================
+# Re-use $c_text from the 3-rule grammar S::=AB A::=/a/ B::=/b/ above.
+# That grammar has no nullable nonterminals but does have prediction closures
+# for S, A, and B.
+
+# === Test: TOTAL_PRED_ENTRIES define is present ===
+like($c_text, qr/#define TOTAL_PRED_ENTRIES \d+/,
+    'dfa_tables.c contains #define TOTAL_PRED_ENTRIES');
+my ($total_pred_entries) = $c_text =~ /#define TOTAL_PRED_ENTRIES (\d+)/;
+ok(defined $total_pred_entries && $total_pred_entries > 0,
+    'TOTAL_PRED_ENTRIES is positive (test grammar has prediction items)');
+
+# === Test: NUM_PRED_NONTERMS define is present ===
+like($c_text, qr/#define NUM_PRED_NONTERMS \d+/,
+    'dfa_tables.c contains #define NUM_PRED_NONTERMS');
+my ($num_pred_nonterms) = $c_text =~ /#define NUM_PRED_NONTERMS (\d+)/;
+ok(defined $num_pred_nonterms && $num_pred_nonterms > 0,
+    'NUM_PRED_NONTERMS is positive (test grammar has nonterminals)');
+
+# === Test: PredictionEntry typedef present ===
+like($c_text, qr/typedef struct \{[^}]*core_id[^}]*skip_count[^}]*\}\s*PredictionEntry/s,
+    'dfa_tables.c contains PredictionEntry typedef');
+
+# === Test: prediction_entries array present ===
+like($c_text, qr/prediction_entries\[/,
+    'dfa_tables.c contains prediction_entries array');
+
+# === Test: prediction_nonterminals array present ===
+like($c_text, qr/prediction_nonterminals\[/,
+    'dfa_tables.c contains prediction_nonterminals array');
+
+# === Test: prediction_offset array present ===
+like($c_text, qr/prediction_offset\[/,
+    'dfa_tables.c contains prediction_offset array');
+
+# === Test: prediction_count array present ===
+like($c_text, qr/prediction_count\[/,
+    'dfa_tables.c contains prediction_count array');
+
+# === Test: prediction_offset has NUM_PRED_NONTERMS entries ===
+my ($pred_off_init) = $c_text =~ /prediction_offset\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $pred_off_init, 'prediction_offset initializer is parseable');
+my @pred_off_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $pred_off_init);
+is(scalar @pred_off_vals, $num_pred_nonterms,
+    'prediction_offset has NUM_PRED_NONTERMS entries');
+
+# === Test: prediction_count has NUM_PRED_NONTERMS entries ===
+my ($pred_cnt_init) = $c_text =~ /prediction_count\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $pred_cnt_init, 'prediction_count initializer is parseable');
+my @pred_cnt_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $pred_cnt_init);
+is(scalar @pred_cnt_vals, $num_pred_nonterms,
+    'prediction_count has NUM_PRED_NONTERMS entries');
+
+# === Test: prediction_entries has TOTAL_PRED_ENTRIES entries ===
+# Each entry is a braced struct {core_id, skip_count}
+my ($pred_entries_init) = $c_text =~ /prediction_entries\[\d+\]\s*=\s*\{(.*?)\}\s*;/s;
+ok(defined $pred_entries_init, 'prediction_entries initializer is parseable');
+my @pred_entry_structs = ($pred_entries_init =~ /\{[^}]+\}/g);
+is(scalar @pred_entry_structs, $total_pred_entries,
+    'prediction_entries struct count matches TOTAL_PRED_ENTRIES');
+
+# === Test: prediction_nonterminals has NUM_PRED_NONTERMS entries ===
+my ($pred_nt_init) = $c_text =~ /prediction_nonterminals\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $pred_nt_init, 'prediction_nonterminals initializer is parseable');
+my @pred_nt_entries;
+{
+    my $rest = $pred_nt_init;
+    while ($rest =~ s/^\s*("(?:[^"\\]|\\.)*"|NULL)\s*,?//) {
+        push @pred_nt_entries, $1;
+    }
+}
+is(scalar @pred_nt_entries, $num_pred_nonterms,
+    'prediction_nonterminals entry count matches NUM_PRED_NONTERMS');
+
+# === Test: prediction_offset[0] is always 0 ===
+is($pred_off_vals[0], '0', 'prediction_offset[0] is 0 (first nonterminal starts at slot 0)');
+
+# === Test: prediction_count entries sum to TOTAL_PRED_ENTRIES ===
+my $count_sum = 0;
+$count_sum += $_ for @pred_cnt_vals;
+is($count_sum, $total_pred_entries,
+    'sum of prediction_count entries equals TOTAL_PRED_ENTRIES');
+
+# === Test: prediction_offset is non-decreasing (monotone) ===
+my $monotone = true;
+for my $i (1 .. $#pred_off_vals) {
+    if ($pred_off_vals[$i] < $pred_off_vals[$i - 1]) {
+        $monotone = false;
+        last;
+    }
+}
+ok($monotone, 'prediction_offset values are non-decreasing');
+
+# === Test: skip_count in prediction_entries is non-negative ===
+# Extract (core_id, skip_count) pairs from prediction_entries structs
+my @skip_counts;
+for my $struct (@pred_entry_structs) {
+    my ($core_id, $skip) = $struct =~ /\{(\d+),\s*(\d+)\}/;
+    push @skip_counts, $skip if defined $skip;
+}
+is(scalar @skip_counts, $total_pred_entries,
+    'all prediction_entries structs have parseable (core_id, skip_count)');
+my @negative_skips = grep { $_ < 0 } @skip_counts;
+is(scalar @negative_skips, 0, 'all skip_count values are non-negative');
+
+# ============================================================
+# === Tests: Nullable set (Component 4)                   ===
+# ============================================================
+# The test grammar S::=AB A::=/a/ B::=/b/ has no nullable nonterminals.
+# We test that the define and array are present; NUM_NULLABLE may be 0.
+
+# === Test: NUM_NULLABLE define is present ===
+like($c_text, qr/#define NUM_NULLABLE \d+/,
+    'dfa_tables.c contains #define NUM_NULLABLE');
+my ($num_nullable) = $c_text =~ /#define NUM_NULLABLE (\d+)/;
+ok(defined $num_nullable, 'NUM_NULLABLE is parseable from C text');
+# For this grammar there are no nullable nonterminals
+is($num_nullable, 0, 'NUM_NULLABLE is 0 for the non-nullable test grammar');
+
+# === Test: nullable_nonterminals array is present ===
+like($c_text, qr/nullable_nonterminals\[/,
+    'dfa_tables.c contains nullable_nonterminals array');
+
+# ============================================================
+# === Tests: Nullable grammar (grammar with nullable nonterminal) ===
+# ============================================================
+# Build a grammar where one nonterminal IS nullable:
+#   Top ::= A B
+#   A   ::= /x/ | (empty — epsilon production)
+#   B   ::= /y/
+# Here A is nullable because it has an empty alternative.
+# This validates that nullable_nonterminals and NUM_NULLABLE > 0
+# when the grammar actually has nullable nonterminals.
+
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $factory3 = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+my sub make_sym3(%args) {
+    my $type  = $factory3->make('Constant', const_type => 'enum',   value => $args{type});
+    my $value = $factory3->make('Constant', const_type => 'string', value => $args{value});
+    my $quant = defined($args{quantifier})
+        ? $factory3->make('Constant', const_type => 'string', value => $args{quantifier})
+        : undef;
+    return $factory3->make('Constructor',
+        class      => 'Symbol',
+        type       => $type,
+        value      => $value,
+        quantifier => $quant,
+    );
+}
+
+my sub make_expr3(@symbols) {
+    return $factory3->make('Constructor', class => 'Expression', elements => \@symbols);
+}
+
+my sub make_rule3($name, @expressions) {
+    my $name_node = $factory3->make('Constant', const_type => 'string', value => $name);
+    return $factory3->make('Constructor',
+        class       => 'Rule',
+        name        => $name_node,
+        expressions => \@expressions,
+    );
+}
+
+# A ::= /x/ | (epsilon)  — two alternatives, second is empty
+my $ir3 = [
+    make_rule3('Top', make_expr3(
+        make_sym3(type => 'reference', value => 'A'),
+        make_sym3(type => 'reference', value => 'B'),
+    )),
+    make_rule3('A',
+        make_expr3(make_sym3(type => 'terminal', value => '/x/')),
+        make_expr3(),   # epsilon alternative
+    ),
+    make_rule3('B', make_expr3(make_sym3(type => 'terminal', value => '/y/'))),
+];
+
+my $target3 = Chalk::Bootstrap::BNF::Target::C->new();
+my $result3  = $target3->generate($ir3);
+my $c_text3  = $result3->{'dfa_tables.c'};
+
+# === Test: nullable grammar has NUM_NULLABLE > 0 ===
+my ($num_nullable3) = $c_text3 =~ /#define NUM_NULLABLE (\d+)/;
+ok(defined $num_nullable3 && $num_nullable3 > 0,
+    'NUM_NULLABLE > 0 for grammar with nullable nonterminal A');
+
+# === Test: nullable_nonterminals contains "A" ===
+my ($null_nt_init3) = $c_text3 =~ /nullable_nonterminals\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $null_nt_init3, 'nullable_nonterminals initializer parseable for nullable grammar');
+like($null_nt_init3, qr/"A"/, 'nullable_nonterminals contains "A" for nullable grammar');
+
 done_testing();
