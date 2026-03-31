@@ -266,20 +266,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $body   = $node->inputs()->[2];
 
         my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
-        my $decl = "method $name$sig {";
-
-        my @lines = ($decl);
-        for my $item ($body->@*) {
-            my $code = $self->_emit_node($item);
-            if (defined $code) {
-                for my $line (split /\n/, $code) {
-                    push @lines, "    $line";
-                }
-            }
-        }
-        push @lines, "}";
-
-        return join("\n", @lines);
+        return $self->_emit_body_block("method $name$sig {", $body);
     }
 
     # SubDecl inputs: [name, params, body, scope]
@@ -292,9 +279,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
         my $prefix = $scope eq 'package' ? 'sub' : "$scope sub";
-        my $decl = "$prefix $name$sig {";
+        return $self->_emit_body_block("$prefix $name$sig {", $body);
+    }
 
-        my @lines = ($decl);
+    method _emit_body_block($decl_line, $body) {
+        my @lines = ($decl_line);
         for my $item ($body->@*) {
             my $code = $self->_emit_node($item);
             if (defined $code) {
@@ -304,7 +293,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
         }
         push @lines, "}";
-
         return join("\n", @lines);
     }
 

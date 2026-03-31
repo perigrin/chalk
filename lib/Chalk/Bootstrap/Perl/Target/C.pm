@@ -338,6 +338,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # an exception during body compilation does not leak state into
         # subsequent method/sub compilation within the same class.
         my $prev_sub_name = $self->_get_current_sub_name();
+        my $prev_return_context = $self->_get_return_context();
         $self->_set_current_sub_name($name);
 
         my $result = eval {
@@ -382,7 +383,6 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         my $has_early_return = $self->_has_early_return($body);
 
-        my $prev_return_context = $self->_get_return_context();
         $self->_set_return_context($has_return);
 
         for my $idx (0 .. $body->@* - 1) {
@@ -403,8 +403,6 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
             }
         }
-
-        $self->_set_return_context($prev_return_context);
 
         my @helper;
         # Class-scope subs are static helpers — not exported, not in the .h file.
@@ -443,6 +441,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # Always restore state, even if body compilation threw
         $self->_set_current_sub_name($prev_sub_name);
+        $self->_set_return_context($prev_return_context);
 
         die $@ if $@;
         return $result;
