@@ -123,4 +123,115 @@ ok(ref($empty_result) eq 'HASH', 'generate([]) returns a hashref even for empty 
 ok(exists $empty_result->{'dfa_tables.c'}, 'empty grammar result has dfa_tables.c');
 ok(exists $empty_result->{'dfa_tables.h'}, 'empty grammar result has dfa_tables.h');
 
+# === Tests 9-25: CoreItemIndex static C array emission ===
+# Re-run generate() with the 3-rule grammar to get the C output
+
+my $c_result = $target->generate($ir);
+my $c_text = $c_result->{'dfa_tables.c'};
+
+# === Test 9: NUM_CORE_ITEMS define is present ===
+like($c_text, qr/#define NUM_CORE_ITEMS \d+/,
+    'dfa_tables.c contains #define NUM_CORE_ITEMS');
+
+# === Test 10-16: All 7 CoreItemIndex array declarations are present ===
+like($c_text, qr/ci_rule_names\[/, 'dfa_tables.c contains ci_rule_names array');
+like($c_text, qr/ci_alt_idxs\[/,   'dfa_tables.c contains ci_alt_idxs array');
+like($c_text, qr/ci_dots\[/,        'dfa_tables.c contains ci_dots array');
+like($c_text, qr/ci_is_complete\[/, 'dfa_tables.c contains ci_is_complete array');
+like($c_text, qr/ci_advance\[/,     'dfa_tables.c contains ci_advance array');
+like($c_text, qr/ci_to_state\[/,    'dfa_tables.c contains ci_to_state array');
+like($c_text, qr/ci_symbol_after_pattern\[/, 'dfa_tables.c contains ci_symbol_after_pattern array');
+like($c_text, qr/ci_symbol_after_is_ref\[/,  'dfa_tables.c contains ci_symbol_after_is_ref array');
+
+# === Test 17: Array entry counts match core_index->count() ===
+# Count entries in ci_alt_idxs by extracting the initializer list and counting commas+1.
+# The grammar S::=AB, A::=/a/, B::=/b/ has:
+#   S: 3 items (dot 0,1,2)
+#   A: 2 items (dot 0,1)
+#   B: 2 items (dot 0,1)
+# Total = 7 core items.
+my $n = $target->last_dfa_state_count(); # we want core count — use core_index instead
+# Extract N from the define
+my ($num_core_items) = $c_text =~ /#define NUM_CORE_ITEMS (\d+)/;
+ok(defined $num_core_items, 'NUM_CORE_ITEMS is parseable from C text');
+cmp_ok($num_core_items, '>', 0, 'NUM_CORE_ITEMS is positive');
+
+# Count entries in ci_alt_idxs initializer to verify it matches NUM_CORE_ITEMS.
+# Extract the initializer: static const int ci_alt_idxs[N] = { ... };
+my ($ci_alt_idxs_init) = $c_text =~ /ci_alt_idxs\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $ci_alt_idxs_init, 'ci_alt_idxs initializer is parseable');
+my @ci_alt_idxs_entries = split /,/, $ci_alt_idxs_init;
+# Trim whitespace from each entry and remove empties
+@ci_alt_idxs_entries = grep { /\S/ } map { s/^\s+|\s+$//gr } @ci_alt_idxs_entries;
+is(scalar @ci_alt_idxs_entries, $num_core_items,
+    'ci_alt_idxs entry count matches NUM_CORE_ITEMS');
+
+# === Test 18: core_id 0 rule_name appears at position 0 in ci_rule_names ===
+# Extract the ci_rule_names initializer
+my ($ci_rule_names_init) = $c_text =~ /ci_rule_names\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $ci_rule_names_init, 'ci_rule_names initializer is parseable');
+# First entry should be a quoted string (or NULL)
+my ($first_rule_name_entry) = $ci_rule_names_init =~ /^\s*("(?:[^"\\]|\\.)*"|NULL)/;
+ok(defined $first_rule_name_entry, 'ci_rule_names[0] entry is parseable');
+# It must be a quoted string (core_id 0 always has a rule name)
+like($first_rule_name_entry, qr/^"/, 'ci_rule_names[0] is a quoted string, not NULL');
+
+# Extract the unquoted name and verify it is one of our rule names (S, A, or B)
+my ($name_at_0) = $first_rule_name_entry =~ /^"(.+)"$/;
+ok(defined $name_at_0, 'ci_rule_names[0] value is extractable');
+ok($name_at_0 =~ /^(?:S|A|B)$/, "ci_rule_names[0] is 'S', 'A', or 'B' (got '$name_at_0')");
+
+# === Test 19: ci_is_complete contains 0s and 1s only ===
+my ($ci_is_complete_init) = $c_text =~ /ci_is_complete\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $ci_is_complete_init, 'ci_is_complete initializer is parseable');
+my @complete_vals = split /,/, $ci_is_complete_init;
+@complete_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } @complete_vals;
+my @invalid_complete = grep { !/^[01]$/ } @complete_vals;
+is(scalar @invalid_complete, 0, 'ci_is_complete contains only 0 and 1 values');
+
+# === Test 20: ci_advance contains -1 for completed items, non-negative otherwise ===
+my ($ci_advance_init) = $c_text =~ /ci_advance\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $ci_advance_init, 'ci_advance initializer is parseable');
+my @advance_vals = split /,/, $ci_advance_init;
+@advance_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } @advance_vals;
+my @invalid_advance = grep { !/^-?[0-9]+$/ } @advance_vals;
+is(scalar @invalid_advance, 0, 'ci_advance contains only integers');
+# Completed items (ci_is_complete==1) must have advance==-1
+for my ($idx, $complete_val) (indexed @complete_vals) {
+    if ($complete_val eq '1') {
+        is($advance_vals[$idx], '-1',
+            "ci_advance[$idx] is -1 for completed item (ci_is_complete[$idx]==1)");
+    }
+}
+
+# === Test 21: ci_symbol_after_is_ref contains 0s and 1s only (not NULL entries) ===
+my ($ci_sym_is_ref_init) = $c_text =~ /ci_symbol_after_is_ref\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $ci_sym_is_ref_init, 'ci_symbol_after_is_ref initializer is parseable');
+my @sym_is_ref_vals = split /,/, $ci_sym_is_ref_init;
+@sym_is_ref_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } @sym_is_ref_vals;
+my @invalid_is_ref = grep { !/^[01]$/ } @sym_is_ref_vals;
+is(scalar @invalid_is_ref, 0, 'ci_symbol_after_is_ref contains only 0 and 1 values');
+
+# === Test 22: ci_symbol_after_pattern NULLs align with ci_is_complete ones ===
+my ($ci_sym_pat_init) = $c_text =~ /ci_symbol_after_pattern\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $ci_sym_pat_init, 'ci_symbol_after_pattern initializer is parseable');
+# Split on commas that are not inside quotes (simple heuristic: split and rejoin quoted parts)
+# We use a regex split that is aware of quoted strings.
+my @sym_pat_entries;
+{
+    my $rest = $ci_sym_pat_init;
+    while ($rest =~ s/^\s*("(?:[^"\\]|\\.)*"|NULL)\s*,?//) {
+        push @sym_pat_entries, $1;
+    }
+}
+is(scalar @sym_pat_entries, $num_core_items,
+    'ci_symbol_after_pattern entry count matches NUM_CORE_ITEMS');
+# Every NULL in pattern must correspond to is_complete==1
+for my ($idx, $pat) (indexed @sym_pat_entries) {
+    if ($pat eq 'NULL') {
+        is($complete_vals[$idx], '1',
+            "ci_symbol_after_pattern[$idx] is NULL only when ci_is_complete[$idx]==1");
+    }
+}
+
 done_testing();

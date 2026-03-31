@@ -12,6 +12,23 @@ use Chalk::Bootstrap::LR0DFA;
 
 class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
 
+    # Lexical helpers used by _emit_core_item_arrays().
+    # Defined as my subs so they are resolved at compile time within the class scope.
+
+    # Escape a Perl string for use as a C string literal and wrap it in double quotes.
+    my sub _c_string($s) {
+        $s =~ s/\\/\\\\/g;
+        $s =~ s/"/\\"/g;
+        return qq("$s");
+    }
+
+    # Emit a single static C array declaration with the given type, name, size, and values.
+    # Values must already be formatted as C literal strings (e.g. via _c_string, or plain ints).
+    my sub _emit_c_array($type, $name, $n, $values) {
+        my $init = join(', ', $values->@*);
+        return "static $type $name\[$n\] = { $init };\n";
+    }
+
     # Stored after the most recent generate() call for introspection by tests
     # and for use by future serialization methods.
     field $last_dfa_state_count :reader = 0;
@@ -73,10 +90,69 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             $last_dfa_state_count = $dfa->state_count();
         }
 
+        my $c_body = "/* stub */\n";
+        $c_body = $self->_emit_core_item_arrays() if $core_index;
+
         return {
-            'dfa_tables.c' => "/* stub */\n",
+            'dfa_tables.c' => $c_body,
             'dfa_tables.h' => "/* stub */\n",
         };
+    }
+
+    # Emit the 7 CoreItemIndex parallel arrays as static C source.
+    # All arrays are indexed by core_id (0 to count-1).
+    method _emit_core_item_arrays() {
+        my $n = $core_index->count();
+
+        # Collect per-id values up front.
+        my @rule_names;
+        my @alt_idxs;
+        my @dots;
+        my @is_complete;
+        my @advance;
+        my @to_state;
+        my @sym_patterns;
+        my @sym_is_ref;
+
+        for my $id (0 .. $n - 1) {
+            push @rule_names,   _c_string($core_index->rule_name_for($id));
+            push @alt_idxs,     $core_index->alt_idx_for($id);
+            push @dots,         $core_index->dot_for($id);
+
+            my $complete = $core_index->is_complete($id) ? 1 : 0;
+            push @is_complete, $complete;
+
+            my $adv = $core_index->advance($id);
+            push @advance, defined($adv) ? $adv : -1;
+
+            my $state = $core_index->state_for($id);
+            push @to_state, defined($state) ? $state : -1;
+
+            my $sym = $core_index->symbol_after($id);
+            if (defined $sym) {
+                push @sym_patterns, _c_string($sym->value());
+                push @sym_is_ref,   $sym->is_reference() ? 1 : 0;
+            }
+            else {
+                push @sym_patterns, 'NULL';
+                push @sym_is_ref,   0;
+            }
+        }
+
+        my $out = '';
+
+        $out .= "#define NUM_CORE_ITEMS $n\n\n";
+
+        $out .= _emit_c_array('const char *', 'ci_rule_names',          $n, \@rule_names);
+        $out .= _emit_c_array('const int',    'ci_alt_idxs',            $n, \@alt_idxs);
+        $out .= _emit_c_array('const int',    'ci_dots',                $n, \@dots);
+        $out .= _emit_c_array('const int',    'ci_is_complete',         $n, \@is_complete);
+        $out .= _emit_c_array('const int',    'ci_advance',             $n, \@advance);
+        $out .= _emit_c_array('const int',    'ci_to_state',            $n, \@to_state);
+        $out .= _emit_c_array('const char *', 'ci_symbol_after_pattern',$n, \@sym_patterns);
+        $out .= _emit_c_array('const int',    'ci_symbol_after_is_ref', $n, \@sym_is_ref);
+
+        return $out;
     }
 
     # generate_distribution wraps generate() with the standard distribution shape.
