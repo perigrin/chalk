@@ -16,6 +16,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     field $_field_type_slugs;        # hashref: field_name => C slug, derived from field_types
     field $compiled_class_metadata :param = {};  # hashref: class_name => { slug, readers, methods }
     field $_method_dispatch;  # hashref: method_name => { type => 'reader'|'method', ... }
+    field $_polymorphic_dispatch;  # hashref: method_name => [{ slug, class_name }, ...] for stash-compare chains
+    method _method_dispatch() { return $_method_dispatch; }
+    method _polymorphic_dispatch() { return $_polymorphic_dispatch; }
     method _class_slug_for($class_name) {
         return $self->_class_slug($class_name);
     }
@@ -1409,16 +1412,18 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my $readers = $meta->{readers} // {};
                 for my $rdr (sort keys $readers->%*) {
                     push $method_owners{$rdr}->@*, {
-                        type      => 'reader',
-                        slug      => $meta->{slug},
-                        field_idx => $readers->{$rdr},
+                        type       => 'reader',
+                        slug       => $meta->{slug},
+                        field_idx  => $readers->{$rdr},
+                        class_name => $class_name,
                     };
                 }
                 my $methods = $meta->{methods} // {};
                 for my $meth (sort keys $methods->%*) {
                     push $method_owners{$meth}->@*, {
-                        type => 'method',
-                        slug => $meta->{slug},
+                        type       => 'method',
+                        slug       => $meta->{slug},
+                        class_name => $class_name,
                     };
                 }
             }
@@ -1431,6 +1436,21 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
             }
             $_method_dispatch = \%dispatch;
+
+            # Build polymorphic dispatch map: collect ALL classes per method name,
+            # then keep only methods with multiple owners (single-owner methods are
+            # already handled by $_method_dispatch with cheaper direct dispatch).
+            my %poly;
+            for my $mname (sort keys %method_owners) {
+                my @owners = $method_owners{$mname}->@*;
+                # Skip single-owner methods — covered by $_method_dispatch
+                next if scalar @owners == 1;
+                $poly{$mname} = [
+                    map { { slug => $_->{slug}, class_name => $_->{class_name} } }
+                        @owners
+                ];
+            }
+            $_polymorphic_dispatch = \%poly;
         }
 
         if (defined $sa) {
