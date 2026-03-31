@@ -597,6 +597,55 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # %_fallback_method_slugs, $self->_get_param_fields()) are not available in the
         # C target. Fall through to standard call_method dispatch.
 
+        # Polymorphic dispatch: when multiple compiled classes implement this method,
+        # emit a stash-compare chain with direct C calls and a call_method fallback.
+        # Each stash pointer is initialized in init_statics via gv_stashpvn and stored
+        # in a file-scope static for O(1) pointer comparison at each call site.
+        if ($_polymorphic_dispatch && exists $_polymorphic_dispatch->{$method_name}) {
+            my @candidates = sort { $a->{slug} cmp $b->{slug} }
+                             $_polymorphic_dispatch->{$method_name}->@*;
+
+            my @call_args  = ($invocant_expr, @arg_exprs);
+            my $args_str   = join(', ', @call_args);
+
+            my @stmts;
+            push @stmts, @pre_eval;
+            push @stmts, "HV *_pd_stash = SvSTASH(SvRV($invocant_expr))";
+            push @stmts, 'SV *_mcr';
+
+            # Build the if/else-if chain of stash compares with direct C calls.
+            my @branches;
+            for my $cand (@candidates) {
+                my $slug      = $cand->{slug};
+                my $c_func    = "${slug}_${method_name}";
+                push @branches,
+                    "if (_pd_stash == _${slug}_stash) { _mcr = SvREFCNT_inc(${c_func}(aTHX_ ${args_str})); }";
+            }
+
+            # Assemble the call_method fallback as the else branch.
+            my @fallback;
+            push @fallback, 'dSP';
+            push @fallback, 'ENTER; SAVETMPS';
+            push @fallback, 'PUSHMARK(SP)';
+            push @fallback, "XPUSHs($invocant_expr)";
+            for my $expr (@arg_exprs) {
+                push @fallback, "XPUSHs($expr)";
+            }
+            push @fallback, 'PUTBACK';
+            push @fallback, "call_method(\"$escaped_name\", G_SCALAR)";
+            push @fallback, 'SPAGAIN';
+            push @fallback, '_mcr = SvREFCNT_inc(POPs)';
+            push @fallback, 'PUTBACK; FREETMPS; LEAVE';
+            my $fallback_str = join('; ', @fallback);
+
+            # Join branches into an if/else-if/.../else chain.
+            my $chain = join(' else ', @branches) . " else { $fallback_str; }";
+            push @stmts, $chain;
+            push @stmts, '_mcr';
+
+            return '({ ' . join('; ', @stmts) . '; })';
+        }
+
         my @stmts;
         push @stmts, @pre_eval;
 

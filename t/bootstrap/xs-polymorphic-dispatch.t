@@ -175,4 +175,91 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
 my $alpha_include_count = () = $c_text =~ /#include "testsemiringalpha\.h"/g;
 is($alpha_include_count, 1, '#include "testsemiringalpha.h" appears exactly once (no duplicates)');
 
+# --- Component 2: Stash-compare dispatch chains in generated C ---
+#
+# Build a new IR program with a method that calls is_zero on an unknown-typed
+# parameter $sr.  The invocant is NOT self and NOT a field_types-typed field,
+# so it must fall through to the polymorphic-dispatch tier.
+#   method check($sr, $v) { return $sr->is_zero($v); }
+
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $factory2 = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+my $call_node = $factory2->make('Constructor',
+    class       => 'MethodCallExpr',
+    invocant    => $factory2->make('Constant', const_type => 'string', value => '$sr'),
+    method_name => $factory2->make('Constant', const_type => 'string', value => 'is_zero'),
+    args        => [
+        $factory2->make('Constant', const_type => 'string', value => '$v'),
+    ],
+);
+
+my $check_method = $factory2->make('Constructor',
+    class  => 'MethodDecl',
+    name   => $factory2->make('Constant', const_type => 'string', value => 'check'),
+    params => [
+        $factory2->make('Constant', const_type => 'string', value => '$self'),
+        $factory2->make('Constant', const_type => 'string', value => '$sr'),
+        $factory2->make('Constant', const_type => 'string', value => '$v'),
+    ],
+    body   => [
+        $factory2->make('Constructor',
+            class => 'ReturnStmt',
+            value => $call_node,
+        ),
+    ],
+    return_type => undef,
+);
+
+my $class_decl2 = $factory2->make('Constructor',
+    class  => 'ClassDecl',
+    name   => $factory2->make('Constant', const_type => 'string', value => 'Test::Dispatch::Host2'),
+    parent => undef,
+    body   => [$check_method],
+);
+
+my $program2 = $factory2->make('Constructor',
+    class      => 'Program',
+    statements => [$class_decl2],
+);
+
+my $target2 = Chalk::Bootstrap::Perl::Target::C->new(
+    module_name             => 'Test::Dispatch::Host2',
+    compiled_class_metadata => $compiled_metadata,
+);
+
+my $result2 = eval { $target2->generate_c_files($program2, undef, undef) };
+ok(defined $result2, 'generate_c_files succeeds for Component 2 stash-compare test') or do {
+    diag "Error: $@";
+    done_testing();
+    exit;
+};
+
+my $c_text2 = $result2->{files}{'host2.c'};
+ok(defined $c_text2, 'Component 2: generated .c file exists') or do {
+    diag 'Keys: ' . join(', ', sort keys $result2->{files}->%*);
+    done_testing();
+    exit;
+};
+
+# The stash-compare pattern must appear in the generated method.
+like($c_text2, qr/SvSTASH\s*\(\s*SvRV\s*\(/,
+    'Component 2: generated C contains stash-compare SvSTASH(SvRV(');
+
+# Direct C calls for each polymorphic candidate must appear.
+for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
+    like($c_text2, qr/\b${slug}_is_zero\b/,
+        "Component 2: generated C contains direct call ${slug}_is_zero");
+}
+
+# call_method fallback must still appear (for uncompiled classes).
+like($c_text2, qr/call_method\s*\(\s*"is_zero"/,
+    'Component 2: generated C retains call_method fallback for is_zero');
+
+# The stash comparison must use the stash pointer statics populated by init_statics.
+for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
+    like($c_text2, qr/_${slug}_stash/,
+        "Component 2: generated C references _${slug}_stash pointer static");
+}
+
 done_testing;
