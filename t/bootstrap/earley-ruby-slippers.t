@@ -86,4 +86,57 @@ my $bool = Chalk::Bootstrap::Semiring::Boolean->new();
     ok(!$parser->parse('(hello'), 'recovery off: missing paren fails');
 }
 
+# === Test 5: Virtual semicolon insertion between statements ===
+# Grammar: Block ::= '{' StmtList '}'
+#          StmtList ::= Stmt | StmtList ';' Stmt
+#          Stmt     ::= /[a-z]+/ '=' /[0-9]+/
+# Input '{x=1 y=2}' is missing ';' between statements.
+# Ruby Slippers should insert a virtual ';' and recover.
+{
+    my @block_rules = (
+        Chalk::Grammar::Rule->new(
+            name        => 'Block',
+            expressions => [
+                [terminal('\{'), reference('StmtList'), terminal('\}')],
+            ],
+        ),
+        Chalk::Grammar::Rule->new(
+            name        => 'StmtList',
+            expressions => [
+                [reference('Stmt')],
+                [reference('StmtList'), terminal(';'), reference('Stmt')],
+            ],
+        ),
+        Chalk::Grammar::Rule->new(
+            name        => 'Stmt',
+            expressions => [
+                [terminal('[a-z]+'), terminal('='), terminal('[0-9]+')],
+            ],
+        ),
+    );
+    my $block_grammar = Chalk::Bootstrap::Desugar::desugar_grammar(\@block_rules);
+
+    # First verify the grammar accepts valid input
+    {
+        my $parser = Chalk::Bootstrap::Earley->new(
+            grammar => $block_grammar, semiring => $bool, recover => true,
+        );
+        ok($parser->parse('{x=1;y=2}'), 'virtual semicolon: valid input parses');
+        is(scalar $parser->errors()->@*, 0, 'virtual semicolon: no errors on valid input');
+    }
+
+    # Now test recovery: missing ';' between statements
+    {
+        my $parser = Chalk::Bootstrap::Earley->new(
+            grammar => $block_grammar, semiring => $bool, recover => true,
+        );
+        my $result = $parser->parse('{x=1 y=2}');
+        my $errors = $parser->errors();
+        ok($result, 'virtual semicolon: {x=1 y=2} recovered via Ruby Slippers');
+        ok($errors->@* > 0, 'virtual semicolon: error recorded for missing semicolon');
+        is($errors->[0]{recovery_type}, 'ruby_slippers',
+            'virtual semicolon: recovery type is ruby_slippers');
+    }
+}
+
 done_testing();
