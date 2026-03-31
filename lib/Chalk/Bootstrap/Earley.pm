@@ -424,33 +424,84 @@ class Chalk::Bootstrap::Earley {
             }
 
             # Stall detection: empty agenda means no items survived to this
-            # position. If recovery is enabled, find a sync point and resume.
+            # position. If recovery is enabled, try Ruby Slippers (virtual
+            # delimiter insertion) first, then fall back to panic mode.
             # Only trigger when past the scanner frontier — empty positions
             # within the frontier are normal (multi-char terminals skip them).
-            if (!@agenda && $pos > $furthest_chart_pos && $pos < $n && $_recover) {
+            if (!@agenda && $pos > $furthest_chart_pos && $pos <= $n && $_recover) {
                 if (scalar(@_errors) < 20) {
-                    push @_errors, {
-                        position  => $pos,
-                        expected  => { $_diag_expected->%* },
-                    };
-
-                    my ($sync_pos, $sync_type) = $self->_find_sync_point($input, $pos);
-                    if (defined $sync_pos) {
-                        $_errors[-1]{sync_pos}  = $sync_pos;
-                        $_errors[-1]{sync_type} = $sync_type;
-
-                        # Seed chart at recovery position with start rule items
-                        for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
-                            my $seed_id = $core_index->id_for(
-                                $start_rule->name(), $alt_idx, 0);
-                            ($chart[$sync_pos][$seed_id] //= [])->[0]
-                                = $semiring->one();
+                    # Tier 1: Ruby Slippers — try inserting expected closing delimiters.
+                    # Check if expected tokens include a delimiter that would let
+                    # parsing continue. Insert it as a zero-width virtual token.
+                    my $ruby_recovered = false;
+                    if ($_diag_expected && $_diag_expected->%*) {
+                        my @closers = grep { /^\\[)\]}\;]$|^\)$|^\}$|^\]$|^;$/ }
+                                      keys $_diag_expected->%*;
+                        for my $closer (@closers) {
+                            # Find items at the last active position waiting for this terminal
+                            my $prev_pos = $_last_active_pos;
+                            next unless defined $prev_pos;
+                            for my $cid (0 .. $chart[$prev_pos]->$#*) {
+                                my $oh = $chart[$prev_pos][$cid];
+                                next unless defined $oh;
+                                next if $self->_is_complete_id($cid);
+                                my $sym = $self->_symbol_after_dot_for($cid);
+                                next unless defined $sym && !$sym->is_reference();
+                                next unless $sym->value() eq $closer;
+                                # This item expects the closer — virtually scan it
+                                for my $rd (0 .. $oh->$#*) {
+                                    next unless defined $oh->[$rd];
+                                    my $item_origin = $prev_pos - $rd;
+                                    my $val = $oh->[$rd];
+                                    # Advance the item as if the closer was scanned
+                                    my $new_value = $semiring->on_scan(
+                                        $val, $core_index->rule_name_for($cid),
+                                        $core_index->alt_idx_for($cid), $prev_pos, '');
+                                    next if $semiring->is_zero($new_value);
+                                    my $new_cid = $core_index->advance($cid);
+                                    # Place at current position (zero-width insertion)
+                                    ($chart[$pos][$new_cid] //= [])->[($pos - $item_origin)]
+                                        = $new_value;
+                                    $ruby_recovered = true;
+                                }
+                            }
                         }
-                        $pos = $sync_pos;
+                    }
+                    if ($ruby_recovered) {
+                        push @_errors, {
+                            position      => $pos,
+                            expected      => { $_diag_expected->%* },
+                            recovery_type => 'ruby_slippers',
+                        };
+                        # Re-build agenda from newly inserted items and continue
                         next;
                     }
+
+                    # Tier 2: panic mode — scan forward to sync point
+                    if ($pos < $n) {
+                        push @_errors, {
+                            position  => $pos,
+                            expected  => { $_diag_expected->%* },
+                        };
+
+                        my ($sync_pos, $sync_type) = $self->_find_sync_point($input, $pos);
+                        if (defined $sync_pos) {
+                            $_errors[-1]{sync_pos}  = $sync_pos;
+                            $_errors[-1]{sync_type} = $sync_type;
+
+                            # Seed chart at recovery position with start rule items
+                            for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
+                                my $seed_id = $core_index->id_for(
+                                    $start_rule->name(), $alt_idx, 0);
+                                ($chart[$sync_pos][$seed_id] //= [])->[0]
+                                    = $semiring->one();
+                            }
+                            $pos = $sync_pos;
+                            next;
+                        }
+                    }
                 }
-                # No sync point or error limit reached — stop
+                # No recovery succeeded or error limit reached — stop
                 last;
             }
 
@@ -835,6 +886,83 @@ class Chalk::Bootstrap::Earley {
             my $end_oh = $chart[$n][$core_id];
             if (defined $end_oh && defined $end_oh->[$n]) {
                 return $end_oh->[$n];
+            }
+        }
+
+        # Ruby Slippers at EOF: if the parse ended without a completed start rule
+        # and recovery is enabled, try inserting virtual closing delimiters.
+        # Repeat until no more insertions are possible or the start rule completes.
+        if ($_recover && scalar(@_errors) < 20) {
+            my $max_ruby_rounds = 10;  # prevent infinite loops
+            for my $round (1 .. $max_ruby_rounds) {
+                my $inserted = false;
+                # Find items at $n waiting for closing delimiters
+                for my $cid (0 .. $chart[$n]->$#*) {
+                    my $oh = $chart[$n][$cid];
+                    next unless defined $oh;
+                    next if $self->_is_complete_id($cid);
+                    my $sym = $self->_symbol_after_dot_for($cid);
+                    next unless defined $sym && !$sym->is_reference();
+                    my $pat = $sym->value();
+                    # Only insert closing delimiters and semicolons
+                    next unless $pat =~ /^\\[)\]}\;]$|^\)$|^\}$|^\]$|^;$/;
+                    for my $rd (0 .. $oh->$#*) {
+                        next unless defined $oh->[$rd];
+                        my $item_origin = $n - $rd;
+                        my $val = $oh->[$rd];
+                        my $new_value = $semiring->on_scan(
+                            $val, $core_index->rule_name_for($cid),
+                            $core_index->alt_idx_for($cid), $n, '');
+                        next if $semiring->is_zero($new_value);
+                        my $new_cid = $core_index->advance($cid);
+                        # Place at $n (zero-width virtual token)
+                        if ($self->_chart_has(\@chart, $n, $new_cid, $item_origin)) {
+                            my $existing = $self->_chart_get(\@chart, $n, $new_cid, $item_origin);
+                            my $merged = $semiring->add($existing, $new_value);
+                            $self->_chart_set(\@chart, $n, $new_cid, $item_origin, $merged);
+                        } else {
+                            $self->_chart_set(\@chart, $n, $new_cid, $item_origin, $new_value);
+                        }
+                        $inserted = true;
+                    }
+                }
+                last unless $inserted;
+
+                # Process completions from virtual insertions
+                my @virt_agenda;
+                for my $cid (0 .. $chart[$n]->$#*) {
+                    my $oh = $chart[$n][$cid];
+                    next unless defined $oh;
+                    for my $rd (0 .. $oh->$#*) {
+                        next unless defined $oh->[$rd];
+                        push @virt_agenda, [$cid, $n - $rd];
+                    }
+                }
+                for my $entry (@virt_agenda) {
+                    my ($cid, $origin) = $entry->@*;
+                    next unless $self->_is_complete_id($cid);
+                    $self->_complete(
+                        $cid, $origin, $chart[$n][$cid][($n - $origin)],
+                        $n, \@chart, undef,
+                    );
+                }
+
+                push @_errors, {
+                    position      => $n,
+                    expected      => { $_diag_expected->%* },
+                    recovery_type => 'ruby_slippers',
+                    round         => $round,
+                };
+
+                # Check if start rule now completes
+                for my $alt_idx (0 .. $start_rule->expressions()->$#*) {
+                    my $end_dot = scalar($start_rule->expressions()->[$alt_idx]->@*);
+                    my $check_id = $core_index->id_for($start_rule->name(), $alt_idx, $end_dot);
+                    my $check_oh = $chart[$n][$check_id];
+                    if (defined $check_oh && defined $check_oh->[$n]) {
+                        return $check_oh->[$n];
+                    }
+                }
             }
         }
 
