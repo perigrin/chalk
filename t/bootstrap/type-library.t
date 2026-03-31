@@ -567,4 +567,81 @@ is(Chalk::Grammar::Perl::TypeLibrary::narrow_type('Str', 'List'), 'Str',
         'split arg 3 (limit) accepts Num');
 }
 
+# ========================================================================
+# Type bitset representation (Section 3.3 of design doc)
+# ========================================================================
+
+# type_bitset returns an integer for each type
+{
+    my $int_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Int');
+    ok(defined $int_bits, 'type_bitset(Int) returns defined value');
+    ok($int_bits > 0, 'type_bitset(Int) is a positive integer');
+}
+
+# Subtype check via bitwise AND: IsSubtype(child, parent) = (parent & child) == child
+{
+    my $int_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Int');
+    my $num_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Num');
+    my $str_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Str');
+    my $scalar_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Scalar');
+    my $any_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Any');
+
+    # Int is subtype of Num: (Num & Int) == Int
+    is(($num_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Num');
+    # Int is subtype of Str: (Str & Int) == Int
+    is(($str_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Str');
+    # Int is subtype of Scalar: (Scalar & Int) == Int
+    is(($scalar_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Scalar');
+    # Int is subtype of Any: (Any & Int) == Int
+    is(($any_bits & $int_bits), $int_bits, 'bitwise: Int is subtype of Any');
+
+    # Num is NOT subtype of Int: (Int & Num) != Num
+    isnt(($int_bits & $num_bits), $num_bits, 'bitwise: Num is NOT subtype of Int');
+    # Scalar is NOT subtype of Str: (Str & Scalar) != Scalar
+    isnt(($str_bits & $scalar_bits), $scalar_bits, 'bitwise: Scalar is NOT subtype of Str');
+}
+
+# Cross-branch types have disjoint bitsets
+{
+    my $array_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Array');
+    my $scalar_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Scalar');
+    my $code_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Code');
+
+    isnt(($scalar_bits & $array_bits), $array_bits, 'bitwise: Array is NOT subtype of Scalar');
+    isnt(($scalar_bits & $code_bits), $code_bits, 'bitwise: Code is NOT subtype of Scalar');
+}
+
+# Ref hierarchy
+{
+    my $ref_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Ref');
+    my $arrayref_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('ArrayRef');
+    my $hashref_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('HashRef');
+    my $coderef_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('CodeRef');
+    my $object_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('Object');
+
+    is(($ref_bits & $arrayref_bits), $arrayref_bits, 'bitwise: ArrayRef is subtype of Ref');
+    is(($ref_bits & $hashref_bits), $hashref_bits, 'bitwise: HashRef is subtype of Ref');
+    is(($ref_bits & $coderef_bits), $coderef_bits, 'bitwise: CodeRef is subtype of Ref');
+    is(($ref_bits & $object_bits), $object_bits, 'bitwise: Object is subtype of Ref');
+}
+
+# None has a unique bitset of 0 (subtype of everything by convention)
+{
+    my $none_bits = Chalk::Grammar::Perl::TypeLibrary::type_bitset('None');
+    is($none_bits, 0, 'type_bitset(None) is 0 (bottom type)');
+}
+
+# is_subtype uses bitwise ops internally — verify it still works
+# (These duplicate existing tests but confirm the new implementation path)
+{
+    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('Int', 'Any'),
+        'is_subtype still works with bitsets: Int <: Any');
+    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('ArrayRef', 'Scalar'),
+        'is_subtype still works with bitsets: ArrayRef <: Scalar');
+    ok(!Chalk::Grammar::Perl::TypeLibrary::is_subtype('Code', 'Scalar'),
+        'is_subtype still works with bitsets: Code NOT <: Scalar');
+    ok(Chalk::Grammar::Perl::TypeLibrary::is_subtype('None', 'Hash'),
+        'is_subtype still works with bitsets: None <: Hash');
+}
+
 done_testing;
