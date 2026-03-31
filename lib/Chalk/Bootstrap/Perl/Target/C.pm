@@ -1704,6 +1704,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @lines, 'extern void Perl_class_set_field_defop(pTHX_ PADNAME *pn, U32 flags, OP *defop);';
         push @lines, 'extern void Perl_class_apply_field_attributes(pTHX_ PADNAME *pn, OP *attr);';
         push @lines, 'extern void Perl_class_add_ADJUST(pTHX_ HV *stash, CV *cv);';
+        push @lines, 'extern void Perl_class_apply_attributes(pTHX_ HV *stash, OP *attrlist);';
         push @lines, '';
 
         # Classify exported functions: skip init_statics and _ADJUST from regular XSUBs.
@@ -1832,6 +1833,19 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @lines, '    PL_curstash = stash;';
         push @lines, '    ENTER;';
         push @lines, '    Perl_class_setup_stash(aTHX_ stash);';
+
+        # Register :isa (parent class) if the ClassDecl has a parent
+        if (defined $class_decl) {
+            my $parent_node = $class_decl->inputs()->[1];
+            if (defined $parent_node && $parent_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                my $parent_name = $parent_node->value();
+                my $escaped_parent = $self->_escape_c_string($parent_name);
+                push @lines, "    {";
+                push @lines, "        OP *isa_attr = newSVOP(OP_CONST, 0, newSVpvs(\"isa($escaped_parent)\"));";
+                push @lines, "        Perl_class_apply_attributes(aTHX_ stash, isa_attr);";
+                push @lines, "    }";
+            }
+        }
         push @lines, '';
 
         # Register fields (if the class has any FieldDecl nodes)
