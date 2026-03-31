@@ -397,6 +397,12 @@ class Chalk::Bootstrap::Earley {
             push @pending_sweeps, [$origin, $end];
         };
 
+        # Track the furthest chart position that has entries (from scanning).
+        # Multi-character terminal scans can jump from pos P to pos P+N,
+        # leaving intermediate positions empty. Stall detection should only
+        # trigger when we're past this frontier, not at skipped positions.
+        my $furthest_chart_pos = 0;
+
         # Process each chart position (while loop enables recovery skip)
         my $pos = 0;
         while ($pos <= $n) {
@@ -419,7 +425,9 @@ class Chalk::Bootstrap::Earley {
 
             # Stall detection: empty agenda means no items survived to this
             # position. If recovery is enabled, find a sync point and resume.
-            if (!@agenda && $pos > 0 && $pos < $n && $_recover) {
+            # Only trigger when past the scanner frontier — empty positions
+            # within the frontier are normal (multi-char terminals skip them).
+            if (!@agenda && $pos > $furthest_chart_pos && $pos < $n && $_recover) {
                 if (scalar(@_errors) < 20) {
                     push @_errors, {
                         position  => $pos,
@@ -449,6 +457,7 @@ class Chalk::Bootstrap::Earley {
             # Track furthest position with active items for diagnostics
             if (@agenda) {
                 $_last_active_pos = $pos;
+                $furthest_chart_pos = $pos if $pos > $furthest_chart_pos;
             }
 
             my @processed;
@@ -594,6 +603,15 @@ class Chalk::Bootstrap::Earley {
                         # Scan (allow at end of input for zero-width matches)
                         $self->_scan($core_id, $origin, $value, $symbol, $pos, $input, \@chart, $n, \@agenda, \%predicted_at);
                     }
+                }
+            }
+
+            # Update scan frontier: check scan cache for this position to find
+            # the furthest position that scanning advanced items to.
+            if (exists $_scan_cache{$pos}) {
+                for my $end (values $_scan_cache{$pos}->%*) {
+                    $furthest_chart_pos = $end
+                        if defined $end && $end > $furthest_chart_pos;
                 }
             }
 
