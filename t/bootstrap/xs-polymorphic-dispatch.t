@@ -262,4 +262,63 @@ for my $slug (qw(testsemiringalpha testsemiringbeta testsemiringgamma)) {
         "Component 2: generated C references _${slug}_stash pointer static");
 }
 
+# ============================================================
+# Reader edge case: shared :reader names must NOT appear in
+# $_polymorphic_dispatch (readers use ObjectFIELDS, not C calls)
+# ============================================================
+
+{
+    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+    my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+    my $method_node = $f->make('Constructor',
+        class  => 'MethodDecl',
+        name   => $f->make('Constant', const_type => 'string', value => 'stub'),
+        params => [$f->make('Constant', const_type => 'string', value => '$self')],
+        body   => [
+            $f->make('Constructor',
+                class => 'ReturnStmt',
+                value => $f->make('Constant', const_type => 'string', value => '1'),
+            ),
+        ],
+        return_type => undef,
+    );
+
+    my $class_decl = $f->make('Constructor',
+        class  => 'ClassDecl',
+        name   => $f->make('Constant', const_type => 'string', value => 'Test::ReaderEdge'),
+        parent => undef,
+        body   => [$method_node],
+    );
+
+    my $program = $f->make('Constructor',
+        class      => 'Program',
+        statements => [$class_decl],
+    );
+
+    # Two classes that share a :reader 'name' — these should NOT go into poly dispatch
+    my $reader_target = Chalk::Bootstrap::Perl::Target::C->new(
+        module_name => 'Test::ReaderEdge',
+        compiled_class_metadata => {
+            'Test::ClassA' => {
+                slug    => 'testclassa',
+                readers => { name => 0 },
+                methods => { is_zero => 1 },
+            },
+            'Test::ClassB' => {
+                slug    => 'testclassb',
+                readers => { name => 0 },
+                methods => { is_zero => 1 },
+            },
+        },
+    );
+
+    my $reader_result = eval { $reader_target->generate_c_files($program, undef, undef) };
+    ok(defined $reader_result, 'reader edge case: generate_c_files succeeds');
+
+    my $pd = $reader_target->_polymorphic_dispatch();
+    ok(!exists $pd->{name}, 'reader edge case: shared :reader "name" is NOT in polymorphic dispatch');
+    ok(exists $pd->{is_zero}, 'reader edge case: is_zero (pure method) IS in polymorphic dispatch');
+}
+
 done_testing;

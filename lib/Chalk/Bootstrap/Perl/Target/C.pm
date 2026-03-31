@@ -1489,11 +1489,16 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             # Build polymorphic dispatch map: collect ALL classes per method name,
             # then keep only methods with multiple owners (single-owner methods are
             # already handled by $_method_dispatch with cheaper direct dispatch).
+            # Exclude methods where any owner is a :reader — readers use
+            # ObjectFIELDS access, not C function calls, so emitting
+            # slug_readername() would produce an undefined symbol at link time.
             my %poly;
             for my $mname (sort keys %method_owners) {
                 my @owners = $method_owners{$mname}->@*;
                 # Skip single-owner methods — covered by $_method_dispatch
                 next if scalar @owners == 1;
+                # Skip methods where any owner is a reader (no C function exists)
+                next if grep { $_->{type} eq 'reader' } @owners;
                 $poly{$mname} = [
                     map { { slug => $_->{slug}, class_name => $_->{class_name} } }
                         @owners
