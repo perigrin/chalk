@@ -91,7 +91,12 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         }
 
         my $c_body = "/* stub */\n";
-        $c_body = $self->_emit_core_item_arrays() if $core_index;
+        if ($core_index) {
+            $c_body  = $self->_emit_core_item_arrays();
+            $c_body .= $self->_emit_terminal_maps();
+            $c_body .= $self->_emit_completion_maps();
+            $c_body .= $self->_emit_goto_tables();
+        }
 
         return {
             'dfa_tables.c' => $c_body,
@@ -151,6 +156,224 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         $out .= _emit_c_array('const int',    'ci_to_state',            $n, \@to_state);
         $out .= _emit_c_array('const char *', 'ci_symbol_after_pattern',$n, \@sym_patterns);
         $out .= _emit_c_array('const int',    'ci_symbol_after_is_ref', $n, \@sym_is_ref);
+
+        return $out;
+    }
+
+    # Emit terminal map arrays as static C.
+    # For each DFA state: a list of (pattern, [core_ids]) pairs.
+    # Patterns are deduplicated into a flat string table.
+    # core_ids are flattened into tmap_core_ids with per-slice (pattern, offset, count) records.
+    # Per-state offset/count arrays let the C consumer locate each state's slices in O(1).
+    method _emit_terminal_maps() {
+        my $states = $lr0_dfa->states();
+        my $num_states = scalar $states->@*;
+
+        # Deduplicate patterns: pattern string => index in unique-patterns table
+        my %pattern_index;
+        my @unique_patterns;
+
+        # Collect per-state slice info and flat core_ids as we go.
+        # @state_slices[$state_id] = [ {pattern_idx, offset, count}, ... ]
+        my @state_slices;
+        my @flat_core_ids;
+
+        for my $state ($states->@*) {
+            my $sid    = $state->{id};
+            my $tmap   = $state->{terminal_map};
+            my @slices;
+
+            for my $pattern (sort keys %{$tmap}) {
+                # Assign a unique index to this pattern if not seen before
+                unless (exists $pattern_index{$pattern}) {
+                    $pattern_index{$pattern} = scalar @unique_patterns;
+                    push @unique_patterns, $pattern;
+                }
+                my $pat_idx = $pattern_index{$pattern};
+                my $offset  = scalar @flat_core_ids;
+                my @ids     = sort { $a <=> $b } $tmap->{$pattern}->@*;
+                push @flat_core_ids, @ids;
+                push @slices, { pattern_idx => $pat_idx, offset => $offset, count => scalar @ids };
+            }
+
+            $state_slices[$sid] = \@slices;
+        }
+
+        my $total_entries  = scalar @flat_core_ids;
+        my $num_patterns   = scalar @unique_patterns;
+
+        # Build flat slice array and per-state offset/count arrays
+        my @all_slices;
+        my @so_vals;   # state slice offsets
+        my @sc_vals;   # state slice counts
+        for my $sid (0 .. $num_states - 1) {
+            my $slices = $state_slices[$sid] // [];
+            push @so_vals, scalar @all_slices;
+            push @sc_vals, scalar $slices->@*;
+            push @all_slices, $slices->@*;
+        }
+        my $total_slices = scalar @all_slices;
+
+        my $out = '';
+        $out .= "#define NUM_DFA_STATES $num_states\n";
+        $out .= "#define TOTAL_TMAP_ENTRIES $total_entries\n";
+        $out .= "#define TOTAL_TMAP_SLICES $total_slices\n";
+        $out .= "#define NUM_UNIQUE_TMAP_PATTERNS $num_patterns\n\n";
+
+        # tmap_core_ids
+        if ($total_entries > 0) {
+            $out .= _emit_c_array('const int', 'tmap_core_ids', $total_entries, \@flat_core_ids);
+        }
+        else {
+            $out .= "static const int tmap_core_ids[1] = { -1 }; /* empty */\n";
+        }
+
+        # tmap_patterns (unique pattern strings)
+        my @pat_vals = map { _c_string($_) } @unique_patterns;
+        if ($num_patterns > 0) {
+            $out .= _emit_c_array('const char *', 'tmap_patterns', $num_patterns, \@pat_vals);
+        }
+        else {
+            $out .= "static const char *tmap_patterns[1] = { NULL }; /* empty */\n";
+        }
+
+        # TMapSlice typedef + tmap_slices
+        $out .= "typedef struct { int pattern_idx; int offset; int count; } TMapSlice;\n";
+        if ($total_slices > 0) {
+            my @slice_vals = map { "{$_->{pattern_idx}, $_->{offset}, $_->{count}}" } @all_slices;
+            $out .= _emit_c_array('const TMapSlice', 'tmap_slices', $total_slices, \@slice_vals);
+        }
+        else {
+            $out .= "static const TMapSlice tmap_slices[1] = { {0, 0, 0} }; /* empty */\n";
+        }
+
+        $out .= _emit_c_array('const int', 'tmap_state_offset', $num_states, \@so_vals);
+        $out .= _emit_c_array('const int', 'tmap_state_count',  $num_states, \@sc_vals);
+        $out .= "\n";
+
+        return $out;
+    }
+
+    # Emit completion map arrays as static C.
+    # Identical encoding to terminal maps but keyed by nonterminal name.
+    method _emit_completion_maps() {
+        my $states     = $lr0_dfa->states();
+        my $num_states = scalar $states->@*;
+
+        my %nonterm_index;
+        my @unique_nonterms;
+        my @state_slices;
+        my @flat_core_ids;
+
+        for my $state ($states->@*) {
+            my $sid    = $state->{id};
+            my $cmap   = $state->{completion_map};
+            my @slices;
+
+            for my $nt (sort keys %{$cmap}) {
+                unless (exists $nonterm_index{$nt}) {
+                    $nonterm_index{$nt} = scalar @unique_nonterms;
+                    push @unique_nonterms, $nt;
+                }
+                my $nt_idx = $nonterm_index{$nt};
+                my $offset = scalar @flat_core_ids;
+                my @ids    = sort { $a <=> $b } $cmap->{$nt}->@*;
+                push @flat_core_ids, @ids;
+                push @slices, { nonterm_idx => $nt_idx, offset => $offset, count => scalar @ids };
+            }
+
+            $state_slices[$sid] = \@slices;
+        }
+
+        my $total_entries  = scalar @flat_core_ids;
+        my $num_nonterms   = scalar @unique_nonterms;
+
+        my @all_slices;
+        my @so_vals;
+        my @sc_vals;
+        for my $sid (0 .. $num_states - 1) {
+            my $slices = $state_slices[$sid] // [];
+            push @so_vals, scalar @all_slices;
+            push @sc_vals, scalar $slices->@*;
+            push @all_slices, $slices->@*;
+        }
+        my $total_slices = scalar @all_slices;
+
+        my $out = '';
+        $out .= "#define TOTAL_CMAP_ENTRIES $total_entries\n";
+        $out .= "#define TOTAL_CMAP_SLICES $total_slices\n";
+        $out .= "#define NUM_UNIQUE_CMAP_NONTERMS $num_nonterms\n\n";
+
+        if ($total_entries > 0) {
+            $out .= _emit_c_array('const int', 'cmap_core_ids', $total_entries, \@flat_core_ids);
+        }
+        else {
+            $out .= "static const int cmap_core_ids[1] = { -1 }; /* empty */\n";
+        }
+
+        my @nt_vals = map { _c_string($_) } @unique_nonterms;
+        if ($num_nonterms > 0) {
+            $out .= _emit_c_array('const char *', 'cmap_nonterminals', $num_nonterms, \@nt_vals);
+        }
+        else {
+            $out .= "static const char *cmap_nonterminals[1] = { NULL }; /* empty */\n";
+        }
+
+        $out .= "typedef struct { int nonterm_idx; int offset; int count; } CMapSlice;\n";
+        if ($total_slices > 0) {
+            my @slice_vals = map { "{$_->{nonterm_idx}, $_->{offset}, $_->{count}}" } @all_slices;
+            $out .= _emit_c_array('const CMapSlice', 'cmap_slices', $total_slices, \@slice_vals);
+        }
+        else {
+            $out .= "static const CMapSlice cmap_slices[1] = { {0, 0, 0} }; /* empty */\n";
+        }
+
+        $out .= _emit_c_array('const int', 'cmap_state_offset', $num_states, \@so_vals);
+        $out .= _emit_c_array('const int', 'cmap_state_count',  $num_states, \@sc_vals);
+        $out .= "\n";
+
+        return $out;
+    }
+
+    # Emit goto table arrays as static C.
+    # goto_entries is a flat array of { symbol_key, target_state } structs.
+    # goto_state_offset/goto_state_count provide O(1) per-state access.
+    method _emit_goto_tables() {
+        my $states     = $lr0_dfa->states();
+        my $num_states = scalar $states->@*;
+
+        my @flat_entries;    # { symbol_key, target_state }
+        my @so_vals;
+        my @sc_vals;
+
+        for my $sid (0 .. $num_states - 1) {
+            my $state      = $states->[$sid];
+            my $goto_table = $state->{goto_table};
+            push @so_vals, scalar @flat_entries;
+            my @syms = sort keys %{$goto_table};
+            push @sc_vals, scalar @syms;
+            for my $sym_key (@syms) {
+                push @flat_entries, { symbol_key => $sym_key, target_state => $goto_table->{$sym_key} };
+            }
+        }
+
+        my $total_entries = scalar @flat_entries;
+
+        my $out = '';
+        $out .= "#define TOTAL_GOTO_ENTRIES $total_entries\n\n";
+        $out .= "typedef struct { const char *symbol_key; int target_state; } GotoEntry;\n";
+
+        if ($total_entries > 0) {
+            my @entry_vals = map { "{" . _c_string($_->{symbol_key}) . ", $_->{target_state}}" } @flat_entries;
+            $out .= _emit_c_array('const GotoEntry', 'goto_entries', $total_entries, \@entry_vals);
+        }
+        else {
+            $out .= "static const GotoEntry goto_entries[1] = { {NULL, -1} }; /* empty */\n";
+        }
+
+        $out .= _emit_c_array('const int', 'goto_state_offset', $num_states, \@so_vals);
+        $out .= _emit_c_array('const int', 'goto_state_count',  $num_states, \@sc_vals);
+        $out .= "\n";
 
         return $out;
     }

@@ -234,4 +234,226 @@ for my ($idx, $pat) (indexed @sym_pat_entries) {
     }
 }
 
+# ============================================================
+# === Tests 23+: DFA state table emission (Component 3)  ===
+# ============================================================
+# Re-use $c_text from the generate() call above (the 3-rule grammar S::=AB A::=/a/ B::=/b/).
+# The grammar has terminals /a/ and /b/, nonterminals S/A/B, and several DFA states with
+# goto entries.
+
+# Extract the number of DFA states for later cross-checks
+my ($num_dfa_states) = $c_text =~ /#define NUM_DFA_STATES (\d+)/;
+
+# === Test: NUM_DFA_STATES define is present ===
+like($c_text, qr/#define NUM_DFA_STATES \d+/,
+    'dfa_tables.c contains #define NUM_DFA_STATES');
+ok(defined $num_dfa_states && $num_dfa_states > 0,
+    'NUM_DFA_STATES is a positive integer');
+
+# ============================================================
+# === Terminal map arrays ===
+# ============================================================
+
+# === Test: TOTAL_TMAP_ENTRIES define ===
+like($c_text, qr/#define TOTAL_TMAP_ENTRIES \d+/,
+    'dfa_tables.c contains #define TOTAL_TMAP_ENTRIES');
+my ($total_tmap_entries) = $c_text =~ /#define TOTAL_TMAP_ENTRIES (\d+)/;
+ok(defined $total_tmap_entries && $total_tmap_entries > 0,
+    'TOTAL_TMAP_ENTRIES is positive (the test grammar has terminals)');
+
+# === Test: TOTAL_TMAP_SLICES define ===
+like($c_text, qr/#define TOTAL_TMAP_SLICES \d+/,
+    'dfa_tables.c contains #define TOTAL_TMAP_SLICES');
+my ($total_tmap_slices) = $c_text =~ /#define TOTAL_TMAP_SLICES (\d+)/;
+ok(defined $total_tmap_slices && $total_tmap_slices > 0,
+    'TOTAL_TMAP_SLICES is positive');
+
+# === Test: NUM_UNIQUE_TMAP_PATTERNS define ===
+like($c_text, qr/#define NUM_UNIQUE_TMAP_PATTERNS \d+/,
+    'dfa_tables.c contains #define NUM_UNIQUE_TMAP_PATTERNS');
+my ($num_unique_tmap) = $c_text =~ /#define NUM_UNIQUE_TMAP_PATTERNS (\d+)/;
+ok(defined $num_unique_tmap && $num_unique_tmap > 0,
+    'NUM_UNIQUE_TMAP_PATTERNS is positive');
+
+# === Test: tmap_core_ids array present ===
+like($c_text, qr/tmap_core_ids\[/, 'dfa_tables.c contains tmap_core_ids array');
+
+# === Test: tmap_patterns array present ===
+like($c_text, qr/tmap_patterns\[/, 'dfa_tables.c contains tmap_patterns array');
+
+# === Test: TMapSlice typedef present ===
+like($c_text, qr/typedef struct \{[^}]*pattern_idx[^}]*\}\s*TMapSlice/s,
+    'dfa_tables.c contains TMapSlice typedef');
+
+# === Test: tmap_slices array present ===
+like($c_text, qr/tmap_slices\[/, 'dfa_tables.c contains tmap_slices array');
+
+# === Test: tmap_state_offset array present ===
+like($c_text, qr/tmap_state_offset\[/, 'dfa_tables.c contains tmap_state_offset array');
+
+# === Test: tmap_state_count array present ===
+like($c_text, qr/tmap_state_count\[/, 'dfa_tables.c contains tmap_state_count array');
+
+# === Test: tmap_state_offset has NUM_DFA_STATES entries ===
+my ($tmap_so_init) = $c_text =~ /tmap_state_offset\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $tmap_so_init, 'tmap_state_offset initializer is parseable');
+my @tmap_so_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $tmap_so_init);
+is(scalar @tmap_so_vals, $num_dfa_states,
+    'tmap_state_offset has NUM_DFA_STATES entries');
+
+# === Test: tmap_state_count has NUM_DFA_STATES entries ===
+my ($tmap_sc_init) = $c_text =~ /tmap_state_count\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $tmap_sc_init, 'tmap_state_count initializer is parseable');
+my @tmap_sc_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $tmap_sc_init);
+is(scalar @tmap_sc_vals, $num_dfa_states,
+    'tmap_state_count has NUM_DFA_STATES entries');
+
+# === Test: tmap_core_ids has TOTAL_TMAP_ENTRIES entries ===
+my ($tmap_ci_init) = $c_text =~ /tmap_core_ids\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $tmap_ci_init, 'tmap_core_ids initializer is parseable');
+my @tmap_ci_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $tmap_ci_init);
+is(scalar @tmap_ci_vals, $total_tmap_entries,
+    'tmap_core_ids entry count matches TOTAL_TMAP_ENTRIES');
+
+# ============================================================
+# === Completion map arrays ===
+# ============================================================
+
+# === Test: TOTAL_CMAP_ENTRIES define ===
+like($c_text, qr/#define TOTAL_CMAP_ENTRIES \d+/,
+    'dfa_tables.c contains #define TOTAL_CMAP_ENTRIES');
+
+# === Test: TOTAL_CMAP_SLICES define ===
+like($c_text, qr/#define TOTAL_CMAP_SLICES \d+/,
+    'dfa_tables.c contains #define TOTAL_CMAP_SLICES');
+
+# === Test: NUM_UNIQUE_CMAP_NONTERMS define ===
+like($c_text, qr/#define NUM_UNIQUE_CMAP_NONTERMS \d+/,
+    'dfa_tables.c contains #define NUM_UNIQUE_CMAP_NONTERMS');
+
+# === Test: cmap_core_ids array present ===
+like($c_text, qr/cmap_core_ids\[/, 'dfa_tables.c contains cmap_core_ids array');
+
+# === Test: cmap_nonterminals array present ===
+like($c_text, qr/cmap_nonterminals\[/, 'dfa_tables.c contains cmap_nonterminals array');
+
+# === Test: CMapSlice typedef present ===
+like($c_text, qr/typedef struct \{[^}]*nonterm_idx[^}]*\}\s*CMapSlice/s,
+    'dfa_tables.c contains CMapSlice typedef');
+
+# === Test: cmap_slices array present ===
+like($c_text, qr/cmap_slices\[/, 'dfa_tables.c contains cmap_slices array');
+
+# === Test: cmap_state_offset has NUM_DFA_STATES entries ===
+my ($cmap_so_init) = $c_text =~ /cmap_state_offset\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $cmap_so_init, 'cmap_state_offset initializer is parseable');
+my @cmap_so_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $cmap_so_init);
+is(scalar @cmap_so_vals, $num_dfa_states,
+    'cmap_state_offset has NUM_DFA_STATES entries');
+
+# === Test: cmap_state_count has NUM_DFA_STATES entries ===
+my ($cmap_sc_init) = $c_text =~ /cmap_state_count\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $cmap_sc_init, 'cmap_state_count initializer is parseable');
+my @cmap_sc_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $cmap_sc_init);
+is(scalar @cmap_sc_vals, $num_dfa_states,
+    'cmap_state_count has NUM_DFA_STATES entries');
+
+# ============================================================
+# === Goto table arrays ===
+# ============================================================
+
+# === Test: TOTAL_GOTO_ENTRIES define ===
+like($c_text, qr/#define TOTAL_GOTO_ENTRIES \d+/,
+    'dfa_tables.c contains #define TOTAL_GOTO_ENTRIES');
+my ($total_goto_entries) = $c_text =~ /#define TOTAL_GOTO_ENTRIES (\d+)/;
+ok(defined $total_goto_entries && $total_goto_entries > 0,
+    'TOTAL_GOTO_ENTRIES is positive (the test grammar has goto transitions)');
+
+# === Test: GotoEntry typedef present ===
+like($c_text, qr/typedef struct \{[^}]*symbol_key[^}]*target_state[^}]*\}\s*GotoEntry/s,
+    'dfa_tables.c contains GotoEntry typedef');
+
+# === Test: goto_entries array present ===
+like($c_text, qr/goto_entries\[/, 'dfa_tables.c contains goto_entries array');
+
+# === Test: goto_state_offset present ===
+like($c_text, qr/goto_state_offset\[/, 'dfa_tables.c contains goto_state_offset array');
+
+# === Test: goto_state_count present ===
+like($c_text, qr/goto_state_count\[/, 'dfa_tables.c contains goto_state_count array');
+
+# === Test: goto_entries contains at least one entry ===
+my ($goto_entries_init) = $c_text =~ /goto_entries\[\d+\]\s*=\s*\{(.*?)\}\s*;/s;
+ok(defined $goto_entries_init, 'goto_entries initializer is parseable');
+like($goto_entries_init, qr/\{[^}]+\}/,
+    'goto_entries contains at least one entry (braced struct literal)');
+
+# === Test: goto_state_offset has NUM_DFA_STATES entries ===
+my ($goto_so_init) = $c_text =~ /goto_state_offset\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $goto_so_init, 'goto_state_offset initializer is parseable');
+my @goto_so_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $goto_so_init);
+is(scalar @goto_so_vals, $num_dfa_states,
+    'goto_state_offset has NUM_DFA_STATES entries');
+
+# === Test: goto_state_count has NUM_DFA_STATES entries ===
+my ($goto_sc_init) = $c_text =~ /goto_state_count\[\d+\]\s*=\s*\{([^}]*)\}/s;
+ok(defined $goto_sc_init, 'goto_state_count initializer is parseable');
+my @goto_sc_vals = grep { /\S/ } map { s/^\s+|\s+$//gr } split(/,/, $goto_sc_init);
+is(scalar @goto_sc_vals, $num_dfa_states,
+    'goto_state_count has NUM_DFA_STATES entries');
+
+# === Test: goto_entries has TOTAL_GOTO_ENTRIES entries ===
+# Count braced struct literals: { "...", N }
+my @goto_entry_structs = ($goto_entries_init =~ /\{[^}]+\}/g);
+is(scalar @goto_entry_structs, $total_goto_entries,
+    'goto_entries struct count matches TOTAL_GOTO_ENTRIES');
+
+# ============================================================
+# === Determinism: emit twice, outputs must be byte-identical ===
+# ============================================================
+
+# Reset the factory so nodes aren't shared across calls (tests independence)
+Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
+my $factory2 = Chalk::Bootstrap::IR::NodeFactory->instance();
+
+my sub make_sym2(%args) {
+    my $type  = $factory2->make('Constant', const_type => 'enum',   value => $args{type});
+    my $value = $factory2->make('Constant', const_type => 'string', value => $args{value});
+    my $quant = defined($args{quantifier})
+        ? $factory2->make('Constant', const_type => 'string', value => $args{quantifier})
+        : undef;
+    return $factory2->make('Constructor',
+        class      => 'Symbol',
+        type       => $type,
+        value      => $value,
+        quantifier => $quant,
+    );
+}
+
+my sub make_expr2(@symbols) {
+    return $factory2->make('Constructor', class => 'Expression', elements => \@symbols);
+}
+
+my sub make_rule2($name, @expressions) {
+    my $name_node = $factory2->make('Constant', const_type => 'string', value => $name);
+    return $factory2->make('Constructor',
+        class       => 'Rule',
+        name        => $name_node,
+        expressions => \@expressions,
+    );
+}
+
+my $ir2 = [
+    make_rule2('S', make_expr2(make_sym2(type => 'reference', value => 'A'),
+                               make_sym2(type => 'reference', value => 'B'))),
+    make_rule2('A', make_expr2(make_sym2(type => 'terminal',  value => '/a/'))),
+    make_rule2('B', make_expr2(make_sym2(type => 'terminal',  value => '/b/'))),
+];
+
+my $target2 = Chalk::Bootstrap::BNF::Target::C->new();
+my $result2  = $target2->generate($ir2);
+my $c_text2  = $result2->{'dfa_tables.c'};
+
+is($c_text2, $c_text, 'generate() is deterministic: two runs on equivalent IR are byte-identical');
+
 done_testing();
