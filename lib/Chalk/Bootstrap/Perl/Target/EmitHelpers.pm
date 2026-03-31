@@ -17,6 +17,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     field %_class_scope_vars;  # var_name => { sigil, init, static_name } for class-level lexicals
     field %_class_subs;        # sub_name => { params => [...], is_sub => 1 } for class-scope sub declarations
     field $_current_slug = ''; # class-derived identifier prefix for collision avoidance
+    field $_current_sub_name = ''; # name of the sub currently being compiled (for __SUB__ recursion)
     field $_param_fields;      # hashref: field_name => 1 for :param fields (type varies per instance)
     field $_sa;                # stored SemanticAction for emit_from_cfg_state access
     field $_ctx;               # stored Context for emit_from_cfg_state access
@@ -37,6 +38,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _set_field_map($val)       { $field_map = $val; }
     method _get_current_slug()        { return $_current_slug; }
     method _set_current_slug($val)    { $_current_slug = $val; }
+    method _get_current_sub_name()    { return $_current_sub_name; }
+    method _set_current_sub_name($val) { $_current_sub_name = $val; }
     method _get_class_methods()       { return $_class_methods; }
     method _set_class_methods($val)   { $_class_methods = $val; }
     method _delete_class_method($name) { delete $_class_methods->{$name}; }
@@ -1740,6 +1743,27 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         # Coderef call: $f->($arg1, $arg2) — emit call_sv with arguments.
         if ($style eq 'call') {
+            # __SUB__->() recursion: emit direct C call to current static helper.
+            # The Earley parser loses the __SUB__ invocant via stale-value merge,
+            # so target is undef. Detect: undef target + inside a my sub body.
+            my $is_sub_recursion = (!defined $target
+                && length $self->_get_current_sub_name());
+            if ($is_sub_recursion) {
+                my $helper_name = $self->_get_current_slug() . '_' . $self->_get_current_sub_name();
+                my @c_args;
+                if (ref($index) eq 'ARRAY') {
+                    for my $arg ($index->@*) {
+                        push @c_args, $self->_emit_expr($arg, $declared_vars);
+                    }
+                } elsif (defined $index) {
+                    push @c_args, $self->_emit_expr($index, $declared_vars);
+                }
+                my $call_args = @c_args
+                    ? 'aTHX_ ' . join(', ', @c_args)
+                    : 'aTHX';
+                return "$helper_name($call_args)";
+            }
+
             my $tgt = defined $target
                 ? $self->_emit_expr($target, $declared_vars)
                 : 'self';

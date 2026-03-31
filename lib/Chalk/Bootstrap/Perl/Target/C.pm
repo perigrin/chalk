@@ -333,6 +333,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     method _emit_sub($name, $params, $body) {
         my @code;
 
+        # Track current sub name for __SUB__ recursion resolution
+        my $prev_sub_name = $self->_get_current_sub_name();
+        $self->_set_current_sub_name($name);
+
         my $last_item = $body->[-1];
         my $last_is_return = (defined $last_item
             && $last_item isa Chalk::Bootstrap::IR::Node::Constructor
@@ -428,6 +432,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             push @helper, '    return &PL_sv_undef;';
         }
         push @helper, '}';
+
+        # Restore previous sub name
+        $self->_set_current_sub_name($prev_sub_name);
 
         return { helper => \@helper };
     }
