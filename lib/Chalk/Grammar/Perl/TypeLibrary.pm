@@ -41,6 +41,52 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Cache for is_subtype lookups
     my %subtype_cache;
 
+    # Bitfield representation for O(1) subtype checking (design doc Section 3.3).
+    # Each leaf type gets a unique bit. Parent types are the OR of all descendant bits.
+    # IsSubtype(child, parent) = (parent & child) == child.
+    my %TYPE_BITSET;
+    {
+        # Assign a unique bit position to each leaf type.
+        my $bit = 0;
+        my @leaf_types = qw(
+            Undef Bool Regex Int DualVar
+            ScalarRef ArrayRef HashRef CodeRef GlobRef Object
+            Array Hash Code Glob
+        );
+        for my $type (@leaf_types) {
+            $TYPE_BITSET{$type} = 1 << $bit++;
+        }
+
+        # Internal intermediate types get their own bit too, so that
+        # is_subtype(Num, Num) and is_subtype(Str, Str) work via exact match
+        # and subtypes include their ancestor's bit.
+        $TYPE_BITSET{Num} = (1 << $bit++);
+        $TYPE_BITSET{Str} = (1 << $bit++);
+        $TYPE_BITSET{Ref} = (1 << $bit++);
+        $TYPE_BITSET{Scalar} = (1 << $bit++);
+        $TYPE_BITSET{List} = (1 << $bit++);
+
+        # Now propagate: each type's bitset includes its own bit OR all descendant bits.
+        # Walk the hierarchy bottom-up by iterating until stable.
+        for my $child (keys %PARENT) {
+            my $current = $child;
+            while (my $parent = $PARENT{$current}) {
+                $TYPE_BITSET{$parent} //= 0;
+                $TYPE_BITSET{$parent} |= $TYPE_BITSET{$child};
+                $current = $parent;
+            }
+        }
+
+        # Any is the root — OR of all types
+        $TYPE_BITSET{Any} = 0;
+        for my $type (keys %TYPE_BITSET) {
+            $TYPE_BITSET{Any} |= $TYPE_BITSET{$type};
+        }
+
+        # None is the bottom type — 0 (subtype of everything by convention)
+        $TYPE_BITSET{None} = 0;
+    }
+
     # Builtin function signatures: argument types, minimum arity, and return type.
     # Last entry in arg_types applies to all remaining positions (variadic).
     my %BUILTIN_SIGNATURES = (
@@ -131,12 +177,27 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return false;
     }
 
+    # Returns the bitfield for a type name, or undef if unknown.
+    sub type_bitset($type) {
+        return $TYPE_BITSET{$type};
+    }
+
     # Returns true if $child is a subtype of (or equal to) $parent.
-    # Walks the parent chain. None is subtype of everything.
+    # Uses O(1) bitwise AND when both types have bitfields.
+    # Falls back to parent-chain walking for unknown types.
+    # None is subtype of everything.
     sub is_subtype($child, $parent) {
         return true if $child eq $parent;
         return true if $child eq 'None';
 
+        # O(1) bitwise check: (parent_bits & child_bits) == child_bits
+        my $child_bits  = $TYPE_BITSET{$child};
+        my $parent_bits = $TYPE_BITSET{$parent};
+        if (defined $child_bits && defined $parent_bits) {
+            return ($parent_bits & $child_bits) == $child_bits ? true : false;
+        }
+
+        # Fallback for types not in the bitfield (e.g. user-defined)
         my $cache_key = "$child\0$parent";
         return $subtype_cache{$cache_key} if exists $subtype_cache{$cache_key};
 

@@ -16,6 +16,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     field $_field_type_slugs;        # hashref: field_name => C slug, derived from field_types
     field $compiled_class_metadata :param = {};  # hashref: class_name => { slug, readers, methods }
     field $_method_dispatch;  # hashref: method_name => { type => 'reader'|'method', ... }
+    field $_polymorphic_dispatch;  # hashref: method_name => [{ slug, class_name }, ...] for stash-compare chains
+    method _method_dispatch() { return $_method_dispatch; }
+    method _polymorphic_dispatch() { return $_polymorphic_dispatch; }
     method _class_slug_for($class_name) {
         return $self->_class_slug($class_name);
     }
@@ -593,6 +596,54 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # $_semiring_intrinsics, %_multi_class_methods, $_class_registry,
         # %_fallback_method_slugs, $self->_get_param_fields()) are not available in the
         # C target. Fall through to standard call_method dispatch.
+
+        # Polymorphic dispatch: when multiple compiled classes implement this method,
+        # emit a stash-compare chain with direct C calls and a call_method fallback.
+        # Each stash pointer is initialized in init_statics via gv_stashpvn and stored
+        # in a file-scope static for O(1) pointer comparison at each call site.
+        if ($_polymorphic_dispatch && exists $_polymorphic_dispatch->{$method_name}) {
+            my @candidates = $_polymorphic_dispatch->{$method_name}->@*;
+
+            my @call_args  = ($invocant_expr, @arg_exprs);
+            my $args_str   = join(', ', @call_args);
+
+            my @stmts;
+            push @stmts, @pre_eval;
+            push @stmts, "HV *_pd_stash = SvROK($invocant_expr) ? SvSTASH(SvRV($invocant_expr)) : NULL";
+            push @stmts, 'SV *_mcr';
+
+            # Build the if/else-if chain of stash compares with direct C calls.
+            my @branches;
+            for my $cand (@candidates) {
+                my $slug      = $cand->{slug};
+                my $c_func    = "${slug}_${method_name}";
+                push @branches,
+                    "if (_pd_stash == _${slug}_stash) { _mcr = SvREFCNT_inc(${c_func}(aTHX_ ${args_str})); }";
+            }
+
+            # Assemble the call_method fallback as the else branch.
+            my @fallback;
+            push @fallback, 'dSP';
+            push @fallback, 'ENTER; SAVETMPS';
+            push @fallback, 'PUSHMARK(SP)';
+            push @fallback, "XPUSHs($invocant_expr)";
+            for my $expr (@arg_exprs) {
+                push @fallback, "XPUSHs($expr)";
+            }
+            push @fallback, 'PUTBACK';
+            push @fallback, "call_method(\"$escaped_name\", G_SCALAR)";
+            push @fallback, 'SPAGAIN';
+            push @fallback, '_mcr = SvREFCNT_inc(POPs)';
+            push @fallback, 'PUTBACK; FREETMPS; LEAVE';
+            my $fallback_str = join('; ', @fallback);
+
+            # Join branches into an if/else-if/.../else chain.
+            my $chain = join(' else ', @branches) . " else { $fallback_str; }";
+            push @stmts, $chain;
+            push @stmts, '_mcr';
+
+            return '({ ' . join('; ', @stmts) . '; })';
+        }
 
         my @stmts;
         push @stmts, @pre_eval;
@@ -1409,16 +1460,18 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my $readers = $meta->{readers} // {};
                 for my $rdr (sort keys $readers->%*) {
                     push $method_owners{$rdr}->@*, {
-                        type      => 'reader',
-                        slug      => $meta->{slug},
-                        field_idx => $readers->{$rdr},
+                        type       => 'reader',
+                        slug       => $meta->{slug},
+                        field_idx  => $readers->{$rdr},
+                        class_name => $class_name,
                     };
                 }
                 my $methods = $meta->{methods} // {};
                 for my $meth (sort keys $methods->%*) {
                     push $method_owners{$meth}->@*, {
-                        type => 'method',
-                        slug => $meta->{slug},
+                        type       => 'method',
+                        slug       => $meta->{slug},
+                        class_name => $class_name,
                     };
                 }
             }
@@ -1431,6 +1484,27 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
             }
             $_method_dispatch = \%dispatch;
+
+            # Build polymorphic dispatch map: collect ALL classes per method name,
+            # then keep only methods with multiple owners (single-owner methods are
+            # already handled by $_method_dispatch with cheaper direct dispatch).
+            # Exclude methods where any owner is a :reader — readers use
+            # ObjectFIELDS access, not C function calls, so emitting
+            # slug_readername() would produce an undefined symbol at link time.
+            my %poly;
+            for my $mname (sort keys %method_owners) {
+                my @owners = $method_owners{$mname}->@*;
+                # Skip single-owner methods — covered by $_method_dispatch
+                next if scalar @owners == 1;
+                # Skip methods where any owner is a reader (no C function exists)
+                next if grep { $_->{type} eq 'reader' } @owners;
+                $poly{$mname} = [
+                    sort { $a->{slug} cmp $b->{slug} }
+                    map { { slug => $_->{slug}, class_name => $_->{class_name} } }
+                        @owners
+                ];
+            }
+            $_polymorphic_dispatch = \%poly;
         }
 
         if (defined $sa) {
@@ -1513,19 +1587,36 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # Assemble the .c file
         my $class_full = $self->module_name();
+
+        # Build deduplicated map: slug => class_name for all polymorphic-dispatch
+        # candidates. Used for #include directives, static stash declarations,
+        # and init_statics population below.
+        my %poly_slug_to_class;
+        if ($_polymorphic_dispatch && keys $_polymorphic_dispatch->%*) {
+            for my $meth (keys $_polymorphic_dispatch->%*) {
+                for my $cand ($_polymorphic_dispatch->{$meth}->@*) {
+                    $poly_slug_to_class{ $cand->{slug} } = $cand->{class_name};
+                }
+            }
+        }
+
         my @c_lines;
         push @c_lines, "/* ABOUTME: C implementation of $class_full (generated by Target::C). */";
         push @c_lines, "/* ABOUTME: Auto-generated from Perl source — do not edit. */";
         push @c_lines, "#include \"chalk.h\"";
         push @c_lines, "#include \"${slug}.h\"";
         # Include headers for cross-class direct calls when field_types is provided.
+        my %included_slugs = ($slug => 1);  # track all emitted includes to prevent duplicates
         if ($_field_type_slugs && keys $_field_type_slugs->%*) {
-            my %seen_slugs;
             for my $target_slug (sort values $_field_type_slugs->%*) {
-                next if $seen_slugs{$target_slug}++;
-                next if $target_slug eq $slug;  # skip self-include
+                next if $included_slugs{$target_slug}++;
                 push @c_lines, "#include \"${target_slug}.h\"";
             }
+        }
+        # Include headers for polymorphic dispatch chains (cross-class stash compares).
+        for my $poly_slug (sort keys %poly_slug_to_class) {
+            next if $included_slugs{$poly_slug}++;
+            push @c_lines, "#include \"${poly_slug}.h\"";
         }
         push @c_lines, '';
 
@@ -1546,6 +1637,16 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                            : $info->{sigil} eq '@' ? 'AV *'
                            :                         'SV *';
                 push @c_lines, "static ${c_type}$info->{static_name} = NULL;";
+            }
+            push @c_lines, '';
+        }
+
+        # Emit stash pointer statics for polymorphic dispatch chains.
+        # Each compiled class referenced in a poly-dispatch chain needs a cached
+        # HV* stash pointer so _emit_method_call_expr can do a fast pointer compare.
+        if (keys %poly_slug_to_class) {
+            for my $poly_slug (sort keys %poly_slug_to_class) {
+                push @c_lines, "static HV *_${poly_slug}_stash = NULL;";
             }
             push @c_lines, '';
         }
@@ -1615,6 +1716,17 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $cvvar = $reg->{cv_var}; # e.g. "_cv__anon_earley_0"
             push @init_lines,
                 "    $cvvar = (SV*)newXS(\"$pname\", $cname, __FILE__);";
+        }
+        # Populate stash pointer statics for polymorphic dispatch chains.
+        # gv_stashpvn resolves the package stash by full class name; the resulting
+        # HV* is stored in a file-scope static for O(1) pointer comparison at
+        # each polymorphic call site.
+        for my $poly_slug (sort keys %poly_slug_to_class) {
+            my $class_name = $poly_slug_to_class{$poly_slug};
+            my $escaped_class = $self->_escape_c_string($class_name);
+            my $len        = length($class_name);
+            push @init_lines,
+                "    _${poly_slug}_stash = gv_stashpvn(\"${escaped_class}\", ${len}, GV_ADD);";
         }
         push @init_lines, "}";
         push @c_lines, "/* One-time static initializer — called from BOOT */";
@@ -1704,6 +1816,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @lines, 'extern void Perl_class_set_field_defop(pTHX_ PADNAME *pn, U32 flags, OP *defop);';
         push @lines, 'extern void Perl_class_apply_field_attributes(pTHX_ PADNAME *pn, OP *attr);';
         push @lines, 'extern void Perl_class_add_ADJUST(pTHX_ HV *stash, CV *cv);';
+        push @lines, 'extern void Perl_class_apply_attributes(pTHX_ HV *stash, OP *attrlist);';
         push @lines, '';
 
         # Classify exported functions: skip init_statics and _ADJUST from regular XSUBs.
@@ -1832,6 +1945,19 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @lines, '    PL_curstash = stash;';
         push @lines, '    ENTER;';
         push @lines, '    Perl_class_setup_stash(aTHX_ stash);';
+
+        # Register :isa (parent class) if the ClassDecl has a parent
+        if (defined $class_decl) {
+            my $parent_node = $class_decl->inputs()->[1];
+            if (defined $parent_node && $parent_node isa Chalk::Bootstrap::IR::Node::Constant) {
+                my $parent_name = $parent_node->value();
+                my $escaped_parent = $self->_escape_c_string($parent_name);
+                push @lines, "    {";
+                push @lines, "        OP *isa_attr = newSVOP(OP_CONST, 0, newSVpvs(\"isa($escaped_parent)\"));";
+                push @lines, "        Perl_class_apply_attributes(aTHX_ stash, isa_attr);";
+                push @lines, "    }";
+            }
+        }
         push @lines, '';
 
         # Register fields (if the class has any FieldDecl nodes)

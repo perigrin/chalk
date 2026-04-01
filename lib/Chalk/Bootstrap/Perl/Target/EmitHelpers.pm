@@ -1633,10 +1633,19 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($op eq '||' || $op eq 'or')  { return "({ SV *_l = $sv_left; SvTRUE(_l) ? _l : $sv_right; })"; }
         if ($op eq '//')                  { return "({ SV *_l = $sv_left; SvOK(_l) ? _l : $sv_right; })"; }
 
-        # Numeric ops — sv_2mortal prevents leaks when used as sub-expressions
-        if ($op eq '+')  { return "sv_2mortal(newSVnv(SvNV($left) + SvNV($right)))"; }
-        if ($op eq '-')  { return "sv_2mortal(newSVnv(SvNV($left) - SvNV($right)))"; }
-        if ($op eq '*')  { return "sv_2mortal(newSVnv(SvNV($left) * SvNV($right)))"; }
+        # Numeric ops — sv_2mortal prevents leaks when used as sub-expressions.
+        # Type specialization: when operands are known Int (from emitted C
+        # expression patterns), use SvIV/newSViv for integer arithmetic.
+        if ($op eq '+' || $op eq '-' || $op eq '*') {
+            my $l_int = _is_int_expr($left);
+            my $r_int = _is_int_expr($right);
+            if ($l_int && $r_int) {
+                my $l_val = $l_int ? _extract_int_val($left) : "SvIV($left)";
+                my $r_val = $r_int ? _extract_int_val($right) : "SvIV($right)";
+                return "sv_2mortal(newSViv($l_val $op $r_val))";
+            }
+            return "sv_2mortal(newSVnv(SvNV($left) $op SvNV($right)))";
+        }
         if ($op eq '/')  { return "sv_2mortal(newSVnv(SvNV($left) / SvNV($right)))"; }
         if ($op eq '%')  { return "sv_2mortal(newSViv(SvIV($left) % SvIV($right)))"; }
         # Integer bitwise ops — used by Structural semiring for flag manipulation
@@ -2416,6 +2425,25 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         return join("\n\n", @typedefs) . "\n";
+    }
+
+    # Check if a C expression is known to produce an integer value.
+    # Used by _emit_binary_expr for type-directed operator specialization.
+    sub _is_int_expr($expr) {
+        # sv_2mortal(newSViv(...)) — integer wrapped in mortal
+        return true if $expr =~ /^sv_2mortal\(newSViv\(/;
+        return false;
+    }
+
+    # Extract the integer value from a known-integer C expression.
+    # Returns a C expression suitable for use in arithmetic.
+    sub _extract_int_val($expr) {
+        # sv_2mortal(newSViv(N)) → N (parenthesized to preserve C precedence)
+        if ($expr =~ /^sv_2mortal\(newSViv\((.+)\)\)$/) {
+            return "($1)";
+        }
+        # newSViv(N) inside other wrappers → SvIV(expr)
+        return "SvIV($expr)";
     }
 
 }
