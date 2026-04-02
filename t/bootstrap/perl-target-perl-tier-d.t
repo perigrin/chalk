@@ -117,7 +117,6 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Grammar::Rule',
     test_ns     => 'Chalk::Grammar::RuleGenD',
-    todo_eval   => 'Grammar fragmentation: unless $symbol in for-loop body',
     behavioral  => sub ($mod) {
         use Chalk::Grammar::Symbol;
         my $sym1 = Chalk::Grammar::Symbol->new(type => 'reference', value => 'Foo');
@@ -136,10 +135,16 @@ test_perl_file(
     label       => 'Terminal.pm',
     structural  => [
         { pattern => qr/Terminal/, label => 'contains Terminal class' },
+        { pattern => qr/sub match/, label => 'has sub match declaration' },
     ],
     original_ns => 'Chalk::Bootstrap::Terminal',
     test_ns     => 'Chalk::Bootstrap::TerminalGenD',
-    todo_eval   => 'sub inside class emits as string literal, not function definition',
+    behavioral  => sub ($mod) {
+        my $end = $mod->match("hello123world", 5, '\d+');
+        is($end, 8, 'match returns correct end position');
+        my $no = $mod->match("hello", 0, '\d+');
+        is($no, undef, 'match returns undef on no match');
+    },
 );
 
 test_perl_file(
@@ -418,7 +423,6 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNode',
     test_ns     => 'Chalk::Bootstrap::BNF::Target::XS::AST::CompositeNodeGenD',
-    todo_eval   => 'CompositeNode.pm depends on AST::Node parent class',
     behavioral  => sub ($mod) {
         my $node = $mod->new(children => []);
         ok(defined $node, 'CompositeNode can be constructed');
