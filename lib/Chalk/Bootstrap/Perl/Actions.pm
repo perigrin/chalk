@@ -588,12 +588,15 @@ class Chalk::Bootstrap::Perl::Actions {
     # or SubscriptExpr(ReturnStmt($h), $k, hash) when the statement keyword gets
     # absorbed as the left operand.  Restructure so the statement wraps the
     # expression: ReturnStmt(BinaryExpr(==, $x, 1)).
-    my sub _unwrap_stmt_from_expr($factory, $node) {
+    my $_unwrap_stmt_from_expr;
+    $_unwrap_stmt_from_expr = sub ($factory, $node) {
         return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
         my $class = $node->class();
 
         if ($class eq 'BinaryExpr') {
-            my $left = $node->inputs()->[1];
+            # Recurse into left child first to handle nested cases like
+            # BinaryExpr(|, BinaryExpr(&, ReturnStmt(X), Y), Z)
+            my $left = $_unwrap_stmt_from_expr->($factory, $node->inputs()->[1]);
             if ($left isa Chalk::Bootstrap::IR::Node::Constructor
                     && ($left->class() eq 'ReturnStmt' || $left->class() eq 'DieCall')) {
                 my $inner_val = $left->inputs()->[0];
@@ -609,6 +612,15 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 return $factory->make('Constructor',
                     'class' => 'DieCall', args => [$new_expr]);
+            }
+            # Left was recursively fixed but isn't a stmt — rebuild if changed
+            if (refaddr($left) != refaddr($node->inputs()->[1])) {
+                return $factory->make('Constructor',
+                    'class' => 'BinaryExpr',
+                    op      => $node->inputs()->[0],
+                    left    => $left,
+                    right   => $node->inputs()->[2],
+                );
             }
         }
 
@@ -651,6 +663,26 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
+        if ($class eq 'TernaryExpr') {
+            my $cond = $node->inputs()->[0];
+            if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($cond->class() eq 'ReturnStmt' || $cond->class() eq 'DieCall')) {
+                my $inner_val = $cond->inputs()->[0];
+                my $new_expr = $factory->make('Constructor',
+                    'class'      => 'TernaryExpr',
+                    condition  => $inner_val,
+                    true_expr  => $node->inputs()->[1],
+                    false_expr => $node->inputs()->[2],
+                );
+                if ($cond->class() eq 'ReturnStmt') {
+                    return $factory->make('Constructor',
+                        'class' => 'ReturnStmt', value => $new_expr);
+                }
+                return $factory->make('Constructor',
+                    'class' => 'DieCall', args => [$new_expr]);
+            }
+        }
+
         if ($class eq 'MethodCallExpr') {
             my $invocant = $node->inputs()->[0];
             if ($invocant isa Chalk::Bootstrap::IR::Node::Constructor
@@ -672,7 +704,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $node;
-    }
+    };
 
     # Post-process statement list to fix grammar ambiguity artifacts.
     # The ambiguous grammar sometimes parses compound statements as
@@ -858,7 +890,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     args  => [$arg],
                 );
             } else {
-                push @result, _unwrap_stmt_from_expr($factory, $item);
+                push @result, $_unwrap_stmt_from_expr->($factory, $item);
             }
             $i++;
         }
