@@ -71,6 +71,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                              && ($ir_node->class() eq 'Program'
                                  || $ir_node->class() eq 'ClassDecl'
                                  || $ir_node->class() eq 'MethodDecl'
+                                 || $ir_node->class() eq 'SubDecl'
                                  || $ir_node->class() eq 'UseDecl'
                                  || $ir_node->class() eq 'FieldDecl'))) {
                     $_cfg_lookup{refaddr($ir_node)} = $state;
