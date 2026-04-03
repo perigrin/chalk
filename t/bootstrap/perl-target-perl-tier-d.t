@@ -140,10 +140,15 @@ test_perl_file(
     original_ns => 'Chalk::Bootstrap::Terminal',
     test_ns     => 'Chalk::Bootstrap::TerminalGenD',
     behavioral  => sub ($mod) {
-        my $end = $mod->match("hello123world", 5, '\d+');
-        is($end, 8, 'match returns correct end position');
-        my $no = $mod->match("hello", 0, '\d+');
-        is($no, undef, 'match returns undef on no match');
+        # match is a sub (not method), call as package function
+        my $match = $mod->can('match');
+        ok(defined $match, 'match function exists');
+        if ($match) {
+            my $end = $match->("hello123world", 5, '\d+');
+            is($end, 8, 'match returns correct end position');
+            my $no = $match->("hello", 0, '\d+');
+            is($no, undef, 'match returns undef on no match');
+        }
     },
 );
 
