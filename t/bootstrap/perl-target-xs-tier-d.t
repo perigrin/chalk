@@ -147,7 +147,9 @@ test_file(
     file       => 'lib/Chalk/Bootstrap/Terminal.pm',
     label      => 'Terminal.pm',
     module     => 'Chalk::Bootstrap::XS::TierD::Terminal',
-    skip_build => 'Terminal: XS emitter build failure',
+    structural => [
+        { pattern => qr/match/, label => 'has match function' },
+    ],
 );
 
 test_file(
