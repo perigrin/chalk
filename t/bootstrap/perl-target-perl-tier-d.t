@@ -179,8 +179,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::IR::NodeFactory',
     test_ns     => 'Chalk::Bootstrap::IR::NodeFactoryGenD',
-    todo_parse  => 'IR::NodeFactory.pm parse fails (Unknown Constructor class: SubDecl)',
-    todo_eval   => 'NodeFactory.pm depends on IR::Node classes',
+    todo_eval   => 'NodeFactory.pm: delete argument codegen issue',
     behavioral  => sub ($mod) {
         my $factory = $mod->new();
         ok(defined $factory, 'NodeFactory can be constructed');
@@ -213,7 +212,6 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::Optimizer',
     test_ns     => 'Chalk::Bootstrap::OptimizerGenD',
-    todo_eval   => 'Grammar fragmentation: field() default syntax',
     behavioral  => sub ($mod) {
         my $opt = $mod->new();
         is($opt->pass_count(), 0, 'new optimizer has 0 passes');
@@ -301,8 +299,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::Semiring::SemanticAction',
     test_ns     => 'Chalk::Bootstrap::Semiring::SemanticActionGenD',
-    todo_parse  => 'Semiring::SemanticAction.pm parse fails (Unknown Constructor class: SubDecl)',
-    todo_eval   => 'Grammar fragmentation: complex sub/coderef patterns',
+    todo_eval   => 'exists argument codegen: not emitting HASH element',
     behavioral  => sub ($mod) {
         my $sa = $mod->new(actions => {}, ir_factory => undef);
         ok(!defined $sa->zero(), 'zero is undef');
@@ -323,8 +320,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::Semiring::TypeInference',
     test_ns     => 'Chalk::Bootstrap::Semiring::TypeInferenceGenD',
-    todo_parse  => 'Semiring::TypeInference.pm parse fails (Unknown Constructor class: SubDecl)',
-    todo_eval   => 'Grammar fragmentation: complex coderef/tree-walker patterns',
+    todo_eval   => 'codegen: complex coderef/tree-walker patterns',
     behavioral  => sub ($mod) {
         my $ti = $mod->new(
             keyword_check  => sub ($w) { false },
@@ -344,8 +340,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::Semiring::TypeInferenceActions',
     test_ns     => 'Chalk::Bootstrap::Semiring::TypeInferenceActionsGenD',
-    todo_parse  => 'Semiring::TypeInferenceActions.pm parse fails (Unknown Constructor class: SubDecl)',
-    todo_eval   => 'Grammar fragmentation: complex method dispatch patterns',
+    todo_eval   => 'codegen: complex method dispatch patterns',
     behavioral  => sub ($mod) {
         my $actions = $mod->new();
         ok(defined $actions, 'TypeInferenceActions can be constructed');
@@ -384,8 +379,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Grammar::Perl::KeywordTable',
     test_ns     => 'Chalk::Grammar::Perl::KeywordTableGenD',
-    todo_parse  => 'KeywordTable.pm parse fails (Unknown Constructor class: SubDecl)',
-    todo_eval   => 'sub inside class emits as string literal',
+    todo_eval   => 'codegen: hash variable subscript emits spurious semicolon',
 );
 
 test_perl_file(
@@ -396,8 +390,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Grammar::Perl::PrecedenceTable',
     test_ns     => 'Chalk::Grammar::Perl::PrecedenceTableGenD',
-    todo_parse  => 'PrecedenceTable.pm parse fails (Unknown Constructor class: SubDecl)',
-    todo_eval   => 'sub inside class emits as string literal',
+    todo_eval   => 'codegen: hash variable subscript emits spurious semicolon',
 );
 
 test_perl_file(
@@ -411,8 +404,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Grammar::Perl::TypeLibrary',
     test_ns     => 'Chalk::Grammar::Perl::TypeLibraryGenD',
-    todo_parse  => 'TypeLibrary.pm parse fails (Unknown Constructor class: SubDecl)',
-    todo_eval   => 'my sub declarations emit as string literals, not function definitions',
+    todo_eval   => 'codegen: my sub declarations emit incorrectly',
 );
 
 # ============================================================
@@ -547,7 +539,7 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::ConciseTree::Actions',
     test_ns     => 'Chalk::Bootstrap::ConciseTree::ActionsGenD',
-    todo_parse  => 'ConciseTree::Actions.pm parse fails (Unknown Constructor class: SubDecl)',
+    todo_parse  => 'ConciseTree::Actions.pm parse fails at line 82 (#681)',
     todo_eval   => 'Actions depends on ConciseOp/ConciseTree and uses complex patterns',
     behavioral  => sub ($mod) {
         my $actions = $mod->new();
@@ -583,7 +575,6 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Grammar::BNF',
     test_ns     => 'Chalk::Grammar::BNFGenD',
-    todo_parse  => 'Grammar::BNF.pm parse fails (Unknown Constructor class: SubDecl)',
     todo_eval   => 'BNF depends on Rule/Symbol classes',
     behavioral  => sub ($mod) {
         my $bnf = $mod->new();
@@ -600,7 +591,6 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Grammar::BNF::Generated',
     test_ns     => 'Chalk::Grammar::BNF::GeneratedGenD',
-    todo_parse  => 'Grammar::BNF::Generated.pm parse fails (Unknown Constructor class: SubDecl)',
     todo_eval   => 'Generated.pm depends on Symbol/Rule/BNF classes',
 );
 
@@ -612,7 +602,6 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Grammar::BNF::Actions',
     test_ns     => 'Chalk::Grammar::BNF::ActionsGenD',
-    todo_parse  => 'Grammar::BNF::Actions.pm parse fails (Unknown Constructor class: SubDecl)',
     todo_eval   => 'BNF::Actions depends on Symbol/Rule constructors',
     behavioral  => sub ($mod) {
         my $actions = $mod->new();
