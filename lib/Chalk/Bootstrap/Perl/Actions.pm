@@ -583,6 +583,97 @@ class Chalk::Bootstrap::Perl::Actions {
         return $node;
     };
 
+    # Unwrap ReturnStmt/DieCall trapped inside expression nodes by stale-value
+    # merge.  Earley's add() can produce IR like BinaryExpr(==, ReturnStmt($x), 1)
+    # or SubscriptExpr(ReturnStmt($h), $k, hash) when the statement keyword gets
+    # absorbed as the left operand.  Restructure so the statement wraps the
+    # expression: ReturnStmt(BinaryExpr(==, $x, 1)).
+    my sub _unwrap_stmt_from_expr($factory, $node) {
+        return $node unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        my $class = $node->class();
+
+        if ($class eq 'BinaryExpr') {
+            my $left = $node->inputs()->[1];
+            if ($left isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($left->class() eq 'ReturnStmt' || $left->class() eq 'DieCall')) {
+                my $inner_val = $left->inputs()->[0];
+                my $new_expr = $factory->make('Constructor',
+                    'class' => 'BinaryExpr',
+                    op      => $node->inputs()->[0],
+                    left    => $inner_val,
+                    right   => $node->inputs()->[2],
+                );
+                if ($left->class() eq 'ReturnStmt') {
+                    return $factory->make('Constructor',
+                        'class' => 'ReturnStmt', value => $new_expr);
+                }
+                return $factory->make('Constructor',
+                    'class' => 'DieCall', args => [$new_expr]);
+            }
+        }
+
+        if ($class eq 'SubscriptExpr') {
+            my $base = $node->inputs()->[0];
+            if ($base isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($base->class() eq 'ReturnStmt' || $base->class() eq 'DieCall')) {
+                my $inner_val = $base->inputs()->[0];
+                my $new_expr = $factory->make('Constructor',
+                    'class' => 'SubscriptExpr',
+                    target  => $inner_val,
+                    index   => $node->inputs()->[1],
+                    style   => $node->inputs()->[2],
+                );
+                if ($base->class() eq 'ReturnStmt') {
+                    return $factory->make('Constructor',
+                        'class' => 'ReturnStmt', value => $new_expr);
+                }
+                return $factory->make('Constructor',
+                    'class' => 'DieCall', args => [$new_expr]);
+            }
+        }
+
+        if ($class eq 'PostfixDerefExpr') {
+            my $base = $node->inputs()->[0];
+            if ($base isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($base->class() eq 'ReturnStmt' || $base->class() eq 'DieCall')) {
+                my $inner_val = $base->inputs()->[0];
+                my $new_expr = $factory->make('Constructor',
+                    'class' => 'PostfixDerefExpr',
+                    target  => $inner_val,
+                    sigil   => $node->inputs()->[1],
+                );
+                if ($base->class() eq 'ReturnStmt') {
+                    return $factory->make('Constructor',
+                        'class' => 'ReturnStmt', value => $new_expr);
+                }
+                return $factory->make('Constructor',
+                    'class' => 'DieCall', args => [$new_expr]);
+            }
+        }
+
+        if ($class eq 'MethodCallExpr') {
+            my $invocant = $node->inputs()->[0];
+            if ($invocant isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($invocant->class() eq 'ReturnStmt' || $invocant->class() eq 'DieCall')) {
+                my $inner_val = $invocant->inputs()->[0];
+                my $new_expr = $factory->make('Constructor',
+                    'class'     => 'MethodCallExpr',
+                    invocant    => $inner_val,
+                    method_name => $node->inputs()->[1],
+                    args        => $node->inputs()->[2],
+                );
+                if ($invocant->class() eq 'ReturnStmt') {
+                    return $factory->make('Constructor',
+                        'class' => 'ReturnStmt', value => $new_expr);
+                }
+                return $factory->make('Constructor',
+                    'class' => 'DieCall', args => [$new_expr]);
+            }
+        }
+
+        return $node;
+    }
+
     # Post-process statement list to fix grammar ambiguity artifacts.
     # The ambiguous grammar sometimes parses compound statements as
     # separate items. These fixups merge them back together:
@@ -767,7 +858,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     args  => [$arg],
                 );
             } else {
-                push @result, $item;
+                push @result, _unwrap_stmt_from_expr($factory, $item);
             }
             $i++;
         }
