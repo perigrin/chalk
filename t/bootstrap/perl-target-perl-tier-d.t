@@ -495,7 +495,6 @@ test_perl_file(
     ],
     original_ns => 'Chalk::Bootstrap::BNF::Target::Perl',
     test_ns     => 'Chalk::Bootstrap::BNF::Target::PerlGenD',
-    todo_eval   => 'Target::Perl depends on IR node types',
     behavioral  => sub ($mod) {
         my $target = $mod->new();
         ok(defined $target, 'Target::Perl can be constructed');
