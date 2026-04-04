@@ -22,17 +22,27 @@ Replace Constructor's type-case dispatch with typed node subclasses under
 `Chalk::IR::Node::*`. Separate program structure metadata from executable
 computation graphs, following Cliff Click's Sea of Nodes architecture.
 
-## Architecture: Two-Tier IR
+## Architecture: Metadata + Per-Method SoN Graphs
 
 Click's SoN represents executable computation within a single method. Class
 declarations, field layouts, and module structure live outside the graph in
 metadata. Every production SoN compiler (C2, Graal, TurboFan) follows this
-separation. Chalk adopts it.
+separation. Graal receives bytecode with class/method structure already
+resolved by the JVM class loader; perl5-son's FromOptree receives one CV at
+a time with stash/pad structure already resolved by `perl -c`. In both
+cases, structural metadata exists before the SoN graph is built.
 
-### Tier 1: Program Metadata
+Chalk's parser already does this work. Semantic actions for ClassDecl,
+MethodDecl, and FieldDecl accumulate structural context during parsing.
+When a MethodDecl completes, the full method body is available. The
+semantic actions produce metadata structs (ClassInfo, MethodInfo) directly,
+with a per-method `Chalk::IR::Graph` inside each one. No structural IR
+nodes exist at any point.
 
-Plain data containers describing program organization. No `operation()`,
-no `content_hash()`, no hash consing.
+### Program Metadata (not IR nodes)
+
+Plain data containers produced directly by semantic actions. No
+`operation()`, no `content_hash()`, no hash consing.
 
 ```
 Chalk::IR::Program
@@ -50,10 +60,10 @@ Chalk::IR::Program
   top_level_subs: [Chalk::IR::SubInfo]
 ```
 
-**Migrated from Constructor:** Program, ClassDecl, MethodDecl, SubDecl,
-FieldDecl, UseDecl. These were never computation nodes.
+**Eliminated Constructor classes:** Program, ClassDecl, MethodDecl, SubDecl,
+FieldDecl, UseDecl. These become metadata structs, not IR nodes.
 
-### Tier 2: SoN Computation Graphs
+### SoN Computation Graphs
 
 Each method/sub body becomes its own `Chalk::IR::Graph` (one Start node,
 one or more Return/Unwind terminators).
@@ -248,16 +258,21 @@ The singleton goes away when all callers switch to the new API.
 
 **Phase 1: Scaffold new types.**
 Create `Chalk::IR::Node` base class and all typed subclasses. Create
-`Chalk::IR::Graph`. Create metadata types (Program, ClassInfo, MethodInfo,
-FieldInfo, SubInfo). Add corresponding types to perl5-son.
+`Chalk::IR::Graph`. Create metadata structs (Program, ClassInfo,
+MethodInfo, FieldInfo, SubInfo) as plain `feature class` data containers.
+Add corresponding node types to perl5-son.
 
 **Phase 2: Factory shim.**
 Rewrite NodeFactory to accept both old-style and new-style creation. Map
 old Constructor classes to new types internally.
 
-**Phase 3: Actions.pm creation sites.**
-Migrate 87 `make('Constructor', ...)` calls in Actions.pm to new-style
-API. Split method body IR creation from structural metadata extraction.
+**Phase 3: Actions.pm — emit metadata directly.**
+Migrate 87 `make('Constructor', ...)` calls in Actions.pm. Structural
+rules (Program, ClassDecl, MethodDecl, FieldDecl, SubDecl, UseDecl)
+produce metadata structs instead of Constructor nodes. Method/sub body
+rules produce `Chalk::IR::Graph` instances containing typed computation
+nodes. The semantic actions already accumulate structural context during
+parsing; this phase changes where that context lands.
 
 **Phase 4: Consumer migration (file-by-file).**
 Replace `->class() eq 'X'` with `isa Chalk::IR::Node::X`. Order by
