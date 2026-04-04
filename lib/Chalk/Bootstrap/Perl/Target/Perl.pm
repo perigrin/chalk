@@ -314,7 +314,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $body   = $node->inputs()->[2];
 
         my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
-        return $self->_emit_body_block("method $name$sig {", $body);
+        # Scope aggregate vars: params shadow class-scope aggregate names
+        my %saved = %_aggregate_vars;
+        $self->_scope_body_vars($params, $body);
+        my $result = $self->_emit_body_block("method $name$sig {", $body);
+        %_aggregate_vars = %saved;
+        return $result;
     }
 
     # SubDecl inputs: [name, params, body, scope]
@@ -327,7 +332,36 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
         my $prefix = $scope eq 'package' ? 'sub' : "$scope sub";
-        return $self->_emit_body_block("$prefix $name$sig {", $body);
+        # Scope aggregate vars: params shadow class-scope aggregate names
+        my %saved = %_aggregate_vars;
+        $self->_scope_body_vars($params, $body);
+        my $result = $self->_emit_body_block("$prefix $name$sig {", $body);
+        %_aggregate_vars = %saved;
+        return $result;
+    }
+
+    # Adjust %_aggregate_vars for a method/sub body scope.
+    # Remove param names (params are always scalars) and add body-local
+    # VarDecl aggregate names.
+    method _scope_body_vars($params, $body) {
+        # Params shadow: $reachable param means $reachable is a scalar here
+        for my $p ($params->@*) {
+            my $pname = $p->value();
+            if ($pname =~ /^\$(.+)/) {
+                delete $_aggregate_vars{$1};
+            }
+        }
+        # Add body-local aggregate VarDecls
+        for my $item ($body->@*) {
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            next unless $item->class() eq 'VarDecl';
+            my $var = $item->inputs()->[0];
+            next unless defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant;
+            my $vname = $var->value();
+            if (defined $vname && $vname =~ /^([\@\%])(.+)/) {
+                $_aggregate_vars{$2} = $1;
+            }
+        }
     }
 
     method _emit_body_block($decl_line, $body) {
