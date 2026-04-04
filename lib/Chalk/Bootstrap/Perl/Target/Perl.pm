@@ -14,6 +14,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Struct schemas for StructRef/FieldAccess lowering (schema_name → { fields => [...] })
     field $_struct_schemas = {};
 
+    # Set of variable base names declared with aggregate sigils (% or @).
+    # Used by _emit_subscript_expr to emit $hash{key} instead of $hash->{key}
+    # when the variable was declared as %hash.  Keys are bare names (no sigil).
+    field %_aggregate_vars;
+
     # Set struct schemas for StructRef/FieldAccess lowering.
     method set_struct_schemas($schemas) {
         $_struct_schemas = $schemas;
@@ -43,9 +48,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             && $ir->class() eq 'Program';
 
         %_cfg_lookup = ();
+        %_aggregate_vars = ();
         $self->_build_cfg_lookup($sa, $ctx);
+        $self->_scan_aggregate_vars($ir);
         my $code = $self->_emit_program($ir);
         %_cfg_lookup = ();
+        %_aggregate_vars = ();
         return $code;
     }
 
@@ -80,6 +88,45 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             push @stack, reverse $node->children()->@*;
         }
         return;
+    }
+
+    # Scan IR tree for VarDecl nodes with aggregate sigils (% or @).
+    # Populates %_aggregate_vars so _emit_subscript_expr can emit
+    # $hash{key} instead of $hash->{key} for hash variables.
+    method _scan_aggregate_vars($ir) {
+        my @stack = ($ir);
+        while (@stack) {
+            my $node = pop @stack;
+            next unless defined $node && ref($node);
+            if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+                if ($node->class() eq 'VarDecl') {
+                    my $var = $node->inputs()->[0];
+                    if (defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant) {
+                        my $name = $var->value();
+                        if (defined $name && $name =~ /^([\@\%])(.+)/) {
+                            $_aggregate_vars{$2} = $1;
+                        }
+                    }
+                }
+                # Also check FieldDecl for class-scope fields
+                if ($node->class() eq 'FieldDecl') {
+                    my $var = $node->inputs()->[0];
+                    if (defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant) {
+                        my $name = $var->value();
+                        if (defined $name && $name =~ /^([\@\%])(.+)/) {
+                            $_aggregate_vars{$2} = $1;
+                        }
+                    }
+                }
+                for my $input ($node->inputs()->@*) {
+                    if (ref($input) eq 'ARRAY') {
+                        push @stack, @$input;
+                    } elsif (ref($input)) {
+                        push @stack, $input;
+                    }
+                }
+            }
+        }
     }
 
     method generate_distribution($ir) {
@@ -472,12 +519,66 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return "$inv->$method_name(" . join(', ', @arg_strs) . ")";
     }
 
+    # Prefix builtins that take a single argument and should absorb subscripts:
+    # exists $hash{key}, delete $arr[0], defined $h{k}, etc.
+    my %SUBSCRIPT_ABSORBING_BUILTINS = map { $_ => 1 }
+        qw(exists delete defined scalar ref);
+
     method _emit_subscript_expr($node) {
         my $target = $node->inputs()->[0];
         my $index  = $node->inputs()->[1];
         my $style  = $node->inputs()->[2]->value();
 
+        # Fix stale-value merge: SubscriptExpr(BuiltinCall(exists, [$var]), $key)
+        # should emit as exists($var->{$key}), not exists($var)->{$key}.
+        # Push the subscript inside the builtin argument.
+        if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor
+                && $target->class() eq 'BuiltinCall') {
+            my $bname = $target->inputs()->[0]->value();
+            if ($SUBSCRIPT_ABSORBING_BUILTINS{$bname}) {
+                my @args = $target->inputs()->[1]->@*;
+                my $inner = $args[-1];
+                my $inner_expr = $self->_emit_expr($inner);
+                my $sub_expr = $self->_format_subscript($inner_expr, $index, $style);
+                my @other_args = map { $self->_emit_expr($_) } @args[0 .. $#args - 1];
+                return "$bname(" . join(', ', @other_args, $sub_expr) . ")";
+            }
+        }
+
+        # Fix stale-value merge: SubscriptExpr(UnaryExpr(!, BuiltinCall(exists, ...)), $key)
+        # Push the subscript past the unary op into the builtin argument.
+        if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor
+                && $target->class() eq 'UnaryExpr') {
+            my $op = $target->inputs()->[0]->value();
+            my $operand = $target->inputs()->[1];
+            if ($operand isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $operand->class() eq 'BuiltinCall') {
+                my $bname = $operand->inputs()->[0]->value();
+                if ($SUBSCRIPT_ABSORBING_BUILTINS{$bname}) {
+                    my @args = $operand->inputs()->[1]->@*;
+                    my $inner = $args[-1];
+                    my $inner_expr = $self->_emit_expr($inner);
+                    my $sub_expr = $self->_format_subscript($inner_expr, $index, $style);
+                    my @other_args = map { $self->_emit_expr($_) } @args[0 .. $#args - 1];
+                    return "$op$bname(" . join(', ', @other_args, $sub_expr) . ")";
+                }
+            }
+        }
+
         my $tgt = defined $target ? $self->_emit_expr($target) : '$self';
+
+        # Direct hash/array element: if the target is a $ variable whose name
+        # was declared with % or @ sigil, emit direct subscript (no arrow).
+        # $hash{key} for %hash, $arr[idx] for @array.
+        if ($tgt =~ /^\$(.+)/ && %_aggregate_vars && exists $_aggregate_vars{$1}) {
+            if ($style eq 'array') {
+                return "$tgt\[" . $self->_emit_expr($index) . "]";
+            }
+            if ($style ne 'call') {
+                return "$tgt\{" . $self->_emit_expr($index) . "}";
+            }
+        }
+
         if ($style eq 'array') {
             return "$tgt\->[" . $self->_emit_expr($index) . "]";
         }
@@ -492,6 +593,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return "$tgt\->(" . join(', ', @args) . ")";
         }
         return "$tgt\->{" . $self->_emit_expr($index) . "}";
+    }
+
+    # Format a subscript access, using direct syntax for aggregate vars.
+    method _format_subscript($tgt_expr, $index_node, $style) {
+        my $idx = $self->_emit_expr($index_node);
+        my $is_aggregate = ($tgt_expr =~ /^\$(.+)/ && %_aggregate_vars
+                            && exists $_aggregate_vars{$1});
+        if ($style eq 'array') {
+            return $is_aggregate ? "${tgt_expr}[$idx]" : "${tgt_expr}->[$idx]";
+        }
+        return $is_aggregate ? "${tgt_expr}\{$idx}" : "${tgt_expr}->{$idx}";
     }
 
     method _emit_postfix_deref_expr($node) {

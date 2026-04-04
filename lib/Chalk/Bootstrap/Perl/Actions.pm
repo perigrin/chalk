@@ -541,10 +541,12 @@ class Chalk::Bootstrap::Perl::Actions {
         # Otherwise, recurse into children
         my $class = $node->class();
         if ($class eq 'BinaryExpr') {
-            my $left  = $_fix_postfix_chain_deep->($f, $node->inputs()->[1]);
-            my $right = $_fix_postfix_chain_deep->($f, $node->inputs()->[2]);
-            if (refaddr($left) != refaddr($node->inputs()->[1])
-                || refaddr($right) != refaddr($node->inputs()->[2])) {
+            my $orig_left  = $node->inputs()->[1];
+            my $orig_right = $node->inputs()->[2];
+            my $left  = $_fix_postfix_chain_deep->($f, $orig_left);
+            my $right = $_fix_postfix_chain_deep->($f, $orig_right);
+            if ((defined $left && defined $orig_left && refaddr($left) != refaddr($orig_left))
+                || (defined $right && defined $orig_right && refaddr($right) != refaddr($orig_right))) {
                 return $f->make('Constructor',
                     'class' => 'BinaryExpr',
                     op    => $node->inputs()->[0],
@@ -1298,11 +1300,17 @@ class Chalk::Bootstrap::Perl::Actions {
             $return_type = 'Void';
         }
 
+        # Fix stale-value merge artifacts in method body (return/die inside
+        # expression wrappers, prefix builtin subscript chains, etc.)
+        # Use _deep variant to reach nested expressions (e.g., if-conditions).
+        @body = map { $_fix_postfix_chain_deep->($factory, $_) } @body;
+        my $fixed_body = _fixup_stmts($factory, \@body);
+
         return $factory->make('Constructor',
             'class'       => 'MethodDecl',
             name          => $method_name,
             params        => \@params,
-            body          => \@body,
+            body          => $fixed_body,
             return_type   => $factory->make('Constant',
                                 const_type => 'string', value => $return_type),
         );
@@ -1391,11 +1399,15 @@ class Chalk::Bootstrap::Perl::Actions {
         # If we couldn't find the sub name, skip this node
         return unless defined $sub_name;
 
+        # Fix stale-value merge artifacts in sub body
+        @body = map { $_fix_postfix_chain_deep->($factory, $_) } @body;
+        my $fixed_body = _fixup_stmts($factory, \@body);
+
         return $factory->make('Constructor',
             'class'  => 'SubDecl',
             name     => $sub_name,
             params   => \@params,
-            body     => \@body,
+            body     => $fixed_body,
             scope    => $factory->make('Constant',
                             const_type => 'string', value => $scope),
         );
