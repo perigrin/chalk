@@ -822,11 +822,27 @@ class Chalk::Bootstrap::Perl::Actions {
                     && $i + 1 <= $#$stmts
                     && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node) {
                 # Merge bare VarDecl(var, undef) + following expression → VarDecl(var, expr)
+                # Only merge when the next item is actually an initializer, not a
+                # separate statement. Block merge for known statement-starting patterns.
                 my $next = $stmts->[$i + 1];
-                if (!(($next isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $STMT_BOUNDARY_CLASSES{$next->class()})
-                    || ($next isa Chalk::Bootstrap::IR::Node
-                        && $STMT_BOUNDARY_OPS{$next->operation() // ''}))) {
+                my $is_boundary = false;
+                # Statement-level Constructor classes (ReturnStmt, ClassDecl, etc.)
+                $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $STMT_BOUNDARY_CLASSES{$next->class()};
+                # CFG control flow nodes
+                $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node
+                    && $STMT_BOUNDARY_OPS{$next->operation() // ''};
+                # Bare keyword Constants (push, return, die, for, etc.)
+                $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $next->value()
+                    && ($STOP_KEYWORDS{$next->value()}
+                        || $LIST_BUILTINS{$next->value()}
+                        || $PREFIX_BUILTINS{$next->value()});
+                # MethodCallExpr and BuiltinCall are always separate statements
+                $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
+                    && ($next->class() eq 'MethodCallExpr'
+                        || $next->class() eq 'BuiltinCall');
+                if (!$is_boundary) {
                     $i++;
                     push @result, $factory->make('Constructor',
                         'class'       => 'VarDecl',
