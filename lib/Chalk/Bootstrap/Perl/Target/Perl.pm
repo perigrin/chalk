@@ -472,10 +472,55 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return "$inv->$method_name(" . join(', ', @arg_strs) . ")";
     }
 
+    # Prefix builtins that take a single argument and should absorb subscripts:
+    # exists $hash{key}, delete $arr[0], defined $h{k}, etc.
+    my %SUBSCRIPT_ABSORBING_BUILTINS = map { $_ => 1 }
+        qw(exists delete defined scalar ref);
+
     method _emit_subscript_expr($node) {
         my $target = $node->inputs()->[0];
         my $index  = $node->inputs()->[1];
         my $style  = $node->inputs()->[2]->value();
+
+        # Fix stale-value merge: SubscriptExpr(BuiltinCall(exists, [$var]), $key)
+        # should emit as exists($var->{$key}), not exists($var)->{$key}.
+        # Push the subscript inside the builtin argument.
+        if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor
+                && $target->class() eq 'BuiltinCall') {
+            my $bname = $target->inputs()->[0]->value();
+            if ($SUBSCRIPT_ABSORBING_BUILTINS{$bname}) {
+                my @args = $target->inputs()->[1]->@*;
+                my $inner = $args[-1];
+                my $inner_expr = $self->_emit_expr($inner);
+                my $sub_expr = $style eq 'array'
+                    ? "$inner_expr\->[" . $self->_emit_expr($index) . "]"
+                    : "$inner_expr\->{" . $self->_emit_expr($index) . "}";
+                my @other_args = map { $self->_emit_expr($_) } @args[0 .. $#args - 1];
+                return "$bname(" . join(', ', @other_args, $sub_expr) . ")";
+            }
+        }
+
+        # Fix stale-value merge: SubscriptExpr(UnaryExpr(!, BuiltinCall(exists, ...)), $key)
+        # Push the subscript past the unary op into the builtin argument.
+        if (defined $target && $target isa Chalk::Bootstrap::IR::Node::Constructor
+                && $target->class() eq 'UnaryExpr') {
+            my $op = $target->inputs()->[0]->value();
+            my $operand = $target->inputs()->[1];
+            if ($operand isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $operand->class() eq 'BuiltinCall') {
+                my $bname = $operand->inputs()->[0]->value();
+                if ($SUBSCRIPT_ABSORBING_BUILTINS{$bname}) {
+                    my @args = $operand->inputs()->[1]->@*;
+                    my $inner = $args[-1];
+                    my $inner_expr = $self->_emit_expr($inner);
+                    my $sub_expr = $style eq 'array'
+                        ? "$inner_expr\->[" . $self->_emit_expr($index) . "]"
+                        : "$inner_expr\->{" . $self->_emit_expr($index) . "}";
+                    my @other_args = map { $self->_emit_expr($_) } @args[0 .. $#args - 1];
+                    return "$op$bname(" . join(', ', @other_args, $sub_expr) . ")";
+                }
+            }
+        }
 
         my $tgt = defined $target ? $self->_emit_expr($target) : '$self';
         if ($style eq 'array') {

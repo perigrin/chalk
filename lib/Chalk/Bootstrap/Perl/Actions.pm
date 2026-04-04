@@ -541,10 +541,12 @@ class Chalk::Bootstrap::Perl::Actions {
         # Otherwise, recurse into children
         my $class = $node->class();
         if ($class eq 'BinaryExpr') {
-            my $left  = $_fix_postfix_chain_deep->($f, $node->inputs()->[1]);
-            my $right = $_fix_postfix_chain_deep->($f, $node->inputs()->[2]);
-            if (refaddr($left) != refaddr($node->inputs()->[1])
-                || refaddr($right) != refaddr($node->inputs()->[2])) {
+            my $orig_left  = $node->inputs()->[1];
+            my $orig_right = $node->inputs()->[2];
+            my $left  = $_fix_postfix_chain_deep->($f, $orig_left);
+            my $right = $_fix_postfix_chain_deep->($f, $orig_right);
+            if ((defined $left && defined $orig_left && refaddr($left) != refaddr($orig_left))
+                || (defined $right && defined $orig_right && refaddr($right) != refaddr($orig_right))) {
                 return $f->make('Constructor',
                     'class' => 'BinaryExpr',
                     op    => $node->inputs()->[0],
