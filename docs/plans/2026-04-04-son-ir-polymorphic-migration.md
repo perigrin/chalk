@@ -50,7 +50,7 @@ Chalk::IR::Program
   classes: [Chalk::IR::ClassInfo]
     name, parent
     fields: [Chalk::IR::FieldInfo]
-      name, attributes, default_value
+      name, attributes: [{name => 'param'}, ...], default_value
     methods: [Chalk::IR::MethodInfo]
       name, params, return_type
       graph: Chalk::IR::Graph        # per-method SoN graph
@@ -61,7 +61,8 @@ Chalk::IR::Program
 ```
 
 **Eliminated Constructor classes:** Program, ClassDecl, MethodDecl, SubDecl,
-FieldDecl, UseDecl. These become metadata structs, not IR nodes.
+FieldDecl, UseDecl, _Attribute. These become metadata structs or fields
+within metadata structs (e.g., _Attribute folds into FieldInfo.attributes).
 
 ### SoN Computation Graphs
 
@@ -76,13 +77,13 @@ Chalk::IR::Node (base)
 CFG nodes (unique per instance, not hash-consed):
   Start                          # graph entry
   Return                         # normal exit (value)
-  Unwind                         # exceptional exit (die)
+  Unwind                         # exceptional exit (die) [see Exception Model]
   If                             # conditional branch
   Proj (index)                   # projection from multi-output node
   Region                         # control merge
   Loop                           # loop header
 
-BinOp (left, right):             # intermediate base class
+BinOp (left, right, op_str):     # intermediate base class
   Add, Subtract, Multiply, Divide, Modulo, Power
   Concat
   NumEq, NumNe, NumLt, NumGt, NumLe, NumGe, NumCmp
@@ -91,7 +92,7 @@ BinOp (left, right):             # intermediate base class
   BitAnd, BitOr, BitXor, LeftShift, RightShift
   Assign
 
-UnaryOp (operand):               # intermediate base class
+UnaryOp (operand, op_str):       # intermediate base class
   Not, Negate, Complement
   Defined
 
@@ -106,7 +107,6 @@ Access:                          # intermediate base class
   Subscript
 
 Call (dispatch_kind, name)       # methods, subs, builtins
-  Two control projections: normal continuation + exceptional edge
 
 Aggregate:                       # intermediate base class
   HashRef
@@ -119,9 +119,13 @@ Regex:                           # intermediate base class
   RegexMatch (flags)
   RegexSubst (flags)
 
+TryCatch (try_body, catch_var, catch_body)   # typed node until exception
+                                              # design lowers to CFG
+
 PostfixDeref (sigil)
 CompoundAssign (op)              # or lower to read+binop+assign
 BacktickExpr
+VarDecl
 ```
 
 ## Key Design Decisions
@@ -143,8 +147,11 @@ if ($node isa Chalk::IR::Node::BinOp) { ... }
 
 Related nodes share a base class that provides common accessors:
 
-- **BinOp**: `left()`, `right()` (aliases for `inputs->[0]`, `inputs->[1]`)
-- **UnaryOp**: `operand()` (alias for `inputs->[0]`)
+- **BinOp**: `left()`, `right()` (aliases for `inputs->[0]`, `inputs->[1]`),
+  `op_str()` (abstract — each subclass returns its Perl operator string,
+  e.g., Add returns `'+'`, NumEq returns `'=='`)
+- **UnaryOp**: `operand()` (alias for `inputs->[0]`),
+  `op_str()` (e.g., Not returns `'!'`, Negate returns `'-'`)
 - **Access**: grouping for variable/field/subscript access
 - **Aggregate**: grouping for collection constructors
 - **Regex**: grouping for regex operations
@@ -157,16 +164,16 @@ for consumers that handle all binary ops identically.
 `Constructor:BinaryExpr` with an `op` field becomes one SoN type per
 operator. The operator string is encoded in the type:
 
-| Constructor | SoN Type |
-|---|---|
-| `BinaryExpr(op="+")` | `Add` |
-| `BinaryExpr(op=".")` | `Concat` |
-| `BinaryExpr(op="==")` | `NumEq` |
-| `BinaryExpr(op="&&")` | `And` |
+| Constructor | SoN Type | `op_str()` |
+|---|---|---|
+| `BinaryExpr(op="+")` | `Add` | `'+'` |
+| `BinaryExpr(op=".")` | `Concat` | `'.'` |
+| `BinaryExpr(op="==")` | `NumEq` | `'=='` |
+| `BinaryExpr(op="&&")` | `And` | `'&&'` |
 
-Consumers that need the operator string can call `operation()`.
+Codegen uses `$node->op_str()` to get the Perl operator for emission.
 
-### Exception Model: Unwind + Dual Projections
+### Exception Model: Target Architecture
 
 `die` is a CFG terminator, not a function call. Both `return` and `die`
 exit the graph:
@@ -186,11 +193,11 @@ paths) or propagates via Unwind. Any Perl call can die, so all Call nodes
 carry exceptional edges. The optimizer can remove them when it proves a
 call cannot throw.
 
-`TryCatchStmt` becomes CFG structure: the try body's Call exceptional edges
-flow to a catch Region, which either handles and continues or re-unwinds.
-
-This matches Graal's exception model and corrects perl5-son's current
-simplification of `die` as a `Call` node.
+**Deferred:** Dual projections on Call nodes and full exception flow are a
+separate design and implementation effort. This migration creates the
+`Unwind` node type but does not wire exceptional edges. `TryCatch` remains
+a typed computation node until the exception design lowers it to CFG
+structure (Region + Unwind + Proj). See Dependencies section.
 
 ### Builtins: Call Now, Specialize Later
 
@@ -224,6 +231,18 @@ Both projects produce the same graph vocabulary, enabling `SoN::Compare`
 to do structural diff between Chalk's parser output and perl5-son's optree
 translation.
 
+### BNF Constructor Nodes
+
+`Constructor:Symbol`, `Constructor:Expression`, and `Constructor:Rule` are
+BNF grammar-level nodes used by the BNF pipeline (`BNF::Target::Perl`,
+`BNF::Target::XS`, `BNF::Target::C`). They are **excluded from this
+migration**. The BNF pipeline is stable and small (4 creation sites, 6
+type checks).
+
+The correct disposition is metadata structs (grammar rules are metadata,
+not computation), but that work is deferred to a separate ticket to avoid
+risk to a working pipeline.
+
 ## Migration Strategy
 
 ### Approach: Adapter Shim with Gradual Migration
@@ -241,6 +260,13 @@ working.
 `Chalk::Bootstrap::IR::NodeFactory::instance()` returns a thin wrapper
 that delegates internally.
 
+Old-style `make('Constructor', class => 'BinaryExpr', ...)` **eagerly
+translates** to the new typed node. The factory never creates Constructor
+nodes — it always creates the target type (e.g., `Add`). This ensures
+a single hash-consing cache with consistent content hashes. Old-style
+and new-style callers that create the same computation get the same
+cached node.
+
 Old-style creation:
 ```perl
 $factory->make('Constructor', class => 'BinaryExpr',
@@ -257,22 +283,34 @@ The singleton goes away when all callers switch to the new API.
 ### Migration Phases
 
 **Phase 1: Scaffold new types.**
-Create `Chalk::IR::Node` base class and all typed subclasses. Create
-`Chalk::IR::Graph`. Create metadata structs (Program, ClassInfo,
+Create `Chalk::IR::Node` base class and all typed subclasses with
+intermediate base classes (BinOp, UnaryOp, Access, Aggregate, Regex).
+Create `Chalk::IR::Graph`. Create metadata structs (Program, ClassInfo,
 MethodInfo, FieldInfo, SubInfo) as plain `feature class` data containers.
 Add corresponding node types to perl5-son.
 
 **Phase 2: Factory shim.**
-Rewrite NodeFactory to accept both old-style and new-style creation. Map
-old Constructor classes to new types internally.
+Rewrite NodeFactory to accept both old-style and new-style creation.
+Old-style calls eagerly translate to new typed nodes (no Constructor
+objects in the cache). New nodes respond to `->class()` for backward
+compatibility with unmigrated consumers.
 
-**Phase 3: Actions.pm — emit metadata directly.**
-Migrate 87 `make('Constructor', ...)` calls in Actions.pm. Structural
-rules (Program, ClassDecl, MethodDecl, FieldDecl, SubDecl, UseDecl)
-produce metadata structs instead of Constructor nodes. Method/sub body
-rules produce `Chalk::IR::Graph` instances containing typed computation
-nodes. The semantic actions already accumulate structural context during
-parsing; this phase changes where that context lands.
+**Phase 3: Actions.pm — emit metadata and graphs directly.**
+This is two sub-phases due to entanglement between structural output and
+scope/Phi tracking:
+
+- **3a: Computation node migration.** Change `make('Constructor',
+  class=>'BinaryExpr', ...)` calls to new-style `make('Add', ...)` for
+  computation nodes within method/sub bodies. The factory shim makes this
+  safe — old and new styles produce the same nodes.
+
+- **3b: Structural split.** Change Program, ClassDecl, MethodDecl,
+  FieldDecl, SubDecl, UseDecl semantic actions to emit metadata structs
+  with per-method `Chalk::IR::Graph` instead of Constructor nodes.
+  Restructure the Phi insertion and scope tracking in Program() to work
+  with the new representation. **This sub-phase is atomic with codegen
+  entry point changes** — Actions.pm structural output and codegen
+  structural traversal must change together (see Phase 4 note).
 
 **Phase 4: Consumer migration (file-by-file).**
 Replace `->class() eq 'X'` with `isa Chalk::IR::Node::X`. Order by
@@ -282,20 +320,42 @@ increasing risk:
 2. DCE.pm — few type checks
 3. DepChaser.pm — few type checks
 4. StructPromotion.pm — pattern matching on node types
-5. BNF/Actions.pm — 4 Constructor uses
+5. BNF/Actions.pm — 4 Constructor uses (excluded from this migration,
+   see BNF Constructor Nodes section)
 6. EmitHelpers.pm — medium
-7. Target/Perl.pm — large, codegen dispatch
-8. Target/C.pm — largest, XS codegen
+7. Target/Perl.pm — large; includes restructuring entry points to walk
+   metadata + per-method graphs (merged from former Phase 6)
+8. Target/C.pm — largest; same entry point restructuring
+
+**Note:** Phase 3b and Phase 4 items 7-8 are atomic for structural nodes.
+Actions.pm cannot emit metadata structs until codegen can consume them.
+These land as one unit of work, verified against the 16 green eval files.
 
 **Phase 5: Delete Constructor and old namespace.**
 Remove `Chalk::Bootstrap::IR::Node::Constructor`, all
 `Chalk::Bootstrap::IR::Node::*` classes, the singleton wrapper, and
 `->class()` shim methods.
 
-**Phase 6: Codegen restructuring.**
-Target/Perl.pm and Target/C.pm switch from walking a single tree to
-walking metadata structure for program/class/method scaffolding and
-per-method `Chalk::IR::Graph` for method body codegen.
+### Acceptance Criteria Per Phase
+
+**Phase 1:** New node types have unit tests — `operation()`, `content_hash()`
+determinism, intermediate base class accessors (`left()`, `right()`,
+`operand()`, `op_str()`). Hash consing verified: identical inputs produce
+same node object.
+
+**Phase 2:** Existing test suite passes unchanged. Factory shim verified:
+old-style and new-style creation produce identical nodes (same cache entry).
+
+**Phase 3a:** Existing test suite passes. No change in codegen output.
+
+**Phase 3b + Phase 4 items 7-8:** 16 green files still eval correctly.
+Codegen output is byte-identical (or semantically equivalent where node
+ID changes are expected).
+
+**Phase 4 items 1-6:** Existing test suite passes after each file migration.
+
+**Phase 5:** `grep -r 'Chalk::Bootstrap::IR::Node' lib/` returns zero hits
+(excluding BNF pipeline). No `->class()` calls remain outside BNF.
 
 ## Call Site Census
 
@@ -310,6 +370,8 @@ per-method `Chalk::IR::Graph` for method body codegen.
 | Grammar/BNF/Actions.pm | 6 | 4 |
 | IR/ToSoN.pm | 1 | 0 |
 | **Total** | **174** | **98** |
+
+(Counts are approximate — may shift as the codebase evolves.)
 
 ## Open Questions
 
@@ -326,8 +388,17 @@ per-method `Chalk::IR::Graph` for method body codegen.
 4. **BacktickExpr**: Lower to a Call to `readpipe()`, or keep as a
    distinct type?
 
+5. **StructRef / FieldAccess**: Optimizer-specific Constructor classes.
+   Handle during Phase 4 when StructPromotion.pm is migrated.
+
 ## Dependencies
 
-- perl5-son: Add Unwind, dual Call projections, and Perl-specific node
-  types before Chalk can converge fully
-- Chalk Perl 5.42.0: All new classes use `feature class`
+- **perl5-son convergence:** Add Unwind, dual Call projections, and
+  Perl-specific node types. Can proceed in parallel with this migration.
+- **Exception flow design:** Separate design doc for Unwind + dual
+  projections on Call + TryCatch lowering to CFG. Depends on this
+  migration completing first (typed nodes must exist before exception
+  edges can be wired).
+- **BNF Constructor migration:** Separate ticket to convert
+  Constructor:Symbol/Expression/Rule to metadata structs.
+- **Chalk Perl 5.42.0:** All new classes use `feature class`.
