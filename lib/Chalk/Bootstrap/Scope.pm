@@ -128,6 +128,48 @@ class Chalk::Bootstrap::Scope {
     method raw_lookup($name) {
         return $bindings->{$name};
     }
+
+    # Merge two branch scopes at a Region node, creating Phi nodes for variables
+    # that have different values (by identity) across the two branches.
+    # $then_scope: final scope after the then-branch
+    # $else_scope: final scope after the else-branch
+    # $region: the Region node representing the merge point
+    # $factory: NodeFactory used to create Phi nodes
+    # Returns a new Scope with Phi nodes where variables differ between branches.
+    method merge_with_phis($then_scope, $else_scope, $region, $factory) {
+        my %merged;
+
+        # Collect all variable names from both branches
+        my %all_names;
+        $all_names{$_} = 1 for $then_scope->variable_names();
+        $all_names{$_} = 1 for $else_scope->variable_names();
+
+        for my $name (sort keys %all_names) {
+            my $then_val = $then_scope->lookup($name);
+            my $else_val = $else_scope->lookup($name);
+
+            # Both undef — variable not bound in either branch, skip
+            if (!defined $then_val && !defined $else_val) {
+                next;
+            }
+
+            # Same node identity — no Phi needed
+            if (defined $then_val && defined $else_val
+                    && refaddr($then_val) == refaddr($else_val)) {
+                $merged{$name} = $then_val;
+                next;
+            }
+
+            # Values differ (or one branch is undef) — create a Phi node
+            my $phi = $factory->make('Phi',
+                region => $region,
+                values => [$then_val, $else_val],
+            );
+            $merged{$name} = $phi;
+        }
+
+        return Chalk::Bootstrap::Scope->new(bindings => \%merged);
+    }
 }
 
 1;
