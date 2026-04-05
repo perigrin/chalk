@@ -116,9 +116,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         while (@stack) {
             my $node = pop @stack;
             next unless defined $node && ref($node);
-            if ($node isa Chalk::IR::Node::VarDecl
-                    || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $node->class() eq 'VarDecl')) {
+            if ($node isa Chalk::IR::Node::VarDecl) {
                 my $var = $node->inputs()->[0];
                 if (defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant) {
                     my $name = $var->value();
@@ -191,20 +189,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return join("\n", @lines) . "\n";
     }
 
-    # Statement-level types that handle their own formatting (no auto-semicolon)
-    my %STATEMENT_TYPES = map { $_ => 1 } qw(
-        Program UseDecl ClassDecl MethodDecl SubDecl ReturnStmt DieCall FieldDecl
-        VarDecl TryCatchStmt
-    );
-
-    # Expression types that need semicolons when used as statements
-    my %EXPR_TYPES = map { $_ => 1 } qw(
-        BinaryExpr UnaryExpr MethodCallExpr SubscriptExpr PostfixDerefExpr
-        TernaryExpr HashRefExpr ArrayRefExpr AnonSubExpr RegexMatch
-        RegexSubst BuiltinCall BacktickExpr InterpolatedString
-        CompoundAssign
-    );
-
     method _emit_node($node) {
         return undef unless defined $node;
 
@@ -258,7 +242,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return $self->_emit_constant($node);
         }
 
-        # Typed fast-paths for computation nodes (dual-path with Constructor fallback below)
+        # Typed fast-paths for computation nodes
         if ($node isa Chalk::IR::Node::BinOp
                 || $node isa Chalk::IR::Node::UnaryOp
                 || $node isa Chalk::IR::Node::Call
@@ -283,11 +267,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
-            # Expression-type nodes get semicolons when used as statements
-            if ($EXPR_TYPES{$class}) {
-                return $self->_emit_expr($node) . ";";
-            }
-
             if ($class eq 'Program')    { return $self->_emit_program($node); }
             if ($class eq 'UseDecl')    { return $self->_emit_use_decl($node); }
             if ($class eq 'ClassDecl')  { return $self->_emit_class_decl($node); }
@@ -296,8 +275,6 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($class eq 'ReturnStmt') { return $self->_emit_return_stmt($node); }
             if ($class eq 'DieCall')    { return $self->_emit_die_call($node); }
             if ($class eq 'FieldDecl')  { return $self->_emit_field_decl($node); }
-            if ($class eq 'VarDecl')         { return $self->_emit_var_decl($node); }
-            if ($class eq 'CompoundAssign')  { return $self->_emit_compound_assign($node); }
             die "Unknown Constructor class: $class";
         }
 
@@ -403,9 +380,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         }
         # Add body-local aggregate VarDecls
         for my $item ($body->@*) {
-            next unless $item isa Chalk::IR::Node::VarDecl
-                || ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'VarDecl');
+            next unless $item isa Chalk::IR::Node::VarDecl;
             my $var = $item->inputs()->[0];
             next unless defined $var && $var isa Chalk::Bootstrap::IR::Node::Constant;
             my $vname = $var->value();
@@ -510,7 +485,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return "'" . $self->_escape_single_quote($val) . "'";
         }
 
-        # Typed fast-paths for computation nodes (dual-path with Constructor fallback below)
+        # Typed fast-paths for computation nodes
         if ($node isa Chalk::IR::Node::Interpolate) { return $self->_emit_interpolated_string($node); }
         if ($node isa Chalk::IR::Node::BinOp)       { return $self->_emit_binary_expr($node); }
         if ($node isa Chalk::IR::Node::UnaryOp)     { return $self->_emit_unary_expr($node); }
@@ -533,24 +508,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
-            if ($class eq 'InterpolatedString') { return $self->_emit_interpolated_string($node); }
-            if ($class eq 'BinaryExpr')         { return $self->_emit_binary_expr($node); }
-            if ($class eq 'UnaryExpr')          { return $self->_emit_unary_expr($node); }
-            if ($class eq 'MethodCallExpr')     { return $self->_emit_method_call_expr($node); }
-            if ($class eq 'SubscriptExpr')      { return $self->_emit_subscript_expr($node); }
-            if ($class eq 'PostfixDerefExpr')   { return $self->_emit_postfix_deref_expr($node); }
-            if ($class eq 'TernaryExpr')        { return $self->_emit_ternary_expr($node); }
-            if ($class eq 'HashRefExpr')        { return $self->_emit_hash_ref_expr($node); }
-            if ($class eq 'ArrayRefExpr')       { return $self->_emit_array_ref_expr($node); }
-            if ($class eq 'AnonSubExpr')        { return $self->_emit_anon_sub_expr($node); }
-            if ($class eq 'RegexMatch')         { return $self->_emit_regex_match($node); }
-            if ($class eq 'RegexSubst')         { return $self->_emit_regex_subst($node); }
-            if ($class eq 'BuiltinCall')        { return $self->_emit_builtin_call($node); }
-            if ($class eq 'BacktickExpr')       { return $self->_emit_backtick_expr($node); }
-            if ($class eq 'CompoundAssign')     { return $self->_emit_compound_assign($node); }
-            if ($class eq 'VarDecl')            { return $self->_emit_var_decl_expr($node); }
-            if ($class eq 'StructRef')          { return $self->_emit_struct_ref_expr($node); }
-            if ($class eq 'FieldAccess')        { return $self->_emit_field_access_expr($node); }
+            if ($class eq 'TernaryExpr')  { return $self->_emit_ternary_expr($node); }
+            if ($class eq 'StructRef')    { return $self->_emit_struct_ref_expr($node); }
+            if ($class eq 'FieldAccess')  { return $self->_emit_field_access_expr($node); }
             # Fall through to _emit_node for statement-level types
             return $self->_emit_node($node);
         }
@@ -595,7 +555,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # (e.g., unless desugars to !cond, and !$a && $b != !($a && $b))
         my $needs_parens = ($operand isa Chalk::IR::Node::BinOp)
             || ($operand isa Chalk::Bootstrap::IR::Node::Constructor
-                && ($operand->class() eq 'BinaryExpr' || $operand->class() eq 'TernaryExpr'));
+                && $operand->class() eq 'TernaryExpr');
 
         my $expr = $self->_emit_expr($operand);
         if ($needs_parens) {
@@ -640,9 +600,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # should emit as exists($var->{$key}), not exists($var)->{$key}.
         # Push the subscript inside the builtin argument.
         if (defined $target
-                && (($target isa Chalk::IR::Node::Call && $target->dispatch_kind() eq 'builtin')
-                    || ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $target->class() eq 'BuiltinCall'))) {
+                && ($target isa Chalk::IR::Node::Call && $target->dispatch_kind() eq 'builtin')) {
             my $bname = $target->inputs()->[0]->value();
             if ($SUBSCRIPT_ABSORBING_BUILTINS{$bname}) {
                 my @args = $target->inputs()->[1]->@*;
@@ -657,14 +615,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # Fix stale-value merge: SubscriptExpr(UnaryExpr(!, BuiltinCall(exists, ...)), $key)
         # Push the subscript past the unary op into the builtin argument.
         if (defined $target
-                && ($target isa Chalk::IR::Node::UnaryOp
-                    || ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $target->class() eq 'UnaryExpr'))) {
+                && ($target isa Chalk::IR::Node::UnaryOp)) {
             my $op = $target->inputs()->[0]->value();
             my $operand = $target->inputs()->[1];
-            if (($operand isa Chalk::IR::Node::Call && $operand->dispatch_kind() eq 'builtin')
-                    || ($operand isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $operand->class() eq 'BuiltinCall')) {
+            if ($operand isa Chalk::IR::Node::Call && $operand->dispatch_kind() eq 'builtin') {
                 my $bname = $operand->inputs()->[0]->value();
                 if ($SUBSCRIPT_ABSORBING_BUILTINS{$bname}) {
                     my @args = $operand->inputs()->[1]->@*;
@@ -847,9 +801,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     method _emit_loop_jump($jump_keyword, $if_node) {
         my $cond = $if_node->inputs()->[1];
         # Detect negation wrapper: UnaryExpr('!', expr) → emit 'unless expr'
-        if (($cond isa Chalk::IR::Node::UnaryOp
-                || ($cond isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $cond->class() eq 'UnaryExpr'))
+        if (($cond isa Chalk::IR::Node::UnaryOp)
                 && $cond->inputs()->[0] isa Chalk::Bootstrap::IR::Node::Constant
                 && $cond->inputs()->[0]->value() eq '!') {
             my $inner = $cond->inputs()->[1];
