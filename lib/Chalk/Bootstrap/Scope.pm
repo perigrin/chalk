@@ -129,6 +129,35 @@ class Chalk::Bootstrap::Scope {
         return $bindings->{$name};
     }
 
+    # Remove a trivial Phi (all operands identical, ignoring self-references).
+    # Returns the single common value if trivial, or the Phi if non-trivial.
+    # A Phi is trivial when every operand (excluding backedge self-references)
+    # is the same node. An undef operand counts as a distinct "no value" path
+    # and makes the Phi non-trivial.
+    sub _remove_trivial_phi($phi) {
+        my $same;
+        my $seen_same = false;
+        for my $operand ($phi->inputs()->[1]->@*) {
+            # Skip self-references (loop backedges)
+            next if defined $operand
+                && ref($operand)
+                && refaddr($operand) == refaddr($phi);
+            # undef means "value doesn't exist on this path" — that's non-trivial
+            # unless we have already established $same as undef
+            if (!defined $operand) {
+                return $phi if $seen_same;
+                next;
+            }
+            if (!$seen_same) {
+                $same = $operand;
+                $seen_same = true;
+            } elsif (refaddr($same) != refaddr($operand)) {
+                return $phi;  # non-trivial: two different values
+            }
+        }
+        return $same // $phi;
+    }
+
     # Merge two branch scopes at a Region node, creating Phi nodes for variables
     # that have different values (by identity) across the two branches.
     # $then_scope: final scope after the then-branch
@@ -160,12 +189,13 @@ class Chalk::Bootstrap::Scope {
                 next;
             }
 
-            # Values differ (or one branch is undef) — create a Phi node
+            # Values differ (or one branch is undef) — create a Phi node,
+            # then simplify away trivial Phis (all operands the same value).
             my $phi = $factory->make('Phi',
                 region => $region,
                 values => [$then_val, $else_val],
             );
-            $merged{$name} = $phi;
+            $merged{$name} = _remove_trivial_phi($phi);
         }
 
         return Chalk::Bootstrap::Scope->new(bindings => \%merged);
