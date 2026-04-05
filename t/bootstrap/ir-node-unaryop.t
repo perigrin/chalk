@@ -21,6 +21,25 @@ is($not->operand()->id(), 'op_0', 'operand() returns inputs->[0]');
 is($not->operation(), 'Not', 'Not operation');
 is($not->op_str(), '!', 'Not op_str is !');
 
+# Named operand field: construction with explicit named param
+my $not_named = Chalk::IR::Node::Not->new(
+    id      => 'not_named',
+    inputs  => [$operand],
+    operand => $operand,
+);
+is($not_named->operand()->id(), 'op_0', 'named operand() returns named field value');
+
+# Migration layout: 2-element inputs [op_node, operand] with named operand field
+my $op_node = Chalk::IR::Node->new(id => 'op_node');
+my $not_migr = Chalk::IR::Node::Not->new(
+    id      => 'not_migr',
+    inputs  => [$op_node, $operand],
+    operand => $operand,
+);
+is($not_migr->operand()->id(), 'op_0',   'migration: operand() returns named field, not inputs->[0]');
+is(scalar $not_migr->inputs()->@*, 2,    'migration: inputs has 2 elements');
+is($not_migr->inputs()->[0]->id(), 'op_node', 'migration: inputs->[0] is op_node (not operand)');
+
 # content_hash includes operation name
 like($not->content_hash(), qr/^Not\|/, 'Not content_hash starts with Not');
 

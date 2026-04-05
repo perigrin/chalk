@@ -7,7 +7,13 @@ use experimental 'class';
 use Chalk::IR::Node;
 
 class Chalk::IR::Node::UnaryOp :isa(Chalk::IR::Node) {
-    method operand() { $self->inputs()->[0] }
+    field $operand :param :reader = undef;
+
+    ADJUST {
+        if (!defined $operand && $self->inputs()->@*) {
+            $operand = $self->inputs()->[0];
+        }
+    }
 
     method op_str() {
         die "Subclass must implement op_str()";
