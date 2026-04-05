@@ -52,6 +52,28 @@ is($add->op_str(), '+', 'Add op_str is +');
 # content_hash includes operation name
 like($add->content_hash(), qr/^Add\|/, 'Add content_hash starts with Add');
 
+# Named left/right fields: construction with explicit named params
+my $add_named = Chalk::IR::Node::Add->new(
+    id     => 'add_named',
+    inputs => [$left, $right],
+    left   => $left,
+    right  => $right,
+);
+is($add_named->left()->id(),  'left_0',  'named left() returns left node');
+is($add_named->right()->id(), 'right_0', 'named right() returns right node');
+
+# Migration layout: 3-element inputs [op, left, right] with named fields
+my $op_const = Chalk::IR::Node->new(id => 'op_const');
+my $add_migr = Chalk::IR::Node::Add->new(
+    id     => 'add_migr',
+    inputs => [$op_const, $left, $right],
+    left   => $left,
+    right  => $right,
+);
+is($add_migr->left()->id(),  'left_0',  'migration: left() from named field');
+is($add_migr->right()->id(), 'right_0', 'migration: right() from named field');
+is(scalar $add_migr->inputs()->@*, 3,   'migration: inputs has 3 elements');
+
 # Verify all 29 leaf types: operation, op_str, isa BinOp
 my %expected = (
     Add        => '+',   Subtract   => '-',   Multiply => '*',
