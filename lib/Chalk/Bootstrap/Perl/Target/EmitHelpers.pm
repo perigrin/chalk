@@ -5,6 +5,13 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Target;
+use Chalk::IR::Node;
+use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::Call;
+use Chalk::IR::Node::Interpolate;
+use Chalk::IR::Node::Subscript;
+use Chalk::IR::Node::PostfixDeref;
+use Chalk::IR::Node::TryCatch;
 
 class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;  # module being compiled (e.g., "Chalk::Bootstrap::Earley")
@@ -186,10 +193,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # Recurse one level into VarDecl initializers to find these.
         my @items_to_scan;
         for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
+            next unless ($item isa Chalk::IR::Node || $item isa Chalk::Bootstrap::IR::Node::Constructor);
             push @items_to_scan, $item;
             # Check VarDecl initializer for mis-parented SubDecl
-            if ($item->class() eq 'VarDecl') {
+            if ($item isa Chalk::IR::Node::VarDecl
+                    || ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $item->class() eq 'VarDecl')) {
                 my $init = $item->inputs()->[1];
                 if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
                         && $init->class() eq 'SubDecl') {
@@ -339,8 +348,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         for my $item ($body->@*) {
-            if ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'VarDecl') {
+            if ($item isa Chalk::IR::Node::VarDecl
+                    || ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $item->class() eq 'VarDecl')) {
                 my $var = $item->inputs()->[0]->value();
                 $var =~ s/^\$//;
                 push @keys, $var unless grep { $_ eq $var } @keys;
@@ -547,8 +557,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         $walk = sub ($node) {
             return unless defined $node;
 
-            if ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $node->class() eq 'MethodCallExpr') {
+            if (($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'method')
+                    || ($node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $node->class() eq 'MethodCallExpr')) {
                 my $invocant_node = $node->inputs()->[0];
                 my $method_const  = $node->inputs()->[1];
 
@@ -574,7 +585,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 }
             }
 
-            if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
+            if ($node isa Chalk::IR::Node || $node isa Chalk::Bootstrap::IR::Node::Constructor) {
                 for my $input ($node->inputs()->@*) {
                     if (ref($input) eq 'ARRAY') {
                         $walk->($_) for $input->@*;
@@ -609,8 +620,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         if ($returns_value) {
             my $value = $body_item->inputs()->[0];
-            if ($value isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $value->class() eq 'InterpolatedString') {
+            if ($value isa Chalk::IR::Node::Interpolate
+                    || ($value isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $value->class() eq 'InterpolatedString')) {
                 return false;
             }
             if ($value isa Chalk::Bootstrap::IR::Node::Constant
@@ -627,7 +639,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
     method _has_early_return($nodes) {
         for my $item ($nodes->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node;
+            next unless ($item isa Chalk::Bootstrap::IR::Node || $item isa Chalk::IR::Node);
             if (%_cfg_lookup && ref($item)) {
                 my $state = $_cfg_lookup{refaddr($item)};
                 if (defined $state && defined $state->{if_node}) {
@@ -656,7 +668,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _body_contains_return($body) {
         return false unless ref($body) eq 'ARRAY';
         for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node;
+            next unless ($item isa Chalk::Bootstrap::IR::Node || $item isa Chalk::IR::Node);
             if (%_cfg_lookup && ref($item)) {
                 my $state = $_cfg_lookup{refaddr($item)};
                 if (defined $state && defined $state->{if_node}) {
@@ -688,6 +700,14 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # stripped by the Earley stale-value merge.
     method _is_bare_return_expr($node) {
         return false unless defined $node;
+        # Typed node fast-path: check typed nodes before falling through to
+        # Constructor class-string dispatch for legacy untyped nodes.
+        if ($node isa Chalk::IR::Node::VarDecl)    { return false; }
+        if ($node isa Chalk::IR::Node::Call)        { return false; }  # BuiltinCall is void-ish
+        if ($node isa Chalk::IR::Node::Subscript)   { return true;  }
+        if ($node isa Chalk::IR::Node::PostfixDeref){ return false; }
+        if ($node isa Chalk::IR::Node::TryCatch)    { return false; }
+        if ($node isa Chalk::IR::Node::Interpolate) { return false; }
         return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
         my $class = $node->class();
         my %void = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign ReturnStmt
@@ -702,7 +722,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Detect if an IR node is unambiguously a value expression.
     method _is_unambiguous_value_expr($node) {
         return false unless defined $node;
-        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return false unless ($node isa Chalk::IR::Node || $node isa Chalk::Bootstrap::IR::Node::Constructor);
         my $class = $node->class();
         return true if $class eq 'TernaryExpr';
         if ($class eq 'BinaryExpr') {
@@ -725,7 +745,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Detect if a single-statement method body's expression is a return value.
     method _is_single_stmt_return_expr($node) {
         return false unless defined $node;
-        return false unless $node isa Chalk::Bootstrap::IR::Node::Constructor;
+        return false unless ($node isa Chalk::IR::Node || $node isa Chalk::Bootstrap::IR::Node::Constructor);
         my $class = $node->class();
         my %void_classes = map { $_ => 1 } qw(VarDecl DieCall CompoundAssign);
         return false if $void_classes{$class};
@@ -735,7 +755,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Recursively collect VarDecl and iterator names from IR nodes at any nesting depth.
     method _collect_var_decls($nodes, $declared_vars) {
         for my $item ($nodes->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node;
+            next unless ($item isa Chalk::Bootstrap::IR::Node || $item isa Chalk::IR::Node);
 
             if (%_cfg_lookup && ref($item)) {
                 my $state = $_cfg_lookup{refaddr($item)};
@@ -772,22 +792,28 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 }
             }
 
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            my $class = $item->class();
+            my $is_var_decl = $item isa Chalk::IR::Node::VarDecl
+                || ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $item->class() eq 'VarDecl');
+            next unless $is_var_decl;
 
-            if ($class eq 'VarDecl') {
+            if ($is_var_decl) {
                 my $var = $item->inputs()->[0]->value();
                 $var =~ s/^[\$\@\%]//;
                 next if defined $field_map && exists $field_map->{$var};
                 next if %_class_scope_vars && exists $_class_scope_vars{$var};
                 $declared_vars->{$var} = true;
                 my $init = $item->inputs()->[1];
-                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $init->class() eq 'VarDecl') {
+                if (defined $init
+                        && ($init isa Chalk::IR::Node::VarDecl
+                            || ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $init->class() eq 'VarDecl'))) {
                     $self->_collect_var_decls([$init], $declared_vars);
                 }
-                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $init->class() eq 'TryCatchStmt') {
+                if (defined $init
+                        && ($init isa Chalk::IR::Node::TryCatch
+                            || ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $init->class() eq 'TryCatchStmt'))) {
                     my $state = $_cfg_lookup{refaddr($init)};
                     if (defined $state) {
                         my $try = $state->{try_stmts};
@@ -826,7 +852,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                     next if %_class_scope_vars && exists $_class_scope_vars{$bare};
                     $declared_vars->{$bare} = true;
                 }
-            } elsif ($node isa Chalk::Bootstrap::IR::Node) {
+            } elsif ($node isa Chalk::Bootstrap::IR::Node || $node isa Chalk::IR::Node) {
                 push @queue, grep { defined $_ && ref($_) } $node->inputs()->@*;
             }
 
@@ -901,7 +927,17 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Walks SubscriptExpr, ReturnStmt, and DieCall wrappers inward.
     method _find_exists_delete_in_chain($node) {
         my $cur = $node;
-        while (defined $cur && $cur isa Chalk::Bootstrap::IR::Node::Constructor) {
+        while (defined $cur && ($cur isa Chalk::IR::Node || $cur isa Chalk::Bootstrap::IR::Node::Constructor)) {
+            if ($cur isa Chalk::IR::Node::Call && $cur->dispatch_kind() eq 'builtin') {
+                my $name = $cur->inputs()->[0]->value() // '';
+                return $cur if $name eq 'exists' || $name eq 'delete';
+                return;
+            }
+            if ($cur isa Chalk::IR::Node::Subscript) {
+                $cur = $cur->inputs()->[0];
+                next;
+            }
+            next unless $cur isa Chalk::Bootstrap::IR::Node::Constructor;
             if ($cur->class() eq 'BuiltinCall') {
                 my $name = $cur->inputs()->[0]->value() // '';
                 return $cur if $name eq 'exists' || $name eq 'delete';
@@ -931,7 +967,19 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $base_node;
 
         # Collect subscript chain (outermost first, then reverse)
-        while (defined $cur && $cur isa Chalk::Bootstrap::IR::Node::Constructor) {
+        while (defined $cur && ($cur isa Chalk::IR::Node || $cur isa Chalk::Bootstrap::IR::Node::Constructor)) {
+            if ($cur isa Chalk::IR::Node::Subscript) {
+                push @subscripts, [$cur->inputs()->[1], $cur->inputs()->[2]->value()];
+                $cur = $cur->inputs()->[0];
+                next;
+            }
+            if ($cur isa Chalk::IR::Node::Call && $cur->dispatch_kind() eq 'builtin') {
+                $builtin_name = $cur->inputs()->[0]->value();
+                my $args = $cur->inputs()->[1];
+                $base_node = $args->[0] if $args->@* > 0;
+                last;
+            }
+            next unless $cur isa Chalk::Bootstrap::IR::Node::Constructor;
             if ($cur->class() eq 'SubscriptExpr') {
                 push @subscripts, [$cur->inputs()->[1], $cur->inputs()->[2]->value()];
                 $cur = $cur->inputs()->[0];
@@ -1057,6 +1105,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # (e.g., _complete()), not a return value. Only allow unambiguous
             # value expressions (SubscriptExpr, TernaryExpr) inside loops.
             my $is_loop_safe_return = !$_loop_depth
+                || $stmt isa Chalk::IR::Node::Subscript
                 || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                     && ($stmt->class() eq 'SubscriptExpr'
                         || $stmt->class() eq 'TernaryExpr'));
@@ -1192,14 +1241,18 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # Detect while (my $var = shift @array) pattern:
             # VarDecl($var, BuiltinCall(shift, @array))
             # Emit: while ((var_sv = av_shift(...)) != &PL_sv_undef)
-            if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $cond->class() eq 'VarDecl') {
+            if ($cond isa Chalk::IR::Node::VarDecl
+                    || ($cond isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $cond->class() eq 'VarDecl')) {
                 my $var_name = $cond->inputs()->[0]->value();
                 $var_name =~ s/^[\$\@\%]//;
                 my $init = $cond->inputs()->[1];
-                if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $init->class() eq 'BuiltinCall'
-                        && $init->inputs()->[0]->value() eq 'shift') {
+                if (defined $init
+                        && ($init isa Chalk::IR::Node::Call && $init->dispatch_kind() eq 'builtin'
+                            && $init->inputs()->[0]->value() eq 'shift'
+                            || ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $init->class() eq 'BuiltinCall'
+                                && $init->inputs()->[0]->value() eq 'shift'))) {
                     my $shift_args = $init->inputs()->[1];
                     my $arr_arg = (ref($shift_args) eq 'ARRAY') ? $shift_args->[0] : $shift_args;
                     my $arr_expr = $self->_emit_expr($arr_arg, $declared_vars);
@@ -1237,8 +1290,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # ($item, $alt_idx) = $self->_chart_get(...)->@* is lost entirely.
             # Detect this by checking if the while condition created an entry var
             # and the body uses alt_idx_sv without setting it.
-            if ($cond isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $cond->class() eq 'VarDecl') {
+            if ($cond isa Chalk::IR::Node::VarDecl
+                    || ($cond isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $cond->class() eq 'VarDecl')) {
                 my $entry_var = $cond->inputs()->[0]->value();
                 $entry_var =~ s/^[\$\@\%]//;
                 my $body_code = join("\n", @lines);
@@ -1403,6 +1457,10 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             }
         }
 
+        # Typed node fast-path: handle computation types before falling through
+        # to Constructor class-string dispatch for legacy untyped nodes.
+        if ($node isa Chalk::IR::Node::VarDecl) { return $self->_emit_var_decl($node, $declared_vars); }
+
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
@@ -1412,6 +1470,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             if ($class eq 'CompoundAssign')  { return $self->_emit_compound_assign_stmt($node, $declared_vars); }
 
             # Expression types used as statements (side effects)
+            return $self->_emit_expr($node, $declared_vars) . ";";
+        }
+
+        # Typed IR nodes that aren't VarDecl: emit as expression statements
+        if ($node isa Chalk::IR::Node) {
             return $self->_emit_expr($node, $declared_vars) . ";";
         }
 
@@ -2023,8 +2086,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _emit_keys_list($hash_node, $declared_vars) {
         my $hash = $self->_emit_expr($hash_node, $declared_vars);
         my $hv_expr;
-        if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $hash_node->class() eq 'PostfixDerefExpr') {
+        if ($hash_node isa Chalk::IR::Node::PostfixDeref
+                || ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $hash_node->class() eq 'PostfixDerefExpr')) {
             $hv_expr = $hash;
         } else {
             $hv_expr = "(HV*)SvRV($hash)";
@@ -2126,8 +2190,10 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # consecutive hash/array resets are merged into a linked list of VarDecl
         # nodes. Split into separate statements: emit inner first, then outer
         # with its sigil-appropriate default.
-        if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                && $init->class() eq 'VarDecl') {
+        if (defined $init
+                && ($init isa Chalk::IR::Node::VarDecl
+                    || ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $init->class() eq 'VarDecl'))) {
             my $inner_stmt = $self->_emit_var_decl($init, $declared_vars);
             # Fall through to emit this variable with its sigil default
             $init = undef;
@@ -2203,8 +2269,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # TryCatchStmt as VarDecl init is a stale-value merge artifact.
             # The variable is declared with undef, then assigned inside the
             # try block. Split into: declare var, then emit try/catch statement.
-            if ($init isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $init->class() eq 'TryCatchStmt') {
+            if ($init isa Chalk::IR::Node::TryCatch
+                    || ($init isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $init->class() eq 'TryCatchStmt')) {
                 my $try_stmt = $self->_emit_stmt($init, $declared_vars);
                 return "${var}_sv = $default_val;\n$try_stmt";
             }
@@ -2286,6 +2353,17 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
             return $self->_emit_const_expr($node, $declared_vars);
+        }
+
+        # Typed node fast-paths for computation types during transition.
+        # These nodes may arrive as either the new typed class or old Constructor.
+        if ($node isa Chalk::IR::Node::Interpolate)  { return $self->_emit_interp_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::Subscript)    { return $self->_emit_subscript_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::PostfixDeref) { return $self->_emit_postfix_deref_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::VarDecl)      { return $self->_emit_var_decl_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::Call) {
+            if ($node->dispatch_kind() eq 'method')  { return $self->_emit_method_call_expr($node, $declared_vars); }
+            if ($node->dispatch_kind() eq 'builtin') { return $self->_emit_builtin_call($node, $declared_vars); }
         }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
