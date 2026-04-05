@@ -2591,6 +2591,9 @@ class Chalk::Bootstrap::Perl::Actions {
             $keyword = $1;
         }
 
+        my $cond_leaf;
+        my $then_leaf;
+        my $else_leaf;
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
             my $rule = $leaf->rule();
@@ -2603,12 +2606,15 @@ class Chalk::Bootstrap::Perl::Actions {
                     next;
                 }
                 $condition = $focus;
+                $cond_leaf = $leaf;  # remember condition leaf for pre-branch scope
             } elsif (ref($focus) eq 'ARRAY' && !defined $then_body) {
-                # First array is then_body (from Block)
+                # First array is then_body (from Block); remember leaf for scope extraction
                 $then_body = $focus;
+                $then_leaf = $leaf;
             } elsif (ref($focus) eq 'ARRAY' && defined $then_body) {
-                # Second array is else_body (from else Block)
+                # Second array is else_body (from else Block); remember leaf for scope extraction
                 $else_body = $focus;
+                $else_leaf = $leaf;
             } elsif ($focus isa Chalk::Bootstrap::IR::Node::If) {
                 # ElsifChain returns a CFG If node — wrap as else_body
                 $else_body = [$focus];
@@ -2644,9 +2650,42 @@ class Chalk::Bootstrap::Perl::Actions {
                 my $region = $factory->make('Region',
                     controls => [$true_proj, $false_proj],
                 );
+
+                # Extract per-branch final scopes from the leaf Contexts that
+                # provided then_body and else_body.  cfg_state on those leaves
+                # records the scope as it stood at the end of each branch.
+                #
+                # The pre-branch scope comes from the condition leaf's cfg_state,
+                # not from state->{scope}: by the time on_complete runs, multiply()
+                # has already merged the then-block's scope into the inherited state,
+                # so state->{scope} is contaminated with branch assignments.
+                my $pre_scope;
+                if (defined $cond_leaf) {
+                    my $cs = $sa->cfg_state($cond_leaf);
+                    $pre_scope = $cs->{scope} if defined $cs && defined $cs->{scope};
+                }
+                $pre_scope //= $state->{scope};
+
+                my $then_scope  = $pre_scope;
+                my $else_scope  = $pre_scope;
+                if (defined $then_leaf) {
+                    my $ts = $sa->cfg_state($then_leaf);
+                    $then_scope = $ts->{scope} if defined $ts && defined $ts->{scope};
+                }
+                if (defined $else_leaf) {
+                    my $es = $sa->cfg_state($else_leaf);
+                    $else_scope = $es->{scope} if defined $es && defined $es->{scope};
+                }
+
+                # Merge branch scopes with eager Phi creation for variables
+                # that differ between branches.
+                my $merged_scope = $pre_scope->merge_with_phis(
+                    $then_scope, $else_scope, $region, $factory,
+                );
+
                 $sa->update_cfg({
                     control    => $region,
-                    scope      => $state->{scope},
+                    scope      => $merged_scope,
                     then_stmts => $then_body,
                     else_stmts => $else_body,
                     if_node    => $if_node,
