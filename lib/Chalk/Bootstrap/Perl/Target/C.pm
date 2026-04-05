@@ -5,6 +5,16 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
+use Chalk::IR::Node;
+use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::Call;
+use Chalk::IR::Node::Interpolate;
+use Chalk::IR::Node::Subscript;
+use Chalk::IR::Node::PostfixDeref;
+use Chalk::IR::Node::BinOp;
+use Chalk::IR::Node::HashRef;
+use Chalk::IR::Node::ArrayRef;
+use Chalk::IR::Node::AnonSub;
 
 class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -42,25 +52,26 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # These are compiled as static C variables, initialized at module load time.
         $self->_reset_class_scope_vars();
         for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            if ($item->class() eq 'VarDecl') {
-                my $raw_var = $item->inputs()->[0]->value();
-                my $sigil = substr($raw_var, 0, 1);
-                my $var = $raw_var;
-                $var =~ s/^[\$\@\%]//;
-                my $init = $item->inputs()->[1];
-                # Skip VarDecl whose init is a SubDecl (those are sub definitions)
-                next if defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $init->class() eq 'SubDecl';
-                # Skip VarDecl for variables that are fields (ADJUST assigns them,
-                # but they're already handled by the field map)
-                next if defined $self->_get_field_map() && exists $self->_get_field_map()->{$var};
-                $self->_set_class_scope_var($var, {
-                    sigil       => $sigil,
-                    init        => $init,
-                    static_name => "_csv_" . $self->_get_current_slug() . "_${var}",
-                });
-            }
+            next unless $item isa Chalk::IR::Node::VarDecl
+                     || ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                         && $item->class() eq 'VarDecl');
+            my $raw_var = $item->inputs()->[0]->value();
+            my $sigil = substr($raw_var, 0, 1);
+            my $var = $raw_var;
+            $var =~ s/^[\$\@\%]//;
+            my $init = $item->inputs()->[1];
+            # Skip VarDecl whose init is a SubDecl (those are sub definitions)
+            next if defined $init
+                && $init isa Chalk::Bootstrap::IR::Node::Constructor
+                && $init->class() eq 'SubDecl';
+            # Skip VarDecl for variables that are fields (ADJUST assigns them,
+            # but they're already handled by the field map)
+            next if defined $self->_get_field_map() && exists $self->_get_field_map()->{$var};
+            $self->_set_class_scope_var($var, {
+                sigil       => $sigil,
+                init        => $init,
+                static_name => "_csv_" . $self->_get_current_slug() . "_${var}",
+            });
         }
 
         # Extract `use constant { NAME => value, ... }` declarations.
@@ -68,15 +79,16 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # since C doesn't have Perl's constant sub mechanism.
         $self->_reset_use_constants();
         for my $item ($body->@*) {
-            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-            next unless $item->class() eq 'UseDecl';
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor
+                     && $item->class() eq 'UseDecl';
             my $mn = $item->inputs()->[0];
             next unless defined $mn && $mn->value() eq 'constant';
             my $args = $item->inputs()->[1];
             next unless defined $args && ref($args) eq 'ARRAY';
             my $hash_expr = $args->[0];
-            next unless $hash_expr isa Chalk::Bootstrap::IR::Node::Constructor
-                     && $hash_expr->class() eq 'HashRefExpr';
+            next unless $hash_expr isa Chalk::IR::Node::HashRef
+                     || ($hash_expr isa Chalk::Bootstrap::IR::Node::Constructor
+                         && $hash_expr->class() eq 'HashRefExpr');
             my $pairs = $hash_expr->inputs()->[0];
             next unless defined $pairs && ref($pairs) eq 'ARRAY';
             for (my $i = 0; $i < $pairs->@*; $i += 2) {
@@ -114,8 +126,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             if ($returns_value) {
                 my $value = $body_item->inputs()->[0];
 
-                if ($value isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $value->class() eq 'InterpolatedString') {
+                if ($value isa Chalk::IR::Node::Interpolate
+                        || ($value isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $value->class() eq 'InterpolatedString')) {
                     return $self->_emit_interp_return($name, $value);
                 } elsif ($value isa Chalk::Bootstrap::IR::Node::Constant
                          && ($value->const_type() // '') ne 'variable'
@@ -466,9 +479,18 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # temp variables before any XPUSHs — nested dSP reads PL_stack_sp which
     # would clobber the outer stack entries if evaluated inline.
     method _emit_method_call_expr($node, $declared_vars) {
-        my $invocant_node = $node->inputs()->[0];
-        my $method_name   = $node->inputs()->[1]->value();
-        my $args          = $node->inputs()->[2];
+        my ($invocant_node, $method_name, $args);
+        if ($node isa Chalk::IR::Node::Call) {
+            # Typed Call node: inputs() = [invocant, arg0, arg1, ...]
+            $invocant_node = $node->inputs()->[0];
+            $method_name   = $node->name();
+            $args          = [ $node->inputs()->@[1 .. $node->inputs()->$#*] ];
+        } else {
+            # Constructor MethodCallExpr: inputs() = [invocant, name_const, args_arrayref]
+            $invocant_node = $node->inputs()->[0];
+            $method_name   = $node->inputs()->[1]->value();
+            $args          = $node->inputs()->[2];
+        }
 
         # Determine invocant C expression ($self if undef).
         # If the invocant is wrapped in PostfixDerefExpr('$'), unwrap it:
@@ -476,8 +498,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $invocant_expr;
         if (defined $invocant_node) {
 
-            if ($invocant_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $invocant_node->class() eq 'PostfixDerefExpr') {
+            if ($invocant_node isa Chalk::IR::Node::PostfixDeref
+                    || ($invocant_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $invocant_node->class() eq 'PostfixDerefExpr')) {
                 # Unwrap any PostfixDerefExpr sigil ($, $#, @, %) — call_method
                 # needs the blessed object reference, not a dereferenced value.
                 $invocant_expr = $self->_emit_expr($invocant_node->inputs()->[0], $declared_vars);
@@ -787,8 +810,14 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
     # Emit builtin call as C expression
     method _emit_builtin_call($node, $declared_vars) {
-        my $name = $node->inputs()->[0]->value();
-        my $args = $node->inputs()->[1];
+        my ($name, $args);
+        if ($node isa Chalk::IR::Node::Call) {
+            $name = $node->name();
+            $args = $node->inputs();
+        } else {
+            $name = $node->inputs()->[0]->value();
+            $args = $node->inputs()->[1];
+        }
 
         # defined() — check SvOK
         if ($name eq 'defined' && $args->@* == 1) {
@@ -822,8 +851,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $arr = $self->_emit_expr($arr_node, $declared_vars);
             # PostfixDerefExpr ->@* already returns (AV*)SvRV(...), no need to double-deref
             my $av_expr;
-            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $arr_node->class() eq 'PostfixDerefExpr') {
+            if ($arr_node isa Chalk::IR::Node::PostfixDeref
+                    || ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $arr_node->class() eq 'PostfixDerefExpr')) {
                 $av_expr = $arr;
             } else {
                 $av_expr = "(AV*)SvRV($arr)";
@@ -831,16 +861,21 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             # Flatten list-producing value arguments (values %hash) into
             # individual av_push calls instead of wrapping in an extra AV.
             my $val_node = $args->[1];
-            if ($val_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $val_node->class() eq 'BuiltinCall') {
-                my $val_name_node = $val_node->inputs()->[0];
-                my $val_name = $val_name_node->value() // '';
+            if (($val_node isa Chalk::IR::Node::Call && $val_node->dispatch_kind() eq 'builtin')
+                    || ($val_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $val_node->class() eq 'BuiltinCall')) {
+                my $val_name = ($val_node isa Chalk::IR::Node::Call)
+                    ? $val_node->name()
+                    : ($val_node->inputs()->[0]->value() // '');
+                my $val_args = ($val_node isa Chalk::IR::Node::Call)
+                    ? $val_node->inputs()
+                    : $val_node->inputs()->[1];
                 if ($val_name eq 'values') {
-                    my $val_args = $val_node->inputs()->[1];
                     my $hash_expr = $self->_emit_expr($val_args->[0], $declared_vars);
                     my $hv_expr;
-                    if ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $val_args->[0]->class() eq 'PostfixDerefExpr') {
+                    if ($val_args->[0] isa Chalk::IR::Node::PostfixDeref
+                            || ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $val_args->[0]->class() eq 'PostfixDerefExpr')) {
                         $hv_expr = $hash_expr;
                     } else {
                         $hv_expr = "(HV*)SvRV($hash_expr)";
@@ -853,11 +888,11 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
                 # push @arr, reverse @src — iterate source backwards, push each element
                 if ($val_name eq 'reverse') {
-                    my $val_args = $val_node->inputs()->[1];
                     my $src_expr = $self->_emit_expr($val_args->[0], $declared_vars);
                     my $src_av;
-                    if ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $val_args->[0]->class() eq 'PostfixDerefExpr') {
+                    if ($val_args->[0] isa Chalk::IR::Node::PostfixDeref
+                            || ($val_args->[0] isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $val_args->[0]->class() eq 'PostfixDerefExpr')) {
                         $src_av = $src_expr;
                     } else {
                         $src_av = "(AV*)SvRV($src_expr)";
@@ -933,8 +968,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $arr_node = $args->[0];
             my $arr = $self->_emit_expr($arr_node, $declared_vars);
             my $av_expr;
-            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $arr_node->class() eq 'PostfixDerefExpr') {
+            if ($arr_node isa Chalk::IR::Node::PostfixDeref
+                    || ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $arr_node->class() eq 'PostfixDerefExpr')) {
                 $av_expr = $arr;
             } else {
                 $av_expr = "(AV*)SvRV($arr)";
@@ -947,8 +983,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $arr_node = $args->[0];
             my $arr = $self->_emit_expr($arr_node, $declared_vars);
             my $av_expr;
-            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $arr_node->class() eq 'PostfixDerefExpr') {
+            if ($arr_node isa Chalk::IR::Node::PostfixDeref
+                    || ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $arr_node->class() eq 'PostfixDerefExpr')) {
                 $av_expr = $arr;
             } else {
                 $av_expr = "(AV*)SvRV($arr)";
@@ -961,8 +998,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $arr_node = $args->[0];
             my $arr = $self->_emit_expr($arr_node, $declared_vars);
             my $av_expr;
-            if ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $arr_node->class() eq 'PostfixDerefExpr') {
+            if ($arr_node isa Chalk::IR::Node::PostfixDeref
+                    || ($arr_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $arr_node->class() eq 'PostfixDerefExpr')) {
                 $av_expr = $arr;
             } else {
                 $av_expr = "(AV*)SvRV($arr)";
@@ -981,8 +1019,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $hash_node = $args->[0];
             my $hash = $self->_emit_expr($hash_node, $declared_vars);
             my $hv_expr;
-            if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $hash_node->class() eq 'PostfixDerefExpr') {
+            if ($hash_node isa Chalk::IR::Node::PostfixDeref
+                    || ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $hash_node->class() eq 'PostfixDerefExpr')) {
                 $hv_expr = $hash;
             } else {
                 $hv_expr = "(HV*)SvRV($hash)";
@@ -995,10 +1034,15 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $list_node = $args->[0];
             # Detect sort keys %$hash — emit keys as list, then sort
             my $list_expr;
-            if ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $list_node->class() eq 'BuiltinCall'
-                    && $list_node->inputs()->[0]->value() eq 'keys') {
-                $list_expr = $self->_emit_keys_list($list_node->inputs()->[1]->[0], $declared_vars);
+            if (($list_node isa Chalk::IR::Node::Call && $list_node->dispatch_kind() eq 'builtin'
+                        && $list_node->name() eq 'keys')
+                    || ($list_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $list_node->class() eq 'BuiltinCall'
+                        && $list_node->inputs()->[0]->value() eq 'keys')) {
+                my $keys_arg = ($list_node isa Chalk::IR::Node::Call)
+                    ? $list_node->inputs()->[0]
+                    : $list_node->inputs()->[1]->[0];
+                $list_expr = $self->_emit_keys_list($keys_arg, $declared_vars);
             } else {
                 $list_expr = $self->_emit_expr($list_node, $declared_vars);
             }
@@ -1025,8 +1069,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             my $hash_node = $args->[0];
             my $hash = $self->_emit_expr($hash_node, $declared_vars);
             my $hv_expr;
-            if ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $hash_node->class() eq 'PostfixDerefExpr') {
+            if ($hash_node isa Chalk::IR::Node::PostfixDeref
+                    || ($hash_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $hash_node->class() eq 'PostfixDerefExpr')) {
                 $hv_expr = $hash;
             } else {
                 $hv_expr = "(HV*)SvRV($hash)";
@@ -1072,8 +1117,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 $map_vars{'_'} = 1;
                 my @block_stmts;
                 for my $stmt (@block_body_items) {
-                    if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $stmt->class() eq 'VarDecl') {
+                    if ($stmt isa Chalk::IR::Node::VarDecl
+                            || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                                && $stmt->class() eq 'VarDecl')) {
                         my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
                         $map_vars{$vname} = 1;
                         my $init = $self->_emit_expr($stmt->inputs()->[1], \%map_vars);
@@ -1083,8 +1129,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                     }
                 }
                 $block_body = '({ ' . join('; ', @block_stmts) . '; })';
-            } elsif (defined $block_node && $block_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $block_node->class() eq 'AnonSubExpr') {
+            } elsif (defined $block_node
+                    && ($block_node isa Chalk::IR::Node::AnonSub
+                        || ($block_node isa Chalk::Bootstrap::IR::Node::Constructor
+                            && $block_node->class() eq 'AnonSubExpr'))) {
                 my $body = $block_node->inputs()->[1] // [];
                 if ($body->@* > 1) {
                     # Multi-statement block: emit all stmts as compound statement expr.
@@ -1094,8 +1142,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                     $map_vars{'_'} = 1;
                     my @block_stmts;
                     for my $stmt ($body->@*) {
-                        if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                                && $stmt->class() eq 'VarDecl') {
+                        if ($stmt isa Chalk::IR::Node::VarDecl
+                                || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+                                    && $stmt->class() eq 'VarDecl')) {
                             my $vname = $stmt->inputs()->[0]->value() =~ s/^\$//r;
                             $map_vars{$vname} = 1;
                             my $init = $self->_emit_expr($stmt->inputs()->[1], \%map_vars);
@@ -1165,8 +1214,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # delete($hash{$key}) — native hash entry removal via hv_delete_ent
         if ($name eq 'delete' && $args->@* == 1) {
             my $sub_node = $args->[0];
-            if ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $sub_node->class() eq 'SubscriptExpr') {
+            if ($sub_node isa Chalk::IR::Node::Subscript
+                    || ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $sub_node->class() eq 'SubscriptExpr')) {
                 my $target = $self->_emit_expr($sub_node->inputs()->[0], $declared_vars);
                 my $key = $self->_emit_expr($sub_node->inputs()->[1], $declared_vars);
                 my $field_sig = $self->_field_sigil_for_expr($target);
@@ -1179,8 +1229,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # exists($hash{$key}) — native hash key existence check via hv_exists_ent
         if ($name eq 'exists' && $args->@* == 1) {
             my $sub_node = $args->[0];
-            if ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $sub_node->class() eq 'SubscriptExpr') {
+            if ($sub_node isa Chalk::IR::Node::Subscript
+                    || ($sub_node isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $sub_node->class() eq 'SubscriptExpr')) {
                 my $target = $self->_emit_expr($sub_node->inputs()->[0], $declared_vars);
                 my $key = $self->_emit_expr($sub_node->inputs()->[1], $declared_vars);
                 my $field_sig = $self->_field_sigil_for_expr($target);
@@ -1389,18 +1440,22 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # Returns a C expression string, or undef if the init cannot be represented.
     method _emit_init_expr($init_node, $sigil) {
         return undef unless defined $init_node;
-        return undef unless $init_node isa Chalk::Bootstrap::IR::Node::Constructor;
-        my $class = $init_node->class();
+        return undef unless ($init_node isa Chalk::IR::Node
+                             || $init_node isa Chalk::Bootstrap::IR::Node::Constructor);
+        my $class = ($init_node isa Chalk::Bootstrap::IR::Node::Constructor)
+            ? $init_node->class() : '';
 
         # my $scalar = [] — empty array reference
-        if ($class eq 'ArrayRefExpr') {
+        if ($init_node isa Chalk::IR::Node::ArrayRef
+                || $class eq 'ArrayRefExpr') {
             my $elems = $init_node->inputs()->[0];
             if (!defined $elems || (ref($elems) eq 'ARRAY' && $elems->@* == 0)) {
                 return 'newRV_noinc((SV*)newAV())';
             }
         }
         # my $scalar = {} — empty hash reference
-        if ($class eq 'HashRefExpr') {
+        if ($init_node isa Chalk::IR::Node::HashRef
+                || $class eq 'HashRefExpr') {
             my $elems = $init_node->inputs()->[0];
             if (!defined $elems || (ref($elems) eq 'ARRAY' && $elems->@* == 0)) {
                 return 'newRV_noinc((SV*)newHV())';
@@ -1693,8 +1748,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         if (defined $class_decl && keys $self->_get_class_scope_vars()->%*) {
             my $body = $class_decl->inputs()->[2];
             for my $item ($body->@*) {
-                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-                next unless $item->class() eq 'VarDecl';
+                next unless $item isa Chalk::IR::Node::VarDecl
+                         || ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                             && $item->class() eq 'VarDecl');
                 my $raw = $item->inputs()->[0]->value();
                 my $var = $raw;
                 $var =~ s/^[\$\@\%]//;
@@ -2052,11 +2108,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 my $escaped = $self->_escape_c_string($val);
                 push @lines, "            OP *defop = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped\"));";
             }
-        } elsif ($default isa Chalk::Bootstrap::IR::Node::Constructor
-                && $default->class() eq 'ArrayRefExpr') {
+        } elsif ($default isa Chalk::IR::Node::ArrayRef
+                || ($default isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $default->class() eq 'ArrayRefExpr')) {
             push @lines, '            OP *defop = newANONLIST(NULL);';
-        } elsif ($default isa Chalk::Bootstrap::IR::Node::Constructor
-                && $default->class() eq 'HashRefExpr') {
+        } elsif ($default isa Chalk::IR::Node::HashRef
+                || ($default isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $default->class() eq 'HashRefExpr')) {
             push @lines, '            OP *defop = newANONHASH(NULL);';
         } else {
             # Unknown default — skip defop entirely
