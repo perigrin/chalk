@@ -10,6 +10,9 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node) {
     method operation() { 'Loop' }
 
     method set_backedge_ctrl($ctrl) {
+        my $old = $self->inputs()->[1];
+        $old->remove_consumer($self) if defined $old;
         $self->inputs()->[1] = $ctrl;
+        $ctrl->add_consumer($self) if defined $ctrl;
     }
 }

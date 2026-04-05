@@ -25,7 +25,7 @@ class Chalk::IR::Node {
 
     method content_hash() {
         my $op = $self->operation();
-        my @input_ids = map { $_->id() } $inputs->@*;
+        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $inputs->@*;
         return $op . '|' . join('|', @input_ids);
     }
 }

@@ -17,6 +17,9 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node) {
     }
 
     method set_backedge($value) {
+        my $old = $self->inputs()->[1];
+        $old->remove_consumer($self) if defined $old;
         $self->inputs()->[1] = $value;
+        $value->add_consumer($self) if defined $value;
     }
 }
