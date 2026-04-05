@@ -158,6 +158,46 @@ class Chalk::Bootstrap::Scope {
         return $same // $phi;
     }
 
+    # Merge pre-loop and body-final scopes at a Loop node, creating Phi nodes for
+    # variables that differ between loop entry and body exit.
+    # $body_scope is a hashref of { var_name => body_final_binding }.
+    # $loop is the Loop CFG node.
+    # $factory is the NodeFactory.
+    # $iterator is the loop variable name (excluded from Phis, or undef if none).
+    # Returns a new scope with Phi nodes for loop-carried variables.
+    method merge_for_loop($body_scope, $loop, $factory, $iterator) {
+        my %merged;
+
+        for my $name ($self->variable_names()) {
+            my $pre_val  = $bindings->{$name};
+            my $body_val = $body_scope->{$name};
+
+            # Iterator variable is defined by the loop itself — exclude from Phi creation
+            if (defined $iterator && $name eq $iterator) {
+                $merged{$name} = $pre_val;
+                next;
+            }
+
+            # If body did not assign this variable, no Phi needed
+            if (!defined $body_val
+                    || (defined $pre_val && refaddr($pre_val) == refaddr($body_val))) {
+                $merged{$name} = $pre_val;
+                next;
+            }
+
+            # Values differ — create a Phi and wire the backedge immediately
+            my $phi = $factory->make('Phi',
+                region => $loop,
+                values => [$pre_val, undef],
+            );
+            $phi->set_backedge($body_val);
+
+            $merged{$name} = $phi;
+        }
+
+        return Chalk::Bootstrap::Scope->new(bindings => \%merged);
+    }
+
     # Merge two branch scopes at a Region node, creating Phi nodes for variables
     # that have different values (by identity) across the two branches.
     # $then_scope: final scope after the then-branch
