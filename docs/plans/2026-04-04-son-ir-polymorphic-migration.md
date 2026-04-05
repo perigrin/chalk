@@ -256,27 +256,32 @@ working.
 
 ### Factory Shim
 
-`Chalk::IR::NodeFactory` wraps the new type system. The old singleton
-`Chalk::Bootstrap::IR::NodeFactory::instance()` returns a thin wrapper
-that delegates internally.
+`Chalk::IR::Shim` translates old-style Constructor parameters to new
+typed nodes. `Chalk::IR::NodeFactory` creates the typed nodes with hash
+consing. The old singleton `Chalk::Bootstrap::IR::NodeFactory` has the
+wiring to delegate to the Shim, but **activation is disabled** until
+Phase 4 migrates `isa Constructor` checks.
 
-Old-style `make('Constructor', class => 'BinaryExpr', ...)` **eagerly
-translates** to the new typed node. The factory never creates Constructor
-nodes — it always creates the target type (e.g., `Add`). This ensures
-a single hash-consing cache with consistent content hashes. Old-style
-and new-style callers that create the same computation get the same
-cached node.
+**Why disabled:** ~100 sites across Actions.pm, Target/Perl.pm,
+Target/C.pm, EmitHelpers.pm, and StructPromotion.pm check
+`$node isa Chalk::Bootstrap::IR::Node::Constructor`. Translated nodes
+(e.g., `Chalk::IR::Node::Add`) don't inherit from Constructor, so
+these checks silently fail. The shim must be enabled incrementally as
+each consumer file's `isa Constructor` checks are migrated in Phase 4.
 
-Old-style creation:
+**Translation API** (works when called directly):
 ```perl
-$factory->make('Constructor', class => 'BinaryExpr',
-    op => $op, left => $left, right => $right)
+use Chalk::IR::Shim;
+my $typed = Chalk::IR::Shim::translate($factory, 'BinaryExpr',
+    op => $op, left => $left, right => $right);
+# Returns Chalk::IR::Node::Add with class() => 'BinaryExpr'
 ```
 
-Translates internally to:
-```perl
-$factory->make('Add', inputs => [$left, $right])  # when op is '+'
-```
+**Activation sequence** (Phase 4, per-file):
+1. Migrate a consumer file's `isa Constructor` checks to `isa` typed nodes
+2. Enable shim translation for the Constructor classes that file uses
+3. Verify tests pass
+4. Repeat for next file
 
 The singleton goes away when all callers switch to the new API.
 
@@ -289,11 +294,14 @@ Create `Chalk::IR::Graph`. Create metadata structs (Program, ClassInfo,
 MethodInfo, FieldInfo, SubInfo) as plain `feature class` data containers.
 Add corresponding node types to perl5-son.
 
-**Phase 2: Factory shim.**
-Rewrite NodeFactory to accept both old-style and new-style creation.
-Old-style calls eagerly translate to new typed nodes (no Constructor
-objects in the cache). New nodes respond to `->class()` for backward
-compatibility with unmigrated consumers.
+**Phase 2: Factory shim (built but disabled).**
+Create `Chalk::IR::Shim` translation module and wire it into the old
+NodeFactory. The shim correctly translates 17 Constructor classes to
+typed nodes, but activation is disabled behind `if (0)` because ~100
+`isa Constructor` checks in consumers would break. BinOp/UnaryOp gain
+named fields (left/right/operand) with ADJUST fallback for migration
+layout compatibility. Node base gains `compat_class` field and `class()`
+method for backward compat. Phase 4 enables the shim incrementally.
 
 **Phase 3: Actions.pm — emit metadata and graphs directly.**
 This is two sub-phases due to entanglement between structural output and
@@ -312,8 +320,10 @@ scope/Phi tracking:
   entry point changes** — Actions.pm structural output and codegen
   structural traversal must change together (see Phase 4 note).
 
-**Phase 4: Consumer migration (file-by-file).**
-Replace `->class() eq 'X'` with `isa Chalk::IR::Node::X`. Order by
+**Phase 4: Consumer migration + shim activation (file-by-file).**
+For each consumer file: migrate `isa Constructor` checks to typed `isa`
+checks, migrate `->class() eq 'X'` to typed `isa` checks, then enable
+shim translation for the corresponding Constructor classes. Order by
 increasing risk:
 
 1. ToSoN.pm — delete entirely (adapter no longer needed)
@@ -326,6 +336,10 @@ increasing risk:
 7. Target/Perl.pm — large; includes restructuring entry points to walk
    metadata + per-method graphs (merged from former Phase 6)
 8. Target/C.pm — largest; same entry point restructuring
+
+Each file migration enables the shim for the Constructor classes that
+file consumes. The shim's `if (0)` guard is replaced with a set of
+enabled classes that grows as consumers are migrated.
 
 **Note:** Phase 3b and Phase 4 items 7-8 are atomic for structural nodes.
 Actions.pm cannot emit metadata structs until codegen can consume them.
@@ -343,8 +357,9 @@ determinism, intermediate base class accessors (`left()`, `right()`,
 `operand()`, `op_str()`). Hash consing verified: identical inputs produce
 same node object.
 
-**Phase 2:** Existing test suite passes unchanged. Factory shim verified:
-old-style and new-style creation produce identical nodes (same cache entry).
+**Phase 2:** Shim translation works correctly when called directly (21
+tests). Old factory shim wiring exists but is disabled — existing test
+suite passes unchanged. Named fields and class() compat verified.
 
 **Phase 3a:** Existing test suite passes. No change in codegen output.
 
