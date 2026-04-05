@@ -2425,14 +2425,21 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 return $result;
             }
-            # Plain variable assignment ($var = expr) — emit as BinaryExpr, not VarDecl.
-            # VarDecl is only for explicit `my`/`our`/`state` declarations (handled above).
-            return $factory->make('Constructor',
-                'class' => 'BinaryExpr',
-                op    => $op,
-                left  => $target,
-                right => $value,
+            # Plain variable assignment ($var = expr) — emit as a VarDecl and update scope.
+            # In SSA form, each assignment to a variable creates a new definition point,
+            # represented as a VarDecl node so downstream analyses can track the value.
+            my $assign_result = $factory->make('Constructor',
+                'class'       => 'VarDecl',
+                variable    => $target,
+                initializer => $value,
             );
+            # SSA: track reassignment in scope so downstream analyses can resolve the new value.
+            if ($target isa Chalk::Bootstrap::IR::Node::Constant
+                    && defined $target->value()
+                    && $target->value() =~ /^[\$\@\%]/) {
+                $update_scope->($target->value(), $assign_result);
+            }
+            return $assign_result;
         }
 
         # Compound assignment (.=, //=, +=, etc.)
