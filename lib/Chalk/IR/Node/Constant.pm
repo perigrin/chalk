@@ -13,6 +13,7 @@ class Chalk::IR::Node::Constant :isa(Chalk::IR::Node) {
     method operation() { 'Constant' }
 
     method content_hash() {
-        return "Constant|value=" . (defined $value ? $value : 'undef');
+        return "Constant|const_type=" . $const_type
+             . "|value=" . (defined $value ? $value : 'undef');
     }
 }

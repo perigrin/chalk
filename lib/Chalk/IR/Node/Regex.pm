@@ -8,4 +8,10 @@ use Chalk::IR::Node;
 
 class Chalk::IR::Node::Regex :isa(Chalk::IR::Node) {
     field $flags :param :reader = '';
+
+    method content_hash() {
+        my $op = $self->operation();
+        my @input_ids = map { $_->id() } $self->inputs()->@*;
+        return $op . "|flags=" . $flags . "|" . join('|', @input_ids);
+    }
 }

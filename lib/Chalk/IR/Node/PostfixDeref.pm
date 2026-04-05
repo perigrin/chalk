@@ -10,4 +10,9 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Node) {
     field $sigil :param :reader;
 
     method operation() { 'PostfixDeref' }
+
+    method content_hash() {
+        my @input_ids = map { $_->id() } $self->inputs()->@*;
+        return "PostfixDeref|sigil=" . $sigil . "|" . join('|', @input_ids);
+    }
 }

@@ -20,7 +20,7 @@ is($c->operation(), 'Constant', 'Constant operation');
 is($c->value(), '42', 'Constant value');
 is($c->const_type(), 'integer', 'Constant const_type');
 is($c->stamp(), 'Int', 'Constant stamp');
-like($c->content_hash(), qr/Constant\|value=42/, 'Constant content_hash includes value');
+like($c->content_hash(), qr/Constant\|const_type=integer\|value=42/, 'Constant content_hash includes const_type and value');
 
 my $undef_c = Chalk::IR::Node::Constant->new(id => 'c_u', value => undef, stamp => 'Undef', const_type => 'string');
 like($undef_c->content_hash(), qr/value=undef/, 'undef value in content_hash');

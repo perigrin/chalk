@@ -10,4 +10,9 @@ class Chalk::IR::Node::CompoundAssign :isa(Chalk::IR::Node) {
     field $op :param :reader;
 
     method operation() { 'CompoundAssign' }
+
+    method content_hash() {
+        my @input_ids = map { $_->id() } $self->inputs()->@*;
+        return "CompoundAssign|op=" . $op . "|" . join('|', @input_ids);
+    }
 }
