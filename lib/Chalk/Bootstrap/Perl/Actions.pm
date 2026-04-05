@@ -165,8 +165,7 @@ class Chalk::Bootstrap::Perl::Actions {
 
     # Helper: check if a BuiltinCall node should be unwrapped during push-inward
     my sub _is_unwrappable_builtin($node) {
-        return false unless ($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'builtin')
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor && $node->class() eq 'BuiltinCall');
+        return false unless $node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'builtin';
         my $name = $node->inputs()->[0]->value();
         return $PREFIX_BUILTINS{$name} || $LIST_BUILTINS{$name};
     }
@@ -186,7 +185,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # Collect wrappers to rewrap later
         my @wrappers;
         my $current = $target;
-        while (defined $current && ($current isa Chalk::IR::Node || $current isa Chalk::Bootstrap::IR::Node::Constructor)) {
+        while (defined $current && $current isa Chalk::IR::Node) {
             if ($current isa Chalk::Bootstrap::IR::Node::Constructor
                     && $current->class() eq 'ReturnStmt') {
                 push @wrappers, ['ReturnStmt'];
@@ -200,9 +199,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
                 my $args = $current->inputs()->[1];
                 $current = $args->[-1];
-            } elsif (($current isa Chalk::IR::Node::Call && $current->dispatch_kind() eq 'method')
-                    || ($current isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $current->class() eq 'MethodCallExpr')) {
+            } elsif ($current isa Chalk::IR::Node::Call && $current->dispatch_kind() eq 'method') {
                 # MethodCall wrapping a prefix construct — peel it off
                 push @wrappers, ['MethodCallExpr', $current->inputs()->[1], $current->inputs()->[2]];
                 $current = $current->inputs()->[0];  # invocant
@@ -263,7 +260,7 @@ class Chalk::Bootstrap::Perl::Actions {
     my sub _push_methodcall_inward($factory, $invocant, $method_name, $args) {
         my @wrappers;
         my $current = $invocant;
-        while (defined $current && ($current isa Chalk::IR::Node || $current isa Chalk::Bootstrap::IR::Node::Constructor)) {
+        while (defined $current && $current isa Chalk::IR::Node) {
             if ($current isa Chalk::Bootstrap::IR::Node::Constructor
                     && $current->class() eq 'ReturnStmt') {
                 push @wrappers, ['ReturnStmt'];
@@ -277,9 +274,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @wrappers, ['BuiltinCall', $current->inputs()->[0], $current->inputs()->[1]];
                 my $bi_args = $current->inputs()->[1];
                 $current = $bi_args->[-1];
-            } elsif (($current isa Chalk::IR::Node::PostfixDeref)
-                    || ($current isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $current->class() eq 'PostfixDerefExpr')) {
+            } elsif ($current isa Chalk::IR::Node::PostfixDeref) {
                 # PostfixDeref wrapping target — peel off and rewrap outside
                 push @wrappers, ['PostfixDerefExpr', $current->inputs()->[1]];
                 $current = $current->inputs()->[0];  # target
@@ -413,9 +408,7 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($node->class() eq 'MethodCallExpr') {
             my $invocant = $node->inputs()->[0];
             if (defined $invocant
-                    && ($invocant isa Chalk::IR::Node::PostfixDeref
-                        || ($invocant isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $invocant->class() eq 'PostfixDerefExpr'))) {
+                    && $invocant isa Chalk::IR::Node::PostfixDeref) {
                 my $inner_target = $invocant->inputs()->[0];
                 my $sigil = $invocant->inputs()->[1];
                 my $new_method = $factory->make('Constructor',
@@ -446,21 +439,19 @@ class Chalk::Bootstrap::Perl::Actions {
             if (defined $target
                     && (($target isa Chalk::IR::Node::Call
                             && $target->dispatch_kind() eq 'builtin')
-                        || $target isa Chalk::Bootstrap::IR::Node::Constructor)) {
-                if (($target isa Chalk::IR::Node::Call
-                            && $target->dispatch_kind() eq 'builtin')
                         || ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $target->class() eq 'BuiltinCall')) {
+                            && ($target->class() eq 'ReturnStmt'
+                                || $target->class() eq 'DieCall')))) {
+                if ($target isa Chalk::IR::Node::Call
+                        && $target->dispatch_kind() eq 'builtin') {
                     $builtin_call = $target;
                 } elsif ($target isa Chalk::Bootstrap::IR::Node::Constructor
                         && ($target->class() eq 'ReturnStmt'
                         || $target->class() eq 'DieCall')) {
                     my $inner = $target->inputs()->[0];
                     if (defined $inner
-                            && (($inner isa Chalk::IR::Node::Call
-                                    && $inner->dispatch_kind() eq 'builtin')
-                                || ($inner isa Chalk::Bootstrap::IR::Node::Constructor
-                                    && $inner->class() eq 'BuiltinCall'))) {
+                            && $inner isa Chalk::IR::Node::Call
+                            && $inner->dispatch_kind() eq 'builtin') {
                         $builtin_call = $inner;
                         $wrapper_class = $target->class();
                     }
@@ -498,9 +489,7 @@ class Chalk::Bootstrap::Perl::Actions {
             # → UnaryExpr(op, SubscriptExpr(X, $key, style))
             # The subscript belongs on the operand, not wrapping the negation.
             if (defined $target
-                    && ($target isa Chalk::IR::Node::UnaryOp
-                        || ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $target->class() eq 'UnaryExpr'))) {
+                    && $target isa Chalk::IR::Node::UnaryOp) {
                 my $operand = $target->inputs()->[1];
                 my $new_operand = $factory->make('Constructor',
                     'class'  => 'SubscriptExpr',
@@ -526,9 +515,7 @@ class Chalk::Bootstrap::Perl::Actions {
             # Handles both logical (||, &&) and comparison (<, >, etc.) ops
             # since SubscriptExpr wrapping any BinaryExpr is always corruption.
             if (defined $target
-                    && ($target isa Chalk::IR::Node::BinOp
-                        || ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $target->class() eq 'BinaryExpr'))) {
+                    && $target isa Chalk::IR::Node::BinOp) {
                 my $right = $target->inputs()->[2];
                 my $new_right = $factory->make('Constructor',
                     'class'  => 'SubscriptExpr',
@@ -803,13 +790,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 } else {
                     push @result, $item;
                 }
-            } elsif (($item isa Chalk::IR::Node::BinOp
-                    || ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'BinaryExpr'))
+            } elsif ($item isa Chalk::IR::Node::BinOp
                     && $item->inputs()->[0]->value() eq '='
-                    && ($item->inputs()->[1] isa Chalk::IR::Node::VarDecl
-                        || ($item->inputs()->[1] isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $item->inputs()->[1]->class() eq 'VarDecl'))
+                    && $item->inputs()->[1] isa Chalk::IR::Node::VarDecl
                     && !defined $item->inputs()->[1]->inputs()->[1]) {
                 # Merge BinaryExpr(=, VarDecl(var, undef), expr) → VarDecl(var, expr)
                 my $var_decl = $item->inputs()->[1];
@@ -818,13 +801,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     variable    => $var_decl->inputs()->[0],
                     initializer => $item->inputs()->[2],
                 );
-            } elsif (($item isa Chalk::IR::Node::BinOp
-                    || ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'BinaryExpr'))
-                    && ($item->inputs()->[1] isa Chalk::IR::Node::Call
-                            && $item->inputs()->[1]->dispatch_kind() eq 'builtin'
-                        || ($item->inputs()->[1] isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $item->inputs()->[1]->class() eq 'BuiltinCall'))
+            } elsif ($item isa Chalk::IR::Node::BinOp
+                    && $item->inputs()->[1] isa Chalk::IR::Node::Call
+                    && $item->inputs()->[1]->dispatch_kind() eq 'builtin'
                     && $LIST_BUILTINS{$item->inputs()->[1]->inputs()->[0]->value()}) {
                 # Restructure BinaryExpr(op, BuiltinCall(name, [..., last]), right)
                 # into BuiltinCall(name, [..., BinaryExpr(op, last, right)])
@@ -849,9 +828,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     name    => $name,
                     args    => \@args,
                 );
-            } elsif (($item isa Chalk::IR::Node::VarDecl
-                    || ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'VarDecl'))
+            } elsif ($item isa Chalk::IR::Node::VarDecl
                     && !defined $item->inputs()->[1]
                     && $i + 1 <= $#$stmts
                     && $stmts->[$i + 1] isa Chalk::Bootstrap::IR::Node) {
@@ -873,12 +850,9 @@ class Chalk::Bootstrap::Perl::Actions {
                         || $LIST_BUILTINS{$next->value()}
                         || $PREFIX_BUILTINS{$next->value()});
                 # MethodCallExpr and BuiltinCall are always separate statements
-                $is_boundary = true if ($next isa Chalk::IR::Node::Call
-                        && ($next->dispatch_kind() eq 'method'
-                            || $next->dispatch_kind() eq 'builtin'))
-                    || ($next isa Chalk::Bootstrap::IR::Node::Constructor
-                        && ($next->class() eq 'MethodCallExpr'
-                            || $next->class() eq 'BuiltinCall'));
+                $is_boundary = true if $next isa Chalk::IR::Node::Call
+                    && ($next->dispatch_kind() eq 'method'
+                        || $next->dispatch_kind() eq 'builtin');
                 if (!$is_boundary) {
                     $i++;
                     push @result, $factory->make('Constructor',
@@ -1379,9 +1353,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $n = pop @stack;
             next unless defined $n;
             next unless $n isa Chalk::Bootstrap::IR::Node;
-            if (($n isa Chalk::IR::Node::Call && $n->dispatch_kind() eq 'builtin')
-                    || ($n isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $n->class() eq 'BuiltinCall')) {
+            if ($n isa Chalk::IR::Node::Call && $n->dispatch_kind() eq 'builtin') {
                 my $name_node = $n->inputs()->[0];
                 if (defined $name_node
                         && $name_node isa Chalk::Bootstrap::IR::Node::Constant
@@ -2174,25 +2146,19 @@ class Chalk::Bootstrap::Perl::Actions {
         # Chain postfix operations by setting invocant/target
         my $result = $base;
         for my $op (@postfix_ops) {
-            if (($op isa Chalk::IR::Node::Call && $op->dispatch_kind() eq 'method')
-                    || ($op isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $op->class() eq 'MethodCallExpr')) {
+            if ($op isa Chalk::IR::Node::Call && $op->dispatch_kind() eq 'method') {
                 # Set invocant to current result, pushing inward
                 # past any prefix wrappers from stale-value merge
                 $result = _push_methodcall_inward(
                     $factory, $result, $op->inputs()->[1], $op->inputs()->[2],
                 );
-            } elsif (($op isa Chalk::IR::Node::Subscript)
-                    || ($op isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $op->class() eq 'SubscriptExpr')) {
+            } elsif ($op isa Chalk::IR::Node::Subscript) {
                 # Push subscript inside exists/delete BuiltinCall so the
                 # argument includes the full subscript chain:
                 #   SubscriptExpr(BuiltinCall(exists, [$chart]), $pos)
                 #   → BuiltinCall(exists, [SubscriptExpr($chart, $pos)])
-                if (($result isa Chalk::IR::Node::Call
-                            && $result->dispatch_kind() eq 'builtin')
-                        || ($result isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $result->class() eq 'BuiltinCall')) {
+                if ($result isa Chalk::IR::Node::Call
+                        && $result->dispatch_kind() eq 'builtin') {
                     my $bname = $result->inputs()->[0]->value();
                     if ($bname eq 'exists' || $bname eq 'delete') {
                         my @args = $result->inputs()->[1]->@*;
@@ -2217,17 +2183,12 @@ class Chalk::Bootstrap::Perl::Actions {
                     index  => $op->inputs()->[1],
                     style  => $op->inputs()->[2],
                 );
-            } elsif (($op isa Chalk::IR::Node::PostfixDeref)
-                    || ($op isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $op->class() eq 'PostfixDerefExpr')) {
+            } elsif ($op isa Chalk::IR::Node::PostfixDeref) {
                 $result = $factory->make('Constructor',
                     'class'  => 'PostfixDerefExpr',
                     target => $result,
                     sigil  => $op->inputs()->[1],
                 );
-            } elsif ($op isa Chalk::Bootstrap::IR::Node::Constructor) {
-                # Unknown Constructor postfix — return as-is
-                $result = $op;
             }
         }
 
@@ -2450,9 +2411,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 );
             }
             # VarDecl target: set its initializer and return it
-            if ($target isa Chalk::IR::Node::VarDecl
-                    || ($target isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $target->class() eq 'VarDecl')) {
+            if ($target isa Chalk::IR::Node::VarDecl) {
                 my $result = $factory->make('Constructor',
                     'class'       => 'VarDecl',
                     variable    => $target->inputs()->[0],
