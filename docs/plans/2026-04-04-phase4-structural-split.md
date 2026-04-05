@@ -1,4 +1,4 @@
-# Phase 4: Structural Split + Braun-Style SSA
+# Phase 4: SSA Scope + Structural Split
 
 ## Problem
 
@@ -13,68 +13,67 @@ This design has three problems:
    in metadata, not the graph
 2. Phi insertion in Program() is fragile — it only handles loops, misses
    if/else merges, and can't work with per-method graphs
-3. The single-tree output couples parser to codegen format
+3. Variable reassignments (`$x = expr`) don't update the scope — only
+   `my` declarations do. This means the IR doesn't track SSA versions
+   for reassigned variables.
 
 ## Goal
 
-1. Actions.pm emits metadata structs (Program, ClassInfo, MethodInfo,
-   FieldInfo, SubInfo, UseInfo) directly during parsing
-2. Each method/sub body becomes a self-contained `Chalk::IR::Graph`
-   with a schedule (control flow context for each node)
-3. Phi nodes are created lazily during parsing via Braun et al.'s
-   algorithm adapted for Sea of Nodes, eliminating the post-hoc pass
-4. Codegen walks metadata for program structure, reads per-method
-   graphs for method body emission
+**Phase 4a (SSA Scope):**
+1. Assign nodes update the scope (new SSA value per reassignment)
+2. IfStatement forks scope per-branch and merges eagerly at Region
+   completion with Phis for variables that differ between branches
+3. Loop Phis continue via the existing sentinel mechanism
+4. Trivial Phi removal inline
+5. Remove post-hoc Phi pass from Program()
 
-## Part A: Braun-Style Scope
+**Phase 4b (Structural Split):**
+1. Actions.am emits metadata structs incrementally, one structural type
+   at a time: UseDecl → FieldDecl → MethodDecl → SubDecl → ClassDecl → Program
+2. Each method/sub body becomes a self-contained `Chalk::IR::Graph`
+   with a schedule (control flow context per node)
+3. ReturnStmt → Return CFG node, DieCall → Unwind CFG node
+4. Codegen accepts both old and new formats during transition
+5. TernaryExpr stays as computation node (lowered in a future pass)
+
+## Phase 4a: SSA Scope
 
 ### Current State
 
-`Chalk::Bootstrap::Scope` is a name→value immutable map. Variable
-definitions and lookups are simple:
+`Chalk::Bootstrap::Scope` is an immutable name→value map. Only VarDecl
+(my/our/state declarations) updates the scope. Variable reassignment
+(`$x = expr`) produces an Assign node but does not update the scope.
 
-```perl
-$scope = $scope->define('$x', $node);
-my $val = $scope->lookup('$x');
+Phi insertion is a post-hoc pass in `Program()` that only handles loops
+via `$_loop_body_var_refs`. If/else branches don't produce Phis.
+
+The scope already has `fork_for_loop()` and `resolve_sentinel()` for
+lazy loop Phi creation, but these are only used in tests.
+
+### Hybrid Phi Strategy (Click + Sentinel)
+
+Earley's left-to-right completion order means that by the time
+IfStatement completes, both branches' scope effects are available.
+This enables eager Phi creation at if/else merge points (Click-style).
+
+Loops are different — the loop body is parsed before the backedge is
+known. The existing sentinel mechanism handles this (lazy Phi creation).
+
+**If/else Phis (eager, Click-style):**
+1. IfStatement's semantic action reads per-branch scopes from child
+   Contexts via `inherited_cfg_state`
+2. Diffs the two branch scopes against the pre-if scope
+3. For variables that differ, creates Phi at the Region node
+4. Post-if scope maps those variables to the Phi nodes
+
+**Loop Phis (lazy, sentinel-based):**
+1. At loop entry, `fork_for_loop()` replaces bindings with sentinels
+2. When a variable is read inside the loop, `resolve_sentinel()` creates
+   a Phi on demand
+3. At loop exit, backedge values are wired into the Phis
+
+**Trivial Phi removal:**
 ```
-
-Phi insertion happens after the fact in `Program()`:
-- Walk statements looking for Loop nodes
-- For each loop, check which variables were defined before the loop
-- Create Phi nodes connecting pre-loop value to loop-body value
-
-This only handles loops. Variables that differ across if/else branches
-don't get Phis — they rely on the Earley parser's merge semantics.
-
-### Target State
-
-Scope becomes region-aware. Each scope knows which control flow Region
-(or Loop) it belongs to. Variable reads at merge points create Phis
-lazily.
-
-```perl
-# Write: variable defined at current region
-$scope->write_variable($name, $value);
-
-# Read: may create Phi at current region if values differ
-my $val = $scope->read_variable($name);
-```
-
-### Braun Algorithm (SoN adaptation)
-
-```
-read_variable($name, $region):
-  if $region has local definition for $name:
-    return it
-  if $region has single control predecessor:
-    return read_variable($name, predecessor_region)
-  # Merge point: region has multiple control inputs
-  create Phi at $region
-  record Phi (break cycles for loops)
-  for each control input of $region:
-    add Phi operand: read_variable($name, input's region)
-  return remove_trivial_phi(Phi)
-
 remove_trivial_phi($phi):
   $same = undef
   for each operand:
@@ -82,95 +81,99 @@ remove_trivial_phi($phi):
     skip if operand is undef (unfilled backedge)
     if !defined $same: $same = operand
     elsif $same != operand: return $phi  # non-trivial
-  # All operands are the same value
   replace all uses of $phi with $same
   return $same
 ```
 
-In SoN terms:
-- "Block" → Region or Loop node
-- "Predecessor" → control input of the Region/Loop
-- "Local definition" → write_variable recorded at this region
+### Scope Changes
 
-### Scope Class Changes
+1. **Assign updates scope:** The `AssignmentExpression` semantic action
+   calls `$update_scope->($var_name, $assign_node)` for plain
+   assignments, not just VarDecl.
 
-`Chalk::Bootstrap::Scope` gains:
-- `field $region` — the current control flow Region/Loop node
-- `method read_variable($name)` — Braun lookup with lazy Phi
-- `method write_variable($name, $value)` — record definition at current region
-- `method with_region($new_region)` — create child scope at a new region
+2. **IfStatement merges scopes:** After creating the Region, IfStatement
+   reads the then-branch and else-branch final scopes, diffs them
+   against the pre-if scope, and creates Phis for differing variables.
 
-The existing `define()` and `lookup()` methods are replaced by
-`write_variable()` and `read_variable()`.
+3. **Remove Program() Phi pass:** The `$_loop_body_var_refs` side table
+   and the loop-walking Phi insertion logic in `Program()` are deleted.
+   Phi insertion happens during parsing via the hybrid mechanism.
 
-### Program() Simplification
+### Testing
 
-Current Program() (~80 lines) does:
-1. Collect statements
-2. Fix postfix chains
-3. Phi insertion for loops (the bulk of the code)
-4. Wrap in Constructor:Program
+- Variables assigned in if-branch get Phis at the merge point
+- Variables unchanged across branches don't get Phis (trivial removal)
+- Loop-carried variables get Phis at the loop header (sentinel mechanism)
+- Variables only read in loops don't get Phis (sentinel resolves to same value)
+- Nested if/else and loops produce correct Phis
+- The 16 green eval files still produce correct codegen output
 
-After Braun, Program() does:
-1. Collect metadata items (UseInfo, ClassInfo, SubInfo)
-2. Wrap in Chalk::IR::Program
-3. No Phi pass needed
+## Phase 4b: Structural Split (Incremental)
 
-## Part B: Per-Method Graph Construction
+### Migration Order
 
-### MethodDecl Action
+One structural type at a time, simplest first:
 
-Currently produces:
+1. **UseDecl** → `Chalk::IR::UseInfo` (new class: name, args)
+2. **_Attribute** → plain hashref `{name => $str}`
+3. **FieldDecl** → `Chalk::IR::FieldInfo`
+4. **MethodDecl** → `Chalk::IR::MethodInfo` with `Chalk::IR::Graph`
+5. **SubDecl** → `Chalk::IR::SubInfo` with `Chalk::IR::Graph`
+6. **ClassDecl** → `Chalk::IR::ClassInfo`
+7. **Program** → `Chalk::IR::Program`
+
+Each step: change the semantic action, update codegen to accept both
+formats, verify 16 green files.
+
+### ReturnStmt → Return, DieCall → Unwind
+
+When MethodDecl/SubDecl build per-method graphs (step 4-5):
+
+- `ReturnStmt(value)` becomes `Return(control, value)` — a CFG node
+  created via `make_cfg('Return', ...)`. The graph's `returns` field
+  collects all Return nodes.
+- `DieCall(args)` becomes `Unwind(control, exception_value)` — a CFG
+  node. The graph's `returns` field collects Unwind nodes too (they're
+  both graph exits).
+- Dual projections on Call (normal + exceptional edge) remain deferred.
+
+### Per-Method Graph Construction
+
+MethodDecl action builds the graph:
+
 ```perl
-$factory->make('Constructor',
-    class       => 'MethodDecl',
-    name        => $name_node,
-    params      => $params,
-    body        => $body_nodes,
-    return_type => $return_type,
-);
-```
-
-After Phase 4:
-```perl
+my $start = $factory->make_cfg('Start');
+# ... body parsing with scope produces computation nodes ...
+# ... ReturnStmt actions produce Return CFG nodes ...
 my $graph = Chalk::IR::Graph->new(
-    start    => $start_node,
+    start    => $start,
     returns  => \@return_nodes,
-    schedule => $method_schedule,
+    schedule => $method_schedule,  # extracted from cfg_state
 );
 Chalk::IR::MethodInfo->new(
-    name        => $name_str,         # plain string, not Constant node
-    params      => \@param_strs,      # plain strings
-    return_type => $return_type_str,
-    graph       => $graph,
+    name   => $name_str,      # plain string, not Constant node
+    params => \@param_strs,   # plain strings
+    graph  => $graph,
 );
 ```
 
 ### Schedule
 
-The schedule maps node IDs to their control flow context. It's the
-per-method extract of the current global `cfg_state` side table.
+The schedule maps node IDs to their control flow context — the per-method
+extract of the current global `cfg_state` side table.
 
 ```perl
-# In Chalk::IR::Graph
 field $schedule :param :reader = {};
 # Keys: node ID strings
-# Values: { region => $region_node, if_node => ..., loop => ..., etc. }
+# Values: { region => $node, if_node => ..., loop => ..., etc. }
 ```
 
 During parsing, semantic actions already build cfg_state entries. The
-MethodDecl action collects the cfg_state entries for nodes in its body
-and packages them as the graph's schedule.
+MethodDecl action collects entries for its body's nodes and packages
+them as the graph's schedule.
 
 Future: a Click-style scheduler derives the schedule from graph structure,
 replacing the parse-time schedule. The Graph interface stays the same.
-
-### SubDecl Action
-
-Same as MethodDecl but produces `Chalk::IR::SubInfo` with a `scope`
-field ('my', 'our', 'package').
-
-## Part C: Structural Metadata Emission
 
 ### New Type: Chalk::IR::UseInfo
 
@@ -181,113 +184,87 @@ class Chalk::IR::UseInfo {
 }
 ```
 
-### Actions.pm Changes
+### Codegen Restructuring
 
-| Semantic Action | Old Output | New Output |
-|---|---|---|
-| UseDecl | Constructor:UseDecl | Chalk::IR::UseInfo |
-| FieldDecl | Constructor:FieldDecl | Chalk::IR::FieldInfo |
-| MethodDecl | Constructor:MethodDecl | Chalk::IR::MethodInfo |
-| SubDecl | Constructor:SubDecl | Chalk::IR::SubInfo |
-| ClassDecl | Constructor:ClassDecl | Chalk::IR::ClassInfo |
-| Program | Constructor:Program | Chalk::IR::Program |
-| _Attribute | Constructor:_Attribute | plain hashref {name => $str} |
-
-### What Gets Deleted
-
-- Constructor:Program, ClassDecl, MethodDecl, SubDecl, FieldDecl, UseDecl,
-  _Attribute entries from NodeFactory's %INPUT_SPECS
-- The Phi insertion logic in Program()
-- The `$_loop_body_var_refs` side table in Actions.pm
-
-## Part D: Codegen Restructuring
-
-### Entry Points
+Codegen accepts both old Constructor and new metadata during transition.
+For each structural type migrated:
 
 ```perl
-# Target/Perl.pm
-method generate($program) {
-    # $program is Chalk::IR::Program
-    return $self->_emit_program($program);
-}
-
-method generate_with_cfg($program, $sa, $ctx) {
-    $self->_build_cfg_lookup($sa, $ctx);
-    return $self->_emit_program($program);
+# UseDecl example:
+method _emit_use($node_or_info) {
+    if ($node_or_info isa Chalk::IR::UseInfo) {
+        # New path: plain accessors
+        my $name = $node_or_info->name();
+        my $args = $node_or_info->args();
+    } else {
+        # Old path: Constructor node
+        my $name = $node_or_info->inputs()->[0]->value();
+        my $args = $node_or_info->inputs()->[1];
+    }
+    # ... rest of emission unchanged
 }
 ```
 
-### New _emit Methods for Metadata
+Old path removed when all structural types are migrated.
+
+For method body emission:
 
 ```perl
-method _emit_program($program) {
-    my @lines;
-    push @lines, $self->_emit_use_info($_) for $program->use_decls()->@*;
-    push @lines, $self->_emit_class_info($_) for $program->classes()->@*;
-    push @lines, $self->_emit_sub_info($_) for $program->top_level_subs()->@*;
-    return join("\n", @lines) . "\n";
-}
-
-method _emit_class_info($class_info) {
-    my $decl = "class " . $class_info->name();
-    $decl .= " :isa(" . $class_info->parent() . ")" if defined $class_info->parent();
-    $decl .= " {";
-    my @lines = ($decl);
-    push @lines, "    " . $self->_emit_field_info($_) for $class_info->fields()->@*;
-    push @lines, map { "    $_" } split(/\n/, $self->_emit_method_info($_))
-        for $class_info->methods()->@*;
-    push @lines, map { "    $_" } split(/\n/, $self->_emit_sub_info($_))
-        for $class_info->subs()->@*;
-    push @lines, "}";
-    return join("\n", @lines);
-}
-
 method _emit_method_info($method_info) {
     my $sig = '(' . join(', ', $method_info->params()->@*) . ')';
     my $graph = $method_info->graph();
     return $self->_emit_body_from_graph(
         "method " . $method_info->name() . "$sig {", $graph);
 }
+
+method _emit_body_from_graph($decl, $graph) {
+    my $schedule = $graph->schedule();
+    # Walk schedule entries, emit nodes via existing _emit_node/_emit_expr
+}
 ```
 
-### _emit_body_from_graph
+Both Target/Perl.pm and Target/C.pm need this. Shared methods can live
+in EmitHelpers.
 
-Reads the graph's schedule to emit the method body. Uses the same
-`_emit_node` / `_emit_expr` dispatch as today for computation nodes.
-The schedule tells it which nodes go inside if-branches, loop bodies, etc.
+### What Gets Deleted (after all structural types migrated)
 
-### Target/C.pm
-
-Same restructuring as Target/Perl.pm. Both inherit from EmitHelpers,
-so shared metadata emission methods can live there.
+- Constructor:Program, ClassDecl, MethodDecl, SubDecl, FieldDecl, UseDecl,
+  _Attribute, ReturnStmt, DieCall entries from NodeFactory %INPUT_SPECS
+- The `$_loop_body_var_refs` side table in Actions.pm (Phase 4a)
+- The Phi insertion logic in Program() (Phase 4a)
+- Old-path codegen branches for structural types (Phase 4b)
 
 ## Ordering
 
-1. **Part A first** — Braun scope is independently testable
-2. **Part B next** — per-method graphs need Braun scope
-3. **Parts C + D atomic** — Actions.pm output and codegen input change together
-4. Verify: 16 green files, all IR tests, no regressions
+1. **Phase 4a** — SSA scope (independently testable)
+2. **Phase 4b step 1-3** — UseDecl, _Attribute, FieldDecl (no graph needed)
+3. **Phase 4b step 4-5** — MethodDecl, SubDecl (graph construction + Return/Unwind)
+4. **Phase 4b step 6-7** — ClassDecl, Program (collecting metadata)
+
+Phase 4a can land independently. Phase 4b steps are incremental and
+independently verifiable.
 
 ## Risks
 
-1. **Braun scope + Earley parser interaction**: The Earley parser explores
-   multiple parse paths simultaneously. The scope must handle ambiguity
-   correctly — each parse alternative carries its own scope state via the
-   comonad Context. Braun's algorithm assumes a single forward pass, but
-   the Context threading should provide the right scope at each point.
+1. **Scope change + Earley ambiguity:** Earley explores multiple parse
+   paths. Each alternative carries its own Context/scope. Scope merging
+   in `multiply()` must not create spurious Phis from Earley ambiguity
+   (as opposed to genuine if/else control flow merges). Phis should only
+   be created in IfStatement's semantic action, not in multiply().
 
-2. **cfg_state extraction**: The current cfg_state is built by walking
-   the Context tree after parsing. Extracting per-method schedules
-   requires partitioning cfg_state entries by which method they belong to.
+2. **cfg_state extraction per-method:** The global cfg_state keyed by
+   Context refaddr must be partitioned to extract per-method schedules.
+   Entries for nodes in method A must not leak into method B's schedule.
 
-3. **Atomic C+D**: Changing Actions.pm output and codegen input
-   simultaneously is high-risk. Mitigation: comprehensive tests on the
-   16 green files before and after.
+3. **Return/Unwind inside nested control flow:** A `return` inside an
+   if-branch inside a loop must produce a Return CFG node at the right
+   control point. The control token threading should handle this, but
+   needs careful testing.
 
 ## Dependencies
 
 - Phase 1-3 complete (typed nodes flowing, shim active)
-- `Chalk::IR::Graph` exists (Phase 1)
+- `Chalk::IR::Graph` exists with `schedule` field (Phase 1, extended)
 - Metadata structs exist (Phase 1): Program, ClassInfo, MethodInfo,
   SubInfo, FieldInfo
-- New: `Chalk::IR::UseInfo` (created in this phase)
+- New: `Chalk::IR::UseInfo` (created in Phase 4b step 1)
