@@ -110,15 +110,20 @@ class Chalk::Bootstrap::IR::NodeFactory {
             my $class = $params{class}
                 or die "Constructor requires 'class' parameter";
 
-            # Try delegating to the new typed IR via the shim
-            $self->_ensure_new_factory();
-            my $typed = Chalk::IR::Shim::translate($_new_factory, $class, %params);
-            if (defined $typed) {
-                # Cache translated nodes in the shared node_cache keyed by their content hash
-                my $key = $typed->content_hash();
-                return $node_cache->{$key} if exists $node_cache->{$key};
-                $node_cache->{$key} = $typed;
-                return $typed;
+            # Shim translation is disabled until Phase 4 migrates isa Constructor
+            # checks in consumers. The shim code and tests remain for Phase 4.
+            # Enabling: remove the 'if (0)' guard and consumers must use
+            # $node isa Chalk::IR::Node::BinOp (etc.) instead of
+            # $node isa Chalk::Bootstrap::IR::Node::Constructor.
+            if (0) {  # DISABLED: translated nodes break ~100 isa Constructor checks
+                $self->_ensure_new_factory();
+                my $typed = Chalk::IR::Shim::translate($_new_factory, $class, %params);
+                if (defined $typed) {
+                    my $key = $typed->content_hash();
+                    return $node_cache->{$key} if exists $node_cache->{$key};
+                    $node_cache->{$key} = $typed;
+                    return $typed;
+                }
             }
 
             # Untranslated Constructor class — fall through to old path
