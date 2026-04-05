@@ -5,6 +5,13 @@ use utf8;
 
 package Chalk::IR::Shim;
 
+my %ENABLED;
+
+sub enable_class  ($class_name) { $ENABLED{$class_name} = 1; }
+sub disable_class ($class_name) { delete $ENABLED{$class_name}; }
+sub is_enabled    ($class_name) { exists $ENABLED{$class_name} }
+sub reset_enabled ()            { %ENABLED = (); }
+
 my %BINOP_MAP = (
     '+'   => 'Add',        '-'   => 'Subtract',  '*'   => 'Multiply',
     '/'   => 'Divide',     '%'   => 'Modulo',     '**'  => 'Power',
@@ -41,6 +48,9 @@ my %NOT_TRANSLATED = map { $_ => 1 } qw(
 );
 
 sub translate($factory, $constructor_class, %params) {
+    # Only translate classes that have been explicitly enabled
+    return undef unless $ENABLED{$constructor_class};
+
     # Fast exit for known-untranslated classes
     return undef if $NOT_TRANSLATED{$constructor_class};
 
