@@ -8,10 +8,11 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Shim;
 
-# Start clean
+# Start clean, then disable BinaryExpr to test the off→on transition
 Chalk::IR::Shim::reset_enabled();
+Chalk::IR::Shim::disable_class('BinaryExpr');
 
-# Before enabling: everything produces Constructor
+# With BinaryExpr disabled: produces Constructor
 Chalk::Bootstrap::IR::NodeFactory::reset_for_testing();
 my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
 
@@ -22,9 +23,9 @@ my $add_old = $f->make('Constructor', class => 'BinaryExpr',
     op => $op, left => $left, right => $right);
 
 isa_ok($add_old, 'Chalk::Bootstrap::IR::Node::Constructor',
-    'Before enable: BinaryExpr is Constructor');
+    'Disabled: BinaryExpr is Constructor');
 
-# Enable BinaryExpr
+# Re-enable BinaryExpr
 Chalk::IR::Shim::enable_class('BinaryExpr');
 ok(Chalk::IR::Shim::is_enabled('BinaryExpr'), 'BinaryExpr is enabled');
 ok(!Chalk::IR::Shim::is_enabled('Program'), 'Program is not enabled');

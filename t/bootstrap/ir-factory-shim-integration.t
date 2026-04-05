@@ -87,19 +87,25 @@ sub nconst ($val, $ct = 'string') {
         undef, 'Shim: Program not translated');
 }
 
-# --- Part 2: Old factory produces Constructor when class is not enabled ---
+# --- Part 2: Old factory still produces Constructor for structural types ---
 
 Chalk::Bootstrap::IR::NodeFactory::reset_for_testing();
 my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
 
+# Program is structural — never translated by the shim
+my $prog = $f->make('Constructor', class => 'Program', statements => []);
+isa_ok($prog, 'Chalk::Bootstrap::IR::Node::Constructor',
+    'Old factory: Program is Constructor (structural, not translated)');
+is($prog->class(), 'Program', 'Old factory: class() works');
+
+# BinaryExpr IS now default-enabled — produces typed Add
 my $op    = $f->make('Constant', const_type => 'string', value => '+');
 my $left  = $f->make('Constant', const_type => 'integer', value => '1');
 my $right = $f->make('Constant', const_type => 'integer', value => '2');
 my $add   = $f->make('Constructor', class => 'BinaryExpr',
     op => $op, left => $left, right => $right);
-
-isa_ok($add, 'Chalk::Bootstrap::IR::Node::Constructor',
-    'Old factory: BinaryExpr is Constructor when not enabled');
-is($add->class(), 'BinaryExpr', 'Old factory: class() works');
+isa_ok($add, 'Chalk::IR::Node::Add',
+    'Old factory: BinaryExpr produces typed Add (default-enabled)');
+is($add->class(), 'BinaryExpr', 'Old factory: class() compat works');
 
 done_testing();
