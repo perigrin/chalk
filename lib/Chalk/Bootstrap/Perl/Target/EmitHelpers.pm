@@ -196,9 +196,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             next unless ($item isa Chalk::IR::Node || $item isa Chalk::Bootstrap::IR::Node::Constructor);
             push @items_to_scan, $item;
             # Check VarDecl initializer for mis-parented SubDecl
-            if ($item isa Chalk::IR::Node::VarDecl
-                    || ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'VarDecl')) {
+            if ($item isa Chalk::IR::Node::VarDecl) {
                 my $init = $item->inputs()->[1];
                 if (defined $init && $init isa Chalk::Bootstrap::IR::Node::Constructor
                         && $init->class() eq 'SubDecl') {
@@ -348,9 +346,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         for my $item ($body->@*) {
-            if ($item isa Chalk::IR::Node::VarDecl
-                    || ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $item->class() eq 'VarDecl')) {
+            if ($item isa Chalk::IR::Node::VarDecl) {
                 my $var = $item->inputs()->[0]->value();
                 $var =~ s/^\$//;
                 push @keys, $var unless grep { $_ eq $var } @keys;
@@ -557,9 +553,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         $walk = sub ($node) {
             return unless defined $node;
 
-            if (($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'method')
-                    || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $node->class() eq 'MethodCallExpr')) {
+            if ($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'method') {
                 my $invocant_node = $node->inputs()->[0];
                 my $method_const  = $node->inputs()->[1];
 
@@ -620,9 +614,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         if ($returns_value) {
             my $value = $body_item->inputs()->[0];
-            if ($value isa Chalk::IR::Node::Interpolate
-                    || ($value isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $value->class() eq 'InterpolatedString')) {
+            if ($value isa Chalk::IR::Node::Interpolate) {
                 return false;
             }
             if ($value isa Chalk::Bootstrap::IR::Node::Constant
@@ -792,9 +784,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 }
             }
 
-            my $is_var_decl = $item isa Chalk::IR::Node::VarDecl
-                || ($item isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $item->class() eq 'VarDecl');
+            my $is_var_decl = $item isa Chalk::IR::Node::VarDecl;
             next unless $is_var_decl;
 
             if ($is_var_decl) {
@@ -804,16 +794,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                 next if %_class_scope_vars && exists $_class_scope_vars{$var};
                 $declared_vars->{$var} = true;
                 my $init = $item->inputs()->[1];
-                if (defined $init
-                        && ($init isa Chalk::IR::Node::VarDecl
-                            || ($init isa Chalk::Bootstrap::IR::Node::Constructor
-                                && $init->class() eq 'VarDecl'))) {
+                if (defined $init && $init isa Chalk::IR::Node::VarDecl) {
                     $self->_collect_var_decls([$init], $declared_vars);
                 }
                 if (defined $init
-                        && ($init isa Chalk::IR::Node::TryCatch
-                            || ($init isa Chalk::Bootstrap::IR::Node::Constructor
-                                && $init->class() eq 'TryCatchStmt'))) {
+                        && $init isa Chalk::IR::Node::TryCatch) {
                     my $state = $_cfg_lookup{refaddr($init)};
                     if (defined $state) {
                         my $try = $state->{try_stmts};

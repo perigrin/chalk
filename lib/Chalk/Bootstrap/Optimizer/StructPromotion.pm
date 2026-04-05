@@ -151,16 +151,12 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             || $node isa Chalk::IR::Node;
 
         # Pattern 1: VarDecl with HashRefExpr initializer (empty or literal)
-        if ($node isa Chalk::IR::Node::VarDecl
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $node->class() eq 'VarDecl')) {
+        if ($node isa Chalk::IR::Node::VarDecl) {
             my $variable    = $node->inputs()->[0];
             my $initializer = $node->inputs()->[1];
 
             if (defined $initializer
-                && ($initializer isa Chalk::IR::Node::HashRef
-                    || ($initializer isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $initializer->class() eq 'HashRefExpr'))) {
+                && $initializer isa Chalk::IR::Node::HashRef) {
 
                 my $var_name = $variable->value();
                 my $var_key  = "${var_prefix}::${var_name}";
@@ -190,9 +186,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         }
 
         # Pattern 2: BinaryExpr assignment with SubscriptExpr target
-        if ($node isa Chalk::IR::Node::BinOp
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $node->class() eq 'BinaryExpr')) {
+        if ($node isa Chalk::IR::Node::BinOp) {
             my $op_node = $node->inputs()->[0];
             my $left    = $node->inputs()->[1];
             my $right   = $node->inputs()->[2];
@@ -205,9 +199,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
                     # Type inference: if RHS is integer constant, mark field as integer
                     if (defined $left
-                        && ($left isa Chalk::IR::Node::Subscript
-                            || ($left isa Chalk::Bootstrap::IR::Node::Constructor
-                                && $left->class() eq 'SubscriptExpr'))) {
+                        && $left isa Chalk::IR::Node::Subscript) {
                         $self->_infer_field_type($var_prefix, $left, $right, $var_schemas);
                     }
                 }
@@ -227,9 +219,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         }
 
         # Pattern 3: Direct SubscriptExpr read access
-        if ($node isa Chalk::IR::Node::Subscript
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $node->class() eq 'SubscriptExpr')) {
+        if ($node isa Chalk::IR::Node::Subscript) {
             $self->_check_subscript_access($var_prefix, $node, $var_schemas);
             return;
         }
@@ -252,9 +242,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # Check a SubscriptExpr node for hash key access and accumulate keys.
     method _check_subscript_access($var_prefix, $node, $var_schemas) {
         return unless defined $node;
-        return unless $node isa Chalk::IR::Node::Subscript
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $node->class() eq 'SubscriptExpr');
+        return unless $node isa Chalk::IR::Node::Subscript;
 
         my $target = $node->inputs()->[0];
         my $index  = $node->inputs()->[1];
@@ -386,9 +374,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # Mark a SubscriptExpr node's field as used in integer context (arithmetic).
     method _mark_integer_context($var_prefix, $node, $var_schemas) {
         return unless defined $node;
-        return unless $node isa Chalk::IR::Node::Subscript
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $node->class() eq 'SubscriptExpr');
+        return unless $node isa Chalk::IR::Node::Subscript;
 
         my $target = $node->inputs()->[0];
         my $index  = $node->inputs()->[1];
@@ -558,16 +544,12 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                     || $stmt isa Chalk::IR::Node);
 
             # Detect VarDecl with empty HashRefExpr
-            if ($stmt isa Chalk::IR::Node::VarDecl
-                || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'VarDecl')) {
+            if ($stmt isa Chalk::IR::Node::VarDecl) {
                 my $var_node    = $stmt->inputs()->[0];
                 my $initializer = $stmt->inputs()->[1];
 
                 next unless defined $initializer
-                    && ($initializer isa Chalk::IR::Node::HashRef
-                        || ($initializer isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $initializer->class() eq 'HashRefExpr'));
+                    && $initializer isa Chalk::IR::Node::HashRef;
 
                 my $var_name = $var_node->value();
                 my $var_key  = "${var_prefix}::${var_name}";
@@ -579,9 +561,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             }
 
             # Detect assignment: $var->{key} = val
-            if ($stmt isa Chalk::IR::Node::BinOp
-                || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'BinaryExpr')) {
+            if ($stmt isa Chalk::IR::Node::BinOp) {
                 my $op_node = $stmt->inputs()->[0];
                 next unless defined $op_node
                     && $op_node isa Chalk::Bootstrap::IR::Node::Constant
@@ -589,9 +569,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
                 my $left = $stmt->inputs()->[1];
                 next unless defined $left
-                    && ($left isa Chalk::IR::Node::Subscript
-                        || ($left isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $left->class() eq 'SubscriptExpr'));
+                    && $left isa Chalk::IR::Node::Subscript;
 
                 my $target = $left->inputs()->[0];
                 next unless defined $target
@@ -624,9 +602,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
             # Replace VarDecl(HashRefExpr) with VarDecl(StructRef)
             if (defined $stmt
-                && ($stmt isa Chalk::IR::Node::VarDecl
-                    || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                        && $stmt->class() eq 'VarDecl'))) {
+                && $stmt isa Chalk::IR::Node::VarDecl) {
 
                 my $var_node = $stmt->inputs()->[0];
                 my $var_name = $var_node->value();
@@ -682,9 +658,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             || $node isa Chalk::IR::Node;
 
         # Replace SubscriptExpr on promoted var with FieldAccess
-        if ($node isa Chalk::IR::Node::Subscript
-            || ($node isa Chalk::Bootstrap::IR::Node::Constructor
-                && $node->class() eq 'SubscriptExpr')) {
+        if ($node isa Chalk::IR::Node::Subscript) {
             my $target = $node->inputs()->[0];
             my $index  = $node->inputs()->[1];
             my $style  = $node->inputs()->[2];
