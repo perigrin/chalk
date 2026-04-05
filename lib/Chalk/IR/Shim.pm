@@ -5,13 +5,15 @@ use utf8;
 
 package Chalk::IR::Shim;
 
-# Types whose consumers have all been migrated to dual-path isa checks.
-# These are safe to translate — the typed isa path handles them, and the
-# Constructor fallback is dead code that will be removed in Phase 5.
-# Types whose consumers have been fully migrated to dual-path isa checks.
-# More types are enabled as regressions are diagnosed and fixed.
+# All computation types — consumers have dual-path isa Constructor checks,
+# and the new base inherits from old base for isa Node compat.
+# Constructor fallback in dual-path is dead code, removed in Phase 5.
 my %DEFAULT_ENABLED = map { $_ => 1 } qw(
-    CompoundAssign RegexMatch RegexSubst BacktickExpr
+    BinaryExpr UnaryExpr MethodCallExpr BuiltinCall
+    SubscriptExpr PostfixDerefExpr CompoundAssign
+    HashRefExpr ArrayRefExpr AnonSubExpr
+    RegexMatch RegexSubst InterpolatedString
+    BacktickExpr VarDecl TryCatchStmt
 );
 
 my %ENABLED = %DEFAULT_ENABLED;

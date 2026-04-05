@@ -19,7 +19,7 @@ is($node->stamp(), undef, 'stamp defaults to undef');
 
 # operation() is abstract — base class dies
 eval { $node->operation() };
-like($@, qr/Subclass must implement/, 'base operation() dies');
+like($@, qr/must implement operation/, 'base operation() dies');
 
 # Consumer tracking
 my $producer = Chalk::IR::Node->new(id => 'p1');

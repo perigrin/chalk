@@ -1,27 +1,22 @@
 # ABOUTME: Base class for all IR nodes in the Chalk Sea of Nodes representation.
-# ABOUTME: Provides id, inputs, consumers, stamp fields with use-def chain tracking.
+# ABOUTME: Extends Chalk::Bootstrap::IR::Node for migration compat; adds stamp, compat_class, content_hash.
 use 5.42.0;
 use utf8;
 use experimental 'class';
 
-class Chalk::IR::Node {
-    field $id           :param :reader;
-    field $inputs       :param :reader = [];
-    field $consumers    :reader        = [];
+# Migration bridge: inheriting from the old base class ensures typed nodes
+# pass `isa Chalk::Bootstrap::IR::Node` checks (283 sites across 6 files).
+# This inheritance is removed in Phase 5 when those checks are migrated.
+use Chalk::Bootstrap::IR::Node;
+
+class Chalk::IR::Node :isa(Chalk::Bootstrap::IR::Node) {
+    # Fields added beyond the old base class
     field $stamp        :param :reader = undef;
     field $compat_class :param :reader = undef;
 
-    method add_consumer($node) {
-        push $consumers->@*, $node;
-    }
-
-    method remove_consumer($node) {
-        my $target_id = $node->id();
-        $consumers->@* = grep { $_->id() ne $target_id } $consumers->@*;
-    }
-
+    # Override operation() — subclasses still must implement
     method operation() {
-        die "Subclass must implement operation()";
+        die ref($self) . " must implement operation()";
     }
 
     method class() {
@@ -32,7 +27,7 @@ class Chalk::IR::Node {
     method content_hash() {
         my $op = $self->operation();
         my @parts;
-        for my $input ($inputs->@*) {
+        for my $input ($self->inputs()->@*) {
             if (!defined $input) {
                 push @parts, 'undef';
             } elsif (ref($input) eq 'ARRAY') {
