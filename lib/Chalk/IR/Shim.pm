@@ -5,12 +5,19 @@ use utf8;
 
 package Chalk::IR::Shim;
 
-my %ENABLED;
+# Types whose consumers have all been migrated to dual-path isa checks.
+# These are safe to translate — the typed isa path handles them, and the
+# Constructor fallback is dead code that will be removed in Phase 5.
+my %DEFAULT_ENABLED = map { $_ => 1 } qw(
+    CompoundAssign RegexMatch RegexSubst BacktickExpr
+);
+
+my %ENABLED = %DEFAULT_ENABLED;
 
 sub enable_class  ($class_name) { $ENABLED{$class_name} = 1; }
 sub disable_class ($class_name) { delete $ENABLED{$class_name}; }
 sub is_enabled    ($class_name) { exists $ENABLED{$class_name} }
-sub reset_enabled ()            { %ENABLED = (); }
+sub reset_enabled ()            { %ENABLED = %DEFAULT_ENABLED; }
 
 my %BINOP_MAP = (
     '+'   => 'Add',        '-'   => 'Subtract',  '*'   => 'Multiply',
