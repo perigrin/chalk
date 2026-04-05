@@ -35,4 +35,18 @@ is(scalar $producer->consumers()->@*, 0, 'remove_consumer removes it');
 my $stamped = Chalk::IR::Node->new(id => 's1', stamp => 'Int');
 is($stamped->stamp(), 'Int', 'stamp is set from constructor');
 
+# class() returns compat_class when set
+my $compat = Chalk::IR::Node->new(id => 'compat_1', compat_class => 'BinaryExpr');
+is($compat->class(), 'BinaryExpr', 'class() returns compat_class when set');
+
+# class() without compat_class — can't fully test on base (operation() dies)
+# Tested via subclass: class() falls back to operation()
+use Chalk::IR::Node::Start;
+my $start = Chalk::IR::Node::Start->new(id => 'start_class_test');
+is($start->class(), 'Start', 'class() falls back to operation() when no compat_class');
+
+# class() with compat_class on a subclass overrides operation()
+my $overridden = Chalk::IR::Node::Start->new(id => 'start_override', compat_class => 'BinaryExpr');
+is($overridden->class(), 'BinaryExpr', 'class() returns compat_class on subclass when set');
+
 done_testing();

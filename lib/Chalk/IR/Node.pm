@@ -5,10 +5,11 @@ use utf8;
 use experimental 'class';
 
 class Chalk::IR::Node {
-    field $id        :param :reader;
-    field $inputs    :param :reader = [];
-    field $consumers :reader        = [];
-    field $stamp     :param :reader = undef;
+    field $id           :param :reader;
+    field $inputs       :param :reader = [];
+    field $consumers    :reader        = [];
+    field $stamp        :param :reader = undef;
+    field $compat_class :param :reader = undef;
 
     method add_consumer($node) {
         push $consumers->@*, $node;
@@ -21,6 +22,11 @@ class Chalk::IR::Node {
 
     method operation() {
         die "Subclass must implement operation()";
+    }
+
+    method class() {
+        return $compat_class if defined $compat_class;
+        return $self->operation();
     }
 
     method content_hash() {
