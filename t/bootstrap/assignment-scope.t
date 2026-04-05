@@ -126,9 +126,9 @@ my sub make_parent_ctx(@children) {
     my $node = $result->extract();
     ok(defined $node, 'plain assignment: result has an IR node');
     ok($node isa Chalk::Bootstrap::IR::Node, 'plain assignment: result is an IR node');
-    is($node->class(), 'VarDecl', 'plain assignment: result is a VarDecl (reassign)');
+    is($node->class(), 'BinaryExpr', 'plain assignment: result is a BinaryExpr (Assign)');
 
-    # Verify scope was updated with the new VarDecl
+    # Verify scope was updated with the Assign node
     my $state = $sa->cfg_state($result);
     ok(defined $state, 'plain assignment: result has cfg_state');
     if (defined $state) {
@@ -216,7 +216,7 @@ my sub make_parent_ctx(@children) {
 
     my $node = $result->extract();
     ok(defined $node, 'no-scope assignment: result has an IR node');
-    is($node->class(), 'VarDecl', 'no-scope assignment: returns VarDecl even without scope');
+    is($node->class(), 'BinaryExpr', 'no-scope assignment: returns BinaryExpr (Assign)');
 }
 
 done_testing();
