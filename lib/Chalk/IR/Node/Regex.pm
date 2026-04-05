@@ -11,7 +11,7 @@ class Chalk::IR::Node::Regex :isa(Chalk::IR::Node) {
 
     method content_hash() {
         my $op = $self->operation();
-        my @input_ids = map { $_->id() } $self->inputs()->@*;
+        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
         return $op . "|flags=" . $flags . "|" . join('|', @input_ids);
     }
 }

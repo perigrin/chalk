@@ -13,7 +13,7 @@ class Chalk::IR::Node::FieldAccess :isa(Chalk::IR::Node::Access) {
     method operation() { 'FieldAccess' }
 
     method content_hash() {
-        my @input_ids = map { $_->id() } $self->inputs()->@*;
+        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
         return "FieldAccess|field_index=" . $field_index . "|field_stash=" . $field_stash . "|" . join('|', @input_ids);
     }
 }

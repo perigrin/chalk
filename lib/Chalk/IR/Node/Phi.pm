@@ -12,7 +12,7 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Node) {
     method operation() { 'Phi' }
 
     method content_hash() {
-        my @input_ids = map { $_->id() } $self->inputs()->@*;
+        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
         return "Phi|region=" . $region->id() . "|" . join('|', @input_ids);
     }
 
