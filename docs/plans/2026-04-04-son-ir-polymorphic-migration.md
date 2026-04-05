@@ -303,28 +303,18 @@ named fields (left/right/operand) with ADJUST fallback for migration
 layout compatibility. Node base gains `compat_class` field and `class()`
 method for backward compat. Phase 4 enables the shim incrementally.
 
-**Phase 3: Actions.pm — emit metadata and graphs directly.**
-This is two sub-phases due to entanglement between structural output and
-scope/Phi tracking:
+**Phase 3: Consumer migration + shim activation (file-by-file).**
+This is the critical phase — it migrates `isa Constructor` checks to
+typed `isa` checks and enables the factory shim incrementally. For each
+consumer file:
 
-- **3a: Computation node migration.** Change `make('Constructor',
-  class=>'BinaryExpr', ...)` calls to new-style `make('Add', ...)` for
-  computation nodes within method/sub bodies. The factory shim makes this
-  safe — old and new styles produce the same nodes.
+1. Replace `$node isa Chalk::Bootstrap::IR::Node::Constructor` with
+   typed checks (e.g., `$node isa Chalk::IR::Node::BinOp`)
+2. Replace `$node->class() eq 'X'` with `$node isa Chalk::IR::Node::X`
+3. Enable shim translation for the Constructor classes that file uses
+4. Verify tests pass
 
-- **3b: Structural split.** Change Program, ClassDecl, MethodDecl,
-  FieldDecl, SubDecl, UseDecl semantic actions to emit metadata structs
-  with per-method `Chalk::IR::Graph` instead of Constructor nodes.
-  Restructure the Phi insertion and scope tracking in Program() to work
-  with the new representation. **This sub-phase is atomic with codegen
-  entry point changes** — Actions.pm structural output and codegen
-  structural traversal must change together (see Phase 4 note).
-
-**Phase 4: Consumer migration + shim activation (file-by-file).**
-For each consumer file: migrate `isa Constructor` checks to typed `isa`
-checks, migrate `->class() eq 'X'` to typed `isa` checks, then enable
-shim translation for the corresponding Constructor classes. Order by
-increasing risk:
+Order by increasing risk:
 
 1. ToSoN.pm — delete entirely (adapter no longer needed)
 2. DCE.pm — few type checks
@@ -333,17 +323,22 @@ increasing risk:
 5. BNF/Actions.pm — 4 Constructor uses (excluded from this migration,
    see BNF Constructor Nodes section)
 6. EmitHelpers.pm — medium
-7. Target/Perl.pm — large; includes restructuring entry points to walk
-   metadata + per-method graphs (merged from former Phase 6)
-8. Target/C.pm — largest; same entry point restructuring
+7. Actions.pm — large, both creation sites and isa checks
+8. Target/Perl.pm — large; includes restructuring entry points to walk
+   metadata + per-method graphs
+9. Target/C.pm — largest; same entry point restructuring
 
-Each file migration enables the shim for the Constructor classes that
-file consumes. The shim's `if (0)` guard is replaced with a set of
-enabled classes that grows as consumers are migrated.
+The shim's `if (0)` guard is replaced with a set of enabled classes
+that grows as consumers are migrated.
 
-**Note:** Phase 3b and Phase 4 items 7-8 are atomic for structural nodes.
-Actions.pm cannot emit metadata structs until codegen can consume them.
-These land as one unit of work, verified against the 16 green eval files.
+**Phase 4: Structural split (metadata + per-method graphs).**
+After consumers use typed nodes, change Actions.pm structural rules
+(Program, ClassDecl, MethodDecl, FieldDecl, SubDecl, UseDecl) to emit
+metadata structs with per-method `Chalk::IR::Graph` instead of
+Constructor nodes. Restructure Phi insertion and scope tracking in
+Program() for the new representation. **Atomic with codegen entry point
+changes** — Actions.pm structural output and codegen structural
+traversal must change together, verified against the 16 green eval files.
 
 **Phase 5: Delete Constructor and old namespace.**
 Remove `Chalk::Bootstrap::IR::Node::Constructor`, all
@@ -361,13 +356,13 @@ same node object.
 tests). Old factory shim wiring exists but is disabled — existing test
 suite passes unchanged. Named fields and class() compat verified.
 
-**Phase 3a:** Existing test suite passes. No change in codegen output.
+**Phase 3 (per-file):** Existing test suite passes after each file
+migration. Shim enabled for migrated Constructor classes. No regressions
+in the 16 green eval files.
 
-**Phase 3b + Phase 4 items 7-8:** 16 green files still eval correctly.
-Codegen output is byte-identical (or semantically equivalent where node
-ID changes are expected).
-
-**Phase 4 items 1-6:** Existing test suite passes after each file migration.
+**Phase 4 (structural split):** 16 green files still eval correctly.
+Actions.pm emits metadata structs. Codegen walks metadata + per-method
+graphs.
 
 **Phase 5:** `grep -r 'Chalk::Bootstrap::IR::Node' lib/` returns zero hits
 (excluding BNF pipeline). No `->class()` calls remain outside BNF.
