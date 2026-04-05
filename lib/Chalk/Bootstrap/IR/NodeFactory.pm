@@ -4,6 +4,10 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
+# Shim and new factory for delegating translatable Constructor classes
+use Chalk::IR::Shim;
+use Chalk::IR::NodeFactory;
+
 class Chalk::Bootstrap::IR::NodeFactory {
 
     # Static imports for all node types (eliminates need for dynamic loading)
@@ -25,6 +29,9 @@ class Chalk::Bootstrap::IR::NodeFactory {
 
     # Counter for unique CFG node IDs (CFG nodes are not hash-consed)
     field $cfg_counter = 0;
+
+    # New-style factory used to create typed nodes for translated Constructor classes
+    field $_new_factory = undef;
 
     # CFG operations represent control flow positions, not data values.
     # Two if-statements at different program points must be distinct objects
@@ -88,6 +95,11 @@ class Chalk::Bootstrap::IR::NodeFactory {
         return;
     }
 
+    # Lazily initialize the new-style factory on first use
+    method _ensure_new_factory() {
+        $_new_factory //= Chalk::IR::NodeFactory->new();
+    }
+
     # Create or retrieve a node
     # $operation: string like 'Constant', 'Constructor', etc.
     # %params: named parameters (inputs and attributes)
@@ -97,6 +109,19 @@ class Chalk::Bootstrap::IR::NodeFactory {
         if ($operation eq 'Constructor') {
             my $class = $params{class}
                 or die "Constructor requires 'class' parameter";
+
+            # Try delegating to the new typed IR via the shim
+            $self->_ensure_new_factory();
+            my $typed = Chalk::IR::Shim::translate($_new_factory, $class, %params);
+            if (defined $typed) {
+                # Cache translated nodes in the shared node_cache keyed by their content hash
+                my $key = $typed->content_hash();
+                return $node_cache->{$key} if exists $node_cache->{$key};
+                $node_cache->{$key} = $typed;
+                return $typed;
+            }
+
+            # Untranslated Constructor class — fall through to old path
             $lookup_key = "Constructor:$class";
         }
 
