@@ -976,16 +976,14 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _ir_default_to_perl($node) {
         return undef unless defined $node;
 
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            my $class = $node->class();
-            if ($class eq 'ArrayRefExpr') {
-                my $elements = $node->inputs()->[0];
-                return '[]' if !$elements->@*;
-            }
-            if ($class eq 'HashRefExpr') {
-                my $pairs = $node->inputs()->[0];
-                return '{}' if !$pairs->@*;
-            }
+        if ($node isa Chalk::IR::Node::ArrayRef) {
+            my $elements = $node->inputs()->[0];
+            return '[]' if !$elements->@*;
+        }
+
+        if ($node isa Chalk::IR::Node::HashRef) {
+            my $pairs = $node->inputs()->[0];
+            return '{}' if !$pairs->@*;
         }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constant) {
@@ -1521,12 +1519,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::Unwind)  { return $self->_emit_die_call($node, $declared_vars); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            my $class = $node->class();
-
-            if ($class eq 'VarDecl')         { return $self->_emit_var_decl($node, $declared_vars); }
-            if ($class eq 'CompoundAssign')  { return $self->_emit_compound_assign_stmt($node, $declared_vars); }
-
-            # Expression types used as statements (side effects)
+            # Expression types used as statements (side effects):
+            # TernaryExpr, StructRef, FieldAccess, and structural types
             return $self->_emit_expr($node, $declared_vars) . ";";
         }
 
@@ -2430,22 +2424,19 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
-            if ($class eq 'InterpolatedString') { return $self->_emit_interp_expr($node, $declared_vars); }
+            # Computation types that may still be Constructor when the shim does
+            # not translate them (e.g., BinaryExpr with operators not in BINOP_MAP
+            # such as '..'; UnaryExpr with '\' reference operator).
             if ($class eq 'BinaryExpr')         { return $self->_emit_binary_expr($node, $declared_vars); }
             if ($class eq 'UnaryExpr')          { return $self->_emit_unary_expr($node, $declared_vars); }
-            if ($class eq 'MethodCallExpr')     { return $self->_emit_method_call_expr($node, $declared_vars); }
-            if ($class eq 'SubscriptExpr')      { return $self->_emit_subscript_expr($node, $declared_vars); }
-            if ($class eq 'PostfixDerefExpr')   { return $self->_emit_postfix_deref_expr($node, $declared_vars); }
             if ($class eq 'TernaryExpr')        { return $self->_emit_ternary_expr($node, $declared_vars); }
             if ($class eq 'HashRefExpr')        { return $self->_emit_hash_ref_expr($node, $declared_vars); }
             if ($class eq 'ArrayRefExpr')       { return $self->_emit_array_ref_expr($node, $declared_vars); }
             if ($class eq 'AnonSubExpr')        { return $self->_emit_anon_sub_expr($node, $declared_vars); }
             if ($class eq 'RegexMatch')         { return $self->_emit_regex_match($node, $declared_vars); }
             if ($class eq 'RegexSubst')         { return $self->_emit_regex_subst($node, $declared_vars); }
-            if ($class eq 'BuiltinCall')        { return $self->_emit_builtin_call($node, $declared_vars); }
             if ($class eq 'BacktickExpr')       { return $self->_emit_backtick_expr($node, $declared_vars); }
             if ($class eq 'CompoundAssign')     { return $self->_emit_compound_assign_expr($node, $declared_vars); }
-            if ($class eq 'VarDecl')            { return $self->_emit_var_decl_expr($node, $declared_vars); }
             if ($class eq 'StructRef')          { return $self->_emit_struct_ref_expr($node, $declared_vars); }
             if ($class eq 'FieldAccess')        { return $self->_emit_field_access_expr($node, $declared_vars); }
 
