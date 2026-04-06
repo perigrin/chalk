@@ -14,6 +14,9 @@ use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::TryCatch;
+use Chalk::IR::Node::TernaryExpr;
+use Chalk::IR::Node::StructRef;
+use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
@@ -806,6 +809,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     method _is_unambiguous_value_expr($node) {
         return false unless defined $node;
         return false unless ($node isa Chalk::IR::Node || $node isa Chalk::Bootstrap::IR::Node::Constructor);
+        return true if $node isa Chalk::IR::Node::TernaryExpr;
         my $class = $node->class();
         return true if $class eq 'TernaryExpr';
         if ($class eq 'BinaryExpr') {
@@ -1169,6 +1173,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # value expressions (SubscriptExpr, TernaryExpr) inside loops.
             my $is_loop_safe_return = !$_loop_depth
                 || $stmt isa Chalk::IR::Node::Subscript
+                || $stmt isa Chalk::IR::Node::TernaryExpr
                 || ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                     && $stmt->class() eq 'TernaryExpr');
             if ($_return_context && $is_loop_safe_return && $is_last_in_then
@@ -2420,6 +2425,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             if ($node->dispatch_kind() eq 'method')  { return $self->_emit_method_call_expr($node, $declared_vars); }
             if ($node->dispatch_kind() eq 'builtin') { return $self->_emit_builtin_call($node, $declared_vars); }
         }
+        if ($node isa Chalk::IR::Node::TernaryExpr)       { return $self->_emit_ternary_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::StructRef)         { return $self->_emit_struct_ref_expr($node, $declared_vars); }
+        if ($node isa Chalk::IR::Node::StructFieldAccess) { return $self->_emit_field_access_expr($node, $declared_vars); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();

@@ -25,6 +25,9 @@ use Chalk::IR::Node::BacktickExpr;
 use Chalk::IR::Node::Aggregate;
 use Chalk::IR::Node::Regex;
 use Chalk::IR::Node::TryCatch;
+use Chalk::IR::Node::TernaryExpr;
+use Chalk::IR::Node::StructRef;
+use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
@@ -631,6 +634,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::BacktickExpr) { return $self->_emit_backtick_expr($node); }
         if ($node isa Chalk::IR::Node::CompoundAssign) { return $self->_emit_compound_assign($node); }
         if ($node isa Chalk::IR::Node::VarDecl)     { return $self->_emit_var_decl_expr($node); }
+        if ($node isa Chalk::IR::Node::TernaryExpr)       { return $self->_emit_ternary_expr($node); }
+        if ($node isa Chalk::IR::Node::StructRef)         { return $self->_emit_struct_ref_expr($node); }
+        if ($node isa Chalk::IR::Node::StructFieldAccess) { return $self->_emit_field_access_expr($node); }
 
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
@@ -683,6 +689,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         # Parenthesize compound operands to preserve precedence
         # (e.g., unless desugars to !cond, and !$a && $b != !($a && $b))
         my $needs_parens = ($operand isa Chalk::IR::Node::BinOp)
+            || ($operand isa Chalk::IR::Node::TernaryExpr)
             || ($operand isa Chalk::Bootstrap::IR::Node::Constructor
                 && $operand->class() eq 'TernaryExpr');
 

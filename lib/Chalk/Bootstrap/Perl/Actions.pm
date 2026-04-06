@@ -14,6 +14,7 @@ use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
+use Chalk::IR::Node::TernaryExpr;
 use Chalk::IR::UseInfo;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
@@ -634,7 +635,7 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        if ($class eq 'TernaryExpr') {
+        if ($node isa Chalk::IR::Node::TernaryExpr || $class eq 'TernaryExpr') {
             my $cond = $node->inputs()->[0];
             if (_is_stmt_node($cond)) {
                 my ($inner_val) = _stmt_inner($cond);

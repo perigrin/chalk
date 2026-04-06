@@ -286,9 +286,18 @@ subtest 'ReturnStmt returns undef (CFG, deferred to Phase 3b)' => sub {
     is($node, undef, 'ReturnStmt returns undef');
 };
 
-subtest 'TernaryExpr returns undef (CFG lowering deferred)' => sub {
-    my $node = Chalk::IR::Shim::translate($f, 'TernaryExpr');
-    is($node, undef, 'TernaryExpr returns undef');
+subtest 'TernaryExpr is enabled by default and translates to typed node' => sub {
+    my $cond       = const_node('$x');
+    my $true_expr  = const_node('1');
+    my $false_expr = const_node('0');
+    my $node = Chalk::IR::Shim::translate($f, 'TernaryExpr',
+        condition  => $cond,
+        true_expr  => $true_expr,
+        false_expr => $false_expr,
+    );
+    ok(defined $node, 'TernaryExpr returns a node (now in DEFAULT_ENABLED)');
+    isa_ok($node, 'Chalk::IR::Node::TernaryExpr', 'TernaryExpr isa TernaryExpr');
+    is($node->class(), 'TernaryExpr', 'TernaryExpr class() is TernaryExpr');
 };
 
 # ---- BNF types return undef ----

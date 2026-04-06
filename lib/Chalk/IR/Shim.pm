@@ -14,6 +14,7 @@ my %DEFAULT_ENABLED = map { $_ => 1 } qw(
     HashRefExpr ArrayRefExpr AnonSubExpr
     RegexMatch RegexSubst InterpolatedString
     BacktickExpr VarDecl TryCatchStmt
+    TernaryExpr StructRef FieldAccess
 );
 
 my %ENABLED = %DEFAULT_ENABLED;
@@ -53,8 +54,6 @@ my %UNOP_MAP = (
 my %NOT_TRANSLATED = map { $_ => 1 } qw(
     Program ClassDecl MethodDecl SubDecl FieldDecl UseDecl _Attribute
     Symbol Expression Rule
-    StructRef FieldAccess
-    TernaryExpr
 );
 
 sub translate($factory, $constructor_class, %params) {
@@ -201,6 +200,27 @@ sub translate($factory, $constructor_class, %params) {
         return $factory->make('TryCatch',
             inputs       => [$params{try_body}, $params{catch_var}, $params{catch_body}],
             compat_class => 'TryCatchStmt',
+        );
+    }
+
+    if ($constructor_class eq 'TernaryExpr') {
+        return $factory->make('TernaryExpr',
+            inputs       => [$params{condition}, $params{true_expr}, $params{false_expr}],
+            compat_class => 'TernaryExpr',
+        );
+    }
+
+    if ($constructor_class eq 'StructRef') {
+        return $factory->make('StructRef',
+            inputs       => [$params{schema}, $params{fields}],
+            compat_class => 'StructRef',
+        );
+    }
+
+    if ($constructor_class eq 'FieldAccess') {
+        return $factory->make('StructFieldAccess',
+            inputs       => [$params{schema}, $params{field_name}, $params{target}],
+            compat_class => 'FieldAccess',
         );
     }
 

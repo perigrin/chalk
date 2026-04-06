@@ -56,6 +56,9 @@ use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::CompoundAssign;
 use Chalk::IR::Node::BacktickExpr;
 use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::TernaryExpr;
+use Chalk::IR::Node::StructRef;
+use Chalk::IR::Node::StructFieldAccess;
 use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
@@ -75,6 +78,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Call HashRef ArrayRef Interpolate AnonSub
     RegexMatch RegexSubst TryCatch
     PostfixDeref CompoundAssign BacktickExpr VarDecl
+    TernaryExpr StructRef StructFieldAccess
 );
 
 my %CFG_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
