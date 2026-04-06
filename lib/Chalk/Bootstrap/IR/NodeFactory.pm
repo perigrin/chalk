@@ -165,9 +165,11 @@ class Chalk::Bootstrap::IR::NodeFactory {
                 next;
             }
             elsif (ref($input) eq 'ARRAY') {
-                # Handle array of nodes
+                # Handle array of nodes (skip plain hashrefs — not IR nodes)
                 for my $element ($input->@*) {
-                    $element->add_consumer($node) if defined $element;
+                    next unless defined $element;
+                    next if ref($element) eq 'HASH';
+                    $element->add_consumer($node);
                 }
             }
             else {
@@ -218,8 +220,22 @@ class Chalk::Bootstrap::IR::NodeFactory {
                     push @parts, 'undef';
                 }
                 elsif (ref($input) eq 'ARRAY') {
-                    # Handle array of nodes (e.g., elements in Constructor:Expression)
-                    my @ids = map { defined($_) ? $_->id : 'undef' } $input->@*;
+                    # Handle array of nodes or plain hashrefs
+                    my @ids;
+                    for my $element ($input->@*) {
+                        if (!defined $element) {
+                            push @ids, 'undef';
+                        } elsif (ref($element) eq 'HASH') {
+                            # Plain hashref (e.g., attribute {name=>..., value=>...})
+                            my $hkey = join(',', map {
+                                my $v = defined $element->{$_} ? $element->{$_} : 'undef';
+                                "$_=$v";
+                            } sort keys %$element);
+                            push @ids, "{$hkey}";
+                        } else {
+                            push @ids, $element->id;
+                        }
+                    }
                     push @parts, '[' . join(',', @ids) . ']';
                 }
                 else {

@@ -140,16 +140,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 }
                 for my $input ($node->inputs()->@*) {
                     if (ref($input) eq 'ARRAY') {
-                        push @stack, @$input;
-                    } elsif (ref($input)) {
+                        # Skip plain hashrefs (e.g., attribute data), push only IR nodes
+                        push @stack, grep { ref($_) ne 'HASH' } @$input;
+                    } elsif (ref($input) && ref($input) ne 'HASH') {
                         push @stack, $input;
                     }
                 }
-            } elsif (ref($node) && $node->can('inputs')) {
+            } elsif (ref($node) && ref($node) ne 'HASH' && $node->can('inputs')) {
                 for my $input ($node->inputs()->@*) {
                     if (ref($input) eq 'ARRAY') {
-                        push @stack, @$input;
-                    } elsif (ref($input)) {
+                        push @stack, grep { ref($_) ne 'HASH' } @$input;
+                    } elsif (ref($input) && ref($input) ne 'HASH') {
                         push @stack, $input;
                     }
                 }
@@ -436,7 +437,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         if (ref($attrs) eq 'ARRAY' && $attrs->@*) {
             for my $attr ($attrs->@*) {
-                my $attr_name = $attr->inputs()->[0]->value();
+                my $attr_name;
+                if (ref($attr) eq 'HASH') {
+                    $attr_name = $attr->{name};
+                } else {
+                    # Legacy Constructor:_Attribute node
+                    $attr_name = $attr->inputs()->[0]->value();
+                }
                 $decl .= " :$attr_name";
             }
         }

@@ -2000,7 +2000,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 # Apply field attributes (:param, :reader, :writer)
                 if (ref($attrs) eq 'ARRAY') {
                     for my $attr ($attrs->@*) {
-                        my $attr_name    = $attr->inputs()->[0]->value();
+                        my $attr_name;
+                        if (ref($attr) eq 'HASH') {
+                            $attr_name = $attr->{name};
+                        } else {
+                            # Legacy Constructor:_Attribute node
+                            $attr_name = $attr->inputs()->[0]->value();
+                        }
                         my $escaped_attr = $self->_escape_c_string($attr_name);
                         push @lines, '        {';
                         push @lines, "            OP *attr = newSVOP(OP_CONST, 0, newSVpvs(\"$escaped_attr\"));";

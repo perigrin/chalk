@@ -1141,12 +1141,13 @@ class Chalk::Bootstrap::Perl::Actions {
                     # AttributeList returns arrayref of attribute data
                     # Look for :isa(Parent) → parent name Constant
                     for my $attr ($focus->@*) {
-                        if ($attr isa Chalk::Bootstrap::IR::Node::Constructor
-                                && $attr->class() eq '_Attribute') {
-                            my $attr_name = $attr->inputs()->[0];
-                            if (defined $attr_name
-                                    && $attr_name->value() eq 'isa') {
-                                $parent = $attr->inputs()->[1];
+                        if (ref($attr) eq 'HASH') {
+                            if (defined $attr->{name} && $attr->{name} eq 'isa'
+                                    && defined $attr->{value}) {
+                                $parent = $factory->make('Constant',
+                                    const_type => 'identifier',
+                                    value      => $attr->{value},
+                                );
                             }
                         }
                     }
@@ -1397,14 +1398,13 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §10 AttributeList ::= WS Attribute | AttributeList WS Attribute
-    # Returns arrayref of _Attribute Constructor nodes
+    # Returns arrayref of attribute hashrefs {name => $str, value => $str_or_undef}
     method AttributeList($ctx) {
         my @attrs;
         for my $val (_collect_ir_values($ctx)) {
             if (ref($val) eq 'ARRAY') {
                 push @attrs, $val->@*;
-            } elsif ($val isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $val->class() eq '_Attribute') {
+            } elsif (ref($val) eq 'HASH') {
                 push @attrs, $val;
             }
         }
@@ -1412,18 +1412,16 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §10 Attribute ::= /:/ _ QualifiedIdentifier | /:/ _ QualifiedIdentifier _ /\(/ _ QualifiedIdentifier _ /\)/
-    # Returns _Attribute Constructor with name and optional value
+    # Returns plain hashref {name => $str, value => $str_or_undef}
     method Attribute($ctx) {
         my @constants = _collect_constants($ctx);
-        my $attr_name = $constants[0];  # QualifiedIdentifier (attribute name)
-        my $attr_value = $constants[1]; # QualifiedIdentifier (optional, e.g. parent in :isa(Parent))
+        my $attr_name  = $constants[0];  # QualifiedIdentifier (attribute name)
+        my $attr_value = $constants[1];  # QualifiedIdentifier (optional, e.g. parent in :isa(Parent))
 
-        return $factory->make('Constructor',
-            'class'  => '_Attribute',
-            name   => $attr_name,
-            parent => $attr_value, # reuse parent slot for attribute value
-            body   => undef,       # unused
-        );
+        return {
+            name  => defined $attr_name  ? $attr_name->value()  : undef,
+            value => defined $attr_value ? $attr_value->value() : undef,
+        };
     }
 
     # §11 Signature ::= /\(/ _ /\)/ | /\(/ _ SignatureParams _ /\)/
@@ -1791,10 +1789,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Variable name (starts with sigil)
                 $var_name //= $focus;
             } elsif (ref($focus) eq 'ARRAY') {
-                # AttributeList returns arrayref of _Attribute Constructors
+                # AttributeList returns arrayref of attribute hashrefs
                 for my $attr ($focus->@*) {
-                    if ($attr isa Chalk::Bootstrap::IR::Node::Constructor
-                            && $attr->class() eq '_Attribute') {
+                    if (ref($attr) eq 'HASH') {
                         push @attributes, $attr;
                     }
                 }
