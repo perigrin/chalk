@@ -1,20 +1,39 @@
 # ABOUTME: Base class for all IR nodes in the Chalk Sea of Nodes representation.
-# ABOUTME: Extends Chalk::Bootstrap::IR::Node for migration compat; adds stamp, compat_class, content_hash.
+# ABOUTME: Provides id, use-def chains, content_hash, stamp, and compat_class fields.
 use 5.42.0;
 use utf8;
 use experimental 'class';
 
-# Migration bridge: inheriting from the old base class ensures typed nodes
-# pass `isa Chalk::Bootstrap::IR::Node` checks (283 sites across 6 files).
-# This inheritance is removed in Phase 5 when those checks are migrated.
-use Chalk::Bootstrap::IR::Node;
+class Chalk::IR::Node {
 
-class Chalk::IR::Node :isa(Chalk::Bootstrap::IR::Node) {
-    # Fields added beyond the old base class
+    # Stable content-based ID for the node
+    field $id :param :reader;
+
+    # Producer nodes - nodes that produce values consumed by this node
+    field $inputs :param :reader = [];
+
+    # Consumer nodes - nodes that consume values produced by this node
+    # This is mutable to allow building the graph
+    field $consumers :reader = [];
+
+    # Optional stamp for identifying parse-origin or generation context
     field $stamp        :param :reader = undef;
+
+    # Optional compat_class overrides the result of class() for back-compat
     field $compat_class :param :reader = undef;
 
-    # Override operation() — subclasses still must implement
+    # Add a consumer to this node's consumer list
+    method add_consumer($node) {
+        push $consumers->@*, $node;
+    }
+
+    # Remove a consumer from this node's consumer list
+    method remove_consumer($node) {
+        my $target_id = $node->id();
+        $consumers->@* = grep { $_->id() ne $target_id } $consumers->@*;
+    }
+
+    # Abstract method - subclasses must implement
     method operation() {
         die ref($self) . " must implement operation()";
     }
