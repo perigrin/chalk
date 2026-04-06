@@ -36,10 +36,20 @@ use Chalk::IR::Node::BitXor;
 use Chalk::IR::Node::LeftShift;
 use Chalk::IR::Node::RightShift;
 use Chalk::IR::Node::Assign;
+use Chalk::IR::Node::Repeat;
+use Chalk::IR::Node::Match;
+use Chalk::IR::Node::NotMatch;
+use Chalk::IR::Node::DefinedOr;
+use Chalk::IR::Node::Xor;
+use Chalk::IR::Node::Range;
+use Chalk::IR::Node::Yada;
+use Chalk::IR::Node::IsaOp;
 use Chalk::IR::Node::Not;
 use Chalk::IR::Node::Negate;
 use Chalk::IR::Node::Complement;
 use Chalk::IR::Node::Defined;
+use Chalk::IR::Node::UnaryPlus;
+use Chalk::IR::Node::Ref;
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::FieldAccess;
 use Chalk::IR::Node::StashAccess;
@@ -73,7 +83,8 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     NumEq NumNe NumLt NumGt NumLe NumGe NumCmp
     StrEq StrNe StrLt StrGt StrLe StrGe StrCmp
     And Or BitAnd BitOr BitXor LeftShift RightShift
-    Assign Not Negate Complement Defined
+    Assign Repeat Match NotMatch DefinedOr Xor Range Yada IsaOp
+    Not Negate Complement Defined UnaryPlus Ref
     PadAccess FieldAccess StashAccess Subscript
     Call HashRef ArrayRef Interpolate AnonSub
     RegexMatch RegexSubst TryCatch

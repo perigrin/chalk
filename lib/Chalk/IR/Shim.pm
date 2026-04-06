@@ -39,6 +39,12 @@ my %BINOP_MAP = (
     '&'   => 'BitAnd',     '|'   => 'BitOr',      '^'   => 'BitXor',
     '<<'  => 'LeftShift',  '>>'  => 'RightShift',
     '='   => 'Assign',
+    'x'   => 'Repeat',
+    '=~'  => 'Match',      '!~'  => 'NotMatch',
+    '//'  => 'DefinedOr',
+    'xor' => 'Xor',
+    '..'  => 'Range',      '...' => 'Yada',
+    'isa' => 'IsaOp',
 );
 
 my %UNOP_MAP = (
@@ -47,6 +53,8 @@ my %UNOP_MAP = (
     '-'       => 'Negate',
     '~'       => 'Complement',
     'defined' => 'Defined',
+    '+'       => 'UnaryPlus',
+    '\\'      => 'Ref',
 );
 
 # Classes that are structural metadata or CFG constructs deferred to Phase 3b,
