@@ -25,6 +25,7 @@ use Chalk::IR::Node::Regex;
 use Chalk::IR::Node::TryCatch;
 use Chalk::IR::UseInfo;
 use Chalk::IR::FieldInfo;
+use Chalk::IR::MethodInfo;
 
 class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
@@ -283,6 +284,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return $self->_emit_field_decl($node);
         }
 
+        if ($node isa Chalk::IR::MethodInfo) {
+            return $self->_emit_method_decl($node);
+        }
+
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
@@ -360,14 +365,26 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_method_decl($node) {
-        my $name   = $node->inputs()->[0]->value();
-        my $params = $node->inputs()->[1];
-        my $body   = $node->inputs()->[2];
+        my ($name, $params, $body);
+        if ($node isa Chalk::IR::MethodInfo) {
+            $name   = $node->name();
+            $params = $node->params();    # plain strings
+            $body   = $node->body();
+        } else {
+            $name   = $node->inputs()->[0]->value();
+            $params = $node->inputs()->[1];  # Constant nodes
+            $body   = $node->inputs()->[2];
+        }
 
-        my $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
+        my $sig;
+        if ($node isa Chalk::IR::MethodInfo) {
+            $sig = '(' . join(', ', $params->@*) . ')';
+        } else {
+            $sig = '(' . join(', ', map { $_->value() } $params->@*) . ')';
+        }
         # Scope aggregate vars: params shadow class-scope aggregate names
         my %saved = %_aggregate_vars;
-        $self->_scope_body_vars($params, $body);
+        $self->_scope_body_vars($params, $body, $node isa Chalk::IR::MethodInfo);
         my $result = $self->_emit_body_block("method $name$sig {", $body);
         %_aggregate_vars = %saved;
         return $result;
@@ -394,10 +411,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # Adjust %_aggregate_vars for a method/sub body scope.
     # Remove param names (params are always scalars) and add body-local
     # VarDecl aggregate names.
-    method _scope_body_vars($params, $body) {
+    # $params_are_strings: true when params are plain strings (MethodInfo/SubInfo),
+    # false when params are Constant nodes (Constructor:MethodDecl/SubDecl).
+    method _scope_body_vars($params, $body, $params_are_strings = false) {
         # Params shadow: $reachable param means $reachable is a scalar here
         for my $p ($params->@*) {
-            my $pname = $p->value();
+            my $pname = $params_are_strings ? $p : $p->value();
             if ($pname =~ /^\$(.+)/) {
                 delete $_aggregate_vars{$1};
             }

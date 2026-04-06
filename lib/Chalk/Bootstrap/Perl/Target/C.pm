@@ -5,6 +5,7 @@ use utf8;
 use experimental 'class';
 
 use Chalk::Bootstrap::Perl::Target::EmitHelpers;
+use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::IR::Node;
 use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::Call;
@@ -17,6 +18,7 @@ use Chalk::IR::Node::ArrayRef;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::UseInfo;
 use Chalk::IR::FieldInfo;
+use Chalk::IR::MethodInfo;
 
 class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::EmitHelpers) {
     field @_anon_sub_helpers;  # accumulated static C functions for anonymous subs
@@ -119,9 +121,22 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         return;
     }
     method _emit_method($method_decl) {
-        my $name   = $method_decl->inputs()->[0]->value();
-        my $params = $method_decl->inputs()->[1];
-        my $body   = $method_decl->inputs()->[2];
+        my ($name, $params, $body);
+        if ($method_decl isa Chalk::IR::MethodInfo) {
+            $name = $method_decl->name();
+            $body = $method_decl->body();
+            # Normalize plain string params to Constant nodes so downstream
+            # code can uniformly call ->value() on each param.
+            my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+            $params = [
+                map { $factory->make('Constant', const_type => 'variable', value => $_) }
+                    $method_decl->params()->@*
+            ];
+        } else {
+            $name   = $method_decl->inputs()->[0]->value();
+            $params = $method_decl->inputs()->[1];  # Constant nodes
+            $body   = $method_decl->inputs()->[2];
+        }
 
         my $func_name = "${\  $self->_get_current_slug()}_${name}";
 
@@ -218,8 +233,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             return { helper => \@helper };
         }
 
-        my $return_type_node = $method_decl->inputs()->[3];
-        my $return_type = $return_type_node ? $return_type_node->value() : undef;
+        my $return_type;
+        if ($method_decl isa Chalk::IR::MethodInfo) {
+            $return_type = $method_decl->return_type();  # already a plain string
+        } else {
+            my $return_type_node = $method_decl->inputs()->[3];
+            $return_type = $return_type_node ? $return_type_node->value() : undef;
+        }
         return $self->_emit_complex_method($name, $params, $body, $return_type);
     }
 
@@ -1584,12 +1604,18 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 }
             }
 
-            # Emit MethodDecl items as exported C functions
+            # Emit MethodDecl/MethodInfo items as exported C functions
             for my $item ($body->@*) {
-                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-                next unless $item->class() eq 'MethodDecl';
+                my $mname;
+                if ($item isa Chalk::IR::MethodInfo) {
+                    $mname = $item->name();
+                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                        && $item->class() eq 'MethodDecl') {
+                    $mname = $item->inputs()->[0]->value();
+                } else {
+                    next;
+                }
 
-                my $mname = $item->inputs()->[0]->value();
                 my $result = eval { $self->_emit_method($item) };
                 if (!defined $result || $@) {
                     push @_skipped_methods, $mname;

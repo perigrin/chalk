@@ -7,6 +7,7 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::IR::UseInfo;
+use Chalk::IR::MethodInfo;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -55,6 +56,10 @@ my sub find_class_in_stmts($ir, $class) {
 my sub find_method_in_class($class_decl, $name) {
     my $body = $class_decl->inputs()->[2];
     for my $item ($body->@*) {
+        if ($item isa Chalk::IR::MethodInfo
+                && $item->name() eq $name) {
+            return $item;
+        }
         if ($item isa Chalk::Bootstrap::IR::Node::Constructor
                 && $item->class() eq 'MethodDecl'
                 && $item->inputs()->[0]->value() eq $name) {
@@ -62,6 +67,18 @@ my sub find_method_in_class($class_decl, $name) {
         }
     }
     return undef;
+}
+
+# Helper to get method body from either MethodInfo or Constructor:MethodDecl
+my sub method_body($method) {
+    return $method->body() if $method isa Chalk::IR::MethodInfo;
+    return $method->inputs()->[2];
+}
+
+# Helper to get method name from either MethodInfo or Constructor:MethodDecl
+my sub method_name($method) {
+    return $method->name() if $method isa Chalk::IR::MethodInfo;
+    return $method->inputs()->[0]->value();
 }
 
 # ============================================================
@@ -82,7 +99,7 @@ my sub find_method_in_class($class_decl, $name) {
         my $method = find_method_in_class($class_decl, 'bar');
         ok(defined $method, 'return merge: found method bar');
 
-        my $body = $method->inputs()->[2];
+        my $body = method_body($method);
         is(scalar $body->@*, 1, 'return merge: method body has 1 item');
         is($body->[0]->class(), 'ReturnStmt', 'return merge: body item is ReturnStmt');
     }
@@ -106,7 +123,7 @@ my sub find_method_in_class($class_decl, $name) {
         my $method = find_method_in_class($class_decl, 'bar');
         ok(defined $method, 'die merge: found method bar');
 
-        my $body = $method->inputs()->[2];
+        my $body = method_body($method);
         is(scalar $body->@*, 1, 'die merge: method body has 1 item');
         is($body->[0]->class(), 'DieCall', 'die merge: body item is DieCall');
 
@@ -189,13 +206,14 @@ my sub find_method_in_class($class_decl, $name) {
         if (defined $ir) {
             my $class_decl = find_class_in_stmts($ir, 'ClassDecl');
             my $method = find_method_in_class($class_decl, 'go');
+            my $mbody = method_body($method);
             push @results, {
                 seed        => $seed,
                 class_name  => $class_decl->inputs()->[0]->value(),
                 parent      => $class_decl->inputs()->[1]->value(),
-                method_name => $method->inputs()->[0]->value(),
-                body_class  => $method->inputs()->[2][0]->class(),
-                die_msg     => $method->inputs()->[2][0]->inputs()->[0][0]->value(),
+                method_name => method_name($method),
+                body_class  => $mbody->[0]->class(),
+                die_msg     => $mbody->[0]->inputs()->[0][0]->value(),
             };
         } else {
             push @results, { seed => $seed, error => 'no IR' };

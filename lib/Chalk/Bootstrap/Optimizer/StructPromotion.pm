@@ -10,6 +10,7 @@ use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::Subscript;
+use Chalk::IR::MethodInfo;
 
 class Chalk::Bootstrap::Optimizer::StructPromotion {
 
@@ -60,11 +61,18 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             next unless defined $body && ref($body) eq 'ARRAY';
 
             for my $item ($body->@*) {
-                next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
-                next unless $item->class() eq 'MethodDecl' || $item->class() eq 'SubDecl';
+                my ($method_name, $method_body);
+                if ($item isa Chalk::IR::MethodInfo) {
+                    $method_name = $item->name();
+                    $method_body = $item->body();
+                } elsif ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                        && ($item->class() eq 'MethodDecl' || $item->class() eq 'SubDecl')) {
+                    $method_name = $item->inputs()->[0]->value();
+                    $method_body = $item->inputs()->[2];
+                } else {
+                    next;
+                }
 
-                my $method_name = $item->inputs()->[0]->value();
-                my $method_body = $item->inputs()->[2];
                 next unless defined $method_body && ref($method_body) eq 'ARRAY';
 
                 my $is_public = ($method_name !~ /^_/);
@@ -456,6 +464,40 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
             my @new_body;
             for my $item ($body->@*) {
+                # Handle MethodInfo metadata structs
+                if ($item isa Chalk::IR::MethodInfo) {
+                    my $method_name = $item->name();
+                    my $method_body = $item->body();
+                    my $var_prefix  = "${class_name}::${method_name}";
+
+                    my $method_has_promoted = false;
+                    for my $vk (sort keys %var_to_schema) {
+                        if ($vk =~ /^\Q$var_prefix\E::/) {
+                            $method_has_promoted = true;
+                            last;
+                        }
+                    }
+
+                    unless ($method_has_promoted && defined $method_body
+                        && ref($method_body) eq 'ARRAY') {
+                        push @new_body, $item;
+                        next;
+                    }
+
+                    my $new_method_body = $self->_rewrite_method_body(
+                        $factory, $var_prefix, $method_body,
+                        \%var_to_schema, \%schema_fields,
+                    );
+                    push @new_body, Chalk::IR::MethodInfo->new(
+                        name        => $item->name(),
+                        params      => $item->params(),
+                        return_type => $item->return_type(),
+                        body        => $new_method_body,
+                        graph       => $item->graph(),
+                    );
+                    next;
+                }
+
                 unless ($item isa Chalk::Bootstrap::IR::Node::Constructor
                     && ($item->class() eq 'MethodDecl' || $item->class() eq 'SubDecl')) {
                     push @new_body, $item;

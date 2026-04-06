@@ -14,6 +14,7 @@ use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::UseInfo;
 use Chalk::IR::FieldInfo;
+use Chalk::IR::MethodInfo;
 
 # Builtin keyword sets used by _fixup_stmts for statement merging
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
@@ -790,8 +791,9 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Statement-level Constructor classes (ReturnStmt, ClassDecl, etc.)
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
                     && $STMT_BOUNDARY_CLASSES{$next->class()};
-                # FieldInfo metadata structs are always separate statements
+                # FieldInfo/MethodInfo metadata structs are always separate statements
                 $is_boundary = true if $next isa Chalk::IR::FieldInfo;
+                $is_boundary = true if $next isa Chalk::IR::MethodInfo;
                 # CFG control flow nodes
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node
                     && $STMT_BOUNDARY_OPS{$next->operation() // ''};
@@ -827,8 +829,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     # Stop at statement-level constructs
                     last if $next isa Chalk::Bootstrap::IR::Node::Constructor
                         && $STMT_BOUNDARY_CLASSES{$next->class()};
-                    # FieldInfo metadata structs are always separate statements
+                    # FieldInfo/MethodInfo metadata structs are always separate statements
                     last if $next isa Chalk::IR::FieldInfo;
+                    last if $next isa Chalk::IR::MethodInfo;
                     # Stop at CFG control flow nodes
                     last if $next isa Chalk::Bootstrap::IR::Node
                         && $STMT_BOUNDARY_OPS{$next->operation() // ''};
@@ -915,7 +918,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::Bootstrap::IR::Node
                      || $val isa Chalk::IR::UseInfo
-                     || $val isa Chalk::IR::FieldInfo) {
+                     || $val isa Chalk::IR::FieldInfo
+                     || $val isa Chalk::IR::MethodInfo) {
                 push @stmts, $val;
             }
         }
@@ -931,7 +935,8 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $val (@values) {
             if ($val isa Chalk::Bootstrap::IR::Node
                     || $val isa Chalk::IR::UseInfo
-                    || $val isa Chalk::IR::FieldInfo) {
+                    || $val isa Chalk::IR::FieldInfo
+                    || $val isa Chalk::IR::MethodInfo) {
                 push @ir_nodes, $val;
             }
         }
@@ -965,7 +970,8 @@ class Chalk::Bootstrap::Perl::Actions {
         my @ir_nodes;
         for my $val (@values) {
             if ($val isa Chalk::Bootstrap::IR::Node
-                    || $val isa Chalk::IR::UseInfo) {
+                    || $val isa Chalk::IR::UseInfo
+                    || $val isa Chalk::IR::MethodInfo) {
                 push @ir_nodes, $val;
             }
         }
@@ -1232,13 +1238,14 @@ class Chalk::Bootstrap::Perl::Actions {
         @body = map { $_fix_postfix_chain_deep->($factory, $_) } @body;
         my $fixed_body = _fixup_stmts($factory, \@body);
 
-        return $factory->make('Constructor',
-            'class'       => 'MethodDecl',
-            name          => $method_name,
-            params        => \@params,
-            body          => $fixed_body,
-            return_type   => $factory->make('Constant',
-                                const_type => 'string', value => $return_type),
+        my $method_name_val = defined $method_name ? $method_name->value() : '<unknown>';
+        my @param_strs = map { $_->value() } @params;
+
+        return Chalk::IR::MethodInfo->new(
+            name        => $method_name_val,
+            params      => \@param_strs,
+            return_type => $return_type,
+            body        => $fixed_body,
         );
     }
 

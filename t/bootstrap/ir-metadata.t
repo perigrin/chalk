@@ -39,6 +39,33 @@ is(scalar $mi->params()->@*, 2, 'MethodInfo params');
 is($mi->graph(), undef, 'MethodInfo graph');
 is($mi->return_type(), undef, 'MethodInfo return_type default');
 
+# body field — stores raw statement array
+my $mi_with_body = Chalk::IR::MethodInfo->new(
+    name   => 'bar',
+    params => ['$self'],
+    body   => ['stmt1', 'stmt2'],
+);
+is(scalar $mi_with_body->body()->@*, 2, 'MethodInfo body stores statement array');
+is($mi_with_body->body()->[0], 'stmt1', 'MethodInfo body element 0 correct');
+
+my $mi_no_body = Chalk::IR::MethodInfo->new(name => 'baz', params => []);
+is_deeply($mi_no_body->body(), [], 'MethodInfo body defaults to empty arrayref');
+
+# id() — content-based ID for hash-cons compatibility
+my $id = $mi->id();
+ok(defined $id, 'MethodInfo id() returns a value');
+like($id, qr/MethodInfo/, 'MethodInfo id() contains MethodInfo marker');
+like($id, qr/foo/, 'MethodInfo id() contains method name');
+
+my $mi_same = Chalk::IR::MethodInfo->new(name => 'foo', params => ['$self', '$x'], graph => undef);
+is($mi->id(), $mi_same->id(), 'MethodInfo id() is content-based (same content => same id)');
+
+my $mi_diff = Chalk::IR::MethodInfo->new(name => 'other', params => ['$self'], graph => undef);
+isnt($mi->id(), $mi_diff->id(), 'MethodInfo id() differs for different names');
+
+# add_consumer() — no-op, does not participate in use-def chain
+ok(eval { $mi->add_consumer('dummy'); 1 }, 'MethodInfo add_consumer() does not die');
+
 my $si = Chalk::IR::SubInfo->new(name => '_helper', params => ['$a'], scope => 'my');
 is($si->name(), '_helper', 'SubInfo name');
 is($si->scope(), 'my', 'SubInfo scope');

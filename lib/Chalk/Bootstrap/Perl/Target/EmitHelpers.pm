@@ -13,6 +13,7 @@ use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::TryCatch;
 use Chalk::IR::FieldInfo;
+use Chalk::IR::MethodInfo;
 
 class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target) {
     field $module_name :param :reader;  # module being compiled (e.g., "Chalk::Bootstrap::Earley")
@@ -200,13 +201,15 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $body = $class_decl->inputs()->[2];
         my %methods;
 
-        # Collect all MethodDecl and SubDecl nodes from the class body.
+        # Collect all MethodDecl/MethodInfo and SubDecl nodes from the class body.
         # SubDecl may be mis-parented as VarDecl initializer due to parser
         # ambiguity (e.g., `my %_cache; sub _intern(...)` parsed as one unit).
         # Recurse one level into VarDecl initializers to find these.
         my @items_to_scan;
         for my $item ($body->@*) {
-            next unless ($item isa Chalk::IR::Node || $item isa Chalk::Bootstrap::IR::Node::Constructor);
+            next unless ($item isa Chalk::IR::Node
+                      || $item isa Chalk::Bootstrap::IR::Node::Constructor
+                      || $item isa Chalk::IR::MethodInfo);
             push @items_to_scan, $item;
             # Check VarDecl initializer for mis-parented SubDecl
             if ($item isa Chalk::IR::Node::VarDecl) {
@@ -219,6 +222,22 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         }
 
         for my $item (@items_to_scan) {
+            # Handle MethodInfo metadata structs
+            if ($item isa Chalk::IR::MethodInfo) {
+                my $name = $item->name();
+                my @param_names;
+                for my $p ($item->params()->@*) {
+                    (my $pname = $p) =~ s/^[\$\@\%]//;
+                    push @param_names, $pname;
+                }
+                $methods{$name} = {
+                    returns => true,
+                    params  => \@param_names,
+                };
+                next;
+            }
+
+            next unless $item isa Chalk::Bootstrap::IR::Node::Constructor;
             my $class = $item->class();
             next unless $class eq 'MethodDecl' || $class eq 'SubDecl';
 
