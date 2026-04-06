@@ -10,9 +10,7 @@ class Chalk::IR::Node::UnaryOp :isa(Chalk::IR::Node) {
     field $operand :param :reader = undef;
 
     ADJUST {
-        if (!defined $operand && $self->inputs()->@*) {
-            $operand = $self->inputs()->[0];
-        }
+        $operand //= $self->inputs()->[0];
     }
 
     method op_str() {

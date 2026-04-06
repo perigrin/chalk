@@ -12,7 +12,6 @@ class Chalk::IR::Node::Proj :isa(Chalk::IR::Node) {
     method operation() { 'Proj' }
 
     method content_hash() {
-        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
-        return "Proj|index=" . $index . "|" . join('|', @input_ids);
+        return join('|', 'Proj', "index=$index", $self->_serialize_inputs());
     }
 }

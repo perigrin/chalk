@@ -13,19 +13,9 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Node) {
     method operation() { 'Call' }
 
     method content_hash() {
-        my @input_ids;
-        for my $input ($self->inputs()->@*) {
-            if (!defined $input) {
-                push @input_ids, 'undef';
-            } elsif (ref($input) eq 'ARRAY') {
-                my @ids = map { defined($_) ? $_->id() : 'undef' } $input->@*;
-                push @input_ids, '[' . join(',', @ids) . ']';
-            } else {
-                push @input_ids, $input->id();
-            }
-        }
-        return "Call|dispatch_kind=" . $dispatch_kind
-             . "|name=" . $name
-             . "|" . join('|', @input_ids);
+        return join('|', 'Call',
+            "dispatch_kind=$dispatch_kind",
+            "name=$name",
+            $self->_serialize_inputs());
     }
 }

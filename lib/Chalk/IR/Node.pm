@@ -24,8 +24,9 @@ class Chalk::IR::Node :isa(Chalk::Bootstrap::IR::Node) {
         return $self->operation();
     }
 
-    method content_hash() {
-        my $op = $self->operation();
+    # Serialize inputs to a list of ID strings for content_hash.
+    # Handles undef, nested arrayrefs, and plain node inputs.
+    method _serialize_inputs() {
         my @parts;
         for my $input ($self->inputs()->@*) {
             if (!defined $input) {
@@ -37,6 +38,10 @@ class Chalk::IR::Node :isa(Chalk::Bootstrap::IR::Node) {
                 push @parts, $input->id();
             }
         }
-        return $op . '|' . join('|', @parts);
+        return @parts;
+    }
+
+    method content_hash() {
+        return join('|', $self->operation(), $self->_serialize_inputs());
     }
 }

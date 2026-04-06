@@ -13,6 +13,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::Program;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -48,6 +49,14 @@ my sub parse_file($file) {
 my sub is_constructor($node, $expected_class, $msg) {
     ok(defined $node, "$msg: defined");
     return unless defined $node;
+    # Metadata structs (Chalk::IR::Program, etc.) replaced Constructor nodes
+    my %METADATA_CLASS = (
+        Program => 'Chalk::IR::Program',
+    );
+    if (my $meta_class = $METADATA_CLASS{$expected_class}) {
+        isa_ok($node, $meta_class, "$msg: is $expected_class");
+        return;
+    }
     is($node->operation(), 'Constructor', "$msg: is Constructor");
     is($node->class(), $expected_class, "$msg: class is $expected_class");
 }
@@ -61,6 +70,17 @@ my sub is_constant($node, $expected_value, $msg) {
 
 # Helper to find ClassInfo or ClassDecl in program statements
 my sub find_class_decl($ir) {
+    # Chalk::IR::Program uses classes() accessor
+    if ($ir isa Chalk::IR::Program) {
+        my @classes = $ir->classes()->@*;
+        return $classes[0] if @classes;
+        # Fall through to other_stmts for programs without top-level classes
+        for my $stmt ($ir->other_stmts()->@*) {
+            return $stmt if $stmt isa Chalk::IR::ClassInfo;
+        }
+        return undef;
+    }
+    # Legacy Constructor:Program path
     my $stmts = $ir->inputs()->[0];
     for my $stmt ($stmts->@*) {
         if ($stmt isa Chalk::IR::ClassInfo) {

@@ -13,7 +13,6 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     method operation() { 'PadAccess' }
 
     method content_hash() {
-        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
-        return "PadAccess|targ=" . $targ . "|varname=" . $varname . "|" . join('|', @input_ids);
+        return join('|', 'PadAccess', "targ=$targ", "varname=$varname", $self->_serialize_inputs());
     }
 }

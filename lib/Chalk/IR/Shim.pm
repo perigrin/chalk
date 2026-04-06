@@ -158,8 +158,7 @@ sub translate($factory, $constructor_class, %params) {
 
     if ($constructor_class eq 'RegexMatch') {
         my $flags_node = $params{flags};
-        my $flags_str  = defined $flags_node ? $flags_node->value() : '';
-        $flags_str //= '';
+        my $flags_str  = (defined $flags_node ? $flags_node->value() : '') // '';
         return $factory->make('RegexMatch',
             flags        => $flags_str,
             inputs       => [$params{target}, $params{pattern}, $flags_node],
@@ -169,8 +168,7 @@ sub translate($factory, $constructor_class, %params) {
 
     if ($constructor_class eq 'RegexSubst') {
         my $flags_node = $params{flags};
-        my $flags_str  = defined $flags_node ? $flags_node->value() : '';
-        $flags_str //= '';
+        my $flags_str  = (defined $flags_node ? $flags_node->value() : '') // '';
         return $factory->make('RegexSubst',
             flags        => $flags_str,
             inputs       => [$params{target}, $params{pattern}, $params{replacement}, $flags_node],

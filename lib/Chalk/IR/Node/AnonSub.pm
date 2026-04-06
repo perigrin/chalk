@@ -22,7 +22,6 @@ class Chalk::IR::Node::AnonSub :isa(Chalk::IR::Node) {
     # Each anonymous sub is semantically unique (different closure body),
     # so include a sequential counter to prevent incorrect deduplication.
     method content_hash() {
-        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
-        return "AnonSub|anon_id=" . $anon_id . "|" . join('|', @input_ids);
+        return join('|', 'AnonSub', "anon_id=$anon_id", $self->_serialize_inputs());
     }
 }

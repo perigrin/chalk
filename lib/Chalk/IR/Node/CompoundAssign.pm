@@ -12,7 +12,6 @@ class Chalk::IR::Node::CompoundAssign :isa(Chalk::IR::Node) {
     method operation() { 'CompoundAssign' }
 
     method content_hash() {
-        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
-        return "CompoundAssign|op=" . $op . "|" . join('|', @input_ids);
+        return join('|', 'CompoundAssign', "op=$op", $self->_serialize_inputs());
     }
 }

@@ -10,8 +10,6 @@ class Chalk::IR::Node::Regex :isa(Chalk::IR::Node) {
     field $flags :param :reader = '';
 
     method content_hash() {
-        my $op = $self->operation();
-        my @input_ids = map { defined($_) ? $_->id() : 'undef' } $self->inputs()->@*;
-        return $op . "|flags=" . $flags . "|" . join('|', @input_ids);
+        return join('|', $self->operation(), "flags=$flags", $self->_serialize_inputs());
     }
 }
