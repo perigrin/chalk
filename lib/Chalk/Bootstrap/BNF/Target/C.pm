@@ -34,6 +34,29 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         return "$type $name\[$n\] = { $init };\n";
     }
 
+    # Return a normalized copy of a Chalk::Grammar::Symbol, stripping /…/ delimiters
+    # from terminal values so DFA patterns are bare regexes (e.g. 'a' not '/a/').
+    my sub _normalize_symbol($sym) {
+        return $sym unless $sym->type() eq 'terminal';
+        my $val = $sym->value();
+        return $sym unless $val =~ m{^/(.*)/$};
+        my %args = (type => 'terminal', value => $1);
+        $args{quantifier} = $sym->quantifier() if defined $sym->quantifier();
+        return Chalk::Grammar::Symbol->new(%args);
+    }
+
+    # Return a normalized copy of a Chalk::Grammar::Rule, with all terminal symbols
+    # having their /…/ delimiters stripped from their values.
+    my sub _normalize_rule($rule) {
+        my @normalized_exprs = map {
+            [ map { _normalize_symbol($_) } $_->@* ]
+        } $rule->expressions()->@*;
+        return Chalk::Grammar::Rule->new(
+            name        => $rule->name(),
+            expressions => \@normalized_exprs,
+        );
+    }
+
     # Stored after the most recent generate() call for introspection by tests
     # and for use by future serialization methods.
     field $last_dfa_state_count :reader = 0;
@@ -65,11 +88,13 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         $grammar    = undef;
         $_defines   = [];
 
-        # Reconstruct Rule/Symbol objects from the IR
-        my @rules = $self->_reconstruct_rules($ir);
+        # IR contains Chalk::Grammar::Rule objects directly.
+        # Normalize terminal values: strip /…/ delimiters from terminal symbols so
+        # the DFA, CoreItemIndex, and C arrays all use bare regex patterns.
+        my @rules = map { _normalize_rule($_) } $ir->@*;
         $last_rule_count = scalar @rules;
 
-        # Collect all terminal patterns for introspection
+        # Collect all terminal patterns for introspection (after normalization)
         my @patterns;
         for my $rule (@rules) {
             for my $alt ($rule->expressions()->@*) {
@@ -561,65 +586,4 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
         return $self->generate($ir);
     }
 
-    # Reconstruct Chalk::Grammar::Rule and Chalk::Grammar::Symbol objects
-    # from an arrayref of Constructor:Rule IR nodes.
-    method _reconstruct_rules($ir) {
-        my @rules;
-        for my $rule_node ($ir->@*) {
-            push @rules, $self->_reconstruct_rule($rule_node);
-        }
-        return @rules;
-    }
-
-    # Reconstruct a single Chalk::Grammar::Rule from a Constructor:Rule IR node.
-    # IR layout: inputs()->[0] = Constant(name), inputs()->[1] = arrayref of Expression nodes
-    method _reconstruct_rule($rule_node) {
-        my $inputs      = $rule_node->inputs();
-        my $name        = $inputs->[0]->value();
-        my $expr_nodes  = $inputs->[1];
-
-        my @expressions;
-        for my $expr_node ($expr_nodes->@*) {
-            push @expressions, $self->_reconstruct_expression($expr_node);
-        }
-
-        return Chalk::Grammar::Rule->new(
-            name        => $name,
-            expressions => \@expressions,
-        );
-    }
-
-    # Reconstruct a single alternative (arrayref of Symbol objects)
-    # from a Constructor:Expression IR node.
-    # IR layout: inputs()->[0] = arrayref of Symbol Constructor nodes
-    method _reconstruct_expression($expr_node) {
-        my $symbol_nodes = $expr_node->inputs()->[0];
-        my @symbols;
-        for my $sym_node ($symbol_nodes->@*) {
-            push @symbols, $self->_reconstruct_symbol($sym_node);
-        }
-        return \@symbols;
-    }
-
-    # Reconstruct a single Chalk::Grammar::Symbol from a Constructor:Symbol IR node.
-    # IR layout: inputs()->[0] = Constant(type), inputs()->[1] = Constant(value),
-    #            inputs()->[2] = Constant(quantifier) or undef
-    method _reconstruct_symbol($sym_node) {
-        my $inputs     = $sym_node->inputs();
-        my $type_str   = $inputs->[0]->value();
-        my $raw_value  = $inputs->[1]->value();
-        my $quant_node = $inputs->[2];
-        my $quant_str  = defined($quant_node) ? $quant_node->value() : undef;
-
-        # Strip /…/ delimiters from terminal values (same logic as Target::Perl)
-        my $value = $raw_value;
-        if ($type_str eq 'terminal' && $value =~ m{^/(.*)/$}) {
-            $value = $1;
-        }
-
-        my %args = (type => $type_str, value => $value);
-        $args{quantifier} = $quant_str if defined $quant_str;
-
-        return Chalk::Grammar::Symbol->new(%args);
-    }
 }

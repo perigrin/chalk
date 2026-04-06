@@ -61,7 +61,6 @@ my %UNOP_MAP = (
 # BNF grammar types, or optimizer-specific — none of these are translated.
 my %NOT_TRANSLATED = map { $_ => 1 } qw(
     Program ClassDecl MethodDecl SubDecl FieldDecl UseDecl _Attribute
-    Symbol Expression Rule
 );
 
 sub translate($factory, $constructor_class, %params) {

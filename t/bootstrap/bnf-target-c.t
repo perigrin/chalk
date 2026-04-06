@@ -1,15 +1,12 @@
 # ABOUTME: Tests for BNF::Target::C — the C static-table emitter for DFA serialization.
-# ABOUTME: Verifies grammar reconstruction from IR, DFA construction, and stub result shape.
+# ABOUTME: Verifies grammar data model input, DFA construction, and stub result shape.
 use 5.42.0;
 use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::Bootstrap::IR::NodeFactory;
-
-# Reset factory for clean test state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+use Chalk::Grammar::Symbol;
+use Chalk::Grammar::Rule;
 
 # === Test 1: Module loads and is the right type ===
 
@@ -19,40 +16,29 @@ my $target = Chalk::Bootstrap::BNF::Target::C->new();
 isa_ok($target, 'Chalk::Bootstrap::Target');
 isa_ok($target, 'Chalk::Bootstrap::BNF::Target::C');
 
-# === Helpers: build IR nodes for a small 3-rule grammar ===
+# === Helpers: build grammar data model objects for a small 3-rule grammar ===
 # S ::= A B
 # A ::= /a/
 # B ::= /b/
 
-# Helper: build a Constructor:Symbol IR node
+# Helper: build a Chalk::Grammar::Symbol object
 my sub make_sym(%args) {
-    my $type  = $factory->make('Constant', const_type => 'enum',   value => $args{type});
-    my $value = $factory->make('Constant', const_type => 'string', value => $args{value});
-    my $quant = defined($args{quantifier})
-        ? $factory->make('Constant', const_type => 'string', value => $args{quantifier})
-        : undef;
-    return $factory->make('Constructor',
-        class      => 'Symbol',
-        type       => $type,
-        value      => $value,
-        quantifier => $quant,
+    return Chalk::Grammar::Symbol->new(
+        type       => $args{type},
+        value      => $args{value},
+        quantifier => $args{quantifier},
     );
 }
 
-# Helper: build a Constructor:Expression IR node
+# Helper: build an expression (arrayref of Symbol objects)
 my sub make_expr(@symbols) {
-    return $factory->make('Constructor',
-        class    => 'Expression',
-        elements => \@symbols,
-    );
+    return \@symbols;
 }
 
-# Helper: build a Constructor:Rule IR node
+# Helper: build a Chalk::Grammar::Rule object
 my sub make_rule($name, @expressions) {
-    my $name_node = $factory->make('Constant', const_type => 'string', value => $name);
-    return $factory->make('Constructor',
-        class       => 'Rule',
-        name        => $name_node,
+    return Chalk::Grammar::Rule->new(
+        name        => $name,
         expressions => \@expressions,
     );
 }
@@ -416,42 +402,29 @@ is(scalar @goto_entry_structs, $total_goto_entries,
 # === Determinism: emit twice, outputs must be byte-identical ===
 # ============================================================
 
-# Reset the factory so nodes aren't shared across calls (tests independence)
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory2 = Chalk::Bootstrap::IR::NodeFactory->instance();
-
-my sub make_sym2(%args) {
-    my $type  = $factory2->make('Constant', const_type => 'enum',   value => $args{type});
-    my $value = $factory2->make('Constant', const_type => 'string', value => $args{value});
-    my $quant = defined($args{quantifier})
-        ? $factory2->make('Constant', const_type => 'string', value => $args{quantifier})
-        : undef;
-    return $factory2->make('Constructor',
-        class      => 'Symbol',
-        type       => $type,
-        value      => $value,
-        quantifier => $quant,
-    );
-}
-
-my sub make_expr2(@symbols) {
-    return $factory2->make('Constructor', class => 'Expression', elements => \@symbols);
-}
-
-my sub make_rule2($name, @expressions) {
-    my $name_node = $factory2->make('Constant', const_type => 'string', value => $name);
-    return $factory2->make('Constructor',
-        class       => 'Rule',
-        name        => $name_node,
-        expressions => \@expressions,
-    );
-}
-
+# Build an equivalent IR from scratch to test determinism (no shared state needed)
 my $ir2 = [
-    make_rule2('S', make_expr2(make_sym2(type => 'reference', value => 'A'),
-                               make_sym2(type => 'reference', value => 'B'))),
-    make_rule2('A', make_expr2(make_sym2(type => 'terminal',  value => '/a/'))),
-    make_rule2('B', make_expr2(make_sym2(type => 'terminal',  value => '/b/'))),
+    Chalk::Grammar::Rule->new(
+        name        => 'S',
+        expressions => [
+            [
+                Chalk::Grammar::Symbol->new(type => 'reference', value => 'A'),
+                Chalk::Grammar::Symbol->new(type => 'reference', value => 'B'),
+            ],
+        ],
+    ),
+    Chalk::Grammar::Rule->new(
+        name        => 'A',
+        expressions => [
+            [ Chalk::Grammar::Symbol->new(type => 'terminal', value => '/a/') ],
+        ],
+    ),
+    Chalk::Grammar::Rule->new(
+        name        => 'B',
+        expressions => [
+            [ Chalk::Grammar::Symbol->new(type => 'terminal', value => '/b/') ],
+        ],
+    ),
 ];
 
 my $target2 = Chalk::Bootstrap::BNF::Target::C->new();
@@ -596,47 +569,30 @@ like($c_text, qr/nullable_nonterminals\[/,
 # This validates that nullable_nonterminals and NUM_NULLABLE > 0
 # when the grammar actually has nullable nonterminals.
 
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory3 = Chalk::Bootstrap::IR::NodeFactory->instance();
-
-my sub make_sym3(%args) {
-    my $type  = $factory3->make('Constant', const_type => 'enum',   value => $args{type});
-    my $value = $factory3->make('Constant', const_type => 'string', value => $args{value});
-    my $quant = defined($args{quantifier})
-        ? $factory3->make('Constant', const_type => 'string', value => $args{quantifier})
-        : undef;
-    return $factory3->make('Constructor',
-        class      => 'Symbol',
-        type       => $type,
-        value      => $value,
-        quantifier => $quant,
-    );
-}
-
-my sub make_expr3(@symbols) {
-    return $factory3->make('Constructor', class => 'Expression', elements => \@symbols);
-}
-
-my sub make_rule3($name, @expressions) {
-    my $name_node = $factory3->make('Constant', const_type => 'string', value => $name);
-    return $factory3->make('Constructor',
-        class       => 'Rule',
-        name        => $name_node,
-        expressions => \@expressions,
-    );
-}
-
 # A ::= /x/ | (epsilon)  — two alternatives, second is empty
 my $ir3 = [
-    make_rule3('Top', make_expr3(
-        make_sym3(type => 'reference', value => 'A'),
-        make_sym3(type => 'reference', value => 'B'),
-    )),
-    make_rule3('A',
-        make_expr3(make_sym3(type => 'terminal', value => '/x/')),
-        make_expr3(),   # epsilon alternative
+    Chalk::Grammar::Rule->new(
+        name        => 'Top',
+        expressions => [
+            [
+                Chalk::Grammar::Symbol->new(type => 'reference', value => 'A'),
+                Chalk::Grammar::Symbol->new(type => 'reference', value => 'B'),
+            ],
+        ],
     ),
-    make_rule3('B', make_expr3(make_sym3(type => 'terminal', value => '/y/'))),
+    Chalk::Grammar::Rule->new(
+        name        => 'A',
+        expressions => [
+            [ Chalk::Grammar::Symbol->new(type => 'terminal', value => '/x/') ],
+            [],   # epsilon alternative
+        ],
+    ),
+    Chalk::Grammar::Rule->new(
+        name        => 'B',
+        expressions => [
+            [ Chalk::Grammar::Symbol->new(type => 'terminal', value => '/y/') ],
+        ],
+    ),
 ];
 
 my $target3 = Chalk::Bootstrap::BNF::Target::C->new();

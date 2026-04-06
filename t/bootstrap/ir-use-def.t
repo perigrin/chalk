@@ -15,231 +15,193 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    my $const = $factory->make('Constant',
+    my $var = $factory->make('Constant',
         const_type => 'string',
-        value => 'test1'
+        value      => '$x',
     );
 
-    my $type = $factory->make('Constant',
+    my $init = $factory->make('Constant',
         const_type => 'string',
-        value => 'terminal'
+        value      => '42',
     );
 
-    my $symbol = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $const,
-        quantifier => undef
+    my $decl = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
     );
 
-    # Check producers (inputs) of symbol
-    is(scalar($symbol->inputs->@*), 3, 'symbol has 3 inputs');
-    is($symbol->inputs->[0], $type, 'first input is type');
-    is($symbol->inputs->[1], $const, 'second input is value');
-    is($symbol->inputs->[2], undef, 'third input is undef quantifier');
+    # Check producers (inputs) of decl
+    is(scalar($decl->inputs->@*), 2, 'decl has 2 inputs');
+    is($decl->inputs->[0], $var,  'first input is variable');
+    is($decl->inputs->[1], $init, 'second input is initializer');
 
-    # Check consumers of const
-    is(scalar($const->consumers->@*), 1, 'const has 1 consumer');
-    is($const->consumers->[0], $symbol, 'const consumed by symbol');
+    # Check consumers of var
+    is(scalar($var->consumers->@*), 1, 'var has 1 consumer');
+    is($var->consumers->[0], $decl, 'var consumed by decl');
 
-    # Check consumers of type
-    is(scalar($type->consumers->@*), 1, 'type has 1 consumer');
-    is($type->consumers->[0], $symbol, 'type consumed by symbol');
+    # Check consumers of init
+    is(scalar($init->consumers->@*), 1, 'init has 1 consumer');
+    is($init->consumers->[0], $decl, 'init consumed by decl');
 }
 
-# Test 2: Multiple consumers
+# Test 2: Multiple consumers - same inputs deduplicated
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    my $shared = $factory->make('Constant',
-        const_type => 'string',
-        value => 'shared'
+    my $shared_var  = $factory->make('Constant', const_type => 'string', value => '$shared_var');
+    my $shared_init = $factory->make('Constant', const_type => 'string', value => 'shared_init');
+
+    my $decl1 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $shared_var,
+        initializer => $shared_init,
     );
 
-    my $type = $factory->make('Constant',
-        const_type => 'string',
-        value => 'terminal'
+    my $decl2 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $shared_var,
+        initializer => $shared_init,
     );
 
-    my $symbol1 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $shared,
-        quantifier => undef
-    );
+    # Because of hash consing, decl1 and decl2 are the same
+    is($decl1, $decl2, 'VarDecl nodes are deduplicated');
 
-    my $symbol2 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $shared,
-        quantifier => undef
-    );
-
-    # Because of hash consing, symbol1 and symbol2 are the same
-    is($symbol1, $symbol2, 'symbols are deduplicated');
-
-    # So shared still has only 1 consumer
-    is(scalar($shared->consumers->@*), 1, 'shared has 1 consumer (deduplicated)');
+    # So shared_var still has only 1 consumer
+    is(scalar($shared_var->consumers->@*), 1, 'shared_var has 1 consumer (deduplicated)');
 }
 
-# Test 3: Multiple consumers (non-deduplicated)
+# Test 3: Multiple consumers (non-deduplicated due to different initializers)
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    my $shared = $factory->make('Constant',
+    my $shared_var = $factory->make('Constant',
         const_type => 'string',
-        value => 'shared2'
+        value      => '$multi_var',
     );
 
-    my $type = $factory->make('Constant',
+    my $init1 = $factory->make('Constant',
         const_type => 'string',
-        value => 'terminal'
+        value      => 'init_a',
     );
 
-    my $quant1 = $factory->make('Constant',
+    my $init2 = $factory->make('Constant',
         const_type => 'string',
-        value => '*'
+        value      => 'init_b',
     );
 
-    my $quant2 = $factory->make('Constant',
-        const_type => 'string',
-        value => '+'
+    my $decl1 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $shared_var,
+        initializer => $init1,
     );
 
-    my $symbol1 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $shared,
-        quantifier => $quant1
+    my $decl2 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $shared_var,
+        initializer => $init2,
     );
 
-    my $symbol2 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $shared,
-        quantifier => $quant2
-    );
+    # Different initializers means different decls
+    isnt($decl1, $decl2, 'decls differ due to different initializers');
 
-    # Different quantifiers means different symbols
-    isnt($symbol1, $symbol2, 'symbols differ due to quantifier');
+    # So shared_var has 2 consumers
+    is(scalar($shared_var->consumers->@*), 2, 'shared_var has 2 consumers');
 
-    # So shared has 2 consumers
-    is(scalar($shared->consumers->@*), 2, 'shared has 2 consumers');
-
-    my %consumer_addrs = map { refaddr($_) => 1 } $shared->consumers->@*;
-    ok($consumer_addrs{refaddr($symbol1)}, 'symbol1 is a consumer');
-    ok($consumer_addrs{refaddr($symbol2)}, 'symbol2 is a consumer');
+    my %consumer_addrs = map { refaddr($_) => 1 } $shared_var->consumers->@*;
+    ok($consumer_addrs{refaddr($decl1)}, 'decl1 is a consumer');
+    ok($consumer_addrs{refaddr($decl2)}, 'decl2 is a consumer');
 }
 
-# Test 4: Graph traversal
+# Test 4: Graph traversal (VarDecl -> ArrayRefExpr chain)
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    # Build: const -> symbol -> expression
-    my $const = $factory->make('Constant',
-        const_type => 'string',
-        value => 'leaf'
+    # Build: var_const -> decl -> arr (decl used as element in ArrayRefExpr)
+    # ArrayRefExpr takes 'elements' which is an array input
+    my $var  = $factory->make('Constant', const_type => 'string', value => '$leaf_var');
+    my $init = $factory->make('Constant', const_type => 'string', value => 'leaf_val');
+
+    my $decl = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
     );
 
-    my $type = $factory->make('Constant',
-        const_type => 'string',
-        value => 'terminal'
+    # ArrayRefExpr takes elements as its single input (an array of nodes)
+    my $arr = $factory->make('Constructor',
+        class    => 'ArrayRefExpr',
+        elements => [$decl],
     );
 
-    my $symbol = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $const,
-        quantifier => undef
-    );
+    # Traverse backward from arr
+    is(scalar($arr->inputs->@*), 1, 'arr has 1 input');
+    my $arr_input = $arr->inputs->[0];
+    is(ref($arr_input), 'ARRAY', 'arr input is array ref');
+    is($arr_input->[0], $decl, 'arr input contains decl');
 
-    my $expr = $factory->make('Constructor',
-        class => 'Expression',
-        elements => [$symbol]
-    );
+    # Traverse forward from var
+    is(scalar($var->consumers->@*), 1, 'var has 1 consumer');
+    is($var->consumers->[0], $decl, 'var consumer is decl');
 
-    # Traverse backward from expr
-    is(scalar($expr->inputs->@*), 1, 'expr has 1 input');
-    my $expr_input = $expr->inputs->[0];
-    is(ref($expr_input), 'ARRAY', 'expr input is array ref');
-    is($expr_input->[0], $symbol, 'expr input contains symbol');
-
-    # Traverse forward from const
-    is(scalar($const->consumers->@*), 1, 'const has 1 consumer');
-    is($const->consumers->[0], $symbol, 'const consumer is symbol');
-
-    is(scalar($symbol->consumers->@*), 1, 'symbol has 1 consumer');
-    # Note: Constructor:Expression stores elements as arrayref, so it's the consumer
-    ok($symbol->consumers->[0], 'symbol has a consumer');
+    is(scalar($decl->consumers->@*), 1, 'decl has 1 consumer');
+    ok($decl->consumers->[0], 'decl has a consumer (arr)');
 }
 
 # Test 5: Consumer removal
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    my $const = $factory->make('Constant',
+    my $shared = $factory->make('Constant',
         const_type => 'string',
-        value => 'removal_test'
+        value      => '$removal_test',
     );
 
-    my $type = $factory->make('Constant',
+    my $init1 = $factory->make('Constant',
         const_type => 'string',
-        value => 'terminal'
+        value      => 'init_r1',
     );
 
-    my $quant1 = $factory->make('Constant',
+    my $init2 = $factory->make('Constant',
         const_type => 'string',
-        value => '*'
+        value      => 'init_r2',
     );
 
-    my $quant2 = $factory->make('Constant',
-        const_type => 'string',
-        value => '+'
+    my $decl1 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $shared,
+        initializer => $init1,
     );
 
-    my $symbol1 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $const,
-        quantifier => $quant1
-    );
-
-    my $symbol2 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $const,
-        quantifier => $quant2
+    my $decl2 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $shared,
+        initializer => $init2,
     );
 
     # Verify initial state
-    is(scalar($const->consumers->@*), 2, 'const has 2 consumers initially');
+    is(scalar($shared->consumers->@*), 2, 'shared has 2 consumers initially');
 
     # Remove one consumer
-    $const->remove_consumer($symbol1);
+    $shared->remove_consumer($decl1);
 
-    is(scalar($const->consumers->@*), 1, 'const has 1 consumer after removal');
-    is($const->consumers->[0], $symbol2, 'remaining consumer is symbol2');
+    is(scalar($shared->consumers->@*), 1, 'shared has 1 consumer after removal');
+    is($shared->consumers->[0], $decl2, 'remaining consumer is decl2');
 
     # Remove second consumer
-    $const->remove_consumer($symbol2);
+    $shared->remove_consumer($decl2);
 
-    is(scalar($const->consumers->@*), 0, 'const has no consumers after removal');
+    is(scalar($shared->consumers->@*), 0, 'shared has no consumers after removal');
 }
 
 # Test 6: No circular references at creation
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    # We can't create a node that references itself because:
-    # 1. Inputs must be provided at construction time
-    # 2. The node doesn't exist yet to be its own input
-
-    # This is a structural guarantee, not something we need to test runtime
-    # But let's verify a node's consumers don't include itself initially
-
+    # Verify a node's consumers don't include itself initially
     my $const = $factory->make('Constant',
         const_type => 'string',
-        value => 'circular_test'
+        value      => 'circular_test',
     );
 
     my $has_self_consumer = grep { refaddr($_) == refaddr($const) } $const->consumers->@*;

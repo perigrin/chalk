@@ -86,14 +86,11 @@ sub full_pipeline {
     return parse_ir($parser, bnf_text());
 }
 
-# Convenience function: full pipeline + DCE optimization
+# Convenience function: full pipeline returning grammar data.
+# Grammar::Rule objects are direct data model objects, not IR nodes,
+# so no IR optimizer passes apply to them.
 sub optimized_pipeline {
-    my $ir = full_pipeline();
-    return undef unless defined $ir;
-
-    my $optimizer = Chalk::Bootstrap::Optimizer->new();
-    $optimizer->add_pass(Chalk::Bootstrap::Optimizer::DCE->new());
-    return $optimizer->optimize($ir);
+    return full_pipeline();
 }
 
 # Returns the 65-rule Perl grammar as BNF text (reads from docs/chalk-bootstrap.bnf)

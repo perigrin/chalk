@@ -52,73 +52,69 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
     # Create shared input nodes
-    my $type = $factory->make('Constant',
+    my $var = $factory->make('Constant',
         const_type => 'string',
-        value => 'terminal'
+        value => '$x',
     );
 
-    my $value = $factory->make('Constant',
+    my $init = $factory->make('Constant',
         const_type => 'string',
-        value => 'foo'
+        value => '42',
     );
 
-    # Create two Constructor:Symbol nodes with same inputs
-    my $symbol1 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $value,
-        quantifier => undef
+    # Create two Constructor:VarDecl nodes with same inputs
+    my $decl1 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
     );
 
-    my $symbol2 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $value,
-        quantifier => undef
+    my $decl2 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
     );
 
-    is($symbol1, $symbol2, 'complex nodes with same inputs deduplicated');
+    is($decl1, $decl2, 'complex nodes with same inputs deduplicated');
 }
 
-# Test 4: Hash key determinism - same data different order
+# Test 4: Hash key determinism - same data different code path
 {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    # Create inputs in one order
-    my $type1 = $factory->make('Constant',
+    # Create inputs in one code path
+    my $var1 = $factory->make('Constant',
         const_type => 'string',
-        value => 'reference'
+        value => '$bar',
     );
-    my $val1 = $factory->make('Constant',
+    my $init1 = $factory->make('Constant',
         const_type => 'string',
-        value => 'bar'
+        value => 'value1',
     );
 
-    my $symbol1 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type1,
-        value => $val1,
-        quantifier => undef
+    my $decl1 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var1,
+        initializer => $init1,
     );
 
-    # Create inputs in different code path but same logical data
-    my $type2 = $factory->make('Constant',
+    # Create inputs in a different code path but same logical data
+    my $var2 = $factory->make('Constant',
         const_type => 'string',
-        value => 'reference'
+        value => '$bar',
     );
-    my $val2 = $factory->make('Constant',
+    my $init2 = $factory->make('Constant',
         const_type => 'string',
-        value => 'bar'
+        value => 'value1',
     );
 
-    my $symbol2 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type2,
-        value => $val2,
-        quantifier => undef
+    my $decl2 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var2,
+        initializer => $init2,
     );
 
-    is($symbol1, $symbol2, 'hash key generation is deterministic');
+    is($decl1, $decl2, 'hash key generation is deterministic');
 }
 
 # Test 5: Nested deduplication
@@ -126,40 +122,26 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
     # Build a small graph twice
-    my $const1 = $factory->make('Constant',
-        const_type => 'string',
-        value => 'test'
-    );
-    my $type1 = $factory->make('Constant',
-        const_type => 'string',
-        value => 'terminal'
-    );
-    my $symbol1 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type1,
-        value => $const1,
-        quantifier => undef
+    my $var1  = $factory->make('Constant', const_type => 'string', value => '$z');
+    my $init1 = $factory->make('Constant', const_type => 'string', value => 'nested');
+    my $decl1 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var1,
+        initializer => $init1,
     );
 
     # Build same graph again
-    my $const2 = $factory->make('Constant',
-        const_type => 'string',
-        value => 'test'
-    );
-    my $type2 = $factory->make('Constant',
-        const_type => 'string',
-        value => 'terminal'
-    );
-    my $symbol2 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type2,
-        value => $const2,
-        quantifier => undef
+    my $var2  = $factory->make('Constant', const_type => 'string', value => '$z');
+    my $init2 = $factory->make('Constant', const_type => 'string', value => 'nested');
+    my $decl2 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var2,
+        initializer => $init2,
     );
 
-    is($const1, $const2, 'leaf nodes deduplicated');
-    is($type1, $type2, 'intermediate nodes deduplicated');
-    is($symbol1, $symbol2, 'root nodes deduplicated');
+    is($var1,  $var2,  'leaf variable nodes deduplicated');
+    is($init1, $init2, 'leaf init nodes deduplicated');
+    is($decl1, $decl2, 'root VarDecl nodes deduplicated');
 }
 
 # Test 6: Factory singleton
@@ -251,21 +233,20 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-    my $type = $factory->make('Constant', const_type => 'string', value => 'terminal');
-    my $val = $factory->make('Constant', const_type => 'string', value => '/x/');
-    my $symbol = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $val,
-        quantifier => undef,
+    my $var  = $factory->make('Constant', const_type => 'string', value => '$consumer_test');
+    my $init = $factory->make('Constant', const_type => 'string', value => 'init_val');
+    my $decl = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
     );
 
-    # $type has $symbol as a consumer, so removing it should die
-    eval { $factory->remove_node($type->id()) };
+    # $var has $decl as a consumer, so removing it should die
+    eval { $factory->remove_node($var->id()) };
     like($@, qr/still has consumers/, 'remove_node() dies when node has consumers');
 
-    # $symbol has no consumers, so removing it should succeed
-    eval { $factory->remove_node($symbol->id()) };
+    # $decl has no consumers, so removing it should succeed
+    eval { $factory->remove_node($decl->id()) };
     is($@, '', 'remove_node() succeeds when node has no consumers');
 }
 

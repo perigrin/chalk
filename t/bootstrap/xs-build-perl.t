@@ -1,4 +1,4 @@
-# ABOUTME: Build integration test for XS code generation of the 63-rule Perl grammar.
+# ABOUTME: Build integration test for XS code generation of the 64-rule Perl grammar.
 # ABOUTME: Compiles generated XS and validates two-way recognizer equivalence (M4=M5).
 use 5.42.0;
 use utf8;
@@ -29,19 +29,11 @@ eval { require Module::Build; 1 }
 use TestPipeline qw(perl_pipeline build_perl_recognizer grammars_match);
 use Chalk::Bootstrap::BNF::Target::XS;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::Optimizer;
-use Chalk::Bootstrap::Optimizer::DCE;
 
-my $raw_ir = perl_pipeline();
-ok(defined $raw_ir, 'perl_pipeline produces IR');
-
-# Optimize the Perl grammar IR (same as optimized_pipeline does for BNF)
-my $optimizer = Chalk::Bootstrap::Optimizer->new();
-$optimizer->add_pass(Chalk::Bootstrap::Optimizer::DCE->new());
-my $ir = $optimizer->optimize($raw_ir);
-ok(defined $ir, 'DCE optimization produces IR');
-is(ref($ir), 'ARRAY', 'optimized IR is an arrayref');
-is(scalar $ir->@*, 63, 'optimized IR has 63 rules');
+my $ir = perl_pipeline();
+ok(defined $ir, 'perl_pipeline produces IR');
+is(ref($ir), 'ARRAY', 'pipeline IR is an arrayref');
+is(scalar $ir->@*, 64, 'pipeline IR has 64 rules');
 
 my $target = Chalk::Bootstrap::BNF::Target::XS->new(
     module_name => 'Chalk::Grammar::Perl::Rules',
@@ -104,7 +96,7 @@ eval $perl_code;
 is($@, '', 'M4: generated Perl evals without error') or diag $@;
 my $m4_grammar = Chalk::Grammar::Perl::XSBuildGenerated::grammar();
 ok(defined $m4_grammar, 'M4: Perl-generated grammar loaded');
-is(scalar $m4_grammar->@*, 63, 'M4: 63 rules');
+is(scalar $m4_grammar->@*, 64, 'M4: 64 rules');
 
 # Extract rule names from M4 grammar dynamically
 my @rule_names = map { $_->name() } $m4_grammar->@*;
@@ -126,7 +118,7 @@ for my $name (@rule_names) {
 
 # === Two-way grammar equivalence (M4 = M5) ===
 
-is(scalar @xs_rules, 63, 'M5: XS-generated grammar has 63 rules');
+is(scalar @xs_rules, 64, 'M5: XS-generated grammar has 64 rules');
 ok(grammars_match($m4_grammar, \@xs_rules), 'M4 == M5: Perl-generated matches XS-generated');
 
 # === Recognizer acceptance tests ===

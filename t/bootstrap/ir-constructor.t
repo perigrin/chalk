@@ -1,5 +1,5 @@
-# ABOUTME: Tests for parameterized Constructor IR node for Symbol, Expression, and Rule
-# ABOUTME: Verifies Constructor with class parameter works for all three grammar object types
+# ABOUTME: Tests for parameterized Constructor IR node for Perl IR types
+# ABOUTME: Verifies Constructor with class parameter works for VarDecl and other Perl IR types
 use 5.42.0;
 use utf8;
 
@@ -13,182 +13,163 @@ Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
 
 my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
 
-# Test 1: Constructor:Symbol creation
+# Test 1: Constructor:VarDecl creation
 {
-    my $type = $factory->make('Constant',
-        const_type => 'enum',
-        value => 'terminal'
-    );
-
-    my $value = $factory->make('Constant',
+    my $var_name = $factory->make('Constant',
         const_type => 'string',
-        value => 'foo'
+        value      => '$x',
     );
 
-    my $symbol = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $value,
-        quantifier => undef
+    my $init = $factory->make('Constant',
+        const_type => 'string',
+        value      => '42',
     );
 
-    isa_ok($symbol, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($symbol->class(), 'Symbol', 'class attribute is Symbol');
-    is($symbol->operation(), 'Constructor', 'operation is Constructor');
+    my $decl = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var_name,
+        initializer => $init,
+    );
 
-    my $inputs = $symbol->inputs();
-    is($inputs->[0], $type, 'first input is type');
-    is($inputs->[1], $value, 'second input is value');
-    is($inputs->[2], undef, 'third input is quantifier (undef)');
+    isa_ok($decl, 'Chalk::IR::Node');
+    is($decl->class(), 'VarDecl', 'class attribute is VarDecl');
+    is($decl->operation(), 'VarDecl', 'operation is VarDecl');
+
+    my $inputs = $decl->inputs();
+    is($inputs->[0], $var_name, 'first input is variable name');
+    is($inputs->[1], $init,     'second input is initializer');
 }
 
-# Test 2: Constructor:Expression creation
+# Test 2: Constructor:BinaryExpr creation
 {
-    my $elem1 = $factory->make('Constant',
+    my $op = $factory->make('Constant',
         const_type => 'string',
-        value => 'elem1'
+        value      => '+',
     );
 
-    my $elem2 = $factory->make('Constant',
+    my $left = $factory->make('Constant',
         const_type => 'string',
-        value => 'elem2'
+        value      => 'a',
     );
 
-    my $expr = $factory->make('Constructor',
-        class => 'Expression',
-        elements => [$elem1, $elem2]
+    my $right = $factory->make('Constant',
+        const_type => 'string',
+        value      => 'b',
     );
 
-    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($expr->class(), 'Expression', 'class attribute is Expression');
-    is($expr->operation(), 'Constructor', 'operation is Constructor');
+    my $binop = $factory->make('Constructor',
+        class => 'BinaryExpr',
+        op    => $op,
+        left  => $left,
+        right => $right,
+    );
 
-    my $inputs = $expr->inputs();
-    is(scalar($inputs->[0]->@*), 2, 'elements array has 2 elements');
-    is($inputs->[0]->[0], $elem1, 'first element matches');
-    is($inputs->[0]->[1], $elem2, 'second element matches');
+    isa_ok($binop, 'Chalk::IR::Node');
+    is($binop->operation(), 'Add', 'BinaryExpr with + becomes Add operation');
 }
 
-# Test 3: Constructor:Rule creation
+# Test 3: Constructor:BuiltinCall creation
 {
     my $name = $factory->make('Constant',
         const_type => 'string',
-        value => 'MyRule'
+        value      => 'push',
     );
-
-    my $expr1 = $factory->make('Constant',
+    my $args = $factory->make('Constant',
         const_type => 'string',
-        value => 'expr1'
+        value      => 'args',
     );
 
-    my $expr2 = $factory->make('Constant',
-        const_type => 'string',
-        value => 'expr2'
+    my $call = $factory->make('Constructor',
+        class => 'BuiltinCall',
+        name  => $name,
+        args  => $args,
     );
 
-    my $rule = $factory->make('Constructor',
-        class => 'Rule',
-        name => $name,
-        expressions => [$expr1, $expr2]
-    );
-
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($rule->class(), 'Rule', 'class attribute is Rule');
-    is($rule->operation(), 'Constructor', 'operation is Constructor');
-
-    my $inputs = $rule->inputs();
-    is($inputs->[0], $name, 'first input is name');
-    is(scalar($inputs->[1]->@*), 2, 'expressions array has 2 expressions');
-    is($inputs->[1]->[0], $expr1, 'first expression matches');
-    is($inputs->[1]->[1], $expr2, 'second expression matches');
+    isa_ok($call, 'Chalk::IR::Node');
+    is($call->class(), 'BuiltinCall', 'BuiltinCall compat_class preserved');
 }
 
 # Test 4: Hash consing - different classes not deduplicated
 {
     my $const1 = $factory->make('Constant',
         const_type => 'string',
-        value => 'shared'
+        value      => 'shared',
     );
 
     my $const2 = $factory->make('Constant',
         const_type => 'string',
-        value => 'other'
+        value      => 'other',
     );
 
-    # Create Constructor:Symbol
-    my $symbol = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $const1,
-        value => $const2,
-        quantifier => undef
+    # Create Constructor:VarDecl
+    my $decl = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $const1,
+        initializer => $const2,
     );
 
-    # Create Constructor:Expression with same constants (different structure)
-    my $expr = $factory->make('Constructor',
-        class => 'Expression',
-        elements => [$const1]
+    # Create Constructor:ArrayRefExpr with same single constant
+    my $arr = $factory->make('Constructor',
+        class     => 'ArrayRefExpr',
+        elements  => $const1,
     );
 
-    isnt($symbol, $expr, 'different Constructor classes are different nodes');
-    isnt(refaddr($symbol), refaddr($expr), 'reference addresses differ');
+    isnt($decl, $arr, 'different Constructor classes are different nodes');
+    isnt(refaddr($decl), refaddr($arr), 'reference addresses differ');
 }
 
 # Test 5: Hash consing - same class and inputs deduplicated
 {
-    my $type = $factory->make('Constant',
-        const_type => 'enum',
-        value => 'reference'
-    );
-
-    my $value = $factory->make('Constant',
+    my $var = $factory->make('Constant',
         const_type => 'string',
-        value => 'bar'
+        value      => '$y',
     );
 
-    my $symbol1 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $value,
-        quantifier => undef
+    my $init = $factory->make('Constant',
+        const_type => 'string',
+        value      => 'value',
     );
 
-    my $symbol2 = $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $value,
-        quantifier => undef
+    my $decl1 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
     );
 
-    is($symbol1, $symbol2, 'identical Constructor:Symbol nodes deduplicated');
-    is(refaddr($symbol1), refaddr($symbol2), 'reference addresses match');
+    my $decl2 = $factory->make('Constructor',
+        class       => 'VarDecl',
+        variable    => $var,
+        initializer => $init,
+    );
+
+    is($decl1, $decl2, 'identical Constructor:VarDecl nodes deduplicated');
+    is(refaddr($decl1), refaddr($decl2), 'reference addresses match');
 }
 
 # Test 6: Hash consing - class attribute distinguishes nodes
 {
     my $const = $factory->make('Constant',
         const_type => 'string',
-        value => 'test'
+        value      => 'same',
     );
 
-    # Two constructors with same input but different class
-    my $expr1 = $factory->make('Constructor',
-        class => 'Expression',
-        elements => [$const]
+    my $arr1 = $factory->make('Constructor',
+        class    => 'ArrayRefExpr',
+        elements => $const,
     );
 
-    my $expr2 = $factory->make('Constructor',
-        class => 'Expression',
-        elements => [$const]
+    my $arr2 = $factory->make('Constructor',
+        class    => 'ArrayRefExpr',
+        elements => $const,
     );
 
-    my $expr3 = $factory->make('Constructor',
-        class => 'Rule',
-        name => $const,
-        expressions => []
+    my $hash = $factory->make('Constructor',
+        class  => 'HashRefExpr',
+        pairs  => $const,
     );
 
-    is($expr1, $expr2, 'same class and inputs deduplicated');
-    isnt($expr1, $expr3, 'different class not deduplicated');
+    is($arr1, $arr2, 'same class and inputs deduplicated');
+    isnt($arr1, $hash, 'different class not deduplicated');
 }
 
 done_testing();

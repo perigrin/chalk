@@ -6,11 +6,8 @@ use Test::More;
 
 use lib 'lib';
 
-use Chalk::Bootstrap::IR::NodeFactory;
-
-# Reset factory for clean test state
-Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
+use Chalk::Grammar::Symbol;
+use Chalk::Grammar::Rule;
 
 # === Step 2: Scaffold ===
 
@@ -34,17 +31,13 @@ isa_ok($target, 'Chalk::Bootstrap::BNF::Target::Perl');
 
 # === Step 3: Symbol Emission ===
 
-# Helper: build a Constructor:Symbol IR node
+# Helper: build a Chalk::Grammar::Symbol object
 sub make_symbol {
     my (%args) = @_;
-    my $type = $factory->make('Constant', const_type => 'enum', value => $args{type});
-    my $value = $factory->make('Constant', const_type => 'string', value => $args{value});
-    my $quant = $factory->make('Constant', const_type => 'string', value => $args{quantifier});
-    return $factory->make('Constructor',
-        class => 'Symbol',
-        type => $type,
-        value => $value,
-        quantifier => $quant,
+    return Chalk::Grammar::Symbol->new(
+        type       => $args{type},
+        value      => $args{value},
+        quantifier => $args{quantifier},
     );
 }
 
@@ -110,13 +103,10 @@ sub make_symbol {
 
 # === Step 4: Expression Emission ===
 
-# Helper: build a Constructor:Expression IR node from symbols
+# Helper: build an expression (arrayref of Symbol objects)
 sub make_expression {
     my (@symbols) = @_;
-    return $factory->make('Constructor',
-        class => 'Expression',
-        elements => \@symbols,
-    );
+    return \@symbols;
 }
 
 # Test: Single-element expression
@@ -143,13 +133,11 @@ sub make_expression {
 
 # === Step 5: Rule Emission ===
 
-# Helper: build a Constructor:Rule IR node
+# Helper: build a Chalk::Grammar::Rule object
 sub make_rule {
     my ($name, @expressions) = @_;
-    my $name_node = $factory->make('Constant', const_type => 'string', value => $name);
-    return $factory->make('Constructor',
-        class => 'Rule',
-        name => $name_node,
+    return Chalk::Grammar::Rule->new(
+        name        => $name,
         expressions => \@expressions,
     );
 }
@@ -216,11 +204,8 @@ sub make_rule {
 
 # === Step 6: Full generate() Assembly ===
 
-# Test: generate() with IR rules produces valid Perl
+# Test: generate() with Rule objects produces valid Perl
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
-
     my $sym1 = make_symbol(type => 'terminal', value => '/[A-Za-z_][A-Za-z_0-9]*/', quantifier => undef);
     my $expr1 = make_expression($sym1);
     my $rule1 = make_rule('Identifier', $expr1);
@@ -269,9 +254,6 @@ sub make_rule {
 
 # Test: Target::Perl generate_distribution returns hashref
 {
-    Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
-    $factory = Chalk::Bootstrap::IR::NodeFactory->instance();
-
     my $target_dist = Chalk::Bootstrap::BNF::Target::Perl->new();
     my $dist = $target_dist->generate_distribution([]);
     is(ref($dist), 'HASH', 'generate_distribution returns hashref');

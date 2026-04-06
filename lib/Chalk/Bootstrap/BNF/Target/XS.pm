@@ -58,18 +58,13 @@ class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
         return "newSVpvs(\"$escaped\")";
     }
 
-    # Emit AST nodes for a Constructor:Symbol IR node
+    # Emit AST nodes for a Chalk::Grammar::Symbol object
     # Returns arrayref of [VarDecl, Statement] AST nodes
     method _emit_symbol($symbol_node, $var_name) {
-        my $inputs = $symbol_node->inputs();
-        my $type_const = $inputs->[0];
-        my $value_const = $inputs->[1];
-        my $quant_const = $inputs->[2];
-
-        my $type_str = $type_const->value();
+        my $type_str  = $symbol_node->type();
+        my $raw_value = $symbol_node->value();
 
         # Strip / delimiters from terminal values, then C-escape
-        my $raw_value = $value_const->value();
         my $stripped_value = ($type_str eq 'terminal')
             ? $self->_strip_terminal_delimiters($raw_value)
             : $raw_value;
@@ -94,11 +89,12 @@ class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
             $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$value_str\")));\n";
         }
 
-        # Optional quantifier args (check value, not node — node may exist with undef value)
-        if (defined $quant_const && defined $quant_const->value()) {
-            my $quant_str = $self->_escape_c_string($quant_const->value());
+        # Optional quantifier args
+        my $quant_str = $symbol_node->quantifier();
+        if (defined $quant_str) {
+            my $escaped_quant = $self->_escape_c_string($quant_str);
             $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"quantifier\")));\n";
-            $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$quant_str\")));\n";
+            $block .= "    XPUSHs(sv_2mortal(newSVpvs(\"$escaped_quant\")));\n";
         }
 
         $block .= "    PUTBACK;\n";
@@ -118,7 +114,7 @@ class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
         return [$var_decl, $stmt];
     }
 
-    # Emit AST nodes for a Constructor:Expression IR node (one alternative)
+    # Emit AST nodes for an expression (arrayref of Chalk::Grammar::Symbol objects)
     # Returns arrayref of AST nodes (VarDecl + Statements)
     method _emit_expression($expr_node, $var_name) {
         my @nodes;
@@ -135,8 +131,7 @@ class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
         );
 
         # Emit each symbol and push onto the expression AV
-        my $elements = $expr_node->inputs()->[0];
-        for my $sym ($elements->@*) {
+        for my $sym ($expr_node->@*) {
             my $sym_name = "sym_$sym_counter";
             $sym_counter++;
 
@@ -151,7 +146,7 @@ class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
         return \@nodes;
     }
 
-    # Emit AST nodes for a Constructor:Rule IR node
+    # Emit AST nodes for a Chalk::Grammar::Rule object
     # Returns arrayref of all AST nodes for the complete rule XSUB body
     method _emit_rule($rule_node) {
         my @nodes;
@@ -160,9 +155,8 @@ class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
         $sym_counter = 0;
         $expr_counter = 0;
 
-        my $name_const = $rule_node->inputs()->[0];
-        my $expressions = $rule_node->inputs()->[1];
-        my $rule_name = $name_const->value();
+        my $rule_name  = $rule_node->name();
+        my $expressions = $rule_node->expressions();
 
         # VarDecls for top-level rule variables
         push @nodes, Chalk::Bootstrap::BNF::Target::XS::AST::VarDecl->new(
@@ -221,7 +215,7 @@ class Chalk::Bootstrap::BNF::Target::XS :isa(Chalk::Bootstrap::Target) {
 
     # Wrap a Constructor:Rule IR node into an XSUB AST node
     method _emit_xsub($rule_node) {
-        my $rule_name = $rule_node->inputs()->[0]->value();
+        my $rule_name = $rule_node->name();
         die "Invalid rule name for XS target: $rule_name"
             unless $rule_name =~ /^[A-Za-z_][A-Za-z_0-9]*$/;
         my $body_nodes = $self->_emit_rule($rule_node);

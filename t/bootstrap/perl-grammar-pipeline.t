@@ -1,4 +1,4 @@
-# ABOUTME: Phase 0 test — feed 63-rule Perl grammar through existing BNF pipeline.
+# ABOUTME: Phase 0 test — feed 64-rule Perl grammar through existing BNF pipeline.
 # ABOUTME: Validates that chalk-bootstrap.bnf parses, produces IR, and generates compilable Perl.
 use 5.42.0;
 use utf8;
@@ -12,8 +12,6 @@ use TestPipeline qw(
 );
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Chalk::Bootstrap::Optimizer;
-use Chalk::Bootstrap::Optimizer::DCE;
 
 # Sanity checks on the BNF file
 my $perl_bnf = perl_bnf_text();
@@ -33,7 +31,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
         skip 'Parse failed — cannot validate IR', 7 unless defined $ir;
 
         is(ref($ir), 'ARRAY', 'Phase 0: IR is an arrayref of rules');
-        is(scalar($ir->@*), 63, 'Phase 0: IR contains 63 rules');
+        is(scalar($ir->@*), 64, 'Phase 0: IR contains 64 rules');
         diag sprintf("Parse time: %.3f seconds", $elapsed);
 
         # Phase 0 Gate 2: Code generation produces compilable output
@@ -56,7 +54,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
             # Verify the generated grammar has the expected number of rules
             my $gen_grammar = Chalk::Grammar::Perl::Generated::grammar();
             is(ref($gen_grammar), 'ARRAY', 'Phase 0: generated grammar() returns arrayref');
-            is(scalar($gen_grammar->@*), 63, 'Phase 0: generated grammar has 63 rules');
+            is(scalar($gen_grammar->@*), 64, 'Phase 0: generated grammar has 64 rules');
 
             # Phase 0 Gate 3: Generated recognizer is functional
             # Build a Boolean recognizer from the generated grammar and smoke test
@@ -92,12 +90,11 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
     SKIP: {
         skip 'Parse failed — cannot test optimizer', 3 unless defined $ir;
 
-        my $optimizer = Chalk::Bootstrap::Optimizer->new();
-        $optimizer->add_pass(Chalk::Bootstrap::Optimizer::DCE->new());
-        my $opt_ir = $optimizer->optimize($ir);
+        # Grammar data is Rule objects — no IR optimization step needed
+        my $opt_ir = $ir;
 
         ok(defined $opt_ir, 'Phase 0: optimized pipeline produces IR');
-        is(scalar($opt_ir->@*), 63, 'Phase 0: optimized IR retains 63 rules');
+        is(scalar($opt_ir->@*), 64, 'Phase 0: optimized IR retains 64 rules');
 
         # Generate and compile optimized version
         my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
@@ -132,9 +129,9 @@ SKIP: {
     my $desugared = Chalk::Bootstrap::Desugar::desugar_grammar($gen_grammar);
     my $expanded = scalar($desugared->@*);
     # ? quantifiers pass through without creating helper rules, so the
-    # count stays at 63 when only ? is used (no * or + in Perl grammar).
-    ok($expanded >= 63, "Phase 0: desugaring produces $expanded rules (from 63)");
-    diag "Desugaring: 63 rules + quantifiers -> $expanded effective rules";
+    # count stays at 64 when only ? is used (no * or + in Perl grammar).
+    ok($expanded >= 64, "Phase 0: desugaring produces $expanded rules (from 64)");
+    diag "Desugaring: 64 rules + quantifiers -> $expanded effective rules";
 }
 
 done_testing();

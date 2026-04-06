@@ -42,13 +42,11 @@ class Chalk::Grammar::BNF::Generated {
         return $body;
     }
 
-    # Emit Perl source for a Constructor:Symbol IR node
+    # Emit Perl source for a Chalk::Grammar::Symbol object
     method _emit_symbol($symbol_node) {
-        my $inputs = $symbol_node->inputs();
-        my $type_str = $inputs->[0]->value();
-        my $raw_value = $inputs->[1]->value();
-        my $quant_node = $inputs->[2];
-        my $quant_str = defined($quant_node) ? $quant_node->value() : undef;
+        my $type_str  = $symbol_node->type();
+        my $raw_value = $symbol_node->value();
+        my $quant_str = $symbol_node->quantifier();
 
         # Strip / delimiters from terminal values
         my $value = $raw_value;
@@ -68,9 +66,9 @@ class Chalk::Grammar::BNF::Generated {
         return $code;
     }
 
-    # Emit Perl source for a Constructor:Expression IR node (one alternative)
+    # Emit Perl source for an expression (arrayref of Chalk::Grammar::Symbol objects)
     method _emit_expression($expr_node) {
-        my $elements = $expr_node->inputs()->[0];
+        my $elements = $expr_node;
         my @symbol_codes;
         for my $sym ($elements->@*) {
             push @symbol_codes, $self->_emit_symbol($sym);
@@ -79,10 +77,10 @@ class Chalk::Grammar::BNF::Generated {
         return "[\n" . join(",\n", map { "                $_ " } @symbol_codes) . ",\n            ]";
     }
 
-    # Emit Perl source for a Constructor:Rule IR node
+    # Emit Perl source for a Chalk::Grammar::Rule object
     method _emit_rule($rule_node) {
-        my $name = $rule_node->inputs()->[0]->value();
-        my $expressions = $rule_node->inputs()->[1];
+        my $name        = $rule_node->name();
+        my $expressions = $rule_node->expressions();
 
         my @expr_codes;
         for my $expr ($expressions->@*) {

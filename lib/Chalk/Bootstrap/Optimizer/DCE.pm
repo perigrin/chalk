@@ -1,5 +1,5 @@
 # ABOUTME: Dead Code Elimination pass for the optimizer pipeline.
-# ABOUTME: Removes IR nodes unreachable from the root set (Constructor:Rule nodes).
+# ABOUTME: Removes IR nodes unreachable from the root set (arrayref of IR root nodes).
 use 5.42.0;
 use utf8;
 use experimental 'class';
