@@ -49,7 +49,6 @@ use lib 'lib';
 {
     use_ok('Chalk::Bootstrap::IR::NodeFactory');
     use_ok('Chalk::Bootstrap::IR::Node::Constant');
-    use_ok('Chalk::Bootstrap::IR::Node::Constructor');
 
     Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance();

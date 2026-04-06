@@ -4,17 +4,16 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-# Shim and new factory for delegating translatable Constructor classes
+# Shim translates make('Constructor', class => 'X', ...) to typed Chalk::IR::Node::*
 use Chalk::IR::Shim;
 use Chalk::IR::NodeFactory;
 
 class Chalk::Bootstrap::IR::NodeFactory {
 
-    # Static imports for all node types (eliminates need for dynamic loading)
+    # Static imports for all Bootstrap node types (eliminates dynamic loading)
     use Chalk::Bootstrap::IR::Node::Start;
     use Chalk::Bootstrap::IR::Node::Return;
     use Chalk::Bootstrap::IR::Node::Constant;
-    use Chalk::Bootstrap::IR::Node::Constructor;
     use Chalk::Bootstrap::IR::Node::If;
     use Chalk::Bootstrap::IR::Node::Proj;
     use Chalk::Bootstrap::IR::Node::Region;
@@ -30,7 +29,7 @@ class Chalk::Bootstrap::IR::NodeFactory {
     # Counter for unique CFG node IDs (CFG nodes are not hash-consed)
     field $cfg_counter = 0;
 
-    # New-style factory used to create typed nodes for translated Constructor classes
+    # New-style factory used to produce typed nodes for all Constructor classes
     field $_new_factory = undef;
 
     # CFG operations represent control flow positions, not data values.
@@ -38,43 +37,17 @@ class Chalk::Bootstrap::IR::NodeFactory {
     # even with identical inputs, because cfg_state maps by node identity.
     my %CFG_OPS = map { $_ => 1 } qw(If Proj Region Phi Loop);
 
-    # Define input parameter names for each operation type (in order)
-    # Constructor uses compound keys: "Constructor:Class" format
+    # Define input parameter names for each Bootstrap operation type (in order).
+    # Constructor classes are handled entirely by the shim and do not appear here.
     my %INPUT_SPECS = (
-        Start => [],
-        Return => ['value'],
+        Start    => [],
+        Return   => ['value'],
         Constant => [],  # Constant has attributes, not inputs
-        If => ['control', 'condition'],
-        Proj => ['source'],
-        Region => ['controls'],
-        Phi => ['region', 'values'],
-        Loop => ['entry_ctrl', 'backedge_ctrl'],
-        'Constructor:Program'    => ['statements'],
-        'Constructor:UseDecl'    => ['module_name', 'import_args'],
-        'Constructor:ClassDecl'  => ['name', 'parent', 'body'],
-        'Constructor:MethodDecl' => ['name', 'params', 'body', 'return_type'],
-        'Constructor:SubDecl'    => ['name', 'params', 'body', 'scope'],
-        'Constructor:_Attribute' => ['name', 'parent', 'body'],
-        'Constructor:FieldDecl' => ['name', 'attributes', 'default_value'],
-        'Constructor:InterpolatedString' => ['parts'],
-        'Constructor:VarDecl'         => ['variable', 'initializer'],
-        'Constructor:BinaryExpr'      => ['op', 'left', 'right'],
-        'Constructor:UnaryExpr'       => ['op', 'operand'],
-        'Constructor:CompoundAssign'  => ['op', 'target', 'value'],
-        'Constructor:MethodCallExpr'  => ['invocant', 'method_name', 'args'],
-        'Constructor:SubscriptExpr'   => ['target', 'index', 'style'],
-        'Constructor:PostfixDerefExpr' => ['target', 'sigil'],
-        'Constructor:TernaryExpr'     => ['condition', 'true_expr', 'false_expr'],
-        'Constructor:HashRefExpr'     => ['pairs'],
-        'Constructor:ArrayRefExpr'    => ['elements'],
-        'Constructor:AnonSubExpr'     => ['params', 'body'],
-        'Constructor:RegexMatch'      => ['target', 'pattern', 'flags'],
-        'Constructor:RegexSubst'      => ['target', 'pattern', 'replacement', 'flags'],
-        'Constructor:BuiltinCall'     => ['name', 'args'],
-        'Constructor:BacktickExpr'    => ['command'],
-        'Constructor:TryCatchStmt'    => ['try_body', 'catch_var', 'catch_body'],
-        'Constructor:StructRef'       => ['schema', 'fields'],
-        'Constructor:FieldAccess'     => ['schema', 'field_name', 'target'],
+        If       => ['control', 'condition'],
+        Proj     => ['source'],
+        Region   => ['controls'],
+        Phi      => ['region', 'values'],
+        Loop     => ['entry_ctrl', 'backedge_ctrl'],
     );
 
     # Get singleton instance
@@ -116,20 +89,17 @@ class Chalk::Bootstrap::IR::NodeFactory {
             my $class = $params{class}
                 or die "Constructor requires 'class' parameter";
 
-            # Shim translation — enabled per-class as consumers are migrated.
-            # Chalk::IR::Shim::enable_class('ClassName') activates translation for
-            # a given class; disabled classes fall through to the old Constructor path.
+            # All Constructor classes are translated via the shim.
+            # The shim produces a typed Chalk::IR::Node::* object for every
+            # known class. Unknown classes cause an immediate die.
             $self->_ensure_new_factory();
             my $typed = Chalk::IR::Shim::translate($_new_factory, $class, %params);
-            if (defined $typed) {
-                my $key = $typed->content_hash();
-                return $node_cache->{$key} if exists $node_cache->{$key};
-                $node_cache->{$key} = $typed;
-                return $typed;
-            }
+            die "Unknown or untranslated Constructor class: '$class'" unless defined $typed;
 
-            # Untranslated Constructor class — fall through to old path
-            $lookup_key = "Constructor:$class";
+            my $key = $typed->content_hash();
+            return $node_cache->{$key} if exists $node_cache->{$key};
+            $node_cache->{$key} = $typed;
+            return $typed;
         }
 
         # Get input specification for this operation
@@ -157,7 +127,6 @@ class Chalk::Bootstrap::IR::NodeFactory {
         }
 
         # Create new node (node classes loaded statically at compile time)
-        # Constructor is a special case - class is always Constructor, not derived from operation
         my $node_class = "Chalk::Bootstrap::IR::Node::$operation";
         my $node = $node_class->new(
             id => $key,

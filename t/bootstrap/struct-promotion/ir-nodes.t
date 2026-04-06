@@ -39,7 +39,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     );
 
     ok(defined $struct, 'StructRef node created');
-    is($struct->operation, 'Constructor', 'operation is Constructor');
+    is($struct->operation, 'StructRef', 'operation is StructRef');
     is($struct->class, 'StructRef', 'class is StructRef');
 }
 
@@ -70,7 +70,7 @@ my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     );
 
     ok(defined $access, 'FieldAccess node created');
-    is($access->operation, 'Constructor', 'operation is Constructor');
+    is($access->operation, 'StructFieldAccess', 'operation is StructFieldAccess');
     is($access->class, 'FieldAccess', 'class is FieldAccess');
 }
 

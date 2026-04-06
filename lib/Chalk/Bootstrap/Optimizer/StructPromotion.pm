@@ -555,10 +555,9 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 );
             }
 
-            # Rebuild Program
-            my $new_program = $factory->make('Constructor',
-                class      => 'Program',
-                statements => [$new_class],
+            # Rebuild Program as typed Chalk::IR::Program
+            my $new_program = Chalk::IR::Program->new(
+                classes => [$new_class],
             );
 
             push @result, {
@@ -766,17 +765,14 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         return $self->_rebuild_constructor($factory, $node, \@new_inputs);
     }
 
-    # Rebuild a Constructor node with new inputs, preserving class and attributes.
+    # Rebuild a typed computation node with new inputs, preserving class and attributes.
+    # Only called for nodes that are Chalk::IR::Node instances (computation types).
     method _rebuild_constructor($factory, $original, $new_inputs) {
         my $class = $original->class();
 
-        # Map input positions back to named parameters using INPUT_SPECS knowledge.
-        # This is the inverse of NodeFactory's make() parameter separation.
+        # Map input positions back to named parameters.
+        # These mirror the input order used by each shim translation in Chalk::IR::Shim.
         my %input_specs = (
-            'Program'        => ['statements'],
-            'ClassDecl'      => ['name', 'parent', 'body'],
-            'MethodDecl'     => ['name', 'params', 'body', 'return_type'],
-            'SubDecl'        => ['name', 'params', 'body', 'scope'],
             'VarDecl'        => ['variable', 'initializer'],
             'BinaryExpr'     => ['op', 'left', 'right'],
             'UnaryExpr'      => ['op', 'operand'],
@@ -788,7 +784,6 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             'TernaryExpr'    => ['condition', 'true_expr', 'false_expr'],
             'PostfixDerefExpr' => ['target', 'sigil'],
             'CompoundAssign' => ['op', 'target', 'value'],
-            'FieldDecl'      => ['name', 'attributes', 'default_value'],
             'AnonSubExpr'    => ['params', 'body'],
             'RegexMatch'     => ['target', 'pattern', 'flags'],
             'RegexSubst'     => ['target', 'pattern', 'replacement', 'flags'],
@@ -813,8 +808,8 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         return $factory->make('Constructor', %params);
     }
 
-    # Find the ClassDecl or ClassInfo node in the IR tree.
-    # Returns ClassInfo if available, falls back to Constructor:ClassDecl.
+    # Find the ClassInfo node from an IR tree root.
+    # Accepts a Chalk::IR::Program or a direct Chalk::IR::ClassInfo.
     method _find_class_decl($ir) {
         return unless defined $ir;
 

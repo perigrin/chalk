@@ -87,25 +87,27 @@ sub nconst ($val, $ct = 'string') {
         undef, 'Shim: Program not translated');
 }
 
-# --- Part 2: Old factory still produces Constructor for structural types ---
+# --- Part 2: Old factory produces typed nodes for all computation types ---
 
 Chalk::Bootstrap::IR::NodeFactory::reset_for_testing();
 my $f = Chalk::Bootstrap::IR::NodeFactory->instance();
 
-# Program is structural — never translated by the shim
-my $prog = $f->make('Constructor', class => 'Program', statements => []);
-isa_ok($prog, 'Chalk::Bootstrap::IR::Node::Constructor',
-    'Old factory: Program is Constructor (structural, not translated)');
-is($prog->class(), 'Program', 'Old factory: class() works');
-
-# BinaryExpr IS now default-enabled — produces typed Add
+# BinaryExpr produces typed Add via factory (default-enabled in shim)
 my $op    = $f->make('Constant', const_type => 'string', value => '+');
 my $left  = $f->make('Constant', const_type => 'integer', value => '1');
 my $right = $f->make('Constant', const_type => 'integer', value => '2');
 my $add   = $f->make('Constructor', class => 'BinaryExpr',
     op => $op, left => $left, right => $right);
 isa_ok($add, 'Chalk::IR::Node::Add',
-    'Old factory: BinaryExpr produces typed Add (default-enabled)');
+    'Old factory: BinaryExpr produces typed Add');
 is($add->class(), 'BinaryExpr', 'Old factory: class() compat works');
+
+# VarDecl produces typed VarDecl via factory
+my $var  = $f->make('Constant', const_type => 'variable', value => '$x');
+my $init = $f->make('Constant', const_type => 'integer',  value => '0');
+my $decl = $f->make('Constructor', class => 'VarDecl',
+    variable => $var, initializer => $init);
+isa_ok($decl, 'Chalk::IR::Node::VarDecl', 'Old factory: VarDecl produces typed node');
+is($decl->class(), 'VarDecl', 'Old factory: VarDecl class() compat');
 
 done_testing();

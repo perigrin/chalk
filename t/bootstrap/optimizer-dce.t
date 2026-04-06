@@ -8,7 +8,6 @@ use lib 'lib';
 
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::IR::Node::Constant;
-use Chalk::Bootstrap::IR::Node::Constructor;
 
 use_ok('Chalk::Bootstrap::Optimizer::DCE');
 

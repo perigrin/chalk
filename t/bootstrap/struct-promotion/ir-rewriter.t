@@ -9,6 +9,9 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::IR::Node::Return;
+use Chalk::IR::MethodInfo;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::Program;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
@@ -16,7 +19,7 @@ sub const_node($type, $value) {
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
-# Helper: create a Constructor node
+# Helper: create a computation IR node (VarDecl, BinaryExpr, etc.)
 sub ctor($class, %inputs) {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     return $factory->make('Constructor', class => $class, %inputs);
@@ -28,6 +31,67 @@ sub ret_node($val) {
     return $factory->make_cfg('Return',
         inputs => [ $factory->make('Start'), $val ],
     );
+}
+
+# Helper: create a MethodInfo metadata struct
+sub method_info($name, $body, %opts) {
+    return Chalk::IR::MethodInfo->new(
+        name        => $name,
+        params      => $opts{params} // [],
+        return_type => $opts{return_type},
+        body        => $body,
+    );
+}
+
+# Helper: create a ClassInfo metadata struct with a list of body items
+sub class_info($name, @body) {
+    my (@methods, @subs, @fields);
+    for my $item (@body) {
+        if ($item isa Chalk::IR::MethodInfo) { push @methods, $item; }
+        elsif ($item isa Chalk::IR::SubInfo)  { push @subs,    $item; }
+    }
+    return Chalk::IR::ClassInfo->new(
+        name    => $name,
+        methods => \@methods,
+        subs    => \@subs,
+        fields  => \@fields,
+        body    => \@body,
+    );
+}
+
+# Helper: create a Program IR struct wrapping a single class
+sub program_ir($class_info) {
+    return Chalk::IR::Program->new(
+        classes => [$class_info],
+    );
+}
+
+# Helper: walk an IR tree collecting all typed nodes
+# Handles Chalk::IR::Program, Chalk::IR::ClassInfo, Chalk::IR::MethodInfo,
+# and Chalk::IR::Node subclasses
+sub walk_ir($root, $visitor) {
+    my @work = ($root);
+    while (@work) {
+        my $node = shift @work;
+        next unless defined $node;
+        $visitor->($node);
+        if ($node isa Chalk::IR::Program) {
+            push @work, $node->classes()->@*;
+        } elsif ($node isa Chalk::IR::ClassInfo) {
+            push @work, $node->body()->@*;
+        } elsif ($node isa Chalk::IR::MethodInfo) {
+            push @work, $node->body()->@*;
+        } elsif ($node isa Chalk::IR::Node) {
+            for my $input ($node->inputs()->@*) {
+                next unless defined $input;
+                if (ref($input) eq 'ARRAY') {
+                    push @work, grep { defined } $input->@*;
+                } else {
+                    push @work, $input;
+                }
+            }
+        }
+    }
 }
 
 # === Test: Constructor rewrite — empty hash + assignments → StructRef ===
@@ -70,20 +134,13 @@ sub ret_node($val) {
 
     my $return_stmt = ret_node($item_var);
 
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', '_make_item'),
-        params      => [$rule_var, $dot_var],
-        body        => [$var_decl, $assign_rule, $assign_dot, $return_stmt],
-        return_type => undef,
+    my $method = method_info('_make_item',
+        [$var_decl, $assign_rule, $assign_dot, $return_stmt],
+        params => [$rule_var, $dot_var],
     );
 
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestRewrite'),
-        parent => undef,
-        body   => [$method],
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $class_decl = class_info('TestRewrite', $method);
+    my $program = program_ir($class_decl);
 
     # Run analyze + rewrite
     my $optimizer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
@@ -102,29 +159,11 @@ sub ret_node($val) {
 
     # Walk the rewritten IR to find StructRef
     my $found_struct_ref = false;
-    my $found_field_access = false;
-    my @work = ($rewritten->[0]{ir});
-    while (@work) {
-        my $node = shift @work;
-        next unless defined $node;
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
-            if ($node->class() eq 'StructRef') {
-                $found_struct_ref = true;
-            }
-            if ($node->class() eq 'FieldAccess') {
-                $found_field_access = true;
-            }
+    walk_ir($rewritten->[0]{ir}, sub($node) {
+        if ($node isa Chalk::IR::Node && $node->class() eq 'StructRef') {
+            $found_struct_ref = true;
         }
-        next unless $node isa Chalk::IR::Node;
-        for my $input ($node->inputs()->@*) {
-            next unless defined $input;
-            if (ref($input) eq 'ARRAY') {
-                push @work, grep { defined } $input->@*;
-            } else {
-                push @work, $input;
-            }
-        }
-    }
+    });
 
     # After rewrite, the empty hash + assignments should be replaced by StructRef
     ok($found_struct_ref, 'rewritten IR contains StructRef node');
@@ -165,20 +204,9 @@ sub ret_node($val) {
         args => [$read_x],
     );
 
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', '_reader'),
-        params      => [],
-        body        => [$var_decl, $assign_x, $use_x],
-        return_type => undef,
-    );
-
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestAccess'),
-        parent => undef,
-        body   => [$method],
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $method = method_info('_reader', [$var_decl, $assign_x, $use_x]);
+    my $class_decl = class_info('TestAccess', $method);
+    my $program = program_ir($class_decl);
 
     my $optimizer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
     my $schemas = $optimizer->analyze([
@@ -192,24 +220,11 @@ sub ret_node($val) {
 
     # Walk rewritten IR to find FieldAccess
     my $found_field_access = false;
-    my @work = ($rewritten->[0]{ir});
-    while (@work) {
-        my $node = shift @work;
-        next unless defined $node;
-        if ($node isa Chalk::Bootstrap::IR::Node::Constructor
-            && $node->class() eq 'FieldAccess') {
+    walk_ir($rewritten->[0]{ir}, sub($node) {
+        if ($node isa Chalk::IR::Node && $node->class() eq 'FieldAccess') {
             $found_field_access = true;
         }
-        next unless $node isa Chalk::IR::Node;
-        for my $input ($node->inputs()->@*) {
-            next unless defined $input;
-            if (ref($input) eq 'ARRAY') {
-                push @work, grep { defined } $input->@*;
-            } else {
-                push @work, $input;
-            }
-        }
-    }
+    });
 
     ok($found_field_access, 'rewritten IR contains FieldAccess for read-site subscript');
 }

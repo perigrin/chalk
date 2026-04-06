@@ -1,13 +1,11 @@
-# ABOUTME: Translates old-style Constructor class names to typed Chalk::IR::Node::* objects.
-# ABOUTME: Used during migration; returns undef for structural/CFG/BNF classes not yet translated.
+# ABOUTME: Translates make('Constructor', class => 'X', ...) calls to typed Chalk::IR::Node::* objects.
+# ABOUTME: Returns undef for non-computation classes (Program, ClassDecl, etc.) not handled here.
 use 5.42.0;
 use utf8;
 
 package Chalk::IR::Shim;
 
-# All computation types — consumers have dual-path isa Constructor checks,
-# and the new base inherits from old base for isa Node compat.
-# Constructor fallback in dual-path is dead code, removed in Phase 5.
+# All computation types handled by this shim.
 my %DEFAULT_ENABLED = map { $_ => 1 } qw(
     BinaryExpr UnaryExpr MethodCallExpr BuiltinCall
     SubscriptExpr PostfixDerefExpr CompoundAssign
@@ -57,18 +55,9 @@ my %UNOP_MAP = (
     '\\'      => 'Ref',
 );
 
-# Classes that are structural metadata or CFG constructs deferred to Phase 3b,
-# BNF grammar types, or optimizer-specific — none of these are translated.
-my %NOT_TRANSLATED = map { $_ => 1 } qw(
-    Program ClassDecl MethodDecl SubDecl FieldDecl UseDecl _Attribute
-);
-
 sub translate($factory, $constructor_class, %params) {
     # Only translate classes that have been explicitly enabled
     return undef unless $ENABLED{$constructor_class};
-
-    # Fast exit for known-untranslated classes
-    return undef if $NOT_TRANSLATED{$constructor_class};
 
     if ($constructor_class eq 'BinaryExpr') {
         my $op_str = $params{op}->value();
@@ -231,7 +220,7 @@ sub translate($factory, $constructor_class, %params) {
         );
     }
 
-    # Unknown constructor class — fall through to old Constructor path
+    # Class not in %ENABLED — not handled by this shim
     return undef;
 }
 

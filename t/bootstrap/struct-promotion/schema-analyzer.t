@@ -9,6 +9,10 @@ use lib 'lib';
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::IR::Node::Return;
+use Chalk::IR::MethodInfo;
+use Chalk::IR::SubInfo;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::Program;
 
 # Helper: create a Constant node
 sub const_node($type, $value) {
@@ -16,7 +20,7 @@ sub const_node($type, $value) {
     return $factory->make('Constant', const_type => $type, value => $value);
 }
 
-# Helper: create a Constructor node
+# Helper: create a computation IR node (VarDecl, BinaryExpr, etc.)
 sub ctor($class, %inputs) {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     return $factory->make('Constructor', class => $class, %inputs);
@@ -27,6 +31,39 @@ sub ret_node($val) {
     my $factory = Chalk::Bootstrap::IR::NodeFactory->instance;
     return $factory->make_cfg('Return',
         inputs => [ $factory->make('Start'), $val ],
+    );
+}
+
+# Helper: create a MethodInfo metadata struct
+sub method_info($name, $body, %opts) {
+    return Chalk::IR::MethodInfo->new(
+        name        => $name,
+        params      => $opts{params} // [],
+        return_type => $opts{return_type},
+        body        => $body,
+    );
+}
+
+# Helper: create a ClassInfo metadata struct with a list of body items
+sub class_info($name, @body) {
+    my (@methods, @subs, @fields);
+    for my $item (@body) {
+        if ($item isa Chalk::IR::MethodInfo) { push @methods, $item; }
+        elsif ($item isa Chalk::IR::SubInfo)  { push @subs,    $item; }
+    }
+    return Chalk::IR::ClassInfo->new(
+        name    => $name,
+        methods => \@methods,
+        subs    => \@subs,
+        fields  => \@fields,
+        body    => \@body,
+    );
+}
+
+# Helper: create a Program IR struct wrapping a single class
+sub program_ir($class_info) {
+    return Chalk::IR::Program->new(
+        classes => [$class_info],
     );
 }
 
@@ -82,22 +119,13 @@ sub ret_node($val) {
     # Build method body
     my $method_body = [$var_decl, @assigns, $return_stmt];
 
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', '_make_item'),
-        params      => [$rule_var, $alt_var, const_node('variable', '$dot'),
-                        const_node('variable', '$origin'), $value_var],
-        body        => $method_body,
-        return_type => undef,
+    my $method = method_info('_make_item', $method_body,
+        params => [$rule_var, $alt_var, const_node('variable', '$dot'),
+                   const_node('variable', '$origin'), $value_var],
     );
 
-    my $class_body = [$method];
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestEarley'),
-        parent => undef,
-        body   => $class_body,
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $class_decl = class_info('TestEarley', $method);
+    my $program = program_ir($class_decl);
 
     # Run analyzer
     my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
@@ -149,20 +177,9 @@ sub ret_node($val) {
     );
 
     my $method_body = [$var_decl, $assign];
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', '_tag_it'),
-        params      => [],
-        body        => $method_body,
-        return_type => undef,
-    );
-
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestTags'),
-        parent => undef,
-        body   => [$method],
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $method = method_info('_tag_it', $method_body);
+    my $class_decl = class_info('TestTags', $method);
+    my $program = program_ir($class_decl);
 
     my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
     my $schemas = $analyzer->analyze([
@@ -205,21 +222,11 @@ sub ret_node($val) {
             );
         }
 
-        push @methods, ctor('MethodDecl',
-            name        => const_node('string', $mname),
-            params      => [],
-            body        => \@stmts,
-            return_type => undef,
-        );
+        push @methods, method_info($mname, \@stmts);
     }
 
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestUnify'),
-        parent => undef,
-        body   => \@methods,
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $class_decl = class_info('TestUnify', @methods);
+    my $program = program_ir($class_decl);
 
     my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
     my $schemas = $analyzer->analyze([
@@ -261,20 +268,9 @@ sub ret_node($val) {
     my $return_stmt = ret_node($var);
 
     # Public method (no _ prefix)
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', 'get_result'),
-        params      => [],
-        body        => [$decl, $assign, $return_stmt],
-        return_type => undef,
-    );
-
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestEscape'),
-        parent => undef,
-        body   => [$method],
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $method = method_info('get_result', [$decl, $assign, $return_stmt]);
+    my $class_decl = class_info('TestEscape', $method);
+    my $program = program_ir($class_decl);
 
     my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
     my $schemas = $analyzer->analyze([
@@ -313,20 +309,9 @@ sub ret_node($val) {
     my $return_stmt = ret_node($var);
 
     # Private method (_ prefix) — all callers are compiled
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', '_make_item'),
-        params      => [],
-        body        => [$decl, $assign, $return_stmt],
-        return_type => undef,
-    );
-
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestPrivate'),
-        parent => undef,
-        body   => [$method],
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $method = method_info('_make_item', [$decl, $assign, $return_stmt]);
+    my $class_decl = class_info('TestPrivate', $method);
+    my $program = program_ir($class_decl);
 
     my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
     my $schemas = $analyzer->analyze([
@@ -387,20 +372,9 @@ sub ret_node($val) {
         right => const_node('variable', '$name'),
     );
 
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', '_process'),
-        params      => [],
-        body        => [$decl, $assign_count, $arith, $assign_name],
-        return_type => undef,
-    );
-
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestTypes'),
-        parent => undef,
-        body   => [$method],
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $method = method_info('_process', [$decl, $assign_count, $arith, $assign_name]);
+    my $class_decl = class_info('TestTypes', $method);
+    my $program = program_ir($class_decl);
 
     my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
     my $schemas = $analyzer->analyze([
@@ -449,20 +423,9 @@ sub ret_node($val) {
         args        => [$var],
     );
 
-    my $method = ctor('MethodDecl',
-        name        => const_node('string', '_internal'),
-        params      => [],
-        body        => [$decl, $assign, $method_call],
-        return_type => undef,
-    );
-
-    my $class_decl = ctor('ClassDecl',
-        name   => const_node('string', 'TestCallEscape'),
-        parent => undef,
-        body   => [$method],
-    );
-
-    my $program = ctor('Program', statements => [$class_decl]);
+    my $method = method_info('_internal', [$decl, $assign, $method_call]);
+    my $class_decl = class_info('TestCallEscape', $method);
+    my $program = program_ir($class_decl);
 
     # Compile only TestCallEscape — $obj could be uncompiled
     my $analyzer = Chalk::Bootstrap::Optimizer::StructPromotion->new();
