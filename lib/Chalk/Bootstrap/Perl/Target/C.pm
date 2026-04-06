@@ -398,7 +398,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my @xs_params;
         for my $p ($params->@*) {
             my $pname;
-            if ($p isa Chalk::Bootstrap::IR::Node) {
+            if ($p isa Chalk::IR::Node) {
                 $pname = $p->value();
             } else {
                 $pname = "$p";
@@ -1423,7 +1423,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # Returns a C expression string, or undef if the init cannot be represented.
     method _emit_init_expr($init_node, $sigil) {
         return undef unless defined $init_node;
-        return undef unless $init_node isa Chalk::Bootstrap::IR::Node;
+        return undef unless $init_node isa Chalk::IR::Node;
 
         # my $scalar = [] — empty array reference
         if ($init_node isa Chalk::IR::Node::ArrayRef) {

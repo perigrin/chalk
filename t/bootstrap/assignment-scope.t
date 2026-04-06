@@ -75,7 +75,7 @@ my sub make_parent_ctx(@children) {
 
     my $node = $result->extract();
     ok(defined $node, 'result has an IR node');
-    ok($node isa Chalk::Bootstrap::IR::Node, 'result is an IR node');
+    ok($node isa Chalk::IR::Node, 'result is an IR node');
     is($node->class(), 'VarDecl', 'result is a VarDecl');
 
     # Verify the scope was updated
@@ -125,7 +125,7 @@ my sub make_parent_ctx(@children) {
 
     my $node = $result->extract();
     ok(defined $node, 'plain assignment: result has an IR node');
-    ok($node isa Chalk::Bootstrap::IR::Node, 'plain assignment: result is an IR node');
+    ok($node isa Chalk::IR::Node, 'plain assignment: result is an IR node');
     is($node->class(), 'BinaryExpr', 'plain assignment: result is a BinaryExpr (Assign)');
 
     # Verify scope was updated with the Assign node
@@ -175,7 +175,7 @@ my sub make_parent_ctx(@children) {
 
     my $node = $result->extract();
     ok(defined $node, 'compound assignment: result has an IR node');
-    ok($node isa Chalk::Bootstrap::IR::Node, 'compound assignment: result is an IR node');
+    ok($node isa Chalk::IR::Node, 'compound assignment: result is an IR node');
     is($node->class(), 'CompoundAssign', 'compound assignment: result is a CompoundAssign');
 
     # Verify scope was updated with the CompoundAssign node

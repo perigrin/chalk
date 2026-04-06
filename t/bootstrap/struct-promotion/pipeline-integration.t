@@ -96,7 +96,7 @@ sub ret_node($val) {
             && $node->class() eq 'StructRef') {
             $found_struct_ref = true;
         }
-        next unless $node isa Chalk::Bootstrap::IR::Node;
+        next unless $node isa Chalk::IR::Node;
         for my $input ($node->inputs()->@*) {
             next unless defined $input;
             if (ref($input) eq 'ARRAY') {

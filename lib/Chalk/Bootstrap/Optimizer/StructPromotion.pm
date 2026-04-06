@@ -158,7 +158,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # Recursively walk an IR statement/expression to detect hash patterns.
     method _walk_stmt($var_prefix, $node, $var_schemas) {
         return unless defined $node;
-        return unless $node isa Chalk::Bootstrap::IR::Node;
+        return unless $node isa Chalk::IR::Node;
 
         # Pattern 1: VarDecl with HashRefExpr initializer (empty or literal)
         if ($node isa Chalk::IR::Node::VarDecl) {
@@ -583,7 +583,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
 
         for (my $i = 0; $i < scalar($body->@*); $i++) {
             my $stmt = $body->[$i];
-            next unless defined $stmt && $stmt isa Chalk::Bootstrap::IR::Node;
+            next unless defined $stmt && $stmt isa Chalk::IR::Node;
 
             # Detect VarDecl with empty HashRefExpr
             if ($stmt isa Chalk::IR::Node::VarDecl) {
@@ -696,7 +696,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
     # on promoted variables.
     method _rewrite_node($factory, $var_prefix, $node, $promoted_vars, $var_to_schema, $schema_fields) {
         return $node unless defined $node;
-        return $node unless $node isa Chalk::Bootstrap::IR::Node;
+        return $node unless $node isa Chalk::IR::Node;
 
         # Replace SubscriptExpr on promoted var with FieldAccess
         if ($node isa Chalk::IR::Node::Subscript) {

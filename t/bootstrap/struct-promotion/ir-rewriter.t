@@ -115,7 +115,7 @@ sub ret_node($val) {
                 $found_field_access = true;
             }
         }
-        next unless $node isa Chalk::Bootstrap::IR::Node;
+        next unless $node isa Chalk::IR::Node;
         for my $input ($node->inputs()->@*) {
             next unless defined $input;
             if (ref($input) eq 'ARRAY') {
@@ -200,7 +200,7 @@ sub ret_node($val) {
             && $node->class() eq 'FieldAccess') {
             $found_field_access = true;
         }
-        next unless $node isa Chalk::Bootstrap::IR::Node;
+        next unless $node isa Chalk::IR::Node;
         for my $input ($node->inputs()->@*) {
             next unless defined $input;
             if (ref($input) eq 'ARRAY') {

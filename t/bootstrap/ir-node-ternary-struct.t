@@ -40,7 +40,7 @@ subtest 'TernaryExpr node: operation and isa hierarchy' => sub {
     is($node->operation(), 'TernaryExpr', 'TernaryExpr operation()');
     is($node->class(), 'TernaryExpr', 'TernaryExpr class() returns operation when no compat_class');
     isa_ok($node, 'Chalk::IR::Node', 'TernaryExpr isa Chalk::IR::Node');
-    isa_ok($node, 'Chalk::Bootstrap::IR::Node', 'TernaryExpr isa Chalk::Bootstrap::IR::Node');
+    isa_ok($node, 'Chalk::IR::Node', 'TernaryExpr isa Chalk::IR::Node (standalone)');
     is(scalar($node->inputs()->@*), 3, 'TernaryExpr has 3 inputs');
 };
 
