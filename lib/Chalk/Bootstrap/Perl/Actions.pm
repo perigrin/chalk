@@ -1,5 +1,5 @@
 # ABOUTME: Semantic actions for Perl grammar that build Perl IR nodes from parse results.
-# ABOUTME: One method per grammar rule, constructing Constructor:Program/UseDecl/ClassDecl/etc.
+# ABOUTME: One method per grammar rule, constructing ClassInfo/MethodInfo/SubInfo/etc.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -13,6 +13,7 @@ use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::UseInfo;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
@@ -792,7 +793,8 @@ class Chalk::Bootstrap::Perl::Actions {
                 # Statement-level Constructor classes (ReturnStmt, ClassDecl, etc.)
                 $is_boundary = true if $next isa Chalk::Bootstrap::IR::Node::Constructor
                     && $STMT_BOUNDARY_CLASSES{$next->class()};
-                # FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
+                # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
+                $is_boundary = true if $next isa Chalk::IR::ClassInfo;
                 $is_boundary = true if $next isa Chalk::IR::FieldInfo;
                 $is_boundary = true if $next isa Chalk::IR::MethodInfo;
                 $is_boundary = true if $next isa Chalk::IR::SubInfo;
@@ -831,7 +833,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     # Stop at statement-level constructs
                     last if $next isa Chalk::Bootstrap::IR::Node::Constructor
                         && $STMT_BOUNDARY_CLASSES{$next->class()};
-                    # FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
+                    # ClassInfo/FieldInfo/MethodInfo/SubInfo metadata structs are always separate statements
+                    last if $next isa Chalk::IR::ClassInfo;
                     last if $next isa Chalk::IR::FieldInfo;
                     last if $next isa Chalk::IR::MethodInfo;
                     last if $next isa Chalk::IR::SubInfo;
@@ -898,6 +901,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::Bootstrap::IR::Node
                      || $val isa Chalk::IR::UseInfo
+                     || $val isa Chalk::IR::ClassInfo
                      || $val isa Chalk::IR::FieldInfo) {
                 push @stmts, $val;
             }
@@ -921,6 +925,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @stmts, $val->@*;
             } elsif ($val isa Chalk::Bootstrap::IR::Node
                      || $val isa Chalk::IR::UseInfo
+                     || $val isa Chalk::IR::ClassInfo
                      || $val isa Chalk::IR::FieldInfo
                      || $val isa Chalk::IR::MethodInfo
                      || $val isa Chalk::IR::SubInfo) {
@@ -939,6 +944,7 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $val (@values) {
             if ($val isa Chalk::Bootstrap::IR::Node
                     || $val isa Chalk::IR::UseInfo
+                    || $val isa Chalk::IR::ClassInfo
                     || $val isa Chalk::IR::FieldInfo
                     || $val isa Chalk::IR::MethodInfo
                     || $val isa Chalk::IR::SubInfo) {
@@ -1181,11 +1187,31 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
-        return $factory->make('Constructor',
-            'class'  => 'ClassDecl',
-            name   => $class_name,
-            parent => $parent,
-            body   => \@body,
+        my $name_str   = defined $class_name ? $class_name->value() : '<unknown>';
+        my $parent_str = defined $parent     ? $parent->value()     : undef;
+
+        # Partition body items by type for structured access.
+        # The body array preserves declaration order for ordered iteration.
+        my @fields;
+        my @methods;
+        my @subs;
+        for my $item (@body) {
+            if ($item isa Chalk::IR::FieldInfo) {
+                push @fields, $item;
+            } elsif ($item isa Chalk::IR::MethodInfo) {
+                push @methods, $item;
+            } elsif ($item isa Chalk::IR::SubInfo) {
+                push @subs, $item;
+            }
+        }
+
+        return Chalk::IR::ClassInfo->new(
+            name    => $name_str,
+            parent  => $parent_str,
+            fields  => \@fields,
+            methods => \@methods,
+            subs    => \@subs,
+            body    => \@body,
         );
     }
 

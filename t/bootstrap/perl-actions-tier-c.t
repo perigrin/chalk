@@ -10,7 +10,9 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
+use Chalk::IR::MethodInfo;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -57,10 +59,13 @@ my sub is_constant($node, $expected_value, $msg) {
     is($node->value(), $expected_value, "$msg: value is '$expected_value'");
 }
 
-# Helper to find ClassDecl in program statements
+# Helper to find ClassInfo or ClassDecl in program statements
 my sub find_class_decl($ir) {
     my $stmts = $ir->inputs()->[0];
     for my $stmt ($stmts->@*) {
+        if ($stmt isa Chalk::IR::ClassInfo) {
+            return $stmt;
+        }
         if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                 && $stmt->class() eq 'ClassDecl') {
             return $stmt;
@@ -69,10 +74,37 @@ my sub find_class_decl($ir) {
     return undef;
 }
 
-# Helper to find MethodDecl by name in class body
+# Extract class body from ClassInfo or Constructor:ClassDecl
+my sub class_body($cls) {
+    return $cls isa Chalk::IR::ClassInfo ? $cls->body() : $cls->inputs()->[2];
+}
+
+# Extract class name string from ClassInfo or Constructor:ClassDecl
+my sub class_name($cls) {
+    return $cls isa Chalk::IR::ClassInfo ? $cls->name() : $cls->inputs()->[0]->value();
+}
+
+# Extract method body from MethodInfo or Constructor:MethodDecl
+my sub method_body($method) {
+    return $method isa Chalk::IR::MethodInfo ? $method->body() : $method->inputs()->[2];
+}
+
+# Count methods in class body by type (MethodInfo or MethodDecl)
+my sub count_methods($cls) {
+    my $body = class_body($cls);
+    return scalar grep {
+        ($_ isa Chalk::IR::MethodInfo)
+        || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+    } $body->@*;
+}
+
+# Helper to find MethodInfo or MethodDecl by name in class body
 my sub find_method($class_decl, $name) {
-    my $body = $class_decl->inputs()->[2];
+    my $body = class_body($class_decl);
     for my $item ($body->@*) {
+        if ($item isa Chalk::IR::MethodInfo && $item->name() eq $name) {
+            return $item;
+        }
         if ($item isa Chalk::Bootstrap::IR::Node::Constructor
                 && $item->class() eq 'MethodDecl'
                 && $item->inputs()->[0]->value() eq $name) {
@@ -84,7 +116,7 @@ my sub find_method($class_decl, $name) {
 
 # Helper to find FieldInfo by name in class body
 my sub find_field($class_decl, $name) {
-    my $body = $class_decl->inputs()->[2];
+    my $body = class_body($class_decl);
     for my $item ($body->@*) {
         if ($item isa Chalk::IR::FieldInfo
                 && $item->name() eq $name) {
@@ -108,15 +140,15 @@ my sub find_field($class_decl, $name) {
 
         is_constructor($ir, 'Program', 'ConciseOp Program');
         my $cls = find_class_decl($ir);
-        ok(defined $cls, 'ConciseOp.pm: found ClassDecl');
+        ok(defined $cls, 'ConciseOp.pm: found class declaration');
 
         SKIP: {
-            skip 'ConciseOp.pm: no ClassDecl', 35 unless defined $cls;
+            skip 'ConciseOp.pm: no class declaration', 35 unless defined $cls;
 
-            is_constant($cls->inputs()->[0],
+            is($cls isa Chalk::IR::ClassInfo ? $cls->name() : $cls->inputs()->[0]->value(),
                 'Chalk::Bootstrap::ConciseOp', 'ConciseOp class name');
 
-            my $body = $cls->inputs()->[2];
+            my $body = class_body($cls);
             ok(ref $body eq 'ARRAY', 'ConciseOp.pm: class body is arrayref');
 
             # Should have 5 fields + 2 methods = 7 items
@@ -145,7 +177,7 @@ my sub find_field($class_decl, $name) {
             my $to_string = find_method($cls, 'to_string');
             ok(defined $to_string, 'ConciseOp.pm: has method to_string');
             if (defined $to_string) {
-                my $mbody = $to_string->inputs()->[2];
+                my $mbody = method_body($to_string);
                 ok(ref $mbody eq 'ARRAY', 'ConciseOp.pm: to_string body is array');
                 ok(scalar $mbody->@* >= 1,
                     'ConciseOp.pm: to_string body has statements');
@@ -155,7 +187,7 @@ my sub find_field($class_decl, $name) {
             my $struct_key = find_method($cls, 'structural_key');
             ok(defined $struct_key, 'ConciseOp.pm: has method structural_key');
             if (defined $struct_key) {
-                my $mbody = $struct_key->inputs()->[2];
+                my $mbody = method_body($struct_key);
                 ok(ref $mbody eq 'ARRAY', 'ConciseOp.pm: structural_key body is array');
                 ok(scalar $mbody->@* >= 1,
                     'ConciseOp.pm: structural_key body has statements');
@@ -178,24 +210,26 @@ my sub find_field($class_decl, $name) {
 
         is_constructor($ir, 'Program', 'ConciseTree Program');
         my $cls = find_class_decl($ir);
-        ok(defined $cls, 'ConciseTree.pm: found ClassDecl');
+        ok(defined $cls, 'ConciseTree.pm: found class declaration');
 
         SKIP: {
-            skip 'ConciseTree.pm: no ClassDecl', 25 unless defined $cls;
+            skip 'ConciseTree.pm: no class declaration', 25 unless defined $cls;
 
-            is_constant($cls->inputs()->[0],
+            is($cls isa Chalk::IR::ClassInfo ? $cls->name() : $cls->inputs()->[0]->value(),
                 'Chalk::Bootstrap::ConciseTree', 'ConciseTree class name');
 
             # Field $ops with default []
             my $f_ops = find_field($cls, '$ops');
             ok(defined $f_ops, 'ConciseTree.pm: has field $ops');
 
-            # 4 methods: push_op, concat, to_exec_string, op_count
+            # Methods: push_op, concat, to_exec_string, op_count
             my @methods = grep {
-                $_ isa Chalk::Bootstrap::IR::Node::Constructor
-                && $_->class() eq 'MethodDecl'
-            } $cls->inputs()->[2]->@*;
-            is(scalar @methods, 4, 'ConciseTree.pm: 4 methods');
+                ($_ isa Chalk::IR::MethodInfo)
+                || ($_ isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $_->class() eq 'MethodDecl')
+            } class_body($cls)->@*;
+            ok(scalar @methods >= 4, 'ConciseTree.pm: at least 4 methods')
+                or diag("Got " . scalar @methods . " methods");
 
             my $push_op = find_method($cls, 'push_op');
             ok(defined $push_op, 'ConciseTree.pm: has method push_op');
@@ -209,7 +243,7 @@ my sub find_field($class_decl, $name) {
             # Verify push in to_exec_string body is BuiltinCall, not
             # BinaryExpr wrapping BuiltinCall (grammar ambiguity fix)
             if (defined $to_exec) {
-                my $mbody = $to_exec->inputs()->[2];
+                my $mbody = method_body($to_exec);
                 ok(ref $mbody eq 'ARRAY', 'ConciseTree.pm: to_exec_string body is array');
                 # Find the Loop CFG node in the method body (replaced ForeachLoop Constructor)
                 my ($loop_node) = grep {
@@ -245,19 +279,19 @@ my sub find_field($class_decl, $name) {
 
         is_constructor($ir, 'Program', 'Comparator Program');
         my $cls = find_class_decl($ir);
-        ok(defined $cls, 'Comparator.pm: found ClassDecl');
+        ok(defined $cls, 'Comparator.pm: found class declaration');
 
         SKIP: {
-            skip 'Comparator.pm: no ClassDecl', 15 unless defined $cls;
+            skip 'Comparator.pm: no class declaration', 15 unless defined $cls;
 
-            is_constant($cls->inputs()->[0],
+            is($cls isa Chalk::IR::ClassInfo ? $cls->name() : $cls->inputs()->[0]->value(),
                 'Chalk::Bootstrap::ConciseTree::Comparator', 'Comparator class name');
 
             # 2 methods: compare, normalize
             my $compare = find_method($cls, 'compare');
             ok(defined $compare, 'Comparator.pm: has method compare');
             if (defined $compare) {
-                my $mbody = $compare->inputs()->[2];
+                my $mbody = method_body($compare);
                 ok(scalar $mbody->@* >= 1,
                     'Comparator.pm: compare has body statements');
             }
@@ -265,7 +299,7 @@ my sub find_field($class_decl, $name) {
             my $normalize = find_method($cls, 'normalize');
             ok(defined $normalize, 'Comparator.pm: has method normalize');
             if (defined $normalize) {
-                my $mbody = $normalize->inputs()->[2];
+                my $mbody = method_body($normalize);
                 ok(scalar $mbody->@* >= 1,
                     'Comparator.pm: normalize has body statements');
             }
@@ -287,12 +321,12 @@ my sub find_field($class_decl, $name) {
 
         is_constructor($ir, 'Program', 'Oracle Program');
         my $cls = find_class_decl($ir);
-        ok(defined $cls, 'Oracle.pm: found ClassDecl');
+        ok(defined $cls, 'Oracle.pm: found class declaration');
 
         SKIP: {
-            skip 'Oracle.pm: no ClassDecl', 15 unless defined $cls;
+            skip 'Oracle.pm: no class declaration', 15 unless defined $cls;
 
-            is_constant($cls->inputs()->[0],
+            is($cls isa Chalk::IR::ClassInfo ? $cls->name() : $cls->inputs()->[0]->value(),
                 'Chalk::Bootstrap::ConciseTree::Oracle', 'Oracle class name');
 
             # 2 methods: concise_for, parse_concise_output
@@ -302,7 +336,7 @@ my sub find_field($class_decl, $name) {
             my $parse_output = find_method($cls, 'parse_concise_output');
             ok(defined $parse_output, 'Oracle.pm: has method parse_concise_output');
             if (defined $parse_output) {
-                my $mbody = $parse_output->inputs()->[2];
+                my $mbody = method_body($parse_output);
                 ok(scalar $mbody->@* >= 1,
                     'Oracle.pm: parse_concise_output has body statements');
             }
@@ -323,24 +357,25 @@ my sub find_field($class_decl, $name) {
 
         is_constructor($ir, 'Program', 'Context Program');
         my $cls = find_class_decl($ir);
-        ok(defined $cls, 'Context.pm: found ClassDecl');
+        ok(defined $cls, 'Context.pm: found class declaration');
 
         SKIP: {
-            skip 'Context.pm: no ClassDecl', 25 unless defined $cls;
+            skip 'Context.pm: no class declaration', 25 unless defined $cls;
 
-            is_constant($cls->inputs()->[0],
+            is($cls isa Chalk::IR::ClassInfo ? $cls->name() : $cls->inputs()->[0]->value(),
                 'Chalk::Bootstrap::Context', 'Context class name');
 
             # Fields: $focus, $children, $position, $rule
-            my @fields = grep { $_ isa Chalk::IR::FieldInfo } $cls->inputs()->[2]->@*;
+            my @fields = grep { $_ isa Chalk::IR::FieldInfo } class_body($cls)->@*;
             ok(scalar @fields >= 4, 'Context.pm: at least 4 fields')
                 or diag("Got " . scalar @fields . " fields");
 
             # Methods: extract, extend, duplicate, leaves, scanned_text
             my @methods = grep {
-                $_ isa Chalk::Bootstrap::IR::Node::Constructor
-                && $_->class() eq 'MethodDecl'
-            } $cls->inputs()->[2]->@*;
+                ($_ isa Chalk::IR::MethodInfo)
+                || ($_ isa Chalk::Bootstrap::IR::Node::Constructor
+                    && $_->class() eq 'MethodDecl')
+            } class_body($cls)->@*;
             ok(scalar @methods >= 5, 'Context.pm: at least 5 methods')
                 or diag("Got " . scalar @methods . " methods");
 

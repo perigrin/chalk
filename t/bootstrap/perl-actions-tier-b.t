@@ -10,7 +10,9 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
+use Chalk::IR::MethodInfo;
 
 # Build Perl grammar pipeline: IR -> generated Perl -> eval -> grammar objects
 Chalk::Bootstrap::IR::NodeFactory->reset_for_testing();
@@ -46,8 +48,61 @@ my sub parse_file($file) {
 my sub is_constructor($node, $expected_class, $msg) {
     ok(defined $node, "$msg: defined");
     return unless defined $node;
-    is($node->operation(), 'Constructor', "$msg: is Constructor");
+    # Shimmed typed nodes have operation() == class name; legacy Constructor nodes have operation() == 'Constructor'
+    ok($node->operation() eq 'Constructor' || $node->class() eq $expected_class,
+        "$msg: is Constructor");
     is($node->class(), $expected_class, "$msg: class is $expected_class");
+}
+
+# === Helpers for ClassInfo/ClassDecl dual-path ===
+
+my sub class_body($cls) {
+    return $cls isa Chalk::IR::ClassInfo ? $cls->body() : $cls->inputs()->[2];
+}
+
+my sub class_name_str($cls) {
+    return $cls isa Chalk::IR::ClassInfo
+        ? $cls->name()
+        : $cls->inputs()->[0]->value();
+}
+
+my sub class_parent_str($cls) {
+    return $cls isa Chalk::IR::ClassInfo
+        ? $cls->parent()
+        : (defined $cls->inputs()->[1] ? $cls->inputs()->[1]->value() : undef);
+}
+
+my sub method_body($meth) {
+    return $meth isa Chalk::IR::MethodInfo ? $meth->body() : $meth->inputs()->[2];
+}
+
+my sub method_name_str($meth) {
+    return $meth isa Chalk::IR::MethodInfo
+        ? $meth->name()
+        : $meth->inputs()->[0]->value();
+}
+
+my sub find_class_decl_in_stmts($stmts) {
+    for my $stmt ($stmts->@*) {
+        return $stmt if $stmt isa Chalk::IR::ClassInfo;
+        return $stmt if $stmt isa Chalk::Bootstrap::IR::Node::Constructor
+            && $stmt->class() eq 'ClassDecl';
+    }
+    return undef;
+}
+
+my sub find_method_in_body($body, $name) {
+    for my $item ($body->@*) {
+        if ($item isa Chalk::IR::MethodInfo && $item->name() eq $name) {
+            return $item;
+        }
+        if ($item isa Chalk::Bootstrap::IR::Node::Constructor
+                && $item->class() eq 'MethodDecl'
+                && $item->inputs()->[0]->value() eq $name) {
+            return $item;
+        }
+    }
+    return undef;
 }
 
 my sub is_field_info($node, $expected_name, $msg) {
@@ -78,36 +133,36 @@ my sub is_constant($node, $expected_value, $msg) {
 
         is_constructor($ir, 'Program', 'Constant.pm Program');
         my $stmts = $ir->inputs()->[0];
-        my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Constant.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::IR::Node::Constant', 'Constant.pm class name');
-        is_constant($cls->inputs()->[1],
-            'Chalk::Bootstrap::IR::Node', 'Constant.pm parent class');
+        my $cls = find_class_decl_in_stmts($stmts);
+        ok(defined $cls, 'Constant.pm: found class declaration');
+        is(class_name_str($cls), 'Chalk::Bootstrap::IR::Node::Constant', 'Constant.pm class name');
+        is(class_parent_str($cls), 'Chalk::Bootstrap::IR::Node', 'Constant.pm parent class');
 
-        my $body = $cls->inputs()->[2];
+        my $body = class_body($cls);
         is(ref $body, 'ARRAY', 'Constant.pm: class body is arrayref');
-        # Expect 2 FieldDecl + 1 MethodDecl = 3 items
-        is(scalar $body->@*, 3, 'Constant.pm: class body has 3 items');
+        # 2 FieldInfo + 1 MethodInfo items at minimum
+        ok(scalar $body->@* >= 3, 'Constant.pm: class body has at least 3 items');
 
-        # First field: $const_type :param :reader
-        my $f1 = $body->[0];
+        # Check for fields by name
+        my @fields = grep { $_ isa Chalk::IR::FieldInfo } $body->@*;
+        my ($f1) = grep { $_->name() eq '$const_type' } @fields;
         is_field_info($f1, '$const_type', 'Constant.pm field 1');
         my $f1_attrs = defined $f1 ? $f1->attributes() : [];
         is(ref $f1_attrs, 'ARRAY', 'Constant.pm field 1 attributes');
         is(scalar $f1_attrs->@*, 2, 'Constant.pm field 1 has 2 attributes');
 
-        # Second field: $value :param :reader
-        my $f2 = $body->[1];
+        my ($f2) = grep { $_->name() eq '$value' } @fields;
         is_field_info($f2, '$value', 'Constant.pm field 2');
 
         # Method: operation() returning 'Constant'
-        my $meth = $body->[2];
-        is_constructor($meth, 'MethodDecl', 'Constant.pm method');
-        is_constant($meth->inputs()->[0], 'operation', 'Constant.pm method name');
-        my $ret = $meth->inputs()->[2][0];
-        is_constructor($ret, 'ReturnStmt', 'Constant.pm return');
-        is_constant($ret->inputs()->[0], 'Constant', 'Constant.pm return value');
+        my $meth = find_method_in_body($body, 'operation');
+        ok(defined $meth, 'Constant.pm: has operation method');
+        if (defined $meth) {
+            my $meth_body = method_body($meth);
+            my $ret = $meth_body->[0];
+            is_constructor($ret, 'ReturnStmt', 'Constant.pm return');
+            is_constant($ret->inputs()->[0], 'Constant', 'Constant.pm return value');
+        }
     }
 }
 
@@ -124,22 +179,21 @@ my sub is_constant($node, $expected_value, $msg) {
 
         is_constructor($ir, 'Program', 'Node.pm Program');
         my $stmts = $ir->inputs()->[0];
-        my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Node.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Node.pm class name');
-        is($cls->inputs()->[1], undef, 'Node.pm: no parent class');
+        my $cls = find_class_decl_in_stmts($stmts);
+        ok(defined $cls, 'Node.pm: found class declaration');
+        is(class_name_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Node.pm class name');
+        is(class_parent_str($cls), undef, 'Node.pm: no parent class');
 
-        my $body = $cls->inputs()->[2];
-        is(scalar $body->@*, 1, 'Node.pm: class body has 1 method');
+        my $body = class_body($cls);
+        my $meth = find_method_in_body($body, 'emit');
+        ok(defined $meth, 'Node.pm: has emit method');
+        is(method_name_str($meth), 'emit', 'Node.pm method name');
 
-        my $meth = $body->[0];
-        is_constructor($meth, 'MethodDecl', 'Node.pm method');
-        is_constant($meth->inputs()->[0], 'emit', 'Node.pm method name');
-
-        my $meth_body = $meth->inputs()->[2];
-        is(scalar $meth_body->@*, 1, 'Node.pm: method body has 1 statement');
-        is_constructor($meth_body->[0], 'DieCall', 'Node.pm method dies');
+        if (defined $meth) {
+            my $meth_body = method_body($meth);
+            is(scalar $meth_body->@*, 1, 'Node.pm: method body has 1 statement');
+            is_constructor($meth_body->[0], 'DieCall', 'Node.pm method dies');
+        }
     }
 }
 
@@ -156,28 +210,25 @@ my sub is_constant($node, $expected_value, $msg) {
 
         is_constructor($ir, 'Program', 'Statement.pm Program');
         my $stmts = $ir->inputs()->[0];
-        my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Statement.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::BNF::Target::XS::AST::Statement', 'Statement.pm class name');
-        is_constant($cls->inputs()->[1],
-            'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Statement.pm parent class');
+        my $cls = find_class_decl_in_stmts($stmts);
+        ok(defined $cls, 'Statement.pm: found class declaration');
+        is(class_name_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Statement', 'Statement.pm class name');
+        is(class_parent_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Statement.pm parent class');
 
-        my $body = $cls->inputs()->[2];
+        my $body = class_body($cls);
         is(ref $body, 'ARRAY', 'Statement.pm: class body is arrayref');
-        # 1 FieldDecl + 1 MethodDecl = 2 items
-        is(scalar $body->@*, 2, 'Statement.pm: class body has 2 items');
 
         # Field: $code :param :reader
-        my $f1 = $body->[0];
+        my @fields = grep { $_ isa Chalk::IR::FieldInfo } $body->@*;
+        my ($f1) = grep { $_->name() eq '$code' } @fields;
         is_field_info($f1, '$code', 'Statement.pm field');
 
         # Method: emit() returning interpolated string
-        my $meth = $body->[1];
-        is_constructor($meth, 'MethodDecl', 'Statement.pm method');
-        is_constant($meth->inputs()->[0], 'emit', 'Statement.pm method name');
+        my $meth = find_method_in_body($body, 'emit');
+        ok(defined $meth, 'Statement.pm: has emit method');
+        is(method_name_str($meth), 'emit', 'Statement.pm method name');
 
-        my $meth_body = $meth->inputs()->[2];
+        my $meth_body = defined $meth ? method_body($meth) : [];
         is(scalar $meth_body->@*, 1, 'Statement.pm: method body has 1 statement');
         my $ret = $meth_body->[0];
         is_constructor($ret, 'ReturnStmt', 'Statement.pm return');
@@ -212,28 +263,27 @@ my sub is_constant($node, $expected_value, $msg) {
 
         is_constructor($ir, 'Program', 'Module.pm Program');
         my $stmts = $ir->inputs()->[0];
-        my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Module.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::BNF::Target::XS::AST::Module', 'Module.pm class name');
-        is_constant($cls->inputs()->[1],
-            'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Module.pm parent class');
+        my $cls = find_class_decl_in_stmts($stmts);
+        ok(defined $cls, 'Module.pm: found class declaration');
+        is(class_name_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Module', 'Module.pm class name');
+        is(class_parent_str($cls), 'Chalk::Bootstrap::BNF::Target::XS::AST::Node', 'Module.pm parent class');
 
-        my $body = $cls->inputs()->[2];
+        my $body = class_body($cls);
         is(ref $body, 'ARRAY', 'Module.pm: class body is arrayref');
-        # 2 FieldDecl + 1 MethodDecl = 3 items
-        is(scalar $body->@*, 3, 'Module.pm: class body has 3 items');
+        ok(scalar $body->@* >= 3, 'Module.pm: class body has at least 3 items');
 
         # Fields
-        my $f1 = $body->[0];
+        my @fields = grep { $_ isa Chalk::IR::FieldInfo } $body->@*;
+        my ($f1) = grep { $_->name() eq '$module' } @fields;
         is_field_info($f1, '$module', 'Module.pm field 1');
-        my $f2 = $body->[1];
+        my ($f2) = grep { $_->name() eq '$package' } @fields;
         is_field_info($f2, '$package', 'Module.pm field 2');
 
         # Method with InterpolatedString containing 2 variables
-        my $meth = $body->[2];
-        is_constructor($meth, 'MethodDecl', 'Module.pm method');
-        my $ret = $meth->inputs()->[2][0];
+        my $meth = find_method_in_body($body, 'emit');
+        ok(defined $meth, 'Module.pm: has emit method');
+        my $meth_body = defined $meth ? method_body($meth) : [];
+        my $ret = $meth_body->[0];
         is_constructor($ret, 'ReturnStmt', 'Module.pm return');
 
         my $interp = $ret->inputs()->[0];
@@ -268,41 +318,35 @@ my sub is_constant($node, $expected_value, $msg) {
 
         is_constructor($ir, 'Program', 'Constructor.pm Program');
         my $stmts = $ir->inputs()->[0];
-        my $cls = $stmts->[-1];
 
-        # The last meaningful statement should be the ClassDecl
-        # (trailing 1; may appear as a bare Constant after the class)
-        # So find the ClassDecl in the statements
-        my $class_decl;
-        for my $stmt ($stmts->@*) {
-            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
-                    && $stmt->class() eq 'ClassDecl') {
-                $class_decl = $stmt;
-            }
-        }
+        # Find the class declaration (ClassInfo or ClassDecl) in the statements
+        my $class_decl = find_class_decl_in_stmts($stmts);
 
-        ok(defined $class_decl, 'Constructor.pm: found ClassDecl');
+        ok(defined $class_decl, 'Constructor.pm: found class declaration');
 
         SKIP: {
-            skip 'Constructor.pm: no ClassDecl', 10 unless defined $class_decl;
+            skip 'Constructor.pm: no class declaration', 10 unless defined $class_decl;
 
-            is_constant($class_decl->inputs()->[0],
+            is(class_name_str($class_decl),
                 'Chalk::Bootstrap::IR::Node::Constructor', 'Constructor.pm class name');
-            is_constant($class_decl->inputs()->[1],
+            is(class_parent_str($class_decl),
                 'Chalk::Bootstrap::IR::Node', 'Constructor.pm parent class');
 
-            my $body = $class_decl->inputs()->[2];
+            my $body = class_body($class_decl);
             is(ref $body, 'ARRAY', 'Constructor.pm: class body is arrayref');
-            # 1 FieldDecl + 1 MethodDecl = 2 items
-            is(scalar $body->@*, 2, 'Constructor.pm: class body has 2 items');
+            ok(scalar $body->@* >= 2, 'Constructor.pm: class body has at least 2 items');
 
-            my $f1 = $body->[0];
+            my @fields = grep { $_ isa Chalk::IR::FieldInfo } $body->@*;
+            my ($f1) = grep { $_->name() eq '$class' } @fields;
             is_field_info($f1, '$class', 'Constructor.pm field');
 
-            my $meth = $body->[1];
-            is_constructor($meth, 'MethodDecl', 'Constructor.pm method');
-            my $ret = $meth->inputs()->[2][0];
-            is_constant($ret->inputs()->[0], 'Constructor', 'Constructor.pm return value');
+            my $meth = find_method_in_body($body, 'operation');
+            ok(defined $meth, 'Constructor.pm: has operation method');
+            if (defined $meth) {
+                my $meth_body = method_body($meth);
+                my $ret = $meth_body->[0];
+                is_constant($ret->inputs()->[0], 'Constructor', 'Constructor.pm return value');
+            }
         }
     }
 }

@@ -17,6 +17,7 @@ use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::ArrayRef;
 use Chalk::IR::Node::AnonSub;
 use Chalk::IR::UseInfo;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
@@ -42,7 +43,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         return unless defined $class_decl;
 
         # Set the current class slug for identifier namespacing
-        my $class_name = $class_decl->inputs()->[0]->value();
+        my $class_name = $class_decl isa Chalk::IR::ClassInfo
+            ? $class_decl->name()
+            : $class_decl->inputs()->[0]->value();
         $self->_set_current_slug($self->_class_slug($class_name));
 
         # Build field map once and store it for use throughout code generation
@@ -51,7 +54,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # Pre-scan methods to build $self->_get_class_methods_ref() for direct call optimization
         $self->_set_class_methods($self->_scan_class_methods($class_decl));
 
-        my $body = $class_decl->inputs()->[2];
+        my $body = $class_decl isa Chalk::IR::ClassInfo
+            ? $class_decl->body()
+            : $class_decl->inputs()->[2];
 
         # Collect class-scope variable metadata from ALL VarDecl items in class body.
         # These are compiled as static C variables, initialized at module load time.
@@ -1562,7 +1567,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my @func_lines;     # exported C functions (methods)
 
         if (defined $class_decl) {
-            my $body = $class_decl->inputs()->[2];
+            my $body = $class_decl isa Chalk::IR::ClassInfo
+                ? $class_decl->body()
+                : $class_decl->inputs()->[2];
 
             # Emit class-scope subs (static helpers) before methods.
             # Handles SubInfo structs and legacy Constructor:SubDecl nodes.
@@ -1766,7 +1773,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         push @init_lines, "    if (_initialized) return;";
         push @init_lines, "    _initialized = 1;";
         if (defined $class_decl && keys $self->_get_class_scope_vars()->%*) {
-            my $body = $class_decl->inputs()->[2];
+            my $body = $class_decl isa Chalk::IR::ClassInfo
+                ? $class_decl->body()
+                : $class_decl->inputs()->[2];
             for my $item ($body->@*) {
                 next unless $item isa Chalk::IR::Node::VarDecl;
                 my $raw = $item->inputs()->[0]->value();
@@ -2022,9 +2031,16 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # Register :isa (parent class) if the ClassDecl has a parent
         if (defined $class_decl) {
-            my $parent_node = $class_decl->inputs()->[1];
-            if (defined $parent_node && $parent_node isa Chalk::Bootstrap::IR::Node::Constant) {
-                my $parent_name = $parent_node->value();
+            my $parent_name;
+            if ($class_decl isa Chalk::IR::ClassInfo) {
+                $parent_name = $class_decl->parent();
+            } else {
+                my $parent_node = $class_decl->inputs()->[1];
+                $parent_name = defined $parent_node && $parent_node isa Chalk::Bootstrap::IR::Node::Constant
+                    ? $parent_node->value()
+                    : undef;
+            }
+            if (defined $parent_name) {
                 my $escaped_parent = $self->_escape_c_string($parent_name);
                 push @lines, "    {";
                 push @lines, "        OP *isa_attr = newSVOP(OP_CONST, 0, newSVpvs(\"isa($escaped_parent)\"));";
@@ -2036,7 +2052,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # Register fields (if the class has any FieldDecl nodes)
         if (defined $class_decl) {
-            my $body = $class_decl->inputs()->[2];
+            my $body = $class_decl isa Chalk::IR::ClassInfo
+                ? $class_decl->body()
+                : $class_decl->inputs()->[2];
             for my $item ($body->@*) {
                 my ($field_name, $attrs, $default);
                 if ($item isa Chalk::IR::FieldInfo) {

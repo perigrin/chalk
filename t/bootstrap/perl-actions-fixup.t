@@ -8,6 +8,7 @@ use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::IR::UseInfo;
 use Chalk::IR::MethodInfo;
+use Chalk::IR::ClassInfo;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -40,11 +41,16 @@ my sub parse_source($source) {
     return $sem_ctx->extract();
 }
 
-# === Helper to find a specific Constructor in IR statements ===
+# === Helper to find a class declaration in IR statements ===
 
 my sub find_class_in_stmts($ir, $class) {
     my $stmts = $ir->inputs()->[0];
     for my $stmt ($stmts->@*) {
+        # ClassInfo (new path)
+        if ($stmt isa Chalk::IR::ClassInfo) {
+            return $stmt;
+        }
+        # Constructor:ClassDecl (legacy path)
         if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                 && $stmt->class() eq $class) {
             return $stmt;
@@ -53,8 +59,14 @@ my sub find_class_in_stmts($ir, $class) {
     return undef;
 }
 
+my sub _class_body($class_decl) {
+    return $class_decl isa Chalk::IR::ClassInfo
+        ? $class_decl->body()
+        : $class_decl->inputs()->[2];
+}
+
 my sub find_method_in_class($class_decl, $name) {
-    my $body = $class_decl->inputs()->[2];
+    my $body = _class_body($class_decl);
     for my $item ($body->@*) {
         if ($item isa Chalk::IR::MethodInfo
                 && $item->name() eq $name) {
@@ -178,7 +190,7 @@ my sub method_name($method) {
         my $class_decl = find_class_in_stmts($ir, 'ClassDecl');
         ok(defined $class_decl, 'two methods: found ClassDecl');
 
-        my $body = $class_decl->inputs()->[2];
+        my $body = _class_body($class_decl);
         is(scalar $body->@*, 2, 'two methods: class body has 2 methods');
 
         my $m1 = find_method_in_class($class_decl, 'op');
@@ -207,10 +219,16 @@ my sub method_name($method) {
             my $class_decl = find_class_in_stmts($ir, 'ClassDecl');
             my $method = find_method_in_class($class_decl, 'go');
             my $mbody = method_body($method);
+            my $cname = $class_decl isa Chalk::IR::ClassInfo
+                ? $class_decl->name()
+                : $class_decl->inputs()->[0]->value();
+            my $cparent = $class_decl isa Chalk::IR::ClassInfo
+                ? $class_decl->parent()
+                : (defined $class_decl->inputs()->[1] ? $class_decl->inputs()->[1]->value() : undef);
             push @results, {
                 seed        => $seed,
-                class_name  => $class_decl->inputs()->[0]->value(),
-                parent      => $class_decl->inputs()->[1]->value(),
+                class_name  => $cname,
+                parent      => $cparent,
                 method_name => method_name($method),
                 body_class  => $mbody->[0]->class(),
                 die_msg     => $mbody->[0]->inputs()->[0][0]->value(),

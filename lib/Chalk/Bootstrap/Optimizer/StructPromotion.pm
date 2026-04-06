@@ -10,6 +10,7 @@ use Chalk::IR::Node::VarDecl;
 use Chalk::IR::Node::HashRef;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::Subscript;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
 
@@ -58,7 +59,9 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             my $class_decl = $self->_find_class_decl($ir);
             next unless defined $class_decl;
 
-            my $body = $class_decl->inputs()->[2];
+            my $body = $class_decl isa Chalk::IR::ClassInfo
+                ? $class_decl->body()
+                : $class_decl->inputs()->[2];
             next unless defined $body && ref($body) eq 'ARRAY';
 
             for my $item ($body->@*) {
@@ -446,7 +449,9 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 next;
             }
 
-            my $body = $class_decl->inputs()->[2];
+            my $body = $class_decl isa Chalk::IR::ClassInfo
+                ? $class_decl->body()
+                : $class_decl->inputs()->[2];
             unless (defined $body && ref($body) eq 'ARRAY') {
                 push @result, { $info->%* };
                 next;
@@ -585,13 +590,33 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
                 push @new_body, $new_method;
             }
 
-            # Rebuild ClassDecl with new body
-            my $new_class = $factory->make('Constructor',
-                class  => 'ClassDecl',
-                name   => $class_decl->inputs()->[0],
-                parent => $class_decl->inputs()->[1],
-                body   => \@new_body,
-            );
+            # Rebuild class declaration with new body.
+            # Preserves ClassInfo or Constructor:ClassDecl based on input type.
+            my $new_class;
+            if ($class_decl isa Chalk::IR::ClassInfo) {
+                # Partition new body into fields/methods/subs for structured access
+                my (@fields, @methods, @subs);
+                for my $item (@new_body) {
+                    if ($item isa Chalk::IR::FieldInfo)  { push @fields,  $item; }
+                    elsif ($item isa Chalk::IR::MethodInfo) { push @methods, $item; }
+                    elsif ($item isa Chalk::IR::SubInfo)    { push @subs,    $item; }
+                }
+                $new_class = Chalk::IR::ClassInfo->new(
+                    name    => $class_decl->name(),
+                    parent  => $class_decl->parent(),
+                    fields  => \@fields,
+                    methods => \@methods,
+                    subs    => \@subs,
+                    body    => \@new_body,
+                );
+            } else {
+                $new_class = $factory->make('Constructor',
+                    class  => 'ClassDecl',
+                    name   => $class_decl->inputs()->[0],
+                    parent => $class_decl->inputs()->[1],
+                    body   => \@new_body,
+                );
+            }
 
             # Rebuild Program
             my $new_program = $factory->make('Constructor',
@@ -856,9 +881,16 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
         return $factory->make('Constructor', %params);
     }
 
-    # Find the ClassDecl node in the IR tree.
+    # Find the ClassDecl or ClassInfo node in the IR tree.
+    # Returns ClassInfo if available, falls back to Constructor:ClassDecl.
     method _find_class_decl($ir) {
         return unless defined $ir;
+
+        # Direct ClassInfo match
+        if ($ir isa Chalk::IR::ClassInfo) {
+            return $ir;
+        }
+
         return unless $ir isa Chalk::Bootstrap::IR::Node::Constructor;
 
         if ($ir->class() eq 'ClassDecl') {
@@ -869,8 +901,13 @@ class Chalk::Bootstrap::Optimizer::StructPromotion {
             my $stmts = $ir->inputs()->[0];
             if (defined $stmts && ref($stmts) eq 'ARRAY') {
                 for my $stmt ($stmts->@*) {
-                    my $found = $self->_find_class_decl($stmt);
-                    return $found if defined $found;
+                    if ($stmt isa Chalk::IR::ClassInfo) {
+                        return $stmt;
+                    }
+                    if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor) {
+                        my $found = $self->_find_class_decl($stmt);
+                        return $found if defined $found;
+                    }
                 }
             }
         }

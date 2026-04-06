@@ -113,6 +113,32 @@ my $ci2 = Chalk::IR::ClassInfo->new(name => 'Bare');
 is($ci2->parent(), undef, 'ClassInfo parent defaults undef');
 is_deeply($ci2->fields(), [], 'ClassInfo fields default empty');
 
+# id() — content-based ID for use in NodeFactory hash-cons keys
+my $ci_id = $ci->id();
+ok(defined $ci_id, 'ClassInfo id() returns a value');
+like($ci_id, qr/ClassInfo/, 'ClassInfo id() contains ClassInfo marker');
+like($ci_id, qr/MyClass/, 'ClassInfo id() contains class name');
+
+my $ci_same = Chalk::IR::ClassInfo->new(name => 'MyClass', parent => 'BaseClass', fields => [$fi], methods => [$mi], subs => [$si]);
+is($ci->id(), $ci_same->id(), 'ClassInfo id() is content-based (same content => same id)');
+isnt($ci->id(), $ci2->id(), 'ClassInfo id() differs for different names');
+
+# add_consumer() — no-op, does not participate in use-def chain
+ok(eval { $ci->add_consumer('dummy'); 1 }, 'ClassInfo add_consumer() does not die');
+
+# body field — stores all class body items in declaration order
+my $ci_with_body = Chalk::IR::ClassInfo->new(
+    name   => 'BodyTest',
+    body   => [$fi, $mi, $si],
+);
+is(scalar $ci_with_body->body()->@*, 3, 'ClassInfo body stores all items');
+is($ci_with_body->body()->[0], $fi, 'ClassInfo body[0] is FieldInfo');
+is($ci_with_body->body()->[1], $mi, 'ClassInfo body[1] is MethodInfo');
+is($ci_with_body->body()->[2], $si, 'ClassInfo body[2] is SubInfo');
+
+my $ci_no_body = Chalk::IR::ClassInfo->new(name => 'NoBodies');
+is_deeply($ci_no_body->body(), [], 'ClassInfo body defaults to empty arrayref');
+
 my $prog = Chalk::IR::Program->new(use_decls => [{module => 'strict'}], classes => [$ci], top_level_subs => [$si]);
 is(scalar $prog->use_decls()->@*, 1, 'Program use_decls');
 is(scalar $prog->classes()->@*, 1, 'Program classes');

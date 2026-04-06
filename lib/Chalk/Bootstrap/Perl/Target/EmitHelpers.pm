@@ -12,6 +12,7 @@ use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::TryCatch;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
@@ -102,10 +103,14 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return 'SV *';
     }
 
-    # Extract ClassDecl from Program IR
+    # Extract ClassDecl or ClassInfo from Program IR.
+    # Returns ClassInfo if available, falls back to Constructor:ClassDecl.
     method _find_class_decl($ir) {
         my $stmts = $ir->inputs()->[0];
         for my $stmt ($stmts->@*) {
+            if ($stmt isa Chalk::IR::ClassInfo) {
+                return $stmt;
+            }
             if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                     && $stmt->class() eq 'ClassDecl') {
                 return $stmt;
@@ -114,11 +119,13 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return undef;
     }
 
-    # Build field index map from ClassDecl IR.
+    # Build field index map from ClassDecl or ClassInfo IR.
     # Returns hashref mapping field name (without sigil) to integer index.
     # Fields are numbered in declaration order starting from 0.
     method _build_field_index_map($class_decl) {
-        my $body = $class_decl->inputs()->[2];
+        my $body = $class_decl isa Chalk::IR::ClassInfo
+            ? $class_decl->body()
+            : $class_decl->inputs()->[2];
         my %field_map;
         my %sigils;
         my %params;
@@ -199,7 +206,12 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
     # Also populates %_class_subs for class-scope sub declarations.
     # Returns hashref: name => { returns => bool, params => [...], is_sub => bool, ... }
     method _scan_class_methods($class_decl) {
-        my $body = $class_decl->inputs()->[2];
+        my $body = $class_decl isa Chalk::IR::ClassInfo
+            ? $class_decl->body()
+            : $class_decl->inputs()->[2];
+        my $class_name = $class_decl isa Chalk::IR::ClassInfo
+            ? $class_decl->name()
+            : $class_decl->inputs()->[0]->value();
         my %methods;
 
         # Collect all MethodDecl/MethodInfo, SubDecl/SubInfo nodes from the class body.
@@ -255,7 +267,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                     returns    => true,
                     params     => \@param_names,
                     is_sub     => true,
-                    class_name => $class_decl->inputs()->[0]->value(),
+                    class_name => $class_name,
                     scope      => $item->scope(),
                 };
                 $_class_subs{$name} = $entry;
@@ -285,7 +297,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             # Track subs separately so the emitter knows they lack $self
             if ($class eq 'SubDecl') {
                 $entry->{is_sub} = true;
-                $entry->{class_name} = $class_decl->inputs()->[0]->value();
+                $entry->{class_name} = $class_name;
                 # SubDecl inputs: [name, params, body, scope]
                 my $scope_node = $item->inputs()->[3];
                 $entry->{scope} = defined $scope_node ? $scope_node->value() : 'package';

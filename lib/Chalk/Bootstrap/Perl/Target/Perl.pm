@@ -24,6 +24,7 @@ use Chalk::IR::Node::Aggregate;
 use Chalk::IR::Node::Regex;
 use Chalk::IR::Node::TryCatch;
 use Chalk::IR::UseInfo;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
@@ -98,6 +99,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 # _emit_node emits a bare if-block instead of the class.
                 if (defined $ir_node && ref($ir_node) && !exists $_cfg_lookup{refaddr($ir_node)}
                         && !($ir_node isa Chalk::IR::UseInfo)
+                        && !($ir_node isa Chalk::IR::ClassInfo)
                         && !($ir_node isa Chalk::IR::FieldInfo)
                         && !($ir_node isa Chalk::IR::MethodInfo)
                         && !($ir_node isa Chalk::IR::SubInfo)
@@ -133,7 +135,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                     }
                 }
             }
-            if ($node isa Chalk::IR::FieldInfo) {
+            if ($node isa Chalk::IR::ClassInfo) {
+                # ClassInfo metadata struct — push body items for traversal
+                push @stack, $node->body()->@*;
+            } elsif ($node isa Chalk::IR::FieldInfo) {
                 # FieldInfo metadata struct — check for aggregate-sigil field names
                 my $name = $node->name();
                 if (defined $name && $name =~ /^([\@\%])(.+)/) {
@@ -178,7 +183,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $stmts = $ir->inputs()->[0];
         my $class_name;
         for my $stmt ($stmts->@*) {
-            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+            if ($stmt isa Chalk::IR::ClassInfo) {
+                $class_name = $stmt->name();
+                last;
+            } elsif ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                     && $stmt->class() eq 'ClassDecl') {
                 $class_name = $stmt->inputs()->[0]->value();
                 last;
@@ -295,6 +303,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return $self->_emit_sub_decl($node);
         }
 
+        if ($node isa Chalk::IR::ClassInfo) {
+            return $self->_emit_class_decl($node);
+        }
+
         if ($node isa Chalk::Bootstrap::IR::Node::Constructor) {
             my $class = $node->class();
 
@@ -346,13 +358,21 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_class_decl($node) {
-        my $name   = $node->inputs()->[0]->value();
-        my $parent = $node->inputs()->[1];
-        my $body   = $node->inputs()->[2];
+        my ($name, $parent, $body);
+        if ($node isa Chalk::IR::ClassInfo) {
+            $name   = $node->name();
+            $parent = $node->parent();
+            $body   = $node->body();
+        } else {
+            $name   = $node->inputs()->[0]->value();
+            my $parent_node = $node->inputs()->[1];
+            $parent = defined $parent_node ? $parent_node->value() : undef;
+            $body   = $node->inputs()->[2];
+        }
 
         my $decl = "class $name";
         if (defined $parent) {
-            $decl .= " :isa(${\$parent->value()})";
+            $decl .= " :isa($parent)";
         }
         $decl .= " {";
 

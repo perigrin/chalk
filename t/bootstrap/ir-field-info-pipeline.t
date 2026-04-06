@@ -10,6 +10,7 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
+use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 
 # Build Perl grammar pipeline
@@ -55,17 +56,19 @@ my sub parse_file($file) {
         my $stmts = $ir->inputs()->[0];
         my $cls;
         for my $stmt ($stmts->@*) {
-            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+            if ($stmt isa Chalk::IR::ClassInfo) {
+                $cls = $stmt;
+            } elsif ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                     && $stmt->class() eq 'ClassDecl') {
                 $cls = $stmt;
             }
         }
-        ok(defined $cls, 'Constant.pm: found ClassDecl');
+        ok(defined $cls, 'Constant.pm: found class declaration');
 
         SKIP: {
-            skip 'Constant.pm: no ClassDecl', 15 unless defined $cls;
+            skip 'Constant.pm: no class declaration', 15 unless defined $cls;
 
-            my $body = $cls->inputs()->[2];
+            my $body = $cls isa Chalk::IR::ClassInfo ? $cls->body() : $cls->inputs()->[2];
             is(ref $body, 'ARRAY', 'Constant.pm: body is arrayref');
 
             # Fields should now be Chalk::IR::FieldInfo, not Constructor:FieldDecl
@@ -108,17 +111,19 @@ my sub parse_file($file) {
         my $stmts = $ir->inputs()->[0];
         my $cls;
         for my $stmt ($stmts->@*) {
-            if ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
+            if ($stmt isa Chalk::IR::ClassInfo) {
+                $cls = $stmt;
+            } elsif ($stmt isa Chalk::Bootstrap::IR::Node::Constructor
                     && $stmt->class() eq 'ClassDecl') {
                 $cls = $stmt;
             }
         }
-        ok(defined $cls, 'ConciseOp.pm: found ClassDecl');
+        ok(defined $cls, 'ConciseOp.pm: found class declaration');
 
         SKIP: {
-            skip 'ConciseOp.pm: no ClassDecl', 5 unless defined $cls;
+            skip 'ConciseOp.pm: no class declaration', 5 unless defined $cls;
 
-            my $body = $cls->inputs()->[2];
+            my $body = $cls isa Chalk::IR::ClassInfo ? $cls->body() : $cls->inputs()->[2];
             my @fields = grep { $_ isa Chalk::IR::FieldInfo } $body->@*;
             ok(scalar @fields >= 5, 'ConciseOp.pm: at least 5 FieldInfo objects')
                 or diag("Got " . scalar @fields . " fields");

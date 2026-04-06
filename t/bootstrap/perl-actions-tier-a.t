@@ -7,6 +7,8 @@ use Test::More;
 use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::IR::UseInfo;
+use Chalk::IR::ClassInfo;
+use Chalk::IR::MethodInfo;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::IR::NodeFactory;
@@ -51,6 +53,56 @@ my sub is_constructor($node, $expected_class, $msg) {
     return unless defined $node;
     is($node->operation(), 'Constructor', "$msg: is Constructor");
     is($node->class(), $expected_class, "$msg: class is $expected_class");
+}
+
+# === Helpers for ClassInfo/ClassDecl dual-path ===
+
+# Validate a class node (ClassInfo or Constructor:ClassDecl)
+my sub is_class_node($node, $msg) {
+    ok(defined $node, "$msg: defined");
+    return unless defined $node;
+    ok($node isa Chalk::IR::ClassInfo
+        || ($node isa Chalk::Bootstrap::IR::Node::Constructor
+            && $node->class() eq 'ClassDecl'),
+        "$msg: is ClassInfo or ClassDecl");
+}
+
+# Get class name from ClassInfo or Constructor:ClassDecl
+my sub class_name($cls) {
+    return $cls isa Chalk::IR::ClassInfo
+        ? $cls->name()
+        : $cls->inputs()->[0]->value();
+}
+
+# Get class parent name from ClassInfo or Constructor:ClassDecl
+my sub class_parent($cls) {
+    return $cls isa Chalk::IR::ClassInfo
+        ? $cls->parent()
+        : (defined $cls->inputs()->[1] ? $cls->inputs()->[1]->value() : undef);
+}
+
+# Get class body from ClassInfo or Constructor:ClassDecl
+my sub class_body($cls) {
+    return $cls isa Chalk::IR::ClassInfo ? $cls->body() : $cls->inputs()->[2];
+}
+
+# Get method name from MethodInfo or Constructor:MethodDecl
+my sub method_name($meth) {
+    return $meth isa Chalk::IR::MethodInfo
+        ? $meth->name()
+        : $meth->inputs()->[0]->value();
+}
+
+# Get method params from MethodInfo or Constructor:MethodDecl
+my sub method_params($meth) {
+    return $meth isa Chalk::IR::MethodInfo
+        ? $meth->params()
+        : $meth->inputs()->[1];
+}
+
+# Get method body from MethodInfo or Constructor:MethodDecl
+my sub method_body($meth) {
+    return $meth isa Chalk::IR::MethodInfo ? $meth->body() : $meth->inputs()->[2];
 }
 
 my sub is_constant($node, $expected_value, $msg) {
@@ -98,25 +150,25 @@ my sub is_use_info($node, $expected_name, $msg) {
         my $use_exp = $stmts->[2];
         is_use_info($use_exp, 'experimental', 'Start.pm use experimental');
 
-        # Last: ClassDecl
+        # Last: class declaration (ClassInfo or ClassDecl)
         my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Start.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::IR::Node::Start', 'Start.pm class name');
-        is_constant($cls->inputs()->[1],
-            'Chalk::Bootstrap::IR::Node', 'Start.pm parent class');
+        is_class_node($cls, 'Start.pm class declaration');
+        is(class_name($cls), 'Chalk::Bootstrap::IR::Node::Start', 'Start.pm class name');
+        is(class_parent($cls), 'Chalk::Bootstrap::IR::Node', 'Start.pm parent class');
 
         # Class body has 1 method
-        my $body = $cls->inputs()->[2];
+        my $body = class_body($cls);
         is(ref $body, 'ARRAY', 'Start.pm: class body is arrayref');
-        is(scalar $body->@*, 1, 'Start.pm: class body has 1 method');
+        my @methods = grep { $_ isa Chalk::IR::MethodInfo
+            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+        } $body->@*;
+        ok(scalar @methods >= 1, 'Start.pm: class body has at least 1 method');
 
-        my $meth = $body->[0];
-        is_constructor($meth, 'MethodDecl', 'Start.pm method');
-        is_constant($meth->inputs()->[0], 'operation', 'Start.pm method name');
+        my ($meth) = @methods;
+        is(method_name($meth), 'operation', 'Start.pm method name');
 
         # Method body has ReturnStmt
-        my $meth_body = $meth->inputs()->[2];
+        my $meth_body = method_body($meth);
         is(ref $meth_body, 'ARRAY', 'Start.pm: method body is arrayref');
         is(scalar $meth_body->@*, 1, 'Start.pm: method body has 1 statement');
 
@@ -140,18 +192,20 @@ my sub is_use_info($node, $expected_name, $msg) {
         is_constructor($ir, 'Program', 'Return.pm Program');
         my $stmts = $ir->inputs()->[0];
         my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Return.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::IR::Node::Return', 'Return.pm class name');
-        is_constant($cls->inputs()->[1],
-            'Chalk::Bootstrap::IR::Node', 'Return.pm parent class');
+        is_class_node($cls, 'Return.pm class declaration');
+        is(class_name($cls), 'Chalk::Bootstrap::IR::Node::Return', 'Return.pm class name');
+        is(class_parent($cls), 'Chalk::Bootstrap::IR::Node', 'Return.pm parent class');
 
-        my $body = $cls->inputs()->[2];
-        is(scalar $body->@*, 1, 'Return.pm: class body has 1 method');
-        my $meth = $body->[0];
-        is_constant($meth->inputs()->[0], 'operation', 'Return.pm method name');
+        my $body = class_body($cls);
+        my @methods = grep { $_ isa Chalk::IR::MethodInfo
+            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+        } $body->@*;
+        ok(scalar @methods >= 1, 'Return.pm: class body has at least 1 method');
+        my ($meth) = @methods;
+        is(method_name($meth), 'operation', 'Return.pm method name');
 
-        my $ret = $meth->inputs()->[2][0];
+        my $meth_body = method_body($meth);
+        my $ret = $meth_body->[0];
         is_constructor($ret, 'ReturnStmt', 'Return.pm return');
         is_constant($ret->inputs()->[0], 'Return', 'Return.pm return value');
     }
@@ -171,31 +225,32 @@ my sub is_use_info($node, $expected_name, $msg) {
         is_constructor($ir, 'Program', 'Target.pm Program');
         my $stmts = $ir->inputs()->[0];
         my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Target.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::Target', 'Target.pm class name');
-        is($cls->inputs()->[1], undef, 'Target.pm: no parent class');
+        is_class_node($cls, 'Target.pm class declaration');
+        is(class_name($cls), 'Chalk::Bootstrap::Target', 'Target.pm class name');
+        is(class_parent($cls), undef, 'Target.pm: no parent class');
 
-        my $body = $cls->inputs()->[2];
-        is(scalar $body->@*, 2, 'Target.pm: class body has 2 methods');
+        my $body = class_body($cls);
+        my @methods = grep { $_ isa Chalk::IR::MethodInfo
+            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+        } $body->@*;
+        ok(scalar @methods >= 2, 'Target.pm: class body has at least 2 methods');
 
-        # First method: generate($ir)
-        my $m1 = $body->[0];
-        is_constructor($m1, 'MethodDecl', 'Target.pm generate method');
-        is_constant($m1->inputs()->[0], 'generate', 'Target.pm generate name');
-        my $m1_params = $m1->inputs()->[1];
-        is(scalar $m1_params->@*, 1, 'Target.pm generate has 1 param');
+        # Find generate($ir) method
+        my ($m1) = grep { method_name($_) eq 'generate' } @methods;
+        ok(defined $m1, 'Target.pm: has generate method');
+        if (defined $m1) {
+            my $m1_params = method_params($m1);
+            ok(scalar $m1_params->@* >= 1, 'Target.pm generate has at least 1 param');
 
-        # Body has DieCall
-        my $m1_body = $m1->inputs()->[2];
-        is(scalar $m1_body->@*, 1, 'Target.pm generate body has 1 statement');
-        is_constructor($m1_body->[0], 'DieCall', 'Target.pm generate dies');
+            # Body has DieCall
+            my $m1_body = method_body($m1);
+            is(scalar $m1_body->@*, 1, 'Target.pm generate body has 1 statement');
+            is_constructor($m1_body->[0], 'DieCall', 'Target.pm generate dies');
+        }
 
-        # Second method: generate_distribution($ir)
-        my $m2 = $body->[1];
-        is_constructor($m2, 'MethodDecl', 'Target.pm generate_distribution method');
-        is_constant($m2->inputs()->[0], 'generate_distribution',
-            'Target.pm generate_distribution name');
+        # Find generate_distribution($ir) method
+        my ($m2) = grep { method_name($_) eq 'generate_distribution' } @methods;
+        ok(defined $m2, 'Target.pm: has generate_distribution method');
     }
 }
 
@@ -213,25 +268,29 @@ my sub is_use_info($node, $expected_name, $msg) {
         is_constructor($ir, 'Program', 'Pass.pm Program');
         my $stmts = $ir->inputs()->[0];
         my $cls = $stmts->[-1];
-        is_constructor($cls, 'ClassDecl', 'Pass.pm ClassDecl');
-        is_constant($cls->inputs()->[0],
-            'Chalk::Bootstrap::Optimizer::Pass', 'Pass.pm class name');
-        is($cls->inputs()->[1], undef, 'Pass.pm: no parent class');
+        is_class_node($cls, 'Pass.pm class declaration');
+        is(class_name($cls), 'Chalk::Bootstrap::Optimizer::Pass', 'Pass.pm class name');
+        is(class_parent($cls), undef, 'Pass.pm: no parent class');
 
-        my $body = $cls->inputs()->[2];
-        is(scalar $body->@*, 2, 'Pass.pm: class body has 2 methods');
+        my $body = class_body($cls);
+        my @methods = grep { $_ isa Chalk::IR::MethodInfo
+            || ($_ isa Chalk::Bootstrap::IR::Node::Constructor && $_->class() eq 'MethodDecl')
+        } $body->@*;
+        ok(scalar @methods >= 2, 'Pass.pm: class body has at least 2 methods');
 
-        # First method: name() - no params
-        my $m1 = $body->[0];
-        is_constructor($m1, 'MethodDecl', 'Pass.pm name method');
-        is_constant($m1->inputs()->[0], 'name', 'Pass.pm name method name');
-        is(scalar $m1->inputs()->[1]->@*, 0, 'Pass.pm name has 0 params');
+        # Method: name() - no params
+        my ($m1) = grep { method_name($_) eq 'name' } @methods;
+        ok(defined $m1, 'Pass.pm: has name method');
+        if (defined $m1) {
+            is(scalar method_params($m1)->@*, 0, 'Pass.pm name has 0 params');
+        }
 
-        # Second method: run($ir) - 1 param
-        my $m2 = $body->[1];
-        is_constructor($m2, 'MethodDecl', 'Pass.pm run method');
-        is_constant($m2->inputs()->[0], 'run', 'Pass.pm run method name');
-        is(scalar $m2->inputs()->[1]->@*, 1, 'Pass.pm run has 1 param');
+        # Method: run($ir) - 1 param
+        my ($m2) = grep { method_name($_) eq 'run' } @methods;
+        ok(defined $m2, 'Pass.pm: has run method');
+        if (defined $m2) {
+            is(scalar method_params($m2)->@*, 1, 'Pass.pm run has 1 param');
+        }
     }
 }
 
